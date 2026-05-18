@@ -16,16 +16,15 @@
  * connection row.
  */
 
-import { useCallback, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams, Link } from "react-router-dom";
-import { Boxes, Plus, Trash2, ShieldCheck, Settings2, AlertTriangle } from "lucide-react";
+import { Boxes, Trash2, ShieldCheck, Settings2, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Modal } from "../components/modal";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState } from "../components/page-states";
 import { usePermissions } from "../hooks/use-permissions";
@@ -33,9 +32,6 @@ import {
   useIntegrationDetail,
   useInstallIntegration,
   useUninstallIntegration,
-  useConnectIntegrationFields,
-  useInitiateIntegrationOAuth,
-  useDisconnectIntegration,
   useIntegrationOAuthClient,
   useUpsertIntegrationOAuthClient,
   useDeleteIntegrationOAuthClient,
@@ -46,98 +42,6 @@ import {
   type IntegrationManifestAuth,
 } from "../hooks/use-integrations";
 import { useIntegrations } from "../hooks/use-integrations";
-
-const OAUTH_POPUP_TIMEOUT_MS = 5 * 60_000;
-
-// ─────────────────────────────────────────────
-// Fields-connect modal (api_key / basic / custom)
-// ─────────────────────────────────────────────
-
-function deriveFieldNames(auth: IntegrationManifestAuth): string[] {
-  const schema = auth.credentials?.schema as { properties?: Record<string, unknown> } | undefined;
-  if (schema?.properties && typeof schema.properties === "object") {
-    return Object.keys(schema.properties);
-  }
-  // Sensible defaults by auth type so the form still renders for malformed manifests.
-  if (auth.type === "api_key") return ["api_key"];
-  if (auth.type === "basic") return ["username", "password"];
-  return [];
-}
-
-function FieldsConnectModal({
-  open,
-  onClose,
-  packageId,
-  authKey,
-  auth,
-  displayName,
-}: {
-  open: boolean;
-  onClose: () => void;
-  packageId: string;
-  authKey: string;
-  auth: IntegrationManifestAuth;
-  displayName: string;
-}) {
-  const { t } = useTranslation("settings");
-  const [values, setValues] = useState<Record<string, string>>({});
-  const mutation = useConnectIntegrationFields();
-  const fields = deriveFieldNames(auth);
-  const sensitiveKeywords = ["password", "secret", "token", "key"];
-
-  const submit = (e: React.FormEvent) => {
-    e.preventDefault();
-    mutation.mutate(
-      { packageId, authKey, credentials: values },
-      {
-        onSuccess: () => {
-          setValues({});
-          onClose();
-        },
-      },
-    );
-  };
-
-  return (
-    <Modal
-      open={open}
-      onClose={onClose}
-      title={t("integration.connect.modal.title", { display: displayName })}
-    >
-      <form className="space-y-4" onSubmit={submit}>
-        <p className="text-muted-foreground text-sm">
-          {t("integration.connect.modal.subtitle", { type: auth.type })}
-        </p>
-        {fields.map((field) => {
-          const isSensitive = sensitiveKeywords.some((k) => field.toLowerCase().includes(k));
-          return (
-            <div key={field} className="space-y-1">
-              <Label htmlFor={`field-${field}`} className="font-mono text-xs">
-                {field}
-              </Label>
-              <Input
-                id={`field-${field}`}
-                type={isSensitive ? "password" : "text"}
-                value={values[field] ?? ""}
-                onChange={(e) => setValues((prev) => ({ ...prev, [field]: e.target.value }))}
-                autoComplete="off"
-                data-testid={`field-input-${field}`}
-              />
-            </div>
-          );
-        })}
-        <div className="flex justify-end gap-2 pt-2">
-          <Button type="button" variant="ghost" onClick={onClose}>
-            {t("integration.connect.btn.cancel")}
-          </Button>
-          <Button type="submit" disabled={mutation.isPending}>
-            {t("integration.connect.btn.save")}
-          </Button>
-        </div>
-      </form>
-    </Modal>
-  );
-}
 
 // ─────────────────────────────────────────────
 // OAuth client (admin) form
@@ -281,18 +185,24 @@ function OAuthClientForm({ packageId, authKey }: { packageId: string; authKey: s
  *  - the actor has no connection yet (first-connect already requests
  *    the full union via the existing connect button).
  */
+/**
+ * Read-only diff between agent-required scopes and actor-granted scopes.
+ *
+ * The reconnect CTA was removed when connect/upgrade moved to agent
+ * surfaces (architectural decision: connections are agent-driven; this
+ * page is admin-leaning, for install + OAuth client registration). The
+ * panel still surfaces the diff as audit info so admins can see at a
+ * glance which permissions installed agents are asking for that no
+ * actor has granted yet.
+ */
 function RequiredScopesPanel({
   packageId,
   authKey,
   hasConnection,
-  onReconnect,
-  reconnectPending,
 }: {
   packageId: string;
   authKey: string;
   hasConnection: boolean;
-  onReconnect: () => void;
-  reconnectPending: boolean;
 }) {
   const { t } = useTranslation("settings");
   const { data } = useIntegrationRequiredScopes(packageId, authKey);
@@ -312,110 +222,40 @@ function RequiredScopesPanel({
         {t("integration.scopes.missing.description")}
       </p>
       <ul
-        className="mb-3 list-inside list-disc font-mono text-xs"
+        className="list-inside list-disc font-mono text-xs"
         data-testid={`required-scopes-missing-${authKey}`}
       >
         {data.missingFromGranted.map((s) => (
           <li key={s}>{s}</li>
         ))}
       </ul>
-      <Button
-        size="sm"
-        onClick={onReconnect}
-        disabled={reconnectPending}
-        data-testid={`required-scopes-reconnect-${authKey}`}
-      >
-        {t("integration.scopes.reconnect")}
-      </Button>
     </div>
   );
 }
 
+/**
+ * Per-auth read-only block. The connect/disconnect surfaces moved to
+ * the agent flow (AgentIntegrationsBlock + MissingConnectionsModal) —
+ * see the section banner. This block keeps:
+ *   - Auth metadata: type, required flag, default scopes, audience,
+ *     authorized URIs.
+ *   - Admin-only OAuth client registration form (oauth2).
+ *   - Read-only connection list with scope + expiry info (no disconnect).
+ *   - RequiredScopesPanel — passive diff display (no reconnect CTA).
+ */
 function AuthSection({
   packageId,
-  displayName,
   status,
   authDecl,
   isAdmin,
 }: {
   packageId: string;
-  displayName: string;
   status: IntegrationAuthStatus;
   authDecl: IntegrationManifestAuth;
   isAdmin: boolean;
 }) {
   const { t } = useTranslation("settings");
-  const [fieldsModalOpen, setFieldsModalOpen] = useState(false);
-  const initiateOAuth = useInitiateIntegrationOAuth();
-  const disconnect = useDisconnectIntegration();
-
   const isOAuth = status.type === "oauth2";
-  const canConnect = !isOAuth || status.hasOAuthClient;
-
-  const onOAuthConnect = useCallback(async () => {
-    const popup = window.open("", "integration-oauth", "width=600,height=700");
-    if (!popup) {
-      window.alert(t("integration.popup.blocked"));
-      return;
-    }
-    try {
-      const session = await initiateOAuth.mutateAsync({
-        packageId,
-        authKey: status.authKey,
-      });
-      popup.location.href = session.authUrl;
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          clearInterval(poll);
-          try {
-            popup.close();
-          } catch {
-            /* ignore */
-          }
-          reject(new Error("OAuth timeout"));
-        }, OAUTH_POPUP_TIMEOUT_MS);
-        const poll = setInterval(() => {
-          if (popup.closed) {
-            clearInterval(poll);
-            clearTimeout(timer);
-            resolve();
-          }
-        }, 500);
-      });
-    } catch (err) {
-      try {
-        popup.close();
-      } catch {
-        /* ignore */
-      }
-      throw err;
-    }
-  }, [initiateOAuth, packageId, status.authKey, t]);
-
-  const connectButton = isOAuth ? (
-    <Button
-      size="sm"
-      disabled={!canConnect || initiateOAuth.isPending}
-      onClick={onOAuthConnect}
-      data-testid={`auth-connect-${status.authKey}`}
-    >
-      <Plus size={14} />
-      {status.connections.length === 0
-        ? t("integration.auth.connectWith", { type: status.type })
-        : t("integration.auth.addAccount")}
-    </Button>
-  ) : (
-    <Button
-      size="sm"
-      onClick={() => setFieldsModalOpen(true)}
-      data-testid={`auth-connect-${status.authKey}`}
-    >
-      <Plus size={14} />
-      {status.connections.length === 0
-        ? t("integration.auth.connectWith", { type: status.type })
-        : t("integration.auth.addAccount")}
-    </Button>
-  );
 
   return (
     <div className="bg-card rounded-lg border p-4" data-testid={`auth-section-${status.authKey}`}>
@@ -428,8 +268,6 @@ function AuthSection({
         ) : (
           <Badge variant="secondary">{t("integration.auth.optional")}</Badge>
         )}
-        <div className="flex-1" />
-        {connectButton}
       </div>
 
       {/* Scopes / audience */}
@@ -471,58 +309,30 @@ function AuthSection({
         </div>
       )}
 
-      {/* Niveau 2 Phase 5 — incremental consent banner. Only meaningful
-          for oauth2 with at least one connection; the panel itself
-          short-circuits otherwise. */}
       {isOAuth && (
         <RequiredScopesPanel
           packageId={packageId}
           authKey={status.authKey}
           hasConnection={status.connections.length > 0}
-          onReconnect={onOAuthConnect}
-          reconnectPending={initiateOAuth.isPending}
         />
       )}
 
-      {/* Connections */}
+      {/* Connections — read-only audit list. Connect/disconnect live on
+          the agent surfaces. */}
       {status.connections.length === 0 ? (
         <p className="text-muted-foreground text-sm">{t("integration.auth.noConnection")}</p>
       ) : (
         <div className="space-y-2">
           {status.connections.map((c) => (
-            <ConnectionRow
-              key={c.id}
-              packageId={packageId}
-              connection={c}
-              onDisconnect={() => disconnect.mutate({ packageId, connectionId: c.id })}
-            />
+            <ConnectionRow key={c.id} connection={c} />
           ))}
         </div>
-      )}
-
-      {!isOAuth && (
-        <FieldsConnectModal
-          open={fieldsModalOpen}
-          onClose={() => setFieldsModalOpen(false)}
-          packageId={packageId}
-          authKey={status.authKey}
-          auth={authDecl}
-          displayName={displayName}
-        />
       )}
     </div>
   );
 }
 
-function ConnectionRow({
-  packageId: _packageId,
-  connection,
-  onDisconnect,
-}: {
-  packageId: string;
-  connection: IntegrationConnection;
-  onDisconnect: () => void;
-}) {
+function ConnectionRow({ connection }: { connection: IntegrationConnection }) {
   const { t } = useTranslation("settings");
   const accountLabel =
     (connection.identityClaims?.accountEmail as string | undefined) ??
@@ -553,14 +363,6 @@ function ConnectionRow({
           </p>
         )}
       </div>
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={onDisconnect}
-        aria-label={t("integration.auth.disconnectAccount")}
-      >
-        <Trash2 size={14} className="text-destructive" />
-      </Button>
     </div>
   );
 }
@@ -706,7 +508,6 @@ export function IntegrationDetailPage() {
                 <AuthSection
                   key={authStatus.authKey}
                   packageId={packageId}
-                  displayName={m.displayName}
                   status={authStatus}
                   authDecl={declared}
                   isAdmin={isAdmin}

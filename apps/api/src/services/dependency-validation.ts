@@ -312,6 +312,13 @@ async function checkOne(
 ): Promise<void> {
   const push = (err: IntegrationDependencyError, title: string, message: string): void => {
     integrationErrors.push(err);
+    // Smuggle requiredScopes on the field entry for `insufficient_scopes`
+    // — the dashboard's InlineConnectButton forwards it to the OAuth
+    // kickoff so the consent prompt asks for the strict superset of
+    // what's currently granted + what THIS agent needs. The backend
+    // re-unions with computeRequiredScopes(all agents) before issuing
+    // the redirect, so this is just a hint that gets the right
+    // single-agent floor on the request.
     fieldErrors.push({
       field: err.authKey
         ? `integrations.${err.packageId}.${err.authKey}`
@@ -319,7 +326,10 @@ async function checkOne(
       code: err.reason,
       title,
       message,
-    });
+      ...(err.requiredScopes && err.requiredScopes.length > 0
+        ? { requiredScopes: err.requiredScopes }
+        : {}),
+    } as ValidationFieldError);
   };
 
   // Load the integration manifest fresh from DB (mirrors spawn resolver).

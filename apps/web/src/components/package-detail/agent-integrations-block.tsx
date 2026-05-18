@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { CheckCircle2, AlertTriangle, XCircle, Loader2, Puzzle, ExternalLink } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { CheckCircle2, AlertTriangle, XCircle, Loader2, Puzzle } from "lucide-react";
 import {
   useIntegrationDetail,
   useIntegrationConnections,
   type IntegrationManifestView,
 } from "../../hooks/use-integrations";
+import { InlineConnectButton } from "../integration-connect/inline-connect-button";
 
 interface AgentIntegrationEntry {
   id: string;
@@ -61,7 +60,6 @@ function IntegrationConnectionCard({ packageId, agentTools }: IntegrationConnect
   const { data: detail, isPending: detailPending } = useIntegrationDetail(packageId);
   const { data: connections, isPending: connsPending } = useIntegrationConnections(packageId);
 
-  const detailPath = toDetailPath(packageId);
   const displayName = detail?.manifest.displayName ?? packageId;
   const isLoading = detailPending || connsPending;
 
@@ -82,21 +80,46 @@ function IntegrationConnectionCard({ packageId, agentTools }: IntegrationConnect
   });
 
   const { icon, subtitle } = renderStatus(status, t);
+  const action = resolveAction(status, detail.manifest);
 
   return (
     <CardShell icon={icon} title={displayName} subtitle={subtitle}>
-      <Button asChild size="sm" variant={status.kind === "ok" ? "outline" : "default"}>
-        <Link to={detailPath}>
-          {status.kind === "ok"
-            ? t("detail.integrationManage")
-            : status.kind === "not_connected"
-              ? t("detail.integrationConnect")
-              : t("detail.integrationFix")}
-          <ExternalLink className="ml-1 size-3" />
-        </Link>
-      </Button>
+      {action && (
+        <InlineConnectButton
+          packageId={packageId}
+          authKey={action.authKey}
+          scopes={action.scopes}
+          intent={action.intent}
+        />
+      )}
     </CardShell>
   );
+}
+
+/**
+ * Map status → connect action. `not_connected` picks the first required
+ * auth (preferring oauth2) so the user gets a one-click flow; if the
+ * integration declares multiple auths the agent only needs ONE of them
+ * resolved (mirrors the spawn resolver). `needs_reconnection` and
+ * `insufficient_scopes` already know which authKey is at fault.
+ */
+function resolveAction(
+  status: IntegrationStatus,
+  manifest: IntegrationManifestView,
+): { authKey: string; scopes?: string[]; intent: "connect" | "fix" } | null {
+  if (status.kind === "ok") return null;
+  if (status.kind === "needs_reconnection") {
+    return { authKey: status.authKey, intent: "fix" };
+  }
+  if (status.kind === "insufficient_scopes") {
+    return { authKey: status.authKey, scopes: status.required, intent: "fix" };
+  }
+  // not_connected — pick first oauth2, falling back to first declared.
+  const auths = manifest.auths ?? {};
+  const keys = Object.keys(auths);
+  if (keys.length === 0) return null;
+  const oauth = keys.find((k) => auths[k]?.type === "oauth2");
+  return { authKey: oauth ?? keys[0]!, intent: "connect" };
 }
 
 function CardShell({
@@ -137,7 +160,7 @@ type IntegrationStatus =
   | { kind: "ok" }
   | { kind: "not_connected" }
   | { kind: "needs_reconnection"; authKey: string }
-  | { kind: "insufficient_scopes"; authKey: string; missing: string[] };
+  | { kind: "insufficient_scopes"; authKey: string; missing: string[]; required: string[] };
 
 function deriveIntegrationStatus(input: {
   manifest: IntegrationManifestView;
@@ -191,7 +214,7 @@ function deriveIntegrationStatus(input: {
     const granted = new Set(conn.scopesGranted);
     const missing = required.filter((s) => !granted.has(s));
     if (missing.length > 0) {
-      return { kind: "insufficient_scopes", authKey, missing };
+      return { kind: "insufficient_scopes", authKey, missing, required };
     }
   }
 
@@ -266,11 +289,4 @@ function renderStatus(
         }),
       };
   }
-}
-
-function toDetailPath(packageId: string): string {
-  // packageId is `@scope/name`; the route is `/integrations/:scope/:name`.
-  const slash = packageId.indexOf("/", 1);
-  if (slash < 0) return `/integrations/${encodeURIComponent(packageId)}`;
-  return `/integrations/${encodeURIComponent(packageId.slice(0, slash))}/${encodeURIComponent(packageId.slice(slash + 1))}`;
 }

@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, XCircle, ExternalLink, Puzzle } from "lucide-react";
+import { AlertTriangle, XCircle, Puzzle } from "lucide-react";
 import { Modal } from "./modal";
 import { Button } from "@/components/ui/button";
+import { InlineConnectButton } from "./integration-connect/inline-connect-button";
+import { useIntegrationDetail } from "../hooks/use-integrations";
 
 /**
  * Phase C — recovery surface for the run-kickoff 412 emitted by
@@ -27,6 +28,8 @@ export interface MissingIntegrationFieldError {
     | string;
   title?: string;
   message: string;
+  /** Required scopes — populated on insufficient_scopes for the OAuth re-consent. */
+  requiredScopes?: string[];
 }
 
 interface MissingConnectionsModalProps {
@@ -62,19 +65,25 @@ export function MissingConnectionsModal({ open, onClose, errors }: MissingConnec
 }
 
 function MissingRow({ err }: { err: MissingIntegrationFieldError }) {
-  const { t } = useTranslation(["agents"]);
   const { packageId, authKey } = parseField(err.field);
+  const { data: detail } = useIntegrationDetail(packageId);
   const isReconnect = err.code === "needs_reconnection" || err.code === "insufficient_scopes";
   const Icon = isReconnect ? AlertTriangle : XCircle;
   const colorClass = isReconnect ? "text-amber-500" : "text-destructive";
-  const detailPath = toDetailPath(packageId);
+
+  // Pick the auth to act on. The field carries it for needs_reconnection /
+  // insufficient_scopes. For not_connected the field is integration-level —
+  // fall back to the first oauth2 / first declared (mirrors the
+  // AgentIntegrationsBlock heuristic).
+  const targetAuthKey = authKey ?? pickDefaultAuth(detail?.manifest.auths);
+  const displayName = detail?.manifest.displayName ?? packageId;
 
   return (
     <div className="border-border bg-card flex items-center justify-between gap-3 rounded-md border px-3 py-2">
       <div className="flex min-w-0 items-center gap-2">
         <Puzzle className="text-muted-foreground size-4 shrink-0" />
         <div className="min-w-0">
-          <div className="truncate text-sm font-medium">{packageId}</div>
+          <div className="truncate text-sm font-medium">{displayName}</div>
           <div className={`flex items-center gap-1.5 truncate text-xs ${colorClass}`}>
             <Icon className="size-3" />
             <span className="truncate">{err.message}</span>
@@ -86,14 +95,24 @@ function MissingRow({ err }: { err: MissingIntegrationFieldError }) {
           </div>
         </div>
       </div>
-      <Button asChild size="sm">
-        <Link to={detailPath}>
-          {isReconnect ? t("detail.integrationFix") : t("detail.integrationConnect")}
-          <ExternalLink className="ml-1 size-3" />
-        </Link>
-      </Button>
+      {targetAuthKey && (
+        <InlineConnectButton
+          packageId={packageId}
+          authKey={targetAuthKey}
+          {...(err.requiredScopes ? { scopes: err.requiredScopes } : {})}
+          intent={isReconnect ? "fix" : "connect"}
+        />
+      )}
     </div>
   );
+}
+
+function pickDefaultAuth(auths: Record<string, { type: string }> | undefined): string | null {
+  if (!auths) return null;
+  const keys = Object.keys(auths);
+  if (keys.length === 0) return null;
+  const oauth = keys.find((k) => auths[k]?.type === "oauth2");
+  return oauth ?? keys[0]!;
 }
 
 function parseField(field: string): { packageId: string; authKey: string | null } {
@@ -110,10 +129,4 @@ function parseField(field: string): { packageId: string; authKey: string | null 
     packageId: tail.slice(0, slashIdx + 1 + dotIdx),
     authKey: afterSlash.slice(dotIdx + 1),
   };
-}
-
-function toDetailPath(packageId: string): string {
-  const slash = packageId.indexOf("/", 1);
-  if (slash < 0) return `/integrations/${encodeURIComponent(packageId)}`;
-  return `/integrations/${encodeURIComponent(packageId.slice(0, slash))}/${encodeURIComponent(packageId.slice(slash + 1))}`;
 }
