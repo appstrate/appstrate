@@ -1,0 +1,21 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/agent.schema.json",
+  "schemaVersion": "1.1",
+  "type": "agent",
+  "name": "@appstrate/github-mcp-test",
+  "version": "1.0.0",
+  "displayName": "GitHub MCP — Phase 7 E2E test",
+  "description": "Smoke test for AFPS Integrations Phase 7 (remote Streamable HTTP MCP) against GitHub's hosted MCP server. Calls `get_me` and reports the authenticated user — proves that the sidecar's auth-type-agnostic header injection works with an api_key (Bearer PAT) auth.",
+  "timeout": 60,
+  "dependencies": {
+    "tools": {
+      "@appstrate/output": "^2.0.0"
+    },
+    "integrations": {
+      "@appstrate/github-mcp": {
+        "version": "^1.0.0",
+        "tools": ["get_me"]
+      }
+    }
+  }
+}
