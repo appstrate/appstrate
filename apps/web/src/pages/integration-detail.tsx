@@ -19,7 +19,7 @@
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams, Link } from "react-router-dom";
-import { Boxes, Plus, Trash2, ShieldCheck, Settings2 } from "lucide-react";
+import { Boxes, Plus, Trash2, ShieldCheck, Settings2, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -39,6 +39,7 @@ import {
   useIntegrationOAuthClient,
   useUpsertIntegrationOAuthClient,
   useDeleteIntegrationOAuthClient,
+  useIntegrationRequiredScopes,
   type IntegrationAuthStatus,
   type IntegrationConnection,
   type IntegrationManifestView,
@@ -265,6 +266,71 @@ function OAuthClientForm({ packageId, authKey }: { packageId: string; authKey: s
 // Auth section (per declared auth in manifest)
 // ─────────────────────────────────────────────
 
+/**
+ * Niveau 2 Phase 5 — incremental consent surface for an oauth2 auth.
+ *
+ * Polls `/required-scopes` and renders the diff between what installed
+ * agents ask for and what the actor has actually granted. When the diff
+ * is non-empty AND there is at least one existing connection, surfaces
+ * a "Reconnect to grant" CTA that re-runs the OAuth kickoff (the
+ * backend unions defaults + agent-required + existing-granted scopes
+ * so the IdP shows the upgrade consent screen).
+ *
+ * Silent (returns null) when:
+ *  - no installed agent needs anything beyond the defaults; or
+ *  - the actor has no connection yet (first-connect already requests
+ *    the full union via the existing connect button).
+ */
+function RequiredScopesPanel({
+  packageId,
+  authKey,
+  hasConnection,
+  onReconnect,
+  reconnectPending,
+}: {
+  packageId: string;
+  authKey: string;
+  hasConnection: boolean;
+  onReconnect: () => void;
+  reconnectPending: boolean;
+}) {
+  const { t } = useTranslation("settings");
+  const { data } = useIntegrationRequiredScopes(packageId, authKey);
+  if (!data) return null;
+  if (!hasConnection) return null;
+  if (data.missingFromGranted.length === 0) return null;
+  return (
+    <div
+      className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-amber-700 dark:text-amber-300"
+      data-testid={`required-scopes-warning-${authKey}`}
+    >
+      <div className="mb-2 flex items-center gap-2">
+        <AlertTriangle size={14} />
+        <span className="text-sm font-semibold">{t("integration.scopes.missing")}</span>
+      </div>
+      <p className="text-foreground/90 mb-2 text-xs">
+        {t("integration.scopes.missing.description")}
+      </p>
+      <ul
+        className="mb-3 list-inside list-disc font-mono text-xs"
+        data-testid={`required-scopes-missing-${authKey}`}
+      >
+        {data.missingFromGranted.map((s) => (
+          <li key={s}>{s}</li>
+        ))}
+      </ul>
+      <Button
+        size="sm"
+        onClick={onReconnect}
+        disabled={reconnectPending}
+        data-testid={`required-scopes-reconnect-${authKey}`}
+      >
+        {t("integration.scopes.reconnect")}
+      </Button>
+    </div>
+  );
+}
+
 function AuthSection({
   packageId,
   displayName,
@@ -403,6 +469,19 @@ function AuthSection({
             </p>
           )}
         </div>
+      )}
+
+      {/* Niveau 2 Phase 5 — incremental consent banner. Only meaningful
+          for oauth2 with at least one connection; the panel itself
+          short-circuits otherwise. */}
+      {isOAuth && (
+        <RequiredScopesPanel
+          packageId={packageId}
+          authKey={status.authKey}
+          hasConnection={status.connections.length > 0}
+          onReconnect={onOAuthConnect}
+          reconnectPending={initiateOAuth.isPending}
+        />
       )}
 
       {/* Connections */}

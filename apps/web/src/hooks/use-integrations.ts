@@ -94,6 +94,37 @@ export interface IntegrationDetail {
   auths: IntegrationAuthStatus[];
 }
 
+/**
+ * Niveau 2 Phase 5 — wire shape for
+ * `GET /api/integrations/:packageId/auths/:authKey/required-scopes`.
+ *
+ *  - `defaults` — manifest defaults for this auth.
+ *  - `required` — union of `requiredScopes` across every installed agent
+ *    that depends on this integration (filtered by `requiredAuthKey` for
+ *    multi-auth integrations).
+ *  - `granted` — actor's current high-water-mark across all their
+ *    connections on this integration auth.
+ *  - `union` — `defaults ∪ required ∪ granted` — what the OAuth kickoff
+ *    will actually request (incremental consent).
+ *  - `missingFromGranted` — scopes that the union demands but the actor
+ *    hasn't granted yet → drives the "Reconnect to grant new
+ *    permissions" CTA.
+ *  - `breakdown` — per-agent decomposition for the audit / "why is this
+ *    permission required?" surface.
+ */
+export interface IntegrationRequiredScopes {
+  defaults: string[];
+  required: string[];
+  granted: string[];
+  union: string[];
+  missingFromGranted: string[];
+  breakdown: Array<{
+    agentId: string;
+    viaTools: string[];
+    viaExplicit: string[];
+  }>;
+}
+
 export interface IntegrationOAuthClient {
   applicationId: string;
   integrationPackageId: string;
@@ -221,6 +252,28 @@ export function useConnectIntegrationFields() {
       });
     },
     onError: () => toast.error(t("integration.connect.error")),
+  });
+}
+
+/**
+ * Niveau 2 Phase 5 — fetch the scope union the next OAuth kickoff will
+ * request for `(packageId, authKey)`. Polled at integration-detail page
+ * load so the UI can show a "Reconnect to grant additional permissions"
+ * CTA when `missingFromGranted.length > 0` (incremental consent flow).
+ */
+export function useIntegrationRequiredScopes(
+  packageId: string | undefined,
+  authKey: string | undefined,
+) {
+  const orgId = useCurrentOrgId();
+  const applicationId = useCurrentApplicationId();
+  return useQuery({
+    queryKey: [...KEY(orgId, applicationId), "required-scopes", packageId, authKey] as const,
+    enabled: Boolean(orgId && applicationId && packageId && authKey),
+    queryFn: () =>
+      api<IntegrationRequiredScopes>(
+        `/integrations/${encodeURI(packageId!)}/auths/${encodeURI(authKey!)}/required-scopes`,
+      ),
   });
 }
 
