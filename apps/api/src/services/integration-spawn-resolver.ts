@@ -30,7 +30,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { applicationPackages, integrationConnections, packages } from "@appstrate/db/schema";
 import { decryptCredentials, readCredentialField, resolveHttpDelivery } from "@appstrate/connect";
-import { integrationManifestSchema } from "@appstrate/core/integration";
+import { getToolUrlPatterns, integrationManifestSchema } from "@appstrate/core/integration";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
@@ -167,6 +167,13 @@ async function resolveOne(
   // the slug + length cap.
   const namespace = packageId;
 
+  // Phase 4 — narrow the MITM URL envelope to the union of urlPatterns
+  // declared on the agent-selected tools. Only emitted when EVERY
+  // selected tool declared non-empty `urlPatterns` (otherwise we'd
+  // refuse legitimate traffic from an under-declared tool, so we leave
+  // the field unset and fall back to the per-auth `authorizedUris`).
+  const toolUrlEnvelope = computeToolUrlEnvelope(manifest, agentToolSelection);
+
   return {
     packageId,
     namespace,
@@ -186,7 +193,65 @@ async function resolveOne(
     // `tools/list` is pre-filtered. `undefined` (legacy dep or rich
     // form without tools) preserves the "all tools allowed" default.
     ...(agentToolSelection !== undefined ? { toolAllowlist: agentToolSelection } : {}),
+    ...(toolUrlEnvelope !== undefined ? { toolUrlEnvelope } : {}),
   };
+}
+
+/**
+ * Build the {@link IntegrationSpawnSpec.toolUrlEnvelope} from the agent's
+ * tool selection × the integration manifest's `tools.{name}.urlPatterns`.
+ *
+ * Returns `undefined` (no extra MITM URL enforcement) when:
+ *  - The agent didn't restrict tools (`agentToolSelection === undefined`).
+ *  - The agent restricted to an empty set (handled by toolAllowlist alone).
+ *  - ANY selected tool lacks a `urlPatterns` declaration — we can't
+ *    safely narrow the envelope without blocking that tool's legitimate
+ *    traffic, so we fall back to per-auth `authorizedUris`.
+ *
+ * When every selected tool declares patterns, returns the deduplicated
+ * union. Methods are unioned per pattern (a pattern declared twice with
+ * different methods collapses to the merged set; pattern declared once
+ * with methods + once without keeps methods omitted = "any method").
+ *
+ * Exported for unit testing; production callers go through
+ * {@link resolveIntegrationSpawns}.
+ */
+export function computeToolUrlEnvelope(
+  manifest: IntegrationManifest,
+  agentToolSelection: readonly string[] | undefined,
+): ReadonlyArray<{ pattern: string; methods?: readonly string[] }> | undefined {
+  if (agentToolSelection === undefined) return undefined;
+  if (agentToolSelection.length === 0) return undefined;
+  const merged = new Map<string, { pattern: string; methods?: Set<string>; anyMethod: boolean }>();
+  for (const toolName of agentToolSelection) {
+    const patterns = getToolUrlPatterns(manifest, toolName);
+    if (!patterns || patterns.length === 0) {
+      // Under-declared tool — bail out rather than over-restrict.
+      return undefined;
+    }
+    for (const entry of patterns) {
+      const existing = merged.get(entry.pattern);
+      if (!existing) {
+        merged.set(entry.pattern, {
+          pattern: entry.pattern,
+          ...(entry.methods && entry.methods.length > 0
+            ? { methods: new Set(entry.methods) }
+            : { anyMethod: true }),
+          anyMethod: !entry.methods || entry.methods.length === 0,
+        });
+      } else if (!existing.anyMethod && entry.methods && entry.methods.length > 0) {
+        for (const m of entry.methods) (existing.methods ??= new Set()).add(m);
+      } else {
+        existing.anyMethod = true;
+        delete existing.methods;
+      }
+    }
+  }
+  return [...merged.values()].map((e) =>
+    e.anyMethod || !e.methods
+      ? { pattern: e.pattern }
+      : { pattern: e.pattern, methods: [...e.methods].sort() },
+  );
 }
 
 interface ResolvedDeliveries {

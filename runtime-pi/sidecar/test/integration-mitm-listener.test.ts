@@ -564,6 +564,200 @@ describe("MITM listener — telemetry", () => {
   });
 });
 
+describe("MITM listener — tool URL envelope (Phase 4)", () => {
+  runIfOpenssl("forwards when the URL + method match an envelope entry", async () => {
+    const bundle = await makeCaBundle();
+    const minter = createCertMinter({
+      caCertPem: bundle.pems.caCertPem,
+      caKeyPem: bundle.pems.caKeyPem,
+    });
+
+    const pl = payload("vendor", "oauth2", { access_token: "tk" }, ["https://api.test.local/**"]);
+    const dp: Record<string, HttpDeliveryPlan> = { vendor: plan("Authorization", "tk") };
+    const creds: MitmCredentialSource = {
+      current: () => pl,
+      deliveryPlans: () => dp,
+    };
+
+    const upstreamCalls: string[] = [];
+    const recordedFetch = (async (input: string | URL | Request) => {
+      const url = typeof input === "string" ? input : (input as Request).url;
+      upstreamCalls.push(url);
+      return new Response("ok", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const listener = createIntegrationMitmListener({
+      caBundle: bundle,
+      minter,
+      credentials: creds,
+      fetch: recordedFetch,
+      toolUrlEnvelope: [{ pattern: "https://api.test.local/v1/messages/**", methods: ["GET"] }],
+    });
+    await listener.ready;
+
+    try {
+      const addr = listener.address();
+      const out = await drivenFetch({
+        listenerPort: addr.port,
+        sni: "api.test.local",
+        caCertPem: bundle.pems.caCertPem,
+        method: "GET",
+        path: "/v1/messages/abc123",
+        headers: {},
+      });
+      expect(out.status).toBe(200);
+      expect(upstreamCalls).toEqual(["https://api.test.local/v1/messages/abc123"]);
+    } finally {
+      await listener.close();
+    }
+  });
+
+  runIfOpenssl("refuses with 403 when URL falls outside the envelope", async () => {
+    const bundle = await makeCaBundle();
+    const minter = createCertMinter({
+      caCertPem: bundle.pems.caCertPem,
+      caKeyPem: bundle.pems.caKeyPem,
+    });
+
+    const pl = payload("vendor", "oauth2", { access_token: "tk" }, ["https://api.test.local/**"]);
+    const dp: Record<string, HttpDeliveryPlan> = { vendor: plan("Authorization", "tk") };
+    const creds: MitmCredentialSource = {
+      current: () => pl,
+      deliveryPlans: () => dp,
+    };
+
+    const upstreamCalls: string[] = [];
+    const recordedFetch = (async (input: string | URL | Request) => {
+      upstreamCalls.push(typeof input === "string" ? input : (input as Request).url);
+      return new Response("ok", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const events: MitmListenerEvent[] = [];
+    const listener = createIntegrationMitmListener({
+      caBundle: bundle,
+      minter,
+      credentials: creds,
+      fetch: recordedFetch,
+      toolUrlEnvelope: [{ pattern: "https://api.test.local/v1/messages/get/**" }],
+      onEvent: (e) => events.push(e),
+    });
+    await listener.ready;
+
+    try {
+      const addr = listener.address();
+      const out = await drivenFetch({
+        listenerPort: addr.port,
+        sni: "api.test.local",
+        caCertPem: bundle.pems.caCertPem,
+        method: "POST",
+        path: "/v1/messages/send",
+        headers: {},
+        body: `{}`,
+      });
+      expect(out.status).toBe(403);
+      // Upstream must never be contacted.
+      expect(upstreamCalls).toEqual([]);
+      const refusal = events.find((e) => e.kind === "request-refused");
+      expect(refusal).toBeDefined();
+      expect((refusal as { reason: string }).reason).toBe("tool url envelope");
+    } finally {
+      await listener.close();
+    }
+  });
+
+  runIfOpenssl("refuses when URL matches but method is outside the allowed set", async () => {
+    const bundle = await makeCaBundle();
+    const minter = createCertMinter({
+      caCertPem: bundle.pems.caCertPem,
+      caKeyPem: bundle.pems.caKeyPem,
+    });
+
+    const pl = payload("vendor", "oauth2", { access_token: "tk" }, ["https://api.test.local/**"]);
+    const dp: Record<string, HttpDeliveryPlan> = { vendor: plan("Authorization", "tk") };
+    const creds: MitmCredentialSource = {
+      current: () => pl,
+      deliveryPlans: () => dp,
+    };
+
+    const upstreamCalls: string[] = [];
+    const recordedFetch = (async (input: string | URL | Request) => {
+      upstreamCalls.push(typeof input === "string" ? input : (input as Request).url);
+      return new Response("ok", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const listener = createIntegrationMitmListener({
+      caBundle: bundle,
+      minter,
+      credentials: creds,
+      fetch: recordedFetch,
+      toolUrlEnvelope: [{ pattern: "https://api.test.local/v1/messages/**", methods: ["GET"] }],
+    });
+    await listener.ready;
+
+    try {
+      const addr = listener.address();
+      const out = await drivenFetch({
+        listenerPort: addr.port,
+        sni: "api.test.local",
+        caCertPem: bundle.pems.caCertPem,
+        method: "DELETE",
+        path: "/v1/messages/abc",
+        headers: {},
+      });
+      expect(out.status).toBe(403);
+      expect(upstreamCalls).toEqual([]);
+    } finally {
+      await listener.close();
+    }
+  });
+
+  runIfOpenssl("empty envelope is treated as undefined (legacy passthrough)", async () => {
+    const bundle = await makeCaBundle();
+    const minter = createCertMinter({
+      caCertPem: bundle.pems.caCertPem,
+      caKeyPem: bundle.pems.caKeyPem,
+    });
+
+    const pl = payload("vendor", "oauth2", { access_token: "tk" }, ["https://api.test.local/**"]);
+    const dp: Record<string, HttpDeliveryPlan> = { vendor: plan("Authorization", "tk") };
+    const creds: MitmCredentialSource = {
+      current: () => pl,
+      deliveryPlans: () => dp,
+    };
+
+    const upstreamCalls: string[] = [];
+    const recordedFetch = (async (input: string | URL | Request) => {
+      upstreamCalls.push(typeof input === "string" ? input : (input as Request).url);
+      return new Response("ok", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const listener = createIntegrationMitmListener({
+      caBundle: bundle,
+      minter,
+      credentials: creds,
+      fetch: recordedFetch,
+      toolUrlEnvelope: [],
+    });
+    await listener.ready;
+
+    try {
+      const addr = listener.address();
+      const out = await drivenFetch({
+        listenerPort: addr.port,
+        sni: "api.test.local",
+        caCertPem: bundle.pems.caCertPem,
+        method: "DELETE",
+        path: "/v1/anything",
+        headers: {},
+      });
+      expect(out.status).toBe(200);
+      expect(upstreamCalls).toEqual(["https://api.test.local/v1/anything"]);
+    } finally {
+      await listener.close();
+    }
+  });
+});
+
 describe("MITM listener — proxyUrl shape", () => {
   runIfOpenssl("emits a ready-to-use http://host:port URL", async () => {
     const bundle = await makeCaBundle();

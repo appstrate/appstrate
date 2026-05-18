@@ -157,6 +157,33 @@ export interface IntegrationSpawnSpec {
    * functional for side-channel use) but exposes nothing to the agent.
    */
   toolAllowlist?: readonly string[];
+  /**
+   * Niveau 2 Phase 4 — URL-pattern envelope enforced by the sidecar
+   * MITM proxy. Defence-in-depth on top of `toolAllowlist`: even if a
+   * registered tool somehow issues a request outside its declared URL
+   * surface (compromised integration code, prompt-injection coercing
+   * the integration to talk to an unrelated endpoint), the MITM refuses
+   * the request before the credential is injected upstream.
+   *
+   * Resolved by the platform as `⋃ manifest.tools[t].urlPatterns` for
+   * every `t` in {@link toolAllowlist}. Only emitted when EVERY tool in
+   * the allowlist declares non-empty `urlPatterns` — a single tool
+   * without patterns means we can't safely enforce (we'd block legit
+   * traffic), so the field is left `undefined` (no extra enforcement).
+   *
+   * `undefined` preserves the historical behaviour where only the
+   * per-auth `authorizedUris` allowlist gates outbound traffic. The
+   * envelope is narrower than `authorizedUris` and is checked first;
+   * `authorizedUris` still applies (via {@link httpDeliveryAuths}) for
+   * deciding which credential to inject.
+   *
+   * `methods` (when present) constrains the HTTP verb; omitted means
+   * any method matches.
+   */
+  toolUrlEnvelope?: ReadonlyArray<{
+    pattern: string;
+    methods?: readonly string[];
+  }>;
 }
 
 /**

@@ -640,6 +640,21 @@ export function getToolRequiredScopes(
 }
 
 /**
+ * URL patterns a single tool will reach upstream, looked up against
+ * `tools.{name}.urlPatterns`. Returns `undefined` when the tool isn't
+ * declared or didn't declare patterns — Phase 4 treats that as "cannot
+ * safely narrow the MITM envelope for this tool". The distinction
+ * between "no entry" and "empty array" matters: an explicit empty
+ * array would mean "tool talks to nothing", which Phase 4 honours.
+ */
+export function getToolUrlPatterns(
+  manifest: IntegrationManifest,
+  toolName: string,
+): ReadonlyArray<{ pattern: string; methods?: readonly string[] }> | undefined {
+  return manifest.tools?.[toolName]?.urlPatterns;
+}
+
+/**
  * Union of every OAuth scope advertised across the integration's auths.
  * Used by {@link validateAgentIntegrationScopes} to refuse agent-declared
  * scopes that no auth on this integration even claims to support. When

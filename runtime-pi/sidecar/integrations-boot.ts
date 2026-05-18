@@ -116,6 +116,14 @@ export interface IntegrationSpawnSpec {
    * `IntegrationSpawnSpec.toolAllowlist` in `@appstrate/core/sidecar-types`.
    */
   toolAllowlist?: readonly string[];
+  /**
+   * Niveau 2 Phase 4 — MITM URL envelope. Union of `urlPatterns` from
+   * agent-selected tools; the MITM listener refuses requests that
+   * don't match. `undefined` (default) skips this defence layer.
+   * Structural mirror of `IntegrationSpawnSpec.toolUrlEnvelope` in
+   * `@appstrate/core/sidecar-types`.
+   */
+  toolUrlEnvelope?: ReadonlyArray<{ pattern: string; methods?: readonly string[] }>;
 }
 
 /**
@@ -375,6 +383,11 @@ export async function bootIntegrations(
           // runner can reach it (0.0.0.0 for bridged networks, 127.0.0.1
           // when the runner shares the parent's NS).
           host: adapterCtx.listenerBindHost,
+          // Phase 4 — narrow the per-request URL surface to the union
+          // of agent-selected tool urlPatterns. `undefined` (legacy or
+          // under-declared tools) leaves enforcement on the per-auth
+          // `authorizedUris` only.
+          ...(spec.toolUrlEnvelope ? { toolUrlEnvelope: spec.toolUrlEnvelope } : {}),
           onEvent: (event) => {
             // Filter sensitive bits (URLs may carry signed query params).
             const safe =
