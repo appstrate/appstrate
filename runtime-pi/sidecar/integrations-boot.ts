@@ -28,7 +28,7 @@
  * (which handles CA, MITM, and per-request credential injection).
  */
 
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join, normalize, posix } from "node:path";
 import { tmpdir } from "node:os";
 import { unzipSync } from "fflate";
@@ -40,9 +40,20 @@ import {
   type AppstrateMcpClient,
   type AppstrateToolDefinition,
 } from "@appstrate/mcp-transport";
+import { planCaBundle, type CaBundle } from "@appstrate/connect";
 
 import { McpHost } from "./mcp-host.ts";
 import { logger } from "./logger.ts";
+import { createOpensslCertGenerator } from "./ca-cert-openssl.ts";
+import { createCertMinter, type CertMinter } from "./integration-cert-minter.ts";
+import {
+  createIntegrationMitmListener,
+  type MitmListenerHandle,
+} from "./integration-mitm-listener.ts";
+import {
+  createIntegrationCredentialsSource,
+  fetchInitialIntegrationCredentials,
+} from "./integration-credentials-source.ts";
 
 /**
  * Per-integration spec produced by the platform launcher. The launcher
@@ -64,6 +75,29 @@ export interface IntegrationSpawnSpec {
    * (already-refreshed) credentials. Sensitive: never logged.
    */
   spawnEnv: Record<string, string>;
+  /**
+   * Phase 1.5 — per-auth `delivery.http` metadata. Presence (with at
+   * least one entry) tells the sidecar to take the MITM path for this
+   * integration: start a per-integration HTTPS listener, mint a CA
+   * bundle, hand the runner container `HTTPS_PROXY` + `*_CA_*` env vars,
+   * and let the listener inject the live header per `delivery.http`
+   * spec. Absent / empty = stay on the env-delivery-only path.
+   *
+   * Structural mirror of `IntegrationSpawnSpec.httpDeliveryAuths` in
+   * `@appstrate/core/sidecar-types` — the wire payload is the same shape.
+   */
+  httpDeliveryAuths?: Record<
+    string,
+    {
+      authType: string;
+      headerName: string;
+      headerPrefix: string;
+      value: string;
+      allowServerOverride: boolean;
+      authorizedUris: readonly string[];
+      expiresAtEpochMs: number | null;
+    }
+  >;
 }
 
 /**
@@ -296,16 +330,68 @@ async function dockerExec(args: string[]): Promise<string> {
  * (`cleanupOrphanedContainers()`) sweeps any container the sidecar
  * couldn't kill itself (hard crash / SIGKILL).
  */
+/**
+ * Optional MITM wiring layered on top of {@link setupIntegrationContainer}.
+ * Populated when the integration declares `delivery.http` and the sidecar
+ * has minted a per-run CA bundle:
+ *
+ *   - `proxyUrl` — points at the per-integration MITM listener bound on
+ *     127.0.0.1 inside the sidecar's network namespace.
+ *   - `sidecarContainerId` — the runner container joins the sidecar's
+ *     network namespace (`--network container:<id>`) so 127.0.0.1
+ *     resolves to the listener without needing a dedicated docker network.
+ *   - `caCertHostPath` — path to the run-CA PEM ON the sidecar's fs.
+ *     `docker cp`'d into the runner at {@link CA_CONTAINER_PATH} so the
+ *     runner's language ecosystem (`NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`,
+ *     `REQUESTS_CA_BUNDLE`) trusts the minted leaf certs.
+ */
+interface MitmSpawnExtras {
+  proxyUrl: string;
+  sidecarContainerId: string | null;
+  caCertHostPath: string;
+}
+
+/**
+ * Path inside the runner container where the run-CA cert lands. Matched
+ * by the env vars below so every supported language ecosystem
+ * (Node / Python / shell-installed binary) trusts it without per-language
+ * Dockerfile edits.
+ */
+const CA_CONTAINER_PATH = "/etc/appstrate/ca.pem";
+
 async function setupIntegrationContainer(
   runId: string,
   spec: IntegrationSpawnSpec,
   plan: IntegrationContainerPlan,
+  mitm?: MitmSpawnExtras,
 ): Promise<string> {
   const safeNs = spec.namespace.replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
   const containerName = `appstrate-integ-${safeNs}-${runId.slice(0, 8)}-${Date.now()}`;
   const envFlags: string[] = [];
   for (const [k, v] of Object.entries(spec.spawnEnv)) {
     envFlags.push("-e", `${k}=${v}`);
+  }
+  if (mitm) {
+    // Standardised proxy env vars honoured by Node (via undici-style
+    // dispatchers + NODE_TLS_REJECT_UNAUTHORIZED), Python (requests /
+    // httpx / urllib via REQUESTS_CA_BUNDLE / SSL_CERT_FILE), and most
+    // CLI HTTP clients. The cert path inside the runner is fixed
+    // (CA_CONTAINER_PATH) — the runner Dockerfiles don't need awareness.
+    const proxyEnv: Record<string, string> = {
+      HTTPS_PROXY: mitm.proxyUrl,
+      HTTP_PROXY: mitm.proxyUrl,
+      https_proxy: mitm.proxyUrl,
+      http_proxy: mitm.proxyUrl,
+      NO_PROXY: "127.0.0.1,localhost",
+      no_proxy: "127.0.0.1,localhost",
+      NODE_EXTRA_CA_CERTS: CA_CONTAINER_PATH,
+      SSL_CERT_FILE: CA_CONTAINER_PATH,
+      REQUESTS_CA_BUNDLE: CA_CONTAINER_PATH,
+      CURL_CA_BUNDLE: CA_CONTAINER_PATH,
+    };
+    for (const [k, v] of Object.entries(proxyEnv)) {
+      envFlags.push("-e", `${k}=${v}`);
+    }
   }
   const labelFlags: string[] = [
     "--label",
@@ -317,6 +403,15 @@ async function setupIntegrationContainer(
     "--label",
     `appstrate.integration=${spec.packageId}`,
   ];
+  // Network mode: when MITM is active AND we know the sidecar's container
+  // id, the runner joins the sidecar's network namespace so `127.0.0.1`
+  // inside the runner reaches the MITM listener bound on the sidecar's
+  // loopback. Without this share, the runner would need its own docker
+  // network attached to the sidecar — extra plumbing the MITM model
+  // doesn't justify. Falls back to the default bridge network when we
+  // can't read the sidecar's id (e.g. sidecar running unconfined in dev).
+  const networkFlags: string[] =
+    mitm && mitm.sidecarContainerId ? ["--network", `container:${mitm.sidecarContainerId}`] : [];
   const createArgs = [
     "create",
     "--rm",
@@ -331,6 +426,7 @@ async function setupIntegrationContainer(
     "256m",
     "--pids-limit",
     "128",
+    ...networkFlags,
     ...labelFlags,
     ...envFlags,
     plan.image,
@@ -342,6 +438,14 @@ async function setupIntegrationContainer(
   // the runner image as the WORKDIR), so the runner's entrypoint sees
   // `/bundle/server/index.js` at the path the manifest declared.
   await dockerExec(["cp", `${plan.bundleRoot}/.`, `${containerId}:/bundle/`]);
+  if (mitm) {
+    // Copy the CA cert into a stable path. The container's root fs is
+    // ephemeral (`--rm` cleans up at exit) so this lives only for the
+    // run. The runner image WORKDIR is `/bundle` but we want the cert
+    // under `/etc/appstrate/` to match the env vars above — `docker cp`
+    // creates intermediate dirs as needed.
+    await dockerExec(["cp", mitm.caCertHostPath, `${containerId}:${CA_CONTAINER_PATH}`]);
+  }
   return containerId;
 }
 
@@ -446,6 +550,7 @@ export async function bootIntegrations(
   const failed: BootIntegrationsResult["failed"] = [];
   const clients: AppstrateMcpClient[] = [];
   const containerIds: string[] = [];
+  const mitmListeners: MitmListenerHandle[] = [];
 
   // The sidecar receives RUN_TOKEN but not RUN_ID directly — we
   // synthesise a stable identifier from the run-token prefix purely for
@@ -461,8 +566,111 @@ export async function bootIntegrations(
     integrations: specs.length,
   });
 
+  // ─── Phase 1.5 — MITM bring-up (run-CA + cert minter), only when needed ───
+  // Mint the CA once per run, regardless of how many integrations need it.
+  // Per-integration listeners share the same minter (lazily creates leaf
+  // certs per upstream SNI host). The CA cert PEM lands on local fs so
+  // `docker cp` can ferry it into each runner container's trust store.
+  const mitmIntegrationCount = specs.filter(
+    (s) => s.httpDeliveryAuths && Object.keys(s.httpDeliveryAuths).length > 0,
+  ).length;
+  let runCaBundle: CaBundle | null = null;
+  let runCaCertHostPath: string | null = null;
+  let sharedMinter: CertMinter | null = null;
+  if (mitmIntegrationCount > 0) {
+    try {
+      runCaBundle = await planCaBundle({
+        runId,
+        // /run is tmpfs on the sidecar image. The planner ONLY uses
+        // tmpfsRoot for derived path strings inside the CaBundle return
+        // value — it doesn't write anything itself. We materialise the
+        // CA cert below at our own location.
+        tmpfsRoot: "/run/afps",
+        notAfterSeconds: 3600,
+        generator: createOpensslCertGenerator(),
+      });
+      const caDir = await mkdtemp(join(tmpdir(), "afps-ca-"));
+      runCaCertHostPath = join(caDir, "ca.pem");
+      await writeFile(runCaCertHostPath, runCaBundle.pems.caCertPem, { mode: 0o444 });
+      sharedMinter = createCertMinter({
+        caCertPem: runCaBundle.pems.caCertPem,
+        caKeyPem: runCaBundle.pems.caKeyPem,
+      });
+      logger.info("integration MITM CA minted", {
+        runId,
+        integrations: mitmIntegrationCount,
+        caCertPath: runCaCertHostPath,
+        notAfter: runCaBundle.notAfter,
+      });
+    } catch (err) {
+      // CA bring-up failed — every MITM integration will fail to register
+      // below; non-MITM integrations stay on the env-delivery-only path.
+      // We don't abort: the env-only path is still useful in dev / when
+      // openssl is missing from the sidecar image.
+      logger.warn("integration MITM CA bring-up failed; HTTP-delivery integrations will skip", {
+        runId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  // Sidecar's own container id — used to attach runner containers to the
+  // sidecar's network namespace (`--network container:<id>`) so the
+  // runner's `127.0.0.1` reaches the MITM listener bound on the
+  // sidecar's loopback. In container deployments Docker sets HOSTNAME
+  // to the short container id; in process mode it's the host's hostname
+  // (and `--network container:<host>` would fail). We guard the use of
+  // this id below by `useDocker` AND check that we're actually inside a
+  // container by sniffing /.dockerenv.
+  const sidecarContainerId = await readSidecarContainerIdIfDockerized();
+
   for (const spec of specs) {
     try {
+      const wantsMitm =
+        spec.httpDeliveryAuths !== undefined && Object.keys(spec.httpDeliveryAuths).length > 0;
+
+      // Per-integration MITM listener (only when the CA came up + the
+      // integration declared `delivery.http`).
+      let listener: MitmListenerHandle | null = null;
+      let mitmProxyUrl: string | null = null;
+      if (wantsMitm && sharedMinter !== null && runCaBundle !== null) {
+        const initial = await fetchInitialIntegrationCredentials(spec.packageId, bundleFetchOpts);
+        const source = createIntegrationCredentialsSource({
+          packageId: spec.packageId,
+          platformApiUrl: bundleFetchOpts.platformApiUrl,
+          runToken: bundleFetchOpts.runToken,
+          initialPayload: initial,
+        });
+        listener = createIntegrationMitmListener({
+          caBundle: runCaBundle,
+          minter: sharedMinter,
+          credentials: source,
+          onEvent: (event) => {
+            // Filter sensitive bits (URLs may carry signed query params).
+            const safe =
+              event.kind === "request-forwarded"
+                ? {
+                    kind: event.kind,
+                    status: event.status,
+                    authKey: event.authKey,
+                    retried: event.retried,
+                  }
+                : event;
+            logger.info("integration mitm event", {
+              packageId: spec.packageId,
+              ...safe,
+            });
+          },
+        });
+        await listener.ready;
+        mitmListeners.push(listener);
+        mitmProxyUrl = listener.proxyUrl();
+        logger.info("integration MITM listener ready", {
+          packageId: spec.packageId,
+          proxyUrl: mitmProxyUrl,
+        });
+      }
+
       const bytes = await fetchBundleBytes(spec.packageId, bundleFetchOpts);
       const root = await extractBundle(bytes, spec.namespace);
 
@@ -472,7 +680,15 @@ export async function bootIntegrations(
       if (useDocker) {
         const plan = planIntegrationContainer(spec, root);
         plannedImage = plan.image;
-        containerId = await setupIntegrationContainer(runId, spec, plan);
+        const mitmExtras: MitmSpawnExtras | undefined =
+          mitmProxyUrl !== null && runCaCertHostPath !== null
+            ? {
+                proxyUrl: mitmProxyUrl,
+                sidecarContainerId,
+                caCertHostPath: runCaCertHostPath,
+              }
+            : undefined;
+        containerId = await setupIntegrationContainer(runId, spec, plan, mitmExtras);
         containerIds.push(containerId);
         // `docker start -ai <id>` starts the container's entrypoint (e.g.
         // `node /bundle/server/index.js`) AND attaches stdio. SubprocessTransport
@@ -494,11 +710,28 @@ export async function bootIntegrations(
         });
       } else {
         const plan = planSubprocessSpawn(spec, root);
+        // Process-mode MITM: subprocess inherits the parent's network NS,
+        // so 127.0.0.1:<port> reaches our listener directly. CA env vars
+        // point at the on-disk PEM the planner already materialised. Both
+        // are unset when this integration isn't on the MITM path.
+        const procEnv: Record<string, string> = { ...spec.spawnEnv };
+        if (mitmProxyUrl !== null && runCaCertHostPath !== null) {
+          procEnv.HTTPS_PROXY = mitmProxyUrl;
+          procEnv.HTTP_PROXY = mitmProxyUrl;
+          procEnv.https_proxy = mitmProxyUrl;
+          procEnv.http_proxy = mitmProxyUrl;
+          procEnv.NO_PROXY = "127.0.0.1,localhost";
+          procEnv.no_proxy = "127.0.0.1,localhost";
+          procEnv.NODE_EXTRA_CA_CERTS = runCaCertHostPath;
+          procEnv.SSL_CERT_FILE = runCaCertHostPath;
+          procEnv.REQUESTS_CA_BUNDLE = runCaCertHostPath;
+          procEnv.CURL_CA_BUNDLE = runCaCertHostPath;
+        }
         transport = new SubprocessTransport({
           command: plan.command,
           args: plan.args,
           cwd: plan.cwd,
-          env: spec.spawnEnv,
+          env: procEnv,
           envPassthrough: ["PATH", "HOME", "NODE_OPTIONS"],
           onStderrLine: (line) => {
             logger.info("integration stderr", { packageId: spec.packageId, line });
@@ -559,6 +792,60 @@ export async function bootIntegrations(
       for (const id of containerIds) {
         await killIntegrationContainer(id);
       }
+      // Close MITM listeners after containers are torn down — listeners
+      // hold open the per-SNI Bun.serve sockets + cached leaf certs.
+      // Order matters only weakly; either way the CA cert file unlinks
+      // last so any straggler dump-on-shutdown still has the bytes.
+      for (const listener of mitmListeners) {
+        try {
+          await listener.close();
+        } catch {
+          // ignore — listener already torn down via SIGTERM
+        }
+      }
+      if (runCaCertHostPath) {
+        try {
+          await rm(runCaCertHostPath, { force: true });
+        } catch {
+          // ignore — best-effort
+        }
+      }
     },
   };
+}
+
+/**
+ * Read the sidecar's own container id when running inside Docker. Used
+ * for `--network container:<id>` to share the network namespace with
+ * spawned integration runner containers. Returns `null` in process mode
+ * (no `/.dockerenv` sentinel — the network-share trick doesn't apply).
+ *
+ * Docker sets `HOSTNAME` to the short container id by default; we sniff
+ * `/.dockerenv` to confirm we're actually inside a container before
+ * trusting that value. Custom hostnames (rare in sidecar deployments)
+ * would break this — fall back to the long id via `/proc/self/cgroup`
+ * (cgroup v1 only). For cgroup v2 the long id lives in `/proc/self/mountinfo`,
+ * which we don't parse; the short HOSTNAME is the load-bearing path.
+ */
+async function readSidecarContainerIdIfDockerized(): Promise<string | null> {
+  try {
+    // Stat /.dockerenv — its mere existence signals "inside Docker".
+    // We don't read it; just probe.
+    await readFile("/.dockerenv");
+  } catch {
+    return null;
+  }
+  const hostname = process.env.HOSTNAME;
+  if (hostname && /^[0-9a-f]{12,}$/.test(hostname)) {
+    return hostname;
+  }
+  // Fall back to cgroup v1's container id (longer than HOSTNAME, full id).
+  try {
+    const cgroup = await readFile("/proc/self/cgroup", "utf-8");
+    const match = cgroup.match(/[0-9a-f]{64}/);
+    if (match) return match[0];
+  } catch {
+    // ignore
+  }
+  return null;
 }

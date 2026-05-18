@@ -100,8 +100,13 @@ LABEL org.opencontainers.image.title="Appstrate Sidecar" \
 #                        sidecar shells out to `docker run -i ...` and pipes
 #                        stdio through to the runner; the runner image carries
 #                        the language interpreter, never the sidecar itself.
+#   - openssl            Phase 1.5 — mint the per-run CA + leaf certs for the
+#                        MITM HTTPS proxy that injects integration credentials
+#                        transparently on `delivery.http` auths. Without
+#                        openssl, sidecar falls back to env-delivery only and
+#                        in-run OAuth refresh is unavailable for those auths.
 # `wget` ships with busybox in Alpine → HEALTHCHECK adds no install cost.
-RUN apk add --no-cache libstdc++ libgcc ca-certificates docker-cli
+RUN apk add --no-cache libstdc++ libgcc ca-certificates docker-cli openssl
 
 COPY --from=builder --chmod=0555 /build/runtime-pi/sidecar/sidecar /usr/local/bin/sidecar
 
