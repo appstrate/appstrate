@@ -347,12 +347,12 @@ sidecar
   ├─ for each integration with httpDeliveryAuths:
   │     ├─ GET /internal/integration-credentials/<id>           ← initial payload
   │     ├─ createIntegrationCredentialsSource()                  ← cache + refresh hook
-  │     ├─ createIntegrationMitmListener()                       ← per-SNI Bun.serve
-  │     └─ docker create … --network container:<sidecar-id>
-  │             -e HTTPS_PROXY=http://127.0.0.1:<port>
-  │             -e NODE_EXTRA_CA_CERTS=/etc/appstrate/ca.pem
+  │     ├─ createIntegrationMitmListener() (binds 0.0.0.0 in Docker mode) ← per-SNI Bun.serve
+  │     └─ docker create … --network appstrate-exec-<runId>     ← per-run bridge, DNS alias `sidecar`
+  │             -e HTTPS_PROXY=http://sidecar:<port>
+  │             -e NODE_EXTRA_CA_CERTS=/tmp/appstrate-ca.pem
   │             -e SSL_CERT_FILE / REQUESTS_CA_BUNDLE / CURL_CA_BUNDLE
-  │        docker cp <ca.pem> <id>:/etc/appstrate/ca.pem
+  │        docker cp <ca.pem> <id>:/tmp/appstrate-ca.pem
   │
   └─ on upstream 401:
         listener.refreshOnUnauthorized(authKey)
@@ -369,7 +369,7 @@ Refresh helper: `apps/api/src/services/integration-token-refresh.ts:forceRefresh
 
 Key invariants:
 
-- **Network model**: runner shares the sidecar's network namespace (`--network container:<sidecar-id>`) so `127.0.0.1` reaches the MITM listener bound on the sidecar's loopback. Process mode inherits the parent's NS — same target works. No dedicated docker network per integration.
+- **Network model**: each run gets its own user-defined bridge network `appstrate-exec-<runId>` (created by the platform launcher, sidecar attached with alias `sidecar`). Runner containers join the same network and reach the MITM listener via Docker's embedded DNS (`http://sidecar:<port>`). The earlier attempt to share the sidecar's network namespace via `--network container:<id>` was abandoned because `docker start` raced against the daemon's short-id lookup on Docker Desktop, frequently leaving the runner stuck in `Created`. Process mode inherits the parent's NS — `127.0.0.1:<port>` reaches the listener directly.
 - **Refresh storm protection**: per-`authKey` 5 s cooldown + in-flight dedup on `refreshOnUnauthorized` so a mis-scoped 401 (the credential is fine, the request itself is wrong) can't hammer the platform endpoint.
 - **CA hygiene**: per-run CA, 1 h validity (matches max run duration), private key lives in memory on the sidecar — only the cert PEM (not the key) lands on local fs (`mode 0444`) for `docker cp`. Unlinked on `bootIntegrations().shutdown()`.
 - **Graceful degradation**: if openssl is missing or CA bring-up fails, the sidecar logs `HTTP-delivery integrations will skip` and continues with env-delivery-only integrations. `delivery.env` integrations are unchanged from Phase 1.4 — credentials baked in at container create time.

@@ -11,7 +11,7 @@
  *   2. If the auth is OAuth2 AND (forced OR within the lead window),
  *      call {@link forceRefreshIntegrationConnection}. RefreshError
  *      with `kind="revoked"` flips needsReconnection and bubbles a
- *      structured 410; transient failures bubble a 502.
+ *      structured 403; transient failures bubble a 502.
  *   3. Resolve the live HTTP delivery plan via `resolveHttpDelivery`.
  *   4. Build a `ResolvedAuthCredentials` entry + the matching plan.
  *
@@ -40,7 +40,7 @@ import type { IntegrationManifest } from "@appstrate/core/integration";
 import { OAUTH_REFRESH_LEAD_MS } from "@appstrate/core/sidecar-types";
 
 import { logger } from "../lib/logger.ts";
-import { notFound, forbidden, internalError } from "../lib/errors.ts";
+import { notFound, forbidden, internalError, badGateway } from "../lib/errors.ts";
 import type { Actor } from "../lib/actor.ts";
 import {
   forceRefreshIntegrationConnection,
@@ -62,12 +62,16 @@ export interface ResolveLiveCredentialsOptions {
 }
 
 /**
- * The path's main entry point. Throws ApiError on:
+ * Throws ApiError on:
  *   - 404: integration not declared by the agent, not installed, or no
  *     connection for the actor.
  *   - 403: connection's refresh token was revoked upstream (sidecar
  *     should propagate as 401 to the integration so the LLM sees a
  *     clean "please re-connect" surface).
+ *   - 502: transient OAuth refresh failure (network, upstream 5xx, etc).
+ *     The cached credential may still be valid; the sidecar treats it as
+ *     retry-later and the listener's `refreshOnUnauthorized` cooldown
+ *     keeps a flapping upstream from hammering this endpoint.
  */
 export async function resolveLiveIntegrationCredentials(
   packageId: string,
@@ -139,19 +143,8 @@ export async function resolveLiveIntegrationCredentials(
             connection.credentialsEncrypted,
             refreshContext,
           );
-          fields = refreshed;
-          // Re-read expiresAt — `forceRefreshIntegrationConnection` writes
-          // it; round-trip through DB would be wasteful, so trust the
-          // parsed expiry from the refresh response (mirror what the
-          // refresh helper wrote).
-          // Note: the helper writes the DB row but doesn't return the new
-          // expiresAt — refetch the row to keep the value authoritative.
-          const [refreshedRow] = await db
-            .select({ expiresAt: integrationConnections.expiresAt })
-            .from(integrationConnections)
-            .where(eq(integrationConnections.id, connection.id))
-            .limit(1);
-          expiresAtEpochMs = refreshedRow?.expiresAt ? refreshedRow.expiresAt.getTime() : null;
+          fields = refreshed.fields;
+          expiresAtEpochMs = refreshed.expiresAt ? refreshed.expiresAt.getTime() : null;
         } catch (err) {
           if (err instanceof RefreshError && err.kind === "revoked") {
             // 403 here propagates to the sidecar, which translates back
@@ -167,17 +160,19 @@ export async function resolveLiveIntegrationCredentials(
               `Integration '${packageId}' auth '${authKey}' needs re-connection (refresh token revoked)`,
             );
           }
-          // Transient failure: bubble as internalError. The current
-          // credentials are still valid — but we can't be sure the
-          // sidecar should retry with them blindly, so let it fail this
-          // refresh attempt and try again on the next 401.
+          // Transient failure (network, upstream 5xx, parse error). The
+          // cached credential may still be usable; surfacing 502 lets the
+          // sidecar's `refreshOnUnauthorized` cooldown back off without
+          // poisoning the connection row.
           logger.warn("Integration token refresh transient error", {
             runId: context.runId,
             packageId,
             authKey,
             error: err instanceof Error ? err.message : String(err),
           });
-          throw internalError();
+          throw badGateway(
+            `Integration '${packageId}' auth '${authKey}' token refresh failed upstream (transient)`,
+          );
         }
       }
     }

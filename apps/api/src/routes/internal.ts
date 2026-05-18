@@ -567,35 +567,7 @@ export function createInternalRouter() {
   router.get("/integration-bundle/:scope{@[^/]+}/:name", async (c) => {
     const { runId, run } = await verifyRunToken(c);
     const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
-
-    // Pin: agent must declare this integration as a dep.
-    const agent = await getPackage(run.packageId, run.orgId, { includeEphemeral: true });
-    if (!agent) throw notFound("Agent not found");
-    const deps = asRecord(asRecord(agent.manifest).dependencies);
-    const integrations = asRecord(deps.integrations);
-    if (!(packageId in integrations)) {
-      logger.warn("Integration bundle request rejected — not declared by agent", {
-        runId,
-        packageId,
-        agentId: agent.id,
-      });
-      throw notFound(`Integration '${packageId}' is not a dependency of the running agent`);
-    }
-
-    // Pin: must be installed in the run's application.
-    const [installRow] = await db
-      .select({ packageId: applicationPackages.packageId })
-      .from(applicationPackages)
-      .where(
-        and(
-          eq(applicationPackages.applicationId, run.applicationId),
-          eq(applicationPackages.packageId, packageId),
-        ),
-      )
-      .limit(1);
-    if (!installRow) {
-      throw notFound(`Integration '${packageId}' is not installed in this application`);
-    }
+    await assertAgentDeclaresIntegration(packageId, run, runId);
 
     // Resolve bytes: system package from in-memory map, local from S3
     const sys = getSystemPackages().get(packageId);

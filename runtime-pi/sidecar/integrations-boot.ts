@@ -31,6 +31,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { dirname, join, normalize, posix } from "node:path";
 import { tmpdir } from "node:os";
+import { randomUUID } from "node:crypto";
 import { unzipSync } from "fflate";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -209,7 +210,7 @@ async function extractBundle(bytes: Uint8Array, namespace: string): Promise<stri
   const safe = namespace.replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
   const root = await mkdtemp(join(tmpdir(), `afps-integ-${safe}-`));
   const files = unzipSync(bytes);
-  for (const [rel, bytes] of Object.entries(files)) {
+  for (const [rel, contents] of Object.entries(files)) {
     if (rel.endsWith("/")) continue;
     const relPosix = rel.split("\\").join("/");
     const dest = normalize(join(root, relPosix));
@@ -217,7 +218,7 @@ async function extractBundle(bytes: Uint8Array, namespace: string): Promise<stri
       throw new Error(`integrations-boot: refusing to write outside root: ${rel}`);
     }
     await mkdir(dirname(dest), { recursive: true });
-    await writeFile(dest, bytes as Uint8Array);
+    await writeFile(dest, contents);
   }
   return root;
 }
@@ -291,18 +292,25 @@ function planIntegrationContainer(
  * non-zero exit with both streams in the error message so a failing
  * `docker create` doesn't disappear into a generic "spawn failed".
  */
+interface DockerExecSubprocess {
+  stdout: ReadableStream<Uint8Array>;
+  stderr: ReadableStream<Uint8Array>;
+  exited: Promise<number>;
+}
+
+type DockerExecSpawn = (
+  cmd: string[],
+  opts: { stdin: "ignore"; stdout: "pipe"; stderr: "pipe" },
+) => DockerExecSubprocess;
+
 async function dockerExec(args: string[]): Promise<string> {
-  const bunSpawn = (globalThis as unknown as { Bun?: { spawn: Function } }).Bun?.spawn;
+  const bunSpawn = (globalThis as unknown as { Bun?: { spawn?: DockerExecSpawn } }).Bun?.spawn;
   if (!bunSpawn) throw new Error("integrations-boot: Bun.spawn unavailable");
   const proc = bunSpawn(["docker", ...args], {
     stdin: "ignore",
     stdout: "pipe",
     stderr: "pipe",
-  }) as {
-    stdout: ReadableStream<Uint8Array>;
-    stderr: ReadableStream<Uint8Array>;
-    exited: Promise<number>;
-  };
+  });
   const [stdout, stderr, code] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
@@ -459,14 +467,10 @@ async function setupIntegrationContainer(
   // `/bundle/server/index.js` at the path the manifest declared.
   await dockerExec(["cp", `${plan.bundleRoot}/.`, `${containerId}:/bundle/`]);
   if (mitm) {
-    // Copy the CA cert into the runner's filesystem at a path the env
-    // vars above reference (CA_CONTAINER_PATH). The container's root fs
-    // is ephemeral (`--rm` cleans up at exit) so the cert lives only
-    // for the run. CA_CONTAINER_PATH lives under `/tmp/` for a reason:
-    // `docker cp` does NOT create parent directories on the destination,
-    // so anything pointing at a non-existent dir (e.g. `/etc/appstrate/`)
-    // would fail with `Could not find the file <parent> in container`,
-    // silently breaking every HTTP-delivery integration on the run.
+    // Copy the CA cert into the runner's filesystem at CA_CONTAINER_PATH
+    // (see the const declaration for why it lives under /tmp). The
+    // container's root fs is ephemeral (`--rm` cleans up at exit) so the
+    // cert lives only for the run.
     await dockerExec(["cp", mitm.caCertHostPath, `${containerId}:${CA_CONTAINER_PATH}`]);
   }
   return containerId;
@@ -575,13 +579,15 @@ export async function bootIntegrations(
   const containerIds: string[] = [];
   const mitmListeners: MitmListenerHandle[] = [];
 
-  // The sidecar receives RUN_TOKEN but not RUN_ID directly — we
-  // synthesise a stable identifier from the run-token prefix purely for
-  // labelling the integration containers (lets the orphan reaper match
-  // containers back to their run if the sidecar dies mid-shutdown).
-  // The token itself is sensitive — only the first 12 hex chars land in
-  // a label that's visible via `docker inspect`.
-  const runId = process.env.RUN_ID ?? (process.env.RUN_TOKEN ?? "unknown").slice(0, 12);
+  // The sidecar receives RUN_TOKEN but not always RUN_ID directly — we
+  // need a stable identifier for labelling the integration containers
+  // (lets the orphan reaper match containers back to their run if the
+  // sidecar dies mid-shutdown). NEVER derive this from RUN_TOKEN: even
+  // a 12-char slice of the signed token would leak ~72 bits of secret
+  // entropy via `docker inspect` (labels are visible to anyone who can
+  // talk to the daemon). Fall back to an opaque random id when RUN_ID
+  // isn't available — orphan-cleanup is best-effort either way.
+  const runId = process.env.RUN_ID ?? `nosrunid-${randomUUID().slice(0, 8)}`;
 
   const useDocker = await isDockerAvailable();
   logger.info("integration runtime path", {

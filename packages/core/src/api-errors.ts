@@ -201,6 +201,15 @@ export function internalError(): ApiError {
   });
 }
 
+export function badGateway(detail: string): ApiError {
+  return new ApiError({
+    status: 502,
+    code: "bad_gateway",
+    title: "Bad Gateway",
+    detail,
+  });
+}
+
 export function systemEntityForbidden(type: string, id: string, verb = "modify"): ApiError {
   return new ApiError({
     status: 403,

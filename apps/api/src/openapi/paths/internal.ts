@@ -399,6 +399,15 @@ export const internalPaths = {
           },
         },
         "404": { $ref: "#/components/responses/NotFound" },
+        "502": {
+          description:
+            "Transient OAuth refresh failure upstream (network error, IdP 5xx, malformed response). The cached credential may still be valid; the sidecar's listener cooldown will back off and retry on the next 401.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },
@@ -444,6 +453,15 @@ export const internalPaths = {
           },
         },
         "404": { $ref: "#/components/responses/NotFound" },
+        "502": {
+          description:
+            "Transient OAuth refresh failure upstream — same semantics as the GET endpoint.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },

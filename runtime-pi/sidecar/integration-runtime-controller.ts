@@ -324,7 +324,7 @@ export async function bootstrapIntegrationRuntime(
         // ignore
       }
     }
-    await safeRm(fs, writes);
+    await safeRm(writes);
     throw err;
   }
 
@@ -364,7 +364,7 @@ export async function bootstrapIntegrationRuntime(
           }
         }
         listeners.clear();
-        await safeRm(fs, writes);
+        await safeRm(writes);
       }
     },
   };
@@ -410,8 +410,8 @@ function parseOctalMode(mode: string): number {
   return n;
 }
 
-async function safeRm(fs: FsWriter, writes: ReadonlyArray<FsWriteEntry>): Promise<void> {
-  // Use fs.rm/unlink directly via node:fs to avoid widening the FsWriter
+async function safeRm(writes: ReadonlyArray<FsWriteEntry>): Promise<void> {
+  // Use fs.rm directly via node:fs to avoid widening the FsWriter
   // surface — the unlink path is only needed for cleanup, and going
   // through node:fs keeps test-injected writers focused on the happy path.
   for (const w of writes) {
@@ -421,5 +421,4 @@ async function safeRm(fs: FsWriter, writes: ReadonlyArray<FsWriteEntry>): Promis
       // ignore — caller surface tolerates partial cleanup.
     }
   }
-  void fs; // mark as intentionally unused in the cleanup path
 }

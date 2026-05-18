@@ -12,8 +12,7 @@
  * Lives in apps/api rather than packages/connect because `integration_connections`
  * is platform-internal (the connect package intentionally stays free of
  * `@appstrate/db` to keep its surface light enough for the sidecar to
- * consume). The two helpers should ideally be consolidated behind a
- * table-agnostic writer callback — left as a follow-up.
+ * consume).
  */
 
 import { eq } from "drizzle-orm";
@@ -40,8 +39,15 @@ export interface IntegrationRefreshContext {
   tokenContentType?: OAuthTokenContentType;
 }
 
+export interface IntegrationRefreshResult {
+  /** Decrypted credentials (snake_case + camelCase aliases). */
+  fields: Record<string, string>;
+  /** Parsed `expires_at` from the token response, or `null` if upstream did not return `expires_in`. */
+  expiresAt: Date | null;
+}
+
 /** Per-connection in-flight lock — coalesces concurrent refresh calls. */
-const inflightRefreshes = new Map<string, Promise<Record<string, string>>>();
+const inflightRefreshes = new Map<string, Promise<IntegrationRefreshResult>>();
 
 /**
  * Force-refresh the OAuth2 access token for an integration connection.
@@ -62,9 +68,9 @@ export async function forceRefreshIntegrationConnection(
   authKeyForLog: string,
   credentialsEncrypted: string,
   refreshContext?: IntegrationRefreshContext,
-): Promise<Record<string, string>> {
+): Promise<IntegrationRefreshResult> {
   if (!refreshContext) {
-    return decryptCredentialsAsStringMap(credentialsEncrypted);
+    return { fields: decryptCredentialsAsStringMap(credentialsEncrypted), expiresAt: null };
   }
 
   const cached = inflightRefreshes.get(connectionId);
@@ -91,14 +97,14 @@ async function doRefresh(
   authKey: string,
   credentialsEncrypted: string,
   ctx: IntegrationRefreshContext,
-): Promise<Record<string, string>> {
+): Promise<IntegrationRefreshResult> {
   const current = decryptCredentialsAsStringMap(credentialsEncrypted);
   // The OAuth callback stores tokens under snake_case (refresh_token) AND
   // camelCase (refreshToken) depending on how the storage path was reached.
   // Read both.
   const refreshToken = current.refresh_token ?? current.refreshToken;
   if (!refreshToken) {
-    return current;
+    return { fields: current, expiresAt: null };
   }
 
   const useBasicAuth = ctx.tokenAuthMethod === "client_secret_basic";
@@ -183,17 +189,18 @@ async function doRefresh(
     refresh_token: finalRefreshToken,
     refreshToken: finalRefreshToken,
   };
+  const expiresAt = parsed.expiresAt ? new Date(parsed.expiresAt) : null;
   await db
     .update(integrationConnections)
     .set({
       credentialsEncrypted: encryptCredentials(newCreds),
-      expiresAt: parsed.expiresAt ? new Date(parsed.expiresAt) : null,
+      expiresAt,
       needsReconnection: false,
       updatedAt: new Date(),
     })
     .where(eq(integrationConnections.id, connectionId));
 
-  return newCreds;
+  return { fields: newCreds, expiresAt };
 }
 
 function decryptCredentialsAsStringMap(ciphertext: string): Record<string, string> {
