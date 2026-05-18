@@ -44,6 +44,26 @@ export interface IntegrationRefreshResult {
   fields: Record<string, string>;
   /** Parsed `expires_at` from the token response, or `null` if upstream did not return `expires_in`. */
   expiresAt: Date | null;
+  /**
+   * Niveau 2 Phase 6 — scope set the IdP authoritatively granted on this
+   * refresh (parsed from the response's `scope` field). `null` when the
+   * response omitted `scope` entirely — per OAuth 2 §5.1 that means
+   * "same scopes as previously issued", so the caller MUST NOT treat
+   * `null` as "no scopes granted".
+   */
+  scopesGranted: string[] | null;
+  /**
+   * `true` when {@link scopesGranted} is non-null AND strictly narrower
+   * than the connection's previously-stored `scopesGranted`. The IdP
+   * has shrunk the grant — caller should re-check installed agents'
+   * required scopes and flip `needsReconnection` if the shrink dropped
+   * the actor below the minimum required set.
+   *
+   * `false` when scopes stayed the same, grew (creep), or the response
+   * omitted `scope`. Callers can fast-path: ignore the cross-check
+   * unless `shrinkDetected === true`.
+   */
+  shrinkDetected: boolean;
 }
 
 /** Per-connection in-flight lock — coalesces concurrent refresh calls. */
@@ -70,7 +90,12 @@ export async function forceRefreshIntegrationConnection(
   refreshContext?: IntegrationRefreshContext,
 ): Promise<IntegrationRefreshResult> {
   if (!refreshContext) {
-    return { fields: decryptCredentialsAsStringMap(credentialsEncrypted), expiresAt: null };
+    return {
+      fields: decryptCredentialsAsStringMap(credentialsEncrypted),
+      expiresAt: null,
+      scopesGranted: null,
+      shrinkDetected: false,
+    };
   }
 
   const cached = inflightRefreshes.get(connectionId);
@@ -104,7 +129,7 @@ async function doRefresh(
   // Read both.
   const refreshToken = current.refresh_token ?? current.refreshToken;
   if (!refreshToken) {
-    return { fields: current, expiresAt: null };
+    return { fields: current, expiresAt: null, scopesGranted: null, shrinkDetected: false };
   }
 
   const useBasicAuth = ctx.tokenAuthMethod === "client_secret_basic";
@@ -190,6 +215,28 @@ async function doRefresh(
     refreshToken: finalRefreshToken,
   };
   const expiresAt = parsed.expiresAt ? new Date(parsed.expiresAt) : null;
+
+  // Niveau 2 Phase 6 — only treat the response's `scope` as authoritative
+  // when the IdP echoed it explicitly. `parseTokenResponse` falls back to
+  // the requestedScopes (here `undefined` → `[]`) when the response omits
+  // `scope`; an empty array under that path would FALSELY signal a total
+  // revocation. Distinguish by checking the raw wire payload directly.
+  const responseHadScopeField = typeof tokenData.scope === "string" && tokenData.scope.length > 0;
+  const responseScopes = responseHadScopeField ? parsed.scopesGranted : null;
+
+  // Read the existing `scopes_granted` so we can detect shrinkage. One
+  // extra SELECT per refresh is acceptable — refresh is the slow path.
+  const [prevRow] = await db
+    .select({ scopesGranted: integrationConnections.scopesGranted })
+    .from(integrationConnections)
+    .where(eq(integrationConnections.id, connectionId))
+    .limit(1);
+  const prevScopes = prevRow?.scopesGranted ?? [];
+  const shrinkDetected =
+    responseScopes !== null && responseScopes.length > 0
+      ? prevScopes.some((s) => !responseScopes.includes(s))
+      : false;
+
   await db
     .update(integrationConnections)
     .set({
@@ -197,10 +244,13 @@ async function doRefresh(
       expiresAt,
       needsReconnection: false,
       updatedAt: new Date(),
+      // Only overwrite scopesGranted when the IdP authoritatively echoed
+      // a `scope` field. Otherwise leave the high-water-mark untouched.
+      ...(responseScopes !== null ? { scopesGranted: responseScopes } : {}),
     })
     .where(eq(integrationConnections.id, connectionId));
 
-  return { fields: newCreds, expiresAt };
+  return { fields: newCreds, expiresAt, scopesGranted: responseScopes, shrinkDetected };
 }
 
 function decryptCredentialsAsStringMap(ciphertext: string): Record<string, string> {

@@ -46,6 +46,7 @@ import {
   forceRefreshIntegrationConnection,
   type IntegrationRefreshContext,
 } from "./integration-token-refresh.ts";
+import { computeRequiredScopes } from "./integration-scope-resolver.ts";
 
 export interface LiveIntegrationCredentialsResult {
   /** Auth payloads in the shape the MITM planner expects. */
@@ -145,6 +146,45 @@ export async function resolveLiveIntegrationCredentials(
           );
           fields = refreshed.fields;
           expiresAtEpochMs = refreshed.expiresAt ? refreshed.expiresAt.getTime() : null;
+
+          // Niveau 2 Phase 6 — IdP-side scope shrink awareness. When the
+          // refresh response narrowed `scopesGranted` (user revoked some
+          // permissions in their account settings between issuance and
+          // refresh), cross-check against the union of `requiredScopes`
+          // across every installed agent and flip `needsReconnection`
+          // if the actor has dropped below that floor. Fast-path: skip
+          // the agent scan unless the refresh actually shrank scopes.
+          if (refreshed.shrinkDetected && refreshed.scopesGranted !== null) {
+            const granted = refreshed.scopesGranted;
+            const { required } = await computeRequiredScopes({
+              scope: { orgId: context.orgId, applicationId: context.applicationId },
+              integrationPackageId: packageId,
+              authKey,
+            });
+            const missing = required.filter((s) => !granted.includes(s));
+            if (missing.length > 0) {
+              await db
+                .update(integrationConnections)
+                .set({ needsReconnection: true, updatedAt: new Date() })
+                .where(eq(integrationConnections.id, connection.id));
+              logger.warn("Integration scope shrink dropped below required floor", {
+                runId: context.runId,
+                packageId,
+                authKey,
+                granted,
+                required,
+                missing,
+              });
+            } else {
+              logger.info("Integration scope shrink absorbed (still covers required)", {
+                runId: context.runId,
+                packageId,
+                authKey,
+                granted,
+                required,
+              });
+            }
+          }
         } catch (err) {
           if (err instanceof RefreshError && err.kind === "revoked") {
             // 403 here propagates to the sidecar, which translates back
