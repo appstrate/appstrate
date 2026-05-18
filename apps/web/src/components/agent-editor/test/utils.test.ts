@@ -121,6 +121,92 @@ describe("getResourceEntries / setResourceEntries", () => {
     setResourceEntries(m, "skills", []);
     expect((m.dependencies as Record<string, unknown>).skills).toBeUndefined();
   });
+
+  // Niveau 2 (Phase 5b) — integrations carry a richer payload than
+  // skills/tools. These tests pin the round-trip semantics across both
+  // legacy bare-string entries (no agent-side tool/scope pick) and the
+  // niveau 2 rich form (explicit allowlist drives sidecar enforcement).
+  describe("integrations rich form (niveau 2)", () => {
+    it("reads a bare-string integration dep as version-only", () => {
+      const m = { dependencies: { providers: {}, integrations: { "@vendor/gmail": "^1.0.0" } } };
+      expect(getResourceEntries(m, "integrations")).toEqual([
+        { id: "@vendor/gmail", version: "^1.0.0" },
+      ]);
+    });
+
+    it("reads a rich-form integration dep with tools and scopes", () => {
+      const m = {
+        dependencies: {
+          providers: {},
+          integrations: {
+            "@vendor/gmail": {
+              version: "^1.0.0",
+              tools: ["list_messages", "send_message"],
+              scopes: ["delete"],
+            },
+          },
+        },
+      };
+      expect(getResourceEntries(m, "integrations")).toEqual([
+        {
+          id: "@vendor/gmail",
+          version: "^1.0.0",
+          tools: ["list_messages", "send_message"],
+          scopes: ["delete"],
+        },
+      ]);
+    });
+
+    it("writes the bare-string form when no tools/scopes are set", () => {
+      const m: Record<string, unknown> = { dependencies: { providers: {} } };
+      setResourceEntries(m, "integrations", [{ id: "@vendor/gmail", version: "^1.0.0" }]);
+      expect((m.dependencies as Record<string, unknown>).integrations).toEqual({
+        "@vendor/gmail": "^1.0.0",
+      });
+    });
+
+    it("writes the rich form when tools is an explicit array (even empty)", () => {
+      const m: Record<string, unknown> = { dependencies: { providers: {} } };
+      setResourceEntries(m, "integrations", [
+        { id: "@vendor/gmail", version: "^1.0.0", tools: [] },
+      ]);
+      expect((m.dependencies as Record<string, unknown>).integrations).toEqual({
+        "@vendor/gmail": { version: "^1.0.0", tools: [] },
+      });
+    });
+
+    it("writes the rich form with tools + scopes union", () => {
+      const m: Record<string, unknown> = { dependencies: { providers: {} } };
+      setResourceEntries(m, "integrations", [
+        {
+          id: "@vendor/gmail",
+          version: "^1.0.0",
+          tools: ["list_messages"],
+          scopes: ["delete"],
+        },
+      ]);
+      expect((m.dependencies as Record<string, unknown>).integrations).toEqual({
+        "@vendor/gmail": {
+          version: "^1.0.0",
+          tools: ["list_messages"],
+          scopes: ["delete"],
+        },
+      });
+    });
+
+    it("round-trips a mixed bag of bare + rich entries", () => {
+      const m: Record<string, unknown> = { dependencies: { providers: {} } };
+      setResourceEntries(m, "integrations", [
+        { id: "@vendor/legacy", version: "^1.0.0" },
+        { id: "@vendor/locked", version: "^2.0.0", tools: ["read"] },
+      ]);
+      const back = getResourceEntries(m, "integrations");
+      expect(back).toEqual([
+        { id: "@vendor/legacy", version: "^1.0.0" },
+        { id: "@vendor/locked", version: "^2.0.0", tools: ["read"] },
+      ]);
+    });
+  });
 });
 
 // ─── defaultEditorState ─────────────────────────────────────

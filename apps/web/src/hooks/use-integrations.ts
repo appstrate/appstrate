@@ -47,6 +47,18 @@ export interface IntegrationManifestView {
   };
   transport?: { type: "stdio" | "streamable-http" | "sse" };
   auths?: Record<string, IntegrationManifestAuth>;
+  /**
+   * Niveau 2 (Phase 0) — per-tool scope + URL pattern metadata. Optional;
+   * integrations that omit this block keep legacy "all tools allowed"
+   * semantics. The agent editor reads this to render the tool picker.
+   */
+  tools?: Record<string, IntegrationManifestTool>;
+}
+
+export interface IntegrationManifestTool {
+  requiredScopes?: string[];
+  requiredAuthKey?: string;
+  urlPatterns?: Array<{ pattern: string; methods?: string[] }>;
 }
 
 export interface IntegrationManifestAuth {
@@ -62,6 +74,13 @@ export interface IntegrationManifestAuth {
   };
   tokenAuthMethod?: "client_secret_post" | "client_secret_basic" | "none";
   delivery: Record<string, unknown>;
+  /**
+   * Niveau 2 (Phase 0) — IdP-side scope catalog. Optional; when set, the
+   * UI uses {value, label, description?} to render human-readable scope
+   * pickers instead of raw scope strings. Defaults `scopes[]` and agent
+   * `requiredScopes` must be subsets of this catalog.
+   */
+  availableScopes?: Array<{ value: string; label: string; description?: string }>;
 }
 
 export interface IntegrationConnection {

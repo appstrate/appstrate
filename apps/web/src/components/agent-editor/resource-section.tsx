@@ -24,6 +24,7 @@ import { ShieldCheck } from "lucide-react";
 import { Spinner } from "../spinner";
 import type { ResourceEntry } from "./types";
 import { caretRange } from "./utils";
+import { IntegrationToolPicker } from "./integration-tool-picker";
 
 type ResourceEntriesUpdater = ResourceEntry[] | ((prev: ResourceEntry[]) => ResourceEntry[]);
 
@@ -115,6 +116,10 @@ export function ResourceSection({
     onChange((prev) => prev.map((e) => (e.id === id ? { ...e, version } : e)));
   };
 
+  const replaceEntry = (id: string, next: ResourceEntry) => {
+    onChange((prev) => prev.map((e) => (e.id === id ? next : e)));
+  };
+
   const handleUpload = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -171,38 +176,54 @@ export function ResourceSection({
             const entry = selectedMap.get(item.id);
 
             return (
-              <label
+              <div
                 key={item.id}
                 className={cn(
-                  "border-border hover:bg-muted/50 flex cursor-pointer items-center gap-2.5 rounded-md border px-3 py-2 transition-colors",
+                  "border-border rounded-md border transition-colors",
                   isSelected && "border-primary bg-primary/5",
                 )}
               >
-                <Checkbox checked={isSelected} onCheckedChange={() => toggle(item.id)} />
-                <div className="flex min-w-0 flex-1 flex-col">
-                  <span className="flex items-center gap-1.5 truncate text-sm font-medium">
-                    {item.name || item.id}
-                    {isBuiltIn && (
-                      <ShieldCheck className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
-                    )}
-                  </span>
-                  {item.description && (
-                    <span className="text-muted-foreground truncate text-xs">
-                      {item.description}
-                    </span>
+                <label
+                  className={cn(
+                    "flex cursor-pointer items-center gap-2.5 px-3 py-2",
+                    !isSelected && "hover:bg-muted/50 rounded-md",
                   )}
-                </div>
-                {isSelected && (
-                  <div className="ml-auto shrink-0">
-                    <VersionSelect
-                      type={type}
+                >
+                  <Checkbox checked={isSelected} onCheckedChange={() => toggle(item.id)} />
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="flex items-center gap-1.5 truncate text-sm font-medium">
+                      {item.name || item.id}
+                      {isBuiltIn && (
+                        <ShieldCheck className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
+                      )}
+                    </span>
+                    {item.description && (
+                      <span className="text-muted-foreground truncate text-xs">
+                        {item.description}
+                      </span>
+                    )}
+                  </div>
+                  {isSelected && (
+                    <div className="ml-auto shrink-0">
+                      <VersionSelect
+                        type={type}
+                        packageId={item.id}
+                        value={entry?.version ?? "*"}
+                        onChange={(v) => updateVersion(item.id, v)}
+                      />
+                    </div>
+                  )}
+                </label>
+                {isSelected && type === "integration" && entry && (
+                  <div className="px-3 pb-3">
+                    <IntegrationToolPicker
                       packageId={item.id}
-                      value={entry?.version ?? "*"}
-                      onChange={(v) => updateVersion(item.id, v)}
+                      entry={entry}
+                      onChange={(next) => replaceEntry(item.id, next)}
                     />
                   </div>
                 )}
-              </label>
+              </div>
             );
           })}
         </div>

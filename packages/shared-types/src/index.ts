@@ -85,12 +85,26 @@ export interface AppConfig {
 
 // --- Package Types ---
 
-/** A reference to a skill or tool dependency with optional metadata. */
+/** A reference to a skill, tool, or integration dependency with optional metadata. */
 export interface ResourceEntry {
   id: string;
   version?: string;
   name?: string;
   description?: string;
+  /**
+   * Niveau 2 — agent's tool allowlist for an integration dependency.
+   * Drives sidecar `tools/list` filtering and OAuth scope inference.
+   * `undefined` keeps legacy "all tools allowed" semantics. Ignored for
+   * non-integration resource types.
+   */
+  tools?: string[];
+  /**
+   * Niveau 2 — agent's explicit OAuth scope escape hatch for an
+   * integration dependency, unioned with scopes inferred from `tools`.
+   * `undefined` defaults to "none beyond inference". Ignored for
+   * non-integration resource types.
+   */
+  scopes?: string[];
 }
 
 // --- Run Types ---

@@ -947,5 +947,12 @@
   "agentEditor.integrations.add": "Ajouter une intégration",
   "agentEditor.integrations.empty": "Aucune intégration liée. Cliquez sur \"Ajouter\" pour en lier une.",
   "agentEditor.integrations.notInstalledHint": "Cette intégration n'est pas installée — installez-la depuis le marketplace d'abord.",
-  "agentEditor.integrations.remove": "Retirer"
+  "agentEditor.integrations.remove": "Retirer",
+  "agentEditor.integrations.tools.title": "Outils autorisés",
+  "agentEditor.integrations.tools.legacyNotice": "Aucun outil sélectionné — tous les outils sont autorisés (comportement historique). Cocher un outil active l'enforcement strict.",
+  "agentEditor.integrations.tools.explicitNotice": "Seuls les outils cochés seront exposés à l'agent à l'exécution. Les scopes OAuth requis sont inférés automatiquement.",
+  "agentEditor.integrations.tools.requires": "Requiert :",
+  "agentEditor.integrations.tools.reset": "Revenir à tous les outils",
+  "agentEditor.integrations.scopes.title": "Scopes OAuth supplémentaires",
+  "agentEditor.integrations.scopes.notice": "Optionnel — unionnés avec les scopes inférés des outils sélectionnés."
 }

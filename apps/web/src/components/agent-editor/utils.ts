@@ -16,7 +16,11 @@ import {
   type SchemaWrapper,
 } from "@appstrate/core/form";
 import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
-import { parseManifestProviders, writeManifestProviders } from "@appstrate/core/dependencies";
+import {
+  parseManifestIntegrations,
+  parseManifestProviders,
+  writeManifestProviders,
+} from "@appstrate/core/dependencies";
 
 // ─── Version ranges ─────────────────────────────────────────
 
@@ -182,6 +186,18 @@ export function getResourceEntries(
   m: Record<string, unknown>,
   type: "skills" | "tools" | "integrations",
 ): ResourceEntry[] {
+  // Integrations carry the niveau 2 rich-form payload (`{ version, tools,
+  // scopes }`). Skills/tools are version-only — keep the bare-string path
+  // for them so the editor doesn't accidentally produce object-form
+  // entries that the backend resolver hasn't been taught to accept.
+  if (type === "integrations") {
+    return parseManifestIntegrations(m).map((e) => ({
+      id: e.id,
+      version: e.version,
+      ...(e.tools !== undefined ? { tools: [...e.tools] } : {}),
+      ...(e.scopes !== undefined ? { scopes: [...e.scopes] } : {}),
+    }));
+  }
   const deps = getDeps(m);
   const record = (deps[type] ?? {}) as Record<string, string>;
   return Object.entries(record).map(([id, version]) => ({ id, version }));
@@ -194,6 +210,38 @@ export function setResourceEntries(
 ): void {
   if (!m.dependencies) m.dependencies = { providers: {} };
   const deps = m.dependencies as Record<string, unknown>;
+  if (type === "integrations") {
+    // Niveau 2 — emit the rich object form whenever the user actually
+    // picked a tool allowlist or extra scopes. When neither is present,
+    // fall back to the bare-version string for byte-perfect parity with
+    // legacy manifests (keeps round-trip diffs clean and is the form
+    // every pre-niveau-2 agent on disk uses).
+    const record: Record<
+      string,
+      string | { version: string; tools?: string[]; scopes?: string[] }
+    > = {};
+    for (const e of entries) {
+      if (!e.id) continue;
+      const version = e.version ?? "*";
+      const hasTools = Array.isArray(e.tools);
+      const hasScopes = Array.isArray(e.scopes) && e.scopes.length > 0;
+      if (hasTools || hasScopes) {
+        record[e.id] = {
+          version,
+          ...(hasTools ? { tools: [...e.tools!] } : {}),
+          ...(hasScopes ? { scopes: [...e.scopes!] } : {}),
+        };
+      } else {
+        record[e.id] = version;
+      }
+    }
+    if (Object.keys(record).length > 0) {
+      deps.integrations = record;
+    } else {
+      delete deps.integrations;
+    }
+    return;
+  }
   const record: Record<string, string> = {};
   for (const e of entries) {
     if (e.id) record[e.id] = e.version ?? "*";
