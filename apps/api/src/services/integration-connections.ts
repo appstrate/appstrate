@@ -408,6 +408,31 @@ export async function saveIntegrationConnection(
 
   let row = updated[0];
   if (!row) {
+    // Single-auth-per-integration-per-actor invariant: refuse the insert
+    // when the actor already has a connection on a DIFFERENT auth for
+    // this integration in this application. Multi-auth integrations
+    // (e.g. GitHub MCP with `oauth` + `pat`) would otherwise leave the
+    // PAT row as dead weight (the spawn resolver prefers oauth2 and the
+    // MITM gets ambiguous per-request behaviour). The actor disconnects
+    // first if they want to switch auth.
+    const existingOther = await db
+      .select({ authKey: integrationConnections.authKey })
+      .from(integrationConnections)
+      .where(
+        and(
+          eq(integrationConnections.integrationPackageId, input.packageId),
+          eq(integrationConnections.applicationId, scope.applicationId),
+          ownerPredicate,
+        ),
+      )
+      .limit(1);
+    if (existingOther[0] && existingOther[0].authKey !== input.authKey) {
+      throw conflict(
+        "integration_other_auth_connected",
+        `This integration is already connected via auth '${existingOther[0].authKey}'. Disconnect it before connecting via '${input.authKey}'.`,
+      );
+    }
+
     const inserted = await db
       .insert(integrationConnections)
       .values({

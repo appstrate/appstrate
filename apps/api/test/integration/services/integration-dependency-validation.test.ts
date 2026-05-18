@@ -337,6 +337,75 @@ describe("validateAgentIntegrations (throwing)", () => {
     });
   });
 
+  it("refuses a second connection on a different auth for the same actor/integration", async () => {
+    // Multi-auth integration declaring both oauth + pat (mirrors GitHub MCP).
+    const dualAuthId = "@official/dual";
+    await seedPackage({
+      id: dualAuthId,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: {
+        manifestVersion: "1.1",
+        type: "integration",
+        name: dualAuthId,
+        version: "1.0.0",
+        displayName: "Dual",
+        server: { type: "http", url: "https://api.x/mcp" },
+        auths: {
+          oauth: {
+            type: "oauth2",
+            authorizationUrl: "https://idp/a",
+            tokenUrl: "https://idp/t",
+            authorizedUris: ["https://api.x/*"],
+            delivery: { http: {} },
+          },
+          pat: {
+            type: "api_key",
+            authorizedUris: ["https://api.x/*"],
+            delivery: { http: { headerName: "Authorization", headerPrefix: "Bearer " } },
+            credentials: { schema: { type: "object", properties: { apiKey: { type: "string" } } } },
+          },
+        },
+      },
+    });
+
+    const { saveIntegrationConnection } =
+      await import("../../../src/services/integration-connections.ts");
+
+    // First connection on `oauth` succeeds.
+    await saveIntegrationConnection(
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      {
+        packageId: dualAuthId,
+        authKey: "oauth",
+        accountId: "u1",
+        credentials: { access_token: "tok" },
+        actor,
+      },
+    );
+
+    // Second connection on `pat` for the same actor must throw 409.
+    let caught: unknown;
+    try {
+      await saveIntegrationConnection(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        {
+          packageId: dualAuthId,
+          authKey: "pat",
+          accountId: "u1",
+          credentials: { apiKey: "secret" },
+          actor,
+        },
+      );
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(ApiError);
+    expect((caught as ApiError).status).toBe(409);
+    expect((caught as ApiError).code).toBe("integration_other_auth_connected");
+  });
+
   it("scopes connections to the actor — another user's connection doesn't satisfy", async () => {
     // Seed a second user with the connection.
     const other = await createTestContext({ orgSlug: "deps-throw-other" });

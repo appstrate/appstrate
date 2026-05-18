@@ -53,6 +53,8 @@
   "detail.providersSectionTitle": "Providers",
   "detail.integrationsSectionTitle": "Integrations",
   "detail.integrationConnected": "Connected",
+  "detail.integrationConnectedVia": "Connected via {{authKey}}",
+  "detail.integrationDisconnect": "Disconnect",
   "detail.integrationNotConnected": "Not connected",
   "detail.integrationNeedsReconnection": "Reconnect required ({{authKey}})",
   "detail.integrationMissingScopes": "Missing permissions: {{scopes}}",

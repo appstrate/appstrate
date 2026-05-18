@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { CheckCircle2, AlertTriangle, XCircle, Loader2, Puzzle } from "lucide-react";
+import { CheckCircle2, AlertTriangle, XCircle, Loader2, Puzzle, Unlink } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import {
   useIntegrationDetail,
   useIntegrationConnections,
+  useDisconnectIntegration,
   type IntegrationManifestView,
 } from "../../hooks/use-integrations";
 import { InlineConnectButton } from "../integration-connect/inline-connect-button";
@@ -59,6 +61,7 @@ function IntegrationConnectionCard({ packageId, agentTools }: IntegrationConnect
   const { t } = useTranslation(["agents"]);
   const { data: detail, isPending: detailPending } = useIntegrationDetail(packageId);
   const { data: connections, isPending: connsPending } = useIntegrationConnections(packageId);
+  const disconnect = useDisconnectIntegration();
 
   const displayName = detail?.manifest.displayName ?? packageId;
   const isLoading = detailPending || connsPending;
@@ -82,6 +85,16 @@ function IntegrationConnectionCard({ packageId, agentTools }: IntegrationConnect
   const { icon, subtitle } = renderStatus(status, t);
   const action = resolveAction(status, detail.manifest);
 
+  // When connected, the small unlink button lets the actor switch auth
+  // (the server-side single-auth-per-integration invariant means a
+  // re-connect via the alternate auth would otherwise 409). Finds the
+  // connection row for the connected auth so we can pass its id to
+  // useDisconnectIntegration.
+  const connectedAuthKey = status.kind === "ok" ? status.authKey : null;
+  const connectedConnection = connectedAuthKey
+    ? connections?.find((c) => c.authKey === connectedAuthKey)
+    : null;
+
   return (
     <CardShell icon={icon} title={displayName} subtitle={subtitle}>
       {action && (
@@ -91,6 +104,18 @@ function IntegrationConnectionCard({ packageId, agentTools }: IntegrationConnect
           scopes={action.scopes}
           intent={action.intent}
         />
+      )}
+      {connectedConnection && (
+        <Button
+          size="icon"
+          variant="ghost"
+          title={t("detail.integrationDisconnect")}
+          onClick={() => disconnect.mutate({ packageId, connectionId: connectedConnection.id })}
+          disabled={disconnect.isPending}
+          data-testid={`disconnect-${packageId}`}
+        >
+          <Unlink className="size-3" />
+        </Button>
       )}
     </CardShell>
   );
@@ -157,7 +182,7 @@ function CardShell({
 // ───────────────────────────────────────────────────────────────────────────
 
 type IntegrationStatus =
-  | { kind: "ok" }
+  | { kind: "ok"; authKey: string }
   | { kind: "not_connected" }
   | { kind: "needs_reconnection"; authKey: string }
   | { kind: "insufficient_scopes"; authKey: string; missing: string[]; required: string[] };
@@ -170,7 +195,7 @@ function deriveIntegrationStatus(input: {
   const { manifest, connections, agentTools } = input;
   const auths = manifest.auths ?? {};
   const declaredAuthKeys = Object.keys(auths);
-  if (declaredAuthKeys.length === 0) return { kind: "ok" };
+  if (declaredAuthKeys.length === 0) return { kind: "ok", authKey: "" };
 
   const requiredAuthKeys = requiredAuthKeysForAgent(manifest, agentTools);
 
@@ -218,7 +243,11 @@ function deriveIntegrationStatus(input: {
     }
   }
 
-  return { kind: "ok" };
+  // Single-auth-per-integration invariant (server-side gate in
+  // saveIntegrationConnection) means `connected` has at most one entry
+  // here in practice. Surface its authKey on the ok status so the card
+  // can label "Connected via {auth}" + render a disconnect/switch CTA.
+  return { kind: "ok", authKey: connected[0] ?? "" };
 }
 
 function requiredAuthKeysForAgent(
@@ -269,7 +298,9 @@ function renderStatus(
     case "ok":
       return {
         icon: <CheckCircle2 className="size-3 text-emerald-500" />,
-        subtitle: t("detail.integrationConnected"),
+        subtitle: status.authKey
+          ? t("detail.integrationConnectedVia", { authKey: status.authKey })
+          : t("detail.integrationConnected"),
       };
     case "not_connected":
       return {
