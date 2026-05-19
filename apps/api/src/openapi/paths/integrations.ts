@@ -32,6 +32,34 @@ const connectionIdParam = {
   schema: { type: "string", format: "uuid" },
 } as const;
 
+const agentPackageIdParam = {
+  name: "agentPackageId",
+  in: "path",
+  required: true,
+  description: "Agent package id (e.g. `@acme/my-agent`).",
+  schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$" },
+} as const;
+
+const integrationPinSchema = {
+  type: "object",
+  required: [
+    "packageId",
+    "integrationPackageId",
+    "authKey",
+    "connectionId",
+    "createdAt",
+    "updatedAt",
+  ],
+  properties: {
+    packageId: { type: "string" },
+    integrationPackageId: { type: "string" },
+    authKey: { type: "string" },
+    connectionId: { type: "string", format: "uuid" },
+    createdAt: { type: "string", format: "date-time" },
+    updatedAt: { type: "string", format: "date-time" },
+  },
+} as const;
+
 const integrationSummarySchema = {
   type: "object",
   required: ["id", "manifest", "orgId", "source"],
@@ -575,6 +603,198 @@ export const integrationsPaths = {
           },
         },
         "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    patch: {
+      operationId: "updateIntegrationConnectionMetadata",
+      tags: ["Integrations"],
+      summary: "Update an integration connection's label and/or sharedWithOrg flag",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        integrationPackageIdParam,
+        connectionIdParam,
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              properties: {
+                label: { type: ["string", "null"], maxLength: 80 },
+                sharedWithOrg: { type: "boolean" },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Updated",
+          headers: baseResponseHeaders,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["id", "label", "sharedWithOrg", "updatedAt"],
+                properties: {
+                  id: { type: "string", format: "uuid" },
+                  label: { type: ["string", "null"] },
+                  sharedWithOrg: { type: "boolean" },
+                  updatedAt: { type: "string", format: "date-time" },
+                },
+              },
+            },
+          },
+        },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description: "Connection is pinned and cannot be unshared",
+          headers: baseResponseHeaders,
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+      },
+    },
+  },
+  "/api/integrations/{packageId}/settings": {
+    patch: {
+      operationId: "updateIntegrationSettings",
+      tags: ["Integrations"],
+      summary: "Toggle the per-(app, integration) block_user_connections gate (admin)",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        integrationPackageIdParam,
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["blockUserConnections"],
+              properties: { blockUserConnections: { type: "boolean" } },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Updated",
+          headers: baseResponseHeaders,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["blocked"],
+                properties: { blocked: { type: "boolean" } },
+              },
+            },
+          },
+        },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/integrations/{packageId}/pins": {
+    get: {
+      operationId: "listIntegrationPins",
+      tags: ["Integrations"],
+      summary: "List admin pins for this integration in this application",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        integrationPackageIdParam,
+      ],
+      responses: {
+        "200": {
+          description: "Pin list",
+          headers: baseResponseHeaders,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["object", "data", "hasMore"],
+                properties: {
+                  object: { type: "string", enum: ["list"] },
+                  data: { type: "array", items: integrationPinSchema },
+                  hasMore: { type: "boolean" },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  "/api/integrations/{packageId}/pins/{agentPackageId}/{authKey}": {
+    put: {
+      operationId: "upsertIntegrationPin",
+      tags: ["Integrations"],
+      summary: "Pin an admin-shared connection to (agent, auth) for all members (admin)",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        integrationPackageIdParam,
+        agentPackageIdParam,
+        authKeyParam,
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["connectionId"],
+              properties: { connectionId: { type: "string", format: "uuid" } },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Pinned",
+          headers: baseResponseHeaders,
+          content: { "application/json": { schema: integrationPinSchema } },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    delete: {
+      operationId: "deleteIntegrationPin",
+      tags: ["Integrations"],
+      summary: "Remove an admin pin (admin)",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        integrationPackageIdParam,
+        agentPackageIdParam,
+        authKeyParam,
+      ],
+      responses: {
+        "200": {
+          description: "Deleted",
+          headers: baseResponseHeaders,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["deleted"],
+                properties: { deleted: { type: "boolean" } },
+              },
+            },
+          },
+        },
+        "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
   },

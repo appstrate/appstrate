@@ -72,6 +72,14 @@ import {
   getCurrentGrantedScopes,
 } from "../services/integration-scope-resolver.ts";
 import { isUserConnectionCreationBlocked } from "../services/integration-connection-resolver.ts";
+import {
+  deleteIntegrationPin,
+  listIntegrationPins,
+  loadConnectionOwnership,
+  setBlockUserConnections,
+  updateConnectionMetadata,
+  upsertIntegrationPin,
+} from "../services/integration-pins-service.ts";
 import { oauthStateStore } from "../services/connection-manager/oauth-state-store.ts";
 
 // ─────────────────────────────────────────────
@@ -89,6 +97,23 @@ const connectFieldsSchema = z.object({
 const connectOAuthSchema = z.object({
   scopes: z.array(z.string()).optional(),
 });
+
+const updateSettingsSchema = z.object({
+  blockUserConnections: z.boolean(),
+});
+
+const setPinSchema = z.object({
+  connectionId: z.uuid(),
+});
+
+const updateConnectionSchema = z
+  .object({
+    label: z.string().max(80).nullable().optional(),
+    sharedWithOrg: z.boolean().optional(),
+  })
+  .refine((b) => b.label !== undefined || b.sharedWithOrg !== undefined, {
+    message: "at least one of label, sharedWithOrg must be provided",
+  });
 
 const oauthClientSchema = z.object({
   clientId: z.string().min(1),
@@ -541,5 +566,153 @@ export function createIntegrationsRouter() {
     },
   );
 
+  // ─── Admin: block_user_connections + pins + connection metadata ──
+
+  router.patch(
+    "/:packageId{@[^/]+/[^/]+}/settings",
+    requirePermission("integrations", "install"),
+    async (c) => {
+      assertOrgAdmin(c);
+      const packageId = c.req.param("packageId")!;
+      const scope = getAppScope(c);
+      await assertIsIntegration(scope, packageId);
+      const body = parseBody(updateSettingsSchema, await c.req.json());
+      const result = await setBlockUserConnections(scope, packageId, body.blockUserConnections);
+      await recordAuditFromContext(c, {
+        action: "integration.block_user_connections.updated",
+        resourceType: "integration",
+        resourceId: packageId,
+        after: { blocked: result.blocked },
+      });
+      return c.json(result);
+    },
+  );
+
+  router.get(
+    "/:packageId{@[^/]+/[^/]+}/pins",
+    requirePermission("integrations", "read"),
+    async (c) => {
+      const packageId = c.req.param("packageId")!;
+      const scope = getAppScope(c);
+      const items = await listIntegrationPins(scope, packageId);
+      return c.json(listResponse(items));
+    },
+  );
+
+  router.put(
+    "/:packageId{@[^/]+/[^/]+}/pins/:agentPackageId{@[^/]+/[^/]+}/:authKey",
+    requirePermission("integrations", "install"),
+    async (c) => {
+      assertOrgAdmin(c);
+      const packageId = c.req.param("packageId")!;
+      const agentPackageId = c.req.param("agentPackageId")!;
+      const authKey = c.req.param("authKey")!;
+      const scope = getAppScope(c);
+      const body = parseBody(setPinSchema, await c.req.json());
+      const userId = c.get("user")?.id ?? null;
+      const pin = await upsertIntegrationPin(scope, packageId, {
+        agentPackageId,
+        authKey,
+        connectionId: body.connectionId,
+        createdBy: userId,
+      });
+      await recordAuditFromContext(c, {
+        action: "integration.pin.upserted",
+        resourceType: "integration_pin",
+        resourceId: `${packageId}#${agentPackageId}#${authKey}`,
+        after: { connectionId: pin.connectionId },
+      });
+      return c.json(pin);
+    },
+  );
+
+  router.delete(
+    "/:packageId{@[^/]+/[^/]+}/pins/:agentPackageId{@[^/]+/[^/]+}/:authKey",
+    requirePermission("integrations", "install"),
+    async (c) => {
+      assertOrgAdmin(c);
+      const packageId = c.req.param("packageId")!;
+      const agentPackageId = c.req.param("agentPackageId")!;
+      const authKey = c.req.param("authKey")!;
+      const scope = getAppScope(c);
+      const result = await deleteIntegrationPin(scope, packageId, agentPackageId, authKey);
+      if (result.deleted) {
+        await recordAuditFromContext(c, {
+          action: "integration.pin.deleted",
+          resourceType: "integration_pin",
+          resourceId: `${packageId}#${agentPackageId}#${authKey}`,
+        });
+      }
+      return c.json(result);
+    },
+  );
+
+  router.patch(
+    "/:packageId{@[^/]+/[^/]+}/connections/:connectionId",
+    requirePermission("integrations", "connect"),
+    async (c) => {
+      const connectionId = c.req.param("connectionId")!;
+      const scope = getAppScope(c);
+      const actor = getActor(c);
+      const ownership = await loadConnectionOwnership(connectionId);
+      if (!ownership || ownership.applicationId !== scope.applicationId) {
+        throw notFound(`Connection '${connectionId}' not found`);
+      }
+      // Owner OR org admin can edit metadata. Sharing the connection
+      // is consent: only the owner should toggle sharedWithOrg, so we
+      // refuse non-owner edits to that field specifically.
+      const isOwner =
+        (actor.type === "user" && ownership.userId === actor.id) ||
+        (actor.type === "end_user" && ownership.endUserId === actor.id);
+      const role = c.get("orgRole");
+      const isAdmin = role === "owner" || role === "admin";
+      if (!isOwner && !isAdmin) {
+        throw new ApiError({
+          status: 403,
+          code: "forbidden",
+          title: "Forbidden",
+          detail: "Only the connection owner or an org admin can update this connection",
+        });
+      }
+      const body = parseBody(updateConnectionSchema, await c.req.json());
+      if (body.sharedWithOrg !== undefined && !isOwner) {
+        throw new ApiError({
+          status: 403,
+          code: "forbidden",
+          title: "Forbidden",
+          detail: "Only the connection owner can change sharedWithOrg",
+        });
+      }
+      const updated = await updateConnectionMetadata(connectionId, body);
+      await recordAuditFromContext(c, {
+        action: "integration.connection.metadata.updated",
+        resourceType: "integration_connection",
+        resourceId: connectionId,
+        after: {
+          ...(body.label !== undefined ? { label: body.label } : {}),
+          ...(body.sharedWithOrg !== undefined ? { sharedWithOrg: body.sharedWithOrg } : {}),
+        },
+      });
+      return c.json({
+        id: updated.id,
+        label: updated.label,
+        sharedWithOrg: updated.sharedWithOrg,
+        updatedAt: updated.updatedAt.toISOString(),
+      });
+    },
+  );
+
   return router;
+}
+
+function assertOrgAdmin(c: import("hono").Context<AppEnv>): void {
+  const role = c.get("orgRole");
+  if (role !== "owner" && role !== "admin") {
+    throw new ApiError({
+      status: 403,
+      code: "forbidden",
+      title: "Forbidden",
+      detail: "Org admin or owner role required",
+    });
+  }
 }
