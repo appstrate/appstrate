@@ -183,6 +183,13 @@
       "when": 1789430400000,
       "tag": "0025_integration_oauth_clients",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1789516800000,
+      "tag": "0026_flat_connections_and_pins",
+      "breakpoints": true
     }
   ]
 }

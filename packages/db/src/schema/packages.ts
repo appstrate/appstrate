@@ -39,6 +39,17 @@ export const applicationPackages = pgTable(
     appProfileId: uuid("app_profile_id").references(() => connectionProfiles.id, {
       onDelete: "set null",
     }),
+    // Per-(application, integration) admin lock. Only meaningful for
+    // integration packages — set true to refuse user/end-user attempts
+    // to create their own connection on this integration in this app
+    // (POST /api/integration-connections returns 403). Existing user
+    // connections stay functional; the lock is on creation only. The
+    // intended workflow: admin enables this → connects → marks the
+    // connection sharedWithOrg → users fall through resolution onto
+    // the single admin-shared connection. Stored on application_packages
+    // because the gate is per-(app, integration) and applicationPackages
+    // already keys on those (when type=integration).
+    blockUserConnections: boolean("block_user_connections").notNull().default(false),
     enabled: boolean("enabled").notNull().default(true),
     installedAt: timestamp("installed_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),

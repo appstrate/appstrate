@@ -874,3 +874,94 @@ export function validateAgentIntegrationScopes(
 
   return errors;
 }
+
+// ────────────────────────────────────────────────────────────────────
+// Flat connection model — types consumed by the integration connection
+// resolver (apps/api/src/services/integration-connection-resolver.ts).
+//
+// The resolver is the single source of truth for "which integration
+// connection does this run use?" — pin > run override > schedule
+// override > fallback (own + shared, 1 = auto, 0 = not_connected,
+// N = must_choose). These types live in core so the runtime + the API
+// + the runtime-pi sidecar can all speak the same vocabulary without
+// reaching into apps/api.
+// ────────────────────────────────────────────────────────────────────
+
+/**
+ * Per-(integration, authKey) connection picks. Used on
+ * `runs.connection_overrides` (caller's run-time choice) and
+ * `package_schedules.connection_overrides` (frozen at schedule create).
+ *
+ * Shape: `{ "@scope/integration": { "<authKey>": "<connection_id>" } }`.
+ */
+export type ConnectionOverrides = Record<string, Record<string, string>>;
+
+/** Where a resolved connection came from — drives the audit + UI badge. */
+export type ConnectionResolutionSource =
+  | "admin_pin"
+  | "run_override"
+  | "schedule_override"
+  | "fallback_auto"
+  | "fallback_default";
+
+/** A single (integration, authKey) → connection result. */
+export interface ResolvedConnection {
+  connectionId: string;
+  source: ConnectionResolutionSource;
+}
+
+/**
+ * Snapshot of the resolver output for one run. Persisted on
+ * `runs.resolved_connections` so post-hoc audits don't depend on
+ * still-mutable pin / connection state.
+ *
+ * Shape: `{ "@scope/integration": { "<authKey>": ResolvedConnection } }`.
+ */
+export type ResolvedConnectionMap = Record<string, Record<string, ResolvedConnection>>;
+
+/** Error codes the resolver emits per (integration, authKey). */
+export type ConnectionResolutionErrorCode =
+  | "not_connected"
+  | "needs_reconnection"
+  | "insufficient_scopes"
+  | "connection_blocked_by_admin"
+  | "pinned_connection_unavailable"
+  | "override_connection_unavailable"
+  | "must_choose_connection";
+
+/**
+ * One unresolved (integration, authKey) pair plus structured detail.
+ *
+ * - `not_connected` — actor has no own connection and no shared one matches.
+ * - `needs_reconnection` — the chosen connection has the flag set.
+ * - `insufficient_scopes` — granted scopes don't cover the required union.
+ * - `connection_blocked_by_admin` — actor isn't admin and the (app, integration)
+ *    has `block_user_connections=true`. Reported only at the
+ *    CREATE-connection endpoint; the resolver never sees this case in
+ *    practice (it surfaces missing connections, not creation refusals).
+ * - `pinned_connection_unavailable` — pin points at a connection the actor
+ *    can't see (deleted, unshared, app moved). Pin should usually be cleaned
+ *    up by admin or auto-purged via FK CASCADE; transient case.
+ * - `override_connection_unavailable` — run/schedule override points at an
+ *    invisible connection. Caller error.
+ * - `must_choose_connection` — fallback found >1 candidate; the UI must
+ *    prompt for a pick before retrying.
+ */
+export interface ConnectionResolutionError {
+  integrationId: string;
+  authKey: string;
+  code: ConnectionResolutionErrorCode;
+  /** Candidate connection ids when `code === "must_choose_connection"`. */
+  candidateConnectionIds?: string[];
+  /** Required scopes when `code === "insufficient_scopes"`. */
+  requiredScopes?: string[];
+  /** Granted scopes when `code === "insufficient_scopes"`. */
+  grantedScopes?: string[];
+  message: string;
+}
+
+/** Full resolver output. */
+export interface ConnectionResolutionResult {
+  resolved: ResolvedConnectionMap;
+  errors: ConnectionResolutionError[];
+}

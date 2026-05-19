@@ -74,6 +74,17 @@ export const integrationConnections = pgTable(
       .default(sql`'{}'::text[]`),
     needsReconnection: boolean("needs_reconnection").notNull().default(false),
     expiresAt: timestamp("expires_at"),
+    // User-facing display name ("Perso", "Boulot"). Distinct from
+    // `accountId` (the upstream identifier — `sub` claim, email) which
+    // is opaque and shared across users. Nullable so existing rows stay
+    // valid; the UI falls back to `identityClaims.accountEmail` /
+    // `accountId` when absent.
+    label: text("label"),
+    // Owner-set opt-in: when true, this connection is selectable by
+    // any actor of the same application during the run-time fallback
+    // resolution (see integration-connection-resolver). Off by default
+    // — sharing is explicit consent, never silent.
+    sharedWithOrg: boolean("shared_with_org").notNull().default(false),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
@@ -98,6 +109,13 @@ export const integrationConnections = pgTable(
       .where(sql`${table.endUserId} IS NOT NULL`),
     index("idx_integration_conn_app").on(table.applicationId),
     index("idx_integration_conn_package").on(table.integrationPackageId),
+    // Hot path for the fallback resolution: when an actor has no pin
+    // and no override, the resolver enumerates own + shared connections
+    // for (app, integration, authKey). Partial index keeps the sharing
+    // set small.
+    index("idx_integration_conn_shared")
+      .on(table.applicationId, table.integrationPackageId, table.authKey)
+      .where(sql`${table.sharedWithOrg} = true`),
     check(
       "integration_conn_exactly_one_owner",
       sql`(user_id IS NOT NULL AND end_user_id IS NULL) OR (user_id IS NULL AND end_user_id IS NOT NULL)`,

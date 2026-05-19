@@ -100,6 +100,22 @@ export const runs = pgTable(
     runNumber: integer("run_number"),
     providerProfileIds: jsonb("provider_profile_ids").$type<Record<string, string>>(),
     providerStatuses: jsonb("provider_statuses").$type<RunProviderSnapshot[]>(),
+    // Per-run integration connection overrides — the caller's explicit
+    // choice at run kickoff (e.g. "for this run, use my Gmail-Boulot
+    // not my Gmail-Perso"). Shape: { "@scope/integration": { "<authKey>":
+    // "<connection_id>" } }. Loses to admin pin. Resolution snapshot
+    // lives in resolvedConnections below.
+    connectionOverrides:
+      jsonb("connection_overrides").$type<Record<string, Record<string, string>>>(),
+    // Snapshot of the resolver output at run start — what connection
+    // was actually used per (integration, authKey), plus the source
+    // ("admin_pin" | "run_override" | "schedule_override" | "fallback").
+    // Audit trail: a run's identity in the upstream provider logs maps
+    // back through this column even after pins/connections are mutated.
+    resolvedConnections:
+      jsonb("resolved_connections").$type<
+        Record<string, Record<string, { connectionId: string; source: string }>>
+      >(),
     apiKeyId: text("api_key_id").references(() => apiKeys.id, {
       onDelete: "set null",
     }),
@@ -504,6 +520,11 @@ export const schedules = pgTable(
     // ("latest", "next"). Resolved at fire time the same way the run
     // route resolves `?version=`.
     versionOverride: text("version_override"),
+    // Per-schedule integration connection overrides — frozen at schedule
+    // creation/edit (mirrors `configOverride`). Same shape as
+    // `runs.connectionOverrides`. Loses to admin pin at fire time.
+    connectionOverrides:
+      jsonb("connection_overrides").$type<Record<string, Record<string, string>>>(),
     lastRunAt: timestamp("last_run_at"),
     nextRunAt: timestamp("next_run_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
