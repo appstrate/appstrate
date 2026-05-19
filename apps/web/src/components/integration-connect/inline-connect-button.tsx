@@ -49,8 +49,17 @@ interface InlineConnectButtonProps {
    * already-granted for incremental consent).
    */
   scopes?: string[];
-  /** "Connect" vs "Fix" copy — same wire action, different intent. */
-  intent: "connect" | "fix";
+  /**
+   * `connect` — first connection (no row yet).
+   * `reconnect` — connection exists but `needsReconnection=true`; user
+   *   re-runs the full OAuth dance, the upstream row is preserved
+   *   (upsert keyed by `(integration, authKey, accountId, app, owner)`).
+   * `upgrade` — connection exists with valid tokens but the agent's
+   *   selected tools require scopes the actor hasn't granted yet; OAuth
+   *   re-kickoff requests defaults + missing + already-granted so the
+   *   IdP shows an incremental-consent screen for the diff only.
+   */
+  intent: "connect" | "reconnect" | "upgrade";
   size?: "sm" | "default";
   /** Override button label entirely. */
   label?: string;
@@ -93,8 +102,14 @@ export function InlineConnectButton({
   };
 
   const text =
-    label ?? (intent === "fix" ? t("detail.integrationFix") : t("detail.integrationConnect"));
-  const Icon = intent === "fix" ? RefreshCw : Plug;
+    label ??
+    (intent === "upgrade"
+      ? t("detail.integrationUpgrade")
+      : intent === "reconnect"
+        ? t("detail.integrationReconnect")
+        : t("detail.integrationConnect"));
+  const Icon = intent === "connect" ? Plug : RefreshCw;
+  const tooltip = intent === "upgrade" ? t("detail.integrationUpgradeTooltip") : undefined;
   const fieldsAuth = fieldsAuthKey ? auths[fieldsAuthKey] : null;
 
   return (
@@ -132,6 +147,7 @@ export function InlineConnectButton({
           size={size}
           onClick={() => triggerConnect(defaultAuthKey)}
           disabled={disabled}
+          title={tooltip}
           data-testid={`inline-connect-${packageId}-${defaultAuthKey}`}
         >
           <Icon className="mr-1 size-3" />

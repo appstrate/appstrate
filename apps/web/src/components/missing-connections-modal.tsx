@@ -187,7 +187,13 @@ function MissingRow({
             packageId={packageId}
             authKey={targetAuthKey}
             {...(err.requiredScopes ? { scopes: err.requiredScopes } : {})}
-            intent={isReconnect ? "fix" : "connect"}
+            intent={
+              err.code === "insufficient_scopes"
+                ? "upgrade"
+                : err.code === "needs_reconnection"
+                  ? "reconnect"
+                  : "connect"
+            }
           />
         )}
         {isMustChoose && !onPick && (

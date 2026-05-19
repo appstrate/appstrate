@@ -276,13 +276,16 @@ function MemberConnectionPicker({
 function resolveAction(
   status: IntegrationStatus,
   manifest: IntegrationManifestView,
-): { authKey: string; scopes?: string[]; intent: "connect" | "fix" } | null {
+): { authKey: string; scopes?: string[]; intent: "connect" | "reconnect" | "upgrade" } | null {
   if (status.kind === "ok") return null;
   if (status.kind === "needs_reconnection") {
-    return { authKey: status.authKey, intent: "fix" };
+    return { authKey: status.authKey, intent: "reconnect" };
   }
   if (status.kind === "insufficient_scopes") {
-    return { authKey: status.authKey, scopes: status.required, intent: "fix" };
+    // Upgrade-in-place: backend unions defaults + required + already-granted,
+    // so the IdP shows an incremental-consent screen for the missing scopes
+    // only and the existing connection row is preserved (upserted).
+    return { authKey: status.authKey, scopes: status.required, intent: "upgrade" };
   }
   // not_connected — pick first oauth2, falling back to first declared.
   const authKey = pickDefaultAuth(manifest.auths);
