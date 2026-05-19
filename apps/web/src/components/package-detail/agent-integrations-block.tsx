@@ -11,7 +11,11 @@ import {
 } from "../../hooks/use-integrations";
 import { InlineConnectButton } from "../integration-connect/inline-connect-button";
 import { pickDefaultAuth } from "../integration-connect/pick-default-auth";
-import { requiredAuthKeysForAgent, scopesContributedByTools } from "@appstrate/core/integration";
+import {
+  expandGrantedScopes,
+  requiredAuthKeysForAgent,
+  scopesContributedByTools,
+} from "@appstrate/core/integration";
 
 interface AgentIntegrationEntry {
   id: string;
@@ -235,7 +239,10 @@ function deriveIntegrationStatus(input: {
       agentTools,
     });
     if (required.length === 0) continue;
-    const granted = new Set(conn.scopesGranted);
+    // Expand granted through the manifest's `availableScopes.implies`
+    // hierarchy so a parent grant (e.g. GitHub `repo`) isn't flagged
+    // as missing its narrower children (e.g. `public_repo`).
+    const granted = new Set(expandGrantedScopes(conn.scopesGranted, manifest, authKey));
     const missing = required.filter((s) => !granted.has(s));
     if (missing.length > 0) {
       return { kind: "insufficient_scopes", authKey, missing, required };

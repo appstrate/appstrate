@@ -373,12 +373,21 @@ const authSchema = z
     // target this auth must be a subset (validated at install time,
     // not in this schema). The IdP remains the ultimate authority on
     // what scopes are accepted at consent time.
+    //
+    // `implies` declares the scope hierarchy of the upstream IdP — e.g.
+    // GitHub's `repo` implies `public_repo`, `admin:org` implies
+    // `read:org`. Used by {@link expandGrantedScopes} to take the
+    // transitive closure of a grant before computing "missing" scopes,
+    // so a connection that was granted `repo` doesn't appear to be
+    // missing `public_repo`. Entries listed in `implies` must be values
+    // declared elsewhere in the same catalog (validated at install).
     availableScopes: z
       .array(
         z.object({
           value: z.string().min(1),
           label: z.string().min(1),
           description: z.string().optional(),
+          implies: z.array(z.string().min(1)).optional(),
         }),
       )
       .optional(),
@@ -423,6 +432,30 @@ const authSchema = z
             message: `default scope "${s}" is not declared in availableScopes catalog`,
             path: ["scopes"],
           });
+        }
+      }
+    }
+    // `implies` entries must reference other catalog values. Cycles in
+    // the graph (X→Y→X) aren't detected here — they don't break the
+    // expansion (it terminates on already-visited nodes), they're just
+    // semantically nonsensical; not worth the DFS at install time.
+    if (auth.availableScopes) {
+      const catalog = new Set(auth.availableScopes.map((s) => s.value));
+      for (const s of auth.availableScopes) {
+        for (const target of s.implies ?? []) {
+          if (target === s.value) {
+            ctx.addIssue({
+              code: "custom",
+              message: `availableScopes entry "${s.value}" cannot imply itself`,
+              path: ["availableScopes"],
+            });
+          } else if (!catalog.has(target)) {
+            ctx.addIssue({
+              code: "custom",
+              message: `availableScopes entry "${s.value}" implies "${target}" which is not in the catalog`,
+              path: ["availableScopes"],
+            });
+          }
         }
       }
     }
@@ -719,6 +752,37 @@ export function scopesContributedByTools(input: {
       if (authKeys[0] !== input.authKey) continue;
     } else if (tool.requiredAuthKey !== input.authKey) continue;
     for (const s of tool.requiredScopes) out.add(s);
+  }
+  return [...out];
+}
+
+/**
+ * Expand granted OAuth scopes through the manifest's `implies` hierarchy
+ * (e.g. GitHub `repo` ⇒ `public_repo`, `security_events`, …) so a parent
+ * grant doesn't appear to be missing its narrower children when computing
+ * insufficient-scopes diffs.
+ */
+export function expandGrantedScopes(
+  granted: readonly string[],
+  manifest: IntegrationManifest,
+  authKey: string,
+): string[] {
+  const catalog = manifest.auths?.[authKey]?.availableScopes ?? [];
+  const impliesBy = new Map<string, readonly string[]>();
+  for (const entry of catalog) {
+    if (entry.implies?.length) impliesBy.set(entry.value, entry.implies);
+  }
+  const out = new Set(granted);
+  if (impliesBy.size === 0) return [...out];
+
+  const stack = [...granted];
+  while (stack.length > 0) {
+    for (const child of impliesBy.get(stack.pop()!) ?? []) {
+      if (!out.has(child)) {
+        out.add(child);
+        stack.push(child);
+      }
+    }
   }
   return [...out];
 }

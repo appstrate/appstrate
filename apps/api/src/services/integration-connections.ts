@@ -660,15 +660,19 @@ export async function getIntegrationAuthStatuses(
 /**
  * Surfaces the manifest's `auth` declaration verbatim — used by the
  * OAuth initiate handler to read endpoints + audience + scopes without
- * a second DB round-trip.
+ * a second DB round-trip. Returns the full manifest too so callers that
+ * need the wider catalog (e.g. `expandGrantedScopes`) don't re-fetch.
  */
 export async function readIntegrationAuth(
   scope: AppScope,
   packageId: string,
   authKey: string,
-): Promise<NonNullable<IntegrationManifest["auths"]>[string]> {
+): Promise<{
+  manifest: IntegrationManifest;
+  auth: NonNullable<IntegrationManifest["auths"]>[string];
+}> {
   const manifest = await loadManifestOrThrow(scope, packageId);
-  return lookupAuth(manifest, authKey);
+  return { manifest, auth: lookupAuth(manifest, authKey) };
 }
 
 // ─────────────────────────────────────────────

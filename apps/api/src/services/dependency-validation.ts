@@ -21,7 +21,11 @@ import { ApiError, type ValidationFieldError } from "../lib/errors.ts";
 import type { Actor } from "../lib/actor.ts";
 import { actorFilter } from "../lib/actor.ts";
 import type { AppScope } from "../lib/scope.ts";
-import { requiredAuthKeysForAgent, scopesContributedByTools } from "@appstrate/core/integration";
+import {
+  expandGrantedScopes,
+  requiredAuthKeysForAgent,
+  scopesContributedByTools,
+} from "@appstrate/core/integration";
 import { fetchIntegrationManifest } from "./integration-service.ts";
 
 export interface DependencyValidationDeps {
@@ -409,7 +413,10 @@ async function checkOne(
     });
     if (requiredScopes.length === 0) continue;
 
-    const granted = new Set(conn.scopesGranted);
+    // Expand granted through the manifest's `availableScopes.implies`
+    // hierarchy — e.g. GitHub's `repo` implies `public_repo`, so a
+    // connection granted `repo` is not missing `public_repo`.
+    const granted = new Set(expandGrantedScopes(conn.scopesGranted, manifest, authKey));
     const missing = requiredScopes.filter((s) => !granted.has(s));
     if (missing.length === 0) continue;
 

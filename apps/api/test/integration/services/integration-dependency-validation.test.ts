@@ -216,6 +216,56 @@ describe("collectIntegrationDependencyErrors", () => {
     expect(integrationErrors).toEqual([]);
   });
 
+  it("treats implied scopes as granted (parent grant covers narrower children)", async () => {
+    // Override the integration with a hierarchy: `write` implies `read`,
+    // `admin` implies `write` (transitively `read`). An agent that needs
+    // {read, send} must NOT be flagged insufficient_scopes when the
+    // connection was granted just {admin, send} — `admin` covers `read`.
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "deps" });
+    actor = { type: "user", id: ctx.user.id };
+    await seedPackage({
+      id: INTEGRATION_ID,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: {
+        ...gmailManifest(),
+        auths: {
+          primary: {
+            type: "oauth2",
+            authorizationUrl: "https://idp/a",
+            tokenUrl: "https://idp/t",
+            authorizedUris: ["https://api/*"],
+            delivery: { http: {} },
+            availableScopes: [
+              { value: "read", label: "Read" },
+              { value: "send", label: "Send" },
+              { value: "write", label: "Write", implies: ["read"] },
+              { value: "admin", label: "Admin", implies: ["write", "read"] },
+            ],
+          },
+        },
+      },
+    });
+    await db.insert(integrationConnections).values({
+      integrationPackageId: INTEGRATION_ID,
+      authKey: "primary",
+      accountId: "acct-1",
+      applicationId: ctx.defaultAppId,
+      userId: ctx.user.id,
+      credentialsEncrypted: "x",
+      scopesGranted: ["admin", "send"],
+    });
+
+    const { integrationErrors } = await collectIntegrationDependencyErrors(
+      agentManifest({ version: "^1.0.0", tools: ["list_messages", "send_message"] }),
+      actor,
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+    );
+    expect(integrationErrors).toEqual([]);
+  });
+
   it("scope check is skipped for api_key auths (PAT scopes opaque)", async () => {
     // Manifest with an api_key auth + tools tied to it. Granted scopes
     // are empty but we still pass — runtime upstream gates instead.

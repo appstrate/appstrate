@@ -47,7 +47,8 @@
         {
           "value": "repo",
           "label": "All repos",
-          "description": "Full access to private + public repositories (writes, branches, files, collaborators)."
+          "description": "Full access to private + public repositories (writes, branches, files, collaborators).",
+          "implies": ["public_repo", "repo:status", "repo_deployment", "security_events"]
         },
         {
           "value": "repo:status",
@@ -67,12 +68,14 @@
         {
           "value": "write:org",
           "label": "Write orgs",
-          "description": "Publicize/unpublicize membership and manage teams."
+          "description": "Publicize/unpublicize membership and manage teams.",
+          "implies": ["read:org"]
         },
         {
           "value": "admin:org",
           "label": "Admin orgs",
-          "description": "Full admin access to organizations (rarely needed)."
+          "description": "Full admin access to organizations (rarely needed).",
+          "implies": ["write:org", "read:org"]
         },
         { "value": "gist", "label": "Gists", "description": "Create and manage gists." },
         {
@@ -98,7 +101,8 @@
         {
           "value": "project",
           "label": "Write projects",
-          "description": "Modify GitHub Projects items, fields, and statuses."
+          "description": "Modify GitHub Projects items, fields, and statuses.",
+          "implies": ["read:project"]
         },
         {
           "value": "read:discussion",
@@ -108,7 +112,8 @@
         {
           "value": "write:discussion",
           "label": "Write discussions",
-          "description": "Create and update discussion comments."
+          "description": "Create and update discussion comments.",
+          "implies": ["read:discussion"]
         },
         {
           "value": "delete_repo",
@@ -123,7 +128,8 @@
         {
           "value": "write:packages",
           "label": "Write packages",
-          "description": "Publish and update packages on GitHub Packages."
+          "description": "Publish and update packages on GitHub Packages.",
+          "implies": ["read:packages"]
         }
       ],
       "delivery": { "http": {} }

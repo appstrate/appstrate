@@ -52,6 +52,7 @@ import { getAppScope } from "../lib/scope.ts";
 import { recordAuditFromContext } from "./../services/audit.ts";
 import { installPackage, uninstallPackage } from "../services/application-packages.ts";
 import { listIntegrations, getIntegration } from "../services/integration-service.ts";
+import { expandGrantedScopes } from "@appstrate/core/integration";
 import {
   assertIsIntegration,
   connectIntegrationWithFields,
@@ -291,7 +292,7 @@ export function createIntegrationsRouter() {
       const authKey = c.req.param("authKey")!;
       const scope = getAppScope(c);
       const actor = getActor(c);
-      const auth = await readIntegrationAuth(scope, packageId, authKey);
+      const { manifest, auth } = await readIntegrationAuth(scope, packageId, authKey);
       const [computed, granted] = await Promise.all([
         computeRequiredScopes({ scope, integrationPackageId: packageId, authKey }),
         getCurrentGrantedScopes({
@@ -303,7 +304,8 @@ export function createIntegrationsRouter() {
       ]);
       const defaults = auth.scopes ?? [];
       const union = [...new Set([...defaults, ...computed.required, ...granted])];
-      const missingFromGranted = union.filter((s) => !granted.includes(s));
+      const effective = new Set(expandGrantedScopes(granted, manifest, authKey));
+      const missingFromGranted = union.filter((s) => !effective.has(s));
       return c.json({
         defaults,
         required: computed.required,
@@ -394,7 +396,7 @@ export function createIntegrationsRouter() {
       const actor = getActor(c);
       const body = parseBody(connectOAuthSchema, await c.req.json().catch(() => ({})));
 
-      const auth = await readIntegrationAuth(scope, packageId, authKey);
+      const { auth } = await readIntegrationAuth(scope, packageId, authKey);
       if (auth.type !== "oauth2") {
         throw invalidRequest(
           `Auth '${authKey}' is type '${auth.type}' — use the fields flow instead`,

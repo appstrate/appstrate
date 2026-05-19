@@ -9,6 +9,7 @@
 
 import { describe, expect, it } from "bun:test";
 import {
+  expandGrantedScopes,
   integrationManifestSchema,
   integrationServerTypeEnum,
   caTrustEnvEnum,
@@ -597,6 +598,116 @@ describe("integrationManifestSchema — availableScopes catalog", () => {
   it("skips catalog validation when availableScopes is omitted", () => {
     const m = oauthBase({ scopes: ["any-scope-string"] });
     expect(integrationManifestSchema.safeParse(m).success).toBe(true);
+  });
+
+  it("accepts implies referencing other catalog values", () => {
+    const m = oauthBase({
+      availableScopes: [
+        { value: "read", label: "Read" },
+        { value: "write", label: "Write", implies: ["read"] },
+        { value: "admin", label: "Admin", implies: ["write", "read"] },
+      ],
+    });
+    expect(integrationManifestSchema.safeParse(m).success).toBe(true);
+  });
+
+  it("rejects implies referencing a value not in the catalog", () => {
+    const m = oauthBase({
+      availableScopes: [
+        { value: "read", label: "Read" },
+        { value: "write", label: "Write", implies: ["ghost"] },
+      ],
+    });
+    const r = integrationManifestSchema.safeParse(m);
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      expect(r.error.issues.map((i) => i.message).join("|")).toMatch(/ghost/);
+    }
+  });
+
+  it("rejects self-imply", () => {
+    const m = oauthBase({
+      availableScopes: [{ value: "read", label: "Read", implies: ["read"] }],
+    });
+    const r = integrationManifestSchema.safeParse(m);
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      expect(r.error.issues.map((i) => i.message).join("|")).toMatch(/cannot imply itself/);
+    }
+  });
+});
+
+describe("expandGrantedScopes", () => {
+  function manifestWithImplies(): IntegrationManifest {
+    return integrationManifestSchema.parse({
+      manifestVersion: "1.1",
+      type: "integration",
+      name: "@official/github",
+      version: "1.0.0",
+      displayName: "GitHub",
+      server: { type: "node", entryPoint: "./server/index.js" },
+      auths: {
+        oauth: {
+          type: "oauth2",
+          authorizationUrl: "https://github.com/login/oauth/authorize",
+          tokenUrl: "https://github.com/login/oauth/access_token",
+          authorizedUris: ["https://api.github.com/*"],
+          delivery: { http: { valueFrom: "accessToken" } },
+          availableScopes: [
+            { value: "read:org", label: "Read orgs" },
+            { value: "write:org", label: "Write orgs", implies: ["read:org"] },
+            { value: "admin:org", label: "Admin orgs", implies: ["write:org", "read:org"] },
+            { value: "public_repo", label: "Public repos" },
+            { value: "repo", label: "All repos", implies: ["public_repo"] },
+          ],
+        },
+      },
+    });
+  }
+
+  it("returns granted verbatim (deduplicated) when the auth has no catalog", () => {
+    const m = integrationManifestSchema.parse({
+      manifestVersion: "1.1",
+      type: "integration",
+      name: "@official/x",
+      version: "1.0.0",
+      displayName: "X",
+      server: { type: "node", entryPoint: "./server/index.js" },
+      auths: {
+        oauth: {
+          type: "oauth2",
+          authorizationUrl: "https://i/a",
+          tokenUrl: "https://i/t",
+          authorizedUris: ["https://api.example.com/*"],
+          delivery: { http: { valueFrom: "accessToken" } },
+        },
+      },
+    });
+    expect(expandGrantedScopes(["x", "y", "x"], m, "oauth").sort()).toEqual(["x", "y"]);
+  });
+
+  it("expands one-hop implications", () => {
+    const m = manifestWithImplies();
+    expect(expandGrantedScopes(["repo"], m, "oauth").sort()).toEqual(["public_repo", "repo"]);
+  });
+
+  it("expands transitively (admin:org → write:org → read:org)", () => {
+    const m = manifestWithImplies();
+    expect(expandGrantedScopes(["admin:org"], m, "oauth").sort()).toEqual([
+      "admin:org",
+      "read:org",
+      "write:org",
+    ]);
+  });
+
+  it("returns granted unchanged when no implies declared", () => {
+    const m = manifestWithImplies();
+    expect(expandGrantedScopes(["read:org"], m, "oauth").sort()).toEqual(["read:org"]);
+  });
+
+  it("returns granted verbatim for an unknown auth key", () => {
+    const m = manifestWithImplies();
+    expect(expandGrantedScopes(["whatever"], m, "ghost-auth")).toEqual(["whatever"]);
   });
 });
 
