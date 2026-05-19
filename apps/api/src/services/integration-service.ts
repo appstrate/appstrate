@@ -17,22 +17,57 @@ import { db } from "@appstrate/db/client";
 import { packages } from "@appstrate/db/schema";
 import { integrationManifestSchema } from "@appstrate/core/integration";
 import type { IntegrationManifest } from "@appstrate/core/integration";
+import type { IntegrationSummary } from "@appstrate/shared-types";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import { logger } from "../lib/logger.ts";
 
+export type { IntegrationSummary };
+
 // ---------------------------------------------------------------------------
-// Types
+// Manifest loading
 // ---------------------------------------------------------------------------
 
-export interface IntegrationSummary {
-  /** Package id (e.g. `@official/gmail`). */
-  id: string;
-  /** Latest manifest snapshot — the validated, type-narrowed view. */
-  manifest: IntegrationManifest;
-  /** Owning org. `null` for system packages. */
-  orgId: string | null;
-  /** `"local"` for user-published, `"system"` for built-ins. */
-  source: "local" | "system";
+/**
+ * Discriminated failure modes for {@link fetchIntegrationManifest}.
+ * Each caller maps these to its own error shape (throw / null / push to
+ * a validation error list) — keeps the helper decoupled from the
+ * caller's HTTP semantics.
+ */
+export type IntegrationManifestLoadFailure =
+  | { kind: "not_found" }
+  | { kind: "not_integration"; actualType: string }
+  | { kind: "invalid_manifest" };
+
+export type IntegrationManifestLoadResult =
+  | { ok: true; manifest: IntegrationManifest }
+  | { ok: false; failure: IntegrationManifestLoadFailure };
+
+/**
+ * Fetch + validate an integration manifest from `packages.draft_manifest`,
+ * unscoped (no orgId filter — internal callers already have an authentication
+ * context: a run token, a service-internal call, …). Returns a discriminated
+ * union so each caller can map the failure mode to its preferred response.
+ *
+ * Org-scoped reads (marketplace listing/detail) keep their own SELECT in
+ * `getIntegration` / `listIntegrations` because they pull additional columns
+ * (`orgId`, `source`) under an org+system filter — a single shared helper
+ * would force a redundant second roundtrip or leak its SELECT shape.
+ */
+export async function fetchIntegrationManifest(
+  packageId: string,
+): Promise<IntegrationManifestLoadResult> {
+  const [pkgRow] = await db
+    .select({ manifest: packages.draftManifest, type: packages.type })
+    .from(packages)
+    .where(eq(packages.id, packageId))
+    .limit(1);
+  if (!pkgRow) return { ok: false, failure: { kind: "not_found" } };
+  if (pkgRow.type !== "integration") {
+    return { ok: false, failure: { kind: "not_integration", actualType: pkgRow.type } };
+  }
+  const parsed = integrationManifestSchema.safeParse(pkgRow.manifest);
+  if (!parsed.success) return { ok: false, failure: { kind: "invalid_manifest" } };
+  return { ok: true, manifest: parsed.data };
 }
 
 // ---------------------------------------------------------------------------

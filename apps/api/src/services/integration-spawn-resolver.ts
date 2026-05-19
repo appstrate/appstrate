@@ -26,11 +26,8 @@
  * gives the operator two-sided diagnosis.
  */
 
-import { eq } from "drizzle-orm";
-import { db } from "@appstrate/db/client";
-import { packages } from "@appstrate/db/schema";
 import { decryptCredentials, readCredentialField, resolveHttpDelivery } from "@appstrate/connect";
-import { getToolUrlPatterns, integrationManifestSchema } from "@appstrate/core/integration";
+import { getToolUrlPatterns } from "@appstrate/core/integration";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
@@ -38,6 +35,7 @@ import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import { logger } from "../lib/logger.ts";
 import type { Actor } from "../lib/actor.ts";
 import { isIntegrationInstalled, loadActorConnection } from "./integration-connections.ts";
+import { fetchIntegrationManifest } from "./integration-service.ts";
 
 export interface ResolveIntegrationsInput {
   applicationId: string;
@@ -99,35 +97,24 @@ async function resolveOne(
   // run's org. The runtime never resolves against a yanked version —
   // we always use the package's draft manifest, which the publish path
   // keeps pinned to the live "latest" snapshot.
-  const [pkgRow] = await db
-    .select({
-      id: packages.id,
-      orgId: packages.orgId,
-      source: packages.source,
-      type: packages.type,
-      manifest: packages.draftManifest,
-    })
-    .from(packages)
-    .where(eq(packages.id, packageId))
-    .limit(1);
-  if (!pkgRow) {
-    logger.info("integration not found", { packageId });
-    return null;
+  const res = await fetchIntegrationManifest(packageId);
+  if (!res.ok) {
+    switch (res.failure.kind) {
+      case "not_found":
+        logger.info("integration not found", { packageId });
+        return null;
+      case "not_integration":
+        logger.warn("dependency declared as integration but package is different type", {
+          packageId,
+          type: res.failure.actualType,
+        });
+        return null;
+      case "invalid_manifest":
+        logger.warn("integration manifest fails validation", { packageId });
+        return null;
+    }
   }
-  if (pkgRow.type !== "integration") {
-    logger.warn("dependency declared as integration but package is different type", {
-      packageId,
-      type: pkgRow.type,
-    });
-    return null;
-  }
-
-  const manifestParse = integrationManifestSchema.safeParse(pkgRow.manifest);
-  if (!manifestParse.success) {
-    logger.warn("integration manifest fails validation", { packageId });
-    return null;
-  }
-  const manifest = manifestParse.data;
+  const manifest = res.manifest;
 
   // (b) Installed in the application
   if (!(await isIntegrationInstalled(packageId, applicationId))) {

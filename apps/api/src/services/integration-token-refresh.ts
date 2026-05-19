@@ -25,7 +25,7 @@ import {
   buildTokenHeaders,
   buildTokenBody,
   encryptCredentials,
-  decryptCredentials,
+  decryptCredentialsToStringMap,
 } from "@appstrate/connect";
 import type { RefreshContext as IntegrationRefreshContext } from "@appstrate/connect";
 
@@ -83,7 +83,7 @@ export async function forceRefreshIntegrationConnection(
 ): Promise<IntegrationRefreshResult> {
   if (!refreshContext) {
     return {
-      fields: decryptCredentialsAsStringMap(credentialsEncrypted),
+      fields: decryptCredentialsToStringMap(credentialsEncrypted),
       expiresAt: null,
       scopesGranted: null,
       shrinkDetected: false,
@@ -115,7 +115,7 @@ async function doRefresh(
   credentialsEncrypted: string,
   ctx: IntegrationRefreshContext,
 ): Promise<IntegrationRefreshResult> {
-  const current = decryptCredentialsAsStringMap(credentialsEncrypted);
+  const current = decryptCredentialsToStringMap(credentialsEncrypted);
   // The OAuth callback stores tokens under snake_case (refresh_token) AND
   // camelCase (refreshToken) depending on how the storage path was reached.
   // Read both.
@@ -243,13 +243,4 @@ async function doRefresh(
     .where(eq(integrationConnections.id, connectionId));
 
   return { fields: newCreds, expiresAt, scopesGranted: responseScopes, shrinkDetected };
-}
-
-function decryptCredentialsAsStringMap(ciphertext: string): Record<string, string> {
-  const raw = decryptCredentials<Record<string, unknown>>(ciphertext) ?? {};
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(raw)) {
-    if (typeof v === "string") out[k] = v;
-  }
-  return out;
 }

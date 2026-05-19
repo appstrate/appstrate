@@ -90,7 +90,12 @@ export {
 
 // ─── AFPS integration manifest (Phase 1.1) ─────────────────────────────
 // Multi-auth credential resolver + delivery planners.
-export { ALIAS_MAP, readCredentialField, resolveHttpDelivery } from "./integration-credentials.ts";
+export {
+  ALIAS_MAP,
+  decryptCredentialsToStringMap,
+  readCredentialField,
+  resolveHttpDelivery,
+} from "./integration-credentials.ts";
 export type {
   ResolvedAuthCredentials,
   IntegrationCredentialsPayload,

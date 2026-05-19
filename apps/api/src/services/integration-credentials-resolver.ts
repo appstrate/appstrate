@@ -21,15 +21,15 @@
 
 import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { integrationConnections, integrationOauthClients, packages } from "@appstrate/db/schema";
+import { integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
 import {
   RefreshError,
   decryptCredentials,
+  decryptCredentialsToStringMap,
   resolveHttpDelivery,
   type HttpDeliveryPlan,
   type ResolvedAuthCredentials,
 } from "@appstrate/connect";
-import { integrationManifestSchema } from "@appstrate/core/integration";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { OAUTH_REFRESH_LEAD_MS } from "@appstrate/core/sidecar-types";
 
@@ -42,6 +42,7 @@ import {
 } from "./integration-token-refresh.ts";
 import { assertIntegrationInstalled, loadActorConnection } from "./integration-connections.ts";
 import { computeRequiredScopes } from "./integration-scope-resolver.ts";
+import { fetchIntegrationManifest } from "./integration-service.ts";
 
 export interface LiveIntegrationCredentialsResult {
   /** Auth payloads in the shape the MITM planner expects. */
@@ -242,21 +243,17 @@ export async function resolveLiveIntegrationCredentials(
 // ─────────────────────────────────────────────
 
 async function loadIntegrationManifest(packageId: string): Promise<IntegrationManifest> {
-  const [pkgRow] = await db
-    .select({ manifest: packages.draftManifest, type: packages.type })
-    .from(packages)
-    .where(eq(packages.id, packageId))
-    .limit(1);
-  if (!pkgRow) throw notFound(`Integration '${packageId}' not found`);
-  if (pkgRow.type !== "integration") {
-    throw notFound(`Package '${packageId}' is not an integration`);
+  const res = await fetchIntegrationManifest(packageId);
+  if (res.ok) return res.manifest;
+  switch (res.failure.kind) {
+    case "not_found":
+      throw notFound(`Integration '${packageId}' not found`);
+    case "not_integration":
+      throw notFound(`Package '${packageId}' is not an integration`);
+    case "invalid_manifest":
+      logger.warn("integration manifest fails validation in credentials resolver", { packageId });
+      throw internalError();
   }
-  const parsed = integrationManifestSchema.safeParse(pkgRow.manifest);
-  if (!parsed.success) {
-    logger.warn("integration manifest fails validation in credentials resolver", { packageId });
-    throw internalError();
-  }
-  return parsed.data;
 }
 
 function decryptToStringMap(
@@ -265,12 +262,7 @@ function decryptToStringMap(
   authKey: string,
 ): Record<string, string> | null {
   try {
-    const raw = decryptCredentials<Record<string, unknown>>(ciphertext) ?? {};
-    const out: Record<string, string> = {};
-    for (const [k, v] of Object.entries(raw)) {
-      if (typeof v === "string") out[k] = v;
-    }
-    return out;
+    return decryptCredentialsToStringMap(ciphertext);
   } catch (err) {
     logger.warn("decrypt failed in live credentials resolver", {
       packageId,

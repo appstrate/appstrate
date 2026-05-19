@@ -11,18 +11,19 @@ import { getConnectionStatus, type ConnectionStatus } from "./connection-manager
 import { validateScopes } from "./connection-manager/operations.ts";
 import { isProviderEnabled, getProviderCredentialId } from "@appstrate/connect";
 import { db } from "@appstrate/db/client";
-import { integrationConnections, packages } from "@appstrate/db/schema";
+import { integrationConnections } from "@appstrate/db/schema";
 import {
   parseManifestIntegrations,
   type ManifestIntegrationEntry,
 } from "@appstrate/core/dependencies";
-import { integrationManifestSchema, type IntegrationManifest } from "@appstrate/core/integration";
+import type { IntegrationManifest } from "@appstrate/core/integration";
 import type { AgentProviderRequirement, ProviderProfileMap } from "../types/index.ts";
 import { ApiError, type ValidationFieldError } from "../lib/errors.ts";
 import type { Actor } from "../lib/actor.ts";
 import { actorFilter } from "../lib/actor.ts";
 import type { AppScope } from "../lib/scope.ts";
 import { scopesContributedByTools } from "./integration-scope-resolver.ts";
+import { fetchIntegrationManifest } from "./integration-service.ts";
 
 export interface DependencyValidationDeps {
   isProviderEnabled: (providerId: string, applicationId: string) => Promise<boolean>;
@@ -333,35 +334,26 @@ async function checkOne(
   };
 
   // Load the integration manifest fresh from DB (mirrors spawn resolver).
-  const [pkgRow] = await db
-    .select({
-      id: packages.id,
-      type: packages.type,
-      manifest: packages.draftManifest,
-    })
-    .from(packages)
-    .where(eq(packages.id, entry.id))
-    .limit(1);
-
-  if (!pkgRow || pkgRow.type !== "integration") {
-    push(
-      { packageId: entry.id, authKey: null, reason: "package_not_found" },
-      "Integration Not Found",
-      `Integration '${entry.id}' is not installed`,
-    );
+  const res = await fetchIntegrationManifest(entry.id);
+  if (!res.ok) {
+    if (res.failure.kind === "invalid_manifest") {
+      push(
+        { packageId: entry.id, authKey: null, reason: "not_installed_or_invalid_manifest" },
+        "Integration Manifest Invalid",
+        `Integration '${entry.id}' manifest failed validation`,
+      );
+    } else {
+      // not_found or not_integration — both surface as "not installed"
+      // to keep the error envelope stable across the two cases.
+      push(
+        { packageId: entry.id, authKey: null, reason: "package_not_found" },
+        "Integration Not Found",
+        `Integration '${entry.id}' is not installed`,
+      );
+    }
     return;
   }
-
-  const parsed = integrationManifestSchema.safeParse(pkgRow.manifest);
-  if (!parsed.success) {
-    push(
-      { packageId: entry.id, authKey: null, reason: "not_installed_or_invalid_manifest" },
-      "Integration Manifest Invalid",
-      `Integration '${entry.id}' manifest failed validation`,
-    );
-    return;
-  }
-  const manifest = parsed.data;
+  const manifest = res.manifest;
   const requiredAuthKeys = requiredAuthKeysForAgent(manifest, entry.tools);
   if (requiredAuthKeys.length === 0) {
     // Integration declares no auths — nothing to check.
