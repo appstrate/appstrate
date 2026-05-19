@@ -238,6 +238,7 @@ export const mePaths = {
                               "profile",
                               "authKey",
                               "sharedWithOrg",
+                              "reusedByAgents",
                               "org",
                               "application",
                             ],
@@ -252,6 +253,7 @@ export const mePaths = {
                                 oneOf: [{ type: "string", format: "date-time" }, { type: "null" }],
                               },
                               identity: { type: ["string", "null"] },
+                              reusedByAgents: { type: ["integer", "null"] },
                               profile: {
                                 oneOf: [
                                   {

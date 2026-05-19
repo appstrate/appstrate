@@ -154,6 +154,19 @@ function ConnectionRow({
     ),
   });
 
+  // Reuse hint (integration only) — tells the user this connection is
+  // shared across N agents in the application, killing the "do I need
+  // one connection per agent?" confusion.
+  if (conn.kind === "integration" && typeof conn.reusedByAgents === "number") {
+    rows.push({
+      label: t("connectors.reusedByLabel"),
+      value:
+        conn.reusedByAgents === 0
+          ? t("connectors.reusedByNone")
+          : t("connectors.reusedByCount", { count: conn.reusedByAgents }),
+    });
+  }
+
   // Connected at
   rows.push({
     label: t("connectors.connectedAtLabel"),

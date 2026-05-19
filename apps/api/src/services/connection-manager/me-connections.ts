@@ -10,8 +10,9 @@
  */
 
 import { db } from "@appstrate/db/client";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import {
+  applicationPackages,
   integrationConnections,
   organizationMembers,
   organizations,
@@ -103,6 +104,30 @@ async function listAllActorIntegrationConnections(
     });
   }
 
+  // Count installed agents per (application, integration) that declare this
+  // integration in their dependencies. One scan over the unique (app, pkg)
+  // pairs the user has connections to — single round trip.
+  const uniqueAppIds = [...new Set(rows.map((r) => r.applicationId))];
+  const reuseCount = new Map<string, number>();
+  if (uniqueAppIds.length > 0 && uniquePackageIds.length > 0) {
+    const countRows = (await db.execute(sql`
+      SELECT ap.application_id AS app_id,
+             keys.integ AS integration_id,
+             COUNT(*)::int AS agent_count
+      FROM ${applicationPackages} ap
+      INNER JOIN ${packages} p ON p.id = ap.package_id AND p.type = 'agent'
+      INNER JOIN LATERAL jsonb_object_keys(
+        COALESCE(p.draft_manifest -> 'dependencies' -> 'integrations', '{}'::jsonb)
+      ) AS keys(integ) ON TRUE
+      WHERE ap.application_id = ANY(${uniqueAppIds})
+        AND keys.integ = ANY(${uniquePackageIds})
+      GROUP BY ap.application_id, keys.integ
+    `)) as unknown as { app_id: string; integration_id: string; agent_count: number }[];
+    for (const r of countRows) {
+      reuseCount.set(`${r.app_id}|${r.integration_id}`, r.agent_count);
+    }
+  }
+
   // Group by integration package
   const groups = new Map<string, MeConnectionSourceGroup>();
   for (const row of rows) {
@@ -145,6 +170,7 @@ async function listAllActorIntegrationConnections(
       profile: null,
       authKey: row.authKey,
       sharedWithOrg: row.sharedWithOrg,
+      reusedByAgents: reuseCount.get(`${row.applicationId}|${row.packageId}`) ?? 0,
       org: { id: row.orgId, name: orgName },
       application: { id: row.applicationId, name: row.applicationName },
     };
@@ -182,6 +208,7 @@ async function listAllActorProviderConnectionsUnified(
           profile: conn.profile,
           authKey: null,
           sharedWithOrg: false,
+          reusedByAgents: null,
           org: { id: og.orgId, name: og.orgName },
           application: conn.application,
         });

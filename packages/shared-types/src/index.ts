@@ -271,6 +271,14 @@ export interface MeConnectionEntry {
   authKey: string | null;
   /** Integration only — admin/owner sharing toggle (per-org). */
   sharedWithOrg: boolean;
+  /**
+   * Integration only — number of installed agents in this connection's
+   * application that declare this integration in their dependencies. Used
+   * by the UI to surface "reused by N agents" so members understand that
+   * the connection is shared across the org's agents rather than per-agent.
+   * `null` for providers (their reuse model is per-profile, surfaced elsewhere).
+   */
+  reusedByAgents: number | null;
   /** Where this connection lives (the connection is keyed per-app). */
   org: { id: string; name: string };
   application: { id: string; name: string };

@@ -1,15 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { CheckCircle2, AlertTriangle, XCircle, Loader2, Puzzle, Unlink, Users } from "lucide-react";
+import {
+  CheckCircle2,
+  AlertTriangle,
+  XCircle,
+  Loader2,
+  Puzzle,
+  Unlink,
+  Users,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   useIntegrationDetail,
   useIntegrationConnections,
   useAccessibleIntegrationConnections,
+  useAgentsConsumingIntegration,
   useDisconnectIntegration,
   useIntegrationPins,
   type AccessibleIntegrationConnection,
+  type IntegrationConnection,
   type IntegrationManifestView,
 } from "../../hooks/use-integrations";
 import { useCurrentApplicationId } from "../../hooks/use-current-application";
@@ -89,6 +101,7 @@ function IntegrationConnectionCard({
   const { t } = useTranslation(["agents"]);
   const { data: detail, isPending: detailPending } = useIntegrationDetail(packageId);
   const { data: connections, isPending: connsPending } = useIntegrationConnections(packageId);
+  const { data: consumingAgents } = useAgentsConsumingIntegration(packageId);
   const disconnect = useDisconnectIntegration();
 
   const displayName = detail?.manifest.displayName ?? packageId;
@@ -123,6 +136,13 @@ function IntegrationConnectionCard({
     ? connections?.find((c) => c.authKey === connectedAuthKey)
     : null;
 
+  // R5 — reuse hint: surface that this single connection is shared across
+  // every agent in the app that consumes this integration, killing the
+  // "do I need one connection per agent?" confusion.
+  const reuseInfo = connectedConnection
+    ? buildReuseInfo(connectedConnection, consumingAgents?.length ?? 0, t)
+    : null;
+
   // Member pre-run picker — surfaces ambiguity (>1 candidates) BEFORE Run.
   // Admin pin management has moved to the integration detail page (R2);
   // this block now carries only member-facing widgets.
@@ -131,7 +151,7 @@ function IntegrationConnectionCard({
 
   return (
     <div className="space-y-2">
-      <CardShell icon={icon} title={displayName} subtitle={subtitle}>
+      <CardShell icon={icon} title={displayName} subtitle={subtitle} extraSubtitle={reuseInfo}>
         {action && (
           <InlineConnectButton
             packageId={packageId}
@@ -164,15 +184,36 @@ function IntegrationConnectionCard({
   );
 }
 
+function buildReuseInfo(
+  connection: IntegrationConnection,
+  agentCount: number,
+  t: (k: string, opts?: Record<string, unknown>) => string,
+): string {
+  const account =
+    (connection.identityClaims?.accountEmail as string | undefined) ??
+    (connection.identityClaims?.account_email as string | undefined) ??
+    connection.label ??
+    connection.accountId;
+  if (agentCount <= 1) {
+    return t("detail.integrationReuseSingle", { account });
+  }
+  return t("detail.integrationReuseShared", { account, count: agentCount });
+}
+
 /**
- * R3 — pre-run picker for the member when a required (integration, authKey)
- * has more than one candidate connection (own + shared). Surfaces the
- * ambiguity BEFORE the user clicks Run, instead of letting the run-kickoff
- * 412 modal be the only place where the picker exists.
+ * R3 + R5 — pre-run picker for the member when a required (integration,
+ * authKey) has more than one candidate connection. Surfaces ambiguity
+ * BEFORE the user clicks Run.
  *
- * The pick is persisted in `localStorage` (keyed by application + agent)
- * and read at mutate-time by `useRunAgent` so the resolver respects it
- * via `connectionOverrides`. An admin pin overrides any member pick.
+ * R5 polish: collapse by default. When the actor has their own connection
+ * among the candidates, that's silently the implicit default (resolver
+ * already prefers own at fallback time) — we render only a small "Use
+ * another connection" link. Clicking expands the full select. This kills
+ * the noise for the 99% case where the actor doesn't want to switch.
+ *
+ * Picks persist in `localStorage` and are read at mutate-time by
+ * `useRunAgent` so the resolver respects them via `connectionOverrides`.
+ * An admin pin overrides any member pick.
  */
 function MemberConnectionPicker({
   integrationPackageId,
@@ -189,14 +230,9 @@ function MemberConnectionPicker({
   const { data: accessible } = useAccessibleIntegrationConnections(integrationPackageId);
   const { getPick, setPick } = useAgentConnectionPicks(applicationId, agentPackageId);
 
-  // No accessible candidates → nothing to pick. The card already shows
-  // "not connected" with a connect CTA in that case.
   const allCandidates = accessible ?? [];
   if (allCandidates.length === 0) return null;
 
-  // Only render rows for required auths where:
-  //   - there's no admin pin (admin pin wins over member pick)
-  //   - >1 candidates exist (1 candidate is auto-resolved, no choice needed)
   const pickableRows = requiredAuthKeys
     .map((authKey) => {
       const pinned = pins?.find(
@@ -215,53 +251,112 @@ function MemberConnectionPicker({
   if (pickableRows.length === 0) return null;
 
   return (
-    <div
-      className="border-border/60 bg-muted/30 ml-6 space-y-1.5 rounded-md border border-dashed px-3 py-2 text-xs"
-      data-testid={`member-picker-${integrationPackageId}`}
-    >
-      <div className="text-muted-foreground flex items-center gap-1.5">
+    <div className="ml-6 space-y-1" data-testid={`member-picker-${integrationPackageId}`}>
+      {pickableRows.map(({ authKey, candidates }) => (
+        <PickerRow
+          key={authKey}
+          integrationPackageId={integrationPackageId}
+          authKey={authKey}
+          candidates={candidates}
+          current={getPick(integrationPackageId, authKey) ?? null}
+          onChange={(value) => setPick(integrationPackageId, authKey, value)}
+          t={t}
+        />
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Collapsed-by-default picker row. Resolves the candidate that would be
+ * auto-selected (the actor's own connection if any, else the first shared),
+ * displays it as a label, and gates the full select behind a click.
+ */
+function PickerRow({
+  integrationPackageId,
+  authKey,
+  candidates,
+  current,
+  onChange,
+  t,
+}: {
+  integrationPackageId: string;
+  authKey: string;
+  candidates: AccessibleIntegrationConnection[];
+  current: string | null;
+  onChange: (next: string | null) => void;
+  t: (k: string, opts?: Record<string, unknown>) => string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const own = candidates.find((c) => c.ownerUserId);
+  const implicit = own ?? candidates[0]!;
+  const explicit = current ? (candidates.find((c) => c.id === current) ?? implicit) : implicit;
+  const isImplicit = !current;
+
+  if (!expanded) {
+    return (
+      <div className="text-muted-foreground flex flex-wrap items-center gap-1.5 text-[0.7rem]">
         <Users className="size-3" />
-        <span>{t("detail.integrationMemberPicker.title")}</span>
+        <span>
+          {t("detail.integrationMemberPicker.usingLine", {
+            label: explicit.label ?? explicit.accountId,
+          })}
+        </span>
+        {isImplicit && (
+          <span className="text-muted-foreground/70">
+            {t("detail.integrationMemberPicker.defaultBadge")}
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          className="text-primary hover:underline"
+          data-testid={`member-pick-expand-${integrationPackageId}-${authKey}`}
+        >
+          {t("detail.integrationMemberPicker.changeLink")}
+        </button>
       </div>
-      <div className="space-y-1">
-        {pickableRows.map(({ authKey, candidates }) => {
-          const current = getPick(integrationPackageId, authKey) ?? "";
+    );
+  }
+
+  return (
+    <div className="border-border/60 bg-muted/30 flex items-center gap-2 rounded-md border border-dashed px-3 py-2 text-xs">
+      <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 font-mono text-[10px]">
+        {authKey}
+      </span>
+      <select
+        className="border-border bg-background flex-1 rounded border px-2 py-1 text-xs"
+        value={current ?? ""}
+        onChange={(e) => {
+          const value = e.target.value;
+          onChange(value === "" ? null : value);
+        }}
+        data-testid={`member-pick-${integrationPackageId}-${authKey}`}
+      >
+        <option value="">{t("detail.integrationMemberPicker.autoChoose")}</option>
+        {candidates.map((c) => {
+          const ownership = c.ownerUserId
+            ? c.sharedWithOrg
+              ? t("detail.integrationMemberPicker.ownAndShared")
+              : t("detail.integrationMemberPicker.own")
+            : t("detail.integrationMemberPicker.shared");
+          const display = `${c.label ?? c.accountId} — ${ownership}`;
           return (
-            <div key={authKey} className="flex items-center gap-2">
-              <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 font-mono text-[10px]">
-                {authKey}
-              </span>
-              <select
-                className="border-border bg-background flex-1 rounded border px-2 py-1 text-xs"
-                value={current}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  setPick(integrationPackageId, authKey, value === "" ? null : value);
-                }}
-                data-testid={`member-pick-${integrationPackageId}-${authKey}`}
-              >
-                <option value="">{t("detail.integrationMemberPicker.autoChoose")}</option>
-                {candidates.map((c) => {
-                  const ownership = c.ownerUserId
-                    ? c.sharedWithOrg
-                      ? t("detail.integrationMemberPicker.ownAndShared")
-                      : t("detail.integrationMemberPicker.own")
-                    : t("detail.integrationMemberPicker.shared");
-                  const display = `${c.label ?? c.accountId} — ${ownership}`;
-                  return (
-                    <option key={c.id} value={c.id}>
-                      {display}
-                    </option>
-                  );
-                })}
-              </select>
-            </div>
+            <option key={c.id} value={c.id}>
+              {display}
+            </option>
           );
         })}
-      </div>
-      <p className="text-muted-foreground text-[0.65rem]">
-        {t("detail.integrationMemberPicker.help")}
-      </p>
+      </select>
+      <Button
+        size="icon"
+        variant="ghost"
+        className="h-6 w-6"
+        onClick={() => setExpanded(false)}
+        title={t("detail.integrationMemberPicker.close")}
+      >
+        <X className="h-3 w-3" />
+      </Button>
     </div>
   );
 }
@@ -296,11 +391,14 @@ function CardShell({
   icon,
   title,
   subtitle,
+  extraSubtitle,
   children,
 }: {
   icon: React.ReactNode;
   title: string;
   subtitle: string;
+  /** Second-line subtitle (e.g. reuse hint). Omitted when null/undefined. */
+  extraSubtitle?: string | null;
   children?: React.ReactNode;
 }) {
   return (
@@ -313,6 +411,11 @@ function CardShell({
             {icon}
             <span className="truncate">{subtitle}</span>
           </div>
+          {extraSubtitle && (
+            <div className="text-muted-foreground/80 mt-0.5 truncate text-[0.65rem]">
+              {extraSubtitle}
+            </div>
+          )}
         </div>
       </div>
       {children}
