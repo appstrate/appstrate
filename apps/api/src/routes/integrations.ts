@@ -71,6 +71,7 @@ import {
   computeRequiredScopes,
   getCurrentGrantedScopes,
 } from "../services/integration-scope-resolver.ts";
+import { isUserConnectionCreationBlocked } from "../services/integration-connection-resolver.ts";
 import { oauthStateStore } from "../services/connection-manager/oauth-state-store.ts";
 
 // ─────────────────────────────────────────────
@@ -94,6 +95,41 @@ const oauthClientSchema = z.object({
   clientSecret: z.string().default(""),
   redirectUri: z.url().optional(),
 });
+
+// ─────────────────────────────────────────────
+// Guards
+// ─────────────────────────────────────────────
+
+/**
+ * Refuse a connection-creation attempt when the (application, integration)
+ * has `block_user_connections=true` and the caller is not an org admin.
+ *
+ * Workflow this enables: admin toggles the gate → connects → marks the
+ * connection sharedWithOrg → members are funnelled onto the shared
+ * connection via the resolver's fallback path. Members trying to bypass
+ * with their own connection get a clean 403 instead of a silent override.
+ *
+ * Admins (`owner` / `admin`) are exempt — they can connect even when the
+ * gate is on, which is the whole point (otherwise nobody could create
+ * the shared connection).
+ */
+async function assertConnectionCreationAllowed(
+  c: import("hono").Context<AppEnv>,
+  applicationId: string,
+  integrationPackageId: string,
+): Promise<void> {
+  const role = c.get("orgRole");
+  if (role === "owner" || role === "admin") return;
+  const blocked = await isUserConnectionCreationBlocked(applicationId, integrationPackageId);
+  if (blocked) {
+    throw new ApiError({
+      status: 403,
+      code: "connection_blocked_by_admin",
+      title: "Connection Blocked by Admin",
+      detail: `Creation of personal connections to '${integrationPackageId}' is disabled by the organization admin. Use the shared connection instead.`,
+    });
+  }
+}
 
 // ─────────────────────────────────────────────
 // Router
@@ -362,6 +398,7 @@ export function createIntegrationsRouter() {
       const authKey = c.req.param("authKey")!;
       const scope = getAppScope(c);
       const actor = getActor(c);
+      await assertConnectionCreationAllowed(c, scope.applicationId, packageId);
       const body = parseBody(connectFieldsSchema, await c.req.json());
       try {
         const conn = await connectIntegrationWithFields(
@@ -394,6 +431,7 @@ export function createIntegrationsRouter() {
       const authKey = c.req.param("authKey")!;
       const scope = getAppScope(c);
       const actor = getActor(c);
+      await assertConnectionCreationAllowed(c, scope.applicationId, packageId);
       const body = parseBody(connectOAuthSchema, await c.req.json().catch(() => ({})));
 
       const { auth } = await readIntegrationAuth(scope, packageId, authKey);

@@ -27,7 +27,7 @@
  * directly; this module is the user-facing write side that populates it.
  */
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, or, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   applicationPackages,
@@ -130,9 +130,25 @@ export interface ActorConnectionRow {
 
 /**
  * Lookup the actor's `integration_connections` row for `(packageId, authKey)`
- * scoped to `applicationId`. Returns `null` when the actor has not connected
- * this auth yet — callers decide whether that is a 404, a silent skip, or a
- * 412 envelope.
+ * scoped to `applicationId`. Returns `null` when no accessible connection
+ * exists — callers decide whether that is a 404, a silent skip, or a 412
+ * envelope.
+ *
+ * "Accessible" = own connection first, then any `shared_with_org=true`
+ * connection in the same application + integration + authKey. The fallback
+ * unlocks the admin-shared workflow: when `block_user_connections` is on
+ * and the admin has marked their connection `shared_with_org`, members
+ * who run agents on this integration land on the admin's row instead of
+ * 412-ing with "not connected".
+ *
+ * Ordering rationale (own first): a user with their own connection
+ * deliberately prefers their identity over the org pool — sharing is a
+ * fallback for members who haven't connected, not a silent override.
+ *
+ * Single-row return — when multiple shared connections exist, the DB
+ * order picks. The picker UI lands in p4 to disambiguate; for now
+ * single-source-of-shared-credential is the supported pattern (matches
+ * the documented workflow).
  */
 export async function loadActorConnection(
   packageId: string,
@@ -143,12 +159,14 @@ export async function loadActorConnection(
     context.actor.type === "user"
       ? eq(integrationConnections.userId, context.actor.id)
       : eq(integrationConnections.endUserId, context.actor.id);
-  const [row] = await db
+  const rows = await db
     .select({
       id: integrationConnections.id,
       credentialsEncrypted: integrationConnections.credentialsEncrypted,
       expiresAt: integrationConnections.expiresAt,
       scopesGranted: integrationConnections.scopesGranted,
+      userId: integrationConnections.userId,
+      endUserId: integrationConnections.endUserId,
     })
     .from(integrationConnections)
     .where(
@@ -156,11 +174,25 @@ export async function loadActorConnection(
         eq(integrationConnections.integrationPackageId, packageId),
         eq(integrationConnections.authKey, authKey),
         eq(integrationConnections.applicationId, context.applicationId),
-        ownerPredicate,
+        or(ownerPredicate, eq(integrationConnections.sharedWithOrg, true)),
       ),
-    )
-    .limit(1);
-  return row ?? null;
+    );
+  if (rows.length === 0) return null;
+
+  // Prefer the actor's own row (any) over shared rows. The OR predicate
+  // above admits both — we discriminate here so the result honours user
+  // identity when both are present.
+  const ownsRow = (r: (typeof rows)[number]): boolean =>
+    context.actor.type === "user"
+      ? r.userId === context.actor.id
+      : r.endUserId === context.actor.id;
+  const picked = rows.find(ownsRow) ?? rows[0]!;
+  return {
+    id: picked.id,
+    credentialsEncrypted: picked.credentialsEncrypted,
+    expiresAt: picked.expiresAt,
+    scopesGranted: picked.scopesGranted,
+  };
 }
 
 /**
