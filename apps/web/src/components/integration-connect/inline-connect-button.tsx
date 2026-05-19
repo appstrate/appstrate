@@ -2,17 +2,29 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Plug, RefreshCw } from "lucide-react";
+import { ChevronDown, Plug, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { FieldsConnectModal } from "./fields-connect-modal";
 import { useIntegrationOAuthPopup } from "./use-integration-oauth-popup";
 import { useIntegrationDetail } from "../../hooks/use-integrations";
 
 /**
- * Agent-driven inline connect/upgrade trigger. Picks the right surface
- * based on the auth type — OAuth popup vs api_key/basic/custom fields
- * modal — and forwards the agent's per-tool scope inference to the
- * kickoff so the consent prompt asks for exactly what's needed.
+ * Agent-driven inline connect/upgrade trigger.
+ *
+ * Mono-auth integrations (Gmail, ClickUp): single button — primary click
+ * routes to the OAuth popup or the credentials modal based on auth type.
+ *
+ * Multi-auth integrations (GitHub: oauth + pat): same primary button
+ * with a chevron that opens a dropdown listing every declared auth so
+ * the user picks which method to connect with. Labels come from i18n
+ * keyed on `auth.type` (`oauth2` → "OAuth", `api_key` → "Clé API", …) —
+ * no per-integration label boilerplate, generic across the catalog.
  *
  * Used by:
  *   - AgentIntegrationsBlock (Connexions tab status cards)
@@ -25,6 +37,10 @@ import { useIntegrationDetail } from "../../hooks/use-integrations";
 
 interface InlineConnectButtonProps {
   packageId: string;
+  /**
+   * Default authKey for the primary click action. When the integration
+   * declares multiple auths, the dropdown lets the user override.
+   */
   authKey: string;
   /**
    * Scopes inferred from the agent's `tools[]` selection. Forwarded
@@ -42,7 +58,7 @@ interface InlineConnectButtonProps {
 
 export function InlineConnectButton({
   packageId,
-  authKey,
+  authKey: defaultAuthKey,
   scopes,
   intent,
   size = "sm",
@@ -51,49 +67,84 @@ export function InlineConnectButton({
   const { t } = useTranslation(["agents", "settings"]);
   const { data: detail } = useIntegrationDetail(packageId);
   const { openPopup, isPending } = useIntegrationOAuthPopup();
-  const [fieldsOpen, setFieldsOpen] = useState(false);
+  // When set, the credentials modal renders for that authKey. Unifies
+  // the single-auth and multi-auth paths — both eventually call
+  // setFieldsAuthKey(key) for non-oauth types.
+  const [fieldsAuthKey, setFieldsAuthKey] = useState<string | null>(null);
 
-  const auth = detail?.manifest?.auths?.[authKey];
-  const isOAuth = auth?.type === "oauth2";
+  const auths = detail?.manifest?.auths ?? {};
+  const authKeys = Object.keys(auths);
+  const isMultiAuth = authKeys.length > 1;
   const displayName = detail?.manifest.displayName ?? packageId;
 
   // Guard: a fresh agent run might 412 before the integration manifest
-  // is in cache. Disable the button until the detail loads rather than
+  // is in cache. Disable the trigger until the detail loads rather than
   // popping a modal with no auth metadata.
-  const disabled = !auth || isPending;
+  const disabled = authKeys.length === 0 || isPending;
 
-  const onClick = () => {
+  const triggerConnect = (key: string) => {
+    const auth = auths[key];
     if (!auth) return;
-    if (isOAuth) {
-      void openPopup({ packageId, authKey, ...(scopes ? { scopes } : {}) });
+    if (auth.type === "oauth2") {
+      void openPopup({ packageId, authKey: key, ...(scopes ? { scopes } : {}) });
     } else {
-      setFieldsOpen(true);
+      setFieldsAuthKey(key);
     }
   };
 
   const text =
     label ?? (intent === "fix" ? t("detail.integrationFix") : t("detail.integrationConnect"));
-
   const Icon = intent === "fix" ? RefreshCw : Plug;
+  const fieldsAuth = fieldsAuthKey ? auths[fieldsAuthKey] : null;
 
   return (
     <>
-      <Button
-        size={size}
-        onClick={onClick}
-        disabled={disabled}
-        data-testid={`inline-connect-${packageId}-${authKey}`}
-      >
-        <Icon className="mr-1 size-3" />
-        {text}
-      </Button>
-      {auth && !isOAuth && (
+      {isMultiAuth ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              size={size}
+              disabled={disabled}
+              data-testid={`inline-connect-${packageId}-${defaultAuthKey}`}
+            >
+              <Icon className="mr-1 size-3" />
+              {text}
+              <ChevronDown className="ml-1 size-3" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {authKeys.map((k) => {
+              const typeLabel = t(`settings:integration.auth.type.${auths[k]!.type}`);
+              return (
+                <DropdownMenuItem
+                  key={k}
+                  onSelect={() => triggerConnect(k)}
+                  data-testid={`inline-connect-pick-${packageId}-${k}`}
+                >
+                  {t("settings:integration.auth.connectVia", { label: typeLabel })}
+                </DropdownMenuItem>
+              );
+            })}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : (
+        <Button
+          size={size}
+          onClick={() => triggerConnect(defaultAuthKey)}
+          disabled={disabled}
+          data-testid={`inline-connect-${packageId}-${defaultAuthKey}`}
+        >
+          <Icon className="mr-1 size-3" />
+          {text}
+        </Button>
+      )}
+      {fieldsAuth && fieldsAuthKey && (
         <FieldsConnectModal
-          open={fieldsOpen}
-          onClose={() => setFieldsOpen(false)}
+          open={true}
+          onClose={() => setFieldsAuthKey(null)}
           packageId={packageId}
-          authKey={authKey}
-          auth={auth}
+          authKey={fieldsAuthKey}
+          auth={fieldsAuth}
           displayName={displayName}
         />
       )}
