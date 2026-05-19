@@ -1,0 +1,96 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/clickup-mcp",
+  "version": "1.0.0",
+  "displayName": "ClickUp",
+  "description": "ClickUp integration backed by ClickUp's official remote MCP server (mcp.clickup.com/mcp). The sidecar opens a Streamable HTTP MCP client and injects the actor's OAuth2 access token as `Authorization: Bearer …` on every request — the user authorises Appstrate once, ClickUp's MCP handles tool execution. ClickUp does not use OAuth scopes (the access token authorises the full set of capabilities allowed by the workspace member's role), so the niveau 2 scope model is degenerate here: no `availableScopes` catalog, no per-tool `requiredScopes`, no scope inference, and no missing-scope diff panel. Phase 1 install validation and Phase 3 `tools/list` allowlist still apply — agent authors pick which tools the LLM sees, even though OAuth grants are workspace-wide. Phase 4 (per-tool URL envelope) is N/A — every tool transits the same `/mcp` endpoint, ClickUp's RBAC is the only gate. Rate limits: 50 calls / 24h on Free plan, 300 calls / 24h on Unlimited+. Currently in public beta upstream.",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "iconUrl": "clickup",
+  "categories": ["productivity", "project-management", "task-management"],
+  "server": {
+    "type": "http",
+    "url": "https://mcp.clickup.com/mcp"
+  },
+  "transport": {
+    "type": "streamable-http"
+  },
+  "auths": {
+    "oauth": {
+      "type": "oauth2",
+      "required": true,
+      "authorizationUrl": "https://app.clickup.com/api",
+      "tokenUrl": "https://api.clickup.com/api/v2/oauth/token",
+      "scopes": [],
+      "scopeSeparator": " ",
+      "pkceEnabled": false,
+      "tokenAuthMethod": "client_secret_post",
+      "authorizedUris": ["https://mcp.clickup.com/**"],
+      "delivery": { "http": {} }
+    }
+  },
+  "tools": {
+    "search_workspace": { "requiredAuthKey": "oauth" },
+    "search_tasks_by_task_type": { "requiredAuthKey": "oauth" },
+    "search_tasks_by_tag": { "requiredAuthKey": "oauth" },
+
+    "create_task": { "requiredAuthKey": "oauth" },
+    "get_task": { "requiredAuthKey": "oauth" },
+    "update_task": { "requiredAuthKey": "oauth" },
+    "delete_task": { "requiredAuthKey": "oauth" },
+    "set_custom_fields": { "requiredAuthKey": "oauth" },
+
+    "create_bulk_tasks": { "requiredAuthKey": "oauth" },
+    "update_bulk_tasks": { "requiredAuthKey": "oauth" },
+
+    "attach_file_to_task": { "requiredAuthKey": "oauth" },
+    "get_task_comments": { "requiredAuthKey": "oauth" },
+    "get_threaded_replies": { "requiredAuthKey": "oauth" },
+    "create_task_comment": { "requiredAuthKey": "oauth" },
+
+    "add_tag_to_task": { "requiredAuthKey": "oauth" },
+    "remove_tag_from_task": { "requiredAuthKey": "oauth" },
+
+    "add_task_link": { "requiredAuthKey": "oauth" },
+    "remove_task_link": { "requiredAuthKey": "oauth" },
+    "add_dependency": { "requiredAuthKey": "oauth" },
+    "remove_dependency": { "requiredAuthKey": "oauth" },
+
+    "move_task_to_list": { "requiredAuthKey": "oauth" },
+    "add_task_to_list": { "requiredAuthKey": "oauth" },
+
+    "get_task_time_entries": { "requiredAuthKey": "oauth" },
+    "get_time_entries_for_tasks": { "requiredAuthKey": "oauth" },
+    "start_time_tracking": { "requiredAuthKey": "oauth" },
+    "stop_time_tracking": { "requiredAuthKey": "oauth" },
+    "add_time_entry": { "requiredAuthKey": "oauth" },
+    "get_current_time_entry": { "requiredAuthKey": "oauth" },
+
+    "get_workspace_hierarchy": { "requiredAuthKey": "oauth" },
+    "create_list": { "requiredAuthKey": "oauth" },
+    "create_list_in_folder": { "requiredAuthKey": "oauth" },
+    "get_list": { "requiredAuthKey": "oauth" },
+    "update_list": { "requiredAuthKey": "oauth" },
+    "get_folder": { "requiredAuthKey": "oauth" },
+    "create_folder": { "requiredAuthKey": "oauth" },
+    "update_folder": { "requiredAuthKey": "oauth" },
+
+    "get_workspace_members": { "requiredAuthKey": "oauth" },
+    "find_member_by_name": { "requiredAuthKey": "oauth" },
+    "resolve_assignees": { "requiredAuthKey": "oauth" },
+
+    "get_chat_channels": { "requiredAuthKey": "oauth" },
+    "send_chat_message": { "requiredAuthKey": "oauth" },
+
+    "create_document": { "requiredAuthKey": "oauth" },
+    "list_document_pages": { "requiredAuthKey": "oauth" },
+    "get_document_pages": { "requiredAuthKey": "oauth" },
+    "create_document_page": { "requiredAuthKey": "oauth" },
+    "update_document_page": { "requiredAuthKey": "oauth" },
+
+    "get_time_in_status_for_task": { "requiredAuthKey": "oauth" },
+    "get_time_in_status_for_list": { "requiredAuthKey": "oauth" }
+  }
+}
