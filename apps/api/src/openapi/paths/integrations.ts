@@ -69,6 +69,7 @@ const integrationSummarySchema = {
     orgId: { type: ["string", "null"] },
     source: { type: "string", enum: ["local", "system"] },
     installed: { type: "boolean" },
+    blockUserConnections: { type: "boolean" },
   },
 } as const;
 
@@ -99,6 +100,8 @@ const integrationConnectionSchema = {
     expiresAt: { type: ["string", "null"], format: "date-time" },
     ownerType: { type: "string", enum: ["user", "end_user"] },
     ownerId: { type: "string" },
+    label: { type: ["string", "null"] },
+    sharedWithOrg: { type: "boolean" },
     createdAt: { type: "string", format: "date-time" },
     updatedAt: { type: "string", format: "date-time" },
   },

@@ -168,9 +168,14 @@ export function createIntegrationsRouter() {
   router.get("/", requirePermission("integrations", "read"), async (c) => {
     const scope = getAppScope(c);
     const summaries = await listIntegrations(scope.orgId);
-    // Decorate with `installed` flag for the current application.
+    // Decorate with `installed` + `blockUserConnections` flags for the
+    // current application. `blockUserConnections` defaults to false for
+    // not-yet-installed rows (no per-app config row exists).
     const installedRows = await db
-      .select({ packageId: applicationPackages.packageId })
+      .select({
+        packageId: applicationPackages.packageId,
+        blockUserConnections: applicationPackages.blockUserConnections,
+      })
       .from(applicationPackages)
       .innerJoin(packages, eq(applicationPackages.packageId, packages.id))
       .where(
@@ -179,11 +184,15 @@ export function createIntegrationsRouter() {
           eq(packages.type, "integration"),
         ),
       );
-    const installedSet = new Set(installedRows.map((r) => r.packageId));
-    const enriched = summaries.map((s) => ({
-      ...s,
-      installed: installedSet.has(s.id),
-    }));
+    const installedMap = new Map(installedRows.map((r) => [r.packageId, r]));
+    const enriched = summaries.map((s) => {
+      const row = installedMap.get(s.id);
+      return {
+        ...s,
+        installed: row !== undefined,
+        blockUserConnections: row?.blockUserConnections ?? false,
+      };
+    });
     return c.json(listResponse(enriched));
   });
 

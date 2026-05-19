@@ -601,6 +601,8 @@ function rowToSummary(
     expiresAt: row.expiresAt ? row.expiresAt.toISOString() : null,
     ownerType: row.userId ? "user" : "end_user",
     ownerId: (row.userId ?? row.endUserId)!,
+    label: row.label,
+    sharedWithOrg: row.sharedWithOrg,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

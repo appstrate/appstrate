@@ -20,6 +20,8 @@ export interface IntegrationSummary {
   orgId: string | null;
   source: "local" | "system";
   installed?: boolean;
+  /** Admin-only per-(app, integration) lock; defaults to false when not installed. */
+  blockUserConnections?: boolean;
 }
 
 export interface IntegrationConnection {
@@ -35,6 +37,10 @@ export interface IntegrationConnection {
   expiresAt: string | null;
   ownerType: "user" | "end_user";
   ownerId: string;
+  /** User-set display name ("Perso", "Boulot"). */
+  label?: string | null;
+  /** Opt-in: makes this connection selectable by other members of the same app. */
+  sharedWithOrg?: boolean;
   createdAt: string;
   updatedAt: string;
 }

@@ -36,6 +36,8 @@ import {
   useUpsertIntegrationOAuthClient,
   useDeleteIntegrationOAuthClient,
   useIntegrationRequiredScopes,
+  useUpdateIntegrationConnection,
+  useUpdateIntegrationSettings,
   type IntegrationAuthStatus,
   type IntegrationConnection,
   type IntegrationManifestView,
@@ -309,7 +311,7 @@ function AuthSection({
       ) : (
         <div className="space-y-2">
           {status.connections.map((c) => (
-            <ConnectionRow key={c.id} connection={c} />
+            <ConnectionRow key={c.id} connection={c} packageId={packageId} />
           ))}
         </div>
       )}
@@ -317,36 +319,123 @@ function AuthSection({
   );
 }
 
-function ConnectionRow({ connection }: { connection: IntegrationConnection }) {
+function BlockUserConnectionsToggle({
+  packageId,
+  initialBlocked,
+}: {
+  packageId: string;
+  initialBlocked: boolean;
+}) {
   const { t } = useTranslation("settings");
+  const updateSettings = useUpdateIntegrationSettings();
+  // Drives the checkbox from server state — pending mutation reads the
+  // about-to-be-applied value, idle reads the latest fetched value.
+  const blocked =
+    updateSettings.isPending && updateSettings.variables?.packageId === packageId
+      ? updateSettings.variables.blockUserConnections
+      : initialBlocked;
+  return (
+    <div
+      className="border-border bg-muted/30 mb-6 rounded-md border p-4"
+      data-testid="block-user-connections-section"
+    >
+      <div className="flex items-start gap-3">
+        <input
+          type="checkbox"
+          checked={blocked}
+          disabled={updateSettings.isPending}
+          onChange={(e) =>
+            updateSettings.mutate({ packageId, blockUserConnections: e.target.checked })
+          }
+          data-testid="block-user-connections-toggle"
+          className="mt-0.5"
+        />
+        <div className="flex-1">
+          <label className="text-sm font-semibold">
+            {t("integration.admin.blockUserConnections.label")}
+          </label>
+          <p className="text-muted-foreground mt-1 text-xs">
+            {t("integration.admin.blockUserConnections.help")}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ConnectionRow({
+  connection,
+  packageId,
+}: {
+  connection: IntegrationConnection;
+  packageId: string;
+}) {
+  const { t } = useTranslation("settings");
+  const updateConnection = useUpdateIntegrationConnection();
   const accountLabel =
     (connection.identityClaims?.accountEmail as string | undefined) ??
     (connection.identityClaims?.account_email as string | undefined) ??
     connection.accountId;
+  const isShared = connection.sharedWithOrg === true;
   return (
     <div
-      className="bg-muted/30 flex items-center gap-3 rounded-md border px-3 py-2 text-sm"
+      className="bg-muted/30 flex flex-col gap-2 rounded-md border px-3 py-2 text-sm"
       data-testid={`connection-row-${connection.id}`}
     >
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="truncate font-medium">{accountLabel}</span>
-          {connection.needsReconnection && (
-            <Badge variant="destructive">{t("integration.auth.needsReconnection")}</Badge>
+      <div className="flex items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            {connection.label && <span className="truncate font-medium">{connection.label}</span>}
+            <span
+              className={
+                connection.label ? "text-muted-foreground truncate text-xs" : "truncate font-medium"
+              }
+            >
+              {accountLabel}
+            </span>
+            {isShared && (
+              <Badge variant="secondary" data-testid={`shared-badge-${connection.id}`}>
+                {t("integration.connection.sharedBadge")}
+              </Badge>
+            )}
+            {connection.needsReconnection && (
+              <Badge variant="destructive">{t("integration.auth.needsReconnection")}</Badge>
+            )}
+          </div>
+          {connection.scopesGranted.length > 0 && (
+            <p className="text-muted-foreground truncate font-mono text-[0.65rem]">
+              {connection.scopesGranted.join(" ")}
+            </p>
+          )}
+          {connection.expiresAt && (
+            <p className="text-muted-foreground text-[0.65rem]">
+              {t("integration.auth.expiresAt", {
+                date: new Date(connection.expiresAt).toLocaleDateString(),
+              })}
+            </p>
           )}
         </div>
-        {connection.scopesGranted.length > 0 && (
-          <p className="text-muted-foreground truncate font-mono text-[0.65rem]">
-            {connection.scopesGranted.join(" ")}
-          </p>
-        )}
-        {connection.expiresAt && (
-          <p className="text-muted-foreground text-[0.65rem]">
-            {t("integration.auth.expiresAt", {
-              date: new Date(connection.expiresAt).toLocaleDateString(),
-            })}
-          </p>
-        )}
+      </div>
+      <div className="flex items-center gap-2 pt-1">
+        <label className="flex items-center gap-1.5 text-xs">
+          <input
+            type="checkbox"
+            checked={isShared}
+            disabled={updateConnection.isPending}
+            onChange={(e) =>
+              updateConnection.mutate({
+                packageId,
+                connectionId: connection.id,
+                sharedWithOrg: e.target.checked,
+              })
+            }
+            data-testid={`share-toggle-${connection.id}`}
+          />
+          {t("integration.connection.shareWithOrg.label")}
+        </label>
+        <span className="text-muted-foreground text-[0.65rem]">
+          {t("integration.connection.shareWithOrg.help")}
+        </span>
       </div>
     </div>
   );
@@ -473,6 +562,13 @@ export function IntegrationDetailPage() {
         <p className="text-muted-foreground mt-1 font-mono text-xs">{packageId}</p>
         {m.description && <p className="mt-3 text-sm">{m.description}</p>}
       </PageHeader>
+
+      {installed && isAdmin && (
+        <BlockUserConnectionsToggle
+          packageId={packageId}
+          initialBlocked={summary?.blockUserConnections ?? false}
+        />
+      )}
 
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Auths column (2/3) */}

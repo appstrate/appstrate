@@ -284,6 +284,158 @@ export function useUpsertIntegrationOAuthClient() {
   });
 }
 
+// ─────────────────────────────────────────────
+// Admin: block_user_connections + pins + connection metadata
+// ─────────────────────────────────────────────
+
+export interface IntegrationPin {
+  packageId: string;
+  integrationPackageId: string;
+  authKey: string;
+  connectionId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export function useIntegrationPins(packageId: string | undefined) {
+  const orgId = useCurrentOrgId();
+  const applicationId = useCurrentApplicationId();
+  return useQuery({
+    queryKey: [...KEY(orgId, applicationId), "pins", packageId] as const,
+    queryFn: () => apiList<IntegrationPin>(`/integrations/${encodeURI(packageId!)}/pins`),
+    enabled: !!packageId && !!orgId && !!applicationId,
+  });
+}
+
+export function useUpdateIntegrationSettings() {
+  const { t } = useTranslation("settings");
+  const qc = useQueryClient();
+  const orgId = useCurrentOrgId();
+  const applicationId = useCurrentApplicationId();
+  return useMutation({
+    mutationFn: ({
+      packageId,
+      blockUserConnections,
+    }: {
+      packageId: string;
+      blockUserConnections: boolean;
+    }) =>
+      api<{ blocked: boolean }>(`/integrations/${encodeURI(packageId)}/settings`, {
+        method: "PATCH",
+        body: JSON.stringify({ blockUserConnections }),
+        headers: { "Content-Type": "application/json" },
+      }),
+    onSuccess: (_data, vars) => {
+      toast.success(t("integration.admin.blockUserConnections.updated"));
+      qc.invalidateQueries({
+        queryKey: [...KEY(orgId, applicationId), "detail", vars.packageId],
+      });
+    },
+  });
+}
+
+export function useUpsertIntegrationPin() {
+  const { t } = useTranslation("settings");
+  const qc = useQueryClient();
+  const orgId = useCurrentOrgId();
+  const applicationId = useCurrentApplicationId();
+  return useMutation({
+    mutationFn: ({
+      packageId,
+      agentPackageId,
+      authKey,
+      connectionId,
+    }: {
+      packageId: string;
+      agentPackageId: string;
+      authKey: string;
+      connectionId: string;
+    }) =>
+      api<IntegrationPin>(
+        `/integrations/${encodeURI(packageId)}/pins/${encodeURI(agentPackageId)}/${encodeURI(authKey)}`,
+        {
+          method: "PUT",
+          body: JSON.stringify({ connectionId }),
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    onSuccess: (_data, vars) => {
+      toast.success(t("integration.admin.pin.upserted"));
+      qc.invalidateQueries({
+        queryKey: [...KEY(orgId, applicationId), "pins", vars.packageId],
+      });
+    },
+  });
+}
+
+export function useDeleteIntegrationPin() {
+  const { t } = useTranslation("settings");
+  const qc = useQueryClient();
+  const orgId = useCurrentOrgId();
+  const applicationId = useCurrentApplicationId();
+  return useMutation({
+    mutationFn: ({
+      packageId,
+      agentPackageId,
+      authKey,
+    }: {
+      packageId: string;
+      agentPackageId: string;
+      authKey: string;
+    }) =>
+      api<{ deleted: boolean }>(
+        `/integrations/${encodeURI(packageId)}/pins/${encodeURI(agentPackageId)}/${encodeURI(authKey)}`,
+        { method: "DELETE" },
+      ),
+    onSuccess: (_data, vars) => {
+      toast.success(t("integration.admin.pin.deleted"));
+      qc.invalidateQueries({
+        queryKey: [...KEY(orgId, applicationId), "pins", vars.packageId],
+      });
+    },
+  });
+}
+
+export function useUpdateIntegrationConnection() {
+  const { t } = useTranslation("settings");
+  const qc = useQueryClient();
+  const orgId = useCurrentOrgId();
+  const applicationId = useCurrentApplicationId();
+  return useMutation({
+    mutationFn: ({
+      packageId,
+      connectionId,
+      label,
+      sharedWithOrg,
+    }: {
+      packageId: string;
+      connectionId: string;
+      label?: string | null;
+      sharedWithOrg?: boolean;
+    }) =>
+      api<{ id: string; label: string | null; sharedWithOrg: boolean; updatedAt: string }>(
+        `/integrations/${encodeURI(packageId)}/connections/${connectionId}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            ...(label !== undefined ? { label } : {}),
+            ...(sharedWithOrg !== undefined ? { sharedWithOrg } : {}),
+          }),
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    onSuccess: (_data, vars) => {
+      toast.success(t("integration.connection.updated"));
+      qc.invalidateQueries({
+        queryKey: [...KEY(orgId, applicationId), "connections", vars.packageId],
+      });
+      qc.invalidateQueries({
+        queryKey: [...KEY(orgId, applicationId), "detail", vars.packageId],
+      });
+    },
+  });
+}
+
 export function useDeleteIntegrationOAuthClient() {
   const { t } = useTranslation("settings");
   const qc = useQueryClient();
