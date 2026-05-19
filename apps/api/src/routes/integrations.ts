@@ -75,6 +75,7 @@ import { isUserConnectionCreationBlocked } from "../services/integration-connect
 import {
   deleteIntegrationPin,
   listAccessibleConnections,
+  listAgentsConsumingIntegration,
   listIntegrationPins,
   loadConnectionOwnership,
   setBlockUserConnections,
@@ -626,6 +627,22 @@ export function createIntegrationsRouter() {
       const packageId = c.req.param("packageId")!;
       const scope = getAppScope(c);
       const items = await listIntegrationPins(scope, packageId);
+      return c.json(listResponse(items));
+    },
+  );
+
+  /**
+   * R2 — installed agents in the application that declare this integration
+   * in their dependencies. Drives the "pin a new agent" picker on the
+   * integration detail page so admins can manage pins from one place.
+   */
+  router.get(
+    "/:packageId{@[^/]+/[^/]+}/consuming-agents",
+    requirePermission("integrations", "read"),
+    async (c) => {
+      const packageId = c.req.param("packageId")!;
+      const scope = getAppScope(c);
+      const items = await listAgentsConsumingIntegration(scope, packageId);
       return c.json(listResponse(items));
     },
   );

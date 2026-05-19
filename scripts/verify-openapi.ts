@@ -128,6 +128,7 @@ const expectedEndpoints = [
   "GET /api/integrations/{packageId}/auths/{authKey}/required-scopes",
   "GET /api/integrations/{packageId}/connections",
   "GET /api/integrations/{packageId}/accessible-connections",
+  "GET /api/integrations/{packageId}/consuming-agents",
   "DELETE /api/integrations/{packageId}/connections/{connectionId}",
   "PATCH /api/integrations/{packageId}/connections/{connectionId}",
   "PATCH /api/integrations/{packageId}/settings",

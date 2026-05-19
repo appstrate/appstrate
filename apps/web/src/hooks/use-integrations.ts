@@ -338,6 +338,27 @@ export function useIntegrationPins(packageId: string | undefined) {
   });
 }
 
+/**
+ * R2 — installed agents that declare this integration as a dependency. Used
+ * by the centralised pin management table to populate the "pin a new agent"
+ * picker.
+ */
+export interface ConsumingAgentSummary {
+  packageId: string;
+  displayName: string;
+}
+
+export function useAgentsConsumingIntegration(packageId: string | undefined) {
+  const orgId = useCurrentOrgId();
+  const applicationId = useCurrentApplicationId();
+  return useQuery({
+    queryKey: [...KEY(orgId, applicationId), "consuming-agents", packageId] as const,
+    queryFn: () =>
+      apiList<ConsumingAgentSummary>(`/integrations/${encodeURI(packageId!)}/consuming-agents`),
+    enabled: !!packageId && !!orgId && !!applicationId,
+  });
+}
+
 export function useUpdateIntegrationSettings() {
   const { t } = useTranslation("settings");
   const qc = useQueryClient();

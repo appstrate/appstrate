@@ -9,7 +9,7 @@
  * this layer assumes the caller already has the role.
  */
 
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   applicationPackages,
@@ -95,6 +95,47 @@ export async function listIntegrationPins(
       ),
     );
   return rows.map(toPinSummary);
+}
+
+/**
+ * R2 — agents installed in the application that declare the given integration
+ * in their dependencies. Powers the centralised pin management table on the
+ * integration detail page (so the admin can pick which installed agent to
+ * pin without leaving the integration view).
+ */
+export interface ConsumingAgentSummary {
+  packageId: string;
+  displayName: string;
+}
+
+export async function listAgentsConsumingIntegration(
+  scope: AppScope,
+  integrationPackageId: string,
+): Promise<ConsumingAgentSummary[]> {
+  // Use a JSONB path lookup on packages.draft_manifest.dependencies.integrations.
+  // The key is the integration package id (e.g. `@appstrate/gmail-mcp`).
+  // The `?` operator returns true when the JSONB object contains the key.
+  const rows = await db.execute(sql`
+    SELECT p.id AS package_id,
+           p.draft_manifest->>'displayName' AS display_name_alt,
+           p.draft_manifest->'definition'->>'displayName' AS display_name_def
+    FROM ${applicationPackages} ap
+    INNER JOIN ${packages} p ON p.id = ap.package_id
+    WHERE ap.application_id = ${scope.applicationId}
+      AND p.type = 'agent'
+      AND (p.draft_manifest -> 'dependencies' -> 'integrations') ? ${integrationPackageId}
+    ORDER BY p.id ASC
+  `);
+  return (
+    rows as unknown as {
+      package_id: string;
+      display_name_alt: string | null;
+      display_name_def: string | null;
+    }[]
+  ).map((r) => ({
+    packageId: r.package_id,
+    displayName: r.display_name_def ?? r.display_name_alt ?? r.package_id,
+  }));
 }
 
 export interface SetPinInput {

@@ -47,6 +47,11 @@ import {
   useIntegrationRequiredScopes,
   useUpdateIntegrationConnection,
   useUpdateIntegrationSettings,
+  useIntegrationPins,
+  useIntegrationConnections,
+  useAgentsConsumingIntegration,
+  useUpsertIntegrationPin,
+  useDeleteIntegrationPin,
   type IntegrationAuthStatus,
   type IntegrationConnection,
   type IntegrationManifestView,
@@ -372,6 +377,232 @@ function BlockUserConnectionsToggle({
   );
 }
 
+/**
+ * R2 — centralised pin management.
+ *
+ * Lists every existing pin for this integration as a table (Agent | Auth |
+ * Connection | Delete) and exposes an inline "Pin a new agent" row so the
+ * admin manages all pins from one place. Replaces the per-agent pin
+ * widget that used to live on `AgentIntegrationsBlock`.
+ */
+function PinManagementSection({
+  packageId,
+  manifest,
+}: {
+  packageId: string;
+  manifest: IntegrationManifestView;
+}) {
+  const { t } = useTranslation("settings");
+  const { data: pins } = useIntegrationPins(packageId);
+  const { data: connections } = useIntegrationConnections(packageId);
+  const { data: consumingAgents } = useAgentsConsumingIntegration(packageId);
+  const upsertPin = useUpsertIntegrationPin();
+  const deletePin = useDeleteIntegrationPin();
+
+  const [newAgent, setNewAgent] = useState("");
+  const [newAuthKey, setNewAuthKey] = useState("");
+  const [newConnectionId, setNewConnectionId] = useState("");
+
+  const authKeys = Object.keys(manifest.auths ?? {});
+  const pinnableConnections = (connections ?? []).filter((c) => c.sharedWithOrg === true);
+
+  // Lookup helpers for the table
+  const agentDisplayName = (id: string): string =>
+    consumingAgents?.find((a) => a.packageId === id)?.displayName ?? id;
+  const connectionDisplay = (id: string): string => {
+    const c = (connections ?? []).find((x) => x.id === id);
+    if (!c) return id;
+    const account =
+      (c.identityClaims?.accountEmail as string | undefined) ??
+      (c.identityClaims?.account_email as string | undefined) ??
+      c.accountId;
+    return c.label ? `${c.label} (${account})` : account;
+  };
+
+  const onSubmitNewPin = () => {
+    if (!newAgent || !newAuthKey || !newConnectionId) return;
+    upsertPin.mutate(
+      {
+        packageId,
+        agentPackageId: newAgent,
+        authKey: newAuthKey,
+        connectionId: newConnectionId,
+      },
+      {
+        onSuccess: () => {
+          setNewAgent("");
+          setNewAuthKey("");
+          setNewConnectionId("");
+        },
+      },
+    );
+  };
+
+  // Only include agents that aren't already pinned on every authKey — keeps
+  // the dropdown focused on actionable rows.
+  const pinnableAgents = (consumingAgents ?? []).filter((a) => {
+    const pinnedKeys = new Set(
+      (pins ?? [])
+        .filter((p) => p.packageId === a.packageId && p.integrationPackageId === packageId)
+        .map((p) => p.authKey),
+    );
+    return authKeys.some((k) => !pinnedKeys.has(k));
+  });
+
+  return (
+    <div
+      className="border-border bg-muted/30 mb-6 rounded-md border p-4"
+      data-testid="pin-management-section"
+    >
+      <div className="mb-3">
+        <h3 className="text-sm font-semibold">{t("integration.admin.pinManagement.title")}</h3>
+        <p className="text-muted-foreground mt-1 text-xs">
+          {t("integration.admin.pinManagement.help")}
+        </p>
+      </div>
+
+      {/* Existing pins */}
+      {(pins ?? []).length > 0 ? (
+        <div className="border-border bg-background mb-3 overflow-hidden rounded-md border">
+          <table className="w-full text-xs">
+            <thead className="bg-muted/40 text-muted-foreground">
+              <tr>
+                <th className="px-3 py-2 text-left font-medium">
+                  {t("integration.admin.pinManagement.colAgent")}
+                </th>
+                <th className="px-3 py-2 text-left font-medium">
+                  {t("integration.admin.pinManagement.colAuth")}
+                </th>
+                <th className="px-3 py-2 text-left font-medium">
+                  {t("integration.admin.pinManagement.colConnection")}
+                </th>
+                <th className="w-12 px-3 py-2"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {(pins ?? []).map((p) => (
+                <tr
+                  key={`${p.packageId}-${p.authKey}`}
+                  className="border-border border-t"
+                  data-testid={`pin-row-${p.packageId}-${p.authKey}`}
+                >
+                  <td className="px-3 py-2">{agentDisplayName(p.packageId)}</td>
+                  <td className="px-3 py-2">
+                    <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 font-mono text-[10px]">
+                      {p.authKey}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2">{connectionDisplay(p.connectionId)}</td>
+                  <td className="px-3 py-2">
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-6 w-6"
+                      disabled={deletePin.isPending}
+                      onClick={() =>
+                        deletePin.mutate({
+                          packageId,
+                          agentPackageId: p.packageId,
+                          authKey: p.authKey,
+                        })
+                      }
+                      title={t("integration.admin.pinManagement.delete")}
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="text-muted-foreground mb-3 text-xs italic">
+          {t("integration.admin.pinManagement.empty")}
+        </p>
+      )}
+
+      {/* Add new pin */}
+      {pinnableConnections.length === 0 ? (
+        <p className="text-muted-foreground text-xs italic">
+          {t("integration.admin.pinManagement.noPinnableConnections")}
+        </p>
+      ) : pinnableAgents.length === 0 ? (
+        <p className="text-muted-foreground text-xs italic">
+          {t("integration.admin.pinManagement.noConsumingAgents")}
+        </p>
+      ) : (
+        <div className="border-border bg-background flex flex-wrap items-end gap-2 rounded-md border p-3">
+          <div className="min-w-[12rem] flex-1">
+            <Label className="text-muted-foreground mb-1 block text-[0.65rem]">
+              {t("integration.admin.pinManagement.colAgent")}
+            </Label>
+            <select
+              className="border-border bg-background w-full rounded border px-2 py-1 text-xs"
+              value={newAgent}
+              onChange={(e) => setNewAgent(e.target.value)}
+              data-testid="pin-add-agent"
+            >
+              <option value="">—</option>
+              {pinnableAgents.map((a) => (
+                <option key={a.packageId} value={a.packageId}>
+                  {a.displayName}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="min-w-[8rem]">
+            <Label className="text-muted-foreground mb-1 block text-[0.65rem]">
+              {t("integration.admin.pinManagement.colAuth")}
+            </Label>
+            <select
+              className="border-border bg-background w-full rounded border px-2 py-1 text-xs"
+              value={newAuthKey}
+              onChange={(e) => setNewAuthKey(e.target.value)}
+              data-testid="pin-add-auth"
+            >
+              <option value="">—</option>
+              {authKeys.map((k) => (
+                <option key={k} value={k}>
+                  {k}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="min-w-[12rem] flex-1">
+            <Label className="text-muted-foreground mb-1 block text-[0.65rem]">
+              {t("integration.admin.pinManagement.colConnection")}
+            </Label>
+            <select
+              className="border-border bg-background w-full rounded border px-2 py-1 text-xs"
+              value={newConnectionId}
+              onChange={(e) => setNewConnectionId(e.target.value)}
+              data-testid="pin-add-connection"
+            >
+              <option value="">—</option>
+              {pinnableConnections
+                .filter((c) => !newAuthKey || c.authKey === newAuthKey)
+                .map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {connectionDisplay(c.id)}
+                  </option>
+                ))}
+            </select>
+          </div>
+          <Button
+            size="sm"
+            onClick={onSubmitNewPin}
+            disabled={!newAgent || !newAuthKey || !newConnectionId || upsertPin.isPending}
+            data-testid="pin-add-submit"
+          >
+            {t("integration.admin.pinManagement.add")}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ConnectionRow({
   connection,
   packageId,
@@ -657,6 +888,8 @@ export function IntegrationDetailPage() {
           initialBlocked={summary?.blockUserConnections ?? false}
         />
       )}
+
+      {installed && isAdmin && <PinManagementSection packageId={packageId} manifest={m} />}
 
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Auths column (2/3) */}

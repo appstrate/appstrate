@@ -798,6 +798,50 @@ export const integrationsPaths = {
       },
     },
   },
+  "/api/integrations/{packageId}/consuming-agents": {
+    get: {
+      operationId: "listAgentsConsumingIntegration",
+      tags: ["Integrations"],
+      summary: "List installed agents whose deps declare this integration",
+      description:
+        "Drives the centralised pin management table on the integration detail page " +
+        "(R2): admins pick an installed-agent target without leaving the integration view.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        integrationPackageIdParam,
+      ],
+      responses: {
+        "200": {
+          description: "Consuming agents",
+          headers: baseResponseHeaders,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["object", "data", "hasMore"],
+                properties: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: ["packageId", "displayName"],
+                      properties: {
+                        packageId: { type: "string" },
+                        displayName: { type: "string" },
+                      },
+                    },
+                  },
+                  hasMore: { type: "boolean" },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
   "/api/integrations/{packageId}/pins/{agentPackageId}/{authKey}": {
     put: {
       operationId: "upsertIntegrationPin",
