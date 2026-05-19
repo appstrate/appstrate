@@ -1,40 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Niveau 2 (Phase 5b) — per-integration tool/scope picker rendered
- * inside the agent editor's Integrations section. Lets the agent author
- * narrow which MCP tools the integration exposes to the agent at
- * runtime (drives `IntegrationSpawnSpec.toolAllowlist` → sidecar
- * `McpHost.allowedTools`) and optionally pin extra OAuth scopes beyond
- * those inferred from the tool selection.
+ * Niveau 2 — per-integration tool/scope picker rendered inside the agent
+ * editor's Integrations section. Drives
+ * `IntegrationSpawnSpec.toolAllowlist` → sidecar `McpHost.allowedTools`
+ * (Phase 3) and optionally pins extra OAuth scopes beyond those
+ * inferred from the tool selection.
  *
- * Display hierarchy (Phase 5b.2 — niveau 2 polish):
- *   1. Tool checkboxes — the primary surface. The author picks tools.
- *   2. Inferred OAuth scopes — read-only badges, computed from the
- *      selected tools' `requiredScopes`, with per-scope attribution
- *      ("required by: create_pull_request, delete_file"). This is the
- *      authoritative scope set the OAuth kickoff will request — what
- *      the author sees here is what `computeRequiredScopes` will union.
- *   3. Advanced disclosure — the explicit `scopes[]` escape hatch,
- *      collapsed by default. Covers the four edge cases that tool
- *      inference can't reach (orthogonal scopes like `user:email`,
- *      future-proofing, under-declared tools, legacy "all tools" mode).
+ * Least-privilege contract: the runtime treats `tools: undefined` and
+ * `tools: []` identically (0 tools exposed). The picker surfaces
+ * "Select all" / "Select none" buttons so the author can flip the
+ * common cases in one click; per-tool checkboxes handle the fine
+ * grain. The first toggle promotes `undefined → []` so subsequent
+ * renders see the explicit form.
  *
- * Visibility rules (intentional — keeps the surface tiny when there's
- * nothing meaningful to pick):
- *   - Tool picker shown only when the integration's manifest declares
- *     a `tools` block. Older integrations without per-tool metadata
- *     stay on the legacy "all tools allowed" default.
- *   - Inferred-scopes section shown only when at least one tool
- *     contributes a requiredScope (so empty selections / scope-less
- *     manifests don't render an empty box).
- *   - Advanced disclosure shown only when at least one auth declares an
- *     `availableScopes` catalog. Bare scope strings (no catalog) are
- *     opaque to the UI — operators have to hand-edit the manifest.
- *
- * Writes back through the `onChange` callback handed in by
- * `ResourceSection`; the resulting `ResourceEntry` is then translated
- * to the niveau 2 rich form by `setResourceEntries('integrations')`.
+ * The picker writes back through `onChange` (handed in by
+ * `ResourceSection`); the resulting `ResourceEntry` is translated to
+ * the manifest's top-level `integrations[id]` block by
+ * `setResourceEntries('integrations')`.
  */
 
 import { useState } from "react";
@@ -86,24 +69,22 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
   }
   const hasScopeCatalog = scopeCatalog.size > 0;
 
-  // `entry.tools === undefined` means "legacy — all tools allowed".
-  // The first toggle promotes the entry to the rich form (explicit set).
-  // An empty `[]` is a valid explicit lockdown.
+  // Least-privilege: `entry.tools === undefined` and `entry.tools === []`
+  // both mean "0 tools picked, integration inert at runtime". The first
+  // toggle promotes to `[]`-then-add so subsequent renders see the
+  // explicit form.
   const selectedTools = new Set(entry.tools ?? []);
   const selectedScopes = new Set(entry.scopes ?? []);
+  const allSelected =
+    selectedTools.size === declaredToolNames.length && declaredToolNames.length > 0;
+  const noneSelected = selectedTools.size === 0;
 
   // Inferred OAuth scopes — exactly what Phase 2 `computeRequiredScopes`
-  // will union into the OAuth kickoff. Two cases:
-  //   - entry.tools === undefined (legacy) → contributes the union of
-  //     EVERY declared tool's requiredScopes, mirroring the server-side
-  //     "all tools allowed" semantics.
-  //   - entry.tools defined → contributes the union of selected tools'
-  //     requiredScopes only.
-  // Map keeps attribution (which tools required each scope) so the
-  // badges can show "required by: …".
+  // will union into the OAuth kickoff. Contributes the union of
+  // selected tools' requiredScopes only (`undefined`/`[]` selection
+  // contributes nothing). Map keeps attribution for "required by: …".
   const inferredScopes = new Map<string, string[]>();
-  const contributingToolNames = entry.tools === undefined ? declaredToolNames : (entry.tools ?? []);
-  for (const toolName of contributingToolNames) {
+  for (const toolName of entry.tools ?? []) {
     const meta = declaredTools[toolName];
     for (const scope of meta?.requiredScopes ?? []) {
       const existing = inferredScopes.get(scope) ?? [];
@@ -121,9 +102,6 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
   const pinnedOnlyScopes = [...selectedScopes].filter((s) => !inferredScopes.has(s));
 
   const toggleTool = (name: string) => {
-    // Promote `undefined` → `[]` on first toggle so subsequent renders
-    // see the explicit form; the user's first click is the consent to
-    // niveau 2 enforcement for this integration.
     const current = entry.tools ?? [];
     const next = current.includes(name) ? current.filter((t) => t !== name) : [...current, name];
     onChange({ ...entry, tools: next });
@@ -135,10 +113,8 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
     onChange({ ...entry, scopes: next.length > 0 ? next : undefined });
   };
 
-  const resetTools = () => {
-    const { tools: _tools, ...rest } = entry;
-    onChange(rest);
-  };
+  const selectAllTools = () => onChange({ ...entry, tools: [...declaredToolNames] });
+  const selectNoTools = () => onChange({ ...entry, tools: [] });
 
   // Niveau 2 contract: when the integration manifest declares neither a
   // `tools` block nor any `availableScopes` catalog, there is literally
@@ -168,19 +144,30 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
             <span className="text-xs font-semibold">
               {t("agentEditor.integrations.tools.title")}
             </span>
-            {entry.tools !== undefined && (
+            <div className="flex items-center gap-2">
               <button
                 type="button"
-                className="text-muted-foreground hover:text-foreground text-[10px] underline"
-                onClick={resetTools}
+                className="text-muted-foreground hover:text-foreground text-[10px] underline disabled:cursor-not-allowed disabled:no-underline disabled:opacity-50"
+                onClick={selectAllTools}
+                disabled={allSelected}
+                data-testid={`integ-tools-select-all-${packageId}`}
               >
-                {t("agentEditor.integrations.tools.reset")}
+                {t("agentEditor.integrations.tools.selectAll")}
               </button>
-            )}
+              <button
+                type="button"
+                className="text-muted-foreground hover:text-foreground text-[10px] underline disabled:cursor-not-allowed disabled:no-underline disabled:opacity-50"
+                onClick={selectNoTools}
+                disabled={noneSelected}
+                data-testid={`integ-tools-select-none-${packageId}`}
+              >
+                {t("agentEditor.integrations.tools.selectNone")}
+              </button>
+            </div>
           </div>
           <p className="text-muted-foreground mb-2 text-[11px]">
-            {entry.tools === undefined
-              ? t("agentEditor.integrations.tools.legacyNotice")
+            {noneSelected
+              ? t("agentEditor.integrations.tools.noneNotice")
               : t("agentEditor.integrations.tools.explicitNotice")}
           </p>
           <div className="grid gap-1.5">
@@ -219,9 +206,7 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
             {t("agentEditor.integrations.scopes.inferredTitle")}
           </span>
           <p className="text-muted-foreground mb-2 text-[11px]">
-            {entry.tools === undefined
-              ? t("agentEditor.integrations.scopes.inferredFromAll")
-              : t("agentEditor.integrations.scopes.inferredFromSelection")}
+            {t("agentEditor.integrations.scopes.inferredFromSelection")}
           </p>
           <div className="flex flex-wrap gap-1.5">
             {[...inferredScopes.entries()].map(([scope, tools]) => {

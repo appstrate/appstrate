@@ -153,22 +153,20 @@ export interface IntegrationSpawnSpec {
    */
   httpDeliveryAuths?: Record<string, HttpDeliveryAuthSpec>;
   /**
-   * Niveau 2 Phase 3 — agent-declared MCP tool allowlist. When set, the
-   * sidecar's `McpHost` filters `tools/list` to only expose these tools
-   * to the agent and rejects `tools/call` for any tool outside the set
-   * (returning a structured "tool_not_authorized" error to the agent
-   * without ever forwarding to the integration).
+   * Niveau 2 Phase 3 — agent-declared MCP tool allowlist. The sidecar's
+   * `McpHost` filters `tools/list` to only expose these tools to the
+   * agent and rejects `tools/call` for any tool outside the set
+   * (returning a structured "tool_not_authorized" error without ever
+   * forwarding to the integration).
    *
-   * `undefined` (the default) keeps the legacy "all tools allowed"
-   * semantics — agents that declared their integration as a bare
-   * semver-range string or via the rich form without `tools[]` get the
-   * full surface, same as before niveau 2.
-   *
-   * Bare empty array `[]` (rare but valid) means "no tools allowed" —
-   * the integration is spawned (so its env-delivery / MITM stays
-   * functional for side-channel use) but exposes nothing to the agent.
+   * Always an array (never undefined): the platform builds it from
+   * `manifest.integrations[id].tools` and defaults to `[]` when the
+   * agent author didn't pick any tool — least privilege by default,
+   * the integration still spawns (so env-delivery / MITM credentials
+   * remain functional for side-channel use) but exposes nothing to the
+   * agent's LLM.
    */
-  toolAllowlist?: readonly string[];
+  toolAllowlist: readonly string[];
   /**
    * Niveau 2 Phase 4 — URL-pattern envelope enforced by the sidecar
    * MITM proxy. Defence-in-depth on top of `toolAllowlist`: even if a

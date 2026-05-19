@@ -394,7 +394,7 @@ export async function bootIntegrations(
           client,
           // Phase 3 tool allowlist still applies — McpHost filters
           // tools/list before exposing them to the agent.
-          ...(spec.toolAllowlist ? { allowedTools: spec.toolAllowlist } : {}),
+          allowedTools: spec.toolAllowlist,
         });
         const added = host.size() - sizeBefore;
         clients.push(client);

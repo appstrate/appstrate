@@ -46,15 +46,13 @@ export interface ResolveIntegrationsInput {
   /** The actor whose connections to lookup — `null` skips integration resolution entirely. */
   actor: Actor | null;
   /**
-   * Agent's `dependencies.integrations` map (`packageId → versionRange | rich object`).
-   * Accepts both the bare-version-string shape and the niveau 2 rich
-   * form (`{ version, tools?, scopes? }`). The resolver reads `tools[]`
-   * from the rich form and propagates it to
-   * `IntegrationSpawnSpec.toolAllowlist` for sidecar-side enforcement
-   * (Phase 3). Bare-string / no-tools entries skip the field,
-   * preserving the "all tools allowed" default.
+   * The agent's full manifest. Versions come from
+   * `dependencies.integrations`, tool/scope selections from the
+   * top-level `integrations` block (niveau 2 scope model). The resolver
+   * propagates the per-id `tools[]` to `IntegrationSpawnSpec.toolAllowlist`
+   * for sidecar-side enforcement (Phase 3).
    */
-  integrationDeps: Record<string, unknown> | undefined;
+  agentManifest: Record<string, unknown>;
 }
 
 /**
@@ -65,14 +63,11 @@ export interface ResolveIntegrationsInput {
 export async function resolveIntegrationSpawns(
   input: ResolveIntegrationsInput,
 ): Promise<IntegrationSpawnSpec[]> {
-  const { applicationId, actor, integrationDeps } = input;
+  const { applicationId, actor, agentManifest } = input;
   if (!actor) return [];
-  if (!integrationDeps || Object.keys(integrationDeps).length === 0) return [];
 
-  // Parse the rich form once so we can hand the per-integration
-  // `tools[]` selection (and explicit `scopes[]`) to `resolveOne`
-  // alongside the package id.
-  const entries = parseManifestIntegrations({ dependencies: { integrations: integrationDeps } });
+  const entries = parseManifestIntegrations(agentManifest);
+  if (entries.length === 0) return [];
   const out: IntegrationSpawnSpec[] = [];
   for (const entry of entries) {
     try {
@@ -189,12 +184,12 @@ async function resolveOne(
     ...(deliveries.httpDeliveryAuths && !isRemoteHttp
       ? { httpDeliveryAuths: deliveries.httpDeliveryAuths }
       : {}),
-    // Niveau 2 Phase 3 — when the agent declared a tools[] selection
-    // for this integration, propagate it to the sidecar's McpHost so
-    // `tools/list` is pre-filtered. `undefined` (bare-version-string
-    // dep or rich form without tools) preserves the "all tools
-    // allowed" default.
-    ...(agentToolSelection !== undefined ? { toolAllowlist: agentToolSelection } : {}),
+    // Niveau 2 Phase 3 — least-privilege default: when the agent didn't
+    // pick any tool (undefined selection), the allowlist is `[]` and
+    // the sidecar's McpHost registers nothing for this integration.
+    // The agent author has to explicitly opt into each tool via the
+    // editor UI.
+    toolAllowlist: agentToolSelection ?? [],
     ...(toolUrlEnvelope !== undefined ? { toolUrlEnvelope } : {}),
   };
 }

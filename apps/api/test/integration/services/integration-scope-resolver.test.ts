@@ -54,15 +54,28 @@ function gmailManifest(): Record<string, unknown> {
   };
 }
 
-function agentManifest(name: string, integrationDep: unknown): Record<string, unknown> {
-  return {
+function agentManifest(
+  name: string,
+  selection: { version: string; tools?: string[]; scopes?: string[] },
+): Record<string, unknown> {
+  const { version, tools, scopes } = selection;
+  const m: Record<string, unknown> = {
     name,
     version: "1.0.0",
     type: "agent",
     schemaVersion: "1.0",
     displayName: name,
-    dependencies: { integrations: { [INTEGRATION_ID]: integrationDep } },
+    dependencies: { integrations: { [INTEGRATION_ID]: version } },
   };
+  if (tools !== undefined || scopes !== undefined) {
+    m.integrations = {
+      [INTEGRATION_ID]: {
+        ...(tools !== undefined ? { tools } : {}),
+        ...(scopes !== undefined ? { scopes } : {}),
+      },
+    };
+  }
+  return m;
 }
 
 describe("integration-scope-resolver", () => {
@@ -150,16 +163,16 @@ describe("integration-scope-resolver", () => {
       expect(out.breakdown).toHaveLength(3);
     });
 
-    it("agent declaring no tools (legacy string dep) contributes all declared tool scopes", async () => {
+    it("agent declaring the dep without a selection contributes zero scopes (least-privilege)", async () => {
       await seedPackage({
-        id: "@scope/agent-legacy",
+        id: "@scope/agent-noselection",
         orgId: ctx.orgId,
         type: "agent",
-        draftManifest: agentManifest("@scope/agent-legacy", "^1.0.0"),
+        draftManifest: agentManifest("@scope/agent-noselection", { version: "^1.0.0" }),
       });
       await installPackage(
         { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        "@scope/agent-legacy",
+        "@scope/agent-noselection",
       );
 
       const out = await computeRequiredScopes({
@@ -167,7 +180,8 @@ describe("integration-scope-resolver", () => {
         integrationPackageId: INTEGRATION_ID,
         authKey: "primary",
       });
-      expect(out.required.sort()).toEqual(["delete", "read", "send"]);
+      expect(out.required).toEqual([]);
+      expect(out.breakdown).toEqual([]);
     });
 
     it("includes explicit agent.scopes[] in the breakdown and union", async () => {

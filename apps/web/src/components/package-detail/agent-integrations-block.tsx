@@ -201,6 +201,10 @@ function deriveIntegrationStatus(input: {
   if (declaredAuthKeys.length === 0) return { kind: "ok", authKey: "" };
 
   const requiredAuthKeys = requiredAuthKeysForAgent(manifest, agentTools);
+  // No tools picked → integration is declared but inert; surface as
+  // "ok" with empty authKey so the card doesn't render a "connect" CTA
+  // for an unused integration. The picker is the place to opt in.
+  if (requiredAuthKeys.length === 0) return { kind: "ok", authKey: "" };
 
   // Group by auth (multi-account → union scopes, OR needsReconnection)
   const byAuth = new Map<string, { scopesGranted: string[]; needsReconnection: boolean }>();

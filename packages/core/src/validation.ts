@@ -106,39 +106,39 @@ export const agentManifestSchema = afpsAgentManifestSchema.extend({
   license: z.string().optional(),
   repository: z.string().optional(),
   // Phase 1.0 — additive sibling of `dependencies.providers`. Keys must
-  // be scoped package names; values are either a semver range (legacy
-  // shape) or a rich object selecting tools/scopes (niveau 2 scope
-  // model). Both shapes coexist — the rich form is opt-in per agent.
+  // be scoped package names; values are bare semver ranges (npm-style).
+  // Per-integration tool/scope selection lives in the top-level
+  // `integrations` field below, so `dependencies` stays a pure
+  // version-resolution surface.
   dependencies: z
     .looseObject({
       skills: z.record(z.string().regex(scopedNameRegex), z.string()).optional(),
       tools: z.record(z.string().regex(scopedNameRegex), z.string()).optional(),
       providers: z.record(z.string().regex(scopedNameRegex), z.string()).optional(),
-      integrations: z
-        .record(
-          z.string().regex(scopedNameRegex),
-          z.union([
-            // Legacy: bare semver range.
-            z.string(),
-            // Niveau 2: object selecting tools (drives scope inference
-            // via the integration manifest's tools.{name}.requiredScopes)
-            // and optional escape-hatch scopes the runtime unions with
-            // the inferred set.
-            z.object({
-              version: z.string().min(1),
-              tools: z
-                .array(
-                  z.string().regex(/^[a-z_][a-z0-9_]*$/, {
-                    error: "integration tool names must match /^[a-z_][a-z0-9_]*$/",
-                  }),
-                )
-                .optional(),
-              scopes: z.array(z.string()).optional(),
-            }),
-          ]),
-        )
-        .optional(),
+      integrations: z.record(z.string().regex(scopedNameRegex), z.string()).optional(),
     })
+    .optional(),
+  // Niveau 2 — per-integration runtime policy. Keys mirror
+  // `dependencies.integrations[id]`. `tools[]` is the allowlist exposed
+  // to the agent's LLM via the sidecar's McpHost (Phase 3); empty or
+  // missing means the integration is declared but no tools are used
+  // (= no MCP surface, no auth required at run kickoff). `scopes[]` is
+  // an explicit OAuth scope escape hatch unioned with the set inferred
+  // from the selected tools' `requiredScopes`.
+  integrations: z
+    .record(
+      z.string().regex(scopedNameRegex),
+      z.object({
+        tools: z
+          .array(
+            z.string().regex(/^[a-z_][a-z0-9_]*$/, {
+              error: "integration tool names must match /^[a-z_][a-z0-9_]*$/",
+            }),
+          )
+          .optional(),
+        scopes: z.array(z.string()).optional(),
+      }),
+    )
     .optional(),
 });
 

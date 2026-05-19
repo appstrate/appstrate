@@ -329,7 +329,9 @@ async function checkOne(
   const manifest = res.manifest;
   const requiredAuthKeys = requiredAuthKeysForAgent(manifest, entry.tools);
   if (requiredAuthKeys.length === 0) {
-    // Integration declares no auths — nothing to check.
+    // No auth required — either the integration declares none, or the
+    // agent picked 0 tools (niveau 2: dep declared but inert, no
+    // connection gate at run-kickoff).
     return;
   }
 

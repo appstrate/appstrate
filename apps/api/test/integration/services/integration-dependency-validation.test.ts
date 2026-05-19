@@ -47,15 +47,29 @@ function gmailManifest(): Record<string, unknown> {
   };
 }
 
-function agentManifest(integrationDep: unknown): Record<string, unknown> {
-  return {
+function agentManifest(selection: {
+  version: string;
+  tools?: string[];
+  scopes?: string[];
+}): Record<string, unknown> {
+  const { version, tools, scopes } = selection;
+  const m: Record<string, unknown> = {
     name: "@test/agent",
     version: "1.0.0",
     type: "agent",
     schemaVersion: "1.0",
     displayName: "Test Agent",
-    dependencies: { integrations: { [INTEGRATION_ID]: integrationDep } },
+    dependencies: { integrations: { [INTEGRATION_ID]: version } },
   };
+  if (tools !== undefined || scopes !== undefined) {
+    m.integrations = {
+      [INTEGRATION_ID]: {
+        ...(tools !== undefined ? { tools } : {}),
+        ...(scopes !== undefined ? { scopes } : {}),
+      },
+    };
+  }
+  return m;
 }
 
 describe("collectIntegrationDependencyErrors", () => {

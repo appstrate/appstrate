@@ -469,9 +469,8 @@ describe("GET /api/integrations/:packageId/auths/:authKey/required-scopes", () =
         type: "agent",
         schemaVersion: "1.0",
         displayName: "X",
-        dependencies: {
-          integrations: { "@myorg/gmail-rich": { version: "^1.0.0", tools: ["send_message"] } },
-        },
+        dependencies: { integrations: { "@myorg/gmail-rich": "^1.0.0" } },
+        integrations: { "@myorg/gmail-rich": { tools: ["send_message"] } },
       },
     });
     await db.insert(applicationPackages).values({

@@ -103,31 +103,13 @@ describe("extractDependencies", () => {
     expect(deps[0]!.versionRange).toBe("^1.0.0");
   });
 
-  it("manifest with integrations in niveau 2 rich object form", () => {
+  it("throws when integration dependency value is not a bare string", () => {
     const manifest = {
       dependencies: {
-        integrations: {
-          "@acme/gmail-mcp": {
-            version: "^1.0.0",
-            tools: ["list_messages"],
-            scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
-          },
-        },
+        integrations: { "@acme/gmail-mcp": { version: "^1.0.0" } },
       },
     };
-    const deps = extractDependencies(manifest);
-    expect(deps).toHaveLength(1);
-    expect(deps[0]!.depType).toBe("integration");
-    expect(deps[0]!.versionRange).toBe("^1.0.0");
-  });
-
-  it("throws on malformed integration value (object without version)", () => {
-    const manifest = {
-      dependencies: {
-        integrations: { "@acme/gmail-mcp": { tools: ["list_messages"] } },
-      },
-    };
-    expect(() => extractDependencies(manifest)).toThrow(/Invalid integration dependency/);
+    expect(() => extractDependencies(manifest)).toThrow(/expected string/);
   });
 });
 
@@ -137,7 +119,7 @@ describe("parseManifestIntegrations", () => {
     expect(parseManifestIntegrations({ dependencies: {} })).toEqual([]);
   });
 
-  it("normalises bare version strings to { version, tools: undefined }", () => {
+  it("returns { tools: undefined } when only the dep version is declared", () => {
     const out = parseManifestIntegrations({
       dependencies: { integrations: { "@acme/gmail-mcp": "^1.0.0" } },
     });
@@ -146,15 +128,13 @@ describe("parseManifestIntegrations", () => {
     ]);
   });
 
-  it("preserves tools/scopes from the rich form", () => {
+  it("merges tools/scopes from the top-level `integrations` block", () => {
     const out = parseManifestIntegrations({
-      dependencies: {
-        integrations: {
-          "@acme/gmail-mcp": {
-            version: "^1.0.0",
-            tools: ["list_messages", "get_message"],
-            scopes: ["s1", "s2"],
-          },
+      dependencies: { integrations: { "@acme/gmail-mcp": "^1.0.0" } },
+      integrations: {
+        "@acme/gmail-mcp": {
+          tools: ["list_messages", "get_message"],
+          scopes: ["s1", "s2"],
         },
       },
     });
@@ -164,13 +144,13 @@ describe("parseManifestIntegrations", () => {
     expect(out[0]!.scopes).toEqual(["s1", "s2"]);
   });
 
-  it("skips invalid entries silently (object without version)", () => {
+  it("skips dep entries whose version is not a bare string", () => {
     const out = parseManifestIntegrations({
       dependencies: {
         integrations: {
           "@acme/ok": "^1.0.0",
-          "@acme/bad": { tools: ["x"] },
-        },
+          "@acme/bad": { version: "^1.0.0" },
+        } as unknown as Record<string, string>,
       },
     });
     expect(out).toHaveLength(1);
@@ -179,18 +159,30 @@ describe("parseManifestIntegrations", () => {
 
   it("filters non-string entries inside tools/scopes arrays", () => {
     const out = parseManifestIntegrations({
-      dependencies: {
-        integrations: {
-          "@acme/gmail-mcp": {
-            version: "^1.0.0",
-            tools: ["good", 42, null, "another"],
-            scopes: ["s1", false, "s2"],
-          },
+      dependencies: { integrations: { "@acme/gmail-mcp": "^1.0.0" } },
+      integrations: {
+        "@acme/gmail-mcp": {
+          tools: ["good", 42, null, "another"] as unknown as string[],
+          scopes: ["s1", false, "s2"] as unknown as string[],
         },
       },
     });
     expect(out[0]!.tools).toEqual(["good", "another"]);
     expect(out[0]!.scopes).toEqual(["s1", "s2"]);
+  });
+
+  it("ignores a top-level `integrations` entry without a matching dep", () => {
+    // The dep table is the canonical "is this integration declared" gate.
+    // Selection blocks without a matching dep are silently dropped.
+    const out = parseManifestIntegrations({
+      dependencies: { integrations: { "@acme/gmail-mcp": "^1.0.0" } },
+      integrations: {
+        "@acme/gmail-mcp": { tools: ["a"] },
+        "@acme/orphan": { tools: ["x"] },
+      },
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0]!.id).toBe("@acme/gmail-mcp");
   });
 });
 

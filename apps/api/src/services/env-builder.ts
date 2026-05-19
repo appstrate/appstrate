@@ -23,7 +23,6 @@ import { resolveModel } from "./org-models.ts";
 import { resolveManifestProviders, extractManifestSchemas } from "../lib/manifest-utils.ts";
 import type { ProviderProfileMap } from "../types/index.ts";
 import { resolveIntegrationSpawns } from "./integration-spawn-resolver.ts";
-import { asRecord } from "@appstrate/core/safe-json";
 
 export class ModelNotConfiguredError extends Error {
   constructor() {
@@ -181,17 +180,12 @@ export async function buildRunContext(params: {
   // Phase 1.4 — resolve any declared `dependencies.integrations` into
   // ready-to-spawn specs (manifest + bundle bytes + delivery env with
   // live credentials). Failures here are per-integration warnings; the
-  // run proceeds with the surviving subset.
-  // Accepts both the legacy bare-version-string and the niveau 2 rich
-  // object form (`{ version, tools?, scopes? }`). The downstream
-  // resolver only reads the keys (per-tool/per-scope plumbing lands in
-  // Phase 3); typing as `unknown` keeps that boundary honest.
-  const integrationDeps = (asRecord(asRecord(agent.manifest).dependencies).integrations ??
-    undefined) as Record<string, unknown> | undefined;
+  // run proceeds with the surviving subset. The resolver reads the
+  // tool/scope selection from `manifest.integrations[id]` (niveau 2).
   const integrationSpawns = await resolveIntegrationSpawns({
     applicationId,
     actor,
-    integrationDeps,
+    agentManifest: agent.manifest as Record<string, unknown>,
   });
 
   const plan: AppstrateRunPlan = {

@@ -203,16 +203,14 @@ describe("validateManifest", () => {
     expect(result.valid).toBe(true);
   });
 
-  it("agent with integrations declared as niveau 2 rich object form", () => {
+  it("agent with integrations selection in the top-level `integrations` block", () => {
     const result = validateManifest(
       validAgentManifest({
-        dependencies: {
-          integrations: {
-            "@test/gmail-mcp": {
-              version: "^1.0.0",
-              tools: ["list_messages", "get_message"],
-              scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
-            },
+        dependencies: { integrations: { "@test/gmail-mcp": "^1.0.0" } },
+        integrations: {
+          "@test/gmail-mcp": {
+            tools: ["list_messages", "get_message"],
+            scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
           },
         },
       }),
@@ -220,13 +218,11 @@ describe("validateManifest", () => {
     expect(result.valid).toBe(true);
   });
 
-  it("rejects agent integrations object missing the required version", () => {
+  it("rejects an integration dependency value that's not a bare string", () => {
     const result = validateManifest(
       validAgentManifest({
         dependencies: {
-          integrations: {
-            "@test/gmail-mcp": { tools: ["list_messages"] },
-          },
+          integrations: { "@test/gmail-mcp": { version: "^1.0.0" } },
         },
       }),
     );
@@ -236,10 +232,9 @@ describe("validateManifest", () => {
   it("rejects agent integration tool names that don't match snake_case", () => {
     const result = validateManifest(
       validAgentManifest({
-        dependencies: {
-          integrations: {
-            "@test/gmail-mcp": { version: "^1.0.0", tools: ["List-Messages"] },
-          },
+        dependencies: { integrations: { "@test/gmail-mcp": "^1.0.0" } },
+        integrations: {
+          "@test/gmail-mcp": { tools: ["List-Messages"] },
         },
       }),
     );

@@ -12,10 +12,12 @@
       "@appstrate/output": "^2.0.0"
     },
     "integrations": {
-      "@appstrate/github-mcp": {
-        "version": "^1.0.0",
-        "tools": ["get_me"]
-      }
+      "@appstrate/github-mcp": "^1.0.0"
+    }
+  },
+  "integrations": {
+    "@appstrate/github-mcp": {
+      "tools": ["get_me"]
     }
   }
 }

@@ -642,20 +642,30 @@ describe("Packages API", () => {
       });
     }
 
-    function buildAgentBody(integration: unknown, suffix = "ok") {
-      return {
-        manifest: {
-          name: `@pkgorg/agent-${suffix}`,
-          version: "0.1.0",
-          type: "agent",
-          schemaVersion: "1.0",
-          displayName: `Agent ${suffix}`,
-          dependencies: {
-            integrations: { [integrationId]: integration },
-          },
+    function buildAgentBody(
+      selection: { version: string; tools?: string[]; scopes?: string[] } | string,
+      suffix = "ok",
+    ) {
+      const isBare = typeof selection === "string";
+      const manifest: Record<string, unknown> = {
+        name: `@pkgorg/agent-${suffix}`,
+        version: "0.1.0",
+        type: "agent",
+        schemaVersion: "1.0",
+        displayName: `Agent ${suffix}`,
+        dependencies: {
+          integrations: { [integrationId]: isBare ? selection : selection.version },
         },
-        content: "Prompt",
       };
+      if (!isBare && (selection.tools !== undefined || selection.scopes !== undefined)) {
+        manifest.integrations = {
+          [integrationId]: {
+            ...(selection.tools !== undefined ? { tools: selection.tools } : {}),
+            ...(selection.scopes !== undefined ? { scopes: selection.scopes } : {}),
+          },
+        };
+      }
+      return { manifest, content: "Prompt" };
     }
 
     it("accepts an agent whose tool selection is a subset of the integration's catalog", async () => {
@@ -682,7 +692,7 @@ describe("Packages API", () => {
       expect(res.status).toBe(400);
       const body = (await res.json()) as { errors?: { code: string; field: string }[] };
       expect(body.errors?.[0]?.code).toBe("unknown_tool");
-      expect(body.errors?.[0]?.field).toBe(`dependencies.integrations.${integrationId}.tools`);
+      expect(body.errors?.[0]?.field).toBe(`integrations.${integrationId}.tools`);
     });
 
     it("rejects an agent declaring a scope outside the integration's availableScopes", async () => {
@@ -699,12 +709,12 @@ describe("Packages API", () => {
       expect(body.errors?.some((e) => e.code === "scope_not_in_catalog")).toBe(true);
     });
 
-    it("accepts a legacy bare-version-string integration dep (no validation triggered)", async () => {
+    it("accepts a bare-version-string integration dep with no selection block", async () => {
       await seedGmailIntegration();
       const res = await app.request("/api/packages/agents", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify(buildAgentBody("^1.0.0", "legacy")),
+        body: JSON.stringify(buildAgentBody("^1.0.0", "noselection")),
       });
       expect(res.status).toBe(201);
     });
@@ -739,11 +749,8 @@ describe("Packages API", () => {
             type: "agent",
             schemaVersion: "1.0",
             displayName: "Updated",
-            dependencies: {
-              integrations: {
-                [integrationId]: { version: "^1.0.0", tools: ["nope"] },
-              },
-            },
+            dependencies: { integrations: { [integrationId]: "^1.0.0" } },
+            integrations: { [integrationId]: { tools: ["nope"] } },
           },
           content: "Updated prompt",
           lockVersion: agent.lockVersion,

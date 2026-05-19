@@ -122,29 +122,22 @@ describe("getResourceEntries / setResourceEntries", () => {
     expect((m.dependencies as Record<string, unknown>).skills).toBeUndefined();
   });
 
-  // Niveau 2 (Phase 5b) — integrations carry a richer payload than
-  // skills/tools. These tests pin the round-trip semantics across both
-  // legacy bare-string entries (no agent-side tool/scope pick) and the
-  // niveau 2 rich form (explicit allowlist drives sidecar enforcement).
-  describe("integrations rich form (niveau 2)", () => {
-    it("reads a bare-string integration dep as version-only", () => {
+  // Niveau 2 — version lives in `dependencies.integrations` (bare
+  // string), tool/scope selection lives in the top-level `integrations`
+  // block. These tests pin the round-trip across both halves.
+  describe("integrations (niveau 2 two-block layout)", () => {
+    it("reads version from deps with no selection block", () => {
       const m = { dependencies: { providers: {}, integrations: { "@vendor/gmail": "^1.0.0" } } };
       expect(getResourceEntries(m, "integrations")).toEqual([
         { id: "@vendor/gmail", version: "^1.0.0" },
       ]);
     });
 
-    it("reads a rich-form integration dep with tools and scopes", () => {
+    it("merges version + selection from the two blocks", () => {
       const m = {
-        dependencies: {
-          providers: {},
-          integrations: {
-            "@vendor/gmail": {
-              version: "^1.0.0",
-              tools: ["list_messages", "send_message"],
-              scopes: ["delete"],
-            },
-          },
+        dependencies: { providers: {}, integrations: { "@vendor/gmail": "^1.0.0" } },
+        integrations: {
+          "@vendor/gmail": { tools: ["list_messages", "send_message"], scopes: ["delete"] },
         },
       };
       expect(getResourceEntries(m, "integrations")).toEqual([
@@ -157,53 +150,49 @@ describe("getResourceEntries / setResourceEntries", () => {
       ]);
     });
 
-    it("writes the bare-string form when no tools/scopes are set", () => {
+    it("writes only the dep map when no tools/scopes are set", () => {
       const m: Record<string, unknown> = { dependencies: { providers: {} } };
       setResourceEntries(m, "integrations", [{ id: "@vendor/gmail", version: "^1.0.0" }]);
       expect((m.dependencies as Record<string, unknown>).integrations).toEqual({
         "@vendor/gmail": "^1.0.0",
       });
+      expect(m.integrations).toBeUndefined();
     });
 
-    it("writes the rich form when tools is an explicit array (even empty)", () => {
+    it("writes the selection block when tools is an explicit array (even empty)", () => {
       const m: Record<string, unknown> = { dependencies: { providers: {} } };
       setResourceEntries(m, "integrations", [
         { id: "@vendor/gmail", version: "^1.0.0", tools: [] },
       ]);
       expect((m.dependencies as Record<string, unknown>).integrations).toEqual({
-        "@vendor/gmail": { version: "^1.0.0", tools: [] },
+        "@vendor/gmail": "^1.0.0",
       });
+      expect(m.integrations).toEqual({ "@vendor/gmail": { tools: [] } });
     });
 
-    it("writes the rich form with tools + scopes union", () => {
+    it("writes tools + scopes into the top-level integrations block", () => {
       const m: Record<string, unknown> = { dependencies: { providers: {} } };
       setResourceEntries(m, "integrations", [
-        {
-          id: "@vendor/gmail",
-          version: "^1.0.0",
-          tools: ["list_messages"],
-          scopes: ["delete"],
-        },
+        { id: "@vendor/gmail", version: "^1.0.0", tools: ["list_messages"], scopes: ["delete"] },
       ]);
       expect((m.dependencies as Record<string, unknown>).integrations).toEqual({
-        "@vendor/gmail": {
-          version: "^1.0.0",
-          tools: ["list_messages"],
-          scopes: ["delete"],
-        },
+        "@vendor/gmail": "^1.0.0",
+      });
+      expect(m.integrations).toEqual({
+        "@vendor/gmail": { tools: ["list_messages"], scopes: ["delete"] },
       });
     });
 
-    it("round-trips a mixed bag of bare + rich entries", () => {
+    it("round-trips a mix of selection-less + selected entries", () => {
       const m: Record<string, unknown> = { dependencies: { providers: {} } };
       setResourceEntries(m, "integrations", [
-        { id: "@vendor/legacy", version: "^1.0.0" },
-        { id: "@vendor/locked", version: "^2.0.0", tools: ["read"] },
+        { id: "@vendor/none", version: "^1.0.0" },
+        { id: "@vendor/picked", version: "^2.0.0", tools: ["read"] },
       ]);
       const back = getResourceEntries(m, "integrations");
       expect(back).toEqual([
-        { id: "@vendor/legacy", version: "^1.0.0" },
-        { id: "@vendor/locked", version: "^2.0.0", tools: ["read"] },
+        { id: "@vendor/none", version: "^1.0.0" },
+        { id: "@vendor/picked", version: "^2.0.0", tools: ["read"] },
       ]);
     });
   });

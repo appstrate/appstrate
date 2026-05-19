@@ -928,7 +928,7 @@ describe("validateAgentIntegrationScopes", () => {
     );
     expect(errors).toHaveLength(1);
     expect(errors[0]!.code).toBe("unknown_tool");
-    expect(errors[0]!.field).toBe("dependencies.integrations.@a/i.tools");
+    expect(errors[0]!.field).toBe("integrations.@a/i.tools");
     expect(errors[0]!.message).toContain("delete_message");
   });
 
