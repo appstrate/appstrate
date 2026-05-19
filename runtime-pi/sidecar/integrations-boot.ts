@@ -43,6 +43,7 @@ import {
   type AppstrateToolDefinition,
 } from "@appstrate/mcp-transport";
 import { planCaBundle, type CaBundle } from "@appstrate/connect/integrations";
+import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 
 import { McpHost } from "./mcp-host.ts";
 import { logger } from "./logger.ts";
@@ -67,65 +68,11 @@ import "./integration-runtime-adapter-docker.ts";
 import "./integration-runtime-adapter-process.ts";
 
 /**
- * Per-integration spec produced by the platform launcher. The launcher
- * resolves the agent's `dependencies.integrations` → `applicationPackages`
- * → `integration_connections` chain so the sidecar receives a flat,
- * ready-to-spawn payload (manifest + live credentials). Bundle bytes
- * are fetched separately via the internal endpoint (#bundle size limit).
+ * Re-export the canonical spawn-spec type from `@appstrate/core/sidecar-types`
+ * so adapter modules can import it from the same file that owns the rest of
+ * the sidecar boot surface.
  */
-export interface IntegrationSpawnSpec {
-  /** Package id (e.g. `@appstrate/gmail-mcp`). */
-  packageId: string;
-  /** McpHost namespace — typically the package's slug portion. */
-  namespace: string;
-  /** Validated integration manifest (server, transport, auths). */
-  manifest: IntegrationManifestLite;
-  /**
-   * Resolved env vars to set on the spawned subprocess. Built from
-   * `manifest.auths.{key}.delivery.env`, with values taken from the live
-   * (already-refreshed) credentials. Sensitive: never logged.
-   */
-  spawnEnv: Record<string, string>;
-  /**
-   * Phase 1.5 — per-auth `delivery.http` metadata. Presence (with at
-   * least one entry) tells the sidecar to take the MITM path for this
-   * integration: start a per-integration HTTPS listener, mint a CA
-   * bundle, hand the runner `HTTPS_PROXY` + `*_CA_*` env vars, and let
-   * the listener inject the live header per `delivery.http` spec.
-   * Absent / empty = stay on the env-delivery-only path.
-   *
-   * Structural mirror of `IntegrationSpawnSpec.httpDeliveryAuths` in
-   * `@appstrate/core/sidecar-types` — the wire payload is the same shape.
-   */
-  httpDeliveryAuths?: Record<
-    string,
-    {
-      authType: string;
-      headerName: string;
-      headerPrefix: string;
-      value: string;
-      allowServerOverride: boolean;
-      authorizedUris: readonly string[];
-      expiresAtEpochMs: number | null;
-    }
-  >;
-  /**
-   * Niveau 2 Phase 3 — agent-declared MCP tool allowlist. Passed straight
-   * through to `McpHost.register({ allowedTools })` so the agent's LLM
-   * only sees the tools its manifest declared. `undefined` keeps the
-   * legacy "all tools allowed" semantics. Structural mirror of
-   * `IntegrationSpawnSpec.toolAllowlist` in `@appstrate/core/sidecar-types`.
-   */
-  toolAllowlist?: readonly string[];
-  /**
-   * Niveau 2 Phase 4 — MITM URL envelope. Union of `urlPatterns` from
-   * agent-selected tools; the MITM listener refuses requests that
-   * don't match. `undefined` (default) skips this defence layer.
-   * Structural mirror of `IntegrationSpawnSpec.toolUrlEnvelope` in
-   * `@appstrate/core/sidecar-types`.
-   */
-  toolUrlEnvelope?: ReadonlyArray<{ pattern: string; methods?: readonly string[] }>;
-}
+export type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 
 /**
  * Where the sidecar fetches integration bundles from. The platform
@@ -137,28 +84,6 @@ export interface BundleFetchOptions {
   runToken: string;
   /** Override for tests. Defaults to `globalThis.fetch`. */
   fetchFn?: typeof fetch;
-}
-
-/**
- * Minimal subset of the integration manifest that this boot module
- * needs. Mirrors `@appstrate/core/integration`'s `IntegrationManifest`
- * but flattened to the fields we read here — the sidecar avoids importing
- * the full Zod schema bundle.
- */
-export interface IntegrationManifestLite {
-  name: string;
-  version: string;
-  server: {
-    type: string;
-    entryPoint?: string;
-    /**
-     * Phase 7 — remote MCP endpoint URL. Required when `server.type` is
-     * `"http"`. The sidecar opens a Streamable HTTP MCP client against
-     * this URL instead of spawning a runner via the runtime adapter.
-     */
-    url?: string;
-  };
-  transport?: { type: string };
 }
 
 export interface BootIntegrationsResult {

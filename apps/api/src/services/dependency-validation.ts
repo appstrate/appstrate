@@ -481,11 +481,7 @@ export async function validateAgentIntegrations(
   actor: Actor,
   scope: AppScope,
 ): Promise<void> {
-  const { fieldErrors, integrationErrors } = await collectIntegrationDependencyErrors(
-    agentManifest,
-    actor,
-    scope,
-  );
+  const { fieldErrors } = await collectIntegrationDependencyErrors(agentManifest, actor, scope);
   if (fieldErrors.length === 0) return;
   const first = fieldErrors[0]!;
   throw new ApiError({
@@ -494,14 +490,5 @@ export async function validateAgentIntegrations(
     title: "Missing Integration Connection",
     detail: first.message,
     errors: fieldErrors,
-    // Stash the structured payload on a side channel the route can read.
-    // We piggyback via a non-standard `Appstrate-Missing-Integrations`
-    // header carrying a base64 JSON blob. Hidden but parseable; the UI
-    // primarily uses `errors[]`.
-    headers: {
-      "Appstrate-Missing-Integrations": Buffer.from(JSON.stringify(integrationErrors)).toString(
-        "base64",
-      ),
-    },
   });
 }

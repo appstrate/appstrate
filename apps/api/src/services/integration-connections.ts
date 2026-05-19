@@ -78,8 +78,12 @@ export interface IntegrationOAuthClient {
   updatedAt: string;
 }
 
-/** Internal — decrypted client secret used only by the OAuth flow. */
-export interface IntegrationOAuthClientWithSecret extends IntegrationOAuthClient {
+/**
+ * Internal — full record incl. decrypted `clientSecret`. Used by the
+ * OAuth initiate handler. Route handlers MUST project to
+ * {@link IntegrationOAuthClient} (omit `clientSecret`) before responding.
+ */
+interface IntegrationOAuthClientWithSecret extends IntegrationOAuthClient {
   clientSecret: string;
 }
 
@@ -198,51 +202,12 @@ export async function upsertIntegrationOAuthClient(
   };
 }
 
-export async function getIntegrationOAuthClient(
-  scope: AppScope,
-  packageId: string,
-  authKey: string,
-): Promise<IntegrationOAuthClient | null> {
-  const [row] = await db
-    .select()
-    .from(integrationOauthClients)
-    .where(
-      and(
-        eq(integrationOauthClients.applicationId, scope.applicationId),
-        eq(integrationOauthClients.integrationPackageId, packageId),
-        eq(integrationOauthClients.authKey, authKey),
-      ),
-    )
-    .limit(1);
-  if (!row) return null;
-  let decryptedSecret = "";
-  try {
-    const decrypted = decryptCredentials<{ client_secret?: string }>(row.clientSecretEncrypted);
-    decryptedSecret = decrypted.client_secret ?? "";
-  } catch (err) {
-    logger.warn("integration_oauth_client: client_secret decrypt failed", {
-      packageId,
-      authKey,
-      err: String(err),
-    });
-  }
-  return {
-    applicationId: row.applicationId,
-    integrationPackageId: row.integrationPackageId,
-    authKey: row.authKey,
-    clientId: row.clientId,
-    hasClientSecret: decryptedSecret.length > 0,
-    redirectUri: row.redirectUri,
-    createdAt: row.createdAt.toISOString(),
-    updatedAt: row.updatedAt.toISOString(),
-  };
-}
-
 /**
- * Internal — load the full record incl. decrypted client_secret. Used by
- * the OAuth initiate handler. Never expose to the API surface.
+ * Load the OAuth client record (incl. decrypted `clientSecret`). Public
+ * route handlers MUST project to {@link IntegrationOAuthClient}
+ * (`{ clientSecret: _, ...publicShape } = …`) before responding.
  */
-export async function loadIntegrationOAuthClientForFlow(
+export async function getIntegrationOAuthClient(
   scope: AppScope,
   packageId: string,
   authKey: string,
@@ -263,8 +228,12 @@ export async function loadIntegrationOAuthClientForFlow(
   try {
     const decrypted = decryptCredentials<{ client_secret?: string }>(row.clientSecretEncrypted);
     secret = decrypted.client_secret ?? "";
-  } catch {
-    /* leave empty — caller decides */
+  } catch (err) {
+    logger.warn("integration_oauth_client: client_secret decrypt failed", {
+      packageId,
+      authKey,
+      err: String(err),
+    });
   }
   return {
     applicationId: row.applicationId,

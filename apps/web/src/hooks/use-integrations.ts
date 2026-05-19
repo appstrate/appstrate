@@ -172,16 +172,6 @@ export function useIntegrations() {
   });
 }
 
-export function useInstalledIntegrations() {
-  const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
-  return useQuery({
-    queryKey: [...KEY(orgId, applicationId), "installed"] as const,
-    enabled: Boolean(orgId && applicationId),
-    queryFn: () => apiList<IntegrationSummary>("/integrations/installed"),
-  });
-}
-
 export function useIntegrationDetail(packageId: string | undefined) {
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();

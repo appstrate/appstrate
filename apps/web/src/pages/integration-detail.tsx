@@ -171,21 +171,6 @@ function OAuthClientForm({ packageId, authKey }: { packageId: string; authKey: s
 // ─────────────────────────────────────────────
 
 /**
- * Niveau 2 Phase 5 — incremental consent surface for an oauth2 auth.
- *
- * Polls `/required-scopes` and renders the diff between what installed
- * agents ask for and what the actor has actually granted. When the diff
- * is non-empty AND there is at least one existing connection, surfaces
- * a "Reconnect to grant" CTA that re-runs the OAuth kickoff (the
- * backend unions defaults + agent-required + existing-granted scopes
- * so the IdP shows the upgrade consent screen).
- *
- * Silent (returns null) when:
- *  - no installed agent needs anything beyond the defaults; or
- *  - the actor has no connection yet (first-connect already requests
- *    the full union via the existing connect button).
- */
-/**
  * Read-only diff between agent-required scopes and actor-granted scopes.
  *
  * The reconnect CTA was removed when connect/upgrade moved to agent

@@ -2,58 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Phase 1.1 — credential resolver for the new AFPS `integration`
- * manifest (proposal §4.1.1, §4.1.3, §4.1.4).
- *
- * Pure, DB-free, network-free. Given an integration manifest's `auths`
- * map plus the decrypted credential bundle for each connected auth
- * key, this module produces:
- *
- *   - {@link resolveIntegrationCredentials} — the multi-auth proxy
- *     payload (one entry per declared `auths.{key}`), keyed for
- *     fast URL routing by `authorizedUris` order.
- *   - {@link resolveHttpDelivery} — the header injection plan for a
- *     given auth (header name, prefix, rendered value, override gate).
- *   - {@link resolveEnvDelivery} — the env-var bundle for spawn-time
- *     injection, with `sensitive` masking metadata preserved.
- *   - {@link resolveFilesDelivery} — the tmpfs file plan (path → content
- *     + mode). Actual `fs.write` lives in the runtime/spawn layer
- *     (Phase 1.2a); this module only computes the plan.
- *   - {@link routeRequestToAuth} — given an outbound URL, returns the
- *     auth key whose `authorizedUris` matches first (manifest order),
- *     or `null` if none match.
- *
- * Field aliases:
- *
- *   Credentials are stored using OAuth-canonical snake_case names
- *   (`access_token`, `refresh_token`, …) but the manifest uses the
- *   AFPS camelCase convention (`accessToken`, `refreshToken`). The
- *   resolver applies both directions transparently so manifest authors
- *   can write `from: "accessToken"` and have it resolve against
- *   `credentials.access_token`. {@link ALIAS_MAP} documents the
- *   reverse-canonical mapping.
- *
- * Computed fields:
- *
- *   `delivery.http.valueFrom` accepts either a string ("simple field
- *   reference") or `{ template, encoding }` for templates with optional
- *   post-substitution encoding. Templates use `{{var}}` syntax against
- *   credential fields, then optionally pipe through a whitelisted
- *   encoding (`base64`). Unknown placeholder = template is rendered
- *   with empty substitution; missing-field detection lives in the
- *   caller (we surface the rendered string regardless so log analysis
- *   can see what the proxy actually sent).
- *
- * What lives elsewhere:
- *
- *   - RFC 8707 audience binding → `./audience-binding.ts`
- *   - RFC 9728/8414 discovery   → `./oauth-discovery.ts`
- *   - DB read / token refresh   → `./credentials.ts` (legacy provider
- *     path) / Phase 1.2a runtime (integration spawn).
+ * AFPS integration credential helpers — alias-aware field reader +
+ * per-auth `delivery.http` plan. Consumed by the platform's
+ * spawn/credentials resolvers and the sidecar's MITM listener.
  */
 
 import type { IntegrationManifest } from "@appstrate/core/integration";
-import { matchesAuthorizedUriSpec } from "./proxy-primitives.ts";
 
 /**
  * Camel-cased manifest aliases → snake_case credential storage keys.
@@ -112,57 +66,6 @@ export interface IntegrationCredentialsPayload {
   auths: ResolvedAuthCredentials[];
   /** Set of auth keys whose `required: true` declaration is unmet. */
   missingRequiredAuthKeys: string[];
-}
-
-/** Input bundle for a single auth key: decrypted fields + optional identity claims. */
-export interface AuthCredentialBundle {
-  fields: Record<string, string>;
-  identityClaims?: Record<string, string>;
-  expiresAt?: string;
-  scopesGranted?: readonly string[];
-}
-
-/**
- * Resolve a full multi-auth payload from a manifest + per-auth bundles.
- *
- * `bundles` is keyed by `authKey` (the same string used in
- * `manifest.auths.{key}`). Missing entries are tolerated — the
- * `missingRequiredAuthKeys` field reports which `required: true` auths
- * weren't supplied, so the caller (typically Phase 1.2a runtime) can
- * block the spawn with a structured error.
- */
-export function resolveIntegrationCredentials(
-  manifest: Pick<IntegrationManifest, "auths">,
-  bundles: Readonly<Record<string, AuthCredentialBundle>>,
-): IntegrationCredentialsPayload {
-  const declaredAuths = manifest.auths ?? {};
-  const out: ResolvedAuthCredentials[] = [];
-  const missing: string[] = [];
-
-  for (const [authKey, authDef] of Object.entries(declaredAuths)) {
-    const bundle = bundles[authKey];
-    const isRequired = authDef.required !== false; // default true (§4.1.1)
-
-    if (!bundle) {
-      if (isRequired) missing.push(authKey);
-      continue;
-    }
-
-    out.push({
-      authKey,
-      authType: authDef.type,
-      fields: Object.freeze({ ...bundle.fields }),
-      authorizedUris: Object.freeze([...authDef.authorizedUris]),
-      audience: authDef.audience,
-      identityClaims: bundle.identityClaims
-        ? Object.freeze({ ...bundle.identityClaims })
-        : undefined,
-      expiresAt: bundle.expiresAt,
-      scopesGranted: bundle.scopesGranted ? Object.freeze([...bundle.scopesGranted]) : undefined,
-    });
-  }
-
-  return { auths: out, missingRequiredAuthKeys: missing };
 }
 
 /**
@@ -269,118 +172,6 @@ export function resolveHttpDelivery(
     value,
     allowServerOverride: http.allowServerOverride === true,
   };
-}
-
-// ─────────────────────────────────────────────
-// Delivery — env
-// ─────────────────────────────────────────────
-
-/** Single env-var entry in the spawn-time injection plan. */
-export interface EnvDeliveryEntry {
-  name: string;
-  value: string;
-  /** Mirrors manifest `sensitive: true` so loggers can mask. */
-  sensitive: boolean;
-}
-
-/**
- * Resolve a `delivery.env` plan. Each `delivery.env[NAME].from` is
- * resolved against the credential fields; missing fields produce an
- * entry with empty value (caller decides whether to refuse the spawn).
- */
-export function resolveEnvDelivery(
-  env: NonNullable<NonNullable<IntegrationManifest["auths"]>[string]["delivery"]["env"]>,
-  fields: Readonly<Record<string, string>>,
-  identityClaims?: Readonly<Record<string, string>>,
-): EnvDeliveryEntry[] {
-  return Object.entries(env).map(([name, spec]) => ({
-    name,
-    value: resolveFromReference(spec.from, fields, identityClaims),
-    sensitive: spec.sensitive === true,
-  }));
-}
-
-// ─────────────────────────────────────────────
-// Delivery — files
-// ─────────────────────────────────────────────
-
-/** Single file entry in the spawn-time tmpfs plan. */
-export interface FileDeliveryEntry {
-  /** Absolute path inside the container (e.g. `/run/afps/gmail-creds.json`). */
-  path: string;
-  /** UTF-8 content to write. */
-  content: string;
-  /** POSIX mode as 4-digit octal string, e.g. `"0400"`. Defaults to `"0400"`. */
-  mode: string;
-}
-
-/**
- * Resolve a `delivery.files` plan. The runtime (Phase 1.2a) is
- * responsible for actually writing these files on a tmpfs mount and
- * destroying them at run end. We default the mode to `0400` per
- * proposal §4.1.6.1 — "files on tmpfs lisible only by the process".
- */
-export function resolveFilesDelivery(
-  files: NonNullable<NonNullable<IntegrationManifest["auths"]>[string]["delivery"]["files"]>,
-  fields: Readonly<Record<string, string>>,
-  identityClaims?: Readonly<Record<string, string>>,
-): FileDeliveryEntry[] {
-  return Object.entries(files).map(([path, spec]) => ({
-    path,
-    content: resolveFromReference(spec.from, fields, identityClaims),
-    mode: spec.mode ?? "0400",
-  }));
-}
-
-// ─────────────────────────────────────────────
-// URL routing
-// ─────────────────────────────────────────────
-
-/**
- * Given an outbound URL and a resolved payload, return the auth key
- * whose `authorizedUris` matches first per manifest order — see
- * proposal §4.1.4 step 1 ("If plusieurs auths matchent la même URL,
- * appliquer celle apparaissant en premier dans `auths`"). Returns
- * `null` when no auth matches (the proxy MUST then forward without
- * credential injection and let the upstream return 401 organically).
- */
-export function routeRequestToAuth(
-  url: string,
-  payload: IntegrationCredentialsPayload,
-): ResolvedAuthCredentials | null {
-  for (const auth of payload.auths) {
-    for (const pattern of auth.authorizedUris) {
-      // matchesAuthorizedUriSpec takes (pattern, target) — pattern first.
-      if (matchesAuthorizedUriSpec(pattern, url)) return auth;
-    }
-  }
-  return null;
-}
-
-// ─────────────────────────────────────────────
-// Internals
-// ─────────────────────────────────────────────
-
-/**
- * Resolve a `from` reference (used by env/files). Accepts a single
- * field name (alias-aware) OR a `{{template}}` string. The template
- * variant matches the `delivery.http.valueFrom: { template, … }` shape
- * but without per-call encoding (env/files take literal UTF-8).
- */
-function resolveFromReference(
-  ref: string,
-  fields: Readonly<Record<string, string>>,
-  identityClaims?: Readonly<Record<string, string>>,
-): string {
-  if (ref.includes("{{")) {
-    return renderTemplate(ref, fields, undefined, identityClaims);
-  }
-  const fromFields = readCredentialField(fields, ref);
-  if (fromFields !== undefined) return fromFields;
-  if (identityClaims && identityClaims[ref] !== undefined) return identityClaims[ref];
-  const alias = ALIAS_MAP[ref] ?? REVERSE_ALIAS_MAP[ref];
-  if (alias && identityClaims && identityClaims[alias] !== undefined) return identityClaims[alias];
-  return "";
 }
 
 function renderTemplate(

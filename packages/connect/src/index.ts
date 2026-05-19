@@ -89,115 +89,13 @@ export {
 // it without pulling @appstrate/db. Single type, shared by both paths.
 
 // ─── AFPS integration manifest (Phase 1.1) ─────────────────────────────
-// RFC 8707 audience binding (no DB / network).
-export {
-  appendResourceToTokenBody,
-  buildAuthorizeResourceQuery,
-  categorizeAudienceResponse,
-} from "./audience-binding.ts";
-export type {
-  AudienceInput,
-  AudienceResponseCategory,
-  OAuthErrorResponse,
-} from "./audience-binding.ts";
-
-// RFC 9728 / RFC 8414 discovery cascade.
-export {
-  discoverEndpoints,
-  selectAuthorizationServer,
-  buildAsMetadataUrl,
-  clearDiscoveryCache,
-  DiscoveryError,
-  DEFAULT_DISCOVERY_TTL_MS,
-} from "./oauth-discovery.ts";
-export type {
-  ResolvedAuthorizationEndpoints,
-  ProtectedResourceMetadata,
-  AuthorizationServerMetadata,
-  FetchJsonFn,
-  ClockFn,
-  DiscoverEndpointsOptions,
-  DiscoveryErrorCode,
-} from "./oauth-discovery.ts";
-
 // Multi-auth credential resolver + delivery planners.
-export {
-  ALIAS_MAP,
-  resolveIntegrationCredentials,
-  readCredentialField,
-  resolveHttpDelivery,
-  resolveEnvDelivery,
-  resolveFilesDelivery,
-  routeRequestToAuth,
-} from "./integration-credentials.ts";
+export { ALIAS_MAP, readCredentialField, resolveHttpDelivery } from "./integration-credentials.ts";
 export type {
   ResolvedAuthCredentials,
   IntegrationCredentialsPayload,
-  AuthCredentialBundle,
   HttpDeliveryPlan,
-  EnvDeliveryEntry,
-  FileDeliveryEntry,
 } from "./integration-credentials.ts";
-
-// ─── AFPS integration runtime (Phase 1.2a) ─────────────────────────────
-// Pure spawn-side helpers — server resolver, command builder, proxy env.
-export {
-  IntegrationRuntimeError,
-  buildProxyEnvInjection,
-  buildSpawnCommand,
-  resolveIntegrationServer,
-  validateIntegrationServer,
-  validateRuntimeCompatibility,
-} from "./integration-runtime.ts";
-export type {
-  IntegrationRuntimeErrorCode,
-  ProxyEnvInjectionInput,
-  ResolvedDockerSpawnTarget,
-  ResolvedLocalSpawnTarget,
-  ResolvedSpawnTarget,
-  SpawnCommandPlan,
-} from "./integration-runtime.ts";
-
-// Restart-with-backoff supervisor (proposal §5.4.2).
-export { superviseProcess } from "./restart-supervisor.ts";
-export type {
-  ChildExit,
-  ChildHandle,
-  SupervisedProcess,
-  SupervisorEvent,
-  SupervisorOptions,
-  SupervisorOutcome,
-} from "./restart-supervisor.ts";
-
-// Top-level spawn orchestrator + SIGHUP cred-refresh signal dispatch.
-export { SpawnFailureError, spawnIntegrations } from "./integration-orchestrator.ts";
-export type {
-  IntegrationOrchestrator,
-  IntegrationOrchestratorEvent,
-  IntegrationSpawnRequest,
-  RunningIntegration,
-  SignalDispatcher,
-  SpawnIntegrationsOptions,
-} from "./integration-orchestrator.ts";
-
-// toolsDynamic runtime re-discovery + drift detection (§5.4.6).
-export {
-  DEFAULT_TOOLS_DISCOVERY_TTL_MS,
-  buildConnectedAuthsKey,
-  clearToolsDiscoveryCache,
-  diffToolsAgainstLock,
-  discoverToolsForUser,
-  invalidateToolsForIntegration,
-  invalidateToolsForUser,
-  toolsDiscoveryCacheSize,
-} from "./tools-discovery.ts";
-export type {
-  DiscoveredTools,
-  Tool,
-  ToolsDiff,
-  ToolsDiscoveryOptions,
-  ToolsDiscoveryRequest,
-} from "./tools-discovery.ts";
 
 // CA cert planner for the HTTPS credential proxy (§5.4.1).
 export { bundleToFsWrites, makeGeneratorIdentity, planCaBundle } from "./proxy-ca-planner.ts";
@@ -212,7 +110,7 @@ export type {
 
 // Pure MITM action planner — drives the per-integration HTTPS proxy
 // listener (§4.1.4 strip/inject/retry logic).
-export { pickAuthForUrl, planMitmAction } from "./integration-mitm-planner.ts";
+export { planMitmAction } from "./integration-mitm-planner.ts";
 export type { MitmAction, MitmRequestContext } from "./integration-mitm-planner.ts";
 
 // Phase 1.3 — OAuth2 user-facing connect flow for integration auths
@@ -228,30 +126,3 @@ export type {
   InitiateIntegrationOAuthResult,
   IntegrationOAuthCallbackResult,
 } from "./integration-oauth.ts";
-
-// ─── AFPS integration runtime (Phase 1.2b) ─────────────────────────────
-// RFC 7591 Dynamic Client Registration.
-export { DcrError, registerClient } from "./dynamic-client-registration.ts";
-export type {
-  ClientRegistrationRequest,
-  ClientRegistrationResponse,
-  DcrErrorCode,
-  DcrFetchFn,
-  RegisterClientOptions,
-} from "./dynamic-client-registration.ts";
-
-// MCP HTTP transport OAuth 2.1 wrapper.
-export {
-  AuthLoopExceededError,
-  StepUpFailedError,
-  buildAuthorizationUrl,
-  executeWithBearer,
-  parseWwwAuthenticateChallenge,
-} from "./mcp-http-auth.ts";
-export type {
-  BearerCredential,
-  BuildAuthorizationUrlInput,
-  ExecuteWithBearerOptions,
-  ExecuteWithBearerResult,
-  WwwAuthenticateChallenge,
-} from "./mcp-http-auth.ts";

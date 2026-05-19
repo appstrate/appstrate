@@ -122,7 +122,7 @@ export interface MitmAction {
  * Pick the auth whose `authorizedUris` matches first in manifest order.
  * Returns `null` when none match (proposal §4.1.4 step 1).
  */
-export function pickAuthForUrl(
+function pickAuthForUrl(
   url: string,
   payload: IntegrationCredentialsPayload,
 ): ResolvedAuthCredentials | null {

@@ -60,8 +60,8 @@ import {
   extractIdentity,
   getIntegrationAuthStatuses,
   getIntegrationOAuthClient,
+  type IntegrationOAuthClient,
   listIntegrationConnections,
-  loadIntegrationOAuthClientForFlow,
   readIntegrationAuth,
   saveIntegrationConnection,
   upsertIntegrationOAuthClient,
@@ -320,7 +320,8 @@ export function createIntegrationsRouter() {
       const client = await getIntegrationOAuthClient(scope, packageId, authKey);
       if (!client)
         throw notFound(`No OAuth client registered for '${packageId}' auth '${authKey}'`);
-      return c.json(client);
+      const { clientSecret: _clientSecret, ...publicShape } = client;
+      return c.json(publicShape satisfies IntegrationOAuthClient);
     },
   );
 
@@ -454,7 +455,7 @@ export function createIntegrationsRouter() {
           "OAuth Mode B (RFC 9728 discovery) connection flow not yet wired — manifest must declare explicit authorizationUrl + tokenUrl for marketplace connect.",
         );
       }
-      const client = await loadIntegrationOAuthClientForFlow(scope, packageId, authKey);
+      const client = await getIntegrationOAuthClient(scope, packageId, authKey);
       if (!client) {
         throw forbidden(
           `Administrator must register OAuth client credentials for '${packageId}' auth '${authKey}' before connection`,

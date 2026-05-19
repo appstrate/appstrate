@@ -59,7 +59,7 @@ import type {
   MitmRequestContext,
 } from "@appstrate/connect/integrations";
 import { planMitmAction, type CaBundle } from "@appstrate/connect/integrations";
-import { matchesAuthorizedUriSpec } from "@appstrate/connect/proxy-primitives";
+import { HOP_BY_HOP_HEADERS, matchesAuthorizedUriSpec } from "@appstrate/connect/proxy-primitives";
 import type { CertMinter } from "./integration-cert-minter.ts";
 
 // ─────────────────────────────────────────────
@@ -693,21 +693,10 @@ function buildOutboundHeaders(
   inject: { name: string; value: string } | null,
 ): Headers {
   const stripLower = new Set(strip.map((s) => s.toLowerCase()));
-  const HOP_BY_HOP = new Set([
-    "connection",
-    "keep-alive",
-    "proxy-connection",
-    "proxy-authenticate",
-    "proxy-authorization",
-    "te",
-    "trailer",
-    "transfer-encoding",
-    "upgrade",
-  ]);
   const out = new Headers();
   incoming.forEach((v, k) => {
     const lower = k.toLowerCase();
-    if (HOP_BY_HOP.has(lower)) return;
+    if (HOP_BY_HOP_HEADERS.has(lower)) return;
     if (stripLower.has(lower)) return;
     if (lower === "host") return; // re-added below
     if (lower === "content-length") return; // fetch sets from body

@@ -309,27 +309,6 @@ describe("validateAgentIntegrations (throwing)", () => {
     }
   });
 
-  it("attaches structured payload via Appstrate-Missing-Integrations header", async () => {
-    try {
-      await validateAgentIntegrations(
-        agentManifest({ version: "^1.0.0", tools: ["list_messages"] }),
-        actor,
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      );
-      expect.unreachable("should have thrown");
-    } catch (err) {
-      const apiErr = err as ApiError;
-      const headerB64 = apiErr.headers?.["Appstrate-Missing-Integrations"];
-      expect(headerB64).toBeTruthy();
-      const decoded = JSON.parse(Buffer.from(headerB64!, "base64").toString());
-      expect(Array.isArray(decoded)).toBe(true);
-      expect(decoded[0]).toMatchObject({
-        packageId: INTEGRATION_ID,
-        reason: "not_connected",
-      });
-    }
-  });
-
   it("does not throw when the agent has no integration deps", async () => {
     await validateAgentIntegrations({ name: "@test/agent" }, actor, {
       orgId: ctx.orgId,

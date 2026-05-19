@@ -10,11 +10,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import {
-  pickAuthForUrl,
-  planMitmAction,
-  type MitmRequestContext,
-} from "../src/integration-mitm-planner.ts";
+import { planMitmAction, type MitmRequestContext } from "../src/integration-mitm-planner.ts";
 import type {
   HttpDeliveryPlan,
   IntegrationCredentialsPayload,
@@ -44,26 +40,6 @@ const PLAIN_BEARER: HttpDeliveryPlan = {
   value: "github-tok",
   allowServerOverride: false,
 };
-
-describe("pickAuthForUrl — manifest order", () => {
-  it("returns null when no auth matches", () => {
-    const p = payload(auth("github"));
-    expect(pickAuthForUrl("https://elsewhere.example.com/x", p)).toBeNull();
-  });
-
-  it("returns the only matching auth", () => {
-    const p = payload(auth("github"));
-    expect(pickAuthForUrl("https://api.github.com/repos", p)?.authKey).toBe("github");
-  });
-
-  it("returns the first matching auth in manifest order, even when both match", () => {
-    const p = payload(
-      auth("github", { authorizedUris: Object.freeze(["https://api.example.com/*"]) }),
-      auth("linear", { authorizedUris: Object.freeze(["https://api.example.com/*"]) }),
-    );
-    expect(pickAuthForUrl("https://api.example.com/x", p)?.authKey).toBe("github");
-  });
-});
 
 describe("planMitmAction — no auth matches", () => {
   it("strips the universal pair only; injects nothing; no retry", () => {
