@@ -68,4 +68,36 @@ describe("buildEventEnvelope", () => {
     const data = payload.data as { object: Record<string, unknown> };
     expect(data.object.package).toBeUndefined();
   });
+
+  it("tags the inner data object with the provided objectType (run.blocked.* path)", () => {
+    // Blocked-run events fire before a run row exists, so `dispatchBlockedRunWebhook`
+    // passes `objectType: "run_attempt"` to make the payload self-describing.
+    const { payload } = buildEventEnvelope({
+      eventType: "run.blocked.missing_integration",
+      run: {
+        packageId: "@acme/agent",
+        reason: "missing_integration",
+        actor: { type: "user", id: "u1" },
+        errors: [{ field: "integrations.@acme/x", code: "missing_integration_connection" }],
+      },
+      payloadMode: "full",
+      objectType: "run_attempt",
+    });
+
+    const data = payload.data as { object: Record<string, unknown> };
+    expect(data.object.object).toBe("run_attempt");
+    expect(data.object.reason).toBe("missing_integration");
+    expect(data.object.packageId).toBe("@acme/agent");
+  });
+
+  it("defaults objectType to 'run' when omitted (run-lifecycle path)", () => {
+    const { payload } = buildEventEnvelope({
+      eventType: "run.success",
+      run: { id: "run_xyz", status: "success" },
+      payloadMode: "full",
+    });
+
+    const data = payload.data as { object: Record<string, unknown> };
+    expect(data.object.object).toBe("run");
+  });
 });

@@ -17,6 +17,7 @@ import { deepMergeConfig } from "@appstrate/core/schema-validation";
 import { ApiError, type ValidationFieldError } from "../lib/errors.ts";
 import { resolveProviderProfiles } from "./connection-profiles.ts";
 import type { Actor } from "../lib/actor.ts";
+import { emitEvent } from "../lib/modules/module-loader.ts";
 import type {
   ReadinessProviderEntry,
   ReadinessReason,
@@ -147,6 +148,25 @@ export async function validateAgentReadiness(params: AgentReadinessParams): Prom
   const integrationErrors = errors.filter((e) => e.field.startsWith("integrations."));
   if (integrationErrors.length > 0) {
     const first = integrationErrors[0]!;
+    // Fire-and-forget — modules opting in (e.g. webhooks) get a structured
+    // `run.blocked.missing_integration` notification before we throw. The
+    // actor is always present on integration-gated paths (collection above
+    // only runs when actor is non-null), so the assertion is safe.
+    if (params.actor) {
+      void emitEvent("onRunBlocked", {
+        orgId: params.orgId,
+        applicationId: params.applicationId,
+        packageId: params.agent.id,
+        actor: { type: params.actor.type, id: params.actor.id },
+        reason: "missing_integration",
+        errors: integrationErrors.map((e) => ({
+          field: e.field,
+          code: e.code,
+          message: e.message,
+          ...(e.title ? { title: e.title } : {}),
+        })),
+      });
+    }
     throw new ApiError({
       status: 412,
       code: "missing_integration_connection",

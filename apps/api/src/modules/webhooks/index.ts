@@ -13,10 +13,16 @@ import { z } from "zod";
 import type {
   AppstrateModule,
   ModuleInitContext,
+  RunBlockedParams,
   RunStatusChangeParams,
 } from "@appstrate/core/module";
 import { createWebhooksRouter, createWebhookSchema, updateWebhookSchema } from "./routes.ts";
-import { initWebhookWorker, shutdownWebhookWorker, dispatchRunWebhook } from "./service.ts";
+import {
+  dispatchBlockedRunWebhook,
+  dispatchRunWebhook,
+  initWebhookWorker,
+  shutdownWebhookWorker,
+} from "./service.ts";
 import { webhooksPaths } from "./openapi/paths.ts";
 import { webhooksSchemas } from "./openapi/schemas.ts";
 
@@ -111,6 +117,15 @@ const webhooksModule: AppstrateModule = {
           // receivers treat missing as `false`.
           ...(params.packageEphemeral ? { package: { ephemeral: true } } : {}),
         },
+      );
+    },
+    onRunBlocked: (params: RunBlockedParams) => {
+      dispatchBlockedRunWebhook(
+        { orgId: params.orgId, applicationId: params.applicationId },
+        params.reason,
+        params.packageId,
+        params.actor,
+        params.errors,
       );
     },
   },

@@ -44,6 +44,11 @@ export const webhookEventSchema = z.enum([
   "run.failed",
   "run.timeout",
   "run.cancelled",
+  // Run kickoff was rejected before a run row was created — currently fired
+  // only for the 412 missing-integration envelope. The reason suffix matches
+  // the `RunBlockedParams.reason` discriminator so future reasons add a new
+  // string without touching this schema's downstream consumers.
+  "run.blocked.missing_integration",
 ]);
 
 type WebhookEventType = z.infer<typeof webhookEventSchema>;
@@ -487,11 +492,18 @@ export function buildEventEnvelope(params: {
   eventType: string;
   run: Record<string, unknown>;
   payloadMode: "full" | "summary";
+  /**
+   * Tag applied to the inner data envelope's `object` field. Defaults to
+   * `"run"` so existing run-lifecycle events keep their stable shape;
+   * `run.blocked.*` callers pass `"run_attempt"` because no `run` row
+   * exists at the point of emission.
+   */
+  objectType?: string;
 }): { eventId: string; payload: Record<string, unknown> } {
   const eventId = prefixedId("evt");
   const now = Math.floor(Date.now() / 1000);
 
-  const execObj: Record<string, unknown> = { ...params.run, object: "run" };
+  const execObj: Record<string, unknown> = { ...params.run, object: params.objectType ?? "run" };
 
   // Summary mode: strip result and input
   if (params.payloadMode === "summary") {
@@ -548,6 +560,7 @@ export async function dispatchWebhookEvents(
   scope: AppScope,
   eventType: WebhookEventType,
   run: Record<string, unknown>,
+  objectType?: string,
 ): Promise<void> {
   const rows = await db
     .select({
@@ -577,6 +590,7 @@ export async function dispatchWebhookEvents(
       eventType,
       run,
       payloadMode: wh.payloadMode as "full" | "summary",
+      ...(objectType ? { objectType } : {}),
     });
 
     await queue.add("deliver", {
@@ -756,6 +770,40 @@ export function dispatchRunWebhook(
   }).catch((err) => {
     logger.warn("Webhook dispatch failed", {
       runId,
+      error: getErrorMessage(err),
+    });
+  });
+}
+
+/**
+ * Fire-and-forget webhook dispatch for blocked-run-kickoff events. Called
+ * when `validateAgentReadiness` rejects a kickoff before a run row is
+ * created. The envelope's inner object is tagged `run_attempt` (not `run`)
+ * because nothing is persisted — consumers MUST treat the payload as
+ * informational, not as a run reference.
+ */
+export function dispatchBlockedRunWebhook(
+  scope: AppScope,
+  reason: "missing_integration",
+  packageId: string,
+  actor: { type: "user" | "end_user"; id: string },
+  errors: ReadonlyArray<{ field: string; code: string; message: string; title?: string }>,
+): void {
+  const eventType = `run.blocked.${reason}` as WebhookEventType;
+  dispatchWebhookEvents(
+    scope,
+    eventType,
+    {
+      packageId,
+      reason,
+      actor,
+      errors,
+    },
+    "run_attempt",
+  ).catch((err) => {
+    logger.warn("Blocked-run webhook dispatch failed", {
+      packageId,
+      reason,
       error: getErrorMessage(err),
     });
   });
