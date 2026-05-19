@@ -6,7 +6,7 @@ import { Plug, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FieldsConnectModal } from "./fields-connect-modal";
 import { useIntegrationOAuthPopup } from "./use-integration-oauth-popup";
-import { useIntegrationDetail, type IntegrationManifestAuth } from "../../hooks/use-integrations";
+import { useIntegrationDetail } from "../../hooks/use-integrations";
 
 /**
  * Agent-driven inline connect/upgrade trigger. Picks the right surface
@@ -53,7 +53,7 @@ export function InlineConnectButton({
   const { openPopup, isPending } = useIntegrationOAuthPopup();
   const [fieldsOpen, setFieldsOpen] = useState(false);
 
-  const auth = findAuth(detail?.manifest?.auths, authKey);
+  const auth = detail?.manifest?.auths?.[authKey];
   const isOAuth = auth?.type === "oauth2";
   const displayName = detail?.manifest.displayName ?? packageId;
 
@@ -99,11 +99,4 @@ export function InlineConnectButton({
       )}
     </>
   );
-}
-
-function findAuth(
-  auths: Record<string, IntegrationManifestAuth> | undefined,
-  authKey: string,
-): IntegrationManifestAuth | undefined {
-  return auths?.[authKey];
 }

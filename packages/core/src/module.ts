@@ -491,15 +491,14 @@ export interface ModuleEvents {
   /** Run status changed — broadcast on every run lifecycle transition. */
   onRunStatusChange: (params: RunStatusChangeParams) => void | Promise<void>;
   /**
-   * Run kickoff was blocked before a run record was created — broadcast when
-   * `validateAgentReadiness` rejects a kickoff (e.g. 412 missing integration
-   * connection). Useful for surfacing under-provisioned agents to downstream
-   * dashboards without polling for 4xx responses. No run row exists yet at
-   * this point — the payload carries the would-be kickoff context (agent,
-   * actor) plus a structured `reason` and the field-level errors that
-   * triggered the block.
+   * Run kickoff was blocked because one or more integration connections were
+   * missing or under-scoped — broadcast when `validateAgentReadiness` returns
+   * integration field errors. No run row exists yet at this point; the payload
+   * carries the would-be kickoff context (agent, actor) plus the field-level
+   * errors that triggered the block. Useful for surfacing under-provisioned
+   * agents to downstream dashboards without polling for 4xx responses.
    */
-  onRunBlocked: (params: RunBlockedParams) => void | Promise<void>;
+  onRunIntegrationsMissing: (params: RunIntegrationsMissingParams) => void | Promise<void>;
   /** Org created — broadcast after a new organization is created. */
   onOrgCreate: (orgId: string, userEmail: string) => void | Promise<void>;
   /** Org deleted — broadcast before an organization is deleted. */
@@ -959,12 +958,12 @@ export interface RunStatusChangeParams {
 }
 
 /**
- * Single field-level error entry carried on {@link RunBlockedParams.errors}.
- * Mirrors the shape platform routes return as 4xx envelopes — modules can
- * forward this verbatim to downstream consumers (e.g. webhook payloads,
- * Slack messages) without remapping.
+ * Single field-level error entry carried on
+ * {@link RunIntegrationsMissingParams.errors}. Mirrors the shape platform
+ * routes return as 4xx envelopes — modules can forward this verbatim to
+ * downstream consumers (webhook payloads, Slack messages) without remapping.
  */
-export interface RunBlockedFieldError {
+export interface RunIntegrationsMissingError {
   /** Dotted field path the failure attaches to (e.g. `integrations.@official/gmail.api_key`). */
   field: string;
   /** Stable machine code (e.g. `missing_integration_connection`). */
@@ -975,23 +974,16 @@ export interface RunBlockedFieldError {
   title?: string;
 }
 
-/** Parameters passed to the `onRunBlocked` event. */
-export interface RunBlockedParams {
+/** Parameters passed to the `onRunIntegrationsMissing` event. */
+export interface RunIntegrationsMissingParams {
   orgId: string;
   applicationId: string;
   /** Agent package id whose kickoff was blocked. */
   packageId: string;
   /** Actor whose request was blocked (user or end_user from the headless API). */
   actor: { type: "user" | "end_user"; id: string };
-  /**
-   * Discriminator for the blocking condition. Currently only
-   * `missing_integration` is emitted; the field is left open-shape so future
-   * blocking reasons (`missing_provider_credentials`, `quota_exceeded`, …)
-   * can ride this same event without a new emission.
-   */
-  reason: "missing_integration";
   /** Field-level errors that triggered the block (same shape as 4xx envelopes). */
-  errors: RunBlockedFieldError[];
+  errors: RunIntegrationsMissingError[];
 }
 
 // ---------------------------------------------------------------------------

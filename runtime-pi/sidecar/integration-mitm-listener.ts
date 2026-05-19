@@ -548,10 +548,6 @@ async function handleInnerRequest(
   };
 
   const action = buildAction();
-  if (action.refuse) {
-    emit({ kind: "request-refused", url: targetUrl, reason: "planner refused" });
-    return new Response("MITM listener: request refused", { status: 502 });
-  }
 
   const outboundHeaders = buildOutboundHeaders(
     req.headers,

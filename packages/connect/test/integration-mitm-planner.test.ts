@@ -52,7 +52,6 @@ describe("planMitmAction — no auth matches", () => {
     const action = planMitmAction(ctx, p);
     expect(action.matchedAuth).toBeNull();
     expect(action.injectedHeader).toBeNull();
-    expect(action.refuse).toBe(false);
     expect(action.retry401).toBe(false);
     expect(action.strippedHeaderNames.map((s) => s.toLowerCase())).toEqual([
       "authorization",

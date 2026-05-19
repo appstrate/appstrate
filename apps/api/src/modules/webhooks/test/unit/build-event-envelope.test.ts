@@ -69,28 +69,27 @@ describe("buildEventEnvelope", () => {
     expect(data.object.package).toBeUndefined();
   });
 
-  it("tags the inner data object with the provided objectType (run.blocked.* path)", () => {
-    // Blocked-run events fire before a run row exists, so `dispatchBlockedRunWebhook`
-    // passes `objectType: "run_attempt"` to make the payload self-describing.
+  it("lets the caller override the inner `object` discriminator (run.integrations_missing path)", () => {
+    // run.integrations_missing fires before a run row exists, so the caller
+    // tags the `run` payload with `object: "run_attempt"` to make it
+    // self-describing. The envelope passes the caller's `object` through.
     const { payload } = buildEventEnvelope({
-      eventType: "run.blocked.missing_integration",
+      eventType: "run.integrations_missing",
       run: {
+        object: "run_attempt",
         packageId: "@acme/agent",
-        reason: "missing_integration",
         actor: { type: "user", id: "u1" },
         errors: [{ field: "integrations.@acme/x", code: "missing_integration_connection" }],
       },
       payloadMode: "full",
-      objectType: "run_attempt",
     });
 
     const data = payload.data as { object: Record<string, unknown> };
     expect(data.object.object).toBe("run_attempt");
-    expect(data.object.reason).toBe("missing_integration");
     expect(data.object.packageId).toBe("@acme/agent");
   });
 
-  it("defaults objectType to 'run' when omitted (run-lifecycle path)", () => {
+  it("defaults the inner `object` to 'run' when the caller omits it", () => {
     const { payload } = buildEventEnvelope({
       eventType: "run.success",
       run: { id: "run_xyz", status: "success" },

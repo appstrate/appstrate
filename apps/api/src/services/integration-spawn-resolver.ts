@@ -26,7 +26,11 @@
  * gives the operator two-sided diagnosis.
  */
 
-import { decryptCredentials, readCredentialField, resolveHttpDelivery } from "@appstrate/connect";
+import {
+  decryptCredentialsToStringMap,
+  readCredentialField,
+  resolveHttpDelivery,
+} from "@appstrate/connect";
 import { getToolUrlPatterns } from "@appstrate/core/integration";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
@@ -294,9 +298,9 @@ async function resolveDeliveries(
       continue;
     }
 
-    let creds: Record<string, unknown>;
+    let fields: Record<string, string>;
     try {
-      creds = decryptCredentials<Record<string, unknown>>(row.credentialsEncrypted) ?? {};
+      fields = decryptCredentialsToStringMap(row.credentialsEncrypted);
     } catch (err) {
       logger.warn("decrypt failed for integration connection", {
         packageId,
@@ -304,13 +308,6 @@ async function resolveDeliveries(
         error: err instanceof Error ? err.message : String(err),
       });
       continue;
-    }
-    // Normalise creds to Record<string, string> for downstream consumers.
-    // The OAuth callback stores access_token under `accessToken`; map it
-    // explicitly so the manifest's `from: "accessToken"` resolves.
-    const fields: Record<string, string> = {};
-    for (const [k, v] of Object.entries(creds)) {
-      if (typeof v === "string") fields[k] = v;
     }
 
     // ─── delivery.env ───

@@ -656,6 +656,74 @@ export function getToolUrlPatterns(
 }
 
 /**
+ * Which auth keys an agent actually needs connected, given its declared
+ * `tools[]` selection on the integration. Returns the full auth key set
+ * when the agent didn't restrict tools ("all tools allowed" default) —
+ * at least one of those auths must be connected. For a restricted
+ * selection, returns the union of each tool's `requiredAuthKey`
+ * (single-auth integrations always resolve to the lone key).
+ *
+ * Pure function. Single source of truth for the frontend status badge
+ * (`agent-integrations-block.tsx`) and the backend gate
+ * (`collectIntegrationDependencyErrors`), so the two cannot drift.
+ */
+export function requiredAuthKeysForAgent(
+  manifest: IntegrationManifest,
+  agentTools: readonly string[] | undefined,
+): string[] {
+  const declaredAuths = manifest.auths ? Object.keys(manifest.auths) : [];
+  if (declaredAuths.length === 0) return [];
+  if (agentTools === undefined) return declaredAuths;
+  if (declaredAuths.length === 1) return declaredAuths;
+
+  const toolsRecord = manifest.tools ?? {};
+  const out = new Set<string>();
+  for (const toolName of agentTools) {
+    const tool = toolsRecord[toolName];
+    if (!tool || !tool.requiredAuthKey) continue;
+    if (declaredAuths.includes(tool.requiredAuthKey)) out.add(tool.requiredAuthKey);
+  }
+  // Fallback: if the agent's tool selection didn't pin any auth (e.g. tools
+  // omit `requiredAuthKey`), require every declared auth — preserves the
+  // historical "any one of them" connection requirement.
+  return out.size === 0 ? declaredAuths : [...out];
+}
+
+/**
+ * Union of `requiredScopes` across the agent's selected tools, filtered
+ * by `requiredAuthKey` so multi-auth integrations stay scoped to the
+ * current auth. Single-auth integrations route every tool to the lone
+ * auth. `agentTools === undefined` means "all declared tools" (legacy
+ * default, mirrors the runtime allowlist).
+ *
+ * Pure function. Single source of truth for the frontend status badge
+ * and the backend gate.
+ */
+export function scopesContributedByTools(input: {
+  manifest: IntegrationManifest;
+  authKey: string;
+  agentTools: readonly string[] | undefined;
+}): string[] {
+  const toolsRecord = input.manifest.tools;
+  if (!toolsRecord) return [];
+
+  const authKeys = input.manifest.auths ? Object.keys(input.manifest.auths) : [];
+  const isSingleAuth = authKeys.length === 1;
+  const effectiveTools = input.agentTools ?? Object.keys(toolsRecord);
+
+  const out = new Set<string>();
+  for (const toolName of effectiveTools) {
+    const tool = toolsRecord[toolName];
+    if (!tool || !tool.requiredScopes || tool.requiredScopes.length === 0) continue;
+    if (isSingleAuth) {
+      if (authKeys[0] !== input.authKey) continue;
+    } else if (tool.requiredAuthKey !== input.authKey) continue;
+    for (const s of tool.requiredScopes) out.add(s);
+  }
+  return [...out];
+}
+
+/**
  * Union of every OAuth scope advertised across the integration's auths.
  * Used by {@link validateAgentIntegrationScopes} to refuse agent-declared
  * scopes that no auth on this integration even claims to support. When

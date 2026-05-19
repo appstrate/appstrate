@@ -90,13 +90,11 @@ export interface MitmRequestContext {
 }
 
 /**
- * Action the listener applies. All four fields are independent:
+ * Action the listener applies. All fields are independent:
  *   - `injectedHeader` ⇒ set on outbound request (after strip)
  *   - `strippedHeaderNames` ⇒ remove (case-insensitive) from outbound
  *   - `matchedAuth` ⇒ informational; the listener uses it to drive
  *     401-retry refresh against the correct credential
- *   - `refuse` ⇒ when true, the listener returns 502 to the inner TLS
- *     stream without making the upstream call
  */
 export interface MitmAction {
   matchedAuth: ResolvedAuthCredentials | null;
@@ -104,8 +102,6 @@ export interface MitmAction {
   strippedHeaderNames: readonly string[];
   /** Header to add to the outbound request. `null` when no auth matched. */
   injectedHeader: { name: string; value: string } | null;
-  /** Whether the listener should refuse the request outright (5xx). */
-  refuse: boolean;
   /**
    * Whether to attempt a 401-retry path. Always `true` for `oauth2` /
    * `oauth1` matches (refresh-capable). `false` for `api_key` / `basic` /
@@ -167,7 +163,6 @@ export function planMitmAction(
       matchedAuth: null,
       strippedHeaderNames: dedupeCaseInsensitive(universalStrip),
       injectedHeader: null,
-      refuse: false,
       retry401: false,
     };
   }
@@ -205,7 +200,6 @@ export function planMitmAction(
     matchedAuth: matched,
     strippedHeaderNames: dedupeCaseInsensitive(stripped),
     injectedHeader,
-    refuse: false,
     retry401: matched.authType === "oauth2" || matched.authType === "oauth1",
   };
 }

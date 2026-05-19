@@ -16,13 +16,12 @@ import {
   parseManifestIntegrations,
   type ManifestIntegrationEntry,
 } from "@appstrate/core/dependencies";
-import type { IntegrationManifest } from "@appstrate/core/integration";
 import type { AgentProviderRequirement, ProviderProfileMap } from "../types/index.ts";
 import { ApiError, type ValidationFieldError } from "../lib/errors.ts";
 import type { Actor } from "../lib/actor.ts";
 import { actorFilter } from "../lib/actor.ts";
 import type { AppScope } from "../lib/scope.ts";
-import { scopesContributedByTools } from "./integration-scope-resolver.ts";
+import { requiredAuthKeysForAgent, scopesContributedByTools } from "@appstrate/core/integration";
 import { fetchIntegrationManifest } from "./integration-service.ts";
 
 export interface DependencyValidationDeps {
@@ -240,36 +239,6 @@ export interface IntegrationDependencyError {
   missingScopes?: string[];
 }
 
-/**
- * Determine which auth keys this agent actually needs connected, given its
- * declared `tools[]` selection on the integration. Returns the full auth
- * key set when the agent didn't restrict tools ("all tools allowed"
- * default) — at least one of those auths must be connected. For a
- * restricted selection, returns the union of each tool's `requiredAuthKey`
- * (single-auth integrations always resolve to the lone key).
- */
-function requiredAuthKeysForAgent(
-  manifest: IntegrationManifest,
-  agentTools: readonly string[] | undefined,
-): string[] {
-  const declaredAuths = manifest.auths ? Object.keys(manifest.auths) : [];
-  if (declaredAuths.length === 0) return [];
-  if (agentTools === undefined) return declaredAuths;
-  if (declaredAuths.length === 1) return declaredAuths;
-
-  const toolsRecord = manifest.tools ?? {};
-  const out = new Set<string>();
-  for (const toolName of agentTools) {
-    const tool = toolsRecord[toolName];
-    if (!tool || !tool.requiredAuthKey) continue;
-    if (declaredAuths.includes(tool.requiredAuthKey)) out.add(tool.requiredAuthKey);
-  }
-  // Fallback: if the agent's tool selection didn't pin any auth (e.g. tools
-  // omit `requiredAuthKey`), require every declared auth — preserves the
-  // historical "any one of them" connection requirement.
-  return out.size === 0 ? declaredAuths : [...out];
-}
-
 interface ConnectionRow {
   authKey: string;
   scopesGranted: string[];
@@ -457,30 +426,4 @@ async function checkOne(
       `Integration '${entry.id}' (${authKey}) is missing scopes: ${missing.join(", ")}`,
     );
   }
-}
-
-/**
- * Validate that the actor has every connection (with sufficient scopes)
- * the agent's `dependencies.integrations` declares. Throws 412 with the
- * structured `errors[]` populated (one entry per failing (integration,
- * auth) pair) so the UI can render the MissingConnectionsModal.
- *
- * Mirrors {@link validateAgentDependencies} for the integration surface.
- * Called from the run kickoff paths (Phase A.2).
- */
-export async function validateAgentIntegrations(
-  agentManifest: Record<string, unknown>,
-  actor: Actor,
-  scope: AppScope,
-): Promise<void> {
-  const { fieldErrors } = await collectIntegrationDependencyErrors(agentManifest, actor, scope);
-  if (fieldErrors.length === 0) return;
-  const first = fieldErrors[0]!;
-  throw new ApiError({
-    status: 412,
-    code: "missing_integration_connection",
-    title: "Missing Integration Connection",
-    detail: first.message,
-    errors: fieldErrors,
-  });
 }

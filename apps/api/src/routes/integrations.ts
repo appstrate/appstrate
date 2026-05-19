@@ -73,14 +73,6 @@ import {
 import { oauthStateStore } from "../services/connection-manager/oauth-state-store.ts";
 
 // ─────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────
-
-function getOAuthCallbackUrl(): string {
-  return `${getEnv().APP_URL}/api/integrations/callback`;
-}
-
-// ─────────────────────────────────────────────
 // Zod schemas
 // ─────────────────────────────────────────────
 
@@ -423,7 +415,7 @@ export function createIntegrationsRouter() {
           `Administrator must register OAuth client credentials for '${packageId}' auth '${authKey}' before connection`,
         );
       }
-      const redirectUri = client.redirectUri ?? getOAuthCallbackUrl();
+      const redirectUri = client.redirectUri ?? `${getEnv().APP_URL}/api/integrations/callback`;
       // Niveau 2 (Phase 2) — request the strict superset of:
       //   - manifest defaults (`auth.scopes`)
       //   - caller-supplied (`body.scopes`)

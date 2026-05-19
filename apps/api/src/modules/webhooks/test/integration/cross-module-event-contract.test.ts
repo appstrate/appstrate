@@ -130,24 +130,23 @@ describe("cross-module contract — onRunStatusChange → webhook delivery", () 
     expect(rows).toHaveLength(0);
   });
 
-  it("webhooks module exposes an onRunBlocked handler", () => {
-    expect(webhooksModule.events?.onRunBlocked).toBeDefined();
+  it("webhooks module exposes an onRunIntegrationsMissing handler", () => {
+    expect(webhooksModule.events?.onRunIntegrationsMissing).toBeDefined();
   });
 
-  it("the onRunBlocked handler persists a run.blocked.missing_integration delivery", async () => {
+  it("the onRunIntegrationsMissing handler persists a run.integrations_missing delivery", async () => {
     const webhook = await createWebhook({
       level: "application",
       scope: { orgId, applicationId },
       url: "https://no-such-domain-xyz123.test/hook",
-      events: ["run.blocked.missing_integration"],
+      events: ["run.integrations_missing"],
     });
 
-    await webhooksModule.events!.onRunBlocked!({
+    await webhooksModule.events!.onRunIntegrationsMissing!({
       orgId,
       applicationId,
       packageId: "@scope/agent",
       actor: { type: "user", id: "u_test" },
-      reason: "missing_integration",
       errors: [
         {
           field: "integrations.@official/gmail.api_key",
@@ -159,6 +158,6 @@ describe("cross-module contract — onRunStatusChange → webhook delivery", () 
 
     const row = await waitForDelivery(webhook.id, WAIT_TIMEOUT_MS);
     expect(row).not.toBeNull();
-    expect(row?.eventType).toBe("run.blocked.missing_integration");
+    expect(row?.eventType).toBe("run.integrations_missing");
   });
 });

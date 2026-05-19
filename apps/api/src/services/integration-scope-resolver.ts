@@ -40,7 +40,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { applicationPackages, integrationConnections, packages } from "@appstrate/db/schema";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
-import type { IntegrationManifest } from "@appstrate/core/integration";
+import { scopesContributedByTools } from "@appstrate/core/integration";
 
 import type { Actor } from "../lib/actor.ts";
 import { actorFilter } from "../lib/actor.ts";
@@ -141,56 +141,6 @@ export async function computeRequiredScopes(
   }
 
   return { required: [...required], breakdown };
-}
-
-/**
- * Resolve the set of scopes a single agent contributes via its declared
- * (or implicit) tool selection. Filters by `tools.{name}.requiredAuthKey`
- * — tools tied to a different auth on this multi-auth integration don't
- * contribute to the current authKey's scope envelope.
- *
- * Exported for the run-kickoff dependency validator
- * ({@link validateAgentIntegrations}) which needs the SINGLE-agent
- * inference (vs `computeRequiredScopes` which walks every installed
- * agent for the OAuth-kickoff incremental-consent flow).
- */
-export function scopesContributedByTools(input: {
-  manifest: IntegrationManifest;
-  authKey: string;
-  agentTools: readonly string[] | undefined;
-}): string[] {
-  const toolsRecord = input.manifest.tools;
-  if (!toolsRecord) return [];
-
-  const authKeys = input.manifest.auths ? Object.keys(input.manifest.auths) : [];
-  const isSingleAuth = authKeys.length === 1;
-
-  // Default tool set: "all declared tools" when the agent didn't opt
-  // into rich-form `tools[]` selection. Mirrors the Phase 3 runtime
-  // allowlist default.
-  const effectiveTools = input.agentTools ?? Object.keys(toolsRecord);
-
-  const out = new Set<string>();
-  for (const toolName of effectiveTools) {
-    const tool = toolsRecord[toolName];
-    if (!tool || !tool.requiredScopes || tool.requiredScopes.length === 0) continue;
-
-    // Single-auth integrations: every tool contributes to the lone auth.
-    // Multi-auth: a tool only contributes when its `requiredAuthKey`
-    // points at the current authKey. Tools without `requiredAuthKey`
-    // in a multi-auth integration are ambiguous — the integration's
-    // schema validator already rejects this case at install time, so
-    // we'd only see it on a manifest that bypassed validation. Skip
-    // defensively rather than over-contribute.
-    if (isSingleAuth) {
-      if (authKeys[0] !== input.authKey) continue;
-    } else {
-      if (tool.requiredAuthKey !== input.authKey) continue;
-    }
-
-    for (const s of tool.requiredScopes) out.add(s);
-  }
-  return [...out];
 }
 
 /**

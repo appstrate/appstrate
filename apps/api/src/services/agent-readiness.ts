@@ -149,16 +149,15 @@ export async function validateAgentReadiness(params: AgentReadinessParams): Prom
   if (integrationErrors.length > 0) {
     const first = integrationErrors[0]!;
     // Fire-and-forget — modules opting in (e.g. webhooks) get a structured
-    // `run.blocked.missing_integration` notification before we throw. The
-    // actor is always present on integration-gated paths (collection above
-    // only runs when actor is non-null), so the assertion is safe.
+    // notification before we throw. The actor is always present on
+    // integration-gated paths (collection above only runs when actor is
+    // non-null), so the assertion is safe.
     if (params.actor) {
-      void emitEvent("onRunBlocked", {
+      void emitEvent("onRunIntegrationsMissing", {
         orgId: params.orgId,
         applicationId: params.applicationId,
         packageId: params.agent.id,
         actor: { type: params.actor.type, id: params.actor.id },
-        reason: "missing_integration",
         errors: integrationErrors.map((e) => ({
           field: e.field,
           code: e.code,

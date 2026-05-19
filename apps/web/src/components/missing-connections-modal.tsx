@@ -5,16 +5,17 @@ import { AlertTriangle, XCircle, Puzzle } from "lucide-react";
 import { Modal } from "./modal";
 import { Button } from "@/components/ui/button";
 import { InlineConnectButton } from "./integration-connect/inline-connect-button";
+import { pickDefaultAuth } from "./integration-connect/pick-default-auth";
 import { useIntegrationDetail } from "../hooks/use-integrations";
 
 /**
- * Phase C — recovery surface for the run-kickoff 412 emitted by
- * validateAgentIntegrations. The 412 ships every failing
- * `(integration, auth)` pair on `errors[]`; this modal renders one row
- * per entry with a CTA to the integration detail page (where the actor
- * can connect or re-consent). The same data drives the inline
- * Connexions tab (Phase B), but a user who hits Run on a stale page
- * needs an explicit pointer to where the gap is.
+ * Recovery surface for the run-kickoff 412 emitted by
+ * `validateAgentReadiness` when integration connections are missing. The
+ * 412 ships every failing `(integration, auth)` pair on `errors[]`;
+ * this modal renders one row per entry with a CTA to the integration
+ * detail page (where the actor can connect or re-consent). The same
+ * data drives the inline Connexions tab, but a user who hits Run on a
+ * stale page needs an explicit pointer to where the gap is.
  */
 
 export interface MissingIntegrationFieldError {
@@ -105,14 +106,6 @@ function MissingRow({ err }: { err: MissingIntegrationFieldError }) {
       )}
     </div>
   );
-}
-
-function pickDefaultAuth(auths: Record<string, { type: string }> | undefined): string | null {
-  if (!auths) return null;
-  const keys = Object.keys(auths);
-  if (keys.length === 0) return null;
-  const oauth = keys.find((k) => auths[k]?.type === "oauth2");
-  return oauth ?? keys[0]!;
 }
 
 function parseField(field: string): { packageId: string; authKey: string | null } {

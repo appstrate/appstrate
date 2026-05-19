@@ -10,6 +10,8 @@ import {
   type IntegrationManifestView,
 } from "../../hooks/use-integrations";
 import { InlineConnectButton } from "../integration-connect/inline-connect-button";
+import { pickDefaultAuth } from "../integration-connect/pick-default-auth";
+import { requiredAuthKeysForAgent, scopesContributedByTools } from "@appstrate/core/integration";
 
 interface AgentIntegrationEntry {
   id: string;
@@ -28,7 +30,7 @@ interface AgentIntegrationsBlockProps {
  * states (OK / action-required / not-connected), CTA jumps to the
  * integration detail page where the actor can connect / re-consent.
  *
- * Status derivation matches the backend gate (validateAgentIntegrations):
+ * Status derivation matches the backend gate (collectIntegrationDependencyErrors):
  *   ❌ not_connected         — no connection on any required auth
  *   ⚠️ needs_reconnection    — connection flagged for re-consent
  *   ⚠️ insufficient_scopes   — granted ⊉ required (oauth2 only)
@@ -140,11 +142,8 @@ function resolveAction(
     return { authKey: status.authKey, scopes: status.required, intent: "fix" };
   }
   // not_connected — pick first oauth2, falling back to first declared.
-  const auths = manifest.auths ?? {};
-  const keys = Object.keys(auths);
-  if (keys.length === 0) return null;
-  const oauth = keys.find((k) => auths[k]?.type === "oauth2");
-  return { authKey: oauth ?? keys[0]!, intent: "connect" };
+  const authKey = pickDefaultAuth(manifest.auths);
+  return authKey ? { authKey, intent: "connect" } : null;
 }
 
 function CardShell({
@@ -248,46 +247,6 @@ function deriveIntegrationStatus(input: {
   // here in practice. Surface its authKey on the ok status so the card
   // can label "Connected via {auth}" + render a disconnect/switch CTA.
   return { kind: "ok", authKey: connected[0] ?? "" };
-}
-
-function requiredAuthKeysForAgent(
-  manifest: IntegrationManifestView,
-  agentTools: string[] | undefined,
-): string[] {
-  const declared = manifest.auths ? Object.keys(manifest.auths) : [];
-  if (declared.length === 0) return [];
-  if (agentTools === undefined) return declared;
-  if (declared.length === 1) return declared;
-  const tools = manifest.tools ?? {};
-  const out = new Set<string>();
-  for (const t of agentTools) {
-    const meta = tools[t];
-    if (meta?.requiredAuthKey && declared.includes(meta.requiredAuthKey)) {
-      out.add(meta.requiredAuthKey);
-    }
-  }
-  return out.size === 0 ? declared : [...out];
-}
-
-function scopesContributedByTools(input: {
-  manifest: IntegrationManifestView;
-  authKey: string;
-  agentTools: string[] | undefined;
-}): string[] {
-  const toolsRecord = input.manifest.tools ?? {};
-  const authKeys = input.manifest.auths ? Object.keys(input.manifest.auths) : [];
-  const isSingleAuth = authKeys.length === 1;
-  const effective = input.agentTools ?? Object.keys(toolsRecord);
-  const out = new Set<string>();
-  for (const name of effective) {
-    const tool = toolsRecord[name];
-    if (!tool?.requiredScopes?.length) continue;
-    if (isSingleAuth) {
-      if (authKeys[0] !== input.authKey) continue;
-    } else if (tool.requiredAuthKey !== input.authKey) continue;
-    for (const s of tool.requiredScopes) out.add(s);
-  }
-  return [...out];
 }
 
 function renderStatus(

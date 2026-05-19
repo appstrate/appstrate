@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Phase A.1/A.2 — run-kickoff integration dependency gating.
+ * Run-kickoff integration dependency gating.
  *
- * Validates that `validateAgentIntegrations` and its non-throwing collector
- * surface the right structured errors for the agent editor's
- * MissingConnectionsModal (Phase C).
+ * Validates that `collectIntegrationDependencyErrors` surfaces the right
+ * structured errors for the agent editor's MissingConnectionsModal.
+ * The throwing wrapper that maps these errors to a 412 ApiError lives in
+ * `validateAgentReadiness` — covered by its own tests.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -13,10 +14,7 @@ import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { integrationConnections } from "@appstrate/db/schema";
-import {
-  collectIntegrationDependencyErrors,
-  validateAgentIntegrations,
-} from "../../../src/services/dependency-validation.ts";
+import { collectIntegrationDependencyErrors } from "../../../src/services/dependency-validation.ts";
 import { ApiError } from "../../../src/lib/errors.ts";
 
 const INTEGRATION_ID = "@official/gmail";
@@ -274,7 +272,7 @@ describe("collectIntegrationDependencyErrors", () => {
   });
 });
 
-describe("validateAgentIntegrations (throwing)", () => {
+describe("collectIntegrationDependencyErrors (additional cases)", () => {
   let ctx: TestContext;
   let actor: { type: "user"; id: string };
 
@@ -291,29 +289,55 @@ describe("validateAgentIntegrations (throwing)", () => {
     });
   });
 
-  it("throws 412 with errors[] populated when the actor isn't connected", async () => {
-    try {
-      await validateAgentIntegrations(
-        agentManifest({ version: "^1.0.0", tools: ["list_messages"] }),
-        actor,
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      );
-      expect.unreachable("should have thrown");
-    } catch (err) {
-      expect(err).toBeInstanceOf(ApiError);
-      const apiErr = err as ApiError;
-      expect(apiErr.status).toBe(412);
-      expect(apiErr.code).toBe("missing_integration_connection");
-      expect(apiErr.fieldErrors).toHaveLength(1);
-      expect(apiErr.fieldErrors?.[0]?.code).toBe("not_connected");
-    }
+  it("returns a not_connected entry when the actor isn't connected", async () => {
+    const { fieldErrors } = await collectIntegrationDependencyErrors(
+      agentManifest({ version: "^1.0.0", tools: ["list_messages"] }),
+      actor,
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+    );
+    expect(fieldErrors).toHaveLength(1);
+    expect(fieldErrors[0]?.code).toBe("not_connected");
   });
 
-  it("does not throw when the agent has no integration deps", async () => {
-    await validateAgentIntegrations({ name: "@test/agent" }, actor, {
-      orgId: ctx.orgId,
+  it("returns no errors when the agent has no integration deps", async () => {
+    const { fieldErrors } = await collectIntegrationDependencyErrors(
+      { name: "@test/agent" },
+      actor,
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+    );
+    expect(fieldErrors).toEqual([]);
+  });
+
+  it("scopes connections to the actor — another user's connection doesn't satisfy", async () => {
+    const other = await createTestContext({ orgSlug: "deps-throw-other" });
+    await db.insert(integrationConnections).values({
+      integrationPackageId: INTEGRATION_ID,
+      authKey: "primary",
+      accountId: "acct-1",
       applicationId: ctx.defaultAppId,
+      userId: other.user.id,
+      credentialsEncrypted: "x",
+      scopesGranted: ["read", "send"],
     });
+
+    const { fieldErrors } = await collectIntegrationDependencyErrors(
+      agentManifest({ version: "^1.0.0", tools: ["list_messages"] }),
+      actor,
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+    );
+    expect(fieldErrors).toHaveLength(1);
+    expect(fieldErrors[0]?.code).toBe("not_connected");
+  });
+});
+
+describe("saveIntegrationConnection — single-auth invariant", () => {
+  let ctx: TestContext;
+  let actor: { type: "user"; id: string };
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "single-auth" });
+    actor = { type: "user", id: ctx.user.id };
   });
 
   it("refuses a second connection on a different auth for the same actor/integration", async () => {
@@ -383,30 +407,5 @@ describe("validateAgentIntegrations (throwing)", () => {
     expect(caught).toBeInstanceOf(ApiError);
     expect((caught as ApiError).status).toBe(409);
     expect((caught as ApiError).code).toBe("integration_other_auth_connected");
-  });
-
-  it("scopes connections to the actor — another user's connection doesn't satisfy", async () => {
-    // Seed a second user with the connection.
-    const other = await createTestContext({ orgSlug: "deps-throw-other" });
-    await db.insert(integrationConnections).values({
-      integrationPackageId: INTEGRATION_ID,
-      authKey: "primary",
-      accountId: "acct-1",
-      applicationId: ctx.defaultAppId,
-      userId: other.user.id,
-      credentialsEncrypted: "x",
-      scopesGranted: ["read", "send"],
-    });
-
-    try {
-      await validateAgentIntegrations(
-        agentManifest({ version: "^1.0.0", tools: ["list_messages"] }),
-        actor,
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      );
-      expect.unreachable("should have thrown");
-    } catch (err) {
-      expect((err as ApiError).status).toBe(412);
-    }
   });
 });
