@@ -37,6 +37,13 @@ export interface ParsedInput {
    * and the run-record column (`runs.config_override`).
    */
   configOverride?: Record<string, unknown>;
+  /**
+   * Per-(integration, authKey) connection picks for THIS run (#199).
+   * Wire field `connectionOverrides` on the request body; flows into the
+   * resolver's mechanism #2 and is persisted on `runs.connection_overrides`.
+   * Shape: `{ "<integrationId>": { "<authKey>": "<connectionId>" } }`.
+   */
+  connectionOverrides?: Record<string, Record<string, string>>;
 }
 
 interface RunRequestBody {
@@ -44,6 +51,7 @@ interface RunRequestBody {
   modelId?: string;
   proxyId?: string;
   config?: Record<string, unknown>;
+  connectionOverrides?: Record<string, Record<string, string>>;
 }
 
 function getArrayItems(prop: JSONSchema7): JSONSchema7 | undefined {
@@ -165,11 +173,38 @@ export async function parseRequestInput(
     );
   }
 
+  // `connectionOverrides` shape guard. Matches the Drizzle JSONB shape
+  // `Record<string, Record<string, string>>` — invalid bodies produce a
+  // 400 with a precise param so the picker UI can highlight the offender.
+  if (body.connectionOverrides !== undefined) {
+    if (
+      body.connectionOverrides === null ||
+      typeof body.connectionOverrides !== "object" ||
+      Array.isArray(body.connectionOverrides)
+    ) {
+      throw invalidRequest("`connectionOverrides` must be a JSON object", "connectionOverrides");
+    }
+    for (const [intId, perAuth] of Object.entries(body.connectionOverrides)) {
+      if (
+        perAuth === null ||
+        typeof perAuth !== "object" ||
+        Array.isArray(perAuth) ||
+        Object.values(perAuth).some((v) => typeof v !== "string" || v.length === 0)
+      ) {
+        throw invalidRequest(
+          `\`connectionOverrides["${intId}"]\` must map authKey → non-empty connection id`,
+          `connectionOverrides.${intId}`,
+        );
+      }
+    }
+  }
+
   return {
     input,
     uploadedFiles: uploadedFiles.length > 0 ? uploadedFiles : undefined,
     modelIdOverride: body.modelId,
     proxyIdOverride: body.proxyId,
     configOverride: body.config,
+    connectionOverrides: body.connectionOverrides,
   };
 }

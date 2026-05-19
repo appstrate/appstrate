@@ -32,7 +32,7 @@ import {
   resolveHttpDelivery,
 } from "@appstrate/connect";
 import { getToolUrlPatterns } from "@appstrate/core/integration";
-import type { IntegrationManifest } from "@appstrate/core/integration";
+import type { IntegrationManifest, ResolvedConnectionMap } from "@appstrate/core/integration";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 
@@ -53,6 +53,14 @@ export interface ResolveIntegrationsInput {
    * for sidecar-side enforcement (Phase 3).
    */
   agentManifest: Record<string, unknown>;
+  /**
+   * Snapshot of the 4-mechanism cascade frozen at run kickoff
+   * (`runs.resolved_connections`). When set, the spawn loader uses
+   * `snapshot[packageId][authKey].connectionId` to pin which connection
+   * row is decrypted — pin > run override > schedule override > fallback.
+   * When omitted, falls back to live actor-based lookup (own + shared).
+   */
+  resolvedConnections?: ResolvedConnectionMap | null;
 }
 
 /**
@@ -63,7 +71,7 @@ export interface ResolveIntegrationsInput {
 export async function resolveIntegrationSpawns(
   input: ResolveIntegrationsInput,
 ): Promise<IntegrationSpawnSpec[]> {
-  const { applicationId, actor, agentManifest } = input;
+  const { applicationId, actor, agentManifest, resolvedConnections } = input;
   if (!actor) return [];
 
   const entries = parseManifestIntegrations(agentManifest);
@@ -71,7 +79,13 @@ export async function resolveIntegrationSpawns(
   const out: IntegrationSpawnSpec[] = [];
   for (const entry of entries) {
     try {
-      const spec = await resolveOne(entry.id, applicationId, actor, entry.tools);
+      const spec = await resolveOne(
+        entry.id,
+        applicationId,
+        actor,
+        entry.tools,
+        resolvedConnections?.[entry.id] ?? null,
+      );
       if (spec) out.push(spec);
     } catch (err) {
       logger.warn("integration resolve failed; skipping", {
@@ -89,6 +103,7 @@ async function resolveOne(
   applicationId: string,
   actor: Actor,
   agentToolSelection: readonly string[] | undefined,
+  authSnapshot: ResolvedConnectionMap[string] | null,
 ): Promise<IntegrationSpawnSpec | null> {
   // (a) Package exists + integration type — read the latest manifest
   // straight off `packages.draft_manifest`. System integrations have
@@ -132,7 +147,13 @@ async function resolveOne(
   // An integration is viable if EITHER `delivery.env` OR `delivery.http`
   // resolved to something — pure-http integrations (no env vars) still
   // need to spawn with an empty `spawnEnv`.
-  const deliveries = await resolveDeliveries(packageId, applicationId, actor, manifest);
+  const deliveries = await resolveDeliveries(
+    packageId,
+    applicationId,
+    actor,
+    manifest,
+    authSnapshot,
+  );
   if (!deliveries) {
     // resolveDeliveries already logged the reason (missing connection,
     // decrypt failure, no delivery mapping); skip without surfacing further.
@@ -271,6 +292,7 @@ async function resolveDeliveries(
   applicationId: string,
   actor: Actor,
   manifest: IntegrationManifest,
+  authSnapshot: ResolvedConnectionMap[string] | null,
 ): Promise<ResolvedDeliveries | null> {
   const auths = manifest.auths ?? {};
   if (Object.keys(auths).length === 0) {
@@ -283,7 +305,12 @@ async function resolveDeliveries(
   let resolvedAtLeastOne = false;
 
   for (const [authKey, auth] of Object.entries(auths)) {
-    const row = await loadActorConnection(packageId, authKey, { applicationId, actor });
+    const pinnedConnectionId = authSnapshot?.[authKey]?.connectionId;
+    const row = await loadActorConnection(packageId, authKey, {
+      applicationId,
+      actor,
+      ...(pinnedConnectionId ? { connectionId: pinnedConnectionId } : {}),
+    });
     if (!row) {
       logger.info("no connection for integration auth; skipping delivery entries", {
         packageId,

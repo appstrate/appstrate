@@ -32,6 +32,8 @@ import type { Actor } from "../lib/actor.ts";
 import type { FileReference, UploadedFile } from "./run-launcher/types.ts";
 import { prepareAndExecuteRun, extractRunAgentDenorm } from "./run-pipeline.ts";
 import { validateAgentReadiness } from "./agent-readiness.ts";
+import { resolveConnectionsForRun } from "./integration-connection-resolver.ts";
+import type { ResolvedConnectionMap } from "@appstrate/core/integration";
 import { createRun as createRunRow } from "./state/runs.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 import { isInlineShadowPackageId } from "./inline-run.ts";
@@ -76,6 +78,17 @@ export interface CreateRunInput {
   connectionProfileId?: string;
   overrideVersionLabel?: string;
   uploadedFiles?: UploadedFile[];
+  /**
+   * Caller's per-(integration, authKey) connection picks for THIS run
+   * (#199). Flows into the resolver's mechanism #2 at kickoff and is
+   * persisted on `runs.connection_overrides` for audit + replay.
+   */
+  connectionOverrides?: Record<string, Record<string, string>> | null;
+  /**
+   * Schedule-frozen overrides loaded from `package_schedules.connection_overrides`
+   * (scheduler path only). Resolver mechanism #3.
+   */
+  scheduleConnectionOverrides?: Record<string, Record<string, string>> | null;
   /** Only meaningful when `origin === "remote"` — ignored for platform origin. */
   sink?: SinkRequest;
   /** CLI-provided execution environment metadata (os, cli version, git sha, ...). */
@@ -128,6 +141,8 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
         connectionProfileId: input.connectionProfileId,
         overrideVersionLabel: input.overrideVersionLabel,
         uploadedFiles: input.uploadedFiles,
+        connectionOverrides: input.connectionOverrides ?? null,
+        scheduleConnectionOverrides: input.scheduleConnectionOverrides ?? null,
         runnerName: input.runnerName ?? null,
         runnerKind: input.runnerKind ?? null,
       });
@@ -199,6 +214,35 @@ async function createRemoteRun(input: CreateRunInput): Promise<CreateRunResult> 
   if (!gates.ok) return { ok: false, error: gates.error };
   const { agent, providerStatusSnapshots } = gates;
 
+  // --- Snapshot the connection cascade (#199, remote-path mirror of
+  //     run-pipeline). Any resolver error is hard 412: readiness already
+  //     ran without overrides, so a failure here is either the caller's
+  //     pick pointing at an inaccessible id or a between-readiness-and-now
+  //     race (deleted connection, new admin pin). Either way the runner
+  //     gets a structured agent_not_ready it can surface verbatim.
+  let resolvedConnections: ResolvedConnectionMap | null = null;
+  if (actor) {
+    const resolution = await resolveConnectionsForRun({
+      agentManifest: agent.manifest as Record<string, unknown>,
+      packageId: agent.id,
+      actor,
+      scope: { orgId, applicationId },
+      runOverrides: input.connectionOverrides ?? null,
+      scheduleOverrides: input.scheduleConnectionOverrides ?? null,
+    });
+    if (resolution.errors.length > 0) {
+      return {
+        ok: false,
+        error: {
+          code: "agent_not_ready",
+          message: resolution.errors[0]!.message,
+          status: 412,
+        },
+      };
+    }
+    resolvedConnections = Object.keys(resolution.resolved).length > 0 ? resolution.resolved : null;
+  }
+
   // --- Mint sink credentials ---
   const env = getEnv();
   const ttlSeconds = Math.min(
@@ -236,6 +280,8 @@ async function createRemoteRun(input: CreateRunInput): Promise<CreateRunResult> 
       runOrigin: "remote",
       sinkSecretEncrypted: encrypt(credentials.secret),
       sinkExpiresAt: new Date(credentials.expiresAt),
+      connectionOverrides: input.connectionOverrides ?? null,
+      resolvedConnections,
       ...(overrideVersionLabel ? { versionLabel: overrideVersionLabel } : {}),
       ...(contextSnapshot !== undefined ? { contextSnapshot } : {}),
       runnerName: input.runnerName ?? null,

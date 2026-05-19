@@ -212,6 +212,24 @@ interface CreateRunParams {
    */
   runnerKind?: string | null;
   /**
+   * Caller's per-(integration, authKey) connection override map. Persisted
+   * verbatim on `runs.connection_overrides` for audit + "re-run with same
+   * picks" replay. Feeds the resolver's mechanism #2 at kickoff; surface
+   * pinned admin choices and fallback if absent. Null when the run used
+   * defaults verbatim.
+   */
+  connectionOverrides?: Record<string, Record<string, string>> | null;
+  /**
+   * Snapshot of the resolver output at kickoff: per (integration, authKey),
+   * which connection id was actually picked and which mechanism produced
+   * the pick. Persisted on `runs.resolved_connections` so the credentials
+   * resolver (sidecar MITM refresh) can honour the pick long after kickoff.
+   */
+  resolvedConnections?: Record<
+    string,
+    Record<string, { connectionId: string; source: string }>
+  > | null;
+  /**
    * `model_provider_credentials.id` snapshotted at run creation. Pinned
    * here so the OAuth model token resolver can reject any other
    * credentialId requested via the run's signed token. Set only for
@@ -258,6 +276,12 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
     runnerName: params.runnerName ?? null,
     runnerKind: params.runnerKind ?? null,
     modelCredentialId: params.modelCredentialId ?? null,
+    ...(params.connectionOverrides !== undefined
+      ? { connectionOverrides: params.connectionOverrides }
+      : {}),
+    ...(params.resolvedConnections !== undefined
+      ? { resolvedConnections: params.resolvedConnections }
+      : {}),
   });
 }
 

@@ -277,6 +277,7 @@ export function createRunsRouter() {
         modelIdOverride,
         proxyIdOverride,
         configOverride,
+        connectionOverrides,
       } = inputResult;
 
       // Deep-merge any per-run `config` override on top of the persisted
@@ -316,6 +317,7 @@ export function createRunsRouter() {
         applicationId: c.get("applicationId"),
         uploadedFiles,
         apiKeyId: c.get("apiKeyId") ?? undefined,
+        connectionOverrides: connectionOverrides ?? null,
         traceparent: c.get("traceparent"),
         runnerName: runner.name,
         runnerKind: runner.kind,

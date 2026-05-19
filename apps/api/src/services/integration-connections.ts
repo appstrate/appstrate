@@ -149,11 +149,19 @@ export interface ActorConnectionRow {
  * order picks. The picker UI lands in p4 to disambiguate; for now
  * single-source-of-shared-credential is the supported pattern (matches
  * the documented workflow).
+ *
+ * `connectionId` override (#199 snapshot path): when set, the SELECT
+ * additionally filters by id. The (own OR shared) predicate is kept as
+ * defence-in-depth — pinned connections must be `sharedWithOrg=true`
+ * (enforced at pin upsert) and override ids must come from accessible
+ * candidates (enforced at kickoff by `resolveConnectionsForRun`). So
+ * a snapshot-derived id always satisfies the access predicate; the AND
+ * is a safety net against rogue callers, not a behavioural filter.
  */
 export async function loadActorConnection(
   packageId: string,
   authKey: string,
-  context: { applicationId: string; actor: Actor },
+  context: { applicationId: string; actor: Actor; connectionId?: string },
 ): Promise<ActorConnectionRow | null> {
   const ownerPredicate =
     context.actor.type === "user"
@@ -175,9 +183,22 @@ export async function loadActorConnection(
         eq(integrationConnections.authKey, authKey),
         eq(integrationConnections.applicationId, context.applicationId),
         or(ownerPredicate, eq(integrationConnections.sharedWithOrg, true)),
+        ...(context.connectionId ? [eq(integrationConnections.id, context.connectionId)] : []),
       ),
     );
   if (rows.length === 0) return null;
+
+  // When a connectionId override is set, the WHERE clause already narrowed
+  // to that row — skip the own-vs-shared tiebreaker.
+  if (context.connectionId) {
+    const picked = rows[0]!;
+    return {
+      id: picked.id,
+      credentialsEncrypted: picked.credentialsEncrypted,
+      expiresAt: picked.expiresAt,
+      scopesGranted: picked.scopesGranted,
+    };
+  }
 
   // Prefer the actor's own row (any) over shared rows. The OR predicate
   // above admits both — we discriminate here so the result honours user

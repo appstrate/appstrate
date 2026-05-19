@@ -56,6 +56,13 @@ interface ScheduleJobData {
   modelIdOverride?: string;
   proxyIdOverride?: string;
   versionOverride?: string;
+  /**
+   * Frozen per-(integration, authKey) connection picks (#199 mechanism #3).
+   * Loaded from `package_schedules.connection_overrides`, propagated into
+   * `runs.connection_overrides` at fire time so the snapshot stays in sync
+   * with the scheduler's intent. Loses to admin pins.
+   */
+  connectionOverrides?: Record<string, Record<string, string>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -99,6 +106,7 @@ async function upsertScheduleJob(schedule: Schedule, orgId: string): Promise<voi
     modelIdOverride: schedule.modelIdOverride ?? undefined,
     proxyIdOverride: schedule.proxyIdOverride ?? undefined,
     versionOverride: schedule.versionOverride ?? undefined,
+    connectionOverrides: schedule.connectionOverrides ?? undefined,
   };
 
   await (
@@ -128,6 +136,7 @@ async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> 
     modelIdOverride,
     proxyIdOverride,
     versionOverride,
+    connectionOverrides,
   } = job.data;
 
   await triggerScheduledRun(
@@ -137,7 +146,7 @@ async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> 
     orgId,
     applicationId,
     input,
-    { configOverride, modelIdOverride, proxyIdOverride, versionOverride },
+    { configOverride, modelIdOverride, proxyIdOverride, versionOverride, connectionOverrides },
   );
 
   // Update schedule timestamps
@@ -216,6 +225,7 @@ async function triggerScheduledRun(
     modelIdOverride?: string;
     proxyIdOverride?: string;
     versionOverride?: string;
+    connectionOverrides?: Record<string, Record<string, string>>;
   } = {},
 ) {
   // Populated once the agent loads so every failSchedule() call can
@@ -383,6 +393,7 @@ async function triggerScheduledRun(
         scheduleId,
         connectionProfileId,
         applicationId,
+        scheduleConnectionOverrides: overrides.connectionOverrides ?? null,
       });
     } catch (err) {
       if (err instanceof ApiError) {

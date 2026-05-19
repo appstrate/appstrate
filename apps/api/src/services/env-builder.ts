@@ -23,6 +23,7 @@ import { resolveModel } from "./org-models.ts";
 import { resolveManifestProviders, extractManifestSchemas } from "../lib/manifest-utils.ts";
 import type { ProviderProfileMap } from "../types/index.ts";
 import { resolveIntegrationSpawns } from "./integration-spawn-resolver.ts";
+import type { ResolvedConnectionMap } from "@appstrate/core/integration";
 
 export class ModelNotConfiguredError extends Error {
   constructor() {
@@ -66,6 +67,13 @@ export async function buildRunContext(params: {
    * (scheduler) leave it unset and the runtime mints a fresh trace.
    */
   traceparent?: string;
+  /**
+   * Snapshot of the connection resolver output (#199 flat-connections
+   * cascade). When set, the spawn loader uses it to pin which connection
+   * row is decrypted per (integration, authKey) — admin pins / run
+   * overrides survive the kickoff handoff into the live runtime.
+   */
+  resolvedConnections?: ResolvedConnectionMap | null;
 }): Promise<{
   context: ExecutionContext;
   plan: AppstrateRunPlan;
@@ -186,6 +194,7 @@ export async function buildRunContext(params: {
     applicationId,
     actor,
     agentManifest: agent.manifest as Record<string, unknown>,
+    resolvedConnections: params.resolvedConnections ?? null,
   });
 
   const plan: AppstrateRunPlan = {

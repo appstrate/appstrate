@@ -12,7 +12,9 @@ import { getPackageConfig } from "./application-packages.ts";
 import { executeAgentInBackground } from "../routes/runs.ts";
 import { resolveProviderProfiles } from "./connection-profiles.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
-import { validateAgentReadiness } from "./agent-readiness.ts";
+import { validateAgentReadiness, translateResolutionError } from "./agent-readiness.ts";
+import { resolveConnectionsForRun } from "./integration-connection-resolver.ts";
+import type { ConnectionOverrides, ResolvedConnectionMap } from "@appstrate/core/integration";
 import { parseScopedName } from "@appstrate/core/naming";
 import { mintSinkCredentials } from "../lib/mint-sink-credentials.ts";
 import { encrypt } from "@appstrate/connect";
@@ -82,6 +84,19 @@ export interface RunPipelineParams {
   uploadedFiles?: UploadedFile[];
   /** API key ID that triggered the run (if auth via API key). */
   apiKeyId?: string;
+  /**
+   * Per-(integration, authKey) connection id chosen by the caller for
+   * THIS run (#199). Persisted on `runs.connection_overrides` as the
+   * audit trail and fed into the resolver's mechanism #2 so the snapshot
+   * pins the right row. Loses to admin pins (mechanism #1).
+   */
+  connectionOverrides?: ConnectionOverrides | null;
+  /**
+   * Schedule-frozen overrides loaded from `package_schedules.connection_overrides`.
+   * Same shape as `connectionOverrides`; loses to both admin pins and
+   * per-run overrides. Scheduler path only.
+   */
+  scheduleConnectionOverrides?: ConnectionOverrides | null;
   /**
    * W3C `traceparent` header value of the spawning request. Forwarded
    * into the runtime so its outbound traffic becomes child spans of
@@ -213,6 +228,41 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   }
   const { agent, providerStatusSnapshots } = gates;
 
+  // --- Step 0.5: Connection resolution snapshot (#199) ---
+  //
+  // Apply the 4-mechanism cascade once at kickoff so:
+  //  - the spawn loader (env-builder) pins the same row admin/run intended,
+  //  - the credentials resolver (sidecar MITM refresh) honours that pick
+  //    long after kickoff via runs.resolved_connections.
+  //
+  // Readiness already ran in resolveRunPreflight WITHOUT overrides — this
+  // pass adds the per-run picks. Any error here is hard 412: either the
+  // override points at an invalid id (caller's mistake), or a race after
+  // readiness mutated DB state (connection deleted / pin shifted). Either
+  // way the caller needs structured feedback, not a silent fallback.
+  let resolvedConnections: ResolvedConnectionMap | null = null;
+  if (actor) {
+    const resolution = await resolveConnectionsForRun({
+      agentManifest: agent.manifest as Record<string, unknown>,
+      packageId: agent.id,
+      actor,
+      scope: { orgId, applicationId },
+      runOverrides: params.connectionOverrides ?? null,
+      scheduleOverrides: params.scheduleConnectionOverrides ?? null,
+    });
+    if (resolution.errors.length > 0) {
+      const first = resolution.errors[0]!;
+      throw new ApiError({
+        status: 412,
+        code: "missing_integration_connection",
+        title: "Missing Integration Connection",
+        detail: first.message,
+        errors: resolution.errors.map(translateResolutionError),
+      });
+    }
+    resolvedConnections = Object.keys(resolution.resolved).length > 0 ? resolution.resolved : null;
+  }
+
   // --- Step 1: Build run context ---
   let context;
   let plan;
@@ -246,6 +296,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
       proxyId,
       overrideVersionLabel,
       traceparent: params.traceparent,
+      resolvedConnections,
     }));
   } catch (err) {
     if (err instanceof ModelNotConfiguredError) {
@@ -309,6 +360,8 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
       runOrigin: "platform",
       sinkSecretEncrypted: encrypt(sinkCredentials.secret),
       sinkExpiresAt: new Date(sinkCredentials.expiresAt),
+      connectionOverrides: params.connectionOverrides ?? null,
+      resolvedConnections,
       runnerName: params.runnerName ?? null,
       runnerKind: params.runnerKind ?? null,
       modelCredentialId: plan.llmConfig.credentialId ?? null,

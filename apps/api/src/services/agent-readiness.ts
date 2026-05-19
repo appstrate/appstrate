@@ -209,7 +209,7 @@ export async function validateAgentReadiness(params: AgentReadinessParams): Prom
  * insufficient_scopes case so the inline connect button can forward it
  * to the OAuth kickoff for incremental consent.
  */
-function translateResolutionError(e: ConnectionResolutionError): ValidationFieldError {
+export function translateResolutionError(e: ConnectionResolutionError): ValidationFieldError {
   const title = TITLE_BY_CODE[e.code];
   return {
     field: `integrations.${e.integrationId}.${e.authKey}`,

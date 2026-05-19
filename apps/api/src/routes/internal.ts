@@ -88,6 +88,15 @@ async function verifyRunToken(c: Context): Promise<{
     providerProfileIds: Record<string, string> | null;
     modelCredentialId: string | null;
     runOrigin: "platform" | "remote";
+    /**
+     * Snapshot of the connection resolver output frozen at run kickoff
+     * (#199). The credentials resolver uses it to honour admin pins and
+     * per-run overrides past the kickoff handoff.
+     */
+    resolvedConnections: Record<
+      string,
+      Record<string, { connectionId: string; source: string }>
+    > | null;
   };
 }> {
   const authHeader = c.req.header("Authorization");
@@ -118,6 +127,7 @@ async function verifyRunToken(c: Context): Promise<{
       providerProfileIds: runs.providerProfileIds,
       modelCredentialId: runs.modelCredentialId,
       runOrigin: runs.runOrigin,
+      resolvedConnections: runs.resolvedConnections,
     })
     .from(runs)
     .where(eq(runs.id, runId))
@@ -145,6 +155,7 @@ async function verifyRunToken(c: Context): Promise<{
       providerProfileIds: run.providerProfileIds ?? null,
       modelCredentialId: run.modelCredentialId ?? null,
       runOrigin: run.runOrigin,
+      resolvedConnections: run.resolvedConnections ?? null,
     },
   };
 }
@@ -521,6 +532,7 @@ export function createInternalRouter() {
       applicationId: run.applicationId,
       agentPackageId: run.packageId,
       actor,
+      resolvedConnections: run.resolvedConnections,
     });
     logger.info("Integration credentials delivered", {
       runId,
@@ -548,6 +560,7 @@ export function createInternalRouter() {
         applicationId: run.applicationId,
         agentPackageId: run.packageId,
         actor,
+        resolvedConnections: run.resolvedConnections,
       },
       { forceRefresh: true },
     );

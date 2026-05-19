@@ -47,6 +47,15 @@ export const runsPaths = {
                   description:
                     "Per-run config override. Deep-merged with the per-application persisted config (`application_packages.config`): override leaves replace, plain-object children merge recursively, arrays are replaced wholesale, `null` at a leaf sets the value to null (validated as missing for required string fields), missing keys fall through. Re-validated against the manifest config schema after the merge — a 400 `invalid_config` is returned if the merged result violates the schema. Top-level `null` is rejected (returns 400) — omit the field to inherit persisted defaults, send `{}` for an explicit empty override. Mirrors the OpenAPI Assistants `runs.create { instructions, model, tools }` and Argo Workflows `submitOptions.parameters` SOTA — every client (UI, CLI, SDK) reaches the same resolved config for the same `(persisted, override)` pair.",
                 },
+                connectionOverrides: {
+                  type: "object",
+                  description:
+                    'Per-(integration, authKey) connection picks for THIS run (flat-connections mechanism #2). Shape: `{ "@scope/integration": { "<authKey>": "<connection_id>" } }`. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor.',
+                  additionalProperties: {
+                    type: "object",
+                    additionalProperties: { type: "string" },
+                  },
+                },
               },
             },
             example: {

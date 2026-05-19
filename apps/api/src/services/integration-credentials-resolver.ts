@@ -78,6 +78,21 @@ export async function resolveLiveIntegrationCredentials(
     applicationId: string;
     agentPackageId: string;
     actor: Actor | null;
+    /**
+     * Snapshot from `runs.resolved_connections` (#199). When present,
+     * the (packageId, authKey) entry's connectionId pins which row the
+     * MITM listener decrypts — so admin pins / run overrides survive
+     * past kickoff into the live credential surface.
+     *
+     * Typed as the DB JSONB shape (string `source`) rather than the
+     * union-narrowed `ResolvedConnectionMap` because Postgres JSONB
+     * widens unions to string on read — the resolver only consumes
+     * `connectionId` so the wider type is safe at this boundary.
+     */
+    resolvedConnections?: Record<
+      string,
+      Record<string, { connectionId: string; source: string }>
+    > | null;
   },
   options: ResolveLiveCredentialsOptions = {},
 ): Promise<LiveIntegrationCredentialsResult> {
@@ -101,14 +116,18 @@ export async function resolveLiveIntegrationCredentials(
     expiresAtEpochMs: {},
   };
 
+  const authSnapshot = context.resolvedConnections?.[packageId] ?? null;
+
   for (const [authKey, authDef] of Object.entries(auths)) {
     // Look up the connection row for the actor. Skip silently if none —
     // matches the resolveIntegrationCredentials behaviour (the caller
     // gets a partial payload and the MITM planner refuses requests on
     // unauthorised URLs without crashing the integration).
+    const pinnedConnectionId = authSnapshot?.[authKey]?.connectionId;
     const connection = await loadActorConnection(packageId, authKey, {
       applicationId: context.applicationId,
       actor: context.actor,
+      ...(pinnedConnectionId ? { connectionId: pinnedConnectionId } : {}),
     });
     if (!connection) continue;
 
