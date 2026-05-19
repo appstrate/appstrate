@@ -1,19 +1,32 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { CheckCircle2, AlertTriangle, XCircle, Loader2, Puzzle, Unlink, Pin } from "lucide-react";
+import {
+  CheckCircle2,
+  AlertTriangle,
+  XCircle,
+  Loader2,
+  Puzzle,
+  Unlink,
+  Pin,
+  Users,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   useIntegrationDetail,
   useIntegrationConnections,
+  useAccessibleIntegrationConnections,
   useDisconnectIntegration,
   useIntegrationPins,
   useUpsertIntegrationPin,
   useDeleteIntegrationPin,
+  type AccessibleIntegrationConnection,
   type IntegrationConnection,
   type IntegrationManifestView,
 } from "../../hooks/use-integrations";
 import { usePermissions } from "../../hooks/use-permissions";
+import { useCurrentApplicationId } from "../../hooks/use-current-application";
+import { useAgentConnectionPicks } from "../../hooks/use-agent-connection-picks";
 import { InlineConnectButton } from "../integration-connect/inline-connect-button";
 import { pickDefaultAuth } from "../integration-connect/pick-default-auth";
 import {
@@ -129,6 +142,7 @@ function IntegrationConnectionCard({
   // exactly where the agent's integration dependency is already shown.
   const requiredAuthKeys = requiredAuthKeysForAgent(detail.manifest, agentTools);
   const showPinAdmin = !!agentPackageId && requiredAuthKeys.length > 0;
+  const showMemberPicker = !!agentPackageId && requiredAuthKeys.length > 0;
 
   return (
     <div className="space-y-2">
@@ -154,6 +168,13 @@ function IntegrationConnectionCard({
           </Button>
         )}
       </CardShell>
+      {showMemberPicker && (
+        <MemberConnectionPicker
+          integrationPackageId={packageId}
+          agentPackageId={agentPackageId!}
+          requiredAuthKeys={requiredAuthKeys}
+        />
+      )}
       {showPinAdmin && (
         <AdminPinSection
           integrationPackageId={packageId}
@@ -162,6 +183,108 @@ function IntegrationConnectionCard({
           connections={connections ?? []}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * R3 — pre-run picker for the member when a required (integration, authKey)
+ * has more than one candidate connection (own + shared). Surfaces the
+ * ambiguity BEFORE the user clicks Run, instead of letting the run-kickoff
+ * 412 modal be the only place where the picker exists.
+ *
+ * The pick is persisted in `localStorage` (keyed by application + agent)
+ * and read at mutate-time by `useRunAgent` so the resolver respects it
+ * via `connectionOverrides`. An admin pin overrides any member pick.
+ */
+function MemberConnectionPicker({
+  integrationPackageId,
+  agentPackageId,
+  requiredAuthKeys,
+}: {
+  integrationPackageId: string;
+  agentPackageId: string;
+  requiredAuthKeys: string[];
+}) {
+  const { t } = useTranslation(["agents"]);
+  const applicationId = useCurrentApplicationId();
+  const { data: pins } = useIntegrationPins(integrationPackageId);
+  const { data: accessible } = useAccessibleIntegrationConnections(integrationPackageId);
+  const { getPick, setPick } = useAgentConnectionPicks(applicationId, agentPackageId);
+
+  // No accessible candidates → nothing to pick. The card already shows
+  // "not connected" with a connect CTA in that case.
+  const allCandidates = accessible ?? [];
+  if (allCandidates.length === 0) return null;
+
+  // Only render rows for required auths where:
+  //   - there's no admin pin (admin pin wins over member pick)
+  //   - >1 candidates exist (1 candidate is auto-resolved, no choice needed)
+  const pickableRows = requiredAuthKeys
+    .map((authKey) => {
+      const pinned = pins?.find(
+        (p) =>
+          p.packageId === agentPackageId &&
+          p.integrationPackageId === integrationPackageId &&
+          p.authKey === authKey,
+      );
+      if (pinned) return null;
+      const candidates = allCandidates.filter((c) => c.authKey === authKey);
+      if (candidates.length < 2) return null;
+      return { authKey, candidates };
+    })
+    .filter((r): r is { authKey: string; candidates: AccessibleIntegrationConnection[] } => !!r);
+
+  if (pickableRows.length === 0) return null;
+
+  return (
+    <div
+      className="border-border/60 bg-muted/30 ml-6 space-y-1.5 rounded-md border border-dashed px-3 py-2 text-xs"
+      data-testid={`member-picker-${integrationPackageId}`}
+    >
+      <div className="text-muted-foreground flex items-center gap-1.5">
+        <Users className="size-3" />
+        <span>{t("detail.integrationMemberPicker.title")}</span>
+      </div>
+      <div className="space-y-1">
+        {pickableRows.map(({ authKey, candidates }) => {
+          const current = getPick(integrationPackageId, authKey) ?? "";
+          return (
+            <div key={authKey} className="flex items-center gap-2">
+              <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 font-mono text-[10px]">
+                {authKey}
+              </span>
+              <select
+                className="border-border bg-background flex-1 rounded border px-2 py-1 text-xs"
+                value={current}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setPick(integrationPackageId, authKey, value === "" ? null : value);
+                }}
+                data-testid={`member-pick-${integrationPackageId}-${authKey}`}
+              >
+                <option value="">{t("detail.integrationMemberPicker.autoChoose")}</option>
+                {candidates.map((c) => {
+                  const ownership = c.ownerUserId
+                    ? c.sharedWithOrg
+                      ? t("detail.integrationMemberPicker.ownAndShared")
+                      : t("detail.integrationMemberPicker.own")
+                    : t("detail.integrationMemberPicker.shared");
+                  const display = `${c.label ?? c.accountId} — ${ownership}`;
+                  return (
+                    <option key={c.id} value={c.id}>
+                      {display}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+          );
+        })}
+      </div>
+      <p className="text-muted-foreground text-[0.65rem]">
+        {t("detail.integrationMemberPicker.help")}
+      </p>
     </div>
   );
 }

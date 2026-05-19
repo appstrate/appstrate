@@ -580,6 +580,67 @@ export const integrationsPaths = {
       },
     },
   },
+  "/api/integrations/{packageId}/accessible-connections": {
+    get: {
+      operationId: "listAccessibleIntegrationConnections",
+      tags: ["Integrations"],
+      summary: "List own + shared connections the actor could pick at run-time",
+      description:
+        "Drives the R3 pre-run picker on agent pages — returns every connection the " +
+        "caller could resolve to for this integration at run kickoff (own connections " +
+        "and connections others shared with the org). Same predicate as the spawn-time " +
+        "resolver's fallback step.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        integrationPackageIdParam,
+      ],
+      responses: {
+        "200": {
+          description: "Accessible connection list",
+          headers: baseResponseHeaders,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["object", "data", "hasMore"],
+                properties: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: [
+                        "id",
+                        "authKey",
+                        "accountId",
+                        "label",
+                        "ownerUserId",
+                        "ownerEndUserId",
+                        "sharedWithOrg",
+                        "needsReconnection",
+                      ],
+                      properties: {
+                        id: { type: "string", format: "uuid" },
+                        authKey: { type: "string" },
+                        accountId: { type: "string" },
+                        label: { type: ["string", "null"] },
+                        ownerUserId: { type: ["string", "null"] },
+                        ownerEndUserId: { type: ["string", "null"] },
+                        sharedWithOrg: { type: "boolean" },
+                        needsReconnection: { type: "boolean" },
+                      },
+                    },
+                  },
+                  hasMore: { type: "boolean" },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
   "/api/integrations/{packageId}/connections/{connectionId}": {
     delete: {
       operationId: "disconnectIntegrationConnection",

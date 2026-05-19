@@ -74,6 +74,7 @@ import {
 import { isUserConnectionCreationBlocked } from "../services/integration-connection-resolver.ts";
 import {
   deleteIntegrationPin,
+  listAccessibleConnections,
   listIntegrationPins,
   loadConnectionOwnership,
   setBlockUserConnections,
@@ -571,6 +572,27 @@ export function createIntegrationsRouter() {
       const scope = getAppScope(c);
       const actor = getActor(c);
       const items = await listIntegrationConnections(scope, packageId, actor);
+      return c.json(listResponse(items));
+    },
+  );
+
+  /**
+   * GET /api/integrations/:packageId/accessible-connections
+   *
+   * Lists every connection the actor could pick for this integration at
+   * run-kickoff: own + shared-with-org. Drives the pre-run picker on
+   * agent surfaces (R3) so a member sees the ambiguity and resolves it
+   * upfront instead of via the 412 recovery modal.
+   */
+  router.get(
+    "/:packageId{@[^/]+/[^/]+}/accessible-connections",
+    requirePermission("integrations", "read"),
+    async (c) => {
+      const packageId = c.req.param("packageId")!;
+      const scope = getAppScope(c);
+      const actor = getActor(c);
+      const actorFilter = actor.type === "user" ? { userId: actor.id } : { endUserId: actor.id };
+      const items = await listAccessibleConnections(scope, packageId, actorFilter);
       return c.json(listResponse(items));
     },
   );

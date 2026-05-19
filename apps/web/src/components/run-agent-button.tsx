@@ -18,6 +18,8 @@ import { usePackageDetail } from "../hooks/use-packages";
 import { hasDisconnectedProviders } from "../lib/provider-status";
 import { packageDetailPath } from "../lib/package-paths";
 import { usePermissions } from "../hooks/use-permissions";
+import { useCurrentApplicationId } from "../hooks/use-current-application";
+import { readAgentConnectionPicks } from "../hooks/use-agent-connection-picks";
 import { ApiError } from "../api";
 import type { AgentDetail } from "@appstrate/shared-types";
 
@@ -48,10 +50,22 @@ export function RunAgentButton({
   const { t } = useTranslation(["agents"]);
   const navigate = useNavigate();
   const { isMember } = usePermissions();
+  const applicationId = useCurrentApplicationId();
   const runAgent = useRunAgent(packageId);
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [inputOpen, setInputOpen] = useState(false);
   const [missingErrors, setMissingErrors] = useState<MissingIntegrationFieldError[] | null>(null);
+
+  /**
+   * Read the member's pre-run picks (R3) and merge as `connectionOverrides`.
+   * Returns `undefined` when no picks exist so the resolver's normal cascade
+   * (admin pin > fallback) still applies.
+   */
+  const pickConnectionOverrides = (): Record<string, Record<string, string>> | undefined => {
+    if (!applicationId) return undefined;
+    const picks = readAgentConnectionPicks(applicationId, packageId);
+    return Object.keys(picks).length > 0 ? picks : undefined;
+  };
 
   // Intercept 412 missing_integration_connection — surface the recovery
   // modal instead of (or alongside) the generic toast. Set via the
@@ -89,7 +103,10 @@ export function RunAgentButton({
     const agentHasInput =
       !!detail?.input?.schema?.properties && Object.keys(detail.input.schema.properties).length > 0;
     if (!agentHasInput) {
-      runAgent.mutate({ version }, { onError: onRunError });
+      runAgent.mutate(
+        { version, connectionOverrides: pickConnectionOverrides() },
+        { onError: onRunError },
+      );
       return;
     }
     setInputOpen(true);
@@ -175,7 +192,12 @@ export function RunAgentButton({
           open={inputOpen}
           onClose={() => setInputOpen(false)}
           agent={detail}
-          onSubmit={(input) => runAgent.mutate({ input, version }, { onError: onRunError })}
+          onSubmit={(input) =>
+            runAgent.mutate(
+              { input, version, connectionOverrides: pickConnectionOverrides() },
+              { onError: onRunError },
+            )
+          }
           isPending={runAgent.isPending}
         />
       )}

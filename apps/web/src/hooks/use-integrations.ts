@@ -79,6 +79,37 @@ export function useIntegrationConnections(packageId: string | undefined) {
   });
 }
 
+/**
+ * R3 — own + shared connections the actor could resolve to at run-kickoff.
+ * Powers the pre-run picker rendered on agent surfaces when more than one
+ * candidate exists (avoids the must_choose 412 recovery loop).
+ */
+export interface AccessibleIntegrationConnection {
+  id: string;
+  authKey: string;
+  accountId: string;
+  label: string | null;
+  ownerUserId: string | null;
+  ownerEndUserId: string | null;
+  sharedWithOrg: boolean;
+  needsReconnection: boolean;
+}
+
+export function useAccessibleIntegrationConnections(packageId: string | undefined) {
+  const orgId = useCurrentOrgId();
+  const applicationId = useCurrentApplicationId();
+  return useQuery({
+    queryKey: [...KEY(orgId, applicationId), "accessible-connections", packageId] as const,
+    enabled: Boolean(orgId && applicationId && packageId),
+    queryFn: async () => {
+      const envelope = await api<ListEnvelope<AccessibleIntegrationConnection>>(
+        `/integrations/${encodeURI(packageId!)}/accessible-connections`,
+      );
+      return envelope.data;
+    },
+  });
+}
+
 export function useInstallIntegration() {
   const { t } = useTranslation("settings");
   const qc = useQueryClient();
