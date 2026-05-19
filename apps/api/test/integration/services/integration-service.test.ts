@@ -10,16 +10,8 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
-import {
-  getIntegration,
-  listIntegrations,
-  getIntegrationVersion,
-  isIntegrationInstalled,
-  parseIntegrationManifest,
-  safeManifestFromRow,
-} from "../../../src/services/integration-service.ts";
+import { seedPackage } from "../../helpers/seed.ts";
+import { getIntegration, listIntegrations } from "../../../src/services/integration-service.ts";
 
 function validIntegrationManifest(name = "@official/gmail"): Record<string, unknown> {
   return {
@@ -187,111 +179,6 @@ describe("integration-service", () => {
       });
       const out = await listIntegrations(ctx.orgId);
       expect(out).toEqual([]);
-    });
-  });
-
-  describe("getIntegrationVersion", () => {
-    it("returns the persisted version row", async () => {
-      const manifest = validIntegrationManifest("@official/gmail");
-      await seedPackage({
-        id: "@official/gmail",
-        orgId: ctx.orgId,
-        type: "integration",
-        draftManifest: manifest,
-      });
-      await seedPackageVersion({
-        packageId: "@official/gmail",
-        version: "1.0.0",
-        integrity: "sha256-deadbeef",
-        artifactSize: 2048,
-        manifest,
-      });
-      const v = await getIntegrationVersion(ctx.orgId, "@official/gmail", "1.0.0");
-      expect(v).not.toBeNull();
-      expect(v!.version).toBe("1.0.0");
-      expect(v!.integrity).toBe("sha256-deadbeef");
-      expect(v!.manifest.displayName).toBe("Gmail");
-    });
-
-    it("returns null for an unknown version", async () => {
-      await seedPackage({
-        id: "@official/gmail",
-        orgId: ctx.orgId,
-        type: "integration",
-        draftManifest: validIntegrationManifest(),
-      });
-      const v = await getIntegrationVersion(ctx.orgId, "@official/gmail", "9.9.9");
-      expect(v).toBeNull();
-    });
-
-    it("returns null when the package is not an integration", async () => {
-      await seedPackage({
-        id: "@official/agent",
-        orgId: ctx.orgId,
-        type: "agent",
-      });
-      await seedPackageVersion({
-        packageId: "@official/agent",
-        version: "1.0.0",
-        integrity: "sha256-x",
-        artifactSize: 1,
-        manifest: { type: "agent", name: "@official/agent", version: "1.0.0" },
-      });
-      const v = await getIntegrationVersion(ctx.orgId, "@official/agent", "1.0.0");
-      expect(v).toBeNull();
-    });
-  });
-
-  describe("isIntegrationInstalled", () => {
-    it("returns false before installation, true after", async () => {
-      await seedPackage({
-        id: "@official/gmail",
-        orgId: ctx.orgId,
-        type: "integration",
-        draftManifest: validIntegrationManifest(),
-      });
-      const before = await isIntegrationInstalled(ctx.defaultAppId, "@official/gmail");
-      expect(before).toBe(false);
-
-      await installPackage(
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        "@official/gmail",
-      );
-
-      const after = await isIntegrationInstalled(ctx.defaultAppId, "@official/gmail");
-      expect(after).toBe(true);
-    });
-  });
-
-  describe("parseIntegrationManifest", () => {
-    it("validates a well-formed manifest", () => {
-      const r = parseIntegrationManifest(validIntegrationManifest());
-      expect(r.valid).toBe(true);
-    });
-
-    it("surfaces field-level errors on a broken manifest", () => {
-      const r = parseIntegrationManifest({
-        type: "integration",
-        name: "broken",
-        version: "1.0.0",
-      });
-      expect(r.valid).toBe(false);
-      if (!r.valid) {
-        expect(r.errors.length).toBeGreaterThan(0);
-      }
-    });
-  });
-
-  describe("safeManifestFromRow", () => {
-    it("returns null for empty JSONB", () => {
-      expect(safeManifestFromRow({})).toBeNull();
-      expect(safeManifestFromRow(null)).toBeNull();
-    });
-
-    it("narrows a valid raw manifest", () => {
-      const m = safeManifestFromRow(validIntegrationManifest());
-      expect(m).not.toBeNull();
-      expect(m!.type).toBe("integration");
     });
   });
 });

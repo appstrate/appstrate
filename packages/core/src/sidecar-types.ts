@@ -82,6 +82,37 @@ export interface SidecarLaunchSpec {
  * `GET /internal/integration-bundle/:scope/:name` using the same
  * Bearer run-token as the credentials surface.
  */
+/**
+ * Per-auth HTTP injection plan embedded in {@link IntegrationSpawnSpec}.
+ * Extends the connect-side `HttpDeliveryPlan` shape with the two fields
+ * the sidecar needs but the proxy planner doesn't: which manifest URIs
+ * the auth is authorised for, and when the credential expires (for
+ * proactive refresh scheduling).
+ */
+export interface HttpDeliveryAuthSpec {
+  /** Auth type from the manifest (`oauth2` | `oauth1` | `api_key` | `basic` | `custom`). */
+  authType: string;
+  /** Header name to inject (e.g. `Authorization`). */
+  headerName: string;
+  /** Prefix prepended to the value (e.g. `"Bearer "`). May be empty. */
+  headerPrefix: string;
+  /** Rendered header value (already base64-encoded if the manifest declared it). */
+  value: string;
+  /** When `false` (default), the MITM proxy strips any caller-supplied header of the same name. */
+  allowServerOverride: boolean;
+  /**
+   * URI patterns this auth is authorised for — glob-style strings copied verbatim
+   * from `manifest.auths.{key}.authorizedUris`. The sidecar's planner uses these
+   * to decide which auth (if any) applies to each upstream request.
+   */
+  authorizedUris: readonly string[];
+  /**
+   * Epoch milliseconds the credential expires at. `null` when expiry is unknown
+   * (api_key, basic, custom) — sidecar refresh logic is skipped in that case.
+   */
+  expiresAtEpochMs: number | null;
+}
+
 export interface IntegrationSpawnSpec {
   /** Package id (e.g. `@appstrate/gmail-mcp`). */
   packageId: string;
@@ -119,37 +150,8 @@ export interface IntegrationSpawnSpec {
    * Sensitive (`value` carries the live OAuth access_token / API key);
    * never logged. Omitted when the integration has no `delivery.http`
    * auths — those integrations stay on the env-delivery-only path.
-   *
-   * Shape is structurally compatible with `HttpDeliveryPlan` from
-   * `@appstrate/connect` (core cannot import from connect, so the
-   * type is redeclared here as the wire-level boundary).
    */
-  httpDeliveryAuths?: Record<
-    string,
-    {
-      /** Auth type from the manifest (`oauth2` | `oauth1` | `api_key` | `basic` | `custom`). */
-      authType: string;
-      /** Header name to inject (e.g. `Authorization`). */
-      headerName: string;
-      /** Prefix prepended to the value (e.g. `"Bearer "`). May be empty. */
-      headerPrefix: string;
-      /** Rendered header value (already base64-encoded if the manifest declared it). */
-      value: string;
-      /** When `false` (default), the MITM proxy strips any caller-supplied header of the same name. */
-      allowServerOverride: boolean;
-      /**
-       * URI patterns this auth is authorised for — glob-style strings copied verbatim
-       * from `manifest.auths.{key}.authorizedUris`. The sidecar's planner uses these
-       * to decide which auth (if any) applies to each upstream request.
-       */
-      authorizedUris: readonly string[];
-      /**
-       * Epoch milliseconds the credential expires at. `null` when expiry is unknown
-       * (api_key, basic, custom) — sidecar refresh logic is skipped in that case.
-       */
-      expiresAtEpochMs: number | null;
-    }
-  >;
+  httpDeliveryAuths?: Record<string, HttpDeliveryAuthSpec>;
   /**
    * Niveau 2 Phase 3 — agent-declared MCP tool allowlist. When set, the
    * sidecar's `McpHost` filters `tools/list` to only expose these tools

@@ -33,35 +33,21 @@
  *     and integration paths).
  */
 
-import { randomBytes, createHash } from "node:crypto";
 import type { Actor, OAuthStateRecord, OAuthStateStore } from "./types.ts";
 import { OAuthCallbackError } from "./oauth.ts";
-import {
-  parseTokenResponse,
-  parseTokenErrorResponse,
-  buildTokenHeaders,
-  buildTokenBody,
-} from "./token-utils.ts";
-import { extractErrorMessage } from "./utils.ts";
+import { randomBase64Url, sha256Base64Url } from "./pkce.ts";
+import { exchangeAuthorizationCode } from "./token-exchange.ts";
 
 const OAUTH_STATE_TTL_SECONDS = 10 * 60;
 
-function randomBase64Url(byteLength: number): string {
-  return randomBytes(byteLength).toString("base64url");
-}
-
-function sha256Base64Url(input: string): string {
-  return createHash("sha256").update(input).digest("base64url");
-}
-
 /**
  * Provider identifier sentinel embedded in the {@link OAuthStateRecord}
- * for integration auth states. The legacy OAuth callback dispatcher in
+ * for integration auth states. The OAuth callback dispatcher in
  * `apps/api/src/routes/connections.ts` checks the `integration` field
  * first; this sentinel just makes the state record self-describing for
  * audit logging.
  */
-export function integrationProviderIdSentinel(packageId: string, authKey: string): string {
+function integrationProviderIdSentinel(packageId: string, authKey: string): string {
   return `__integration__:${packageId}:${authKey}`;
 }
 
@@ -225,87 +211,23 @@ export async function handleIntegrationOAuthCallback(
 
   const integration = stateRow.integration;
   const sentinel = integrationProviderIdSentinel(integration.packageId, integration.authKey);
-  const tokenAuthMethod = integration.tokenAuthMethod ?? "client_secret_post";
-  const useBasicAuth = tokenAuthMethod === "client_secret_basic";
-  const isPublicClient = tokenAuthMethod === "none";
 
-  const tokenParams: Record<string, string> = {
-    grant_type: "authorization_code",
+  const { parsed, raw: tokenData } = await exchangeAuthorizationCode({
+    tokenUrl: integration.tokenUrl,
+    clientId: integration.clientId ?? "",
+    clientSecret: integration.clientSecret ?? "",
+    tokenAuthMethod: integration.tokenAuthMethod ?? "client_secret_post",
+    codeVerifier: stateRow.codeVerifier,
+    redirectUri: stateRow.redirectUri,
     code,
-    redirect_uri: stateRow.redirectUri,
-    code_verifier: stateRow.codeVerifier,
+    scopesRequested: stateRow.scopesRequested,
     // RFC 8707 — re-bind on the token request even if we sent it on the
     // authorize URL; some IdPs only honour it here.
-    ...(integration.audience ? { resource: integration.audience } : {}),
-    ...(useBasicAuth || isPublicClient
-      ? {}
-      : {
-          client_id: integration.clientId ?? "",
-          client_secret: integration.clientSecret ?? "",
-        }),
-    // Public client still needs client_id in the body (no secret).
-    ...(isPublicClient ? { client_id: integration.clientId ?? "" } : {}),
-  };
-
-  const tokenBody = buildTokenBody(tokenParams);
-
-  let tokenResponse: Response;
-  try {
-    tokenResponse = await fetch(integration.tokenUrl, {
-      method: "POST",
-      headers: buildTokenHeaders(
-        useBasicAuth ? "client_secret_basic" : "client_secret_post",
-        integration.clientId ?? "",
-        integration.clientSecret ?? "",
-      ),
-      body: tokenBody,
-      signal: AbortSignal.timeout(30_000),
-    });
-  } catch (err) {
-    throw new OAuthCallbackError(
-      `Token exchange network error for '${sentinel}': ${extractErrorMessage(err)}`,
-      "transient",
-      sentinel,
-    );
-  }
-
-  if (!tokenResponse.ok) {
-    const body = await tokenResponse.text();
-    const classification = parseTokenErrorResponse(tokenResponse.status, body);
-    const summary =
-      classification.error !== undefined
-        ? `${classification.error}${classification.errorDescription ? ` — ${classification.errorDescription}` : ""}`
-        : `HTTP ${tokenResponse.status}`;
-    if (classification.kind === "revoked") {
-      try {
-        await store.delete(state);
-      } catch {
-        /* swallowed: stale row reaped by TTL */
-      }
-    }
-    throw new OAuthCallbackError(
-      `Token exchange failed for '${sentinel}': ${summary}`,
-      classification.kind,
-      sentinel,
-      tokenResponse.status,
-      body,
-      classification.error,
-      classification.errorDescription,
-    );
-  }
-
-  let tokenData: Record<string, unknown>;
-  try {
-    tokenData = (await tokenResponse.json()) as Record<string, unknown>;
-  } catch {
-    throw new OAuthCallbackError(
-      `Token exchange returned non-JSON response for '${sentinel}'`,
-      "transient",
-      sentinel,
-    );
-  }
-
-  const parsed = parseTokenResponse(tokenData, stateRow.scopesRequested);
+    ...(integration.audience ? { extraTokenParams: { resource: integration.audience } } : {}),
+    errorLabel: sentinel,
+    state,
+    store,
+  });
   await store.delete(state);
 
   const actor: Actor = stateRow.endUserId

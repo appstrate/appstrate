@@ -4,7 +4,6 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import {
   initiateIntegrationOAuth,
   handleIntegrationOAuthCallback,
-  integrationProviderIdSentinel,
   OAuthCallbackError,
   type OAuthStateRecord,
   type OAuthStateStore,
@@ -35,14 +34,6 @@ function withFetch<T>(impl: typeof fetch, fn: () => Promise<T>): Promise<T> {
     globalThis.fetch = orig;
   });
 }
-
-describe("integrationProviderIdSentinel", () => {
-  it("formats a stable, audit-readable provider id", () => {
-    expect(integrationProviderIdSentinel("@official/gmail", "primary")).toBe(
-      "__integration__:@official/gmail:primary",
-    );
-  });
-});
 
 describe("initiateIntegrationOAuth", () => {
   let store: ReturnType<typeof memoryStore>;

@@ -14,8 +14,7 @@
 
 import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { applicationPackages, packages, packageVersions } from "@appstrate/db/schema";
-import { asRecord } from "@appstrate/core/safe-json";
+import { packages } from "@appstrate/db/schema";
 import { integrationManifestSchema } from "@appstrate/core/integration";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
@@ -34,14 +33,6 @@ export interface IntegrationSummary {
   orgId: string | null;
   /** `"local"` for user-published, `"system"` for built-ins. */
   source: "local" | "system";
-}
-
-export interface IntegrationVersionRow {
-  versionId: number;
-  version: string;
-  integrity: string;
-  manifest: IntegrationManifest;
-  yanked: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -135,102 +126,4 @@ export async function listIntegrations(orgId: string): Promise<IntegrationSummar
     });
   }
   return out;
-}
-
-/**
- * Fetch a specific published version's manifest snapshot. Used by the
- * future runtime resolver to materialise an integration at a frozen
- * version (Phase 1.2a). For Phase 1.0, exposed so tests can assert
- * that bundle-import populated `packageVersions` correctly.
- */
-export async function getIntegrationVersion(
-  orgId: string,
-  packageId: string,
-  version: string,
-): Promise<IntegrationVersionRow | null> {
-  const [pkg] = await db
-    .select({ id: packages.id })
-    .from(packages)
-    .where(
-      and(orgOrSystemFilter(orgId), eq(packages.id, packageId), eq(packages.type, "integration")),
-    )
-    .limit(1);
-  if (!pkg) return null;
-
-  const [row] = await db
-    .select({
-      versionId: packageVersions.id,
-      version: packageVersions.version,
-      integrity: packageVersions.integrity,
-      manifest: packageVersions.manifest,
-      yanked: packageVersions.yanked,
-    })
-    .from(packageVersions)
-    .where(and(eq(packageVersions.packageId, packageId), eq(packageVersions.version, version)))
-    .limit(1);
-
-  if (!row) return null;
-  const manifest = asIntegrationManifest(row.manifest);
-  if (!manifest) return null;
-
-  return {
-    versionId: row.versionId,
-    version: row.version,
-    integrity: row.integrity,
-    manifest,
-    yanked: row.yanked,
-  };
-}
-
-/**
- * Check whether an integration is installed in an application. The
- * runtime resolver (Phase 1.2a) reads this same join to decide which
- * integrations to spawn for an agent run.
- */
-export async function isIntegrationInstalled(
-  applicationId: string,
-  packageId: string,
-): Promise<boolean> {
-  const [row] = await db
-    .select({ packageId: applicationPackages.packageId })
-    .from(applicationPackages)
-    .where(
-      and(
-        eq(applicationPackages.applicationId, applicationId),
-        eq(applicationPackages.packageId, packageId),
-      ),
-    )
-    .limit(1);
-  return row !== undefined;
-}
-
-// ---------------------------------------------------------------------------
-// Helpers exposed for tests / future routes
-// ---------------------------------------------------------------------------
-
-/**
- * Narrow a raw JSONB manifest into the validated integration manifest.
- * Exposed so route handlers can validate user-supplied manifests
- * without depending on the Zod schema directly.
- */
-export function parseIntegrationManifest(
-  raw: unknown,
-): { valid: true; manifest: IntegrationManifest } | { valid: false; errors: string[] } {
-  const parsed = integrationManifestSchema.safeParse(raw);
-  if (parsed.success) return { valid: true, manifest: parsed.data };
-  return {
-    valid: false,
-    errors: parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`),
-  };
-}
-
-/**
- * Lift a `draftManifest` JSONB blob into a stricter typed view. Returns
- * `null` on parse failure (silent, no throw) so callers can render a
- * graceful empty-state instead of a 500.
- */
-export function safeManifestFromRow(draftManifest: unknown): IntegrationManifest | null {
-  const obj = asRecord(draftManifest);
-  if (Object.keys(obj).length === 0) return null;
-  return asIntegrationManifest(obj);
 }

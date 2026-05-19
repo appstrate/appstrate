@@ -15,11 +15,7 @@ import { zipSync } from "fflate";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { handleImportBundle } from "../../../src/services/bundle-import.ts";
-import {
-  getIntegration,
-  getIntegrationVersion,
-  listIntegrations,
-} from "../../../src/services/integration-service.ts";
+import { getIntegration, listIntegrations } from "../../../src/services/integration-service.ts";
 import { packages, packageVersions } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
 
@@ -112,10 +108,6 @@ describe("handleImportBundle — integration packages", () => {
     const summary = await getIntegration(ctx.orgId, "@official/gmail");
     expect(summary).not.toBeNull();
     expect(summary!.manifest.displayName).toBe("Gmail");
-
-    const v = await getIntegrationVersion(ctx.orgId, "@official/gmail", "1.0.0");
-    expect(v).not.toBeNull();
-    expect(v!.manifest.server.type).toBe("node");
 
     const list = await listIntegrations(ctx.orgId);
     expect(list.length).toBe(1);

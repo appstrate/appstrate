@@ -5,9 +5,9 @@ import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { getItemId } from "./packages.ts";
 import { logger } from "../lib/logger.ts";
-import { escapeHtml } from "@appstrate/core/html";
 import { ApiError, forbidden, invalidRequest, internalError, parseBody } from "../lib/errors.ts";
 import { listResponse } from "../lib/list-response.ts";
+import { popupHtmlClose, popupHtmlError } from "../lib/oauth-popup-html.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import {
   listActorConnections,
@@ -210,9 +210,7 @@ export function createConnectionsRouter() {
     const error = c.req.query("error");
     if (error) {
       logger.warn("OAuth callback received error", { error });
-      return c.html(
-        `<html><body><p>OAuth error: ${escapeHtml(error)}</p><script>setTimeout(()=>window.close(),3000);</script></body></html>`,
-      );
+      return c.html(popupHtmlError(`OAuth error: ${error}`, 3000));
     }
 
     // OAuth1 callback: oauth_token + oauth_verifier
@@ -222,13 +220,11 @@ export function createConnectionsRouter() {
       try {
         await handleOAuth1CallbackAndSave(oauthToken, oauthVerifier);
         logger.info("OAuth1 callback success", { oauthToken });
-        return c.html(`<html><body><script>window.close();</script></body></html>`);
+        return c.html(popupHtmlClose());
       } catch (err) {
         const message = err instanceof Error ? err.message : "OAuth1 callback failed";
         logger.error("OAuth1 callback failed", { message });
-        return c.html(
-          `<html><body><p style="color:red;font-family:monospace;">Error: ${escapeHtml(message)}</p><script>setTimeout(()=>window.close(),5000);</script></body></html>`,
-        );
+        return c.html(popupHtmlError(`Error: ${message}`));
       }
     }
 
@@ -241,15 +237,13 @@ export function createConnectionsRouter() {
         hasState: !!state,
         hasOauthToken: !!oauthToken,
       });
-      return c.html(
-        `<html><body><p>Missing required parameters</p><script>setTimeout(()=>window.close(),3000);</script></body></html>`,
-      );
+      return c.html(popupHtmlError("Missing required parameters", 3000));
     }
 
     try {
       await handleCallback(code, state);
       logger.info("OAuth callback success", { state });
-      return c.html(`<html><body><script>window.close();</script></body></html>`);
+      return c.html(popupHtmlClose());
     } catch (err) {
       // Distinguish revocation from transient failure so the user gets a tailored
       // message instead of a raw provider error string. Revoked = restart the flow;
@@ -266,15 +260,11 @@ export function createConnectionsRouter() {
           oauthError: err.oauthError,
           oauthErrorDescription: err.oauthErrorDescription,
         });
-        return c.html(
-          `<html><body><p style="color:red;font-family:monospace;">${escapeHtml(userMessage)}</p><script>setTimeout(()=>window.close(),5000);</script></body></html>`,
-        );
+        return c.html(popupHtmlError(userMessage));
       }
       const message = err instanceof Error ? err.message : "OAuth callback failed";
       logger.error("OAuth callback failed", { message });
-      return c.html(
-        `<html><body><p style="color:red;font-family:monospace;">Error: ${escapeHtml(message)}</p><script>setTimeout(()=>window.close(),5000);</script></body></html>`,
-      );
+      return c.html(popupHtmlError(`Error: ${message}`));
     }
   });
 

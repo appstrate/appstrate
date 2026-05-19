@@ -11,149 +11,31 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
+import type {
+  IntegrationConnection,
+  IntegrationDetail,
+  IntegrationOAuthClient,
+  IntegrationRequiredScopes,
+  IntegrationSummary,
+} from "@appstrate/shared-types";
 import { api, apiList, type ListEnvelope } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
 
-// ─────────────────────────────────────────────
-// Types (mirror the backend OpenAPI shapes)
-// ─────────────────────────────────────────────
-
-export interface IntegrationSummary {
-  id: string;
-  manifest: IntegrationManifestView;
-  orgId: string | null;
-  source: "local" | "system";
-  installed?: boolean;
-}
-
-export interface IntegrationManifestView {
-  name: string;
-  version: string;
-  displayName: string;
-  description?: string;
-  license?: string;
-  author?: string | { name: string; email?: string; url?: string };
-  repository?: string | { type: string; url: string };
-  privacyPolicy?: string;
-  keywords?: string[];
-  icon?: string;
-  compatibility?: { afps?: string; mcp?: string };
-  server: {
-    type: string;
-    entryPoint?: string;
-    url?: string;
-    toolsDynamic?: boolean;
-  };
-  transport?: { type: "stdio" | "streamable-http" | "sse" };
-  auths?: Record<string, IntegrationManifestAuth>;
-  /**
-   * Niveau 2 (Phase 0) — per-tool scope + URL pattern metadata. Optional;
-   * integrations that omit this block keep legacy "all tools allowed"
-   * semantics. The agent editor reads this to render the tool picker.
-   */
-  tools?: Record<string, IntegrationManifestTool>;
-}
-
-export interface IntegrationManifestTool {
-  requiredScopes?: string[];
-  requiredAuthKey?: string;
-  urlPatterns?: Array<{ pattern: string; methods?: string[] }>;
-}
-
-export interface IntegrationManifestAuth {
-  type: "oauth2" | "oauth1" | "api_key" | "basic" | "custom";
-  required?: boolean;
-  authorizationUrl?: string;
-  tokenUrl?: string;
-  scopes?: string[];
-  audience?: string;
-  authorizedUris: string[];
-  credentials?: {
-    schema: Record<string, unknown>;
-  };
-  tokenAuthMethod?: "client_secret_post" | "client_secret_basic" | "none";
-  delivery: Record<string, unknown>;
-  /**
-   * Niveau 2 (Phase 0) — IdP-side scope catalog. Optional; when set, the
-   * UI uses {value, label, description?} to render human-readable scope
-   * pickers instead of raw scope strings. Defaults `scopes[]` and agent
-   * `requiredScopes` must be subsets of this catalog.
-   */
-  availableScopes?: Array<{ value: string; label: string; description?: string }>;
-}
-
-export interface IntegrationConnection {
-  id: string;
-  packageId: string;
-  authKey: string;
-  accountId: string;
-  identityClaims: Record<string, unknown> | null;
-  scopesGranted: string[];
-  needsReconnection: boolean;
-  expiresAt: string | null;
-  ownerType: "user" | "end_user";
-  ownerId: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface IntegrationAuthStatus {
-  authKey: string;
-  type: IntegrationManifestAuth["type"];
-  required: boolean;
-  scopes: string[];
-  audience: string | null;
-  connections: IntegrationConnection[];
-  hasOAuthClient: boolean;
-}
-
-export interface IntegrationDetail {
-  manifest: IntegrationManifestView;
-  auths: IntegrationAuthStatus[];
-}
-
-/**
- * Niveau 2 Phase 5 — wire shape for
- * `GET /api/integrations/:packageId/auths/:authKey/required-scopes`.
- *
- *  - `defaults` — manifest defaults for this auth.
- *  - `required` — union of `requiredScopes` across every installed agent
- *    that depends on this integration (filtered by `requiredAuthKey` for
- *    multi-auth integrations).
- *  - `granted` — actor's current high-water-mark across all their
- *    connections on this integration auth.
- *  - `union` — `defaults ∪ required ∪ granted` — what the OAuth kickoff
- *    will actually request (incremental consent).
- *  - `missingFromGranted` — scopes that the union demands but the actor
- *    hasn't granted yet → drives the "Reconnect to grant new
- *    permissions" CTA.
- *  - `breakdown` — per-agent decomposition for the audit / "why is this
- *    permission required?" surface.
- */
-export interface IntegrationRequiredScopes {
-  defaults: string[];
-  required: string[];
-  granted: string[];
-  union: string[];
-  missingFromGranted: string[];
-  breakdown: Array<{
-    agentId: string;
-    viaTools: string[];
-    viaExplicit: string[];
-  }>;
-}
-
-export interface IntegrationOAuthClient {
-  applicationId: string;
-  integrationPackageId: string;
-  authKey: string;
-  clientId: string;
-  hasClientSecret: boolean;
-  redirectUri: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
+// Re-export wire types for component consumers — canonical definitions
+// live in `@appstrate/shared-types/integrations.ts`.
+export type {
+  IntegrationAuthStatus,
+  IntegrationAuthType,
+  IntegrationConnection,
+  IntegrationDetail,
+  IntegrationManifestAuth,
+  IntegrationManifestTool,
+  IntegrationManifestView,
+  IntegrationOAuthClient,
+  IntegrationRequiredScopes,
+  IntegrationSummary,
+} from "@appstrate/shared-types";
 
 // ─────────────────────────────────────────────
 // Hooks

@@ -27,7 +27,6 @@ import { z } from "zod";
 import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { applicationPackages, packages } from "@appstrate/db/schema";
-import { escapeHtml } from "@appstrate/core/html";
 import { getEnv } from "@appstrate/env";
 import {
   initiateIntegrationOAuth,
@@ -46,6 +45,7 @@ import {
   parseBody,
 } from "../lib/errors.ts";
 import { listResponse } from "../lib/list-response.ts";
+import { popupHtmlClose, popupHtmlError } from "../lib/oauth-popup-html.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getActor } from "../lib/actor.ts";
 import { getAppScope } from "../lib/scope.ts";
@@ -78,14 +78,6 @@ import { oauthStateStore } from "../services/connection-manager/oauth-state-stor
 
 function getOAuthCallbackUrl(): string {
   return `${getEnv().APP_URL}/api/integrations/callback`;
-}
-
-function popupHtmlClose(): string {
-  return `<html><body><script>window.close();</script></body></html>`;
-}
-
-function popupHtmlError(msg: string, ttlMs = 5000): string {
-  return `<html><body><p style="color:red;font-family:monospace;">${escapeHtml(msg)}</p><script>setTimeout(()=>window.close(),${ttlMs});</script></body></html>`;
 }
 
 // ─────────────────────────────────────────────

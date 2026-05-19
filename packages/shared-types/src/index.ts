@@ -4,6 +4,18 @@ import { z } from "zod";
 import type { ModelCost } from "@appstrate/core/module";
 
 export type { WebhookInfo, WebhookCreateResponse, WebhookDelivery } from "./webhooks.ts";
+export type {
+  IntegrationAuthStatus,
+  IntegrationAuthType,
+  IntegrationConnection,
+  IntegrationDetail,
+  IntegrationManifestAuth,
+  IntegrationManifestTool,
+  IntegrationManifestView,
+  IntegrationOAuthClient,
+  IntegrationRequiredScopes,
+  IntegrationSummary,
+} from "./integrations.ts";
 
 export type { UserProfile, RunLog, ConnectionProfile } from "@appstrate/db/schema";
 import type {

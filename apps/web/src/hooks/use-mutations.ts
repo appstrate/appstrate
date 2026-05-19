@@ -8,8 +8,7 @@ import { api, apiFetch, ApiError, buildQs, uploadFormData } from "../api";
 import { PACKAGE_CONFIG, type PackageType } from "./use-packages";
 import { packageDetailPath } from "../lib/package-paths";
 import { invalidateConnectionRelated } from "./invalidation";
-
-const OAUTH_TIMEOUT_MS = 5 * 60 * 1000;
+import { useOAuthPopup } from "./use-oauth-popup";
 
 export function onMutationError(err: Error) {
   // Skip the generic toast for missing_integration_connection (412) —
@@ -68,6 +67,7 @@ export function useRunAgent(packageId: string) {
 
 export function useConnect() {
   const qc = useQueryClient();
+  const openOAuthPopup = useOAuthPopup("oauth");
   return useMutation({
     mutationFn: async (
       params: string | { provider: string; scopes?: string[]; connectionProfileId?: string },
@@ -81,27 +81,22 @@ export function useConnect() {
       if (scopes) body.scopes = scopes;
       if (connectionProfileId) body.connectionProfileId = connectionProfileId;
 
-      const session = await apiFetch<{ authUrl: string }>(`/api/connections/connect/${provider}`, {
-        method: "POST",
-        body: JSON.stringify(body),
-      });
-      const popup = window.open(session.authUrl, "oauth", "width=600,height=700");
-      if (!popup) {
-        throw new Error(i18n.t("error.popupBlocked"));
+      try {
+        await openOAuthPopup(() =>
+          apiFetch<{ authUrl: string }>(`/api/connections/connect/${provider}`, {
+            method: "POST",
+            body: JSON.stringify(body),
+          }),
+        );
+      } catch (err) {
+        if (err instanceof Error && err.message === "popup_blocked") {
+          throw new Error(i18n.t("error.popupBlocked"));
+        }
+        if (err instanceof Error && err.message === "oauth_timeout") {
+          throw new Error(i18n.t("error.oauthTimeout"));
+        }
+        throw err;
       }
-      return new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          clearInterval(interval);
-          reject(new Error(i18n.t("error.oauthTimeout")));
-        }, OAUTH_TIMEOUT_MS);
-        const interval = setInterval(() => {
-          if (popup.closed) {
-            clearInterval(interval);
-            clearTimeout(timeout);
-            resolve();
-          }
-        }, 500);
-      });
     },
     onSuccess: () => {
       invalidateConnectionRelated(qc);

@@ -21,12 +21,7 @@
 
 import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import {
-  applicationPackages,
-  integrationConnections,
-  integrationOauthClients,
-  packages,
-} from "@appstrate/db/schema";
+import { integrationConnections, integrationOauthClients, packages } from "@appstrate/db/schema";
 import {
   RefreshError,
   decryptCredentials,
@@ -45,6 +40,7 @@ import {
   forceRefreshIntegrationConnection,
   type IntegrationRefreshContext,
 } from "./integration-token-refresh.ts";
+import { assertIntegrationInstalled, loadActorConnection } from "./integration-connections.ts";
 import { computeRequiredScopes } from "./integration-scope-resolver.ts";
 
 export interface LiveIntegrationCredentialsResult {
@@ -91,7 +87,7 @@ export async function resolveLiveIntegrationCredentials(
   }
 
   const manifest = await loadIntegrationManifest(packageId);
-  await assertInstalledInApplication(packageId, context.applicationId);
+  await assertIntegrationInstalled(packageId, context.applicationId);
 
   const auths = manifest.auths ?? {};
   if (Object.keys(auths).length === 0) {
@@ -109,7 +105,7 @@ export async function resolveLiveIntegrationCredentials(
     // matches the resolveIntegrationCredentials behaviour (the caller
     // gets a partial payload and the MITM planner refuses requests on
     // unauthorised URLs without crashing the integration).
-    const connection = await loadConnection(packageId, authKey, {
+    const connection = await loadActorConnection(packageId, authKey, {
       applicationId: context.applicationId,
       actor: context.actor,
     });
@@ -261,57 +257,6 @@ async function loadIntegrationManifest(packageId: string): Promise<IntegrationMa
     throw internalError();
   }
   return parsed.data;
-}
-
-async function assertInstalledInApplication(
-  packageId: string,
-  applicationId: string,
-): Promise<void> {
-  const [row] = await db
-    .select({ packageId: applicationPackages.packageId })
-    .from(applicationPackages)
-    .where(
-      and(
-        eq(applicationPackages.applicationId, applicationId),
-        eq(applicationPackages.packageId, packageId),
-      ),
-    )
-    .limit(1);
-  if (!row) throw notFound(`Integration '${packageId}' is not installed in this application`);
-}
-
-async function loadConnection(
-  packageId: string,
-  authKey: string,
-  context: { applicationId: string; actor: Actor },
-): Promise<{
-  id: string;
-  credentialsEncrypted: string;
-  expiresAt: Date | null;
-  scopesGranted: string[];
-} | null> {
-  const ownerPredicate =
-    context.actor.type === "user"
-      ? eq(integrationConnections.userId, context.actor.id)
-      : eq(integrationConnections.endUserId, context.actor.id);
-  const [row] = await db
-    .select({
-      id: integrationConnections.id,
-      credentialsEncrypted: integrationConnections.credentialsEncrypted,
-      expiresAt: integrationConnections.expiresAt,
-      scopesGranted: integrationConnections.scopesGranted,
-    })
-    .from(integrationConnections)
-    .where(
-      and(
-        eq(integrationConnections.integrationPackageId, packageId),
-        eq(integrationConnections.authKey, authKey),
-        eq(integrationConnections.applicationId, context.applicationId),
-        ownerPredicate,
-      ),
-    )
-    .limit(1);
-  return row ?? null;
 }
 
 function decryptToStringMap(

@@ -98,15 +98,17 @@ export type {
 } from "./integration-credentials.ts";
 
 // CA cert planner for the HTTPS credential proxy (§5.4.1).
-export { bundleToFsWrites, makeGeneratorIdentity, planCaBundle } from "./proxy-ca-planner.ts";
+export { planCaBundle } from "./proxy-ca-planner.ts";
 export type {
   CaBundle,
   CaGenerationOutput,
   CaGenerationRequest,
   CertGenerator,
-  FsWriteEntry,
   PlanCaBundleOptions,
 } from "./proxy-ca-planner.ts";
+
+// Shared OAuth token-refresh request shape (consumed by integration-side refresh too).
+export type { RefreshContext } from "./token-refresh.ts";
 
 // Pure MITM action planner — drives the per-integration HTTPS proxy
 // listener (§4.1.4 strip/inject/retry logic).
@@ -116,11 +118,7 @@ export type { MitmAction, MitmRequestContext } from "./integration-mitm-planner.
 // Phase 1.3 — OAuth2 user-facing connect flow for integration auths
 // (used by the marketplace UI; mirrors `./oauth.ts` but parameterised
 // by manifest endpoints + admin-registered client credentials).
-export {
-  initiateIntegrationOAuth,
-  handleIntegrationOAuthCallback,
-  integrationProviderIdSentinel,
-} from "./integration-oauth.ts";
+export { initiateIntegrationOAuth, handleIntegrationOAuthCallback } from "./integration-oauth.ts";
 export type {
   InitiateIntegrationOAuthInput,
   InitiateIntegrationOAuthResult,

@@ -30,6 +30,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
+  applicationPackages,
   integrationConnections,
   integrationOauthClients,
   applications,
@@ -47,36 +48,17 @@ import { getIntegration } from "./integration-service.ts";
 // Types
 // ─────────────────────────────────────────────
 
-export type IntegrationAuthType = "oauth2" | "oauth1" | "api_key" | "basic" | "custom";
+export type {
+  IntegrationAuthStatus,
+  IntegrationAuthType,
+  IntegrationConnection as IntegrationConnectionSummary,
+  IntegrationOAuthClient,
+} from "@appstrate/shared-types";
 
-export interface IntegrationConnectionSummary {
-  id: string;
-  packageId: string;
-  authKey: string;
-  /** Multi-account discriminator extracted at connect time. */
-  accountId: string;
-  /** Identity claims surfaced for the UI (e.g. `account_email`). */
-  identityClaims: Record<string, unknown> | null;
-  scopesGranted: string[];
-  needsReconnection: boolean;
-  expiresAt: string | null;
-  ownerType: "user" | "end_user";
-  ownerId: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface IntegrationOAuthClient {
-  applicationId: string;
-  integrationPackageId: string;
-  authKey: string;
-  clientId: string;
-  /** True when the client_secret blob is non-empty (private client). */
-  hasClientSecret: boolean;
-  redirectUri: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
+import type {
+  IntegrationConnection as IntegrationConnectionSummary,
+  IntegrationOAuthClient,
+} from "@appstrate/shared-types";
 
 /**
  * Internal — full record incl. decrypted `clientSecret`. Used by the
@@ -128,6 +110,89 @@ async function loadManifestOrThrow(
     throw notFound(`Integration '${packageId}' not found in this organization`);
   }
   return summary.manifest;
+}
+
+// ─────────────────────────────────────────────
+// Cross-service helpers (shared with the credentials + spawn resolvers)
+// ─────────────────────────────────────────────
+
+/**
+ * The shape every credential/spawn resolver needs out of a connection
+ * row. `id` is included so the credentials resolver can write back to the
+ * row when refreshing tokens.
+ */
+export interface ActorConnectionRow {
+  id: string;
+  credentialsEncrypted: string;
+  expiresAt: Date | null;
+  scopesGranted: string[];
+}
+
+/**
+ * Lookup the actor's `integration_connections` row for `(packageId, authKey)`
+ * scoped to `applicationId`. Returns `null` when the actor has not connected
+ * this auth yet — callers decide whether that is a 404, a silent skip, or a
+ * 412 envelope.
+ */
+export async function loadActorConnection(
+  packageId: string,
+  authKey: string,
+  context: { applicationId: string; actor: Actor },
+): Promise<ActorConnectionRow | null> {
+  const ownerPredicate =
+    context.actor.type === "user"
+      ? eq(integrationConnections.userId, context.actor.id)
+      : eq(integrationConnections.endUserId, context.actor.id);
+  const [row] = await db
+    .select({
+      id: integrationConnections.id,
+      credentialsEncrypted: integrationConnections.credentialsEncrypted,
+      expiresAt: integrationConnections.expiresAt,
+      scopesGranted: integrationConnections.scopesGranted,
+    })
+    .from(integrationConnections)
+    .where(
+      and(
+        eq(integrationConnections.integrationPackageId, packageId),
+        eq(integrationConnections.authKey, authKey),
+        eq(integrationConnections.applicationId, context.applicationId),
+        ownerPredicate,
+      ),
+    )
+    .limit(1);
+  return row ?? null;
+}
+
+/**
+ * `true` when the integration is recorded in `application_packages` for the
+ * given app. Use {@link assertIntegrationInstalled} when the caller needs a
+ * structured 404 instead of a boolean.
+ */
+export async function isIntegrationInstalled(
+  packageId: string,
+  applicationId: string,
+): Promise<boolean> {
+  const [row] = await db
+    .select({ packageId: applicationPackages.packageId })
+    .from(applicationPackages)
+    .where(
+      and(
+        eq(applicationPackages.applicationId, applicationId),
+        eq(applicationPackages.packageId, packageId),
+      ),
+    )
+    .limit(1);
+  return row !== undefined;
+}
+
+/** Throw `notFound` unless the integration is installed in the application. */
+export async function assertIntegrationInstalled(
+  packageId: string,
+  applicationId: string,
+): Promise<void> {
+  if (!(await isIntegrationInstalled(packageId, applicationId))) {
+    throw notFound(`Integration '${packageId}' is not installed in this application`);
+  }
 }
 
 // ─────────────────────────────────────────────
@@ -552,18 +617,7 @@ export async function connectIntegrationWithFields(
 // Aggregate views for the marketplace UI
 // ─────────────────────────────────────────────
 
-export interface IntegrationAuthStatus {
-  authKey: string;
-  type: IntegrationAuthType;
-  required: boolean;
-  /** Scopes declared in the manifest (the ones the connect button requests). */
-  scopes: string[];
-  audience: string | null;
-  /** Connections the calling actor has for this auth (multi-account = >1). */
-  connections: IntegrationConnectionSummary[];
-  /** True when this auth has an admin-registered OAuth2 client (oauth2 only). */
-  hasOAuthClient: boolean;
-}
+import type { IntegrationAuthStatus } from "@appstrate/shared-types";
 
 /**
  * Marketplace "detail" view — manifest + per-auth status for the calling

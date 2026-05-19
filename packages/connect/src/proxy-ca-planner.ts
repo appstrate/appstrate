@@ -26,8 +26,6 @@
  *   exposes a `requiresAki: true` flag the generator can assert on.
  */
 
-import { isValidVersion } from "@appstrate/core/semver";
-
 // ─────────────────────────────────────────────
 // Public types
 // ─────────────────────────────────────────────
@@ -158,27 +156,6 @@ export async function planCaBundle(options: PlanCaBundleOptions): Promise<CaBund
 // same tmpfs structure deterministically.
 // ─────────────────────────────────────────────
 
-export interface FsWriteEntry {
-  path: string;
-  /** UTF-8 content (PEM). */
-  content: string;
-  /** 4-digit octal mode string. */
-  mode: string;
-}
-
-/** Flatten the bundle into a series of fs.write operations the sidecar replays. */
-export function bundleToFsWrites(bundle: CaBundle): FsWriteEntry[] {
-  return [
-    { path: bundle.caCertPath, content: bundle.pems.caCertPem, mode: bundle.modes.caCert },
-    {
-      path: bundle.serverCertPath,
-      content: bundle.pems.serverCertPem,
-      mode: bundle.modes.serverCert,
-    },
-    { path: bundle.serverKeyPath, content: bundle.pems.serverKeyPem, mode: bundle.modes.serverKey },
-  ];
-}
-
 // ─────────────────────────────────────────────
 // Internals
 // ─────────────────────────────────────────────
@@ -190,17 +167,4 @@ function assertPem(value: string, fieldName: string, kind: string): void {
   if (!value.includes(`-----BEGIN ${kind}-----`)) {
     throw new Error(`planCaBundle: ${fieldName} is missing the '-----BEGIN ${kind}-----' marker`);
   }
-}
-
-/**
- * Public helper for cert-generator implementations to advertise an
- * implementation tag (e.g. `"openssl-3.5.0"`, `"node-forge-1.3.1"`)
- * the platform records in audit logs. Validated against semver to
- * keep parsing simple.
- */
-export function makeGeneratorIdentity(tool: string, version: string): string {
-  if (!isValidVersion(version)) {
-    throw new Error(`makeGeneratorIdentity: '${version}' is not a valid semver`);
-  }
-  return `${tool}-${version}`;
 }

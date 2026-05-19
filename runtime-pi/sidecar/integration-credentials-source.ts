@@ -24,30 +24,19 @@
 import type {
   HttpDeliveryPlan,
   IntegrationCredentialsPayload,
+  ResolvedAuthCredentials,
 } from "@appstrate/connect/integrations";
 import type { MitmCredentialSource } from "./integration-mitm-listener.ts";
 import { logger } from "./logger.ts";
 
 /**
- * Wire-level payload returned by both endpoints. Mirrors
- * `LiveIntegrationCredentialsResult` in
- * `apps/api/src/services/integration-credentials-resolver.ts`.
- *
- * Defined here as a structural type rather than re-imported — the
- * sidecar deliberately doesn't take a build-time dep on apps/api, and
- * the platform type lives behind a workspace boundary the sidecar
- * doesn't cross.
+ * Wire-level payload returned by both endpoints. The `auths[]` shape is
+ * exactly the `IntegrationCredentialsPayload` the MITM planner consumes
+ * — `deliveryPlans` and `expiresAtEpochMs` are sibling maps the sidecar
+ * needs but the planner doesn't.
  */
 export interface IntegrationCredentialsWire {
-  auths: ReadonlyArray<{
-    authKey: string;
-    authType: string;
-    fields: Readonly<Record<string, string>>;
-    authorizedUris: readonly string[];
-    audience?: string;
-    expiresAt?: string;
-    scopesGranted?: readonly string[];
-  }>;
+  auths: ReadonlyArray<ResolvedAuthCredentials>;
   deliveryPlans: Readonly<Record<string, HttpDeliveryPlan>>;
   expiresAtEpochMs: Readonly<Record<string, number | null>>;
 }
@@ -94,15 +83,7 @@ export function createIntegrationCredentialsSource(
   const inflight = new Map<string, Promise<boolean>>();
 
   const current = (): IntegrationCredentialsPayload => ({
-    auths: payload.auths.map((a) => ({
-      authKey: a.authKey,
-      authType: a.authType,
-      fields: a.fields,
-      authorizedUris: a.authorizedUris,
-      ...(a.audience !== undefined ? { audience: a.audience } : {}),
-      ...(a.expiresAt !== undefined ? { expiresAt: a.expiresAt } : {}),
-      ...(a.scopesGranted !== undefined ? { scopesGranted: a.scopesGranted } : {}),
-    })),
+    auths: [...payload.auths],
   });
 
   const deliveryPlans = () => payload.deliveryPlans;

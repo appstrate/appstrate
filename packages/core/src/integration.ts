@@ -18,6 +18,7 @@
 
 import { z } from "zod";
 import { SLUG_PATTERN } from "./naming.ts";
+import type { ManifestIntegrationEntry } from "./dependencies.ts";
 
 // Local copy to avoid a circular import with `./validation.ts`.
 // Equivalent to `scopedNameRegex` exported from validation.ts.
@@ -672,21 +673,6 @@ export function getAvailableScopes(manifest: IntegrationManifest): readonly stri
   return [...out];
 }
 
-/**
- * Shape of an agent's `dependencies.integrations[id]` entry once it has
- * been normalised through `parseManifestIntegrations` in `dependencies.ts`.
- * Duplicated here (rather than imported) to keep `integration.ts`
- * dependency-free at runtime.
- */
-export interface AgentIntegrationDepSelection {
-  /** Fully-scoped integration package id (`@scope/name`) — used in error paths. */
-  readonly id: string;
-  /** MCP tool allowlist declared by the agent (Phase 3 enforcement). */
-  readonly tools?: readonly string[];
-  /** Manual OAuth-scope escape hatch (unioned with the inferred set in Phase 2). */
-  readonly scopes?: readonly string[];
-}
-
 /** Structured validation error returned by {@link validateAgentIntegrationScopes}. */
 export interface AgentIntegrationScopeError {
   /** Dotted JSON path into the agent manifest (`dependencies.integrations.<id>.<field>`). */
@@ -713,7 +699,7 @@ export interface AgentIntegrationScopeError {
  * the integration manifest from the DB before calling it.
  */
 export function validateAgentIntegrationScopes(
-  selection: AgentIntegrationDepSelection,
+  selection: Pick<ManifestIntegrationEntry, "id" | "tools" | "scopes">,
   integrationManifest: IntegrationManifest,
 ): AgentIntegrationScopeError[] {
   const errors: AgentIntegrationScopeError[] = [];

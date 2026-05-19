@@ -2,12 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import {
-  bundleToFsWrites,
-  makeGeneratorIdentity,
-  planCaBundle,
-  type CertGenerator,
-} from "../src/proxy-ca-planner.ts";
+import { planCaBundle, type CertGenerator } from "../src/proxy-ca-planner.ts";
 
 const FAKE_PEM = (kind: "CERTIFICATE" | "PRIVATE KEY") =>
   `-----BEGIN ${kind}-----\nMIIBkTCCATegAwIB...\n-----END ${kind}-----\n`;
@@ -99,29 +94,6 @@ describe("planCaBundle", () => {
         }),
       }),
     );
-  });
-});
-
-describe("bundleToFsWrites", () => {
-  it("emits 3 entries in CA→serverCert→serverKey order with the right modes", async () => {
-    const bundle = await planCaBundle({ runId: "r", generator: okGenerator });
-    const writes = bundleToFsWrites(bundle);
-    expect(writes.length).toBe(3);
-    expect(writes[0]!.path).toBe("/run/afps/ca.pem");
-    expect(writes[0]!.mode).toBe("0444");
-    expect(writes[1]!.path).toBe("/run/afps/server.crt");
-    expect(writes[1]!.mode).toBe("0400");
-    expect(writes[2]!.path).toBe("/run/afps/server.key");
-    expect(writes[2]!.mode).toBe("0400");
-  });
-});
-
-describe("makeGeneratorIdentity", () => {
-  it("accepts a valid semver", () => {
-    expect(makeGeneratorIdentity("openssl", "3.5.0")).toBe("openssl-3.5.0");
-  });
-  it("rejects a non-semver version", () => {
-    expect(() => makeGeneratorIdentity("openssl", "3.5")).toThrow(/valid semver/);
   });
 });
 

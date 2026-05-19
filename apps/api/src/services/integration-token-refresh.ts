@@ -27,17 +27,9 @@ import {
   encryptCredentials,
   decryptCredentials,
 } from "@appstrate/connect";
-import type { OAuthTokenAuthMethod, OAuthTokenContentType } from "@appstrate/core/validation";
+import type { RefreshContext as IntegrationRefreshContext } from "@appstrate/connect";
 
-/** Same shape as `RefreshContext` in `@appstrate/connect/token-refresh`. */
-export interface IntegrationRefreshContext {
-  tokenUrl: string;
-  clientId: string;
-  clientSecret: string;
-  tokenAuthMethod?: OAuthTokenAuthMethod;
-  scopeSeparator?: string;
-  tokenContentType?: OAuthTokenContentType;
-}
+export type { IntegrationRefreshContext };
 
 export interface IntegrationRefreshResult {
   /** Decrypted credentials (snake_case + camelCase aliases). */

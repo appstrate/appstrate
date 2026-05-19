@@ -107,10 +107,6 @@ export function registerIntegrationRuntimeAdapter(entry: IntegrationRuntimeAdapt
   REGISTRY.sort((a, b) => b.priority - a.priority);
 }
 
-export function registeredAdapterIds(): readonly string[] {
-  return REGISTRY.map((e) => e.id);
-}
-
 /**
  * Pick the adapter for this sidecar process. When
  * `INTEGRATION_RUNTIME_ADAPTER` is set, that id MUST exist in the

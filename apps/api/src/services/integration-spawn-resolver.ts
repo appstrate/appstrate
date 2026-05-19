@@ -26,9 +26,9 @@
  * gives the operator two-sided diagnosis.
  */
 
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { applicationPackages, integrationConnections, packages } from "@appstrate/db/schema";
+import { packages } from "@appstrate/db/schema";
 import { decryptCredentials, readCredentialField, resolveHttpDelivery } from "@appstrate/connect";
 import { getToolUrlPatterns, integrationManifestSchema } from "@appstrate/core/integration";
 import type { IntegrationManifest } from "@appstrate/core/integration";
@@ -37,6 +37,7 @@ import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 
 import { logger } from "../lib/logger.ts";
 import type { Actor } from "../lib/actor.ts";
+import { isIntegrationInstalled, loadActorConnection } from "./integration-connections.ts";
 
 export interface ResolveIntegrationsInput {
   applicationId: string;
@@ -129,17 +130,7 @@ async function resolveOne(
   const manifest = manifestParse.data;
 
   // (b) Installed in the application
-  const [installRow] = await db
-    .select({ packageId: applicationPackages.packageId })
-    .from(applicationPackages)
-    .where(
-      and(
-        eq(applicationPackages.applicationId, applicationId),
-        eq(applicationPackages.packageId, packageId),
-      ),
-    )
-    .limit(1);
-  if (!installRow) {
+  if (!(await isIntegrationInstalled(packageId, applicationId))) {
     logger.info("integration not installed in application; skipping", { packageId, applicationId });
     return null;
   }
@@ -306,26 +297,7 @@ async function resolveDeliveries(
   let resolvedAtLeastOne = false;
 
   for (const [authKey, auth] of Object.entries(auths)) {
-    const ownerPredicate =
-      actor.type === "user"
-        ? eq(integrationConnections.userId, actor.id)
-        : eq(integrationConnections.endUserId, actor.id);
-
-    const [row] = await db
-      .select({
-        credentialsEncrypted: integrationConnections.credentialsEncrypted,
-        expiresAt: integrationConnections.expiresAt,
-      })
-      .from(integrationConnections)
-      .where(
-        and(
-          eq(integrationConnections.integrationPackageId, packageId),
-          eq(integrationConnections.authKey, authKey),
-          eq(integrationConnections.applicationId, applicationId),
-          ownerPredicate,
-        ),
-      )
-      .limit(1);
+    const row = await loadActorConnection(packageId, authKey, { applicationId, actor });
     if (!row) {
       logger.info("no connection for integration auth; skipping delivery entries", {
         packageId,
@@ -358,7 +330,7 @@ async function resolveDeliveries(
     const envMap = auth.delivery?.env;
     if (envMap && Object.keys(envMap).length > 0) {
       for (const [envKey, conf] of Object.entries(envMap)) {
-        const value = readCredentialFieldFromRecord(fields, conf.from);
+        const value = readCredentialField(fields, conf.from);
         if (value === undefined || value.length === 0) {
           logger.info("delivery.env source field missing on credentials", {
             packageId,
@@ -385,11 +357,8 @@ async function resolveDeliveries(
         });
       } else {
         httpDeliveryAuths[authKey] = {
+          ...plan,
           authType: auth.type,
-          headerName: plan.headerName,
-          headerPrefix: plan.headerPrefix,
-          value: plan.value,
-          allowServerOverride: plan.allowServerOverride,
           authorizedUris: [...auth.authorizedUris],
           expiresAtEpochMs: row.expiresAt ? row.expiresAt.getTime() : null,
         };
@@ -403,17 +372,4 @@ async function resolveDeliveries(
     spawnEnv,
     ...(Object.keys(httpDeliveryAuths).length > 0 ? { httpDeliveryAuths } : {}),
   };
-}
-
-/**
- * Local wrapper around `readCredentialField` that takes the already-narrowed
- * `Record<string, string>` rather than the loose `Record<string, unknown>`
- * the decrypted blob produces. Keeps the alias-aware lookup (camelCase ↔
- * snake_case) without re-implementing it.
- */
-function readCredentialFieldFromRecord(
-  fields: Record<string, string>,
-  name: string,
-): string | undefined {
-  return readCredentialField(fields, name);
 }

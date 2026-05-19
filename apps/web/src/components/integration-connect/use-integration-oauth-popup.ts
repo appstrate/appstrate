@@ -3,71 +3,43 @@
 import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useInitiateIntegrationOAuth } from "../../hooks/use-integrations";
-
-const OAUTH_POPUP_TIMEOUT_MS = 5 * 60_000;
+import { useOAuthPopup } from "../../hooks/use-oauth-popup";
 
 /**
- * Shared OAuth-popup driver for integration connect/upgrade flows.
+ * Integration-side wrapper around the generic OAuth popup driver.
  *
- * Originally inlined in `pages/integration-detail.tsx`. Lifted so the
- * agent-side connect surfaces (`AgentIntegrationsBlock`,
- * `MissingConnectionsModal`) can trigger the same flow without
- * navigating away — connections are conceptually owned by the
- * (integration, auth, account, actor) tuple but the *trigger* is
- * agent-driven (scope union depends on which agent's tools[] the
- * actor is about to run).
- *
- * `scopes` is passed through to `/api/integrations/.../connect/oauth2`
- * so the kickoff requests exactly the union the agent needs. The
- * backend resolver still unions with current granted + computed-across-
- * agents for incremental consent.
+ * Same flow used by the legacy provider connect path (`useConnectOAuth`)
+ * — wired here against `/api/integrations/.../connect/oauth2` so the
+ * inline connect button on agent surfaces (`AgentIntegrationsBlock`,
+ * `MissingConnectionsModal`) can pass the agent's per-tool scope
+ * inference into the kickoff. The backend resolver still unions the
+ * caller scopes with `getCurrentGrantedScopes(actor)` for incremental
+ * consent, so re-running with fewer scopes never shrinks the grant.
  */
 export function useIntegrationOAuthPopup() {
   const { t } = useTranslation("settings");
   const initiateOAuth = useInitiateIntegrationOAuth();
+  const openOAuthPopup = useOAuthPopup("integration-oauth");
 
   const openPopup = useCallback(
     async (input: { packageId: string; authKey: string; scopes?: string[] }) => {
-      const popup = window.open("", "integration-oauth", "width=600,height=700");
-      if (!popup) {
-        window.alert(t("integration.popup.blocked"));
-        return;
-      }
       try {
-        const session = await initiateOAuth.mutateAsync({
-          packageId: input.packageId,
-          authKey: input.authKey,
-          ...(input.scopes ? { scopes: input.scopes } : {}),
-        });
-        popup.location.href = session.authUrl;
-        await new Promise<void>((resolve, reject) => {
-          const timer = setTimeout(() => {
-            clearInterval(poll);
-            try {
-              popup.close();
-            } catch {
-              /* ignore */
-            }
-            reject(new Error("OAuth timeout"));
-          }, OAUTH_POPUP_TIMEOUT_MS);
-          const poll = setInterval(() => {
-            if (popup.closed) {
-              clearInterval(poll);
-              clearTimeout(timer);
-              resolve();
-            }
-          }, 500);
-        });
+        await openOAuthPopup(() =>
+          initiateOAuth.mutateAsync({
+            packageId: input.packageId,
+            authKey: input.authKey,
+            ...(input.scopes ? { scopes: input.scopes } : {}),
+          }),
+        );
       } catch (err) {
-        try {
-          popup.close();
-        } catch {
-          /* ignore */
+        if (err instanceof Error && err.message === "popup_blocked") {
+          window.alert(t("integration.popup.blocked"));
+          return;
         }
         throw err;
       }
     },
-    [initiateOAuth, t],
+    [initiateOAuth, openOAuthPopup, t],
   );
 
   return { openPopup, isPending: initiateOAuth.isPending };

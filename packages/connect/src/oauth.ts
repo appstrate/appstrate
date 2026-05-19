@@ -1,18 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { randomBytes, createHash } from "node:crypto";
+import { randomBase64Url, sha256Base64Url } from "./pkce.ts";
 import type { Db } from "@appstrate/db/client";
 import type { OAuthStateRecord, OAuthStateStore } from "./types.ts";
 import type { Actor } from "./types.ts";
 import { getProviderOrThrow, getProviderOAuthCredentialsOrThrow } from "./registry.ts";
-import {
-  parseTokenResponse,
-  parseTokenErrorResponse,
-  buildTokenHeaders,
-  buildTokenBody,
-  type TokenErrorKind,
-} from "./token-utils.ts";
-import { extractErrorMessage } from "./utils.ts";
+import { exchangeAuthorizationCode } from "./token-exchange.ts";
+import { type TokenErrorKind } from "./token-utils.ts";
 
 /**
  * Error thrown by handleOAuthCallback when the initial token exchange fails.
@@ -47,20 +41,6 @@ export class OAuthCallbackError extends Error {
 }
 
 const OAUTH_STATE_TTL_SECONDS = 10 * 60;
-
-/**
- * Generate a cryptographically random base64url string.
- */
-function randomBase64Url(byteLength: number): string {
-  return randomBytes(byteLength).toString("base64url");
-}
-
-/**
- * Compute SHA-256 hash in base64url format (for PKCE code_challenge).
- */
-function sha256Base64Url(input: string): string {
-  return createHash("sha256").update(input).digest("base64url");
-}
 
 export interface InitiateOAuthResult {
   authUrl: string;
@@ -202,98 +182,23 @@ export async function handleOAuthCallback(
     stateRow.applicationId,
   );
 
-  // Exchange code for tokens
-  const useBasicAuth = provider.tokenAuthMethod === "client_secret_basic";
-
-  const tokenParams: Record<string, string> = {
-    grant_type: "authorization_code",
+  const { parsed } = await exchangeAuthorizationCode({
+    tokenUrl: provider.tokenUrl,
+    clientId: oauthCreds.clientId,
+    clientSecret: oauthCreds.clientSecret,
+    tokenAuthMethod: provider.tokenAuthMethod ?? "client_secret_post",
+    tokenContentType: provider.tokenContentType,
+    ...(provider.pkceEnabled !== false ? { codeVerifier: stateRow.codeVerifier } : {}),
+    redirectUri: stateRow.redirectUri,
     code,
-    redirect_uri: stateRow.redirectUri,
-    ...(useBasicAuth
-      ? {}
-      : { client_id: oauthCreds.clientId, client_secret: oauthCreds.clientSecret }),
-    ...(provider.pkceEnabled !== false ? { code_verifier: stateRow.codeVerifier } : {}),
-    ...(provider.tokenParams ?? {}),
-  };
+    scopesRequested: stateRow.scopesRequested,
+    ...(provider.tokenParams ? { extraTokenParams: provider.tokenParams } : {}),
+    errorLabel: stateRow.providerId,
+    state,
+    store,
+  });
 
-  const tokenBody = buildTokenBody(tokenParams, provider.tokenContentType);
-
-  let tokenResponse: Response;
-  try {
-    tokenResponse = await fetch(provider.tokenUrl, {
-      method: "POST",
-      headers: buildTokenHeaders(
-        provider.tokenAuthMethod,
-        oauthCreds.clientId,
-        oauthCreds.clientSecret,
-        provider.tokenContentType,
-      ),
-      body: tokenBody,
-      signal: AbortSignal.timeout(30_000),
-    });
-  } catch (err) {
-    throw new OAuthCallbackError(
-      `Token exchange network error for '${stateRow.providerId}': ${extractErrorMessage(err)}`,
-      "transient",
-      stateRow.providerId,
-    );
-  }
-
-  if (!tokenResponse.ok) {
-    const body = await tokenResponse.text();
-    const classification = parseTokenErrorResponse(tokenResponse.status, body);
-    // Don't concatenate the raw IdP body into the error message — some
-    // IdPs echo the rejected `code` (or other request fields) back into
-    // 400 bodies, so a generic catcher logging `err.message` would
-    // surface them. Callers that need the body for diagnostics read it
-    // off the typed `body` field instead, where the connections route
-    // already sanitises it before user-facing surfaces.
-    const summary =
-      classification.error !== undefined
-        ? `${classification.error}${classification.errorDescription ? ` — ${classification.errorDescription}` : ""}`
-        : `HTTP ${tokenResponse.status}`;
-    // The auth code is dead by the time the IdP rejects with `revoked`
-    // (codes are one-shot), so the PKCE state row will never be useful
-    // again. Delete it instead of letting it sit in Redis for the full
-    // 10-minute TTL — same hygiene as the success path. We do NOT
-    // delete on `transient` failures because some retry strategies want
-    // the row preserved so a re-exchange of the same code is possible
-    // (the IdP may temporarily 5xx). Errors during the delete are
-    // swallowed so the caller still sees the original classification —
-    // a stale state row is a quality-of-service issue, not a security
-    // one (the auth code is already dead).
-    if (classification.kind === "revoked") {
-      try {
-        await store.delete(state);
-      } catch {
-        /* swallowed: stale row reaped by TTL within 10 minutes */
-      }
-    }
-    throw new OAuthCallbackError(
-      `Token exchange failed for '${stateRow.providerId}': ${summary}`,
-      classification.kind,
-      stateRow.providerId,
-      tokenResponse.status,
-      body,
-      classification.error,
-      classification.errorDescription,
-    );
-  }
-
-  let tokenData: Record<string, unknown>;
-  try {
-    tokenData = (await tokenResponse.json()) as Record<string, unknown>;
-  } catch {
-    throw new OAuthCallbackError(
-      `Token exchange returned non-JSON response for '${stateRow.providerId}'`,
-      "transient",
-      stateRow.providerId,
-    );
-  }
-
-  const parsed = parseTokenResponse(tokenData, stateRow.scopesRequested);
-
-  // Clean up the OAuth state
+  // Clean up the OAuth state on success (revoke path already cleaned up).
   await store.delete(state);
 
   return {
