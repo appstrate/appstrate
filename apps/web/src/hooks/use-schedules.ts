@@ -75,6 +75,7 @@ export function useCreateSchedule(packageId: string) {
       modelIdOverride?: string | null;
       proxyIdOverride?: string | null;
       versionOverride?: string | null;
+      connectionOverrides?: Record<string, Record<string, string>> | null;
     }) => {
       return api<Schedule>(`/agents/${packageId}/schedules`, {
         method: "POST",
@@ -104,6 +105,7 @@ export function useUpdateSchedule() {
       modelIdOverride?: string | null;
       proxyIdOverride?: string | null;
       versionOverride?: string | null;
+      connectionOverrides?: Record<string, Record<string, string>> | null;
     }) => {
       return api<Schedule>(`/schedules/${id}`, {
         method: "PUT",
@@ -134,6 +136,12 @@ export interface ScheduleFormDeps {
   persistedProxyId: string | null;
   persistedVersion: string | null;
   hasFileInputs: boolean;
+  /**
+   * Agent's declared integration deps (#199) — drives the schedule
+   * connection-overrides picker. Empty when the agent has no
+   * integrations.
+   */
+  agentIntegrations: Array<{ id: string; tools?: string[] }>;
 }
 
 /**
@@ -149,6 +157,10 @@ export function useScheduleFormDeps(packageId: string | undefined): ScheduleForm
   if (!packageId) return null;
 
   const inputSchema = agentDetail?.input?.schema ?? undefined;
+  const integrationDeps = (agentDetail?.dependencies?.integrations ?? []).map((d) => ({
+    id: d.id,
+    ...(d.tools ? { tools: d.tools } : {}),
+  }));
   return {
     inputSchema,
     configSchema: agentDetail?.config?.schema ?? undefined,
@@ -157,5 +169,6 @@ export function useScheduleFormDeps(packageId: string | undefined): ScheduleForm
     persistedProxyId: agentProxy?.proxyId ?? null,
     persistedVersion: agentDetail?.version ?? null,
     hasFileInputs: schemaHasFileFields(inputSchema),
+    agentIntegrations: integrationDeps,
   };
 }

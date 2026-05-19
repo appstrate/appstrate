@@ -26,6 +26,11 @@ import { recordAuditFromContext } from "../services/audit.ts";
 import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
 import { runConfigOverrideSchema, scheduleInputSchema } from "../lib/jsonb-schemas.ts";
 
+// Per-(integration, authKey) connection picks frozen on the schedule
+// row (#199 mechanism #3). Same wire shape as the run-route's
+// connectionOverrides; loses to admin pins at fire time.
+const connectionOverridesSchema = z.record(z.string(), z.record(z.string(), z.string()));
+
 export const createScheduleSchema = z.object({
   name: z.string().optional(),
   connectionProfileId: z.uuid(),
@@ -40,6 +45,7 @@ export const createScheduleSchema = z.object({
   modelIdOverride: z.string().optional(),
   proxyIdOverride: z.string().optional(),
   versionOverride: z.string().optional(),
+  connectionOverrides: connectionOverridesSchema.optional(),
 });
 
 export const updateScheduleSchema = z.object({
@@ -54,6 +60,7 @@ export const updateScheduleSchema = z.object({
   modelIdOverride: z.string().nullable().optional(),
   proxyIdOverride: z.string().nullable().optional(),
   versionOverride: z.string().nullable().optional(),
+  connectionOverrides: connectionOverridesSchema.nullable().optional(),
 });
 
 export function createSchedulesRouter() {
@@ -129,6 +136,7 @@ export function createSchedulesRouter() {
         modelIdOverride: data.modelIdOverride ?? null,
         proxyIdOverride: data.proxyIdOverride ?? null,
         versionOverride: data.versionOverride ?? null,
+        connectionOverrides: data.connectionOverrides ?? null,
       });
       await recordAuditFromContext(c, {
         action: "schedule.created",

@@ -62,6 +62,12 @@ export interface ScheduleSaveData {
   modelIdOverride?: string | null;
   proxyIdOverride?: string | null;
   versionOverride?: string | null;
+  /**
+   * Per-integration connection picks frozen on the schedule row
+   * (`package_schedules.connection_overrides`). Same wire shape as the
+   * run-route's `connectionOverrides`; `null` clears on edit.
+   */
+  connectionOverrides?: Record<string, Record<string, string>> | null;
 }
 
 interface ScheduleFormProps {
@@ -77,6 +83,7 @@ interface ScheduleFormProps {
     modelIdOverride?: string | null;
     proxyIdOverride?: string | null;
     versionOverride?: string | null;
+    connectionOverrides?: Record<string, Record<string, string>> | null;
   };
   inputSchema?: JSONSchemaObject;
   /** Agent's config schema — drives the override panel's config form. */
@@ -89,6 +96,12 @@ interface ScheduleFormProps {
   persistedVersion?: string | null;
   /** Package id needed by RunOverridesPanel to fetch versions. */
   packageId?: string;
+  /**
+   * Agent's declared integration deps — surfaces the connectionOverrides
+   * picker. Pass an empty array to hide. Read from
+   * `agentDetail.dependencies.integrations` at the page level.
+   */
+  agentIntegrations?: Array<{ id: string; tools?: string[] }>;
   agents?: Array<{ id: string; displayName: string }>;
   selectedAgentId?: string;
   onAgentChange?: (agentId: string) => void;
@@ -115,6 +128,7 @@ export function ScheduleForm({
   inputSchema,
   configSchema,
   persistedConfig,
+  agentIntegrations,
   persistedModelId,
   persistedProxyId,
   persistedVersion,
@@ -157,6 +171,8 @@ export function ScheduleForm({
   const [overrides, setOverrides] = useState<RunOverridesValue>(() => {
     const v: RunOverridesValue = {};
     if (defaultValues?.configOverride) v.configOverride = defaultValues.configOverride;
+    if (defaultValues?.connectionOverrides)
+      v.connectionOverrides = defaultValues.connectionOverrides;
     if (defaultValues?.modelIdOverride) v.modelIdOverride = defaultValues.modelIdOverride;
     if (defaultValues?.proxyIdOverride) v.proxyIdOverride = defaultValues.proxyIdOverride;
     if (defaultValues?.versionOverride) v.versionOverride = defaultValues.versionOverride;
@@ -166,7 +182,11 @@ export function ScheduleForm({
     !!(defaultValues?.configOverride && Object.keys(defaultValues.configOverride).length > 0) ||
     !!defaultValues?.modelIdOverride ||
     !!defaultValues?.proxyIdOverride ||
-    !!defaultValues?.versionOverride;
+    !!defaultValues?.versionOverride ||
+    !!(
+      defaultValues?.connectionOverrides &&
+      Object.keys(defaultValues.connectionOverrides).length > 0
+    );
   const [overridesOpen, setOverridesOpen] = useState(initialOverridesNonEmpty);
 
   const {
@@ -212,12 +232,16 @@ export function ScheduleForm({
           modelIdOverride: overrides.modelIdOverride ?? null,
           proxyIdOverride: overrides.proxyIdOverride ?? null,
           versionOverride: overrides.versionOverride ?? null,
+          connectionOverrides: overrides.connectionOverrides ?? null,
         }
       : {
           ...(overrides.configOverride ? { configOverride: overrides.configOverride } : {}),
           ...(overrides.modelIdOverride ? { modelIdOverride: overrides.modelIdOverride } : {}),
           ...(overrides.proxyIdOverride ? { proxyIdOverride: overrides.proxyIdOverride } : {}),
           ...(overrides.versionOverride ? { versionOverride: overrides.versionOverride } : {}),
+          ...(overrides.connectionOverrides
+            ? { connectionOverrides: overrides.connectionOverrides }
+            : {}),
         };
 
     onSubmit({
@@ -415,6 +439,7 @@ export function ScheduleForm({
               persistedModelId={persistedModelId ?? null}
               persistedProxyId={persistedProxyId ?? null}
               persistedVersion={persistedVersion ?? null}
+              {...(agentIntegrations ? { agentIntegrations } : {})}
               value={overrides}
               onChange={setOverrides}
             />

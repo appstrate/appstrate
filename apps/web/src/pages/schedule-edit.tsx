@@ -78,6 +78,10 @@ export function ScheduleEditPage() {
           modelIdOverride: schedule.modelIdOverride ?? null,
           proxyIdOverride: schedule.proxyIdOverride ?? null,
           versionOverride: schedule.versionOverride ?? null,
+          connectionOverrides: (schedule.connectionOverrides ?? null) as Record<
+            string,
+            Record<string, string>
+          > | null,
         }}
         inputSchema={deps?.inputSchema}
         configSchema={deps?.configSchema}
@@ -86,6 +90,7 @@ export function ScheduleEditPage() {
         persistedProxyId={deps?.persistedProxyId ?? null}
         persistedVersion={deps?.persistedVersion ?? null}
         packageId={schedule.packageId}
+        agentIntegrations={deps?.agentIntegrations ?? []}
         blockedMessage={deps?.hasFileInputs ? t("schedule.fileInputBlocked") : undefined}
         isPending={updateSchedule.isPending}
         onSubmit={(data) => {

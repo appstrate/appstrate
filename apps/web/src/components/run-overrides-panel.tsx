@@ -20,6 +20,8 @@ import { usePackageVersions } from "../hooks/use-packages";
 import { useProvidersRegistry } from "../hooks/use-model-provider-credentials";
 import { findProviderByApiShapeAndBaseUrl } from "../lib/provider-registry-helpers";
 import { getProviderIcon } from "./icons";
+import { useIntegrationDetail, useIntegrationConnections } from "../hooks/use-integrations";
+import { requiredAuthKeysForAgent } from "@appstrate/core/integration";
 
 const INHERIT = "__inherit__";
 const NONE = "__none__";
@@ -33,6 +35,18 @@ export interface RunOverridesValue {
   proxyIdOverride?: string;
   /** Per-run version label or dist-tag override. */
   versionOverride?: string;
+  /**
+   * Per-(integration, authKey) connection picks — frozen at schedule
+   * create/edit so every fire uses the same row. Loses to admin pins;
+   * beats schedule-less fallback + per-run overrides on the actor.
+   * Shape: `{ "@scope/integration": { "<authKey>": "<connection_id>" } }`.
+   */
+  connectionOverrides?: Record<string, Record<string, string>>;
+}
+
+interface AgentIntegrationRef {
+  id: string;
+  tools?: string[];
 }
 
 export interface RunOverridesPanelProps {
@@ -47,6 +61,13 @@ export interface RunOverridesPanelProps {
   persistedProxyId: string | null;
   /** Persisted version pin (or null = follow latest dist-tag). */
   persistedVersion: string | null;
+  /**
+   * Agent's declared integration dependencies — drives the
+   * connectionOverrides picker. Pass an empty array to hide the section
+   * (e.g. for agents without integrations). The caller is responsible
+   * for reading `dependencies.integrations` off the agent manifest.
+   */
+  agentIntegrations?: AgentIntegrationRef[];
   /** Current value (controlled). */
   value: RunOverridesValue;
   onChange: (next: RunOverridesValue) => void;
@@ -69,6 +90,7 @@ export function RunOverridesPanel({
   persistedModelId,
   persistedProxyId,
   persistedVersion,
+  agentIntegrations,
   value,
   onChange,
 }: RunOverridesPanelProps) {
@@ -251,6 +273,140 @@ export function RunOverridesPanel({
           </div>
         </div>
       )}
+
+      {agentIntegrations && agentIntegrations.length > 0 && (
+        <ScheduleConnectionOverridesSection
+          integrations={agentIntegrations}
+          value={value.connectionOverrides ?? {}}
+          onChange={(next) => {
+            const compacted: Record<string, Record<string, string>> = {};
+            for (const [intId, perAuth] of Object.entries(next)) {
+              const cleaned: Record<string, string> = {};
+              for (const [authKey, connId] of Object.entries(perAuth)) {
+                if (connId) cleaned[authKey] = connId;
+              }
+              if (Object.keys(cleaned).length > 0) compacted[intId] = cleaned;
+            }
+            if (Object.keys(compacted).length === 0) {
+              const { connectionOverrides: _omit, ...rest } = value;
+              void _omit;
+              onChange(rest);
+            } else {
+              onChange({ ...value, connectionOverrides: compacted });
+            }
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Per-integration picker section that drives `value.connectionOverrides`.
+ * Renders one select per (integration, required authKey) listing the
+ * actor's accessible (own + shared) connections. "Inherit" leaves the
+ * resolver's default cascade in charge (admin pin → user fallback at
+ * fire time). Each pick freezes the choice into the schedule row.
+ */
+function ScheduleConnectionOverridesSection({
+  integrations,
+  value,
+  onChange,
+}: {
+  integrations: AgentIntegrationRef[];
+  value: Record<string, Record<string, string>>;
+  onChange: (next: Record<string, Record<string, string>>) => void;
+}) {
+  const { t } = useTranslation(["agents"]);
+  return (
+    <div className="space-y-2">
+      <Label>{t("schedule.connectionOverrides.label")}</Label>
+      <p className="text-muted-foreground text-xs">{t("schedule.connectionOverrides.hint")}</p>
+      <div className="border-border bg-card space-y-3 rounded-md border p-3">
+        {integrations.map((integ) => (
+          <IntegrationOverrideRow
+            key={integ.id}
+            integration={integ}
+            value={value[integ.id] ?? {}}
+            onChange={(authValues) => onChange({ ...value, [integ.id]: authValues })}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function IntegrationOverrideRow({
+  integration,
+  value,
+  onChange,
+}: {
+  integration: AgentIntegrationRef;
+  value: Record<string, string>;
+  onChange: (next: Record<string, string>) => void;
+}) {
+  const { t } = useTranslation(["agents"]);
+  const { data: detail } = useIntegrationDetail(integration.id);
+  const { data: connections } = useIntegrationConnections(integration.id);
+  const displayName = detail?.manifest.displayName ?? integration.id;
+  const requiredAuthKeys = detail
+    ? requiredAuthKeysForAgent(detail.manifest, integration.tools)
+    : [];
+
+  if (requiredAuthKeys.length === 0) return null;
+
+  return (
+    <div className="space-y-1.5" data-testid={`schedule-conn-row-${integration.id}`}>
+      <div className="text-xs font-medium">{displayName}</div>
+      {requiredAuthKeys.map((authKey) => {
+        const candidates = (connections ?? []).filter((c) => c.authKey === authKey);
+        if (candidates.length === 0) {
+          return (
+            <div
+              key={authKey}
+              className="text-muted-foreground flex items-center gap-2 text-[0.7rem]"
+            >
+              <span className="bg-muted rounded px-1.5 py-0.5 font-mono text-[10px]">
+                {authKey}
+              </span>
+              <span>{t("schedule.connectionOverrides.noCandidate")}</span>
+            </div>
+          );
+        }
+        const current = value[authKey] ?? "";
+        return (
+          <div key={authKey} className="flex items-center gap-2">
+            <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 font-mono text-[10px]">
+              {authKey}
+            </span>
+            <select
+              value={current}
+              onChange={(e) => {
+                const next = { ...value };
+                if (e.target.value === "") delete next[authKey];
+                else next[authKey] = e.target.value;
+                onChange(next);
+              }}
+              className="border-border bg-background flex-1 rounded border px-2 py-1 text-xs"
+              data-testid={`schedule-conn-select-${integration.id}-${authKey}`}
+            >
+              <option value="">{t("schedule.connectionOverrides.inherit")}</option>
+              {candidates.map((c) => {
+                const accountLabel =
+                  (c.identityClaims?.accountEmail as string | undefined) ??
+                  (c.identityClaims?.account_email as string | undefined) ??
+                  c.accountId;
+                const display = c.label ? `${c.label} (${accountLabel})` : accountLabel;
+                return (
+                  <option key={c.id} value={c.id}>
+                    {c.sharedWithOrg ? `${display} ⋯ shared` : display}
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+        );
+      })}
     </div>
   );
 }

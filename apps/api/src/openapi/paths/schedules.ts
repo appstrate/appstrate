@@ -115,6 +115,15 @@ export const schedulesPaths = {
                   description:
                     "Pin the agent version every run triggered by this schedule. Literal label or dist-tag.",
                 },
+                connectionOverrides: {
+                  type: "object",
+                  description:
+                    'Per-(integration, authKey) connection picks frozen on the schedule row (flat-connections mechanism #3). Shape: `{ "@scope/integration": { "<authKey>": "<connection_id>" } }`. Loses to admin pins (#1), beats actor-fallback (#4). Stored on `package_schedules.connection_overrides` and replayed on every fire.',
+                  additionalProperties: {
+                    type: "object",
+                    additionalProperties: { type: "string" },
+                  },
+                },
               },
             },
           },
@@ -250,6 +259,15 @@ export const schedulesPaths = {
                 modelIdOverride: { type: ["string", "null"] },
                 proxyIdOverride: { type: ["string", "null"] },
                 versionOverride: { type: ["string", "null"] },
+                connectionOverrides: {
+                  type: ["object", "null"],
+                  description:
+                    "Per-(integration, authKey) connection picks frozen on the schedule. Pass `null` to clear.",
+                  additionalProperties: {
+                    type: "object",
+                    additionalProperties: { type: "string" },
+                  },
+                },
               },
             },
           },

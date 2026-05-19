@@ -597,6 +597,7 @@ export async function createSchedule(
     modelIdOverride?: string | null;
     proxyIdOverride?: string | null;
     versionOverride?: string | null;
+    connectionOverrides?: Record<string, Record<string, string>> | null;
   },
 ): Promise<Schedule> {
   const id = `sched_${crypto.randomUUID()}`;
@@ -622,6 +623,7 @@ export async function createSchedule(
       modelIdOverride: data.modelIdOverride ?? null,
       proxyIdOverride: data.proxyIdOverride ?? null,
       versionOverride: data.versionOverride ?? null,
+      connectionOverrides: data.connectionOverrides ?? null,
       nextRunAt: nextRun ?? null,
     })
     .returning();
@@ -650,6 +652,7 @@ export async function updateSchedule(
     modelIdOverride?: string | null;
     proxyIdOverride?: string | null;
     versionOverride?: string | null;
+    connectionOverrides?: Record<string, Record<string, string>> | null;
   },
 ): Promise<Schedule | null> {
   const existing = await getSchedule(id, scope);
@@ -678,6 +681,8 @@ export async function updateSchedule(
   if (data.modelIdOverride !== undefined) payload.modelIdOverride = data.modelIdOverride;
   if (data.proxyIdOverride !== undefined) payload.proxyIdOverride = data.proxyIdOverride;
   if (data.versionOverride !== undefined) payload.versionOverride = data.versionOverride;
+  if (data.connectionOverrides !== undefined)
+    payload.connectionOverrides = data.connectionOverrides;
 
   const [row] = await db
     .update(schedules)

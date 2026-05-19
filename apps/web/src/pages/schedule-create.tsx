@@ -50,6 +50,7 @@ export function ScheduleCreatePage() {
         persistedProxyId={deps?.persistedProxyId ?? null}
         persistedVersion={deps?.persistedVersion ?? null}
         packageId={effectiveAgentId || undefined}
+        agentIntegrations={deps?.agentIntegrations ?? []}
         blockedMessage={deps?.hasFileInputs ? t("schedule.fileInputBlocked") : undefined}
         isPending={createSchedule.isPending}
         onSubmit={(data) => {
