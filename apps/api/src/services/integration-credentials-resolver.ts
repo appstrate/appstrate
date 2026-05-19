@@ -15,8 +15,7 @@
  *   3. Resolve the live HTTP delivery plan via `resolveHttpDelivery`.
  *   4. Build a `ResolvedAuthCredentials` entry + the matching plan.
  *
- * Output mirrors the existing connect-side `IntegrationCredentialsPayload`
- * shape so the sidecar can feed the result straight into
+ * Output is shaped to feed straight into the sidecar's
  * `MitmCredentialSource.current()` and `.deliveryPlans()`.
  */
 

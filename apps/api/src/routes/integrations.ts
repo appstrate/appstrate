@@ -6,7 +6,6 @@
  * Routes (all mounted under `/api/integrations`, app-scoped):
  *
  *   - `GET    /`                                     — list available + installed status
- *   - `GET    /installed`                            — list installed in current app
  *   - `POST   /:packageId/install`                   — install in current app
  *   - `DELETE /:packageId/install`                   — uninstall
  *   - `GET    /:packageId`                           — manifest + per-auth status for caller
@@ -18,8 +17,9 @@
  *   - `DELETE /:packageId/connections/:connectionId`      — disconnect single connection
  *   - `GET    /callback`                              — OAuth2 callback handler
  *
- * The OAuth2 callback re-uses the legacy `/api/connections/callback`
- * popup-close HTML so the same window handler works on both surfaces.
+ * The OAuth2 callback re-uses the same popup-close HTML as the
+ * provider-side `/api/connections/callback` so the same window handler
+ * works on both surfaces.
  */
 
 import { Hono } from "hono";
@@ -139,36 +139,6 @@ export function createIntegrationsRouter() {
       installed: installedSet.has(s.id),
     }));
     return c.json(listResponse(enriched));
-  });
-
-  router.get("/installed", requirePermission("integrations", "read"), async (c) => {
-    const scope = getAppScope(c);
-    const installedRows = await db
-      .select({
-        packageId: applicationPackages.packageId,
-        installedAt: applicationPackages.installedAt,
-        enabled: applicationPackages.enabled,
-      })
-      .from(applicationPackages)
-      .innerJoin(packages, eq(applicationPackages.packageId, packages.id))
-      .where(
-        and(
-          eq(applicationPackages.applicationId, scope.applicationId),
-          eq(packages.type, "integration"),
-        ),
-      );
-    const items = await Promise.all(
-      installedRows.map(async (row) => {
-        const summary = await getIntegration(scope.orgId, row.packageId);
-        if (!summary) return null;
-        return {
-          ...summary,
-          enabled: row.enabled,
-          installedAt: row.installedAt.toISOString(),
-        };
-      }),
-    );
-    return c.json(listResponse(items.filter((x): x is NonNullable<typeof x> => x !== null)));
   });
 
   router.get("/callback", async (c) => {
@@ -506,9 +476,10 @@ export function createIntegrationsRouter() {
         orgId: scope.orgId,
         applicationId: scope.applicationId,
         actor,
-        // Integration connections don't use the legacy connection_profiles
-        // model — we still carry an ID through for the state record shape.
-        // Use a fixed sentinel so the field is non-empty.
+        // Integration connections aren't keyed by connection_profiles
+        // (that model is provider-side only) — we still carry an ID
+        // through for the state record shape. Use a fixed sentinel so
+        // the field is non-empty.
         connectionProfileId: "integration",
       });
       return c.json({ authUrl: result.authUrl, state: result.state });

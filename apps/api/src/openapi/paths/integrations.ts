@@ -163,37 +163,6 @@ export const integrationsPaths = {
       },
     },
   },
-  "/api/integrations/installed": {
-    get: {
-      operationId: "listInstalledIntegrations",
-      tags: ["Integrations"],
-      summary: "List installed integrations for the current application",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-      ],
-      responses: {
-        "200": {
-          description: "Installed integration list",
-          headers: baseResponseHeaders,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["object", "data", "hasMore"],
-                properties: {
-                  object: { type: "string", enum: ["list"] },
-                  data: { type: "array", items: integrationSummarySchema },
-                  hasMore: { type: "boolean" },
-                },
-              },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-      },
-    },
-  },
   "/api/integrations/callback": {
     get: {
       operationId: "integrationsOAuthCallback",

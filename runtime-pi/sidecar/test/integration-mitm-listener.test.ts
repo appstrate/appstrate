@@ -90,7 +90,6 @@ function payload(
         authorizedUris: Object.freeze([...authorizedUris]),
       },
     ],
-    missingRequiredAuthKeys: [],
   };
 }
 
@@ -218,7 +217,7 @@ describe("MITM listener — CONNECT preamble", () => {
       caKeyPem: bundle.pems.caKeyPem,
     });
     const creds: MitmCredentialSource = {
-      current: () => ({ auths: [], missingRequiredAuthKeys: [] }),
+      current: () => ({ auths: [] }),
       deliveryPlans: () => ({}),
     };
     const listener = createIntegrationMitmListener({
@@ -766,7 +765,7 @@ describe("MITM listener — proxyUrl shape", () => {
       caKeyPem: bundle.pems.caKeyPem,
     });
     const creds: MitmCredentialSource = {
-      current: () => ({ auths: [], missingRequiredAuthKeys: [] }),
+      current: () => ({ auths: [] }),
       deliveryPlans: () => ({}),
     };
     const listener = createIntegrationMitmListener({

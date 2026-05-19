@@ -31,7 +31,7 @@ function auth(
 }
 
 function payload(...auths: ResolvedAuthCredentials[]): IntegrationCredentialsPayload {
-  return { auths, missingRequiredAuthKeys: [] };
+  return { auths };
 }
 
 const PLAIN_BEARER: HttpDeliveryPlan = {

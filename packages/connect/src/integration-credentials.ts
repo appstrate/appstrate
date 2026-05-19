@@ -60,12 +60,10 @@ export interface ResolvedAuthCredentials {
   scopesGranted?: readonly string[];
 }
 
-/** The full multi-auth payload returned by {@link resolveIntegrationCredentials}. */
+/** Multi-auth payload consumed by the sidecar MITM planner. */
 export interface IntegrationCredentialsPayload {
   /** One entry per declared auth that has been connected. */
   auths: ResolvedAuthCredentials[];
-  /** Set of auth keys whose `required: true` declaration is unmet. */
-  missingRequiredAuthKeys: string[];
 }
 
 /**

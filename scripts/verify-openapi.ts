@@ -116,7 +116,6 @@ const expectedEndpoints = [
 
   // Integrations (INTEGRATIONS_PROPOSAL Phase 1.3 — marketplace UI)
   "GET /api/integrations",
-  "GET /api/integrations/installed",
   "GET /api/integrations/callback",
   "GET /api/integrations/{packageId}",
   "POST /api/integrations/{packageId}/install",

@@ -103,7 +103,6 @@ export function createIntegrationCredentialsSource(
       ...(a.expiresAt !== undefined ? { expiresAt: a.expiresAt } : {}),
       ...(a.scopesGranted !== undefined ? { scopesGranted: a.scopesGranted } : {}),
     })),
-    missingRequiredAuthKeys: [],
   });
 
   const deliveryPlans = () => payload.deliveryPlans;

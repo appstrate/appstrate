@@ -44,12 +44,12 @@ export interface ResolveIntegrationsInput {
   actor: Actor | null;
   /**
    * Agent's `dependencies.integrations` map (`packageId → versionRange | rich object`).
-   * Accepts both the legacy bare-version-string shape and the niveau 2
-   * rich form (`{ version, tools?, scopes? }`). The resolver now reads
-   * tools[] from the rich form and propagates it to
+   * Accepts both the bare-version-string shape and the niveau 2 rich
+   * form (`{ version, tools?, scopes? }`). The resolver reads `tools[]`
+   * from the rich form and propagates it to
    * `IntegrationSpawnSpec.toolAllowlist` for sidecar-side enforcement
-   * (Phase 3). Legacy / no-tools entries skip the field, preserving the
-   * "all tools allowed" default.
+   * (Phase 3). Bare-string / no-tools entries skip the field,
+   * preserving the "all tools allowed" default.
    */
   integrationDeps: Record<string, unknown> | undefined;
 }
@@ -209,8 +209,9 @@ async function resolveOne(
       : {}),
     // Niveau 2 Phase 3 — when the agent declared a tools[] selection
     // for this integration, propagate it to the sidecar's McpHost so
-    // `tools/list` is pre-filtered. `undefined` (legacy dep or rich
-    // form without tools) preserves the "all tools allowed" default.
+    // `tools/list` is pre-filtered. `undefined` (bare-version-string
+    // dep or rich form without tools) preserves the "all tools
+    // allowed" default.
     ...(agentToolSelection !== undefined ? { toolAllowlist: agentToolSelection } : {}),
     ...(toolUrlEnvelope !== undefined ? { toolUrlEnvelope } : {}),
   };

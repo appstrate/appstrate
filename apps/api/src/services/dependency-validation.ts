@@ -242,8 +242,8 @@ export interface IntegrationDependencyError {
 /**
  * Determine which auth keys this agent actually needs connected, given its
  * declared `tools[]` selection on the integration. Returns the full auth
- * key set when the agent didn't restrict tools (legacy / "all tools allowed"
- * semantics) — at least one of those auths must be connected. For a
+ * key set when the agent didn't restrict tools ("all tools allowed"
+ * default) — at least one of those auths must be connected. For a
  * restricted selection, returns the union of each tool's `requiredAuthKey`
  * (single-auth integrations always resolve to the lone key).
  */

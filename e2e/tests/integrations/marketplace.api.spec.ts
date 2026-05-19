@@ -6,7 +6,6 @@
  *
  * Verifies the public REST surface end-to-end against a live API:
  *   - `GET /api/integrations` returns a list envelope
- *   - `GET /api/integrations/installed` returns an empty installed list for a fresh org
  *   - `GET /api/integrations/{pkgId}` returns 404 for an unknown package
  *   - `POST /api/integrations/{pkgId}/install` returns 404 for an unknown package
  *   - `GET /api/integrations/{pkgId}/oauth-clients/{key}` returns 404 when none configured
@@ -32,16 +31,6 @@ test.describe("Integration marketplace API surface", () => {
     const body = (await res.json()) as { object: string; data: unknown[]; hasMore: boolean };
     expect(body.object).toBe("list");
     expect(Array.isArray(body.data)).toBe(true);
-  });
-
-  test("GET /api/integrations/installed returns an empty list for a fresh org", async ({
-    apiClient,
-  }) => {
-    const res = await apiClient.get("/integrations/installed");
-    expect(res.status()).toBe(200);
-    const body = (await res.json()) as { object: string; data: unknown[]; hasMore: boolean };
-    expect(body.object).toBe("list");
-    expect(body.data).toHaveLength(0);
   });
 
   test("GET /api/integrations/{packageId} returns 404 for unknown integration", async ({

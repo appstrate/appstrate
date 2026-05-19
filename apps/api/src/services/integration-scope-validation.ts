@@ -13,8 +13,9 @@
  * `getIntegration`) and folds the per-pair errors into the route-layer
  * `ValidationFieldError` shape.
  *
- * Backward compat (Phase 1 strict):
- *  - Agent declares only `version` (string form) → nothing to validate.
+ * Short-circuit cases (no validation, no error):
+ *  - Agent declares only `version` (bare semver-range string) →
+ *    nothing to validate.
  *  - Integration not (yet) installed / not visible to the org →
  *    validation is skipped silently. The existing dependency check at
  *    run-time (`validateAgentDependencies`) is the authority on
@@ -46,7 +47,7 @@ export interface ValidateAgentIntegrationSelectionsInput {
  * field errors (empty array on success). Caller decides whether to
  * `throw validationFailed(errors)` or surface them differently.
  *
- * Non-agent manifests, integration deps in legacy string form, and
+ * Non-agent manifests, bare-version-string integration deps, and
  * absent integrations all short-circuit to a successful result — see
  * the module preamble for the rationale.
  */
@@ -60,7 +61,7 @@ export async function validateAgentIntegrationSelections(
   if (integrations.length === 0) return [];
 
   // Only rich-form entries carry tools/scopes — bare-version-string
-  // entries are a no-op here (legacy behaviour).
+  // entries have nothing to validate.
   const richEntries = integrations.filter(
     (e) => (e.tools && e.tools.length > 0) || (e.scopes && e.scopes.length > 0),
   );
