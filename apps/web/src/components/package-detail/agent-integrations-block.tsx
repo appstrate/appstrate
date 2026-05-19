@@ -1,14 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { CheckCircle2, AlertTriangle, XCircle, Loader2, Puzzle, Unlink } from "lucide-react";
+import { CheckCircle2, AlertTriangle, XCircle, Loader2, Puzzle, Unlink, Pin } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   useIntegrationDetail,
   useIntegrationConnections,
   useDisconnectIntegration,
+  useIntegrationPins,
+  useUpsertIntegrationPin,
+  useDeleteIntegrationPin,
+  type IntegrationConnection,
   type IntegrationManifestView,
 } from "../../hooks/use-integrations";
+import { usePermissions } from "../../hooks/use-permissions";
 import { InlineConnectButton } from "../integration-connect/inline-connect-button";
 import { pickDefaultAuth } from "../integration-connect/pick-default-auth";
 import {
@@ -26,6 +31,13 @@ interface AgentIntegrationEntry {
 
 interface AgentIntegrationsBlockProps {
   entries: AgentIntegrationEntry[];
+  /**
+   * Agent package id — keys per-agent admin pins. Optional so callers
+   * that don't surface the admin pin row (e.g. read-only previews) can
+   * omit it; when present, an admin can pin a specific shared connection
+   * for THIS agent on each (integration, authKey).
+   */
+  agentPackageId?: string;
 }
 
 /**
@@ -46,13 +58,18 @@ interface AgentIntegrationsBlockProps {
  * server-side; the modal (Phase C) is the recovery path when this block is
  * stale or the actor hits Run before refreshing.
  */
-export function AgentIntegrationsBlock({ entries }: AgentIntegrationsBlockProps) {
+export function AgentIntegrationsBlock({ entries, agentPackageId }: AgentIntegrationsBlockProps) {
   if (entries.length === 0) return null;
 
   return (
     <div className="space-y-2">
       {entries.map((entry) => (
-        <IntegrationConnectionCard key={entry.id} packageId={entry.id} agentTools={entry.tools} />
+        <IntegrationConnectionCard
+          key={entry.id}
+          packageId={entry.id}
+          agentTools={entry.tools}
+          {...(agentPackageId ? { agentPackageId } : {})}
+        />
       ))}
     </div>
   );
@@ -61,9 +78,14 @@ export function AgentIntegrationsBlock({ entries }: AgentIntegrationsBlockProps)
 interface IntegrationConnectionCardProps {
   packageId: string;
   agentTools: string[] | undefined;
+  agentPackageId?: string;
 }
 
-function IntegrationConnectionCard({ packageId, agentTools }: IntegrationConnectionCardProps) {
+function IntegrationConnectionCard({
+  packageId,
+  agentTools,
+  agentPackageId,
+}: IntegrationConnectionCardProps) {
   const { t } = useTranslation(["agents"]);
   const { data: detail, isPending: detailPending } = useIntegrationDetail(packageId);
   const { data: connections, isPending: connsPending } = useIntegrationConnections(packageId);
@@ -101,29 +123,149 @@ function IntegrationConnectionCard({ packageId, agentTools }: IntegrationConnect
     ? connections?.find((c) => c.authKey === connectedAuthKey)
     : null;
 
+  // Admin pin row — only when caller passes agentPackageId (admin
+  // surface). Renders below the connect/disconnect surface so the
+  // "force this connection for this agent" mechanism is discoverable
+  // exactly where the agent's integration dependency is already shown.
+  const requiredAuthKeys = requiredAuthKeysForAgent(detail.manifest, agentTools);
+  const showPinAdmin = !!agentPackageId && requiredAuthKeys.length > 0;
+
   return (
-    <CardShell icon={icon} title={displayName} subtitle={subtitle}>
-      {action && (
-        <InlineConnectButton
-          packageId={packageId}
-          authKey={action.authKey}
-          scopes={action.scopes}
-          intent={action.intent}
+    <div className="space-y-2">
+      <CardShell icon={icon} title={displayName} subtitle={subtitle}>
+        {action && (
+          <InlineConnectButton
+            packageId={packageId}
+            authKey={action.authKey}
+            scopes={action.scopes}
+            intent={action.intent}
+          />
+        )}
+        {connectedConnection && (
+          <Button
+            size="icon"
+            variant="ghost"
+            title={t("detail.integrationDisconnect")}
+            onClick={() => disconnect.mutate({ packageId, connectionId: connectedConnection.id })}
+            disabled={disconnect.isPending}
+            data-testid={`disconnect-${packageId}`}
+          >
+            <Unlink className="size-3" />
+          </Button>
+        )}
+      </CardShell>
+      {showPinAdmin && (
+        <AdminPinSection
+          integrationPackageId={packageId}
+          agentPackageId={agentPackageId!}
+          requiredAuthKeys={requiredAuthKeys}
+          connections={connections ?? []}
         />
       )}
-      {connectedConnection && (
-        <Button
-          size="icon"
-          variant="ghost"
-          title={t("detail.integrationDisconnect")}
-          onClick={() => disconnect.mutate({ packageId, connectionId: connectedConnection.id })}
-          disabled={disconnect.isPending}
-          data-testid={`disconnect-${packageId}`}
-        >
-          <Unlink className="size-3" />
-        </Button>
-      )}
-    </CardShell>
+    </div>
+  );
+}
+
+/**
+ * Admin-only "force this connection for this agent" row. Renders one
+ * select per (integration, authKey) listing every shared connection the
+ * admin can pin. Auto-saves on change. Hidden when:
+ *   - the actor is not an admin
+ *   - the integration has no shared (pinnable) connections
+ *   - the agent declares no required auth on this integration
+ *
+ * Server-side `upsertIntegrationPin` enforces `sharedWithOrg=true` on
+ * the pinned connection — the dropdown already filters to shared rows
+ * so the UI surface matches the API contract without round-trip errors.
+ */
+function AdminPinSection({
+  integrationPackageId,
+  agentPackageId,
+  requiredAuthKeys,
+  connections,
+}: {
+  integrationPackageId: string;
+  agentPackageId: string;
+  requiredAuthKeys: string[];
+  connections: IntegrationConnection[];
+}) {
+  const { t } = useTranslation(["agents"]);
+  const { isAdmin } = usePermissions();
+  const { data: pins } = useIntegrationPins(isAdmin ? integrationPackageId : undefined);
+  const upsertPin = useUpsertIntegrationPin();
+  const deletePin = useDeleteIntegrationPin();
+
+  if (!isAdmin) return null;
+  const pinnable = connections.filter((c) => c.sharedWithOrg);
+  if (pinnable.length === 0) return null;
+
+  return (
+    <div
+      className="border-border/60 bg-muted/30 ml-6 space-y-1.5 rounded-md border border-dashed px-3 py-2 text-xs"
+      data-testid={`pin-section-${integrationPackageId}`}
+    >
+      <div className="text-muted-foreground flex items-center gap-1.5">
+        <Pin className="size-3" />
+        <span>{t("detail.integrationPin.title")}</span>
+      </div>
+      <div className="space-y-1">
+        {requiredAuthKeys.map((authKey) => {
+          const currentPin = pins?.find(
+            (p) =>
+              p.packageId === agentPackageId &&
+              p.integrationPackageId === integrationPackageId &&
+              p.authKey === authKey,
+          );
+          return (
+            <div key={authKey} className="flex items-center gap-2">
+              <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 font-mono text-[10px]">
+                {authKey}
+              </span>
+              <select
+                className="border-border bg-background flex-1 rounded border px-2 py-1 text-xs"
+                value={currentPin?.connectionId ?? ""}
+                disabled={upsertPin.isPending || deletePin.isPending}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  if (value === "") {
+                    if (currentPin) {
+                      deletePin.mutate({
+                        packageId: integrationPackageId,
+                        agentPackageId,
+                        authKey,
+                      });
+                    }
+                  } else {
+                    upsertPin.mutate({
+                      packageId: integrationPackageId,
+                      agentPackageId,
+                      authKey,
+                      connectionId: value,
+                    });
+                  }
+                }}
+                data-testid={`pin-select-${integrationPackageId}-${authKey}`}
+              >
+                <option value="">{t("detail.integrationPin.none")}</option>
+                {pinnable.map((c) => {
+                  const accountLabel =
+                    (c.identityClaims?.accountEmail as string | undefined) ??
+                    (c.identityClaims?.account_email as string | undefined) ??
+                    c.accountId;
+                  const display = c.label ? `${c.label} (${accountLabel})` : accountLabel;
+                  return (
+                    <option key={c.id} value={c.id}>
+                      {display}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+          );
+        })}
+      </div>
+      <p className="text-muted-foreground text-[0.65rem]">{t("detail.integrationPin.help")}</p>
+    </div>
   );
 }
 

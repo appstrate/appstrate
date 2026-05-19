@@ -89,7 +89,7 @@ export function AgentConnectionsSection({
               {t("detail.integrationsSectionTitle")}
             </h3>
           )}
-          <AgentIntegrationsBlock entries={integrations} />
+          <AgentIntegrationsBlock entries={integrations} agentPackageId={packageId} />
         </section>
       )}
     </div>

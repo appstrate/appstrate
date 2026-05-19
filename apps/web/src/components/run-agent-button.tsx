@@ -187,6 +187,19 @@ export function RunAgentButton({
           runAgent.reset();
         }}
         errors={missingErrors ?? []}
+        retrying={runAgent.isPending}
+        onRetryWithOverrides={(overrides) => {
+          // Re-fire the run with the user's picks. Keep the modal open
+          // until the response lands so the picker stays visible if the
+          // server returns a fresh 412 (e.g. picks disappeared mid-flight).
+          runAgent.mutate(
+            { version, connectionOverrides: overrides },
+            {
+              onSuccess: () => setMissingErrors(null),
+              onError: onRunError,
+            },
+          );
+        }}
       />
     </>
   );

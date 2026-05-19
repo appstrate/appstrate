@@ -40,6 +40,12 @@ export function useSaveConfig(packageId: string) {
 export interface RunAgentParams {
   input?: Record<string, unknown>;
   version?: string;
+  /**
+   * Per-(integration, authKey) connection picks for THIS run (#199
+   * mechanism #2). Shape: `{ "@scope/integration": { "<authKey>": "<connectionId>" } }`.
+   * Surfaced from the must_choose modal picker.
+   */
+  connectionOverrides?: Record<string, Record<string, string>>;
 }
 
 export function useRunAgent(packageId: string) {
@@ -47,10 +53,11 @@ export function useRunAgent(packageId: string) {
   const navigate = useNavigate();
   return useMutation({
     mutationFn: async (params?: RunAgentParams) => {
-      const { input, version } = params ?? {};
+      const { input, version, connectionOverrides } = params ?? {};
       const qs = buildQs({ version });
       const body: Record<string, unknown> = {};
       if (input !== undefined) body.input = input;
+      if (connectionOverrides !== undefined) body.connectionOverrides = connectionOverrides;
       return api<{ runId: string }>(`/agents/${packageId}/run${qs}`, {
         method: "POST",
         body: JSON.stringify(body),
