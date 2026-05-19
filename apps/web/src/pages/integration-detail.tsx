@@ -19,7 +19,16 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams, Link } from "react-router-dom";
-import { Boxes, Trash2, ShieldCheck, Settings2, AlertTriangle } from "lucide-react";
+import {
+  Boxes,
+  Trash2,
+  ShieldCheck,
+  Settings2,
+  AlertTriangle,
+  Pencil,
+  Check,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -372,11 +381,36 @@ function ConnectionRow({
 }) {
   const { t } = useTranslation("settings");
   const updateConnection = useUpdateIntegrationConnection();
+  const [editing, setEditing] = useState(false);
+  const [draftLabel, setDraftLabel] = useState(connection.label ?? "");
   const accountLabel =
     (connection.identityClaims?.accountEmail as string | undefined) ??
     (connection.identityClaims?.account_email as string | undefined) ??
     connection.accountId;
   const isShared = connection.sharedWithOrg === true;
+  const startEdit = () => {
+    setDraftLabel(connection.label ?? "");
+    setEditing(true);
+  };
+  const cancelEdit = () => {
+    setEditing(false);
+    setDraftLabel(connection.label ?? "");
+  };
+  const submitLabel = () => {
+    const next = draftLabel.trim();
+    if (next === (connection.label ?? "")) {
+      setEditing(false);
+      return;
+    }
+    updateConnection.mutate(
+      {
+        packageId,
+        connectionId: connection.id,
+        label: next === "" ? null : next,
+      },
+      { onSuccess: () => setEditing(false) },
+    );
+  };
   return (
     <div
       className="bg-muted/30 flex flex-col gap-2 rounded-md border px-3 py-2 text-sm"
@@ -385,14 +419,68 @@ function ConnectionRow({
       <div className="flex items-center gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            {connection.label && <span className="truncate font-medium">{connection.label}</span>}
-            <span
-              className={
-                connection.label ? "text-muted-foreground truncate text-xs" : "truncate font-medium"
-              }
-            >
-              {accountLabel}
-            </span>
+            {editing ? (
+              <>
+                <Input
+                  value={draftLabel}
+                  onChange={(e) => setDraftLabel(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") submitLabel();
+                    if (e.key === "Escape") cancelEdit();
+                  }}
+                  placeholder={t("integration.connection.labelPlaceholder")}
+                  className="h-7 max-w-xs text-sm"
+                  autoFocus
+                  data-testid={`label-input-${connection.id}`}
+                />
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="size-7"
+                  onClick={submitLabel}
+                  disabled={updateConnection.isPending}
+                  title={t("integration.connection.labelSave")}
+                  data-testid={`label-save-${connection.id}`}
+                >
+                  <Check className="size-3.5" />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="size-7"
+                  onClick={cancelEdit}
+                  disabled={updateConnection.isPending}
+                  title={t("integration.connection.labelCancel")}
+                >
+                  <X className="size-3.5" />
+                </Button>
+              </>
+            ) : (
+              <>
+                {connection.label && (
+                  <span className="truncate font-medium">{connection.label}</span>
+                )}
+                <span
+                  className={
+                    connection.label
+                      ? "text-muted-foreground truncate text-xs"
+                      : "truncate font-medium"
+                  }
+                >
+                  {accountLabel}
+                </span>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="size-6"
+                  onClick={startEdit}
+                  title={t("integration.connection.labelEdit")}
+                  data-testid={`label-edit-${connection.id}`}
+                >
+                  <Pencil className="size-3" />
+                </Button>
+              </>
+            )}
             {isShared && (
               <Badge variant="secondary" data-testid={`shared-badge-${connection.id}`}>
                 {t("integration.connection.sharedBadge")}

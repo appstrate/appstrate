@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, XCircle, Puzzle } from "lucide-react";
+import { Link } from "react-router-dom";
+import { AlertTriangle, XCircle, Puzzle, Users } from "lucide-react";
 import { Modal } from "./modal";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { InlineConnectButton } from "./integration-connect/inline-connect-button";
 import { pickDefaultAuth } from "./integration-connect/pick-default-auth";
-import { useIntegrationDetail } from "../hooks/use-integrations";
+import { useIntegrationDetail, useIntegrationConnections } from "../hooks/use-integrations";
 
 /**
  * Recovery surface for the run-kickoff 412 emitted by
@@ -24,6 +26,7 @@ export interface MissingIntegrationFieldError {
     | "not_connected"
     | "needs_reconnection"
     | "insufficient_scopes"
+    | "must_choose_connection"
     | "package_not_found"
     | "not_installed_or_invalid_manifest"
     | string;
@@ -31,6 +34,8 @@ export interface MissingIntegrationFieldError {
   message: string;
   /** Required scopes — populated on insufficient_scopes for the OAuth re-consent. */
   requiredScopes?: string[];
+  /** Candidate connection ids — populated on must_choose_connection. */
+  candidateConnectionIds?: string[];
 }
 
 interface MissingConnectionsModalProps {
@@ -66,43 +71,91 @@ export function MissingConnectionsModal({ open, onClose, errors }: MissingConnec
 }
 
 function MissingRow({ err }: { err: MissingIntegrationFieldError }) {
+  const { t } = useTranslation(["agents"]);
   const { packageId, authKey } = parseField(err.field);
   const { data: detail } = useIntegrationDetail(packageId);
+  const isMustChooseCode = err.code === "must_choose_connection";
+  // Only fetch the connection list when we need to render the picker — saves
+  // an extra round trip on the common not_connected / needs_reconnection rows.
+  const { data: connections } = useIntegrationConnections(isMustChooseCode ? packageId : undefined);
   const isReconnect = err.code === "needs_reconnection" || err.code === "insufficient_scopes";
-  const Icon = isReconnect ? AlertTriangle : XCircle;
-  const colorClass = isReconnect ? "text-amber-500" : "text-destructive";
+  const isMustChoose = err.code === "must_choose_connection";
+  const Icon = isMustChoose ? Users : isReconnect ? AlertTriangle : XCircle;
+  const colorClass = isMustChoose
+    ? "text-amber-500"
+    : isReconnect
+      ? "text-amber-500"
+      : "text-destructive";
 
   // Pick the auth to act on. The field carries it for needs_reconnection /
-  // insufficient_scopes. For not_connected the field is integration-level —
-  // fall back to the first oauth2 / first declared (mirrors the
-  // AgentIntegrationsBlock heuristic).
+  // insufficient_scopes / must_choose_connection. For not_connected the
+  // field is integration-level — fall back to the first oauth2 / first
+  // declared (mirrors the AgentIntegrationsBlock heuristic).
   const targetAuthKey = authKey ?? pickDefaultAuth(detail?.manifest.auths);
   const displayName = detail?.manifest.displayName ?? packageId;
+  const candidateIds = err.candidateConnectionIds ?? [];
+  const candidates = (connections ?? []).filter((c) => candidateIds.includes(c.id));
 
   return (
-    <div className="border-border bg-card flex items-center justify-between gap-3 rounded-md border px-3 py-2">
-      <div className="flex min-w-0 items-center gap-2">
-        <Puzzle className="text-muted-foreground size-4 shrink-0" />
-        <div className="min-w-0">
-          <div className="truncate text-sm font-medium">{displayName}</div>
-          <div className={`flex items-center gap-1.5 truncate text-xs ${colorClass}`}>
-            <Icon className="size-3" />
-            <span className="truncate">{err.message}</span>
-            {authKey && (
-              <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 font-mono text-[10px]">
-                {authKey}
-              </span>
-            )}
+    <div className="border-border bg-card flex flex-col gap-2 rounded-md border px-3 py-2">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <Puzzle className="text-muted-foreground size-4 shrink-0" />
+          <div className="min-w-0">
+            <div className="truncate text-sm font-medium">{displayName}</div>
+            <div className={`flex items-center gap-1.5 truncate text-xs ${colorClass}`}>
+              <Icon className="size-3" />
+              <span className="truncate">{err.message}</span>
+              {authKey && (
+                <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 font-mono text-[10px]">
+                  {authKey}
+                </span>
+              )}
+            </div>
           </div>
         </div>
+        {!isMustChoose && targetAuthKey && (
+          <InlineConnectButton
+            packageId={packageId}
+            authKey={targetAuthKey}
+            {...(err.requiredScopes ? { scopes: err.requiredScopes } : {})}
+            intent={isReconnect ? "fix" : "connect"}
+          />
+        )}
+        {isMustChoose && (
+          <Button asChild size="sm" variant="outline">
+            <Link to={`/integrations/${packageId}`}>{t("missingConnections.mustChoose.cta")}</Link>
+          </Button>
+        )}
       </div>
-      {targetAuthKey && (
-        <InlineConnectButton
-          packageId={packageId}
-          authKey={targetAuthKey}
-          {...(err.requiredScopes ? { scopes: err.requiredScopes } : {})}
-          intent={isReconnect ? "fix" : "connect"}
-        />
+      {isMustChoose && candidates.length > 0 && (
+        <div className="border-border/60 mt-1 border-t pt-2">
+          <p className="text-muted-foreground mb-1.5 text-[0.7rem]">
+            {t("missingConnections.mustChoose.candidates", { count: candidates.length })}
+          </p>
+          <ul className="space-y-1">
+            {candidates.map((c) => {
+              const accountLabel =
+                (c.identityClaims?.accountEmail as string | undefined) ??
+                (c.identityClaims?.account_email as string | undefined) ??
+                c.accountId;
+              return (
+                <li
+                  key={c.id}
+                  className="bg-muted/40 flex items-center gap-2 rounded px-2 py-1 text-xs"
+                >
+                  {c.label && <span className="truncate font-medium">{c.label}</span>}
+                  <span className="text-muted-foreground truncate">{accountLabel}</span>
+                  {c.sharedWithOrg && (
+                    <Badge variant="secondary" className="text-[0.6rem]">
+                      {t("missingConnections.mustChoose.sharedBadge")}
+                    </Badge>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
       )}
     </div>
   );

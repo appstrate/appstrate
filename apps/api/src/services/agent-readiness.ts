@@ -219,6 +219,12 @@ function translateResolutionError(e: ConnectionResolutionError): ValidationField
     ...(e.requiredScopes && e.requiredScopes.length > 0
       ? { requiredScopes: e.requiredScopes }
       : {}),
+    // Smuggle the candidate ids on must_choose_connection so the modal
+    // can render a picker (read by `missing-connections-modal.tsx` via the
+    // same loose-typed field projection used for `requiredScopes`).
+    ...(e.candidateConnectionIds && e.candidateConnectionIds.length > 0
+      ? { candidateConnectionIds: e.candidateConnectionIds }
+      : {}),
   } as ValidationFieldError;
 }
 
