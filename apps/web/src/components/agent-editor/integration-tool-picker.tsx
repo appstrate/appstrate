@@ -23,6 +23,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, ChevronRight } from "lucide-react";
+import { expandGrantedScopes } from "@appstrate/core/integration";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Spinner } from "../spinner";
 import { useIntegrationDetail } from "../../hooks/use-integrations";
@@ -93,6 +94,19 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
     }
   }
   const hasInferredScopes = inferredScopes.size > 0;
+
+  // Transitively expand the inferred set through the manifest's `implies`
+  // hierarchy (mirrors `expandGrantedScopes` used server-side for missing-
+  // scope diffs). Without this, `repo` would be flagged as inferred but
+  // its implied children (`repo:status`, `repo_deployment`) would render
+  // as toggleable — even though the OAuth grant already covers them.
+  const inferredExpanded = new Set<string>(inferredScopes.keys());
+  const directInferred = [...inferredScopes.keys()];
+  for (const authKey of Object.keys(detail.manifest.auths ?? {})) {
+    for (const s of expandGrantedScopes(directInferred, detail.manifest, authKey)) {
+      inferredExpanded.add(s);
+    }
+  }
 
   // Pinned scopes that aren't already inferred — surface them as
   // "(pinned)" badges to make the union visible. Pinned scopes that
@@ -271,23 +285,27 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
               </p>
               <div className="grid gap-1.5">
                 {[...scopeCatalog.values()].map((s) => {
-                  const inferredBy = inferredScopes.get(s.value);
+                  const isInferred = inferredExpanded.has(s.value);
+                  const checked = isInferred || selectedScopes.has(s.value);
                   return (
                     <label
                       key={s.value}
-                      className="flex cursor-pointer items-start gap-2 text-xs"
+                      className={`flex items-start gap-2 text-xs ${
+                        isInferred ? "cursor-not-allowed opacity-60" : "cursor-pointer"
+                      }`}
                       data-testid={`integ-scope-${packageId}-${s.value}`}
                     >
                       <Checkbox
-                        checked={selectedScopes.has(s.value)}
-                        onCheckedChange={() => toggleScope(s.value)}
+                        checked={checked}
+                        disabled={isInferred}
+                        onCheckedChange={isInferred ? undefined : () => toggleScope(s.value)}
                         className="mt-0.5"
                       />
                       <span className="flex min-w-0 flex-col">
                         <span>
                           {s.label}{" "}
                           <span className="text-muted-foreground font-mono">({s.value})</span>
-                          {inferredBy && (
+                          {isInferred && (
                             <span className="text-muted-foreground ml-1 text-[10px]">
                               {t("agentEditor.integrations.scopes.alreadyInferred")}
                             </span>
