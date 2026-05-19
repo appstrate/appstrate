@@ -302,6 +302,178 @@ export const mePaths = {
       },
     },
   },
+  "/api/me/integration-pins": {
+    get: {
+      operationId: "listMyIntegrationPins",
+      tags: ["Profile"],
+      summary: "List the caller's member-scope integration pins for an agent",
+      description:
+        "Returns the caller's own (integration, authKey) → connectionId pins for the " +
+        "given agent. Used by the agent-page picker to render the collapsed default " +
+        "row. Member-only; end-user callers receive an empty list. Requires " +
+        "`X-Application-Id`.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        {
+          name: "agentPackageId",
+          in: "query",
+          required: true,
+          schema: { type: "string" },
+          description: "Agent package id whose pins to list.",
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Member pins for the agent",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["object", "data", "hasMore"],
+                properties: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: ["integrationPackageId", "authKey", "connectionId"],
+                      properties: {
+                        integrationPackageId: { type: "string" },
+                        authKey: { type: "string" },
+                        connectionId: { type: "string", format: "uuid" },
+                      },
+                    },
+                  },
+                  hasMore: { type: "boolean" },
+                },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+      },
+    },
+    put: {
+      operationId: "upsertMyIntegrationPin",
+      tags: ["Profile"],
+      summary: "Pin a connection for the caller's runs of an agent",
+      description:
+        "Persists the caller's preference for a (integration, authKey) on this agent. " +
+        "Sits at cascade layer 4 — wins over the fallback ambiguity but loses to admin " +
+        "pins / run / schedule overrides. Replaces the previous R5 localStorage pick. " +
+        "Idempotent — repeated calls update the row in place.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["agentPackageId", "integrationPackageId", "authKey", "connectionId"],
+              properties: {
+                agentPackageId: { type: "string" },
+                integrationPackageId: { type: "string" },
+                authKey: { type: "string" },
+                connectionId: { type: "string", format: "uuid" },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Member pin set",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: [
+                  "packageId",
+                  "integrationPackageId",
+                  "authKey",
+                  "connectionId",
+                  "createdAt",
+                  "updatedAt",
+                ],
+                properties: {
+                  packageId: { type: "string" },
+                  integrationPackageId: { type: "string" },
+                  authKey: { type: "string" },
+                  connectionId: { type: "string", format: "uuid" },
+                  createdAt: { type: "string", format: "date-time" },
+                  updatedAt: { type: "string", format: "date-time" },
+                },
+              },
+            },
+          },
+        },
+        "400": {
+          description:
+            "Validation failed (connection wrong integration/auth, or not accessible to caller).",
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    delete: {
+      operationId: "deleteMyIntegrationPin",
+      tags: ["Profile"],
+      summary: "Clear the caller's pin on a (agent, integration, authKey)",
+      description:
+        "Removes the caller's member pin so the resolver falls back to layer 5 " +
+        "(accessible connections). Idempotent — 204 even when no row exists.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        {
+          name: "agentPackageId",
+          in: "query",
+          required: true,
+          schema: { type: "string" },
+        },
+        {
+          name: "integrationPackageId",
+          in: "query",
+          required: true,
+          schema: { type: "string" },
+        },
+        { name: "authKey", in: "query", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "204": { description: "Pin cleared (or never existed)" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+      },
+    },
+  },
+  "/api/me/connections/{connectionId}": {
+    delete: {
+      operationId: "deleteMyConnection",
+      tags: ["Profile"],
+      summary: "Delete one of the caller's own connections (destructive)",
+      description:
+        "Removes the `integration_connections` row globally. ON DELETE CASCADE vacates " +
+        "every reference (admin pins, member pins, run snapshots, schedule overrides). " +
+        "Intent is destructive: 'I never want to use this credential anywhere again'. " +
+        "Surfaced only from the /connections management page — agent-surface unlinks now " +
+        "drop the member pin instead (see `DELETE /api/me/integration-pins`).",
+      parameters: [
+        {
+          name: "connectionId",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+        },
+      ],
+      responses: {
+        "204": { description: "Connection deleted (or never existed)" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+      },
+    },
+  },
   "/api/me/models": {
     get: {
       operationId: "listMyModels",

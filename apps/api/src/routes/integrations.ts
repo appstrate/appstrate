@@ -14,8 +14,11 @@
  *   - `DELETE /:packageId/oauth-clients/:authKey`    — admin: delete OAuth client
  *   - `POST   /:packageId/auths/:authKey/connect/oauth2`  — initiate OAuth2 PKCE flow
  *   - `POST   /:packageId/auths/:authKey/connect/fields`  — connect api_key/basic/custom
- *   - `DELETE /:packageId/connections/:connectionId`      — disconnect single connection
  *   - `GET    /callback`                              — OAuth2 callback handler
+ *
+ * Destructive connection delete moved to `DELETE /api/me/connections/:id` — the
+ * single owner-scoped entry point. The agent-surface "unlink" button is gone:
+ * members switch agent picks via member pins, not by deleting the shared row.
  *
  * The OAuth2 callback re-uses the same popup-close HTML as the
  * provider-side `/api/connections/callback` so the same window handler
@@ -56,7 +59,6 @@ import { expandGrantedScopes } from "@appstrate/core/integration";
 import {
   assertIsIntegration,
   connectIntegrationWithFields,
-  deleteIntegrationConnection,
   deleteIntegrationOAuthClient,
   extractIdentity,
   getIntegrationAuthStatuses,
@@ -546,24 +548,14 @@ export function createIntegrationsRouter() {
     },
   );
 
-  router.delete(
-    "/:packageId{@[^/]+/[^/]+}/connections/:connectionId",
-    requirePermission("integrations", "disconnect"),
-    async (c) => {
-      const packageId = c.req.param("packageId")!;
-      const connectionId = c.req.param("connectionId")!;
-      const scope = getAppScope(c);
-      const actor = getActor(c);
-      await deleteIntegrationConnection(scope, connectionId, actor);
-      await recordAuditFromContext(c, {
-        action: "integration.connection.deleted",
-        resourceType: "integration_connection",
-        resourceId: connectionId,
-        before: { packageId },
-      });
-      return c.json({ disconnected: true });
-    },
-  );
+  // DELETE /:packageId/connections/:connectionId was removed — destructive
+  // delete is now owner-scoped via `DELETE /api/me/connections/:connectionId`
+  // (single entry point on /connections, surfaces a confirm dialog with the
+  // impact list). The agent surface used to call this endpoint as part of
+  // an "unlink" button that conflated "stop this agent from using this
+  // connection" with "delete the connection globally" — the bug that drove
+  // the integration refactor. Members now switch the agent's pick via the
+  // member-pin endpoint (`PUT /api/me/integration-pins`).
 
   router.get(
     "/:packageId{@[^/]+/[^/]+}/connections",

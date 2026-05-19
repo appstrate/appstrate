@@ -477,6 +477,8 @@
   "connectors.noConnectionsHint": "Connect a service from the providers below.",
   "connectors.connectionCount": "{{count}} connection(s)",
   "connectors.deleteConfirm": "Delete {{provider}} connection from profile {{profile}}?",
+  "connectors.deleteConfirmImpact_one": "This connection is used by {{count}} agent in the application — deleting it will make it unavailable for them.",
+  "connectors.deleteConfirmImpact_other": "This connection is used by {{count}} agents in the application — deleting it will make them unavailable for them.",
   "connectors.orgValid": "Valid for {{org}}",
   "connectors.orgNeedsReconnection": "Reconnection needed for {{org}}",
   "connectors.unused": "Unused",

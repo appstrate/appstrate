@@ -2,30 +2,23 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  CheckCircle2,
-  AlertTriangle,
-  XCircle,
-  Loader2,
-  Puzzle,
-  Unlink,
-  Users,
-  X,
-} from "lucide-react";
+import { CheckCircle2, AlertTriangle, XCircle, Loader2, Puzzle, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   useIntegrationDetail,
   useIntegrationConnections,
   useAccessibleIntegrationConnections,
   useAgentsConsumingIntegration,
-  useDisconnectIntegration,
   useIntegrationPins,
   type AccessibleIntegrationConnection,
   type IntegrationConnection,
   type IntegrationManifestView,
 } from "../../hooks/use-integrations";
-import { useCurrentApplicationId } from "../../hooks/use-current-application";
-import { useAgentConnectionPicks } from "../../hooks/use-agent-connection-picks";
+import {
+  useMemberIntegrationPins,
+  useUpsertMemberIntegrationPin,
+  useDeleteMemberIntegrationPin,
+} from "../../hooks/use-member-integration-pins";
 import { InlineConnectButton } from "../integration-connect/inline-connect-button";
 import { pickDefaultAuth } from "../integration-connect/pick-default-auth";
 import {
@@ -102,7 +95,6 @@ function IntegrationConnectionCard({
   const { data: detail, isPending: detailPending } = useIntegrationDetail(packageId);
   const { data: connections, isPending: connsPending } = useIntegrationConnections(packageId);
   const { data: consumingAgents } = useAgentsConsumingIntegration(packageId);
-  const disconnect = useDisconnectIntegration();
 
   const displayName = detail?.manifest.displayName ?? packageId;
   const isLoading = detailPending || connsPending;
@@ -126,11 +118,13 @@ function IntegrationConnectionCard({
   const { icon, subtitle } = renderStatus(status, t);
   const action = resolveAction(status, detail.manifest);
 
-  // When connected, the small unlink button lets the actor switch auth
-  // (the server-side single-auth-per-integration invariant means a
-  // re-connect via the alternate auth would otherwise 409). Finds the
-  // connection row for the connected auth so we can pass its id to
-  // useDisconnectIntegration.
+  // The connected connection drives the reuse hint below. We used to also
+  // render an unlink button here, but it called the global delete endpoint
+  // (DELETE /api/integrations/.../connections/:id) which yanked the connection
+  // from every other agent in the app — the bug that drove this refactor.
+  // The two safe paths are now: (a) change which connection THIS agent uses
+  // via the picker below (writes a member pin), or (b) delete the connection
+  // globally from /connections (destructive, with confirm + impact list).
   const connectedAuthKey = status.kind === "ok" ? status.authKey : null;
   const connectedConnection = connectedAuthKey
     ? connections?.find((c) => c.authKey === connectedAuthKey)
@@ -159,18 +153,6 @@ function IntegrationConnectionCard({
             scopes={action.scopes}
             intent={action.intent}
           />
-        )}
-        {connectedConnection && (
-          <Button
-            size="icon"
-            variant="ghost"
-            title={t("detail.integrationDisconnect")}
-            onClick={() => disconnect.mutate({ packageId, connectionId: connectedConnection.id })}
-            disabled={disconnect.isPending}
-            data-testid={`disconnect-${packageId}`}
-          >
-            <Unlink className="size-3" />
-          </Button>
         )}
       </CardShell>
       {showMemberPicker && (
@@ -208,12 +190,13 @@ function buildReuseInfo(
  * R5 polish: collapse by default. When the actor has their own connection
  * among the candidates, that's silently the implicit default (resolver
  * already prefers own at fallback time) — we render only a small "Use
- * another connection" link. Clicking expands the full select. This kills
- * the noise for the 99% case where the actor doesn't want to switch.
+ * another connection" link. Clicking expands the full select.
  *
- * Picks persist in `localStorage` and are read at mutate-time by
- * `useRunAgent` so the resolver respects them via `connectionOverrides`.
- * An admin pin overrides any member pick.
+ * Picks are persisted as `integration_pins` rows with `user_id` set —
+ * the resolver sees them at cascade layer 4 on every run. Admin pins
+ * (`user_id IS NULL`) at layer 1 lock the choice for everyone: when an
+ * admin pin exists on a (integration, authKey), the picker renders a
+ * read-only "locked by admin" row and refuses writes.
  */
 function MemberConnectionPicker({
   integrationPackageId,
@@ -225,44 +208,106 @@ function MemberConnectionPicker({
   requiredAuthKeys: string[];
 }) {
   const { t } = useTranslation(["agents"]);
-  const applicationId = useCurrentApplicationId();
-  const { data: pins } = useIntegrationPins(integrationPackageId);
+  const { data: adminPins } = useIntegrationPins(integrationPackageId);
+  const { data: memberPins } = useMemberIntegrationPins(agentPackageId);
   const { data: accessible } = useAccessibleIntegrationConnections(integrationPackageId);
-  const { getPick, setPick } = useAgentConnectionPicks(applicationId, agentPackageId);
+  const upsertPin = useUpsertMemberIntegrationPin();
+  const deletePin = useDeleteMemberIntegrationPin();
 
   const allCandidates = accessible ?? [];
   if (allCandidates.length === 0) return null;
 
-  const pickableRows = requiredAuthKeys
-    .map((authKey) => {
-      const pinned = pins?.find(
-        (p) =>
-          p.packageId === agentPackageId &&
-          p.integrationPackageId === integrationPackageId &&
-          p.authKey === authKey,
-      );
-      if (pinned) return null;
-      const candidates = allCandidates.filter((c) => c.authKey === authKey);
-      if (candidates.length < 2) return null;
-      return { authKey, candidates };
-    })
-    .filter((r): r is { authKey: string; candidates: AccessibleIntegrationConnection[] } => !!r);
+  type PickerRowSpec =
+    | { kind: "locked"; authKey: string; label: string }
+    | {
+        kind: "pickable";
+        authKey: string;
+        candidates: AccessibleIntegrationConnection[];
+        current: string | null;
+      };
 
-  if (pickableRows.length === 0) return null;
+  const rows: PickerRowSpec[] = requiredAuthKeys.flatMap((authKey): PickerRowSpec[] => {
+    const adminPin = adminPins?.find(
+      (p) =>
+        p.packageId === agentPackageId &&
+        p.integrationPackageId === integrationPackageId &&
+        p.authKey === authKey,
+    );
+    if (adminPin) {
+      // Cas 3 — admin force pin: locked, member cannot pick anything.
+      const pinned = allCandidates.find((c) => c.id === adminPin.connectionId);
+      return [{ kind: "locked", authKey, label: pinned?.label ?? pinned?.accountId ?? "" }];
+    }
+    const candidates = allCandidates.filter((c) => c.authKey === authKey);
+    if (candidates.length < 2) return [];
+    const memberPin = memberPins?.find(
+      (p) => p.integrationPackageId === integrationPackageId && p.authKey === authKey,
+    );
+    return [
+      {
+        kind: "pickable",
+        authKey,
+        candidates,
+        current: memberPin?.connectionId ?? null,
+      },
+    ];
+  });
+
+  if (rows.length === 0) return null;
 
   return (
     <div className="ml-6 space-y-1" data-testid={`member-picker-${integrationPackageId}`}>
-      {pickableRows.map(({ authKey, candidates }) => (
-        <PickerRow
-          key={authKey}
-          integrationPackageId={integrationPackageId}
-          authKey={authKey}
-          candidates={candidates}
-          current={getPick(integrationPackageId, authKey) ?? null}
-          onChange={(value) => setPick(integrationPackageId, authKey, value)}
-          t={t}
-        />
-      ))}
+      {rows.map((row) =>
+        row.kind === "locked" ? (
+          <LockedByAdminRow key={row.authKey} authKey={row.authKey} label={row.label} t={t} />
+        ) : (
+          <PickerRow
+            key={row.authKey}
+            integrationPackageId={integrationPackageId}
+            authKey={row.authKey}
+            candidates={row.candidates}
+            current={row.current}
+            onChange={(connectionId) => {
+              if (connectionId === null) {
+                deletePin.mutate({
+                  agentPackageId,
+                  integrationPackageId,
+                  authKey: row.authKey,
+                });
+              } else {
+                upsertPin.mutate({
+                  agentPackageId,
+                  integrationPackageId,
+                  authKey: row.authKey,
+                  connectionId,
+                });
+              }
+            }}
+            t={t}
+          />
+        ),
+      )}
+    </div>
+  );
+}
+
+/**
+ * Cas 3 — admin pin lock. The connection used for this (integration,
+ * authKey) is forced for every actor; no member pick is possible.
+ */
+function LockedByAdminRow({
+  authKey,
+  label,
+  t,
+}: {
+  authKey: string;
+  label: string;
+  t: (k: string, opts?: Record<string, unknown>) => string;
+}) {
+  return (
+    <div className="text-muted-foreground flex flex-wrap items-center gap-1.5 text-[0.7rem]">
+      <Users className="size-3" />
+      <span>{t("detail.integrationMemberPicker.lockedByAdmin", { authKey, label })}</span>
     </div>
   );
 }

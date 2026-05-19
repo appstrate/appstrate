@@ -86,6 +86,7 @@
   "detail.integrationMemberPicker.defaultBadge": "(default)",
   "detail.integrationMemberPicker.changeLink": "Change",
   "detail.integrationMemberPicker.close": "Close",
+  "detail.integrationMemberPicker.lockedByAdmin": "Locked by an administrator — {{authKey}}: {{label}}",
   "detail.integrationReuseSingle": "Connected via {{account}}",
   "detail.integrationReuseShared": "Connected via {{account}} — reused by {{count}} agents",
   "missingConnections.mustChoose.sharedBadge": "Shared",

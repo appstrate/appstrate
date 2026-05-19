@@ -5,12 +5,17 @@
  * connection does this run use for each (integration, authKey)?".
  *
  * Replaces the connection-profile cascade for integrations with a flat
- * 4-mechanism model (see CLAUDE.md "Flat connections + pins"):
+ * 5-mechanism model (see CLAUDE.md "Flat connections + pins"):
  *
  *   1. integration_pins                        → admin force
  *   2. runs.connection_overrides               → caller's run-time choice
  *   3. package_schedules.connection_overrides  → frozen at schedule create
- *   4. fallback: actor's accessible connections
+ *   4. integration_member_assignments          → member's persisted pick
+ *      per (user, app, agent, integration, authKey). Empty in OSS until
+ *      the user explicitly picks via the agent-page picker; replaces
+ *      the R5 localStorage hack with a server-side record the resolver
+ *      sees on every run.
+ *   5. fallback: actor's accessible connections
  *      = own + (shared_with_org AND application match)
  *      → 1 match → auto, 0 → not_connected, N → must_choose
  *
@@ -23,7 +28,7 @@
  * those. The two models will converge when the provider sunset lands.
  */
 
-import { and, eq, or, inArray } from "drizzle-orm";
+import { and, eq, or, inArray, isNull } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { integrationConnections, integrationPins, applicationPackages } from "@appstrate/db/schema";
 import type { InferSelectModel } from "drizzle-orm";
@@ -82,26 +87,43 @@ export interface ResolveConnectionsInput {
    * (actor, application) filter; the resolver just enumerates.
    */
   accessibleConnections: ConnectionRow[];
-  /** Pins for (application, agent). */
+  /**
+   * Pins for (application, agent). Mixed — both admin pins (`userId IS NULL`,
+   * applies to every actor) and member pins (`userId = actor`, the actor's
+   * own preference). The pure resolver filters between them based on
+   * `actorUserId`; the caller can either pass the admin-only subset (used
+   * by the runtime which has no actor context for admin force) or the
+   * full mix.
+   */
   pins: PinRow[];
   /** Caller's run-time override map (POST /api/runs body). */
   runOverrides?: ConnectionOverrides | null;
   /** Schedule's frozen override map (package_schedules row). */
   scheduleOverrides?: ConnectionOverrides | null;
+  /**
+   * Actor's `user.id` — used to match member pins (`pins.userId === actorUserId`)
+   * in the cascade's layer 4. Null for end-users (they don't have member
+   * pins; their connection is selected by the API caller via run overrides).
+   */
+  actorUserId?: string | null;
 }
 
 // ─────────────────────────── Pure resolver (unit-tested) ──────────────────────
 
 /**
- * Walks the 4-mechanism cascade for each (integration, authKey) that
+ * Walks the 5-mechanism cascade for each (integration, authKey) that
  * the agent requires. Pure — no DB, no async, no IO. Test with mock
  * arrays.
+ *
+ * Admin pin always wins; member pins only apply when matching the
+ * caller's `actorUserId` (which is null for end-users — they never own
+ * member pins).
  */
 export function resolveConnections(input: ResolveConnectionsInput): ConnectionResolutionResult {
   const resolved: ResolvedConnectionMap = {};
   const errors: ConnectionResolutionError[] = [];
 
-  const pinIndex = indexPins(input.pins);
+  const { adminPins, memberPins } = indexPins(input.pins, input.actorUserId ?? null);
   const connectionIndex = new Map<string, ConnectionRow>();
   for (const c of input.accessibleConnections) connectionIndex.set(c.id, c);
 
@@ -111,14 +133,16 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
     const perAuth: Record<string, ResolvedConnection> = {};
 
     for (const authKey of req.requiredAuthKeys) {
+      const key = pinKey(req.integrationId, authKey);
       const result = resolveOne({
         integrationId: req.integrationId,
         authKey,
         manifest: req.manifest,
         requiredScopes: req.requiredScopesByAuth[authKey] ?? [],
-        pinId: pinIndex.get(pinKey(req.integrationId, authKey)) ?? null,
+        adminPinId: adminPins.get(key) ?? null,
         runOverrideId: input.runOverrides?.[req.integrationId]?.[authKey] ?? null,
         scheduleOverrideId: input.scheduleOverrides?.[req.integrationId]?.[authKey] ?? null,
+        memberPinId: memberPins.get(key) ?? null,
         accessibleConnections: input.accessibleConnections,
         connectionIndex,
       });
@@ -145,9 +169,10 @@ interface ResolveOneArgs {
   authKey: string;
   manifest: IntegrationManifest;
   requiredScopes: string[];
-  pinId: string | null;
+  adminPinId: string | null;
   runOverrideId: string | null;
   scheduleOverrideId: string | null;
+  memberPinId: string | null;
   accessibleConnections: ConnectionRow[];
   connectionIndex: Map<string, ConnectionRow>;
 }
@@ -157,9 +182,9 @@ type ResolveOneResult =
   | { kind: "error"; error: ConnectionResolutionError };
 
 function resolveOne(args: ResolveOneArgs): ResolveOneResult {
-  // 1. Admin pin (highest precedence).
-  if (args.pinId) {
-    const conn = args.connectionIndex.get(args.pinId);
+  // 1. Admin pin (highest precedence — locks the choice for every actor).
+  if (args.adminPinId) {
+    const conn = args.connectionIndex.get(args.adminPinId);
     if (!conn) {
       return errorOf(args, {
         code: "pinned_connection_unavailable",
@@ -193,7 +218,19 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
     return checkHealth(args, conn, "schedule_override");
   }
 
-  // 4. Fallback — actor's accessible connections matching (integration, authKey).
+  // 4. Member pin — actor's persisted preference for this agent.
+  if (args.memberPinId) {
+    const conn = args.connectionIndex.get(args.memberPinId);
+    if (!conn) {
+      return errorOf(args, {
+        code: "pinned_connection_unavailable",
+        message: `Your pinned connection for ${args.integrationId} (${args.authKey}) is no longer accessible — it may have been deleted or unshared.`,
+      });
+    }
+    return checkHealth(args, conn, "member_pin");
+  }
+
+  // 5. Fallback — actor's accessible connections matching (integration, authKey).
   const candidates = args.accessibleConnections.filter(
     (c) => c.integrationPackageId === args.integrationId && c.authKey === args.authKey,
   );
@@ -210,7 +247,8 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
   }
 
   // >1 — caller must pick. Surface the candidate ids so the UI can render
-  // a picker (label + accountId + shared/owned badge).
+  // a picker (label + accountId + shared/owned badge). The picker writes
+  // a member pin, so the next run skips this branch and resolves via layer 4.
   return errorOf(args, {
     code: "must_choose_connection",
     message: `Multiple connections available for ${args.integrationId} (${args.authKey}) — pick one.`,
@@ -266,12 +304,26 @@ function errorOf(
 
 const pinKey = (integrationId: string, authKey: string): string => `${integrationId}|${authKey}`;
 
-function indexPins(pins: PinRow[]): Map<string, string> {
-  const index = new Map<string, string>();
+/**
+ * Partition pins into admin (`userId IS NULL`) and member (matching the
+ * actor) buckets. Member pins for OTHER users are silently ignored —
+ * each actor sees only their own pin.
+ */
+function indexPins(
+  pins: PinRow[],
+  actorUserId: string | null,
+): { adminPins: Map<string, string>; memberPins: Map<string, string> } {
+  const adminPins = new Map<string, string>();
+  const memberPins = new Map<string, string>();
   for (const p of pins) {
-    index.set(pinKey(p.integrationPackageId, p.authKey), p.connectionId);
+    const key = pinKey(p.integrationPackageId, p.authKey);
+    if (p.userId === null) {
+      adminPins.set(key, p.connectionId);
+    } else if (actorUserId !== null && p.userId === actorUserId) {
+      memberPins.set(key, p.connectionId);
+    }
   }
-  return index;
+  return { adminPins, memberPins };
 }
 
 // ─────────────────────────── DB orchestrator ──────────────────────────────────
@@ -302,11 +354,16 @@ export async function resolveConnectionsForRun(
   const requirements = await Promise.all(entries.map((entry) => buildRequirement(entry)));
   const validReqs = requirements.filter((r): r is IntegrationRequirement => r !== null);
 
+  // End-users never own member pins — only dashboard users can pin via
+  // /api/me/integration-pins. Passing null narrows the pin partition to
+  // admin pins only, keeping the cascade tight for end-user runs.
+  const actorUserId = input.actor.type === "user" ? input.actor.id : null;
+
   // Load accessible connections + pins in parallel.
   const integrationIds = validReqs.map((r) => r.integrationId);
   const [accessibleConnections, pins] = await Promise.all([
     loadAccessibleConnections(input.actor, input.scope.applicationId, integrationIds),
-    loadPins(input.scope.applicationId, input.packageId, integrationIds),
+    loadPins(input.scope.applicationId, input.packageId, integrationIds, actorUserId),
   ]);
 
   return resolveConnections({
@@ -315,6 +372,7 @@ export async function resolveConnectionsForRun(
     pins,
     runOverrides: input.runOverrides ?? null,
     scheduleOverrides: input.scheduleOverrides ?? null,
+    actorUserId,
   });
 }
 
@@ -370,8 +428,16 @@ async function loadPins(
   applicationId: string,
   packageId: string,
   integrationIds: string[],
+  actorUserId: string | null,
 ): Promise<PinRow[]> {
   if (integrationIds.length === 0) return [];
+  // Load admin pins (userId IS NULL) plus this actor's own member pins.
+  // Other members' pins are filtered out at the SQL layer so the pure
+  // resolver never sees them — pin choices are private per actor.
+  const scopeFilter =
+    actorUserId !== null
+      ? or(isNull(integrationPins.userId), eq(integrationPins.userId, actorUserId))!
+      : isNull(integrationPins.userId);
   const rows = await db
     .select()
     .from(integrationPins)
@@ -380,6 +446,7 @@ async function loadPins(
         eq(integrationPins.applicationId, applicationId),
         eq(integrationPins.packageId, packageId),
         inArray(integrationPins.integrationPackageId, integrationIds),
+        scopeFilter,
       ),
     );
   return rows;

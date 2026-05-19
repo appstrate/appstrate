@@ -129,7 +129,6 @@ const expectedEndpoints = [
   "GET /api/integrations/{packageId}/connections",
   "GET /api/integrations/{packageId}/accessible-connections",
   "GET /api/integrations/{packageId}/consuming-agents",
-  "DELETE /api/integrations/{packageId}/connections/{connectionId}",
   "PATCH /api/integrations/{packageId}/connections/{connectionId}",
   "PATCH /api/integrations/{packageId}/settings",
   "GET /api/integrations/{packageId}/pins",
@@ -301,9 +300,13 @@ const expectedEndpoints = [
   "GET /api/me/orgs",
   "GET /api/me/models",
   "GET /api/me/connections",
+  "DELETE /api/me/connections/{connectionId}",
   "GET /api/me/application-profile",
   "PUT /api/me/application-profile",
   "DELETE /api/me/application-profile",
+  "GET /api/me/integration-pins",
+  "PUT /api/me/integration-pins",
+  "DELETE /api/me/integration-pins",
 
   // Invitations
   "GET /invite/{token}/info",

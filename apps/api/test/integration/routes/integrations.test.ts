@@ -246,11 +246,14 @@ describe("api_key connection flow", () => {
     const body = (await list.json()) as { data: Array<{ id: string }> };
     expect(body.data.map((c) => c.id)).toContain(conn.id);
 
-    const del = await app.request(`/api/integrations/@myorg/gmail/connections/${conn.id}`, {
+    // Destructive delete moved to /me/connections/:id (single owner-scoped
+    // entry point — see C7 of the integration refactor). The legacy
+    // /integrations/:packageId/connections/:id route was removed in lockstep.
+    const del = await app.request(`/api/me/connections/${conn.id}`, {
       method: "DELETE",
       headers: authHeaders(ctx),
     });
-    expect(del.status).toBe(200);
+    expect(del.status).toBe(204);
     const after = await db
       .select()
       .from(integrationConnections)

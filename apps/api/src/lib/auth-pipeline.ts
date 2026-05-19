@@ -405,5 +405,8 @@ export function skipOrgContext(path: string): boolean {
   // both wrong (no single org represents the caller's full inventory) and
   // user-hostile (would force the SPA to pick one before showing the list).
   if (path === "/api/me/connections" || path === "/api/me/connections/") return true;
+  // `DELETE /api/me/connections/:id` — destructive global delete, derives
+  // applicationId from the row itself. Same rationale as the list above.
+  if (/^\/api\/me\/connections\/[^/]+\/?$/.test(path)) return true;
   return false;
 }

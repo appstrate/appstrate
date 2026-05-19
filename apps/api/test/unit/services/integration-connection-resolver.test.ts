@@ -101,17 +101,26 @@ function conn(input: Partial<ConnectionRow> & { authKey?: string }): ConnectionR
   } as ConnectionRow;
 }
 
-function pin(connectionId: string, authKey = "oauth"): PinRow {
+let pinSeq = 0;
+function pin(connectionId: string, authKey = "oauth", opts?: { userId?: string | null }): PinRow {
+  pinSeq += 1;
   return {
+    id: `pin_${pinSeq}`,
     applicationId: APP_ID,
     packageId: AGENT_ID,
     integrationPackageId: INTEG,
     authKey,
+    userId: opts?.userId ?? null,
     connectionId,
     createdBy: null,
     createdAt: new Date(),
     updatedAt: new Date(),
   };
+}
+
+/** Sugar — member pin scoped to the test's default user. */
+function memberPin(connectionId: string, authKey = "oauth"): PinRow {
+  return pin(connectionId, authKey, { userId: USER_ID });
 }
 
 function req(
@@ -229,6 +238,98 @@ describe("resolveConnections — schedule override (cascade layer 3)", () => {
       scheduleOverrides: { [INTEG]: { oauth: c.id } },
     });
     expect(result.resolved[INTEG]!.oauth!.source).toBe("schedule_override");
+  });
+});
+
+describe("resolveConnections — member pin (cascade layer 4)", () => {
+  it("uses member pin when no admin pin / no overrides and actor matches", () => {
+    const c = conn({});
+    const result = resolveConnections({
+      requirements: [req(oauth2Manifest())],
+      accessibleConnections: [c],
+      pins: [memberPin(c.id)],
+      actorUserId: USER_ID,
+    });
+    expect(result.resolved[INTEG]!.oauth).toEqual({
+      connectionId: c.id,
+      source: "member_pin",
+    });
+  });
+
+  it("member pin scoped to OTHER actor is ignored — falls through to fallback", () => {
+    const c = conn({});
+    const result = resolveConnections({
+      requirements: [req(oauth2Manifest())],
+      accessibleConnections: [c],
+      pins: [pin(c.id, "oauth", { userId: "user_someone_else" })],
+      actorUserId: USER_ID,
+    });
+    expect(result.resolved[INTEG]!.oauth!.source).toBe("fallback_auto");
+  });
+
+  it("admin pin wins over member pin (same agent, same auth)", () => {
+    const adminChoice = conn({});
+    const memberChoice = conn({});
+    const result = resolveConnections({
+      requirements: [req(oauth2Manifest())],
+      accessibleConnections: [adminChoice, memberChoice],
+      pins: [pin(adminChoice.id), memberPin(memberChoice.id)],
+      actorUserId: USER_ID,
+    });
+    expect(result.resolved[INTEG]!.oauth!.connectionId).toBe(adminChoice.id);
+    expect(result.resolved[INTEG]!.oauth!.source).toBe("admin_pin");
+  });
+
+  it("run override wins over member pin", () => {
+    const memberChoice = conn({});
+    const runChoice = conn({});
+    const result = resolveConnections({
+      requirements: [req(oauth2Manifest())],
+      accessibleConnections: [memberChoice, runChoice],
+      pins: [memberPin(memberChoice.id)],
+      runOverrides: { [INTEG]: { oauth: runChoice.id } },
+      actorUserId: USER_ID,
+    });
+    expect(result.resolved[INTEG]!.oauth!.source).toBe("run_override");
+  });
+
+  it("member pin wins over the >1 fallback ambiguity", () => {
+    // Without the pin, the 2 candidates would surface must_choose. The
+    // pin disambiguates — that's its entire point.
+    const picked = conn({});
+    const other = conn({});
+    const result = resolveConnections({
+      requirements: [req(oauth2Manifest())],
+      accessibleConnections: [picked, other],
+      pins: [memberPin(picked.id)],
+      actorUserId: USER_ID,
+    });
+    expect(result.errors).toEqual([]);
+    expect(result.resolved[INTEG]!.oauth!.connectionId).toBe(picked.id);
+    expect(result.resolved[INTEG]!.oauth!.source).toBe("member_pin");
+  });
+
+  it("emits pinned_connection_unavailable when the member pin points at a vanished connection", () => {
+    const result = resolveConnections({
+      requirements: [req(oauth2Manifest())],
+      accessibleConnections: [],
+      pins: [memberPin("conn_ghost")],
+      actorUserId: USER_ID,
+    });
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]!.code).toBe("pinned_connection_unavailable");
+  });
+
+  it("end-user run (actorUserId=null) ignores all member pins", () => {
+    const c = conn({});
+    const result = resolveConnections({
+      requirements: [req(oauth2Manifest())],
+      accessibleConnections: [c],
+      pins: [memberPin(c.id)],
+      actorUserId: null,
+    });
+    // No admin pin, no overrides, no member-pin-applicable → fallback auto.
+    expect(result.resolved[INTEG]!.oauth!.source).toBe("fallback_auto");
   });
 });
 

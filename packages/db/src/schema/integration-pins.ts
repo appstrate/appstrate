@@ -1,26 +1,35 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Admin-set per-(application, agent, integration, authKey) connection pin.
+ * Per-(application, agent, integration, authKey, user?) connection pin.
  *
- * The highest-precedence layer in the integration connection resolver
- * (see `apps/api/src/services/integration-connection-resolver.ts`):
+ * Two scopes share this table, discriminated by `user_id`:
  *
- *   1. integration_pins         ← THIS table  (admin force)
- *   2. runs.connection_overrides                (run-time pick)
- *   3. schedules.connection_overrides           (frozen at schedule create)
- *   4. fallback: actor's accessible connections
+ *   - `user_id IS NULL` — **admin force pin**. Applies to every actor
+ *     running this agent. Written via admin-only endpoints. Cannot be
+ *     overridden by member pins, run/schedule overrides, or fallback.
+ *
+ *   - `user_id IS NOT NULL` — **member preference pin**. The member's
+ *     persisted "for MY runs of this agent, use MY connection X" choice.
+ *     Written via `/api/me/integration-pins/...` by the member themselves.
+ *     Used to replace the ephemeral R5 localStorage pick with a record
+ *     the resolver sees on every run.
+ *
+ * Resolver cascade (see `apps/api/src/services/integration-connection-resolver.ts`):
+ *
+ *   1. admin pin (this table, `user_id IS NULL`)        ← force, all actors
+ *   2. runs.connection_overrides                          (run-time pick)
+ *   3. schedules.connection_overrides                     (frozen at schedule create)
+ *   4. member pin (this table, `user_id = actor.id`)    ← preference, this actor
+ *   5. fallback: actor's accessible connections
  *      = own + (shared_with_org AND application match)
  *      → 1 match → auto, 0 → not_connected, N → must_choose
  *
- * A pin must reference a connection that is accessible to the actors
- * the agent runs as (i.e. owned by an admin AND shared with the org, OR
- * owned by the actor themselves — though admin-pinning a user's own
- * connection is rejected by the API service because that would let
- * admins coerce members into using their personal credentials by
- * sleight of hand). The validation lives in the pin service, not in
- * a DB constraint, because "accessible" depends on the actor at run
- * time (members vs end-users vs API key impersonation).
+ * A pin must reference a connection accessible to the actor at run time.
+ * For admin pins, validation lives in the pin service (admin can't pin
+ * a member's personal connection — would let them coerce credentials by
+ * sleight of hand). For member pins, validation also lives in the
+ * service (member can only pin a connection they themselves can see).
  *
  * FK on connectionId is ON DELETE CASCADE: when the pinned connection
  * vanishes, the pin row disappears and the resolver naturally falls
@@ -28,7 +37,8 @@
  * UUID.
  */
 
-import { pgTable, text, uuid, timestamp, index, primaryKey } from "drizzle-orm/pg-core";
+import { pgTable, text, uuid, timestamp, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { user } from "./auth.ts";
 import { applications } from "./applications.ts";
 import { packages } from "./packages.ts";
@@ -37,6 +47,7 @@ import { integrationConnections } from "./integrations.ts";
 export const integrationPins = pgTable(
   "integration_pins",
   {
+    id: uuid("id").defaultRandom().primaryKey(),
     applicationId: text("application_id")
       .notNull()
       .references(() => applications.id, { onDelete: "cascade" }),
@@ -50,23 +61,46 @@ export const integrationPins = pgTable(
       .references(() => packages.id, { onDelete: "cascade" }),
     /** Auth key inside the integration manifest (`manifest.auths.{key}`). */
     authKey: text("auth_key").notNull(),
+    /**
+     * Scope discriminator. NULL = admin force (whole org); NOT NULL = this
+     * member's personal preference. End-users never own pins (they don't
+     * pick agents — see the table-level doc).
+     */
+    userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
     /** The connection actors will be coerced to use. CASCADE on delete. */
     connectionId: uuid("connection_id")
       .notNull()
       .references(() => integrationConnections.id, { onDelete: "cascade" }),
-    /** Admin who set the pin — for audit. */
+    /** Who set the pin — admin id for admin pins, same as `user_id` for member pins. */
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => [
-    primaryKey({
-      columns: [table.applicationId, table.packageId, table.integrationPackageId, table.authKey],
-    }),
-    // Resolver hot path: fetch all pins for (app, agent) in one round trip.
+    // One row per (application, agent, integration, authKey, scope). The
+    // coalesce trick keeps the unique constraint usable for both scopes —
+    // empty-string sentinel on the NULL side avoids PostgreSQL's
+    // "NULLs distinct in unique" caveat. Admin and member pins can
+    // therefore coexist on the same (agent, integration, authKey).
+    uniqueIndex("idx_integration_pins_unique").on(
+      table.applicationId,
+      table.packageId,
+      table.integrationPackageId,
+      table.authKey,
+      sql`coalesce(${table.userId}, '')`,
+    ),
+    // Resolver hot path: fetch all pins for (app, agent) in one round trip,
+    // then partition by user_id at app level.
     index("idx_integration_pins_app_pkg").on(table.applicationId, table.packageId),
     // Reverse lookup: "what pins reference this connection?" — used by
-    // the unshare-guard (refuse turning sharedWithOrg off if pinned).
+    // the unshare-guard (refuse turning sharedWithOrg off if pinned) AND
+    // by the impact-list confirm modal on /connections destructive delete.
     index("idx_integration_pins_connection").on(table.connectionId),
+    // Member-pin partial index: lookups filtering by `user_id` (member
+    // self-management endpoints + resolver layer 4) hit only the small
+    // member-scoped subset, not the admin-pin majority.
+    index("idx_integration_pins_user")
+      .on(table.userId)
+      .where(sql`${table.userId} IS NOT NULL`),
   ],
 );

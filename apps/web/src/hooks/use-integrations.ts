@@ -219,29 +219,6 @@ export function useInitiateIntegrationOAuth() {
   });
 }
 
-export function useDisconnectIntegration() {
-  const { t } = useTranslation("settings");
-  const qc = useQueryClient();
-  const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
-  return useMutation({
-    mutationFn: ({ packageId, connectionId }: { packageId: string; connectionId: string }) =>
-      api<{ disconnected: boolean }>(
-        `/integrations/${encodeURI(packageId)}/connections/${connectionId}`,
-        { method: "DELETE" },
-      ),
-    onSuccess: (_data, vars) => {
-      toast.success(t("integration.connect.success"));
-      qc.invalidateQueries({
-        queryKey: [...KEY(orgId, applicationId), "detail", vars.packageId],
-      });
-      qc.invalidateQueries({
-        queryKey: [...KEY(orgId, applicationId), "connections", vars.packageId],
-      });
-    },
-  });
-}
-
 export function useIntegrationOAuthClient(
   packageId: string | undefined,
   authKey: string | undefined,

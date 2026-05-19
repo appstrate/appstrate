@@ -9,7 +9,7 @@
  * this layer assumes the caller already has the role.
  */
 
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   applicationPackages,
@@ -85,6 +85,8 @@ export async function listIntegrationPins(
   scope: AppScope,
   integrationPackageId: string,
 ): Promise<PinSummary[]> {
+  // Admin list — admin pins only (userId IS NULL). Member pins are private
+  // per actor and never surface in admin views.
   const rows = await db
     .select()
     .from(integrationPins)
@@ -92,6 +94,7 @@ export async function listIntegrationPins(
       and(
         eq(integrationPins.applicationId, scope.applicationId),
         eq(integrationPins.integrationPackageId, integrationPackageId),
+        isNull(integrationPins.userId),
       ),
     );
   return rows.map(toPinSummary);
@@ -195,31 +198,44 @@ export async function upsertIntegrationPin(
   await assertAgentInstalled(scope, input.agentPackageId);
 
   const now = new Date();
-  await db
-    .insert(integrationPins)
-    .values({
+  // Admin pin → user_id IS NULL. Conceptual uniqueness on (app, agent,
+  // integration, authKey, coalesce(user_id, '')) — Drizzle can't target
+  // computed expressions with onConflictDoUpdate, so do a guarded
+  // select-then-insert/update. Concurrent admin upserts on the same key
+  // would race; we accept that (admin UI is single-user, the unique
+  // index would still reject a duplicate insert).
+  const [existing] = await db
+    .select({ id: integrationPins.id })
+    .from(integrationPins)
+    .where(
+      and(
+        eq(integrationPins.applicationId, scope.applicationId),
+        eq(integrationPins.packageId, input.agentPackageId),
+        eq(integrationPins.integrationPackageId, integrationPackageId),
+        eq(integrationPins.authKey, input.authKey),
+        isNull(integrationPins.userId),
+      ),
+    )
+    .limit(1);
+
+  if (existing) {
+    await db
+      .update(integrationPins)
+      .set({ connectionId: input.connectionId, createdBy: input.createdBy, updatedAt: now })
+      .where(eq(integrationPins.id, existing.id));
+  } else {
+    await db.insert(integrationPins).values({
       applicationId: scope.applicationId,
       packageId: input.agentPackageId,
       integrationPackageId,
       authKey: input.authKey,
+      userId: null,
       connectionId: input.connectionId,
       createdBy: input.createdBy,
       createdAt: now,
       updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: [
-        integrationPins.applicationId,
-        integrationPins.packageId,
-        integrationPins.integrationPackageId,
-        integrationPins.authKey,
-      ],
-      set: {
-        connectionId: input.connectionId,
-        createdBy: input.createdBy,
-        updatedAt: now,
-      },
     });
+  }
 
   return {
     packageId: input.agentPackageId,
@@ -237,6 +253,9 @@ export async function deleteIntegrationPin(
   agentPackageId: string,
   authKey: string,
 ): Promise<{ deleted: boolean }> {
+  // Admin delete — admin pins only (userId IS NULL). Never touches member
+  // pins (those live under /api/me/integration-pins and are owned by the
+  // member).
   const result = await db
     .delete(integrationPins)
     .where(
@@ -245,9 +264,10 @@ export async function deleteIntegrationPin(
         eq(integrationPins.integrationPackageId, integrationPackageId),
         eq(integrationPins.packageId, agentPackageId),
         eq(integrationPins.authKey, authKey),
+        isNull(integrationPins.userId),
       ),
     )
-    .returning({ packageId: integrationPins.packageId });
+    .returning({ id: integrationPins.id });
   return { deleted: result.length > 0 };
 }
 
@@ -263,6 +283,171 @@ async function assertAgentInstalled(scope: AppScope, agentPackageId: string): Pr
     )
     .limit(1);
   if (!row) throw notFound(`Agent '${agentPackageId}' is not installed in this application`);
+}
+
+// ─────────────────────────── Member-pin CRUD ─────────────────────────────────
+
+export interface UpsertMemberPinInput {
+  agentPackageId: string;
+  integrationPackageId: string;
+  authKey: string;
+  connectionId: string;
+  userId: string;
+}
+
+/**
+ * Upsert a member-scope pin (`integration_pins` row with `user_id` set).
+ *
+ * Member writes their own preference for this (agent, integration, auth) —
+ * what used to be the R5 localStorage pick is now a persisted row the
+ * resolver sees on every run (layer 4).
+ *
+ * Validation:
+ *   1. Connection exists in the same application.
+ *   2. Connection matches the (integration, authKey) target.
+ *   3. Connection is **accessible to the caller** — owned by them OR
+ *      `sharedWithOrg=true`. We refuse pinning a connection the caller
+ *      can't actually use at run-time (would create an
+ *      `override_connection_unavailable` on every run otherwise).
+ *   4. Agent is installed in the application.
+ *
+ * Admin pin on the same (agent, integration, authKey) DOESN'T block the
+ * write — the resolver's cascade already makes the admin pin win, and
+ * disallowing the write would silently lose the member's preference
+ * the moment the admin un-pins. The UI is the layer that hides the
+ * picker when an admin pin exists (clearer UX).
+ */
+export async function upsertMemberPin(
+  scope: AppScope,
+  input: UpsertMemberPinInput,
+): Promise<PinSummary> {
+  // 1-3: validate the connection.
+  const [conn] = await db
+    .select()
+    .from(integrationConnections)
+    .where(eq(integrationConnections.id, input.connectionId))
+    .limit(1);
+  if (!conn) throw notFound(`Connection '${input.connectionId}' not found`);
+  if (conn.applicationId !== scope.applicationId) {
+    throw invalidRequest("Pinned connection belongs to a different application");
+  }
+  if (conn.integrationPackageId !== input.integrationPackageId) {
+    throw invalidRequest(
+      `Pinned connection belongs to integration '${conn.integrationPackageId}', not '${input.integrationPackageId}'`,
+    );
+  }
+  if (conn.authKey !== input.authKey) {
+    throw invalidRequest(`Pinned connection has authKey '${conn.authKey}', not '${input.authKey}'`);
+  }
+  const accessible = conn.userId === input.userId || conn.sharedWithOrg;
+  if (!accessible) {
+    throw invalidRequest(
+      "Pinned connection must be owned by you or shared with the org before you can pin it",
+    );
+  }
+
+  // 4: agent installed in the application.
+  await assertAgentInstalled(scope, input.agentPackageId);
+
+  // Guarded upsert (same pattern as admin pins — Drizzle can't target the
+  // computed-coalesce unique index).
+  const now = new Date();
+  const [existing] = await db
+    .select({ id: integrationPins.id })
+    .from(integrationPins)
+    .where(
+      and(
+        eq(integrationPins.applicationId, scope.applicationId),
+        eq(integrationPins.packageId, input.agentPackageId),
+        eq(integrationPins.integrationPackageId, input.integrationPackageId),
+        eq(integrationPins.authKey, input.authKey),
+        eq(integrationPins.userId, input.userId),
+      ),
+    )
+    .limit(1);
+
+  if (existing) {
+    await db
+      .update(integrationPins)
+      .set({ connectionId: input.connectionId, updatedAt: now })
+      .where(eq(integrationPins.id, existing.id));
+  } else {
+    await db.insert(integrationPins).values({
+      applicationId: scope.applicationId,
+      packageId: input.agentPackageId,
+      integrationPackageId: input.integrationPackageId,
+      authKey: input.authKey,
+      userId: input.userId,
+      connectionId: input.connectionId,
+      createdBy: input.userId,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  return {
+    packageId: input.agentPackageId,
+    integrationPackageId: input.integrationPackageId,
+    authKey: input.authKey,
+    connectionId: input.connectionId,
+    createdAt: now.toISOString(),
+    updatedAt: now.toISOString(),
+  };
+}
+
+export async function deleteMemberPin(
+  scope: AppScope,
+  agentPackageId: string,
+  integrationPackageId: string,
+  authKey: string,
+  userId: string,
+): Promise<{ deleted: boolean }> {
+  const result = await db
+    .delete(integrationPins)
+    .where(
+      and(
+        eq(integrationPins.applicationId, scope.applicationId),
+        eq(integrationPins.packageId, agentPackageId),
+        eq(integrationPins.integrationPackageId, integrationPackageId),
+        eq(integrationPins.authKey, authKey),
+        eq(integrationPins.userId, userId),
+      ),
+    )
+    .returning({ id: integrationPins.id });
+  return { deleted: result.length > 0 };
+}
+
+/**
+ * List the caller's own member pins for an agent. Drives the agent-page
+ * picker — UI checks "is this (integ, authKey) already pinned by me?" and
+ * renders the collapsed "Using: X" row pointing at the pinned connection.
+ */
+export interface MemberPinSummary {
+  integrationPackageId: string;
+  authKey: string;
+  connectionId: string;
+}
+
+export async function listMemberPinsForAgent(
+  scope: AppScope,
+  agentPackageId: string,
+  userId: string,
+): Promise<MemberPinSummary[]> {
+  const rows = await db
+    .select({
+      integrationPackageId: integrationPins.integrationPackageId,
+      authKey: integrationPins.authKey,
+      connectionId: integrationPins.connectionId,
+    })
+    .from(integrationPins)
+    .where(
+      and(
+        eq(integrationPins.applicationId, scope.applicationId),
+        eq(integrationPins.packageId, agentPackageId),
+        eq(integrationPins.userId, userId),
+      ),
+    );
+  return rows;
 }
 
 // ─────────────────────────── Connection metadata edits ────────────────────────

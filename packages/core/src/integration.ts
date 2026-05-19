@@ -901,6 +901,7 @@ export type ConnectionResolutionSource =
   | "admin_pin"
   | "run_override"
   | "schedule_override"
+  | "member_pin"
   | "fallback_auto"
   | "fallback_default";
 

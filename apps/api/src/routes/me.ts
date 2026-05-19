@@ -34,10 +34,21 @@ import {
   setMemberApplicationProfileId,
   clearMemberApplicationProfile,
 } from "../services/connection-profiles.ts";
+import { db } from "@appstrate/db/client";
+import { integrationConnections } from "@appstrate/db/schema";
+import { eq } from "drizzle-orm";
 import { listMeConnections } from "../services/connection-manager/me-connections.ts";
 import { getActor } from "../lib/actor.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { requireAppContext } from "../middleware/app-context.ts";
+import { getAppScope } from "../lib/scope.ts";
+import {
+  upsertMemberPin,
+  deleteMemberPin,
+  listMemberPinsForAgent,
+} from "../services/integration-pins-service.ts";
+import { deleteIntegrationConnection } from "../services/integration-connections.ts";
+import { recordAuditFromContext } from "../services/audit.ts";
 import { parseBody, unauthorized } from "../lib/errors.ts";
 import { listResponse } from "../lib/list-response.ts";
 
@@ -184,6 +195,153 @@ router.delete("/application-profile", requireAppContext(), async (c) => {
   }
   const applicationId = c.get("applicationId")!;
   await clearMemberApplicationProfile(user.id, applicationId);
+  return c.body(null, 204);
+});
+
+/**
+ * `/api/me/integration-pins` — member-self pin CRUD.
+ *
+ * The persisted replacement for the R5 localStorage pick: when an agent
+ * has >1 candidate connection on a required (integration, authKey) and
+ * the member picks one, the choice is stored here and read by the
+ * resolver on every subsequent run (cascade layer 4).
+ *
+ * Member-only (no end-user surface — end-users are addressed via API key
+ * impersonation and the calling member controls the choice via run
+ * overrides). All routes require `X-Application-Id`; the pin is scoped
+ * to (member, application, agent, integration, authKey).
+ *
+ * Admin pins live under `/api/integrations/:packageId/pins/...` and use
+ * a different validation rule (the connection must be `sharedWithOrg`);
+ * the two sets coexist in the same table, discriminated by `user_id`.
+ */
+const upsertMemberPinSchema = z.object({
+  agentPackageId: z.string().min(1),
+  integrationPackageId: z.string().min(1),
+  authKey: z.string().min(1),
+  connectionId: z.uuid(),
+});
+
+router.get("/integration-pins", requireAppContext(), async (c) => {
+  const user = c.get("user");
+  if (!user) throw unauthorized("Authentication required");
+  if (c.get("endUser")) {
+    // End-users have no member-pin surface — return an empty list rather
+    // than 403 so the picker can render without special-casing the actor.
+    return c.json(listResponse([]));
+  }
+  const agentPackageId = c.req.query("agentPackageId");
+  if (!agentPackageId) {
+    return c.json(listResponse([]));
+  }
+  const scope = getAppScope(c);
+  const pins = await listMemberPinsForAgent(scope, agentPackageId, user.id);
+  return c.json(listResponse(pins));
+});
+
+router.put("/integration-pins", requireAppContext(), async (c) => {
+  const user = c.get("user");
+  if (!user) throw unauthorized("Authentication required");
+  if (c.get("endUser")) {
+    throw unauthorized("End-user cannot set a member-scope pin");
+  }
+  const scope = getAppScope(c);
+  const body = await c.req.json().catch(() => ({}));
+  const input = parseBody(upsertMemberPinSchema, body);
+  const result = await upsertMemberPin(scope, { ...input, userId: user.id });
+  await recordAuditFromContext(c, {
+    action: "integration.member_pin.upserted",
+    resourceType: "integration_pin",
+    resourceId: `${input.agentPackageId}|${input.integrationPackageId}|${input.authKey}`,
+    after: { connectionId: input.connectionId },
+  });
+  return c.json(result);
+});
+
+router.delete("/integration-pins", requireAppContext(), async (c) => {
+  const user = c.get("user");
+  if (!user) throw unauthorized("Authentication required");
+  if (c.get("endUser")) {
+    throw unauthorized("End-user cannot clear a member-scope pin");
+  }
+  const scope = getAppScope(c);
+  const agentPackageId = c.req.query("agentPackageId");
+  const integrationPackageId = c.req.query("integrationPackageId");
+  const authKey = c.req.query("authKey");
+  if (!agentPackageId || !integrationPackageId || !authKey) {
+    throw unauthorized(
+      "agentPackageId, integrationPackageId and authKey query params are required",
+    );
+  }
+  const result = await deleteMemberPin(
+    scope,
+    agentPackageId,
+    integrationPackageId,
+    authKey,
+    user.id,
+  );
+  if (result.deleted) {
+    await recordAuditFromContext(c, {
+      action: "integration.member_pin.deleted",
+      resourceType: "integration_pin",
+      resourceId: `${agentPackageId}|${integrationPackageId}|${authKey}`,
+    });
+  }
+  return c.body(null, 204);
+});
+
+/**
+ * `DELETE /api/me/connections/:connectionId` — destructive global delete.
+ *
+ * Removes the underlying `integration_connections` row. ON DELETE CASCADE
+ * naturally vacates every reference: admin pins, member pins, run snapshots,
+ * schedule overrides. The intent is *destructive* — "I never want to use
+ * this credential anywhere again".
+ *
+ * The previous user-facing entrypoint on the agent surface
+ * (`DELETE /api/integrations/:packageId/connections/:connectionId`) is
+ * deprecated in favour of this single owner-scoped endpoint. Surfaced
+ * only from `/connections` (the user-owned management page) so members
+ * can't accidentally trigger a global delete from an agent context.
+ *
+ * App context is implicit — the connection row carries `application_id`,
+ * we re-derive scope from it instead of asking the SPA to send a header
+ * for a per-row operation.
+ */
+router.delete("/connections/:connectionId", async (c) => {
+  const connectionId = c.req.param("connectionId")!;
+  const actor = getActor(c);
+
+  // /me/* skips org/app context middleware — derive applicationId from
+  // the connection row itself. Ownership is enforced by the service via
+  // (userId | endUserId) filter, not by org membership: a connection
+  // belongs to its owner regardless of which org context they're browsing.
+  const [row] = await db
+    .select({ applicationId: integrationConnections.applicationId })
+    .from(integrationConnections)
+    .where(eq(integrationConnections.id, connectionId))
+    .limit(1);
+  if (!row) {
+    // 204 instead of 404 keeps the response stable whether the connection
+    // never existed or already deleted — same end state, no information
+    // disclosure to a caller probing IDs.
+    return c.body(null, 204);
+  }
+
+  // orgId is unused by deleteIntegrationConnection (the service filters
+  // by applicationId + actor ownership only). Pass empty string rather
+  // than fetching the row's org id — adding a JOIN to satisfy a typed
+  // field the service ignores is dead work.
+  await deleteIntegrationConnection(
+    { orgId: c.get("orgId") ?? "", applicationId: row.applicationId },
+    connectionId,
+    actor,
+  );
+  await recordAuditFromContext(c, {
+    action: "integration.connection.deleted",
+    resourceType: "integration_connection",
+    resourceId: connectionId,
+  });
   return c.body(null, 204);
 });
 

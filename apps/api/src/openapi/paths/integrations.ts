@@ -642,33 +642,6 @@ export const integrationsPaths = {
     },
   },
   "/api/integrations/{packageId}/connections/{connectionId}": {
-    delete: {
-      operationId: "disconnectIntegrationConnection",
-      tags: ["Integrations"],
-      summary: "Disconnect a single integration connection",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        integrationPackageIdParam,
-        connectionIdParam,
-      ],
-      responses: {
-        "200": {
-          description: "Disconnected",
-          headers: baseResponseHeaders,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["disconnected"],
-                properties: { disconnected: { type: "boolean" } },
-              },
-            },
-          },
-        },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
     patch: {
       operationId: "updateIntegrationConnectionMetadata",
       tags: ["Integrations"],

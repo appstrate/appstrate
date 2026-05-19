@@ -332,6 +332,12 @@ export function PreferencesConnectorsPage() {
         connectionId: string;
         orgId: string;
         applicationId: string;
+        /**
+         * Number of agents that consume this integration in the application —
+         * surfaced in the confirm dialog so the user understands the blast
+         * radius before deleting the connection globally.
+         */
+        reusedByAgents: number;
       }
     | null
   >(null);
@@ -428,6 +434,7 @@ export function PreferencesConnectorsPage() {
                               connectionId: conn.connectionId,
                               orgId: conn.org.id,
                               applicationId: conn.application.id,
+                              reusedByAgents: conn.reusedByAgents ?? 0,
                             },
                       )
                     }
@@ -467,14 +474,23 @@ export function PreferencesConnectorsPage() {
         open={!!confirmState}
         onClose={() => setConfirmState(null)}
         title={t("btn.confirm", { ns: "common" })}
-        description={
-          confirmState
-            ? t("connectors.deleteConfirm", {
-                provider: confirmState.displayName,
-                profile: confirmState.identity ?? "",
-              })
-            : ""
-        }
+        description={(() => {
+          if (!confirmState) return "";
+          const base = t("connectors.deleteConfirm", {
+            provider: confirmState.displayName,
+            profile: confirmState.identity ?? "",
+          });
+          // Impact list — only relevant for integrations (provider connections
+          // don't carry a reusedByAgents count). Surfaces the blast radius so
+          // the user can intentionally choose between deleting (here) vs
+          // changing the agent-side pick (on the agent page).
+          if (confirmState.kind === "integration" && confirmState.reusedByAgents > 0) {
+            return `${base}\n\n${t("connectors.deleteConfirmImpact", {
+              count: confirmState.reusedByAgents,
+            })}`;
+          }
+          return base;
+        })()}
         isPending={
           confirmState?.kind === "provider"
             ? disconnectProvider.isPending
