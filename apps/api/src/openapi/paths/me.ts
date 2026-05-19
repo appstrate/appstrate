@@ -181,6 +181,125 @@ export const mePaths = {
       },
     },
   },
+  "/api/me/connections": {
+    get: {
+      operationId: "listMyConnections",
+      tags: ["Profile"],
+      summary: "List the caller's connections across every org/app",
+      description:
+        "Unified user-scope view that merges provider connections and integration " +
+        "connections under a single shape, grouped by source package. Crosses " +
+        "orgs/applications by design — does NOT require `X-Org-Id`.",
+      responses: {
+        "200": {
+          description: "Connection groups",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["object", "data", "hasMore"],
+                properties: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: [
+                        "kind",
+                        "sourceId",
+                        "displayName",
+                        "logo",
+                        "totalConnections",
+                        "connections",
+                      ],
+                      properties: {
+                        kind: { type: "string", enum: ["provider", "integration"] },
+                        sourceId: { type: "string" },
+                        displayName: { type: "string" },
+                        logo: { type: "string" },
+                        totalConnections: { type: "integer" },
+                        connections: {
+                          type: "array",
+                          items: {
+                            type: "object",
+                            required: [
+                              "connectionId",
+                              "kind",
+                              "label",
+                              "scopesGranted",
+                              "connectedAt",
+                              "needsReconnection",
+                              "expiresAt",
+                              "identity",
+                              "profile",
+                              "authKey",
+                              "sharedWithOrg",
+                              "org",
+                              "application",
+                            ],
+                            properties: {
+                              connectionId: { type: "string" },
+                              kind: { type: "string", enum: ["provider", "integration"] },
+                              label: { type: ["string", "null"] },
+                              scopesGranted: { type: "array", items: { type: "string" } },
+                              connectedAt: { type: "string", format: "date-time" },
+                              needsReconnection: { type: "boolean" },
+                              expiresAt: {
+                                oneOf: [{ type: "string", format: "date-time" }, { type: "null" }],
+                              },
+                              identity: { type: ["string", "null"] },
+                              profile: {
+                                oneOf: [
+                                  {
+                                    type: "object",
+                                    required: ["id", "name", "isDefault"],
+                                    properties: {
+                                      id: { type: "string" },
+                                      name: { type: "string" },
+                                      isDefault: { type: "boolean" },
+                                    },
+                                  },
+                                  { type: "null" },
+                                ],
+                              },
+                              authKey: { type: ["string", "null"] },
+                              sharedWithOrg: { type: "boolean" },
+                              org: {
+                                type: "object",
+                                required: ["id", "name"],
+                                properties: {
+                                  id: { type: "string" },
+                                  name: { type: "string" },
+                                },
+                              },
+                              application: {
+                                type: "object",
+                                required: ["id", "name"],
+                                properties: {
+                                  id: { type: "string" },
+                                  name: { type: "string" },
+                                },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                  hasMore: { type: "boolean" },
+                },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+      },
+    },
+  },
   "/api/me/models": {
     get: {
       operationId: "listMyModels",

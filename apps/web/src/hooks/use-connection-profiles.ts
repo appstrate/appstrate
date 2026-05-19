@@ -11,6 +11,7 @@ import type {
   ConnectionInfo,
   UserConnectionProviderGroup,
   EnrichedBinding,
+  MeConnectionSourceGroup,
 } from "@appstrate/shared-types";
 
 interface ProfileWithConnections extends ConnectionProfile {
@@ -57,6 +58,18 @@ export function useAllUserConnections() {
     queryKey: ["user-connections", orgId, applicationId],
     queryFn: () => apiList<UserConnectionProviderGroup>("/app-profiles/connections"),
     enabled: !!applicationId,
+  });
+}
+
+/**
+ * Unified user-scope connection list (provider + integration), grouped by
+ * source package. Backs the rationalised `/preferences/connectors` page.
+ * Crosses orgs/applications: no header context required.
+ */
+export function useMyConnections() {
+  return useQuery({
+    queryKey: ["me-connections"],
+    queryFn: () => apiList<MeConnectionSourceGroup>("/me/connections"),
   });
 }
 

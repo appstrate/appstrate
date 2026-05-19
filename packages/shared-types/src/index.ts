@@ -247,6 +247,45 @@ export interface UserConnectionProviderGroup {
   orgs: UserConnectionOrgGroup[];
 }
 
+// --- Unified Me Connections (R1 refactor) ----------------
+// User-scope view that merges provider connections and integration
+// connections under a single shape. Backs `GET /api/me/connections`.
+
+export type MeConnectionKind = "provider" | "integration";
+
+export interface MeConnectionEntry {
+  /** Stable connection id (uuid). */
+  connectionId: string;
+  kind: MeConnectionKind;
+  /** Display label set by the user (integration only — providers have profile names). */
+  label: string | null;
+  scopesGranted: string[];
+  connectedAt: string;
+  needsReconnection: boolean;
+  expiresAt: string | null;
+  /** Human-friendly identity (accountEmail, sub claim, profile name). */
+  identity: string | null;
+  /** Provider only — which profile the connection is attached to. */
+  profile: { id: string; name: string; isDefault: boolean } | null;
+  /** Integration only — which auth slot this connection satisfies. */
+  authKey: string | null;
+  /** Integration only — admin/owner sharing toggle (per-org). */
+  sharedWithOrg: boolean;
+  /** Where this connection lives (the connection is keyed per-app). */
+  org: { id: string; name: string };
+  application: { id: string; name: string };
+}
+
+export interface MeConnectionSourceGroup {
+  kind: MeConnectionKind;
+  /** Package id (provider or integration). */
+  sourceId: string;
+  displayName: string;
+  logo: string;
+  totalConnections: number;
+  connections: MeConnectionEntry[];
+}
+
 export type { ProviderProfileSource } from "@appstrate/db/schema";
 import type { ProviderProfileSource } from "@appstrate/db/schema";
 

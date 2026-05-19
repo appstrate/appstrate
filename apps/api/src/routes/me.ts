@@ -34,6 +34,8 @@ import {
   setMemberApplicationProfileId,
   clearMemberApplicationProfile,
 } from "../services/connection-profiles.ts";
+import { listMeConnections } from "../services/connection-manager/me-connections.ts";
+import { getActor } from "../lib/actor.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { requireAppContext } from "../middleware/app-context.ts";
 import { parseBody, unauthorized } from "../lib/errors.ts";
@@ -120,6 +122,20 @@ router.get("/models", requirePermission("models", "read"), async (c) => {
   const orgId = c.get("orgId");
   const models = await listOrgModels(orgId);
   return c.json(listResponse(models));
+});
+
+/**
+ * GET /api/me/connections — unified user-scope connection list.
+ *
+ * Returns every connection the caller owns (provider + integration) across
+ * all orgs/apps they're a member of. Source-grouped (one group per package).
+ * Skips org context entirely: the connection list belongs to the user, not
+ * to any org/application.
+ */
+router.get("/connections", async (c) => {
+  const actor = getActor(c);
+  const groups = await listMeConnections(actor);
+  return c.json(listResponse(groups));
 });
 
 /**

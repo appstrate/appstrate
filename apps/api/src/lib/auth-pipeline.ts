@@ -400,5 +400,10 @@ export function skipOrgContext(path: string): boolean {
   // resolved. Other `/api/me/*` routes (e.g. `/api/me/models`) DO require
   // org context and are intentionally not listed here.
   if (path === "/api/me/orgs" || path === "/api/me/orgs/") return true;
+  // `/api/me/connections` is the unified user-scope connection view: it
+  // crosses orgs/applications by design, so requiring `X-Org-Id` would be
+  // both wrong (no single org represents the caller's full inventory) and
+  // user-hostile (would force the SPA to pick one before showing the list).
+  if (path === "/api/me/connections" || path === "/api/me/connections/") return true;
   return false;
 }
