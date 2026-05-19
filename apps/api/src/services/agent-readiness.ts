@@ -6,10 +6,9 @@
  */
 
 import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
-import {
-  collectDependencyErrors,
-  collectIntegrationDependencyErrors,
-} from "./dependency-validation.ts";
+import { collectDependencyErrors } from "./dependency-validation.ts";
+import { resolveConnectionsForRun } from "./integration-connection-resolver.ts";
+import type { ConnectionResolutionError } from "@appstrate/core/integration";
 import { validateConfig } from "./schema.ts";
 import { resolveManifestProviders, extractManifestSchemas } from "../lib/manifest-utils.ts";
 import { isPromptEmpty, findMissingDependencies } from "@appstrate/core/validation";
@@ -105,12 +104,25 @@ export async function collectAgentReadinessErrors(
   );
 
   if (actor) {
-    const { fieldErrors } = await collectIntegrationDependencyErrors(
-      manifest as Record<string, unknown>,
+    // New flat-connections + pins model (replaces the per-actor-only
+    // lookup). Resolver enumerates own + shared connections, applies
+    // pin > run override > schedule override > fallback, and surfaces
+    // structured errors per (integration, authKey).
+    const resolution = await resolveConnectionsForRun({
+      agentManifest: manifest as Record<string, unknown>,
+      packageId: agent.id,
       actor,
-      { orgId, applicationId },
-    );
-    errors.push(...fieldErrors);
+      scope: { orgId, applicationId },
+      // Run/schedule overrides aren't plumbed through readiness today;
+      // they are evaluated at run creation time by run-pipeline.ts so the
+      // snapshot stays in sync with the actual run. Readiness only sees
+      // pin + fallback, which is the conservative view (passes readiness
+      // when at least one connection is accessible — wider checks happen
+      // when the caller binds their override at run creation).
+    });
+    for (const e of resolution.errors) {
+      errors.push(translateResolutionError(e));
+    }
   }
 
   if (!skip?.config && config) {
@@ -183,6 +195,42 @@ export async function validateAgentReadiness(params: AgentReadinessParams): Prom
     detail: first.message,
   });
 }
+
+/**
+ * Map a `ConnectionResolutionError` to the wire-format ValidationFieldError
+ * the upstream 412 envelope expects (same shape the old
+ * `collectIntegrationDependencyErrors` emitted, so the dashboard's
+ * MissingConnectionsModal + webhook listeners don't need to change).
+ *
+ * Field path: `integrations.{packageId}.{authKey}` (preserves backward
+ * compatibility with the parser in `missing-connections-modal.tsx`).
+ *
+ * `requiredScopes` is smuggled on the field entry for the
+ * insufficient_scopes case so the inline connect button can forward it
+ * to the OAuth kickoff for incremental consent.
+ */
+function translateResolutionError(e: ConnectionResolutionError): ValidationFieldError {
+  const title = TITLE_BY_CODE[e.code];
+  return {
+    field: `integrations.${e.integrationId}.${e.authKey}`,
+    code: e.code,
+    title,
+    message: e.message,
+    ...(e.requiredScopes && e.requiredScopes.length > 0
+      ? { requiredScopes: e.requiredScopes }
+      : {}),
+  } as ValidationFieldError;
+}
+
+const TITLE_BY_CODE: Record<ConnectionResolutionError["code"], string> = {
+  not_connected: "Integration Not Connected",
+  needs_reconnection: "Needs Reconnection",
+  insufficient_scopes: "Insufficient Scopes",
+  connection_blocked_by_admin: "Connection Blocked by Admin",
+  pinned_connection_unavailable: "Pinned Connection Unavailable",
+  override_connection_unavailable: "Override Connection Unavailable",
+  must_choose_connection: "Multiple Connections Available — Pick One",
+};
 
 /**
  * Re-validate a deep-merged config against the manifest schema.
