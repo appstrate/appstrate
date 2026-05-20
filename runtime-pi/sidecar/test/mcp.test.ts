@@ -1167,3 +1167,91 @@ describe("POST /mcp — provider_call concurrency cap (issue #427)", () => {
     }
   });
 });
+
+describe("POST /mcp — api_call (provider→integration unification)", () => {
+  const integrationCreds = (token = "integ-tok-1") => ({
+    credentials: { __appstrate_api_call_token__: token },
+    authorizedUris: ["https://gmail.googleapis.com/**"],
+    allowAllUris: false,
+    credentialHeaderName: "Authorization",
+    credentialHeaderPrefix: "Bearer",
+    credentialFieldName: "__appstrate_api_call_token__",
+  });
+
+  function makeApiCallDeps(overrides?: Partial<AppDeps>): AppDeps {
+    return makeDeps({
+      apiCallIntegrationsProvider: () => [
+        {
+          namespace: "gmail",
+          packageId: "@official/gmail",
+          fetchCredentials: async () => integrationCreds(),
+          refreshCredentials: async () => integrationCreds("integ-tok-2"),
+        },
+      ],
+      ...overrides,
+    });
+  }
+
+  it("advertises {namespace}__api_call in tools/list", async () => {
+    const app = createApp(makeApiCallDeps());
+    const res = await rpc(app, { method: "tools/list" });
+    const result = res.json.result as {
+      tools: Array<{
+        name: string;
+        inputSchema: { properties: Record<string, unknown>; required?: string[] };
+      }>;
+    };
+    const apiCall = result.tools.find((t) => t.name === "gmail__api_call");
+    expect(apiCall).toBeDefined();
+    // The cloned descriptor drops `providerId` — the integration is implied.
+    expect(apiCall!.inputSchema.properties.providerId).toBeUndefined();
+    expect(apiCall!.inputSchema.required ?? []).not.toContain("providerId");
+    expect(apiCall!.inputSchema.required ?? []).toContain("target");
+  });
+
+  it("injects the integration credential and forwards upstream", async () => {
+    const fetchFn = mock(
+      async () =>
+        new Response('{"messages":[]}', {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    const app = createApp(makeApiCallDeps({ fetchFn }));
+    const res = await rpc(app, {
+      method: "tools/call",
+      params: {
+        name: "gmail__api_call",
+        arguments: { target: "https://gmail.googleapis.com/v1/messages", method: "GET" },
+      },
+    });
+    expect(res.status).toBe(200);
+    const result = res.json.result as { content: Array<{ text: string }>; isError?: boolean };
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0]!.text).toBe('{"messages":[]}');
+    const init = fetchFn.mock.calls[0]![1] as RequestInit;
+    const headers = init.headers as Record<string, string>;
+    expect(headers["Authorization"]).toBe("Bearer integ-tok-1");
+  });
+
+  it("enforces the integration authorizedUris allowlist", async () => {
+    const app = createApp(makeApiCallDeps());
+    const res = await rpc(app, {
+      method: "tools/call",
+      params: {
+        name: "gmail__api_call",
+        arguments: { target: "https://evil.example.com/exfil", method: "GET" },
+      },
+    });
+    const result = res.json.result as { content: Array<{ text: string }>; isError: boolean };
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain("not authorized");
+  });
+
+  it("registers no api_call tool when no integration opts in", async () => {
+    const app = createApp(makeDeps());
+    const res = await rpc(app, { method: "tools/list" });
+    const result = res.json.result as { tools: Array<{ name: string }> };
+    expect(result.tools.some((t) => t.name.endsWith("__api_call"))).toBe(false);
+  });
+});

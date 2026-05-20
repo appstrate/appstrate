@@ -2,7 +2,7 @@
 
 import { Hono, type Context } from "hono";
 import pLimit, { type LimitFunction } from "p-limit";
-import { mountMcp } from "./mcp.ts";
+import { mountMcp, type ApiCallIntegrationConfig } from "./mcp.ts";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import { BlobStore } from "./blob-store.ts";
 import {
@@ -71,6 +71,13 @@ export interface AppDeps {
    * The integration runtime (Phase 1.4) wires `McpHost.buildTools` here.
    */
   additionalMcpToolsProvider?: () => AppstrateToolDefinition[];
+  /**
+   * Lazy provider for the integrations exposing the generic `api_call`
+   * tool (provider→integration unification). Same laziness rationale as
+   * {@link additionalMcpToolsProvider}: the set is only known after the
+   * background bootstrap finishes.
+   */
+  apiCallIntegrationsProvider?: () => ApiCallIntegrationConfig[];
   /**
    * Promise that resolves once `bootIntegrations` has finished its
    * initial pass. `tools/list` awaits this briefly (with a hard
@@ -594,6 +601,9 @@ export function createApp(deps: AppDeps): Hono {
     },
     ...(deps.additionalMcpToolsProvider
       ? { additionalToolsProvider: deps.additionalMcpToolsProvider }
+      : {}),
+    ...(deps.apiCallIntegrationsProvider
+      ? { apiCallIntegrationsProvider: deps.apiCallIntegrationsProvider }
       : {}),
     ...(deps.integrationBootPromise ? { integrationBootPromise: deps.integrationBootPromise } : {}),
   });

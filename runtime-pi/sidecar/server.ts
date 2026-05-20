@@ -6,6 +6,7 @@ import type { CredentialsResponse, LlmProxyConfig } from "./helpers.ts";
 import { logger } from "./logger.ts";
 import { OAuthTokenCache } from "./oauth-token-cache.ts";
 import { bootIntegrations, readIntegrationSpecsFromEnv } from "./integrations-boot.ts";
+import type { ApiCallIntegrationConfig } from "./mcp.ts";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 
 function readLlmConfigFromEnv(): LlmProxyConfig | undefined {
@@ -97,6 +98,7 @@ const oauthTokenCache = new OAuthTokenCache({
 // first `tools/list` call then briefly awaits this promise via the
 // lazy tools provider below.
 let integrationTools: AppstrateToolDefinition[] = [];
+let apiCallIntegrations: ApiCallIntegrationConfig[] = [];
 const specs = readIntegrationSpecsFromEnv();
 const integrationBootPromise =
   specs && specs.length > 0
@@ -106,10 +108,12 @@ const integrationBootPromise =
       })
         .then((result) => {
           integrationTools = result.tools;
+          apiCallIntegrations = result.apiCallIntegrations;
           logger.info("Integrations bootstrapped", {
             spawned: result.spawned,
             failed: result.failed,
             toolCount: result.tools.length,
+            apiCallTools: result.apiCallIntegrations.length,
           });
         })
         .catch((err) => {
@@ -127,6 +131,7 @@ const app = createApp({
   isReady: () => proxy.readySync,
   oauthTokenCache,
   additionalMcpToolsProvider: () => integrationTools,
+  apiCallIntegrationsProvider: () => apiCallIntegrations,
   integrationBootPromise,
 });
 

@@ -57,6 +57,8 @@ import {
   createIntegrationCredentialsSource,
   fetchInitialIntegrationCredentials,
 } from "./integration-credentials-source.ts";
+import { createApiCallCredentialAdapter } from "./api-call-credentials.ts";
+import type { ApiCallIntegrationConfig } from "./mcp.ts";
 import {
   selectIntegrationRuntimeAdapter,
   type IntegrationRuntimeAdapter,
@@ -90,6 +92,13 @@ export interface BootIntegrationsResult {
   host: McpHost;
   /** Tools registered on `host`, ready to merge into the sidecar's MCP surface. */
   tools: AppstrateToolDefinition[];
+  /**
+   * Per-integration `api_call` wiring (provider→integration unification).
+   * One entry per spec that declared `apiCall` and whose agent selected
+   * the `api_call` tool. `mountMcp` turns each into a
+   * `{namespace}__api_call` tool. Empty when no integration opted in.
+   */
+  apiCallIntegrations: ApiCallIntegrationConfig[];
   /** Per-integration spawn outcome — useful for run-event observability. */
   spawned: Array<{ packageId: string; namespace: string; toolCount: number }>;
   /** Per-integration failures — emitted as warnings but do not abort boot. */
@@ -205,7 +214,7 @@ async function connectRemoteHttpIntegration(
   spec: IntegrationSpawnSpec,
   bundleFetchOpts: BundleFetchOptions,
 ): Promise<{ client: AppstrateMcpClient; authKey: string }> {
-  const serverUrl = spec.manifest.server.url;
+  const serverUrl = spec.manifest.server?.url;
   if (!serverUrl) {
     throw new Error(`integration ${spec.packageId} declares server.type="http" but no server.url`);
   }
@@ -294,6 +303,7 @@ export async function bootIntegrations(
   const failed: BootIntegrationsResult["failed"] = [];
   const clients: AppstrateMcpClient[] = [];
   const mitmListeners: MitmListenerHandle[] = [];
+  const apiCallIntegrations: ApiCallIntegrationConfig[] = [];
 
   // The sidecar receives RUN_TOKEN but not always RUN_ID directly — we
   // need a stable identifier for labelling integration containers
@@ -378,6 +388,49 @@ export async function bootIntegrations(
 
   for (const spec of specs) {
     try {
+      // ─── provider→integration unification — generic api_call tool ───
+      // Independent of how (or whether) the integration spawns a server:
+      // build the credential adapter from a dedicated credentials source
+      // so `mountMcp` can register `{namespace}__api_call`. A pure-proxy
+      // integration (apiCall, no server) does ONLY this and skips spawn.
+      if (spec.apiCall) {
+        const initial = await fetchInitialIntegrationCredentials(spec.packageId, bundleFetchOpts);
+        const source = createIntegrationCredentialsSource({
+          packageId: spec.packageId,
+          platformApiUrl: bundleFetchOpts.platformApiUrl,
+          runToken: bundleFetchOpts.runToken,
+          initialPayload: initial,
+        });
+        const credAdapter = createApiCallCredentialAdapter({
+          source,
+          authKey: spec.apiCall.authKey,
+          authorizedUris: spec.apiCall.authorizedUris,
+        });
+        apiCallIntegrations.push({
+          namespace: spec.namespace,
+          packageId: spec.packageId,
+          fetchCredentials: credAdapter.fetchCredentials,
+          refreshCredentials: credAdapter.refreshCredentials,
+        });
+        logger.info("integration api_call registered", {
+          packageId: spec.packageId,
+          namespace: spec.namespace,
+          authKey: spec.apiCall.authKey,
+        });
+      }
+
+      // Serverless integration (apiCall-only, no MCP server) — nothing to
+      // spawn; the api_call tool above is its entire surface.
+      if (!spec.manifest.server) {
+        spawned.push({
+          packageId: spec.packageId,
+          namespace: spec.namespace,
+          toolCount: spec.apiCall ? 1 : 0,
+        });
+        continue;
+      }
+      const server = spec.manifest.server;
+
       // ─── Phase 7 — remote HTTP MCP path ───
       // When the manifest declares `server.type: "http"` the integration
       // is a managed remote MCP (e.g. Google's gmailmcp.googleapis.com).
@@ -386,7 +439,7 @@ export async function bootIntegrations(
       // Bearer token per-request from the credentials source. Trade-off:
       // Phase 4 URL-envelope enforcement is N/A (we can't enforce per-tool
       // upstream URLs through a hosted MCP — the upstream decides).
-      if (spec.manifest.server.type === "http") {
+      if (server.type === "http") {
         const { client, authKey } = await connectRemoteHttpIntegration(spec, bundleFetchOpts);
         const sizeBefore = host.size();
         await host.register({
@@ -406,7 +459,7 @@ export async function bootIntegrations(
         logger.info("integration registered (remote http)", {
           packageId: spec.packageId,
           namespace: spec.namespace,
-          serverUrl: spec.manifest.server.url,
+          serverUrl: server.url,
           authKey,
           toolCount: added,
         });
@@ -544,6 +597,7 @@ export async function bootIntegrations(
   return {
     host,
     tools,
+    apiCallIntegrations,
     spawned,
     failed,
     shutdown: async () => {

@@ -31,7 +31,11 @@ import {
   readCredentialField,
   resolveHttpDelivery,
 } from "@appstrate/connect";
-import { getToolUrlPatterns } from "@appstrate/core/integration";
+import {
+  getToolUrlPatterns,
+  getApiCallConfig,
+  API_CALL_TOOL_NAME,
+} from "@appstrate/core/integration";
 import type {
   IntegrationManifest,
   ResolvedConnection,
@@ -186,10 +190,20 @@ async function resolveOne(
   // there is no runner — the sidecar speaks MCP directly to the managed
   // upstream. The upstream's tool-level RBAC + OAuth scope are the only
   // gates that apply, by design.
-  const isRemoteHttp = manifest.server.type === "http";
+  const isRemoteHttp = manifest.server?.type === "http";
   const toolUrlEnvelope = isRemoteHttp
     ? undefined
     : computeToolUrlEnvelope(manifest, agentToolSelection);
+
+  // provider→integration unification — expose the generic `api_call` tool
+  // when the manifest opts in AND the agent selected it (least-privilege:
+  // the catch-all tool is never auto-granted). `authorizedUris` come from
+  // the auth the apiCall config resolved to.
+  const apiCallCfg = getApiCallConfig(manifest);
+  const exposeApiCall =
+    apiCallCfg !== null && (agentToolSelection ?? []).includes(API_CALL_TOOL_NAME);
+  const apiCallAuthorizedUris =
+    exposeApiCall && apiCallCfg ? (manifest.auths?.[apiCallCfg.authKey]?.authorizedUris ?? []) : [];
 
   return {
     packageId,
@@ -197,16 +211,33 @@ async function resolveOne(
     manifest: {
       name: manifest.name,
       version: manifest.version,
-      server: {
-        type: manifest.server.type,
-        ...(manifest.server.entryPoint ? { entryPoint: manifest.server.entryPoint } : {}),
-        // Phase 7 — propagate the remote MCP URL so the sidecar can open
-        // a Streamable HTTP client against it. Mutually exclusive with
-        // `entryPoint` (enforced by `integrationManifestSchema`).
-        ...(manifest.server.url ? { url: manifest.server.url } : {}),
-      },
+      // Serverless integrations (apiCall-only) omit `server` entirely —
+      // the sidecar skips spawn and only wires the generic tool.
+      ...(manifest.server
+        ? {
+            server: {
+              type: manifest.server.type,
+              ...(manifest.server.entryPoint ? { entryPoint: manifest.server.entryPoint } : {}),
+              // Phase 7 — propagate the remote MCP URL so the sidecar can open
+              // a Streamable HTTP client against it. Mutually exclusive with
+              // `entryPoint` (enforced by `integrationManifestSchema`).
+              ...(manifest.server.url ? { url: manifest.server.url } : {}),
+            },
+          }
+        : {}),
       ...(manifest.transport ? { transport: { type: manifest.transport.type } } : {}),
     },
+    ...(exposeApiCall && apiCallCfg
+      ? {
+          apiCall: {
+            authKey: apiCallCfg.authKey,
+            authorizedUris: [...apiCallAuthorizedUris],
+            ...(apiCallCfg.uploadProtocols.length > 0
+              ? { uploadProtocols: apiCallCfg.uploadProtocols }
+              : {}),
+          },
+        }
+      : {}),
     spawnEnv: deliveries.spawnEnv,
     // For remote HTTP MCP we deliberately drop `httpDeliveryAuths`: the
     // sidecar's HTTP path reads the access token directly from the

@@ -122,7 +122,13 @@ export interface IntegrationSpawnSpec {
   manifest: {
     name: string;
     version: string;
-    server: {
+    /**
+     * MCP server to spawn/connect. Optional: a pure-proxy integration
+     * (`apiCall` with no `server` — the migrated-provider shape) has no
+     * MCP server. The sidecar skips spawn entirely for such specs and
+     * only exposes the generic `api_call` tool.
+     */
+    server?: {
       type: string;
       entryPoint?: string;
       /**
@@ -134,6 +140,26 @@ export interface IntegrationSpawnSpec {
       url?: string;
     };
     transport?: { type: string };
+  };
+  /**
+   * Generic credential-injecting HTTP tool (provider→integration
+   * unification). Set when the manifest declares `apiCall` AND the agent
+   * selected the `api_call` tool. The sidecar registers a
+   * `{namespace}__api_call` tool that proxies an arbitrary upstream
+   * request bounded by {@link authorizedUris}, injecting the resolved
+   * auth's credential header via the same machinery as `delivery.http`.
+   *
+   * Credentials are NOT inlined here — the sidecar reads them from the
+   * `/internal/integration-credentials` surface (same as MITM / remote
+   * HTTP) so a leaked env var can't surface a live token.
+   */
+  apiCall?: {
+    /** Which declared auth supplies credentials + authorizedUris. */
+    authKey: string;
+    /** URI allowlist (verbatim from `auths.{authKey}.authorizedUris`). */
+    authorizedUris: readonly string[];
+    /** Resumable-upload protocols the tool advertises (may be empty). */
+    uploadProtocols?: readonly string[];
   };
   /**
    * Env vars to inject on the spawned subprocess. Resolved from

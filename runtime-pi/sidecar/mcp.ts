@@ -467,7 +467,10 @@ function validateMultipartParts(parts: unknown): MultipartValidationOk | Multipa
  * {@link INLINE_RESPONSE_THRESHOLD_BYTES} is consulted only when no
  * {@link TokenBudget} is wired (tests / embedders).
  */
-function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] {
+function buildSidecarTools(options: MountMcpOptions): {
+  firstParty: AppstrateToolDefinition[];
+  makeApiCallTool: (integ: ApiCallIntegrationConfig) => AppstrateToolDefinition;
+} {
   const { blobStore, proxyDeps, tokenBudget, providerCallLimit } = options;
   const { config, fetchFn } = proxyDeps;
   const providerCall: AppstrateToolDefinition = {
@@ -607,12 +610,66 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
       // parallel `provider_call`s funnels their full payloads into the
       // next LLM turn, blowing past upstream model TPM windows
       // (issue #427). p-limit wraps the operation so the slot is held
-      // only for the duration of `providerCallInner` — no acquire/release
+      // only for the duration of `credentialProxyInner` — no acquire/release
       // pairing to manage.
+      const ctx = {
+        proxyDeps,
+        providerId: (rawArgs as { providerId?: string }).providerId ?? "",
+        label: "provider_call",
+      };
       return providerCallLimit
-        ? await providerCallLimit(() => providerCallInner(rawArgs))
-        : await providerCallInner(rawArgs);
+        ? await providerCallLimit(() => credentialProxyInner(rawArgs, ctx))
+        : await credentialProxyInner(rawArgs, ctx);
     },
+  };
+
+  // provider→integration unification — build one generic `{ns}__api_call`
+  // tool for an integration that opted into `apiCall`. Reuses the exact
+  // credential-proxy core as `provider_call` (body parsing,
+  // redirect/cookie/SSRF hardening, 401 refresh, blob spillover) via
+  // {@link credentialProxyInner}, with a fixed providerId (the integration
+  // package id) and integration-backed credentials. The descriptor is
+  // cloned from `provider_call` minus the `providerId` argument (the
+  // integration is implied by the tool name).
+  //
+  // Built lazily (per `/mcp` request) by `mountMcp` because the set of
+  // integrations is only known after the background bootstrap finishes.
+  const makeApiCallTool = (integ: ApiCallIntegrationConfig): AppstrateToolDefinition => {
+    const baseSchema = providerCall.descriptor.inputSchema as {
+      properties: Record<string, unknown>;
+      required?: string[];
+      [k: string]: unknown;
+    };
+    const { providerId: _omitProviderId, ...properties } = baseSchema.properties;
+    const ctx = {
+      proxyDeps: {
+        ...proxyDeps,
+        fetchCredentials: integ.fetchCredentials,
+        refreshCredentials: integ.refreshCredentials,
+      },
+      providerId: integ.packageId,
+      label: "api_call",
+    };
+    return {
+      descriptor: {
+        name: `${integ.namespace}__api_call`,
+        description:
+          `Make an authenticated request through the "${integ.packageId}" integration's ` +
+          "credential-injecting proxy. The sidecar injects the integration's resolved " +
+          "credential and forwards the request to the supplied target URL, which must match " +
+          "the integration auth's `authorizedUris`. Binary upstream responses spill to MCP " +
+          "`resources` and are returned as a `resource_link`.",
+        inputSchema: {
+          ...baseSchema,
+          properties,
+          required: (baseSchema.required ?? []).filter((r) => r !== "providerId"),
+        },
+      },
+      handler: async (rawArgs) =>
+        providerCallLimit
+          ? await providerCallLimit(() => credentialProxyInner(rawArgs, ctx))
+          : await credentialProxyInner(rawArgs, ctx),
+    };
   };
 
   /**
@@ -621,10 +678,12 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
    * pre-flight validation / upstream HTTP body can keep its existing
    * control flow without nested closures.
    */
-  async function providerCallInner(rawArgs: unknown): Promise<CallToolResult> {
+  async function credentialProxyInner(
+    rawArgs: unknown,
+    ctx: { proxyDeps: ProviderCallDeps; providerId: string; label: string },
+  ): Promise<CallToolResult> {
     {
       const args = rawArgs as {
-        providerId: string;
         target: string;
         method?: string;
         headers?: Record<string, string>;
@@ -649,7 +708,7 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
           content: [
             {
               type: "text",
-              text: `provider_call: 'body' is not allowed with method '${method}'. Use POST/PUT/PATCH/DELETE if you need to send a request body.`,
+              text: `${ctx.label}: 'body' is not allowed with method '${method}'. Use POST/PUT/PATCH/DELETE if you need to send a request body.`,
             },
           ],
           isError: true,
@@ -664,7 +723,7 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
             {
               type: "text",
               text:
-                `provider_call: caller-supplied headers may not include sidecar-control names: ` +
+                `${ctx.label}: caller-supplied headers may not include sidecar-control names: ` +
                 `${dropped.join(", ")}. Use the dedicated tool arguments (substituteBody, …) instead.`,
             },
           ],
@@ -731,7 +790,7 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
               {
                 type: "text",
                 text:
-                  "provider_call: substituteBody requires a text body — pass body as a string, " +
+                  `${ctx.label}: substituteBody requires a text body — pass body as a string, ` +
                   "not { fromBytes }.",
               },
             ],
@@ -746,7 +805,7 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
               {
                 type: "text",
                 text:
-                  "provider_call: body.fromBytes is not standard base64 (RFC 4648 §4, " +
+                  `${ctx.label}: body.fromBytes is not standard base64 (RFC 4648 §4, ` +
                   "alphabet `+/`, no whitespace).",
               },
             ],
@@ -760,7 +819,7 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
               {
                 type: "text",
                 text:
-                  `provider_call: body.fromBytes is ${decoded.byteLength} bytes, ` +
+                  `${ctx.label}: body.fromBytes is ${decoded.byteLength} bytes, ` +
                   `which exceeds the per-request limit of ${MAX_REQUEST_BODY_SIZE} bytes. ` +
                   `Operators can raise the cap with SIDECAR_MAX_REQUEST_BODY_BYTES (and ` +
                   `SIDECAR_MAX_MCP_ENVELOPE_BYTES, since base64 inflation must still fit ` +
@@ -789,7 +848,7 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
 
       const result = await executeProviderCall(
         {
-          providerId: args.providerId,
+          providerId: ctx.providerId,
           targetUrl: args.target,
           method,
           callerHeaders,
@@ -809,11 +868,11 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
           substituteBody: !!args.substituteBody,
           proxyUrl: config.proxyUrl,
         },
-        proxyDeps,
+        ctx.proxyDeps,
       );
       if (!result.ok) {
         return {
-          content: [{ type: "text", text: `provider_call: ${result.error}` }],
+          content: [{ type: "text", text: `${ctx.label}: ${result.error}` }],
           isError: true,
           // Pre-flight failure (cred fetch, URL allowlist, etc): no
           // upstream contact, but the runtime parser requires `_meta`
@@ -826,7 +885,7 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
       return responseToToolResult(result.response, {
         ...(blobStore ? { blobStore } : {}),
         ...(tokenBudget ? { tokenBudget } : {}),
-        source: `provider:${args.providerId}`,
+        source: `${ctx.label}:${ctx.providerId}`,
         // Attach upstream `{ status, headers, finalUrl }` to the
         // CallToolResult `_meta` payload so the agent-side resolver
         // can surface real HTTP status / response headers (Location,
@@ -961,7 +1020,7 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
     },
   };
 
-  return [providerCall, runHistory, recallMemory];
+  return { firstParty: [providerCall, runHistory, recallMemory], makeApiCallTool };
 }
 
 /**
@@ -1433,9 +1492,35 @@ async function readBodyBounded(res: Response, maxBytes: number): Promise<string>
  * per-request cost is negligible compared to the upstream HTTP hop the
  * tool then performs.
  */
+/**
+ * One integration's `api_call` wiring (provider→integration unification).
+ * The credential adapters are built by the sidecar boot from the
+ * integration's live credentials source; `mountMcp` threads them into a
+ * per-integration `ProviderCallDeps` so the generic tool reuses the
+ * shared credential-proxy core.
+ */
+export interface ApiCallIntegrationConfig {
+  /** McpHost-style namespace — the tool is named `{namespace}__api_call`. */
+  namespace: string;
+  /** Integration package id (used as the proxy `providerId` + audit source). */
+  packageId: string;
+  /** Resolve the integration's credentials into the proxy payload. */
+  fetchCredentials: ProviderCallDeps["fetchCredentials"];
+  /** Force-refresh on a mid-run 401 and re-resolve. */
+  refreshCredentials: NonNullable<ProviderCallDeps["refreshCredentials"]>;
+}
+
 export interface MountMcpOptions {
   /** Run-scoped blob store for `provider_call` resource spillover. */
   blobStore?: BlobStore;
+  /**
+   * Lazy provider for integrations exposing the generic `api_call` tool.
+   * Called on every `/mcp` request (like {@link additionalToolsProvider})
+   * so integrations that finish their background bootstrap after the
+   * HTTP listener comes up still surface their `{namespace}__api_call`
+   * tool on the next `tools/list`.
+   */
+  apiCallIntegrationsProvider?: () => ApiCallIntegrationConfig[];
   /**
    * Credential-proxy core deps. `provider_call` calls
    * {@link executeProviderCall} directly with structured args; `run_history`
@@ -1507,7 +1592,7 @@ export interface MountMcpOptions {
 const INTEGRATION_BOOT_WAIT_MS = 30_000;
 
 export function mountMcp(app: Hono, options: MountMcpOptions): void {
-  const firstParty = buildSidecarTools(options);
+  const { firstParty, makeApiCallTool } = buildSidecarTools(options);
   const firstPartyNames = new Set(firstParty.map((t) => t.descriptor.name));
   const resources = options.blobStore ? buildBlobResourceProvider(options.blobStore) : undefined;
   // Cache the await so only the first `/mcp` request pays the wait —
@@ -1606,7 +1691,11 @@ export function mountMcp(app: Hono, options: MountMcpOptions): void {
     if (bootReady) await bootReady;
     // Resolve tools per-request so integrations that finish booting AFTER
     // the sidecar's HTTP listener is up still surface on the next call.
-    const dynamicExtras = (options.additionalToolsProvider?.() ?? []).filter(
+    // provider→integration unification — build the generic `api_call`
+    // tools lazily from the (post-bootstrap) integration set, alongside
+    // the spawned-integration MCP tools.
+    const apiCallExtras = (options.apiCallIntegrationsProvider?.() ?? []).map(makeApiCallTool);
+    const dynamicExtras = [...(options.additionalToolsProvider?.() ?? []), ...apiCallExtras].filter(
       (t) => !firstPartyNames.has(t.descriptor.name),
     );
     const tools = [...firstParty, ...dynamicExtras];
