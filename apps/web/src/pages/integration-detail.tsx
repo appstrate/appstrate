@@ -52,6 +52,9 @@ import {
   useAgentsConsumingIntegration,
   useUpsertIntegrationPin,
   useDeleteIntegrationPin,
+  useIntegrationOrgDefault,
+  useUpsertIntegrationOrgDefault,
+  useDeleteIntegrationOrgDefault,
   type IntegrationAuthStatus,
   type IntegrationConnection,
   type IntegrationManifestView,
@@ -395,9 +398,115 @@ function BlockUserConnectionsToggle({
 }
 
 /**
+ * Org-wide default connection for this integration — the cross-agent
+ * baseline every consuming agent uses unless a per-agent exception (pin)
+ * overrides it. `enforce` locks members; otherwise it's a soft default a
+ * member can still override with their own pick.
+ */
+function OrgDefaultSection({ packageId }: { packageId: string }) {
+  const { t } = useTranslation("settings");
+  const { data: orgDefault } = useIntegrationOrgDefault(packageId);
+  const { data: connections } = useIntegrationConnections(packageId);
+  const upsert = useUpsertIntegrationOrgDefault();
+  const remove = useDeleteIntegrationOrgDefault();
+
+  const shared = (connections ?? []).filter((c) => c.sharedWithOrg === true);
+  const connectionDisplay = (id: string): string => {
+    const c = (connections ?? []).find((x) => x.id === id);
+    if (!c) return id;
+    const account =
+      (c.identityClaims?.accountEmail as string | undefined) ??
+      (c.identityClaims?.account_email as string | undefined) ??
+      c.accountId;
+    return c.label ? `${c.label} (${account})` : account;
+  };
+
+  const [connectionId, setConnectionId] = useState("");
+  const [enforce, setEnforce] = useState(false);
+
+  // Seed the form from the persisted default once loaded.
+  const seededFor = orgDefault?.connectionId ?? null;
+  const [seeded, setSeeded] = useState<string | null>(null);
+  if (seededFor !== seeded) {
+    setSeeded(seededFor);
+    setConnectionId(orgDefault?.connectionId ?? "");
+    setEnforce(orgDefault?.enforce ?? false);
+  }
+
+  return (
+    <div
+      className="border-border bg-muted/30 mb-6 rounded-md border p-4"
+      data-testid="org-default-section"
+    >
+      <div className="mb-3">
+        <h3 className="text-sm font-semibold">{t("integration.admin.orgDefault.title")}</h3>
+        <p className="text-muted-foreground mt-1 text-xs">
+          {t("integration.admin.orgDefault.help")}
+        </p>
+      </div>
+
+      {shared.length === 0 ? (
+        <p className="text-muted-foreground text-xs italic">
+          {t("integration.admin.orgDefault.noPinnableConnections")}
+        </p>
+      ) : (
+        <div className="border-border bg-background flex flex-wrap items-end gap-3 rounded-md border p-3">
+          <div className="min-w-[14rem] flex-1">
+            <Label className="text-muted-foreground mb-1 block text-[0.65rem]">
+              {t("integration.admin.orgDefault.connection")}
+            </Label>
+            <select
+              className="border-border bg-background w-full rounded border px-2 py-1 text-xs"
+              value={connectionId}
+              onChange={(e) => setConnectionId(e.target.value)}
+              data-testid="org-default-connection"
+            >
+              <option value="">{t("integration.admin.orgDefault.none")}</option>
+              {shared.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {connectionDisplay(c.id)}
+                </option>
+              ))}
+            </select>
+          </div>
+          <label className="flex items-center gap-2 pb-1 text-xs">
+            <Checkbox
+              checked={enforce}
+              onCheckedChange={(v) => setEnforce(v === true)}
+              data-testid="org-default-enforce"
+            />
+            {t("integration.admin.orgDefault.enforce")}
+          </label>
+          <Button
+            size="sm"
+            onClick={() => connectionId && upsert.mutate({ packageId, connectionId, enforce })}
+            disabled={!connectionId || upsert.isPending}
+            data-testid="org-default-save"
+          >
+            {t("integration.admin.orgDefault.save")}
+          </Button>
+          {orgDefault ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => remove.mutate({ packageId })}
+              disabled={remove.isPending}
+              data-testid="org-default-clear"
+            >
+              {t("integration.admin.orgDefault.clear")}
+            </Button>
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
  * Centralised pin management. One pin per (agent, integration) — admin
  * picks which shared connection a given agent uses. Flat model: no
  * authKey to disambiguate (the connection's own authKey is implicit).
+ * With an org default in place, this surface is for per-agent EXCEPTIONS.
  */
 function PinManagementSection({ packageId }: { packageId: string }) {
   const { t } = useTranslation("settings");
@@ -456,9 +565,9 @@ function PinManagementSection({ packageId }: { packageId: string }) {
       data-testid="pin-management-section"
     >
       <div className="mb-3">
-        <h3 className="text-sm font-semibold">{t("integration.admin.pinManagement.title")}</h3>
+        <h3 className="text-sm font-semibold">{t("integration.admin.exceptions.title")}</h3>
         <p className="text-muted-foreground mt-1 text-xs">
-          {t("integration.admin.pinManagement.help")}
+          {t("integration.admin.exceptions.help")}
         </p>
       </div>
 
@@ -893,6 +1002,7 @@ export function IntegrationDetailPage() {
         />
       )}
 
+      {installed && isAdmin && <OrgDefaultSection packageId={packageId} />}
       {installed && isAdmin && <PinManagementSection packageId={packageId} />}
 
       <div className="grid gap-6 lg:grid-cols-3">

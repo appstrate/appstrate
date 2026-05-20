@@ -18,6 +18,7 @@ import type {
   IntegrationConnection,
   IntegrationDetail,
   IntegrationOAuthClient,
+  IntegrationOrgDefault,
   IntegrationPin,
   IntegrationRequiredScopes,
   IntegrationSummary,
@@ -435,6 +436,72 @@ export function useDeleteIntegrationPin() {
       qc.invalidateQueries({
         queryKey: [...KEY(orgId, applicationId), "pins", vars.packageId],
       });
+    },
+  });
+}
+
+// ─── Org default connection (cross-agent governance) ───────────────────────
+
+export function useIntegrationOrgDefault(packageId: string | undefined) {
+  const orgId = useCurrentOrgId();
+  const applicationId = useCurrentApplicationId();
+  return useQuery({
+    queryKey: [...KEY(orgId, applicationId), "org-default", packageId] as const,
+    queryFn: () =>
+      api<{ default: IntegrationOrgDefault | null }>(
+        `/integrations/${encodeURI(packageId!)}/default`,
+      ).then((r) => r.default),
+    enabled: !!packageId && !!orgId && !!applicationId,
+  });
+}
+
+export function useUpsertIntegrationOrgDefault() {
+  const { t } = useTranslation("settings");
+  const qc = useQueryClient();
+  const orgId = useCurrentOrgId();
+  const applicationId = useCurrentApplicationId();
+  return useMutation({
+    mutationFn: ({
+      packageId,
+      connectionId,
+      enforce,
+    }: {
+      packageId: string;
+      connectionId: string;
+      enforce: boolean;
+    }) =>
+      api<IntegrationOrgDefault>(`/integrations/${encodeURI(packageId)}/default`, {
+        method: "PUT",
+        body: JSON.stringify({ connectionId, enforce }),
+        headers: { "Content-Type": "application/json" },
+      }),
+    onSuccess: (_data, vars) => {
+      toast.success(t("integration.admin.orgDefault.updated"));
+      qc.invalidateQueries({
+        queryKey: [...KEY(orgId, applicationId), "org-default", vars.packageId],
+      });
+      // Picker verdicts on agent pages depend on the org default.
+      qc.invalidateQueries({ queryKey: ["integrations"] });
+    },
+  });
+}
+
+export function useDeleteIntegrationOrgDefault() {
+  const { t } = useTranslation("settings");
+  const qc = useQueryClient();
+  const orgId = useCurrentOrgId();
+  const applicationId = useCurrentApplicationId();
+  return useMutation({
+    mutationFn: ({ packageId }: { packageId: string }) =>
+      api<{ deleted: boolean }>(`/integrations/${encodeURI(packageId)}/default`, {
+        method: "DELETE",
+      }),
+    onSuccess: (_data, vars) => {
+      toast.success(t("integration.admin.orgDefault.deleted"));
+      qc.invalidateQueries({
+        queryKey: [...KEY(orgId, applicationId), "org-default", vars.packageId],
+      });
+      qc.invalidateQueries({ queryKey: ["integrations"] });
     },
   });
 }

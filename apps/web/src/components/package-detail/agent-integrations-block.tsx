@@ -318,6 +318,8 @@ function MemberConnectionPicker({
     resolvedOwnedByActor,
     adminPinnedConnectionId,
     memberPinnedConnectionId,
+    orgDefaultConnectionId,
+    orgDefaultEnforced,
     canAddConnection,
   } = resolution;
 
@@ -327,12 +329,14 @@ function MemberConnectionPicker({
       ? t("detail.integrationMemberPicker.byYou")
       : (c.ownerName ?? t("detail.integrationMemberPicker.ownerUnknown"));
 
-  // Admin pin → locked, regardless of whether it currently resolves: a
-  // member can never override layer-1 admin force, so we never offer the
-  // editable dropdown when an admin pin exists.
-  if (adminPinnedConnectionId) {
-    const pinned = candidates.find((c) => c.id === adminPinnedConnectionId);
-    const label = pinned?.label ?? pinned?.accountId ?? adminPinnedConnectionId;
+  // Locked when an admin force applies and the member can never override:
+  // a per-agent admin pin OR an enforced org default. Either way we render
+  // the read-only lock instead of the editable dropdown.
+  const lockedConnectionId =
+    adminPinnedConnectionId ?? (orgDefaultEnforced ? orgDefaultConnectionId : null);
+  if (lockedConnectionId) {
+    const pinned = candidates.find((c) => c.id === lockedConnectionId);
+    const label = pinned?.label ?? pinned?.accountId ?? lockedConnectionId;
     return (
       <div data-testid={`member-picker-${integrationPackageId}`}>
         <Button

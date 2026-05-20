@@ -19,6 +19,7 @@ export type {
   IntegrationManifestTool,
   IntegrationManifestView,
   IntegrationOAuthClient,
+  IntegrationOrgDefault,
   IntegrationPickStatus,
   IntegrationPin,
   IntegrationRequiredScopes,

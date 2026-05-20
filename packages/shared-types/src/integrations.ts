@@ -155,6 +155,21 @@ export interface IntegrationPin {
   updatedAt: string;
 }
 
+/**
+ * Org-wide default connection for an integration (all consuming agents).
+ * `enforce: true` locks members; `false` is a soft default they can
+ * override with their own pin. See the resolver cascade.
+ */
+export interface IntegrationOrgDefault {
+  integrationPackageId: string;
+  connectionId: string;
+  /** Denormalised from the default connection — display hint only. */
+  authKey: string;
+  enforce: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /** An installed agent that declares a given integration as a dependency. */
 export interface ConsumingAgentSummary {
   packageId: string;
