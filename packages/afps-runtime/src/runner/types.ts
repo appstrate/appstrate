@@ -5,10 +5,11 @@
  * AFPS 1.3 Runner surface.
  *
  * A {@link Runner} takes a loaded bundle + execution context, wires the
- * four spec resolvers ({@link ProviderResolver}, {@link ToolResolver},
- * {@link SkillResolver}, and the bundled context source), dispatches
- * tool invocations to the LLM, and emits the resulting {@link RunEvent}s
- * to the caller's {@link EventSink}.
+ * spec resolvers ({@link ToolResolver}, {@link SkillResolver}, and the
+ * bundled context source), dispatches tool invocations to the LLM, and
+ * emits the resulting {@link RunEvent}s to the caller's {@link EventSink}.
+ * Credentialled HTTP (integration `api_call`) is wired by the runner
+ * implementation as pre-built tools, not via this generic surface.
  *
  * The runtime ships this interface as the canonical execution contract;
  * individual implementations (Pi SDK backend, mock replay, remote
@@ -20,21 +21,13 @@
 import type { EventSink } from "../interfaces/event-sink.ts";
 import type { Bundle } from "../bundle/types.ts";
 import type { ExecutionContext } from "../types/execution-context.ts";
-import type { ProviderResolver, SkillResolver, Tool, ToolResolver } from "../resolvers/types.ts";
+import type { SkillResolver, Tool, ToolResolver } from "../resolvers/types.ts";
 
 export interface RunOptions {
   /** Already-loaded {@link Bundle} (root package + transitively resolved deps). */
   bundle: Bundle;
   /** Per-run execution context — runId, input, template vars. */
   context: ExecutionContext;
-
-  /**
-   * External resolver for `dependencies.providers[]` — REQUIRED when
-   * the manifest declares providers. Runner-specific: sidecar, local
-   * file, Bitwarden, remote Appstrate, etc. Pass a no-op resolver if
-   * the agent has no provider dependencies.
-   */
-  providerResolver: ProviderResolver;
 
   /** Business terminus — receives every RunEvent the tools emit. */
   eventSink: EventSink;

@@ -2,10 +2,17 @@
 // Copyright 2026 Appstrate
 
 /**
- * Factory for the Tool that every {@link ProviderResolver} produces:
- * `<providerName>_call` (e.g. `gmail_call`, `clickup_call`). A single
- * shape is used across every resolver so agents see an identical
- * interface regardless of the backend wiring.
+ * Reusable credential-injecting HTTP-call core. {@link makeProviderTool}
+ * builds the `Tool` an integration's `{ns}__api_call` surface exposes to
+ * the LLM (method, target URL, optional headers/body, responseMode). The
+ * core is credential-source-agnostic: the caller closes over whatever
+ * credential / transport state it needs and hands a {@link ProviderCallFn}
+ * to {@link makeProviderTool}. The local + remote integration resolvers in
+ * `integration-api-call.ts` reuse this module verbatim.
+ *
+ * Body streaming, redirect/cookie/SSRF hardening, `authorizedUris`
+ * matching, and response serialisation all live here so every transport
+ * shares one implementation.
  *
  * Specification: `afps-spec/spec.md` §8.2, §8.4 — file-reference IO.
  */
@@ -14,8 +21,7 @@ import * as fsPromises from "node:fs/promises";
 import * as nodePath from "node:path";
 
 import { z } from "zod";
-import type { Bundle, JSONSchema, ProviderRef, Tool, ToolContext, ToolResult } from "./types.ts";
-import { resolvePackageRef } from "./bundle-adapter.ts";
+import type { JSONSchema, Tool, ToolContext, ToolResult } from "./types.ts";
 import { ProviderAuthorizationError, ResolverError } from "../errors.ts";
 
 /**
@@ -260,23 +266,21 @@ export const providerCallRequestJsonSchema: JSONSchema = z.toJSONSchema(provider
 }) as JSONSchema;
 
 /**
- * Runtime projection of the provider manifest — a flat view over the
- * subset of fields that `makeProviderTool` actually consumes. The
- * canonical wire shape nests these fields under `definition.*` per AFPS
- * spec §7.5 / §8.6 (`authorizedUris`, `allowAllUris` are transversal
- * fields of the `definition` object); {@link readProviderMeta} projects
- * them onto this flat shape so enforcement code does not have to carry
- * the nesting.
+ * Flat view over the subset of fields {@link makeProviderTool} consumes
+ * for URL-allowlist enforcement. Callers project their credential source
+ * (integration manifest auth, local creds file, …) onto this shape.
  *
  * Credential header metadata (name / prefix / field name) is
  * deliberately NOT part of this type. Every shipped transport —
- * sidecar, credential-proxy, Local — owns credential injection itself:
+ * sidecar, credential-proxy, local/remote integration resolver — owns
+ * credential injection itself:
  *
  *   - Sidecar + credential-proxy: read the metadata from the platform's
  *     internal credentials endpoint and write the header server-side.
  *     The runtime never sees the credential field at all.
- *   - Local: reads `injection` from the local creds file, not from the
- *     bundle manifest.
+ *   - Local integration resolver: reads the injection plan from the
+ *     integration manifest's `delivery.http` (or the local creds file
+ *     override), not surfaced on this meta.
  *
  * Consequence: the tool schema surfaced to the LLM is identical across
  * auth modes and carries no hint of how the credential is transported.
@@ -399,12 +403,12 @@ export type ProviderCallFn = (
 ) => Promise<ProviderCallResponse>;
 
 /**
- * Apply transport control headers to an outgoing provider call.
+ * Apply transport control headers to an outgoing credentialled call.
  *
- * Used by {@link RemoteAppstrateProviderResolver} for the CLI's HTTP
+ * Used by {@link RemoteAppstrateIntegrationResolver} for the CLI's HTTP
  * path to the platform's `/api/credential-proxy/proxy` route.
  * Container runs reach the sidecar's `executeProviderCall` over MCP
- * `provider_call` and bypass this header layer entirely.
+ * (`{ns}__api_call`) and bypass this header layer entirely.
  *
  * Rules applied (mirrors the platform server contract):
  *  - `wantsFile` → `X-Stream-Response: 1` (server pipes response as stream).
@@ -481,10 +485,12 @@ export interface MakeProviderToolOptions {
 }
 
 /**
- * Build a `Tool` exposing a typed provider-call surface to the LLM.
- * Agents see `gmail_call(method, target, headers?, body?, responseMode?)`
+ * Build a `Tool` exposing a typed credentialled-call surface to the LLM.
+ * Agents see `{ns}__api_call(method, target, headers?, body?, responseMode?)`
  * rather than a free-form `curl` invocation — same observability for
- * every resolver, no prompt-level knowledge of the transport.
+ * every resolver, no prompt-level knowledge of the transport. The caller
+ * passes `toolName` to set the surfaced name (integrations use
+ * `{ns}__api_call`); the default falls back to `<slug>_call`.
  */
 export function makeProviderTool(
   meta: ProviderMeta,
@@ -585,15 +591,15 @@ export function makeProviderTool(
 }
 
 /**
- * Canonical slug applied to every provider id before we form a tool name.
- * Strips a leading `@` and replaces any non-word character with `_` so
- * scoped package ids like `@appstrate/gmail` become safe tool identifiers.
+ * Canonical slug applied to a package id before forming a default tool
+ * name. Strips a leading `@` and replaces any non-word character with `_`
+ * so scoped package ids like `@appstrate/gmail` become safe tool
+ * identifiers.
  *
- * Internal: still used by {@link makeProviderTool} to derive the default
- * Pi-tool name for {@link LocalProviderResolver} /
- * {@link RemoteAppstrateProviderResolver} (the CLI's local-resolver path —
- * the platform/agent runtime now exposes providers via the canonical MCP
- * `provider_call` tool, not per-provider aliases).
+ * Internal: used by {@link makeProviderTool} to derive a default tool
+ * name when the caller does not pass an explicit `toolName`. The
+ * integration resolvers always pass `{ns}__api_call`, so this fallback
+ * mostly serves tests.
  */
 function slugifyProviderId(providerId: string): string {
   return providerId.replace(/^@/, "").replace(/[^a-zA-Z0-9_]/g, "_");
@@ -1625,73 +1631,6 @@ export async function serializeFetchResponse(
       ...(truncatedSize !== undefined && { truncatedSize }),
     },
   };
-}
-
-/**
- * Load a provider manifest from the bundle and project the fields
- * consumed at runtime into a flat {@link ProviderMeta}.
- *
- * Missing packages surface the explicit fallback so resolvers don't
- * accidentally share the same default — sidecar/remote paths trust the
- * transport to enforce the allowlist, while the local path refuses to
- * call an un-manifested provider. Sharing this helper keeps manifest
- * parsing in a single place for every resolver.
- *
- * Resolution order inside the provider's package:
- *   1. `provider.json` (AFPS 1.x convention)
- *   2. `manifest.json` (package manifest when no dedicated provider.json)
- *   3. In-memory `pkg.manifest` (the bundle builder's pre-parsed copy)
- *
- * Per AFPS spec §7.5 / §8.6, `authorizedUris` and `allowAllUris` live
- * under `manifest.definition` — they are read from there and exposed
- * flat on the returned meta.
- */
-export function readProviderMeta(
-  bundle: Bundle,
-  ref: ProviderRef,
-  fallbackAllowAllUris: boolean,
-): ProviderMeta {
-  const pkg = resolvePackageRef(bundle, ref);
-  if (!pkg) return { name: ref.name, allowAllUris: fallbackAllowAllUris };
-  for (const candidate of ["provider.json", "manifest.json"] as const) {
-    const bytes = pkg.files.get(candidate);
-    if (!bytes) continue;
-    return projectProviderMeta(ref.name, JSON.parse(new TextDecoder().decode(bytes)));
-  }
-  // Package present but no manifest file — fall back to the in-memory
-  // package manifest that the bundle builder already parsed for us.
-  return projectProviderMeta(ref.name, pkg.manifest);
-}
-
-/**
- * Project a parsed provider manifest onto the flat {@link ProviderMeta}
- * shape consumed by the runtime. Reads from `definition.*` (the
- * canonical AFPS location per spec §7.5 / §8.6) and ignores any
- * top-level occurrences — the manifest wire shape is the single source
- * of truth.
- *
- * Only `authorizedUris` and `allowAllUris` are surfaced: every shipped
- * transport (sidecar, credential-proxy, Local) owns credential
- * injection itself, so the runtime never reads header name / prefix /
- * field name from the manifest.
- */
-function projectProviderMeta(name: string, parsed: unknown): ProviderMeta {
-  const definition =
-    parsed && typeof parsed === "object" && "definition" in parsed
-      ? ((parsed as { definition?: unknown }).definition ?? {})
-      : {};
-  const def = definition as {
-    authorizedUris?: unknown;
-    allowAllUris?: unknown;
-  };
-  const meta: ProviderMeta = { name };
-  if (Array.isArray(def.authorizedUris)) {
-    meta.authorizedUris = def.authorizedUris.filter((u): u is string => typeof u === "string");
-  }
-  if (typeof def.allowAllUris === "boolean") {
-    meta.allowAllUris = def.allowAllUris;
-  }
-  return meta;
 }
 
 function enforceAuthorizedUris(meta: ProviderMeta, target: string): void {

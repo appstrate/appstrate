@@ -30,7 +30,6 @@ describe("PiRunner.run — event forwarding", () => {
     await runner.run({
       bundle: STUB_BUNDLE,
       context: makeContext(),
-      providerResolver: { resolve: async () => [] },
       eventSink: sink,
     });
 
@@ -51,7 +50,6 @@ describe("PiRunner.run — event forwarding", () => {
     await runner.run({
       bundle: STUB_BUNDLE,
       context: makeContext(),
-      providerResolver: { resolve: async () => [] },
       eventSink: sink,
     });
 
@@ -98,7 +96,6 @@ describe("PiRunner.run — event forwarding", () => {
     await runner.run({
       bundle: STUB_BUNDLE,
       context: makeContext(),
-      providerResolver: { resolve: async () => [] },
       eventSink: sink,
     });
 
@@ -128,7 +125,6 @@ describe("PiRunner.run — usage in RunResult", () => {
     await runner.run({
       bundle: STUB_BUNDLE,
       context: makeContext(),
-      providerResolver: { resolve: async () => [] },
       eventSink: sink,
     });
 
@@ -155,7 +151,6 @@ describe("PiRunner.run — usage in RunResult", () => {
     await runner.run({
       bundle: STUB_BUNDLE,
       context: makeContext(),
-      providerResolver: { resolve: async () => [] },
       eventSink: sink,
     });
 
@@ -191,7 +186,6 @@ describe("PiRunner.run — usage in RunResult", () => {
     await runner.run({
       bundle: STUB_BUNDLE,
       context: makeContext(),
-      providerResolver: { resolve: async () => [] },
       eventSink: sink,
     });
 
@@ -216,7 +210,6 @@ describe("PiRunner.run — error path", () => {
     await runner.run({
       bundle: STUB_BUNDLE,
       context: makeContext(),
-      providerResolver: { resolve: async () => [] },
       eventSink: sink,
     });
 
@@ -236,7 +229,6 @@ describe("PiRunner.run — error path", () => {
     await runner.run({
       bundle: STUB_BUNDLE,
       context: makeContext(),
-      providerResolver: { resolve: async () => [] },
       eventSink: sink,
     });
 
@@ -259,7 +251,6 @@ describe("PiRunner.run — cancellation", () => {
       runner.run({
         bundle: STUB_BUNDLE,
         context: makeContext(),
-        providerResolver: { resolve: async () => [] },
         eventSink: sink,
         signal: controller.signal,
       }),
@@ -287,7 +278,6 @@ describe("PiRunner.run — cancellation", () => {
       runner.run({
         bundle: STUB_BUNDLE,
         context: makeContext(),
-        providerResolver: { resolve: async () => [] },
         eventSink: sink,
         signal: controller.signal,
       }),
@@ -310,7 +300,6 @@ describe("PiRunner.run — cancellation", () => {
       await runner.run({
         bundle: STUB_BUNDLE,
         context: makeContext(),
-        providerResolver: { resolve: async () => [] },
         eventSink: sink,
         signal: controller.signal,
       });

@@ -4,11 +4,12 @@
 /**
  * AFPS 1.3 runtime resolvers.
  *
- * Three interfaces mirroring `dependencies.tools[]`, `.providers[]`,
- * `.skills[]` on an agent manifest. The runtime supplies default
- * "bundled" implementations that read content shipped inside the `.afps`
- * file; runners supply external implementations (notably `ProviderResolver`)
- * for anything that lives outside the bundle.
+ * Interfaces mirroring `dependencies.tools[]` and `.skills[]` on an agent
+ * manifest, plus the integration `api_call` surface. The runtime supplies
+ * default "bundled" implementations that read content shipped inside the
+ * `.afps` file; runners supply external implementations (notably the
+ * integration credential resolvers) for anything that lives outside the
+ * bundle.
  *
  * Specification: `afps-spec/spec.md` §8.
  */
@@ -18,7 +19,6 @@ export type {
   BundlePackage,
   DependencyRef,
   ToolRef,
-  ProviderRef,
   SkillRef,
   JSONSchema,
   Tool,
@@ -26,7 +26,6 @@ export type {
   ToolResult,
   ResolvedSkill,
   ToolResolver,
-  ProviderResolver,
   SkillResolver,
 } from "./types.ts";
 
@@ -42,7 +41,7 @@ export {
 export { BundledSkillResolver, BundledSkillResolutionError } from "./bundled-skill-resolver.ts";
 export { resolvePackageRef, readPackageText, readPackageBytes } from "./bundle-adapter.ts";
 
-// Provider-resolver surface — tool factory + concrete impls.
+// Reusable credential-injecting HTTP-call core — tool factory + helpers.
 export {
   ABSOLUTE_MAX_RESPONSE_SIZE,
   defaultInlineLimit,
@@ -51,7 +50,6 @@ export {
   STREAMING_THRESHOLD,
   makeProviderTool,
   matchesAuthorizedUriSpec,
-  readProviderMeta,
   isReproducibleBody,
   providerCallRequestJsonSchema,
   resolveBodyForFetch,
@@ -70,15 +68,6 @@ export {
   type ResolvedRequestBody,
   type SerializeFetchResponseContext,
 } from "./provider-tool.ts";
-export {
-  LocalProviderResolver,
-  type LocalCredentialsFile,
-  type LocalProviderResolverOptions,
-} from "./local-provider-resolver.ts";
-export {
-  RemoteAppstrateProviderResolver,
-  type RemoteAppstrateProviderResolverOptions,
-} from "./remote-appstrate-provider-resolver.ts";
 
 // Integration `api_call` surface (provider→integration unification) — the
 // portable equivalent of the platform's `{ns}__api_call` MCP tool. Reuses

@@ -55,7 +55,6 @@ import {
   type PackageIdentity,
 } from "@appstrate/afps-runtime/bundle";
 import { HttpSink, attachStdoutBridge } from "@appstrate/afps-runtime/sinks";
-import type { ProviderResolver } from "@appstrate/afps-runtime/resolvers";
 import type { ExecutionContext, RunEvent } from "@appstrate/afps-runtime/types";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
 import { createMcpHttpClient, type AppstrateMcpClient } from "@appstrate/mcp-transport";
@@ -299,12 +298,6 @@ await loadExtensionsFromDir("/runtime/extensions", "runtime");
 
 const sidecarUrl = env.sidecarUrl;
 
-// Empty stub forwarded to `runner.run({ providerResolver })` to satisfy
-// the AFPS spec contract — PiRunner does not invoke the resolver
-// (provider tools are pre-built MCP-backed factories above), but the
-// `RunOptions.providerResolver` field is REQUIRED on the AFPS interface.
-const providerResolver: ProviderResolver = { resolve: async () => [] };
-
 // When no sidecar is attached (plan with empty providers[] + static API
 // key), the agent runs without MCP-backed tools. The platform wires
 // MODEL_BASE_URL directly to the upstream provider; the LLM only sees
@@ -531,7 +524,6 @@ try {
   await runner.run({
     bundle: runnerBundle,
     context,
-    providerResolver,
     eventSink: bridgedSink,
   });
   heartbeat.stop();

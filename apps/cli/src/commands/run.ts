@@ -650,11 +650,6 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     await runner.run({
       bundle,
       context,
-      // PiRunner exposes credentialled HTTP via pre-built extension
-      // factories (api_call), not the generic Runner `providerResolver`
-      // field — pass a no-op. The field is removed from RunOptions in a
-      // follow-up afps-runtime stage.
-      providerResolver: { resolve: async () => [] },
       eventSink: sink,
       signal: shutdownSignal,
     });

@@ -92,7 +92,6 @@ function makePiConformanceAdapter(): ConformanceAdapter {
       await runner.run({
         bundle: specBundle,
         context,
-        providerResolver: { resolve: async () => [] },
         eventSink: sink,
       });
       if (!sink.finalized) {
