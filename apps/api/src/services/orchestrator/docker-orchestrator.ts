@@ -246,15 +246,29 @@ export class DockerOrchestrator implements ContainerOrchestrator {
   }
 
   async createWorkload(spec: WorkloadSpec, boundary: IsolationBoundary): Promise<WorkloadHandle> {
+    // `skipSidecar` runs have no egress proxy, so the agent must reach the
+    // upstream LLM + platform sink itself. Give it the same network setup
+    // as the sidecar (egress network primary + host-gateway / platform net)
+    // instead of the internal-only isolation boundary, which has no route
+    // out and would fail the agent's first `emitRuntimeReady` POST.
+    const platformNetwork = spec.egress ? await docker.detectPlatformNetwork() : null;
+
     const containerId = await docker.createContainer(spec.runId, spec.env, {
       image: spec.image,
       adapterName: spec.role,
       memory: spec.resources.memoryBytes,
       nanoCpus: spec.resources.nanoCpus,
       pidsLimit: spec.resources.pidsLimit,
-      networkId: boundary.id,
+      networkId: spec.egress ? this.egressNetworkId! : boundary.id,
       networkAlias: spec.role,
+      ...(spec.egress
+        ? { extraHosts: platformNetwork ? [] : ["host.docker.internal:host-gateway"] }
+        : {}),
     });
+
+    if (spec.egress && platformNetwork) {
+      await docker.connectContainerToNetwork(platformNetwork.networkId, containerId);
+    }
 
     if (spec.files && spec.files.items.length > 0) {
       await docker.injectFiles(containerId, spec.files.items, spec.files.targetDir);

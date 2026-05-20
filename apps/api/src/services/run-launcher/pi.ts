@@ -251,6 +251,10 @@ export async function runPlatformContainer(
             filesToInject.length > 0
               ? { items: filesToInject, targetDir: "/workspace" }
               : undefined,
+          // Without a sidecar there is no egress proxy — the agent must
+          // reach the upstream LLM and the platform sink directly, so it
+          // goes on the egress network instead of the internal boundary.
+          egress: skipSidecar,
         },
         boundary,
       ),

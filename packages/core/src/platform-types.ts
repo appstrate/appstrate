@@ -202,6 +202,15 @@ export interface WorkloadSpec {
   env: Record<string, string>;
   resources: WorkloadResources;
   files?: { items: InjectableFile[]; targetDir: string };
+  /**
+   * Place this workload on the egress network (direct internet + platform
+   * reachability) instead of the internal isolation boundary. Set for the
+   * agent in `skipSidecar` runs: with no sidecar there is no egress proxy,
+   * so the agent must reach the upstream LLM and the platform sink itself —
+   * the same network treatment the orchestrator gives the sidecar. Ignored
+   * by orchestrators without network isolation (e.g. the process orchestrator).
+   */
+  egress?: boolean;
 }
 
 export interface IsolationBoundary {
