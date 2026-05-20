@@ -27,8 +27,36 @@ import {
   user,
 } from "@appstrate/db/schema";
 import type { InferSelectModel } from "drizzle-orm";
+import type {
+  AccessibleIntegrationConnection,
+  ConsumingAgentSummary,
+  IntegrationAgentResolution,
+  IntegrationCandidate,
+  IntegrationPickStatus,
+  IntegrationPin,
+} from "@appstrate/shared-types";
+import {
+  scopesContributedByTools,
+  expandGrantedScopes,
+  type IntegrationManifest,
+} from "@appstrate/core/integration";
+import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { conflict, notFound, invalidRequest } from "../lib/errors.ts";
 import type { AppScope } from "../lib/scope.ts";
+import type { Actor } from "../lib/actor.ts";
+import { getPackage } from "./package-catalog.ts";
+import { fetchIntegrationManifest } from "./integration-service.ts";
+import {
+  resolveConnectionsForRun,
+  isUserConnectionCreationBlocked,
+} from "./integration-connection-resolver.ts";
+
+// Canonical wire shapes live in @appstrate/shared-types so the frontend
+// hook and OpenAPI spec can't drift from the service. Local aliases keep
+// the existing call sites readable.
+export type PinSummary = IntegrationPin;
+export type SharedConnectionSummary = AccessibleIntegrationConnection;
+export type { ConsumingAgentSummary };
 
 type PinRow = InferSelectModel<typeof integrationPins>;
 type ConnectionRow = InferSelectModel<typeof integrationConnections>;
@@ -63,16 +91,6 @@ export async function setBlockUserConnections(
 }
 
 // ─────────────────────────── Pin CRUD ─────────────────────────────────────────
-
-export interface PinSummary {
-  packageId: string;
-  integrationPackageId: string;
-  /** Denormalised from the pinned connection — display hint only. */
-  authKey: string;
-  connectionId: string;
-  createdAt: string;
-  updatedAt: string;
-}
 
 interface PinJoinRow {
   pin: PinRow;
@@ -122,11 +140,6 @@ export async function listIntegrationPins(
  * integration detail page (so the admin can pick which installed agent to
  * pin without leaving the integration view).
  */
-export interface ConsumingAgentSummary {
-  packageId: string;
-  displayName: string;
-}
-
 export async function listAgentsConsumingIntegration(
   scope: AppScope,
   integrationPackageId: string,
@@ -482,31 +495,6 @@ export async function loadConnectionOwnership(connectionId: string): Promise<{
 
 // ─────────────────────────── Shared accessor for the picker UI ────────────────
 
-export interface SharedConnectionSummary {
-  id: string;
-  authKey: string;
-  accountId: string;
-  label: string | null;
-  ownerUserId: string | null;
-  ownerEndUserId: string | null;
-  /**
-   * Display name of whoever created the connection — dashboard user name
-   * (Better Auth `user.name`) or end-user `name`/`externalId`. Null when
-   * the owner row was deleted. Drives the "who connected it" line in the
-   * agent-page picker so a member can tell a shared connection apart.
-   */
-  ownerName: string | null;
-  /**
-   * OAuth scopes currently granted to this connection. Empty for
-   * api_key/basic auths. The agent-page picker diffs these against the
-   * scopes the agent's selected tools require to flag under-scoped
-   * connections before run-kickoff.
-   */
-  scopesGranted: string[];
-  sharedWithOrg: boolean;
-  needsReconnection: boolean;
-}
-
 /**
  * List the connections an actor can pick from for a given
  * (application, integration). Used by the UI picker:
@@ -515,48 +503,40 @@ export interface SharedConnectionSummary {
 export async function listAccessibleConnections(
   scope: AppScope,
   integrationPackageId: string,
-  actorFilter?: { userId?: string; endUserId?: string },
+  actorFilter: { userId?: string; endUserId?: string },
 ): Promise<SharedConnectionSummary[]> {
   const baseConditions = [
     eq(integrationConnections.applicationId, scope.applicationId),
     eq(integrationConnections.integrationPackageId, integrationPackageId),
   ];
 
-  if (actorFilter) {
-    const [own, shared] = await Promise.all([
-      actorFilter.userId || actorFilter.endUserId
-        ? db
-            .select()
-            .from(integrationConnections)
-            .where(
-              and(
-                ...baseConditions,
-                actorFilter.userId
-                  ? eq(integrationConnections.userId, actorFilter.userId)
-                  : eq(integrationConnections.endUserId, actorFilter.endUserId!),
-              ),
-            )
-        : Promise.resolve([] as ConnectionRow[]),
-      db
-        .select()
-        .from(integrationConnections)
-        .where(and(...baseConditions, eq(integrationConnections.sharedWithOrg, true))),
-    ]);
-    const seen = new Set<string>();
-    const merged: ConnectionRow[] = [];
-    for (const r of [...own, ...shared]) {
-      if (seen.has(r.id)) continue;
-      seen.add(r.id);
-      merged.push(r);
-    }
-    return attachOwnerNames(merged);
+  const [own, shared] = await Promise.all([
+    actorFilter.userId || actorFilter.endUserId
+      ? db
+          .select()
+          .from(integrationConnections)
+          .where(
+            and(
+              ...baseConditions,
+              actorFilter.userId
+                ? eq(integrationConnections.userId, actorFilter.userId)
+                : eq(integrationConnections.endUserId, actorFilter.endUserId!),
+            ),
+          )
+      : Promise.resolve([] as ConnectionRow[]),
+    db
+      .select()
+      .from(integrationConnections)
+      .where(and(...baseConditions, eq(integrationConnections.sharedWithOrg, true))),
+  ]);
+  const seen = new Set<string>();
+  const merged: ConnectionRow[] = [];
+  for (const r of [...own, ...shared]) {
+    if (seen.has(r.id)) continue;
+    seen.add(r.id);
+    merged.push(r);
   }
-
-  const rows = await db
-    .select()
-    .from(integrationConnections)
-    .where(and(...baseConditions));
-  return attachOwnerNames(rows);
+  return attachOwnerNames(merged);
 }
 
 /**
@@ -602,4 +582,142 @@ async function attachOwnerNames(rows: ConnectionRow[]): Promise<SharedConnection
     sharedWithOrg: row.sharedWithOrg,
     needsReconnection: row.needsReconnection,
   }));
+}
+
+// ─────────────────────────── Agent-page picker resolution ─────────────────────
+
+/** Scopes the agent's selected tools need on `authKey` that `granted` lacks. */
+function missingScopesForConnection(
+  manifest: IntegrationManifest,
+  authKey: string,
+  granted: string[],
+  agentTools: readonly string[],
+): string[] {
+  const required = scopesContributedByTools({ manifest, authKey, agentTools });
+  if (required.length === 0) return [];
+  const expanded = new Set(expandGrantedScopes(granted, manifest, authKey));
+  return required.filter((s) => !expanded.has(s));
+}
+
+/**
+ * The single-source verdict for the agent-page connection picker: which
+ * connection the next run would use for this (agent, integration, actor),
+ * plus the candidate list and pin/blocked state the dropdown renders.
+ *
+ * The "which connection" decision delegates to {@link resolveConnectionsForRun}
+ * — the exact cascade (admin pin → run/schedule override → member pin →
+ * fallback) + scope check the runtime uses — so the UI never re-implements
+ * it. Per-candidate `missingScopes` are an additional display annotation
+ * (the resolver only scope-checks the one resolved connection).
+ */
+export async function resolveAgentIntegrationPick(args: {
+  scope: AppScope;
+  agentPackageId: string;
+  integrationPackageId: string;
+  actor: Actor;
+  isAdmin: boolean;
+}): Promise<IntegrationAgentResolution> {
+  const { scope, agentPackageId, integrationPackageId, actor, isAdmin } = args;
+
+  const agent = await getPackage(agentPackageId, scope.orgId);
+  if (!agent) throw notFound(`Agent '${agentPackageId}' not found in this organization`);
+  const agentManifest = agent.manifest as unknown as Record<string, unknown>;
+  const agentTools =
+    parseManifestIntegrations(agentManifest).find((e) => e.id === integrationPackageId)?.tools ??
+    [];
+
+  const manifestRes = await fetchIntegrationManifest(integrationPackageId);
+  const manifest = manifestRes.ok ? manifestRes.manifest : null;
+
+  const actorFilter = actor.type === "user" ? { userId: actor.id } : { endUserId: actor.id };
+  const userId = actor.type === "user" ? actor.id : null;
+
+  const [candidatesRaw, adminPins, memberPins, blocked, resolution] = await Promise.all([
+    listAccessibleConnections(scope, integrationPackageId, actorFilter),
+    listIntegrationPins(scope, integrationPackageId),
+    userId
+      ? listMemberPinsForAgent(scope, agentPackageId, userId)
+      : Promise.resolve([] as MemberPinSummary[]),
+    isUserConnectionCreationBlocked(scope.applicationId, integrationPackageId),
+    resolveConnectionsForRun({
+      agentManifest,
+      packageId: agentPackageId,
+      actor,
+      scope: { orgId: scope.orgId, applicationId: scope.applicationId },
+    }),
+  ]);
+
+  const adminPinnedConnectionId =
+    adminPins.find((p) => p.packageId === agentPackageId)?.connectionId ?? null;
+  const memberPinnedConnectionId =
+    memberPins.find((p) => p.integrationPackageId === integrationPackageId)?.connectionId ?? null;
+
+  const candidates: IntegrationCandidate[] = candidatesRaw.map((c) => ({
+    ...c,
+    missingScopes: manifest
+      ? missingScopesForConnection(manifest, c.authKey, c.scopesGranted, agentTools)
+      : [],
+    isOwn: actor.type === "user" ? c.ownerUserId === actor.id : c.ownerEndUserId === actor.id,
+  }));
+
+  const resolved = resolution.resolved[integrationPackageId] ?? null;
+  const err = resolution.errors.find((e) => e.integrationId === integrationPackageId) ?? null;
+
+  let status: IntegrationPickStatus;
+  let resolvedConnectionId: string | null = null;
+  let resolvedMissingScopes: string[] = [];
+  let resolvedOwnedByActor = false;
+
+  if (resolved) {
+    resolvedConnectionId = resolved.connectionId;
+    status =
+      resolved.source === "admin_pin"
+        ? "admin_locked"
+        : resolved.source === "member_pin"
+          ? "pinned"
+          : "auto";
+    resolvedOwnedByActor = candidates.find((c) => c.id === resolved.connectionId)?.isOwn ?? false;
+  } else if (err) {
+    switch (err.code) {
+      case "insufficient_scopes":
+        resolvedConnectionId = err.connectionId ?? null;
+        resolvedMissingScopes = err.missingScopes ?? [];
+        resolvedOwnedByActor = err.ownedByActor ?? false;
+        status =
+          adminPinnedConnectionId && adminPinnedConnectionId === err.connectionId
+            ? "admin_locked"
+            : memberPinnedConnectionId && memberPinnedConnectionId === err.connectionId
+              ? "pinned"
+              : "auto";
+        break;
+      case "must_choose_connection":
+        status = "must_choose";
+        break;
+      case "needs_reconnection":
+        status = "needs_reconnection";
+        break;
+      case "pinned_connection_unavailable":
+      case "override_connection_unavailable":
+        status = "stale";
+        break;
+      default:
+        status = "none";
+    }
+  } else {
+    // Integration is inert (agent picked no tools) — the picker still lists
+    // candidates; mirror the fallback branch so the trigger label is sane.
+    status = candidates.length === 1 ? "auto" : candidates.length === 0 ? "none" : "must_choose";
+    if (candidates.length === 1) resolvedConnectionId = candidates[0]!.id;
+  }
+
+  return {
+    status,
+    resolvedConnectionId,
+    resolvedMissingScopes,
+    resolvedOwnedByActor,
+    adminPinnedConnectionId,
+    memberPinnedConnectionId,
+    canAddConnection: isAdmin || !blocked,
+    candidates,
+  };
 }

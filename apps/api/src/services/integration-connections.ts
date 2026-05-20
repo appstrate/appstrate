@@ -38,7 +38,7 @@ import {
 } from "@appstrate/db/schema";
 import { encryptCredentials, decryptCredentials } from "@appstrate/connect";
 import { logger } from "../lib/logger.ts";
-import { notFound, conflict, invalidRequest, forbidden } from "../lib/errors.ts";
+import { notFound, conflict, invalidRequest } from "../lib/errors.ts";
 import type { AppScope } from "../lib/scope.ts";
 import type { Actor } from "@appstrate/connect";
 import type { IntegrationManifest } from "@appstrate/core/integration";
@@ -261,6 +261,27 @@ export async function loadAccessibleConnectionById(
     )
     .limit(1);
   return row ?? null;
+}
+
+/**
+ * Fallback connection pick used when no resolver snapshot is available
+ * (legacy/manual spawn + the live credentials path). Walks the declared
+ * auth keys and returns the first accessible connection found — same
+ * auto-pick semantics as the runtime resolver's single-candidate fallback.
+ * Multi-candidate ambiguity is resolved by iteration order (declared-auth
+ * precedence); call sites needing deterministic disambiguation go through
+ * `resolveConnectionsForRun`.
+ */
+export async function pickAnyAccessibleConnection(
+  packageId: string,
+  declaredAuthKeys: string[],
+  context: { applicationId: string; actor: Actor },
+): Promise<ResolvedConnectionRow | null> {
+  for (const authKey of declaredAuthKeys) {
+    const row = await loadActorConnection(packageId, authKey, context);
+    if (row) return { ...row, authKey };
+  }
+  return null;
 }
 
 /**
@@ -805,20 +826,4 @@ export async function assertIsIntegration(scope: AppScope, packageId: string): P
       `Package '${packageId}' is type '${row.type}', not 'integration'`,
     );
   }
-}
-
-/**
- * Per-actor gate for managing connections on behalf of someone else.
- * Members may manage their own connections; admin/owner may impersonate
- * via `Appstrate-User`. End-user actors are restricted by upstream
- * `requireAppContext()` + impersonation policy in `actor.ts`.
- */
-export function assertCanManageActorConnection(
-  actor: Actor,
-  targetActor: Actor,
-  callerRole: "owner" | "admin" | "member" | "viewer",
-): void {
-  if (actor.type === targetActor.type && actor.id === targetActor.id) return;
-  if (callerRole === "owner" || callerRole === "admin") return;
-  throw forbidden("Cannot manage connections for another actor");
 }

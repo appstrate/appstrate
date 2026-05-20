@@ -74,7 +74,6 @@
   "detail.integrationPin.none": "— No pin —",
   "detail.integrationPin.help": "Only org-shared connections can be pinned. Pins override per-run picks and the user fallback.",
   "detail.integrationMemberPicker.title": "Pick the connection to use for this agent",
-  "detail.integrationMemberPicker.help": "Several connections are accessible for this integration. Your pick is remembered on this device and sent with every run kickoff. An admin pin still takes precedence if one exists.",
   "detail.integrationMemberPicker.defaultBadge": "(default)",
   "detail.integrationMemberPicker.connectLabel": "Connect",
   "detail.integrationMemberPicker.chooseLabel": "Choose one",

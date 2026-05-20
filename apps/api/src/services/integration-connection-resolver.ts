@@ -10,11 +10,10 @@
  *   1. integration_pins                        → admin force
  *   2. runs.connection_overrides               → caller's run-time choice
  *   3. package_schedules.connection_overrides  → frozen at schedule create
- *   4. integration_member_assignments          → member's persisted pick
- *      per (user, app, agent, integration, authKey). Empty in OSS until
- *      the user explicitly picks via the agent-page picker; replaces
- *      the R5 localStorage hack with a server-side record the resolver
- *      sees on every run.
+ *   4. integration_pins (user_id = actor)      → member's persisted pick
+ *      per (user, app, agent, integration). Empty in OSS until the user
+ *      explicitly picks via the agent-page picker; a server-side record
+ *      the resolver sees on every run.
  *   5. fallback: actor's accessible connections
  *      = own + (shared_with_org AND application match)
  *      → 1 match → auto, 0 → not_connected, N → must_choose

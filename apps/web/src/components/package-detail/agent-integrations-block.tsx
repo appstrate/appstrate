@@ -25,28 +25,22 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  useIntegrations,
   useIntegrationDetail,
   useIntegrationConnections,
-  useAccessibleIntegrationConnections,
   useAgentsConsumingIntegration,
-  useIntegrationPins,
-  type AccessibleIntegrationConnection,
+  useIntegrationAgentResolution,
+  type IntegrationCandidate,
   type IntegrationConnection,
   type IntegrationManifestView,
 } from "../../hooks/use-integrations";
 import {
-  useMemberIntegrationPins,
   useUpsertMemberIntegrationPin,
   useDeleteMemberIntegrationPin,
 } from "../../hooks/use-member-integration-pins";
-import { useAuth } from "../../hooks/use-auth";
-import { usePermissions } from "../../hooks/use-permissions";
 import { InlineConnectButton } from "../integration-connect/inline-connect-button";
 import { FieldsConnectModal } from "../integration-connect/fields-connect-modal";
 import { useIntegrationOAuthPopup } from "../integration-connect/use-integration-oauth-popup";
 import { pickDefaultAuth } from "../integration-connect/pick-default-auth";
-import { scopesContributedByTools, expandGrantedScopes } from "@appstrate/core/integration";
 
 interface AgentIntegrationEntry {
   id: string;
@@ -112,15 +106,10 @@ function IntegrationConnectionCard({
   agentTools,
   agentPackageId,
 }: IntegrationConnectionCardProps) {
-  const { t } = useTranslation(["agents"]);
   const { data: detail, isPending: detailPending } = useIntegrationDetail(packageId);
-  const { data: connections, isPending: connsPending } = useIntegrationConnections(packageId);
-  const { data: consumingAgents } = useAgentsConsumingIntegration(packageId);
-
   const displayName = detail?.manifest.displayName ?? packageId;
-  const isLoading = detailPending || connsPending;
 
-  if (isLoading || !detail) {
+  if (detailPending || !detail) {
     return (
       <CardShell
         icon={<Loader2 className="text-muted-foreground size-4 animate-spin" />}
@@ -130,26 +119,84 @@ function IntegrationConnectionCard({
     );
   }
 
-  // Status is computed only to drive the fallback connect CTA on surfaces
-  // without the dropdown picker (read-only previews / no tools selected).
-  // It is NOT shown on the card: it derives from the actor's OWN
-  // connections, so it would read "not connected" even when an admin's
-  // shared+pinned connection resolves fine. The dropdown is the source of
-  // truth for "which connection this agent uses".
-  const status = deriveIntegrationStatus({
-    manifest: detail.manifest,
-    connections: connections ?? [],
-    agentTools,
-  });
+  // Member pre-run picker — surfaces ambiguity (>1 candidates) BEFORE Run.
+  // Admin pin management has moved to the integration detail page (R2);
+  // this block now carries only member-facing widgets. The picker is
+  // integration-level (flat model — one connection per integration,
+  // regardless of auth shape).
+  const hasSelectedTools = (agentTools?.length ?? 0) > 0;
+  const showMemberPicker = !!agentPackageId && hasSelectedTools;
 
-  const action = resolveAction(status, detail.manifest);
+  // The dropdown is the unified per-integration control — it lists every
+  // accessible connection AND carries "add a connection" entries, so it
+  // stands in for the connect/reconnect button. It owns its own data
+  // (accessible connections + pins), so the fallback's status/reuse
+  // computation and its extra fetches are skipped entirely here.
+  if (showMemberPicker) {
+    return (
+      <CardShell title={displayName} subtitle={packageId}>
+        <MemberConnectionPicker
+          integrationPackageId={packageId}
+          agentPackageId={agentPackageId!}
+          manifest={detail.manifest}
+          displayName={displayName}
+        />
+      </CardShell>
+    );
+  }
+
+  return (
+    <FallbackConnectCard
+      packageId={packageId}
+      manifest={detail.manifest}
+      displayName={displayName}
+      agentTools={agentTools}
+    />
+  );
+}
+
+/**
+ * Connect CTA for surfaces WITHOUT the member picker — read-only previews
+ * and agents that haven't selected any tool. Derives status from the
+ * actor's own connections and surfaces a connect / reconnect / add-another
+ * button plus the R5 reuse hint. Split from the picker path so its two
+ * extra fetches (connections + consuming-agents) and the status/reuse
+ * computation only run when actually rendered.
+ */
+function FallbackConnectCard({
+  packageId,
+  manifest,
+  displayName,
+  agentTools,
+}: {
+  packageId: string;
+  manifest: IntegrationManifestView;
+  displayName: string;
+  agentTools: string[] | undefined;
+}) {
+  const { t } = useTranslation(["agents"]);
+  const { data: connections, isPending: connsPending } = useIntegrationConnections(packageId);
+  const { data: consumingAgents } = useAgentsConsumingIntegration(packageId);
+
+  if (connsPending) {
+    return (
+      <CardShell
+        icon={<Loader2 className="text-muted-foreground size-4 animate-spin" />}
+        title={displayName}
+        subtitle={packageId}
+      />
+    );
+  }
+
+  const status = deriveIntegrationStatus({ manifest, connections: connections ?? [], agentTools });
+  const action = resolveAction(status, manifest);
 
   // The connected connection drives the reuse hint below. We used to also
   // render an unlink button here, but it called the global delete endpoint
   // (DELETE /api/integrations/.../connections/:id) which yanked the connection
   // from every other agent in the app — the bug that drove this refactor.
   // The two safe paths are now: (a) change which connection THIS agent uses
-  // via the picker below (writes a member pin), or (b) delete the connection
+  // via the picker (writes a member pin), or (b) delete the connection
   // globally from /connections (destructive, with confirm + impact list).
   const connectedAuthKey = status.kind === "ok" ? status.authKey : null;
   const connectedConnection = connectedAuthKey
@@ -163,41 +210,14 @@ function IntegrationConnectionCard({
     ? buildReuseInfo(connectedConnection, consumingAgents?.length ?? 0, t)
     : null;
 
-  // Member pre-run picker — surfaces ambiguity (>1 candidates) BEFORE Run.
-  // Admin pin management has moved to the integration detail page (R2);
-  // this block now carries only member-facing widgets. The picker is
-  // integration-level (flat model — one connection per integration,
-  // regardless of auth shape).
-  const hasSelectedTools = (agentTools?.length ?? 0) > 0;
-  const showMemberPicker = !!agentPackageId && hasSelectedTools;
-
   // When already connected, still expose a path to add ANOTHER account on the
   // same auth — a user can hold multiple connections per integration and use
-  // different ones across agents. Without this CTA the only entry-point would
-  // be an OAuth/upgrade flow, which doesn't fire when the existing connection
-  // already satisfies the agent's needs.
+  // different ones across agents.
   const addAnotherAuthKey = status.kind === "ok" && status.authKey ? status.authKey : null;
 
   return (
-    <CardShell
-      title={displayName}
-      subtitle={packageId}
-      extraSubtitle={showMemberPicker ? null : reuseInfo}
-    >
-      {showMemberPicker ? (
-        // The dropdown is the unified per-integration control — it lists
-        // every accessible connection AND carries "add a connection"
-        // entries, so it stands in for the connect/reconnect button.
-        <MemberConnectionPicker
-          integrationPackageId={packageId}
-          agentPackageId={agentPackageId!}
-          manifest={detail.manifest}
-          displayName={displayName}
-          agentTools={agentTools}
-        />
-      ) : action ? (
-        // Fallback for surfaces without the picker (read-only previews,
-        // no tools selected): keep the explicit connect/reconnect CTA.
+    <CardShell title={displayName} subtitle={packageId} extraSubtitle={reuseInfo}>
+      {action ? (
         <InlineConnectButton
           packageId={packageId}
           authKey={action.authKey}
@@ -258,72 +278,67 @@ function MemberConnectionPicker({
   agentPackageId,
   manifest,
   displayName,
-  agentTools,
 }: {
   integrationPackageId: string;
   agentPackageId: string;
   manifest: IntegrationManifestView;
   displayName: string;
-  agentTools: string[] | undefined;
 }) {
   const { t } = useTranslation(["agents", "settings"]);
-  const { user } = useAuth();
-  const { isAdmin } = usePermissions();
-  const { data: integrations } = useIntegrations();
-  const { data: adminPins } = useIntegrationPins(integrationPackageId);
-  const { data: memberPins } = useMemberIntegrationPins(agentPackageId);
-  const { data: accessible } = useAccessibleIntegrationConnections(integrationPackageId);
+  const { data: resolution, isPending } = useIntegrationAgentResolution(
+    integrationPackageId,
+    agentPackageId,
+  );
   const upsertPin = useUpsertMemberIntegrationPin();
   const deletePin = useDeleteMemberIntegrationPin();
   const { openPopup, isPending: oauthPending } = useIntegrationOAuthPopup();
   const qc = useQueryClient();
   const [fieldsAuthKey, setFieldsAuthKey] = useState<string | null>(null);
 
-  // Personal-connection creation can be disabled per (app, integration) by
-  // an admin. Members then can't add a connection (mirrors the server gate
-  // `assertConnectionCreationAllowed`); admins/owners always can.
-  const userConnectionsBlocked =
-    integrations?.find((i) => i.id === integrationPackageId)?.blockUserConnections === true;
-  const canAddConnection = isAdmin || !userConnectionsBlocked;
-
-  const candidates = accessible ?? [];
   const auths = manifest.auths ?? {};
   const authKeys = Object.keys(auths);
-
-  const ownerLabel = (c: AccessibleIntegrationConnection): string => {
-    if (c.ownerUserId && user?.id && c.ownerUserId === user.id) {
-      return t("detail.integrationMemberPicker.byYou");
-    }
-    if (c.ownerName) return c.ownerName;
-    return t("detail.integrationMemberPicker.ownerUnknown");
-  };
   const typeLabel = (authKey: string): string | null => {
     const type = auths[authKey]?.type;
     return type ? t(`settings:integration.auth.type.${type}`) : null;
   };
+  const fieldsAuth = fieldsAuthKey ? auths[fieldsAuthKey] : null;
+  // The whole verdict (cascade + scope diff) is computed server-side; a pin
+  // write or scope upgrade invalidates it so the dropdown re-resolves.
+  const refresh = () => qc.invalidateQueries({ queryKey: ["integrations"] });
 
-  // Scopes the agent's selected tools require that a given connection
-  // lacks, on that connection's own auth. Mirrors the server resolver's
-  // checkHealth scope check (scopesContributedByTools ∖ expandGranted).
-  // Empty for api_key/basic auths (no scopes contributed).
-  const isOwn = (c: AccessibleIntegrationConnection): boolean =>
-    !!c.ownerUserId && !!user?.id && c.ownerUserId === user.id;
-  const missingScopesFor = (c: AccessibleIntegrationConnection): string[] => {
-    const required = scopesContributedByTools({ manifest, authKey: c.authKey, agentTools });
-    if (required.length === 0) return [];
-    // `scopesGranted` may be undefined when the cached connection predates
-    // the API field — guard so expandGrantedScopes's spread doesn't throw.
-    const granted = new Set(expandGrantedScopes(c.scopesGranted ?? [], manifest, c.authKey));
-    return required.filter((s) => !granted.has(s));
-  };
+  if (isPending || !resolution) {
+    return (
+      <div data-testid={`member-picker-${integrationPackageId}`}>
+        <Button variant="outline" size="sm" disabled className="h-7 gap-1.5 text-xs">
+          <Loader2 className="size-3 animate-spin" />
+        </Button>
+      </div>
+    );
+  }
 
-  // Admin pin → locked. Disabled trigger surfacing the forced connection.
-  const adminPin = adminPins?.find(
-    (p) => p.packageId === agentPackageId && p.integrationPackageId === integrationPackageId,
-  );
-  if (adminPin) {
-    const pinned = candidates.find((c) => c.id === adminPin.connectionId);
-    const label = pinned?.label ?? pinned?.accountId ?? adminPin.connectionId;
+  const {
+    candidates,
+    status,
+    resolvedConnectionId,
+    resolvedMissingScopes,
+    resolvedOwnedByActor,
+    adminPinnedConnectionId,
+    memberPinnedConnectionId,
+    canAddConnection,
+  } = resolution;
+
+  const connName = (c: IntegrationCandidate) => c.label ?? c.accountId;
+  const ownerLabel = (c: IntegrationCandidate): string =>
+    c.isOwn
+      ? t("detail.integrationMemberPicker.byYou")
+      : (c.ownerName ?? t("detail.integrationMemberPicker.ownerUnknown"));
+
+  // Admin pin → locked, regardless of whether it currently resolves: a
+  // member can never override layer-1 admin force, so we never offer the
+  // editable dropdown when an admin pin exists.
+  if (adminPinnedConnectionId) {
+    const pinned = candidates.find((c) => c.id === adminPinnedConnectionId);
+    const label = pinned?.label ?? pinned?.accountId ?? adminPinnedConnectionId;
     return (
       <div data-testid={`member-picker-${integrationPackageId}`}>
         <Button
@@ -343,66 +358,33 @@ function MemberConnectionPicker({
     );
   }
 
-  const memberPin = memberPins?.find((p) => p.integrationPackageId === integrationPackageId);
-  const current = memberPin?.connectionId ?? null;
+  const current = memberPinnedConnectionId;
+  const resolvedConn = candidates.find((c) => c.id === resolvedConnectionId) ?? null;
+  const hasCandidates = candidates.length > 0;
+  const underScoped = resolvedMissingScopes.length > 0;
 
-  // Mirror the server resolver (integration-connection-resolver.resolveOne)
-  // for the agent-page context: admin pin is handled above; run/schedule
-  // overrides are per-run and don't apply to this preview. What's left:
-  //   member pin → that connection
-  //   no pin, 0 candidates → not_connected
-  //   no pin, 1 candidate  → that one (fallback_auto)
-  //   no pin, >1 candidates → must_choose (NO implicit default)
-  // So we show the connection the next run would actually use, not an
-  // abstract "automatic" label.
-  const effective = ((): {
-    kind: "pinned" | "auto" | "must_choose" | "none" | "stale";
-    conn?: AccessibleIntegrationConnection;
-  } => {
-    if (current) {
-      const conn = candidates.find((c) => c.id === current);
-      return conn ? { kind: "pinned", conn } : { kind: "stale" };
-    }
-    if (candidates.length === 0) return { kind: "none" };
-    if (candidates.length === 1) return { kind: "auto", conn: candidates[0]! };
-    return { kind: "must_choose" };
-  })();
-  // The connection the resolver would land on (pin or single fallback) —
-  // drives the check mark + "(par défaut)" badge in the list.
-  const effectiveConnId = effective.conn?.id ?? null;
-  // Scope deficiency on the resolved connection blocks the run. Owner of
-  // the connection can upgrade (incremental consent); otherwise it's a
-  // read-only error (only the owner can re-consent).
-  const effectiveMissing = effective.conn ? missingScopesFor(effective.conn) : [];
-  const effectiveUnderScoped = effectiveMissing.length > 0;
-  const effectiveOwn = effective.conn ? isOwn(effective.conn) : false;
-
-  const triggerConnect = (authKey: string) => {
+  const triggerConnect = async (authKey: string) => {
     const auth = auths[authKey];
     if (!auth) return;
     if (auth.type === "oauth2") {
-      void openPopup({ packageId: integrationPackageId, authKey, forceAccountSelect: true });
+      await openPopup({ packageId: integrationPackageId, authKey, forceAccountSelect: true });
+      await refresh();
     } else {
       setFieldsAuthKey(authKey);
     }
   };
 
-  const hasCandidates = candidates.length > 0;
-  const connName = (c: AccessibleIntegrationConnection) => c.label ?? c.accountId;
-  const triggerLabel =
-    effective.conn != null
-      ? connName(effective.conn)
-      : effective.kind === "must_choose"
-        ? t("detail.integrationMemberPicker.chooseLabel")
-        : effective.kind === "stale"
-          ? t("detail.integrationMemberPicker.reconfigureLabel")
-          : t("detail.integrationMemberPicker.connectLabel");
+  const triggerLabel = resolvedConn
+    ? connName(resolvedConn)
+    : status === "must_choose"
+      ? t("detail.integrationMemberPicker.chooseLabel")
+      : status === "stale"
+        ? t("detail.integrationMemberPicker.reconfigureLabel")
+        : t("detail.integrationMemberPicker.connectLabel");
   // Warning visuals when there's no usable resolved connection OR the
   // resolved one is under-scoped (run would be blocked).
-  const triggerWarn =
-    effective.kind === "must_choose" || effective.kind === "stale" || effectiveUnderScoped;
-  const TriggerIcon = triggerWarn ? AlertTriangle : effective.conn != null ? Users : Plus;
-  const fieldsAuth = fieldsAuthKey ? auths[fieldsAuthKey] : null;
+  const triggerWarn = status === "must_choose" || status === "stale" || underScoped;
+  const TriggerIcon = triggerWarn ? AlertTriangle : resolvedConn ? Users : Plus;
 
   // Blocked for this member AND nothing to pick → dead end. Show a
   // disabled, explanatory button instead of an empty dropdown.
@@ -435,7 +417,7 @@ function MemberConnectionPicker({
           >
             <TriggerIcon className="size-3" />
             <span className="max-w-[14rem] truncate">{triggerLabel}</span>
-            {effective.kind === "auto" && (
+            {status === "auto" && (
               <span className="text-muted-foreground/70">
                 {t("detail.integrationMemberPicker.defaultBadge")}
               </span>
@@ -449,17 +431,19 @@ function MemberConnectionPicker({
           </DropdownMenuLabel>
           {candidates.map((c) => {
             const tl = typeLabel(c.authKey);
-            const isDefault = !current && effectiveConnId === c.id;
-            const missing = missingScopesFor(c);
+            const isDefault = !current && resolvedConnectionId === c.id;
             return (
               <DropdownMenuItem
                 key={c.id}
                 onSelect={() =>
-                  upsertPin.mutate({ agentPackageId, integrationPackageId, connectionId: c.id })
+                  upsertPin.mutate(
+                    { agentPackageId, integrationPackageId, connectionId: c.id },
+                    { onSuccess: refresh },
+                  )
                 }
                 data-testid={`member-pick-option-${c.id}`}
               >
-                <Check className={`size-3.5 ${effectiveConnId === c.id ? "" : "opacity-0"}`} />
+                <Check className={`size-3.5 ${resolvedConnectionId === c.id ? "" : "opacity-0"}`} />
                 <div className="flex min-w-0 flex-col">
                   <div className="flex items-center gap-1.5">
                     <span className="truncate font-medium">{connName(c)}</span>
@@ -473,7 +457,7 @@ function MemberConnectionPicker({
                         {t("detail.integrationMemberPicker.sharedBadge")}
                       </Badge>
                     )}
-                    {missing.length > 0 && (
+                    {c.missingScopes.length > 0 && (
                       <Badge variant="destructive" className="text-[0.6rem]">
                         {t("detail.integrationMemberPicker.missingScopesBadge")}
                       </Badge>
@@ -495,7 +479,9 @@ function MemberConnectionPicker({
           })}
           {current && (
             <DropdownMenuItem
-              onSelect={() => deletePin.mutate({ agentPackageId, integrationPackageId })}
+              onSelect={() =>
+                deletePin.mutate({ agentPackageId, integrationPackageId }, { onSuccess: refresh })
+              }
               data-testid={`member-pick-reset-${integrationPackageId}`}
             >
               <Check className="size-3.5 opacity-0" />
@@ -511,7 +497,7 @@ function MemberConnectionPicker({
               return (
                 <DropdownMenuItem
                   key={`add-${k}`}
-                  onSelect={() => triggerConnect(k)}
+                  onSelect={() => void triggerConnect(k)}
                   data-testid={`member-pick-add-${integrationPackageId}-${k}`}
                 >
                   <Plus className="size-3.5" />
@@ -528,7 +514,7 @@ function MemberConnectionPicker({
       {/* Resolved connection is under-scoped → the run is blocked
           server-side (insufficient_scopes). Owner can upgrade via
           incremental consent; a foreign owner can only be flagged. */}
-      {effectiveUnderScoped && effective.conn && (
+      {underScoped && resolvedConn && (
         <div
           className="mt-1.5 flex flex-col gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-[0.7rem] text-amber-700 dark:text-amber-300"
           data-testid={`member-pick-scope-warning-${integrationPackageId}`}
@@ -536,17 +522,17 @@ function MemberConnectionPicker({
           <div className="flex items-center gap-1.5">
             <AlertTriangle className="size-3 shrink-0" />
             <span>
-              {effectiveOwn
+              {resolvedOwnedByActor
                 ? t("detail.integrationMemberPicker.missingScopesOwn")
                 : t("detail.integrationMemberPicker.missingScopesForeign", {
-                    owner: ownerLabel(effective.conn),
+                    owner: ownerLabel(resolvedConn),
                   })}
             </span>
           </div>
           <span className="text-foreground/80 font-mono text-[0.65rem] break-words">
-            {effectiveMissing.join(" ")}
+            {resolvedMissingScopes.join(" ")}
           </span>
-          {effectiveOwn && auths[effective.conn.authKey]?.type === "oauth2" && (
+          {resolvedOwnedByActor && auths[resolvedConn.authKey]?.type === "oauth2" && (
             <div>
               <Button
                 size="sm"
@@ -554,14 +540,14 @@ function MemberConnectionPicker({
                 onClick={async () => {
                   await openPopup({
                     packageId: integrationPackageId,
-                    authKey: effective.conn!.authKey,
-                    scopes: effectiveMissing,
-                    connectionId: effective.conn!.id,
+                    authKey: resolvedConn.authKey,
+                    scopes: resolvedMissingScopes,
+                    connectionId: resolvedConn.id,
                   });
                   // The OAuth callback updated the connection's granted
                   // scopes server-side; refetch so the badge clears
                   // instead of waiting for a window-focus refetch.
-                  await qc.invalidateQueries({ queryKey: ["integrations"] });
+                  await refresh();
                 }}
                 data-testid={`member-pick-upgrade-${integrationPackageId}`}
               >
@@ -681,7 +667,4 @@ function deriveIntegrationStatus(input: {
     return { kind: "ok", authKey: healthy.authKey };
   }
   return { kind: "needs_reconnection", authKey: connections[0]!.authKey };
-
-  // Single-auth-per-integration invariant (server-side gate in
-  // saveIntegrationConnection) means `connected` has at most one entry
 }

@@ -915,8 +915,7 @@ export type ConnectionResolutionSource =
   | "run_override"
   | "schedule_override"
   | "member_pin"
-  | "fallback_auto"
-  | "fallback_default";
+  | "fallback_auto";
 
 /** Per-integration resolution result. */
 export interface ResolvedConnection {

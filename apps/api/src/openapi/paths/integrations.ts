@@ -647,6 +647,103 @@ export const integrationsPaths = {
       },
     },
   },
+  "/api/integrations/{packageId}/agent-resolution/{agentPackageId}": {
+    get: {
+      operationId: "resolveAgentIntegrationConnection",
+      tags: ["Integrations"],
+      summary: "Resolve which connection an agent uses for an integration",
+      description:
+        "Single-source verdict for the agent-page connection picker. Returns which " +
+        "connection the next run would use (admin pin → run/schedule override → member " +
+        "pin → fallback + scope check), the annotated candidate list (own + shared, each " +
+        "with the scopes it lacks for the agent's selected tools), and the admin/member " +
+        "pin + blocked state. Computed by the same resolver the runtime uses so the UI " +
+        "never re-implements the cascade.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        integrationPackageIdParam,
+        agentPackageIdParam,
+      ],
+      responses: {
+        "200": {
+          description: "Resolution verdict",
+          headers: baseResponseHeaders,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: [
+                  "status",
+                  "resolvedConnectionId",
+                  "resolvedMissingScopes",
+                  "resolvedOwnedByActor",
+                  "adminPinnedConnectionId",
+                  "memberPinnedConnectionId",
+                  "canAddConnection",
+                  "candidates",
+                ],
+                properties: {
+                  status: {
+                    type: "string",
+                    enum: [
+                      "admin_locked",
+                      "pinned",
+                      "auto",
+                      "must_choose",
+                      "none",
+                      "stale",
+                      "needs_reconnection",
+                    ],
+                  },
+                  resolvedConnectionId: { type: ["string", "null"] },
+                  resolvedMissingScopes: { type: "array", items: { type: "string" } },
+                  resolvedOwnedByActor: { type: "boolean" },
+                  adminPinnedConnectionId: { type: ["string", "null"] },
+                  memberPinnedConnectionId: { type: ["string", "null"] },
+                  canAddConnection: { type: "boolean" },
+                  candidates: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: [
+                        "id",
+                        "authKey",
+                        "accountId",
+                        "label",
+                        "ownerUserId",
+                        "ownerEndUserId",
+                        "ownerName",
+                        "scopesGranted",
+                        "sharedWithOrg",
+                        "needsReconnection",
+                        "missingScopes",
+                        "isOwn",
+                      ],
+                      properties: {
+                        id: { type: "string", format: "uuid" },
+                        authKey: { type: "string" },
+                        accountId: { type: "string" },
+                        label: { type: ["string", "null"] },
+                        ownerUserId: { type: ["string", "null"] },
+                        ownerEndUserId: { type: ["string", "null"] },
+                        ownerName: { type: ["string", "null"] },
+                        scopesGranted: { type: "array", items: { type: "string" } },
+                        sharedWithOrg: { type: "boolean" },
+                        needsReconnection: { type: "boolean" },
+                        missingScopes: { type: "array", items: { type: "string" } },
+                        isOwn: { type: "boolean" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
   "/api/integrations/{packageId}/connections/{connectionId}": {
     patch: {
       operationId: "updateIntegrationConnectionMetadata",

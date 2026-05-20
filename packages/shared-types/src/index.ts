@@ -5,14 +5,20 @@ import type { ModelCost } from "@appstrate/core/module";
 
 export type { WebhookInfo, WebhookCreateResponse, WebhookDelivery } from "./webhooks.ts";
 export type {
+  AccessibleIntegrationConnection,
+  ConsumingAgentSummary,
+  IntegrationAgentResolution,
   IntegrationAuthStatus,
   IntegrationAuthType,
+  IntegrationCandidate,
   IntegrationConnection,
   IntegrationDetail,
   IntegrationManifestAuth,
   IntegrationManifestTool,
   IntegrationManifestView,
   IntegrationOAuthClient,
+  IntegrationPickStatus,
+  IntegrationPin,
   IntegrationRequiredScopes,
   IntegrationSummary,
 } from "./integrations.ts";

@@ -74,7 +74,6 @@
   "detail.integrationPin.none": "— Pas d'épingle —",
   "detail.integrationPin.help": "Seules les connexions partagées avec l'organisation peuvent être épinglées. L'épingle prime sur le choix per-run et le fallback utilisateur.",
   "detail.integrationMemberPicker.title": "Choisir la connexion à utiliser pour cet agent",
-  "detail.integrationMemberPicker.help": "Plusieurs connexions sont accessibles pour cette intégration. Votre choix est mémorisé sur cet appareil et envoyé au lancement de chaque run. Une épingle administrateur reste prioritaire si elle existe.",
   "detail.integrationMemberPicker.defaultBadge": "(par défaut)",
   "detail.integrationMemberPicker.connectLabel": "Connecter",
   "detail.integrationMemberPicker.chooseLabel": "À choisir",

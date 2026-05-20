@@ -12,9 +12,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import type {
+  AccessibleIntegrationConnection,
+  ConsumingAgentSummary,
+  IntegrationAgentResolution,
   IntegrationConnection,
   IntegrationDetail,
   IntegrationOAuthClient,
+  IntegrationPin,
   IntegrationRequiredScopes,
   IntegrationSummary,
 } from "@appstrate/shared-types";
@@ -25,14 +29,20 @@ import { useCurrentApplicationId } from "./use-current-application";
 // Re-export wire types for component consumers — canonical definitions
 // live in `@appstrate/shared-types/integrations.ts`.
 export type {
+  AccessibleIntegrationConnection,
+  ConsumingAgentSummary,
+  IntegrationAgentResolution,
   IntegrationAuthStatus,
   IntegrationAuthType,
+  IntegrationCandidate,
   IntegrationConnection,
   IntegrationDetail,
   IntegrationManifestAuth,
   IntegrationManifestTool,
   IntegrationManifestView,
   IntegrationOAuthClient,
+  IntegrationPickStatus,
+  IntegrationPin,
   IntegrationRequiredScopes,
   IntegrationSummary,
 } from "@appstrate/shared-types";
@@ -84,21 +94,6 @@ export function useIntegrationConnections(packageId: string | undefined) {
  * Powers the pre-run picker rendered on agent surfaces when more than one
  * candidate exists (avoids the must_choose 412 recovery loop).
  */
-export interface AccessibleIntegrationConnection {
-  id: string;
-  authKey: string;
-  accountId: string;
-  label: string | null;
-  ownerUserId: string | null;
-  ownerEndUserId: string | null;
-  /** Display name of the connection's creator (null if owner deleted). */
-  ownerName: string | null;
-  /** OAuth scopes granted to this connection (empty for api_key/basic). */
-  scopesGranted: string[];
-  sharedWithOrg: boolean;
-  needsReconnection: boolean;
-}
-
 export function useAccessibleIntegrationConnections(packageId: string | undefined) {
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
@@ -111,6 +106,33 @@ export function useAccessibleIntegrationConnections(packageId: string | undefine
       );
       return envelope.data;
     },
+  });
+}
+
+/**
+ * Server-side picker verdict for a (agent, integration) on the agent page:
+ * which connection the next run resolves to + the annotated candidate list
+ * + pin/blocked state. The dropdown renders this verbatim — the resolver
+ * cascade and scope diff live server-side (single source of truth).
+ */
+export function useIntegrationAgentResolution(
+  integrationPackageId: string | undefined,
+  agentPackageId: string | undefined,
+) {
+  const orgId = useCurrentOrgId();
+  const applicationId = useCurrentApplicationId();
+  return useQuery({
+    queryKey: [
+      ...KEY(orgId, applicationId),
+      "agent-resolution",
+      integrationPackageId,
+      agentPackageId,
+    ] as const,
+    enabled: Boolean(orgId && applicationId && integrationPackageId && agentPackageId),
+    queryFn: () =>
+      api<IntegrationAgentResolution>(
+        `/integrations/${encodeURI(integrationPackageId!)}/agent-resolution/${encodeURI(agentPackageId!)}`,
+      ),
   });
 }
 
@@ -311,15 +333,6 @@ export function useUpsertIntegrationOAuthClient() {
 // Admin: block_user_connections + pins + connection metadata
 // ─────────────────────────────────────────────
 
-export interface IntegrationPin {
-  packageId: string;
-  integrationPackageId: string;
-  authKey: string;
-  connectionId: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
 export function useIntegrationPins(packageId: string | undefined) {
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
@@ -335,11 +348,6 @@ export function useIntegrationPins(packageId: string | undefined) {
  * by the centralised pin management table to populate the "pin a new agent"
  * picker.
  */
-export interface ConsumingAgentSummary {
-  packageId: string;
-  displayName: string;
-}
-
 export function useAgentsConsumingIntegration(packageId: string | undefined) {
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();

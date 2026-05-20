@@ -46,8 +46,7 @@ import type { Actor } from "../lib/actor.ts";
 import {
   isIntegrationInstalled,
   loadAccessibleConnectionById,
-  loadActorConnection,
-  type ResolvedConnectionRow,
+  pickAnyAccessibleConnection,
 } from "./integration-connections.ts";
 import { fetchIntegrationManifest } from "./integration-service.ts";
 
@@ -319,7 +318,7 @@ async function resolveDeliveries(
   // Load the one connection chosen by the cascade.
   const row = resolvedConnection
     ? await loadAccessibleConnectionById(resolvedConnection.connectionId, { applicationId, actor })
-    : await pickAnyAccessibleConnection(packageId, applicationId, actor, Object.keys(auths));
+    : await pickAnyAccessibleConnection(packageId, Object.keys(auths), { applicationId, actor });
 
   if (!row) {
     logger.info("no resolved connection for integration; skipping delivery entries", {
@@ -404,27 +403,4 @@ async function resolveDeliveries(
     spawnEnv,
     ...(Object.keys(httpDeliveryAuths).length > 0 ? { httpDeliveryAuths } : {}),
   };
-}
-
-/**
- * Fallback used when no snapshot was passed (legacy paths, manual
- * spawn). Walks the declared auths and returns the first connection
- * found — same auto-pick semantics as the runtime resolver's layer 5
- * fallback, single-candidate branch. Multi-candidate situations
- * resolve by iteration order (declared-auth precedence); call sites
- * that need deterministic ambiguity-handling go through `resolveConnectionsForRun`.
- */
-async function pickAnyAccessibleConnection(
-  packageId: string,
-  applicationId: string,
-  actor: Actor,
-  declaredAuthKeys: string[],
-): Promise<ResolvedConnectionRow | null> {
-  for (const authKey of declaredAuthKeys) {
-    const row = await loadActorConnection(packageId, authKey, { applicationId, actor });
-    if (row) {
-      return { ...row, authKey };
-    }
-  }
-  return null;
 }

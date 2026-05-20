@@ -105,3 +105,95 @@ export interface IntegrationRequiredScopes {
     viaExplicit: string[];
   }>;
 }
+
+/**
+ * One connection an actor can pick from for a given (application,
+ * integration): own + shared-with-org, with caller-facing display fields.
+ * Wire shape for `GET /api/integrations/:packageId/accessible-connections`.
+ */
+export interface AccessibleIntegrationConnection {
+  id: string;
+  authKey: string;
+  accountId: string;
+  label: string | null;
+  ownerUserId: string | null;
+  ownerEndUserId: string | null;
+  /** Display name of the connection's creator (null if owner row deleted). */
+  ownerName: string | null;
+  /** OAuth scopes granted to this connection (empty for api_key/basic). */
+  scopesGranted: string[];
+  sharedWithOrg: boolean;
+  needsReconnection: boolean;
+}
+
+/**
+ * An admin pin (`integration_pins`, `user_id IS NULL`) governing which
+ * connection an agent uses for an integration. Wire shape for the
+ * `/api/integrations/:packageId/pins` surface.
+ */
+export interface IntegrationPin {
+  packageId: string;
+  integrationPackageId: string;
+  /** Denormalised from the pinned connection — display hint only. */
+  authKey: string;
+  connectionId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** An installed agent that declares a given integration as a dependency. */
+export interface ConsumingAgentSummary {
+  packageId: string;
+  displayName: string;
+}
+
+/**
+ * One accessible connection annotated for the agent-page picker — adds the
+ * scopes the agent's selected tools require that the connection lacks, and
+ * whether the calling actor owns it.
+ */
+export interface IntegrationCandidate extends AccessibleIntegrationConnection {
+  missingScopes: string[];
+  isOwn: boolean;
+}
+
+/**
+ * The picker verdict for a given (agent, integration, actor). Computed
+ * server-side by the same resolver cascade the runtime uses, so the
+ * agent-page dropdown never re-implements (and never drifts from) the
+ * "which connection does this run use?" logic.
+ *
+ *  - `admin_locked` — an admin pin forces the choice (dropdown disabled).
+ *  - `pinned`       — the actor's own member pin resolves.
+ *  - `auto`         — no pin, exactly one accessible connection.
+ *  - `must_choose`  — no pin, more than one candidate (member must pick).
+ *  - `none`         — no accessible connection.
+ *  - `stale`        — a pin points at a connection no longer accessible.
+ *  - `needs_reconnection` — the resolved connection is flagged for re-consent.
+ */
+export type IntegrationPickStatus =
+  | "admin_locked"
+  | "pinned"
+  | "auto"
+  | "must_choose"
+  | "none"
+  | "stale"
+  | "needs_reconnection";
+
+export interface IntegrationAgentResolution {
+  status: IntegrationPickStatus;
+  /** Connection the next run would use, or null for none/must_choose/stale. */
+  resolvedConnectionId: string | null;
+  /** Missing scopes on the resolved connection (empty unless under-scoped). */
+  resolvedMissingScopes: string[];
+  /** True when the resolved connection belongs to the calling actor. */
+  resolvedOwnedByActor: boolean;
+  /** Admin pin connection id (status admin_locked), else null. */
+  adminPinnedConnectionId: string | null;
+  /** The actor's own member pin connection id, else null. */
+  memberPinnedConnectionId: string | null;
+  /** Whether the actor may add a connection (admin OR not blocked). */
+  canAddConnection: boolean;
+  /** Own + shared connections, annotated for the dropdown. */
+  candidates: IntegrationCandidate[];
+}
