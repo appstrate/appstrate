@@ -35,7 +35,6 @@ function validManifest() {
     schemaVersion: "1.0",
     dependencies: {
       skills: {},
-      tools: {},
       providers: {},
     },
   };
@@ -43,7 +42,6 @@ function validManifest() {
 
 function manifestWithDeps(
   deps: {
-    tools?: Record<string, string>;
     skills?: Record<string, string>;
   } = {},
 ) {
@@ -51,7 +49,6 @@ function manifestWithDeps(
     ...validManifest(),
     dependencies: {
       skills: deps.skills ?? {},
-      tools: deps.tools ?? {},
       providers: {},
     },
   };
@@ -175,16 +172,16 @@ describe("POST /api/runs/inline — dependency resolution", () => {
   // `executeAgentInBackground()` whose async tail would keep writing to the
   // runs/run_logs tables past the end of the test — a source of flakiness
   // when the next test's `truncateAll()` races the background work.
-  // The bogus-tool case below is enough to prove the /inline route wires
+  // The bogus-skill case below is enough to prove the /inline route wires
   // the preflight correctly; readiness rejects BEFORE the shadow row is
   // inserted, so no pipeline fires.
 
-  it("returns 400 missing_tool when tool dep is bogus", async () => {
-    const manifest = manifestWithDeps({ tools: { "@fake/nope": "^1.0.0" } });
+  it("returns 400 missing_skill when skill dep is bogus", async () => {
+    const manifest = manifestWithDeps({ skills: { "@fake/nope": "^1.0.0" } });
     const res = await post({ manifest, prompt: "do something" });
     expect(res.status).toBe(400);
     const body = (await res.json()) as { code?: string };
-    expect(body.code).toBe("missing_tool");
+    expect(body.code).toBe("missing_skill");
   });
 });
 

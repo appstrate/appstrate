@@ -28,13 +28,12 @@ function validManifest() {
     type: "agent",
     description: "Inline run",
     schemaVersion: "1.0",
-    dependencies: { skills: {}, tools: {}, providers: {} },
+    dependencies: { skills: {}, providers: {} },
   };
 }
 
 function manifestWithDeps(
   deps: {
-    tools?: Record<string, string>;
     skills?: Record<string, string>;
   } = {},
 ) {
@@ -42,7 +41,6 @@ function manifestWithDeps(
     ...validManifest(),
     dependencies: {
       skills: deps.skills ?? {},
-      tools: deps.tools ?? {},
       providers: {},
     },
   };
@@ -198,7 +196,7 @@ describe("POST /api/runs/inline/validate", () => {
       name: "@inline/broken",
       version: "0.0.0",
       schemaVersion: "1.0",
-      dependencies: { skills: {}, tools: {}, providers },
+      dependencies: { skills: {}, providers },
     };
 
     const res = await post({ manifest, prompt: "hi" });
@@ -267,46 +265,6 @@ describe("POST /api/runs/inline/validate", () => {
   });
 
   describe("dependency resolution", () => {
-    it("accepts a manifest referencing a seeded system tool", async () => {
-      await seedPackage({
-        id: "@appstrate/output",
-        type: "tool",
-        source: "system",
-        orgId: null,
-      });
-      const manifest = manifestWithDeps({ tools: { "@appstrate/output": "^1.0.0" } });
-      const res = await post({ manifest, prompt: "do something" });
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { ok: boolean };
-      expect(body.ok).toBe(true);
-    });
-
-    it("accepts a manifest referencing a seeded org-scoped tool", async () => {
-      await seedPackage({
-        id: "@inlineorg/mytool",
-        type: "tool",
-        source: "local",
-        orgId: ctx.orgId,
-      });
-      const manifest = manifestWithDeps({ tools: { "@inlineorg/mytool": "^1.0.0" } });
-      const res = await post({ manifest, prompt: "do something" });
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { ok: boolean };
-      expect(body.ok).toBe(true);
-    });
-
-    it("returns 400 missing_tool when tool dep is not seeded", async () => {
-      const manifest = manifestWithDeps({ tools: { "@fake/nope": "^1.0.0" } });
-      const res = await post({ manifest, prompt: "do something" });
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as {
-        code?: string;
-        errors?: { field: string; code: string }[];
-      };
-      expect(body.code).toBe("validation_failed");
-      expect(body.errors?.some((e) => e.code === "missing_tool")).toBe(true);
-    });
-
     it("accepts a manifest referencing a seeded org-scoped skill", async () => {
       await seedPackage({
         id: "@inlineorg/helper",
@@ -335,12 +293,12 @@ describe("POST /api/runs/inline/validate", () => {
 
     it("does NOT insert a shadow row after successful dep resolution", async () => {
       await seedPackage({
-        id: "@appstrate/output",
-        type: "tool",
-        source: "system",
-        orgId: null,
+        id: "@inlineorg/helper2",
+        type: "skill",
+        source: "local",
+        orgId: ctx.orgId,
       });
-      const manifest = manifestWithDeps({ tools: { "@appstrate/output": "^1.0.0" } });
+      const manifest = manifestWithDeps({ skills: { "@inlineorg/helper2": "^1.0.0" } });
       expect(await shadowCount()).toBe(0);
       const res = await post({ manifest, prompt: "do something" });
       expect(res.status).toBe(200);
