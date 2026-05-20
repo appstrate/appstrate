@@ -21,7 +21,6 @@ import * as path from "node:path";
 import {
   PiRunner,
   prepareBundleForPi,
-  buildProviderCallExtensionFactory,
   buildApiCallExtensionFactory,
   emitRuntimeReady,
   startSinkHeartbeat,
@@ -47,7 +46,6 @@ import {
 import { createConsoleSink } from "./run/sink.ts";
 import { resolveVerbosity } from "./run/format.ts";
 import {
-  buildResolver,
   buildIntegrationResolver,
   parseProviderMode,
   ResolverConfigError,
@@ -335,17 +333,15 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   // ─── 3a. Optional: register run + build reporting session ─────────
   const reportSession = await resolveReportSession(opts, bundle, bundleSource, resolverInputs);
 
-  // ─── 3b. Build the ProviderResolver ────────────────────────────────
+  // ─── 3b. Build the integration api_call resolver ──────────────────
   // Thread X-Run-Id into credential-proxy calls when reporting is on.
+  // Serverless `apiCall` integrations (the unified provider→integration
+  // surface) get credential-injected HTTP calls; the resolver yields one
+  // `{ns}__api_call` tool per integration.
   const effectiveResolverInputs =
     resolverInputsWithProfiles && reportSession
       ? appendResolverHeaders(resolverInputsWithProfiles, reportSession.proxyHeaders)
       : resolverInputsWithProfiles;
-  const providerResolver = buildResolver(mode, effectiveResolverInputs);
-  // Integration `api_call` resolver — the provider→integration unified
-  // surface. Built with the same mode + inputs so a single `appstrate run`
-  // exposes both `provider_call` (legacy providers) and `{ns}__api_call`
-  // (serverless apiCall integrations) when the agent declares both.
   const integrationResolver = buildIntegrationResolver(mode, effectiveResolverInputs);
 
   // ─── 5. Parse input ────────────────────────────────────────────────
@@ -430,33 +426,13 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     },
   });
 
-  // ─── 7a. Provider tools — bridge AFPS ProviderResolver → Pi factories ──
-  // PiRunner takes pre-built Pi extension factories; the AFPS provider
-  // resolver yields one tool per declared provider, exposed to the LLM
-  // through a single `provider_call({providerId, ...})` Pi tool — same
-  // surface as runtime-pi's MCP-backed `provider_call` so prompts are
-  // identical regardless of execution mode.
-  const providerFactories = await buildProviderCallExtensionFactory({
-    bundle,
-    providerResolver,
-    runId,
-    workspace: workspaceDir,
-    emitProvider: () => {
-      // Provider `ctx.emit` events are currently swallowed in CLI mode;
-      // the stdout JSONL sink already reflects tool-call activity via
-      // Pi SDK's own `tool_execution_start` events. A dedicated
-      // `provider.called` stream can be wired later if useful.
-    },
-  });
-  if (!opts.json && providerFactories.length > 0) {
-    process.stderr.write(`→ wired ${providerFactories.length} provider tool(s)\n`);
-  }
-
-  // ─── 7b. Integration api_call tools — one {ns}__api_call per integration ──
-  // Serverless `apiCall` integrations (the migrated-provider shape) expose
-  // a credential-injecting HTTP tool, same surface as the platform sidecar's
-  // `{ns}__api_call` MCP tool. Pure MCP-server integrations are skipped here
-  // (no generic call surface in-process).
+  // ─── 7a. Integration api_call tools — one {ns}__api_call per integration ──
+  // PiRunner takes pre-built Pi extension factories; the integration
+  // resolver yields one tool per serverless `apiCall` integration, exposed
+  // to the LLM as `{ns}__api_call` — same surface as the platform sidecar's
+  // `{ns}__api_call` MCP tool, so prompts are identical regardless of
+  // execution mode. Pure MCP-server integrations are skipped here (no
+  // generic call surface in-process).
   const apiCallFactories = await buildApiCallExtensionFactory({
     bundle,
     integrationResolver,
@@ -619,11 +595,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
       systemPrompt,
       cwd: workspaceDir,
       agentDir: path.join(workspaceDir, ".pi-agent"),
-      extensionFactories: [
-        ...prepared.extensionFactories,
-        ...providerFactories,
-        ...apiCallFactories,
-      ],
+      extensionFactories: [...prepared.extensionFactories, ...apiCallFactories],
       authStoragePath: path.join(workspaceDir, ".pi-auth.json"),
     });
 
@@ -643,8 +615,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     // phase entirely because ES module imports are evaluated before any
     // top-level statement runs.
     const emittedRunId = reportSession?.runId ?? runId;
-    const extensionsCount =
-      prepared.extensionFactories.length + providerFactories.length + apiCallFactories.length;
+    const extensionsCount = prepared.extensionFactories.length + apiCallFactories.length;
     await emitRuntimeReady(sink, emittedRunId, {
       bundleLoaded: true,
       extensions: extensionsCount,
@@ -679,7 +650,11 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     await runner.run({
       bundle,
       context,
-      providerResolver,
+      // PiRunner exposes credentialled HTTP via pre-built extension
+      // factories (api_call), not the generic Runner `providerResolver`
+      // field — pass a no-op. The field is removed from RunOptions in a
+      // follow-up afps-runtime stage.
+      providerResolver: { resolve: async () => [] },
       eventSink: sink,
       signal: shutdownSignal,
     });
