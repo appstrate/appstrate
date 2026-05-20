@@ -11,6 +11,7 @@ import {
   parseTokenErrorResponse,
   buildTokenHeaders,
   buildTokenBody,
+  type ParsedTokenResponse,
 } from "./token-utils.ts";
 import { extractErrorMessage } from "./utils.ts";
 
@@ -93,27 +94,35 @@ export async function forceRefresh(
   }
 }
 
-async function doRefresh(
-  db: Db,
-  connectionId: string,
-  providerId: string,
-  credentialsEncrypted: string,
+/** Success payload from {@link performRefreshTokenExchange}. */
+export interface RefreshExchangeResult {
+  /** Normalised token response (access/refresh token, expiry, scopes). */
+  parsed: ParsedTokenResponse;
+  /** Raw JSON body — callers that need provider-specific fields (e.g. the
+   *  authoritative `scope` echo for shrink detection) read it directly. */
+  raw: Record<string, unknown>;
+}
+
+/**
+ * Perform the OAuth2 `grant_type=refresh_token` HTTP exchange shared by
+ * the provider (`user_provider_connections`) and integration
+ * (`integration_connections`) refresh paths: build the request, POST it,
+ * classify failures into {@link RefreshError} (`revoked` vs `transient`),
+ * and parse the success body. Table-specific concerns — which row to
+ * write back, scope-shrink detection, `needsReconnection` flips — stay in
+ * each caller so the two never re-diverge on the wire mechanics.
+ */
+export async function performRefreshTokenExchange(
   ctx: RefreshContext,
-): Promise<DecryptedCredentials> {
-  const creds = decryptCredentials<DecryptedCredentials>(credentialsEncrypted);
-
-  if (!creds.refresh_token) {
-    return creds;
-  }
-
+  refreshToken: string,
+  opts: { label: string; accessTokenFallback?: string },
+): Promise<RefreshExchangeResult> {
   const useBasicAuth = ctx.tokenAuthMethod === "client_secret_basic";
-
   const bodyParams: Record<string, string> = {
     grant_type: "refresh_token",
-    refresh_token: creds.refresh_token,
+    refresh_token: refreshToken,
     ...(useBasicAuth ? {} : { client_id: ctx.clientId, client_secret: ctx.clientSecret }),
   };
-
   const body = buildTokenBody(bodyParams, ctx.tokenContentType);
 
   let response: Response;
@@ -130,10 +139,7 @@ async function doRefresh(
       signal: AbortSignal.timeout(30_000),
     });
   } catch (err) {
-    throw new RefreshError(
-      `Token refresh network error for '${providerId}': ${extractErrorMessage(err)}`,
-      "transient",
-    );
+    throw new RefreshError(`${opts.label} network error: ${extractErrorMessage(err)}`, "transient");
   }
 
   if (!response.ok) {
@@ -148,28 +154,45 @@ async function doRefresh(
         ? `${classification.error}${classification.errorDescription ? ` — ${classification.errorDescription}` : ""}`
         : `HTTP ${response.status}`;
     throw new RefreshError(
-      `Token refresh failed for '${providerId}': ${summary}`,
+      `${opts.label} failed: ${summary}`,
       classification.kind,
       response.status,
       text,
     );
   }
 
-  let tokenData: Record<string, unknown>;
+  let raw: Record<string, unknown>;
   try {
-    tokenData = (await response.json()) as Record<string, unknown>;
+    raw = (await response.json()) as Record<string, unknown>;
   } catch {
-    throw new RefreshError(
-      `Token refresh returned non-JSON response for '${providerId}'`,
-      "transient",
-    );
+    throw new RefreshError(`${opts.label} returned non-JSON response`, "transient");
   }
 
   const parsed = parseTokenResponse(
-    { ...tokenData, access_token: tokenData.access_token ?? creds.access_token },
+    { ...raw, access_token: raw.access_token ?? opts.accessTokenFallback },
     undefined,
-    creds.refresh_token,
+    refreshToken,
   );
+  return { parsed, raw };
+}
+
+async function doRefresh(
+  db: Db,
+  connectionId: string,
+  providerId: string,
+  credentialsEncrypted: string,
+  ctx: RefreshContext,
+): Promise<DecryptedCredentials> {
+  const creds = decryptCredentials<DecryptedCredentials>(credentialsEncrypted);
+
+  if (!creds.refresh_token) {
+    return creds;
+  }
+
+  const { parsed } = await performRefreshTokenExchange(ctx, creds.refresh_token, {
+    label: `Token refresh for '${providerId}'`,
+    accessTokenFallback: creds.access_token,
+  });
 
   const newCreds: DecryptedCredentials = {
     access_token: parsed.accessToken,

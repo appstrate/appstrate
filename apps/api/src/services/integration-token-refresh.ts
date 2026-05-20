@@ -20,14 +20,14 @@ import { integrationConnections } from "@appstrate/db/schema";
 import { db } from "@appstrate/db/client";
 import {
   RefreshError,
-  parseTokenErrorResponse,
-  parseTokenResponse,
-  buildTokenHeaders,
-  buildTokenBody,
+  performRefreshTokenExchange,
   encryptCredentials,
   decryptCredentialsToStringMap,
 } from "@appstrate/connect";
-import type { RefreshContext as IntegrationRefreshContext } from "@appstrate/connect";
+import type {
+  RefreshContext as IntegrationRefreshContext,
+  RefreshExchangeResult,
+} from "@appstrate/connect";
 
 export type { IntegrationRefreshContext };
 
@@ -124,75 +124,26 @@ async function doRefresh(
     return { fields: current, expiresAt: null, scopesGranted: null, shrinkDetected: false };
   }
 
-  const useBasicAuth = ctx.tokenAuthMethod === "client_secret_basic";
-  const bodyParams: Record<string, string> = {
-    grant_type: "refresh_token",
-    refresh_token: refreshToken,
-    ...(useBasicAuth ? {} : { client_id: ctx.clientId, client_secret: ctx.clientSecret }),
-  };
-  const body = buildTokenBody(bodyParams, ctx.tokenContentType);
-
-  let response: Response;
+  let parsed: RefreshExchangeResult["parsed"];
+  let tokenData: Record<string, unknown>;
   try {
-    response = await fetch(ctx.tokenUrl, {
-      method: "POST",
-      headers: buildTokenHeaders(
-        ctx.tokenAuthMethod,
-        ctx.clientId,
-        ctx.clientSecret,
-        ctx.tokenContentType,
-      ),
-      body,
-      signal: AbortSignal.timeout(30_000),
-    });
+    ({ parsed, raw: tokenData } = await performRefreshTokenExchange(ctx, refreshToken, {
+      label: `Integration token refresh for '${packageId}' auth '${authKey}'`,
+      accessTokenFallback: current.access_token ?? current.accessToken,
+    }));
   } catch (err) {
-    throw new RefreshError(
-      `Integration token refresh network error for '${packageId}' auth '${authKey}': ${(err as Error).message}`,
-      "transient",
-    );
-  }
-
-  if (!response.ok) {
-    const text = await response.text();
-    const classification = parseTokenErrorResponse(response.status, text);
-    if (classification.kind === "revoked") {
-      // Flip needsReconnection so the dashboard prompts the user to re-connect.
-      // Transient errors are NOT flagged — they may be temporary upstream issues.
+    // Flip needsReconnection on a revoked refresh token so the dashboard
+    // prompts re-connect. Transient errors are NOT flagged — they may be
+    // temporary upstream issues. The wire mechanics + classification live
+    // in the shared exchange; only the table write-back is integration-side.
+    if (err instanceof RefreshError && err.kind === "revoked") {
       await db
         .update(integrationConnections)
         .set({ needsReconnection: true, updatedAt: new Date() })
         .where(eq(integrationConnections.id, connectionId));
     }
-    const summary =
-      classification.error !== undefined
-        ? `${classification.error}${classification.errorDescription ? ` — ${classification.errorDescription}` : ""}`
-        : `HTTP ${response.status}`;
-    throw new RefreshError(
-      `Integration token refresh failed for '${packageId}' auth '${authKey}': ${summary}`,
-      classification.kind,
-      response.status,
-      text,
-    );
+    throw err;
   }
-
-  let tokenData: Record<string, unknown>;
-  try {
-    tokenData = (await response.json()) as Record<string, unknown>;
-  } catch {
-    throw new RefreshError(
-      `Integration token refresh returned non-JSON response for '${packageId}' auth '${authKey}'`,
-      "transient",
-    );
-  }
-
-  const parsed = parseTokenResponse(
-    {
-      ...tokenData,
-      access_token: tokenData.access_token ?? current.access_token ?? current.accessToken,
-    },
-    undefined,
-    refreshToken,
-  );
 
   // Persist both snake_case AND camelCase aliases so downstream code paths
   // that read either spelling (e.g. delivery.env `from: "accessToken"`) keep

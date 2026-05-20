@@ -148,13 +148,6 @@ export async function getProviderAuthMode(
 }
 
 /**
- * Get the default authorized URIs for a provider.
- */
-export function getDefaultAuthorizedUris(provider: ProviderDefinition): string[] | null {
-  return provider.authorizedUris?.length ? provider.authorizedUris : null;
-}
-
-/**
  * Get the credential field name for a provider.
  */
 export function getCredentialFieldName(provider: ProviderDefinition): string {

@@ -29,6 +29,7 @@ import {
   useIntegrationConnections,
   useAgentsConsumingIntegration,
   useIntegrationAgentResolution,
+  type AgentIntegrationEntry,
   type IntegrationCandidate,
   type IntegrationConnection,
   type IntegrationManifestView,
@@ -41,13 +42,6 @@ import { InlineConnectButton } from "../integration-connect/inline-connect-butto
 import { FieldsConnectModal } from "../integration-connect/fields-connect-modal";
 import { useIntegrationOAuthPopup } from "../integration-connect/use-integration-oauth-popup";
 import { pickDefaultAuth } from "../integration-connect/pick-default-auth";
-
-interface AgentIntegrationEntry {
-  id: string;
-  version: string;
-  tools?: string[];
-  scopes?: string[];
-}
 
 interface AgentIntegrationsBlockProps {
   entries: AgentIntegrationEntry[];

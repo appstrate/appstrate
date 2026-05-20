@@ -14,6 +14,20 @@ export type IntegrationManifestAuth = NonNullable<IntegrationManifest["auths"]>[
 export type IntegrationManifestTool = NonNullable<IntegrationManifest["tools"]>[string];
 export type IntegrationAuthType = IntegrationManifestAuth["type"];
 
+/**
+ * An agent's `dependencies.integrations` entry flattened by
+ * `parseManifestIntegrations` (`@appstrate/core/integration`): the bare
+ * version dep merged with the optional top-level `integrations[id]`
+ * tool/scope selection. Shared so the backend (`AgentDetail`) and the
+ * frontend agent-integrations block read one definition.
+ */
+export interface AgentIntegrationEntry {
+  id: string;
+  version: string;
+  tools?: string[];
+  scopes?: string[];
+}
+
 export interface IntegrationSummary {
   id: string;
   manifest: IntegrationManifestView;

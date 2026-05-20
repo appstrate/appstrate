@@ -9,6 +9,7 @@ import {
 import type { Db } from "@appstrate/db/client";
 import type { ConnectionRecord, DecryptedCredentials } from "./types.ts";
 import { encryptCredentials, decryptCredentials } from "./encryption.ts";
+import { decryptCredentialsToStringMap, projectToStringMap } from "./integration-credentials.ts";
 import { forceRefresh, type RefreshContext } from "./token-refresh.ts";
 import type {
   AuthMode,
@@ -111,14 +112,7 @@ export async function getCredentials(
   const def = await getProviderDefinition(db, providerId);
 
   // Return current credentials as-is. The sidecar handles 401 → refresh → retry.
-  const decrypted = decryptCredentials<DecryptedCredentials>(connection.credentialsEncrypted);
-
-  const credentials: Record<string, string> = {};
-  for (const [key, value] of Object.entries(decrypted)) {
-    if (value !== undefined) {
-      credentials[key] = value;
-    }
-  }
+  const credentials = decryptCredentialsToStringMap(connection.credentialsEncrypted);
 
   return { credentials, connection, definition: def };
 }
@@ -199,12 +193,7 @@ export async function forceRefreshCredentials(
     decrypted = decryptCredentials<DecryptedCredentials>(connection.credentialsEncrypted);
   }
 
-  const credentials: Record<string, string> = {};
-  for (const [key, value] of Object.entries(decrypted)) {
-    if (value !== undefined) {
-      credentials[key] = value;
-    }
-  }
+  const credentials = projectToStringMap(decrypted);
 
   return {
     credentials: buildSidecarCredentials(credentials, def, authMode),

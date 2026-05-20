@@ -4,8 +4,10 @@ import { z } from "zod";
 import type { ModelCost } from "@appstrate/core/module";
 
 export type { WebhookInfo, WebhookCreateResponse, WebhookDelivery } from "./webhooks.ts";
+import type { AgentIntegrationEntry } from "./integrations.ts";
 export type {
   AccessibleIntegrationConnection,
+  AgentIntegrationEntry,
   ConsumingAgentSummary,
   IntegrationAgentResolution,
   IntegrationAuthStatus,
@@ -371,12 +373,7 @@ export interface AgentDetail {
      * integration-connection status without depending on the optional
      * `manifest` field below.
      */
-    integrations: {
-      id: string;
-      version: string;
-      tools?: string[];
-      scopes?: string[];
-    }[];
+    integrations: AgentIntegrationEntry[];
   };
   input?: SchemaWrapper;
   output?: SchemaWrapper;

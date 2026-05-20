@@ -24,7 +24,6 @@ export {
   getProviderOAuth1CredentialsOrThrow,
   listProviders,
   getProviderAuthMode,
-  getDefaultAuthorizedUris,
   getCredentialFieldName,
   isProviderEnabled,
 } from "./registry.ts";
@@ -38,7 +37,8 @@ export { initiateOAuth1, handleOAuth1Callback } from "./oauth1.ts";
 export type { OAuth1CallbackResult } from "./oauth1.ts";
 
 // Token refresh
-export { RefreshError } from "./token-refresh.ts";
+export { RefreshError, performRefreshTokenExchange } from "./token-refresh.ts";
+export type { RefreshExchangeResult } from "./token-refresh.ts";
 
 // Token error classification + low-level OAuth token endpoint helpers
 // (shared by callback + refresh + custom OAuth flows like model providers).

@@ -78,7 +78,16 @@ export interface IntegrationCredentialsPayload {
  * callers wrap in try/catch if they want to log + skip vs propagate.
  */
 export function decryptCredentialsToStringMap(ciphertext: string): Record<string, string> {
-  const raw = decryptCredentials<Record<string, unknown>>(ciphertext) ?? {};
+  return projectToStringMap(decryptCredentials<Record<string, unknown>>(ciphertext) ?? {});
+}
+
+/**
+ * Project an already-decrypted credentials object to a flat
+ * `Record<string, string>`, dropping non-string (incl. `undefined`)
+ * values. Shared by {@link decryptCredentialsToStringMap} and the
+ * provider-side credential resolvers so the projection rule lives once.
+ */
+export function projectToStringMap(raw: Record<string, unknown>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(raw)) {
     if (typeof v === "string") out[k] = v;
