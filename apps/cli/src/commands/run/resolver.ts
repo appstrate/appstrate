@@ -25,10 +25,15 @@
  *     no provider dependencies.
  */
 
-import type { ProviderResolver } from "@appstrate/afps-runtime/resolvers";
+import type {
+  ProviderResolver,
+  IntegrationApiCallResolver,
+} from "@appstrate/afps-runtime/resolvers";
 import {
   LocalProviderResolver,
   RemoteAppstrateProviderResolver,
+  LocalIntegrationResolver,
+  RemoteAppstrateIntegrationResolver,
 } from "@appstrate/afps-runtime/resolvers";
 
 export type ProviderMode = "remote" | "local" | "none";
@@ -130,6 +135,64 @@ export function buildResolver(
         ...(remote.connectionProfileId ? { connectionProfileId: remote.connectionProfileId } : {}),
         ...(remote.providerProfileOverrides
           ? { providerProfileOverrides: remote.providerProfileOverrides }
+          : {}),
+      });
+    }
+  }
+}
+
+/**
+ * Build an {@link IntegrationApiCallResolver} matching the requested mode —
+ * the integration counterpart to {@link buildResolver}. Serverless `apiCall`
+ * integrations (the migrated-provider shape) get credential-injected HTTP
+ * calls; the resolver yields one `{ns}__api_call` tool per integration.
+ *
+ * Shares the same mode + inputs as the provider resolver so both surfaces
+ * coexist on a single `appstrate run` invocation (provider_call + api_call).
+ */
+export function buildIntegrationResolver(
+  mode: ProviderMode,
+  inputs: RemoteResolverInputs | LocalResolverInputs | null,
+): IntegrationApiCallResolver {
+  switch (mode) {
+    case "none":
+      return { resolve: async () => [] };
+
+    case "local": {
+      const local = inputs as LocalResolverInputs | null;
+      if (!local?.credsFilePath) {
+        throw new ResolverConfigError(
+          "--providers=local requires --creds-file <path>",
+          "Pass a JSON file with { version: 1, integrations: {…} } (and/or { providers: {…} })",
+        );
+      }
+      return new LocalIntegrationResolver({ creds: local.credsFilePath });
+    }
+
+    case "remote": {
+      const remote = inputs as RemoteResolverInputs | null;
+      if (!remote) {
+        throw new ResolverConfigError(
+          "--providers=remote requires a logged-in profile or an API key",
+          "Run `appstrate login`, or set APPSTRATE_API_KEY + APPSTRATE_INSTANCE + APPSTRATE_APP_ID",
+        );
+      }
+      if (!remote.instance || !remote.bearerToken || !remote.applicationId) {
+        throw new ResolverConfigError(
+          "--providers=remote requires instance + bearerToken + applicationId",
+          "Ensure your profile has an applicationId set (run `appstrate app switch`) and a usable session (run `appstrate login`)",
+        );
+      }
+      return new RemoteAppstrateIntegrationResolver({
+        instance: remote.instance,
+        apiKey: remote.bearerToken,
+        applicationId: remote.applicationId,
+        ...(remote.orgId ? { orgId: remote.orgId } : {}),
+        endUserId: remote.endUserId,
+        extraHeaders: remote.extraHeaders,
+        ...(remote.connectionProfileId ? { connectionProfileId: remote.connectionProfileId } : {}),
+        ...(remote.providerProfileOverrides
+          ? { integrationProfileOverrides: remote.providerProfileOverrides }
           : {}),
       });
     }

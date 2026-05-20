@@ -23,6 +23,12 @@ export {
 } from "./provider-bridge.ts";
 
 export {
+  buildApiCallExtensionFactory,
+  readIntegrationRefs,
+  type BuildApiCallExtensionFactoryOptions,
+} from "./api-call-bridge.ts";
+
+export {
   buildRuntimePiEnv,
   pickOperatorSidecarEnv,
   SIDECAR_OPERATOR_ENV_KEYS,

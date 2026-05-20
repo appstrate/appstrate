@@ -9,6 +9,7 @@
 import { describe, it, expect } from "bun:test";
 import {
   buildResolver,
+  buildIntegrationResolver,
   parseProviderMode,
   ResolverConfigError,
 } from "../src/commands/run/resolver.ts";
@@ -130,6 +131,52 @@ describe("buildResolver — remote", () => {
       bearerToken: "ask_x",
       applicationId: "app_x",
       endUserId: "eu_x",
+    });
+    expect(typeof resolver.resolve).toBe("function");
+  });
+});
+
+describe("buildIntegrationResolver — mirrors buildResolver semantics", () => {
+  it("none → empty resolver", async () => {
+    const resolver = buildIntegrationResolver("none", null);
+    const tools = await resolver.resolve([], {} as Parameters<typeof resolver.resolve>[1]);
+    expect(tools).toEqual([]);
+  });
+
+  it("local → throws without credsFilePath, with an integrations hint", () => {
+    try {
+      buildIntegrationResolver("local", null);
+      throw new Error("expected throw");
+    } catch (err) {
+      expect((err as Error).message).toContain("--creds-file");
+      expect((err as ResolverConfigError).hint).toContain("integrations");
+    }
+  });
+
+  it("local → constructs lazily when credsFilePath is provided", () => {
+    const resolver = buildIntegrationResolver("local", { credsFilePath: "/tmp/none.json" });
+    expect(typeof resolver.resolve).toBe("function");
+  });
+
+  it("remote → throws when inputs are null", () => {
+    expect(() => buildIntegrationResolver("remote", null)).toThrow(ResolverConfigError);
+  });
+
+  it("remote → throws when a required field is missing", () => {
+    expect(() =>
+      buildIntegrationResolver("remote", {
+        instance: "https://x.com",
+        bearerToken: "",
+        applicationId: "app_x",
+      }),
+    ).toThrow(ResolverConfigError);
+  });
+
+  it("remote → constructs with all three fields", () => {
+    const resolver = buildIntegrationResolver("remote", {
+      instance: "https://x.com",
+      bearerToken: "ask_x",
+      applicationId: "app_x",
     });
     expect(typeof resolver.resolve).toBe("function");
   });

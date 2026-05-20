@@ -22,6 +22,7 @@ import {
   PiRunner,
   prepareBundleForPi,
   buildProviderCallExtensionFactory,
+  buildApiCallExtensionFactory,
   emitRuntimeReady,
   startSinkHeartbeat,
   type SinkHeartbeatHandle,
@@ -47,6 +48,7 @@ import { createConsoleSink } from "./run/sink.ts";
 import { resolveVerbosity } from "./run/format.ts";
 import {
   buildResolver,
+  buildIntegrationResolver,
   parseProviderMode,
   ResolverConfigError,
   type ProviderMode,
@@ -340,6 +342,11 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
       ? appendResolverHeaders(resolverInputsWithProfiles, reportSession.proxyHeaders)
       : resolverInputsWithProfiles;
   const providerResolver = buildResolver(mode, effectiveResolverInputs);
+  // Integration `api_call` resolver — the provider→integration unified
+  // surface. Built with the same mode + inputs so a single `appstrate run`
+  // exposes both `provider_call` (legacy providers) and `{ns}__api_call`
+  // (serverless apiCall integrations) when the agent declares both.
+  const integrationResolver = buildIntegrationResolver(mode, effectiveResolverInputs);
 
   // ─── 5. Parse input ────────────────────────────────────────────────
   // The merged config (deep-merge of `--config` over the inherited
@@ -443,6 +450,24 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   });
   if (!opts.json && providerFactories.length > 0) {
     process.stderr.write(`→ wired ${providerFactories.length} provider tool(s)\n`);
+  }
+
+  // ─── 7b. Integration api_call tools — one {ns}__api_call per integration ──
+  // Serverless `apiCall` integrations (the migrated-provider shape) expose
+  // a credential-injecting HTTP tool, same surface as the platform sidecar's
+  // `{ns}__api_call` MCP tool. Pure MCP-server integrations are skipped here
+  // (no generic call surface in-process).
+  const apiCallFactories = await buildApiCallExtensionFactory({
+    bundle,
+    integrationResolver,
+    runId,
+    workspace: workspaceDir,
+    emitProvider: () => {
+      // Same rationale as provider factories above — events swallowed in CLI.
+    },
+  });
+  if (!opts.json && apiCallFactories.length > 0) {
+    process.stderr.write(`→ wired ${apiCallFactories.length} integration api_call tool(s)\n`);
   }
 
   // ─── 8. Cancellation wiring ───────────────────────────────────────
@@ -594,7 +619,11 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
       systemPrompt,
       cwd: workspaceDir,
       agentDir: path.join(workspaceDir, ".pi-agent"),
-      extensionFactories: [...prepared.extensionFactories, ...providerFactories],
+      extensionFactories: [
+        ...prepared.extensionFactories,
+        ...providerFactories,
+        ...apiCallFactories,
+      ],
       authStoragePath: path.join(workspaceDir, ".pi-auth.json"),
     });
 
@@ -614,7 +643,8 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     // phase entirely because ES module imports are evaluated before any
     // top-level statement runs.
     const emittedRunId = reportSession?.runId ?? runId;
-    const extensionsCount = prepared.extensionFactories.length + providerFactories.length;
+    const extensionsCount =
+      prepared.extensionFactories.length + providerFactories.length + apiCallFactories.length;
     await emitRuntimeReady(sink, emittedRunId, {
       bundleLoaded: true,
       extensions: extensionsCount,
