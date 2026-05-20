@@ -42,10 +42,8 @@ const MAX_STREAMED_BODY_SIZE = 100 * 1024 * 1024; // 100 MB
 
 /** Wall-clock timeout for piping an upstream streaming response to the client. */
 export const STREAMING_PIPE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
-import { and, eq, isNull, sql } from "drizzle-orm";
-import { db } from "@appstrate/db/client";
-import { connectionProfiles, userApplicationProfiles } from "@appstrate/db/schema";
 import { filterHeaders } from "@appstrate/connect/proxy-primitives";
+import { getActor } from "../lib/actor.ts";
 import { logger } from "../lib/logger.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
@@ -66,120 +64,6 @@ import {
 import { isValidSessionId, bindOrCheckSession } from "../services/credential-proxy/session.ts";
 import { insertCredentialProxyUsage } from "../services/credential-proxy-usage.ts";
 import type { AppEnv } from "../types/index.ts";
-
-/**
- * Resolve the connection profile holding the credentials:
- *   - end-user in context: the end-user's default profile.
- *   - authenticated user (dashboard / CLI JWT) with no app-default:
- *     the user's own default profile. Mirrors how the platform dashboard
- *     resolves providers — the user's personal connection chain is used
- *     when no app-level profile has been provisioned.
- *   - else: the application's default profile (API-key callers).
- *
- * Applications on fresh installs often have no app-default profile —
- * they rely on `app-profile-bindings` to user profiles instead. Without
- * the user-profile fallback a `oauth2-instance`/`oauth2-dashboard`
- * caller would hit a 404 on every provider call despite having their
- * own connected account; that mismatch would make the CLI remote-run
- * flow unusable unless every admin hand-crafts an app-default profile.
- */
-export async function resolveProfileId(args: {
-  applicationId: string;
-  endUserId?: string;
-  userId?: string;
-  /**
-   * Optional explicit profile id from the `X-Connection-Profile-Id`
-   * header. When set the resolver narrows to that profile after
-   * validating the caller is allowed to use it (own user/end-user
-   * profile, or an app profile in the request's application). Mismatched
-   * ids surface as `null` so the route returns `404 — no credentials`,
-   * keeping the failure mode aligned with the implicit-default path.
-   */
-  explicitProfileId?: string;
-}): Promise<string | null> {
-  if (args.explicitProfileId) {
-    const [row] = await db
-      .select({
-        id: connectionProfiles.id,
-        userId: connectionProfiles.userId,
-        endUserId: connectionProfiles.endUserId,
-        applicationId: connectionProfiles.applicationId,
-      })
-      .from(connectionProfiles)
-      .where(eq(connectionProfiles.id, args.explicitProfileId))
-      .limit(1);
-    if (!row) return null;
-    // Authorisation: the profile must belong to one of three buckets
-    // the caller already owns. Anything else (another user's profile,
-    // another app's profile) surfaces as null → 404.
-    const ownsUser = row.userId !== null && row.userId === args.userId;
-    const ownsEndUser = row.endUserId !== null && row.endUserId === args.endUserId;
-    const ownsAppProfile = row.applicationId !== null && row.applicationId === args.applicationId;
-    if (!ownsUser && !ownsEndUser && !ownsAppProfile) return null;
-    return row.id;
-  }
-  if (args.endUserId) {
-    const rows = await db
-      .select({ id: connectionProfiles.id })
-      .from(connectionProfiles)
-      .where(
-        and(
-          eq(connectionProfiles.endUserId, args.endUserId),
-          eq(connectionProfiles.isDefault, true),
-        ),
-      )
-      .limit(1);
-    return rows[0]?.id ?? null;
-  }
-  // Member's per-(user, app) sticky default — set via the dashboard
-  // preferences page (or `appstrate connections profile switch` once the
-  // CLI is server-aligned). Wins over the app's shared default but loses
-  // to an explicit per-run override above.
-  if (args.userId) {
-    const stickyRows = await db
-      .select({ id: userApplicationProfiles.connectionProfileId })
-      .from(userApplicationProfiles)
-      .where(
-        and(
-          eq(userApplicationProfiles.userId, args.userId),
-          eq(userApplicationProfiles.applicationId, args.applicationId),
-        ),
-      )
-      .limit(1);
-    if (stickyRows[0]) return stickyRows[0].id;
-  }
-  const appRows = await db
-    .select({ id: connectionProfiles.id })
-    .from(connectionProfiles)
-    .where(
-      and(
-        eq(connectionProfiles.applicationId, args.applicationId),
-        eq(connectionProfiles.isDefault, true),
-        isNull(connectionProfiles.userId),
-        isNull(connectionProfiles.endUserId),
-      ),
-    )
-    .orderBy(sql`created_at asc`)
-    .limit(1);
-  if (appRows[0]) return appRows[0].id;
-
-  if (args.userId) {
-    const userRows = await db
-      .select({ id: connectionProfiles.id })
-      .from(connectionProfiles)
-      .where(
-        and(
-          eq(connectionProfiles.userId, args.userId),
-          eq(connectionProfiles.isDefault, true),
-          isNull(connectionProfiles.applicationId),
-          isNull(connectionProfiles.endUserId),
-        ),
-      )
-      .limit(1);
-    if (userRows[0]) return userRows[0].id;
-  }
-  return null;
-}
 
 /**
  * Auth methods the credential proxy accepts. The value is the
@@ -281,36 +165,13 @@ export function createCredentialProxyRouter() {
       const userId = c.get("user").id;
       const endUser = c.get("endUser");
 
-      // Resolve the profile that owns the credentials:
-      //   - end-user profile when `Appstrate-User` was supplied
-      //   - app-default profile, else
-      //   - authenticated user's personal profile (dashboard / CLI JWT flows
-      //     only — API keys operate on apps, not users).
-      const userFallback =
-        authMethod === "oauth2-dashboard" || authMethod === "oauth2-instance" ? userId : undefined;
-      let connectionProfileId: string | null;
-      try {
-        connectionProfileId = await resolveProfileId({
-          applicationId,
-          endUserId: endUser?.id,
-          ...(userFallback ? { userId: userFallback } : {}),
-          ...(explicitProfileId ? { explicitProfileId } : {}),
-        });
-      } catch (err) {
-        logger.error("credential-proxy: profile resolution failed", {
-          applicationId,
-          endUserId: endUser?.id,
-          error: getErrorMessage(err),
-        });
-        throw internalError();
-      }
-      if (!connectionProfileId) {
-        throw notFound(
-          endUser
-            ? `End-user ${endUser.id} has no connection profile in application ${applicationId}`
-            : `Application ${applicationId} has no default connection profile`,
-        );
-      }
+      // The actor selects which `integration_connections` row is decrypted:
+      //   - `Appstrate-User` impersonation → the end-user's connection
+      //   - dashboard / CLI-JWT / API-key callers → the platform user's
+      //     own connection (or any `shared_with_org` connection in the app).
+      // `X-Connection-Profile-Id` (when present) pins a specific connection
+      // id, validated against the actor's accessible set in the resolver.
+      const actor = getActor(c);
 
       // Streaming control headers from the runtime.
       const streamRequest = c.req.header("x-stream-request") === "1";
@@ -389,11 +250,12 @@ export function createCredentialProxyRouter() {
         // streamRequest is true, the stream body is forwarded with
         // duplex: "half" and 401-retry is suppressed (body unreplayable);
         // authRefreshed is surfaced on the result instead.
-        const result = await proxyCall(db, {
+        const result = await proxyCall({
           applicationId,
           orgId,
-          connectionProfileId,
-          providerId,
+          actor,
+          ...(explicitProfileId ? { connectionId: explicitProfileId } : {}),
+          integrationId: providerId,
           method,
           target,
           headers: fwdHeaders,

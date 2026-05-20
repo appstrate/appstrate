@@ -42,7 +42,7 @@ const proxyParameters = [
     name: "X-Provider",
     in: "header",
     required: true,
-    description: "Scoped provider name (e.g. `@afps/gmail`).",
+    description: "Scoped integration package name (e.g. `@afps/gmail`).",
     schema: { type: "string" },
   },
   {
@@ -50,7 +50,7 @@ const proxyParameters = [
     in: "header",
     required: true,
     description:
-      "Absolute URL of the upstream endpoint. Must match the provider manifest's " +
+      "Absolute URL of the upstream endpoint. Must match the integration manifest auth's " +
       "`authorizedUris` unless `allowAllUris: true`.",
     schema: { type: "string", format: "uri" },
   },

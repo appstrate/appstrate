@@ -17551,7 +17551,7 @@
             "required": false,
             "schema": {
               "type": "string",
-              "enum": ["agent", "skill", "tool", "provider"]
+              "enum": ["agent", "skill", "provider", "integration"]
             },
             "description": "Filter by package type"
           }
@@ -18781,7 +18781,7 @@
             "name": "X-Provider",
             "in": "header",
             "required": true,
-            "description": "Scoped provider name (e.g. `@afps/gmail`).",
+            "description": "Scoped integration package name (e.g. `@afps/gmail`).",
             "schema": {
               "type": "string"
             }
@@ -18790,7 +18790,7 @@
             "name": "X-Target",
             "in": "header",
             "required": true,
-            "description": "Absolute URL of the upstream endpoint. Must match the provider manifest's `authorizedUris` unless `allowAllUris: true`.",
+            "description": "Absolute URL of the upstream endpoint. Must match the integration manifest auth's `authorizedUris` unless `allowAllUris: true`.",
             "schema": {
               "type": "string",
               "format": "uri"
@@ -18921,7 +18921,7 @@
             "name": "X-Provider",
             "in": "header",
             "required": true,
-            "description": "Scoped provider name (e.g. `@afps/gmail`).",
+            "description": "Scoped integration package name (e.g. `@afps/gmail`).",
             "schema": {
               "type": "string"
             }
@@ -18930,7 +18930,7 @@
             "name": "X-Target",
             "in": "header",
             "required": true,
-            "description": "Absolute URL of the upstream endpoint. Must match the provider manifest's `authorizedUris` unless `allowAllUris: true`.",
+            "description": "Absolute URL of the upstream endpoint. Must match the integration manifest auth's `authorizedUris` unless `allowAllUris: true`.",
             "schema": {
               "type": "string",
               "format": "uri"
@@ -19068,7 +19068,7 @@
             "name": "X-Provider",
             "in": "header",
             "required": true,
-            "description": "Scoped provider name (e.g. `@afps/gmail`).",
+            "description": "Scoped integration package name (e.g. `@afps/gmail`).",
             "schema": {
               "type": "string"
             }
@@ -19077,7 +19077,7 @@
             "name": "X-Target",
             "in": "header",
             "required": true,
-            "description": "Absolute URL of the upstream endpoint. Must match the provider manifest's `authorizedUris` unless `allowAllUris: true`.",
+            "description": "Absolute URL of the upstream endpoint. Must match the integration manifest auth's `authorizedUris` unless `allowAllUris: true`.",
             "schema": {
               "type": "string",
               "format": "uri"
@@ -19215,7 +19215,7 @@
             "name": "X-Provider",
             "in": "header",
             "required": true,
-            "description": "Scoped provider name (e.g. `@afps/gmail`).",
+            "description": "Scoped integration package name (e.g. `@afps/gmail`).",
             "schema": {
               "type": "string"
             }
@@ -19224,7 +19224,7 @@
             "name": "X-Target",
             "in": "header",
             "required": true,
-            "description": "Absolute URL of the upstream endpoint. Must match the provider manifest's `authorizedUris` unless `allowAllUris: true`.",
+            "description": "Absolute URL of the upstream endpoint. Must match the integration manifest auth's `authorizedUris` unless `allowAllUris: true`.",
             "schema": {
               "type": "string",
               "format": "uri"
@@ -19362,7 +19362,7 @@
             "name": "X-Provider",
             "in": "header",
             "required": true,
-            "description": "Scoped provider name (e.g. `@afps/gmail`).",
+            "description": "Scoped integration package name (e.g. `@afps/gmail`).",
             "schema": {
               "type": "string"
             }
@@ -19371,7 +19371,7 @@
             "name": "X-Target",
             "in": "header",
             "required": true,
-            "description": "Absolute URL of the upstream endpoint. Must match the provider manifest's `authorizedUris` unless `allowAllUris: true`.",
+            "description": "Absolute URL of the upstream endpoint. Must match the integration manifest auth's `authorizedUris` unless `allowAllUris: true`.",
             "schema": {
               "type": "string",
               "format": "uri"
@@ -19841,7 +19841,7 @@
                     "packages": {
                       "type": "object",
                       "description": "Packages grouped by type. Every group is always present (possibly empty).",
-                      "required": ["agent", "skill", "tool", "provider"],
+                      "required": ["agent", "skill", "provider", "integration"],
                       "properties": {
                         "agent": {
                           "$ref": "#/components/schemas/LibraryPackageList"
@@ -19849,10 +19849,10 @@
                         "skill": {
                           "$ref": "#/components/schemas/LibraryPackageList"
                         },
-                        "tool": {
+                        "provider": {
                           "$ref": "#/components/schemas/LibraryPackageList"
                         },
-                        "provider": {
+                        "integration": {
                           "$ref": "#/components/schemas/LibraryPackageList"
                         }
                       }
@@ -19885,7 +19885,6 @@
                       }
                     ],
                     "skill": [],
-                    "tool": [],
                     "provider": [
                       {
                         "id": "pkg_gmail",
@@ -19895,7 +19894,8 @@
                         "description": "Google Mail OAuth provider.",
                         "installedIn": ["app_default", "app_staging"]
                       }
-                    ]
+                    ],
+                    "integration": []
                   }
                 }
               }
