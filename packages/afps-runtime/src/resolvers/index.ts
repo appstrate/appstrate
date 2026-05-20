@@ -80,6 +80,24 @@ export {
   type RemoteAppstrateProviderResolverOptions,
 } from "./remote-appstrate-provider-resolver.ts";
 
+// Integration `api_call` surface (provider→integration unification) — the
+// portable equivalent of the platform's `{ns}__api_call` MCP tool. Reuses
+// the same HTTP core (`makeProviderTool`) as the provider resolvers.
+export {
+  LocalIntegrationResolver,
+  RemoteAppstrateIntegrationResolver,
+  readIntegrationRefs,
+  readApiCallIntegrationMeta,
+  apiCallToolName,
+  type IntegrationApiCallResolver,
+  type IntegrationRef,
+  type ApiCallIntegrationMeta,
+  type HttpDeliveryConfig,
+  type LocalIntegrationCredentialsFile,
+  type LocalIntegrationResolverOptions,
+  type RemoteAppstrateIntegrationResolverOptions,
+} from "./integration-api-call.ts";
+
 // Spec-compliant platform tools (note, pin, output, log) — the
 // runtime no longer hardcodes these internally; agents declare them in
 // dependencies.tools[] and a BundledToolResolver loads them.
