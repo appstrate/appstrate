@@ -7,7 +7,6 @@
   "exports": {
     ".": "./src/index.ts",
     "./proxy-primitives": "./src/proxy-primitives.ts",
-    "./integrations": "./src/integrations.ts",
     "./proxy-ca-planner": "./src/proxy-ca-planner.ts",
     "./integration-mitm-planner": "./src/integration-mitm-planner.ts",
     "./integration-credentials": "./src/integration-credentials.ts"
