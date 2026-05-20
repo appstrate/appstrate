@@ -5,6 +5,13 @@
  * `block_user_connections` toggle + connection metadata edits
  * (label, sharedWithOrg). Consumed by the routes in `routes/integrations.ts`.
  *
+ * Pin model (flat): one pin per (application, agent, integration, scope).
+ * Scope = admin (`user_id IS NULL`) OR member (`user_id = caller.id`).
+ * The pin row carries a `connection_id`; the connection's own `auth_key`
+ * is denormalised on the PinSummary for display but never part of the
+ * uniqueness key — OAuth and api_key connections are interchangeable at
+ * runtime.
+ *
  * All admin-only operations — the route layer enforces `requireAdmin()`,
  * this layer assumes the caller already has the role.
  */
@@ -13,9 +20,11 @@ import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   applicationPackages,
+  endUsers,
   integrationConnections,
   integrationPins,
   packages,
+  user,
 } from "@appstrate/db/schema";
 import type { InferSelectModel } from "drizzle-orm";
 import { conflict, notFound, invalidRequest } from "../lib/errors.ts";
@@ -58,25 +67,40 @@ export async function setBlockUserConnections(
 export interface PinSummary {
   packageId: string;
   integrationPackageId: string;
+  /** Denormalised from the pinned connection — display hint only. */
   authKey: string;
   connectionId: string;
   createdAt: string;
   updatedAt: string;
 }
 
-function toPinSummary(row: PinRow): PinSummary {
+interface PinJoinRow {
+  pin: PinRow;
+  conn: ConnectionRow | null;
+}
+
+function toPinSummary(row: PinJoinRow): PinSummary {
   return {
-    packageId: row.packageId,
-    integrationPackageId: row.integrationPackageId,
-    authKey: row.authKey,
-    connectionId: row.connectionId,
-    createdAt: row.createdAt.toISOString(),
-    updatedAt: row.updatedAt.toISOString(),
+    packageId: row.pin.packageId,
+    integrationPackageId: row.pin.integrationPackageId,
+    authKey: row.conn?.authKey ?? "",
+    connectionId: row.pin.connectionId,
+    createdAt: row.pin.createdAt.toISOString(),
+    updatedAt: row.pin.updatedAt.toISOString(),
   };
 }
 
+async function listPinsBy(conditions: Parameters<typeof and>): Promise<PinSummary[]> {
+  const rows = await db
+    .select({ pin: integrationPins, conn: integrationConnections })
+    .from(integrationPins)
+    .leftJoin(integrationConnections, eq(integrationConnections.id, integrationPins.connectionId))
+    .where(and(...conditions));
+  return rows.map(toPinSummary);
+}
+
 /**
- * List every pin governing a (app, integration). Used by the admin UI
+ * List every admin pin governing a (app, integration). Used by the admin UI
  * to render the per-agent pin section + by the runtime resolver via the
  * dedicated `loadPins` helper (private to the resolver, see
  * integration-connection-resolver.ts).
@@ -85,19 +109,11 @@ export async function listIntegrationPins(
   scope: AppScope,
   integrationPackageId: string,
 ): Promise<PinSummary[]> {
-  // Admin list — admin pins only (userId IS NULL). Member pins are private
-  // per actor and never surface in admin views.
-  const rows = await db
-    .select()
-    .from(integrationPins)
-    .where(
-      and(
-        eq(integrationPins.applicationId, scope.applicationId),
-        eq(integrationPins.integrationPackageId, integrationPackageId),
-        isNull(integrationPins.userId),
-      ),
-    );
-  return rows.map(toPinSummary);
+  return listPinsBy([
+    eq(integrationPins.applicationId, scope.applicationId),
+    eq(integrationPins.integrationPackageId, integrationPackageId),
+    isNull(integrationPins.userId),
+  ]);
 }
 
 /**
@@ -115,9 +131,6 @@ export async function listAgentsConsumingIntegration(
   scope: AppScope,
   integrationPackageId: string,
 ): Promise<ConsumingAgentSummary[]> {
-  // Use a JSONB path lookup on packages.draft_manifest.dependencies.integrations.
-  // The key is the integration package id (e.g. `@appstrate/gmail-mcp`).
-  // The `?` operator returns true when the JSONB object contains the key.
   const rows = await db.execute(sql`
     SELECT p.id AS package_id,
            p.draft_manifest->>'displayName' AS display_name_alt,
@@ -143,67 +156,33 @@ export async function listAgentsConsumingIntegration(
 
 export interface SetPinInput {
   agentPackageId: string;
-  authKey: string;
   connectionId: string;
   createdBy: string | null;
 }
 
 /**
- * Upsert a pin. Validates that the pinned connection:
+ * Upsert an admin pin. Validates that the pinned connection:
  *   1. exists in the same application,
  *   2. references the integration this pin governs,
- *   3. is on the matching authKey,
- *   4. is accessible to members — i.e. either admin-shared
- *      (sharedWithOrg=true) OR owned by an end-user shared with org
- *      (currently we accept any shared row; in p3b we may want to
- *      enforce shared-or-admin-owned more strictly).
+ *   3. is `sharedWithOrg=true` (pinning a personal connection would
+ *      leak the admin's identity to other members at run time).
  *
- * Refuses pinning a personal user connection that isn't shared —
- * pinning member A's private connection for everyone would silently
- * leak A's identity to other members at run time.
+ * Flat model: one pin per (app, agent, integration, admin-scope).
+ * The connection carries its own authKey — pinning a PAT connection
+ * overrides the agent's oauth-by-default just by virtue of being the
+ * picked connection.
  */
 export async function upsertIntegrationPin(
   scope: AppScope,
   integrationPackageId: string,
   input: SetPinInput,
 ): Promise<PinSummary> {
-  // 1-3: validate the connection matches the pin target.
-  const [conn] = await db
-    .select()
-    .from(integrationConnections)
-    .where(eq(integrationConnections.id, input.connectionId))
-    .limit(1);
-  if (!conn) throw notFound(`Connection '${input.connectionId}' not found`);
-  if (conn.applicationId !== scope.applicationId) {
-    throw invalidRequest("Pinned connection belongs to a different application");
-  }
-  if (conn.integrationPackageId !== integrationPackageId) {
-    throw invalidRequest(
-      `Pinned connection belongs to integration '${conn.integrationPackageId}', not '${integrationPackageId}'`,
-    );
-  }
-  if (conn.authKey !== input.authKey) {
-    throw invalidRequest(`Pinned connection has authKey '${conn.authKey}', not '${input.authKey}'`);
-  }
-  // 4: must be sharedWithOrg=true (own connections of the pinning
-  // admin still need to be marked shared explicitly — keeps the share
-  // toggle as the single explicit-consent gate).
-  if (!conn.sharedWithOrg) {
-    throw invalidRequest(
-      "Pinned connection must be marked sharedWithOrg=true before it can be pinned for other members",
-    );
-  }
-
-  // 5: validate the agent exists in the application.
+  const conn = await validatePinTarget(scope, integrationPackageId, input.connectionId, {
+    requireShared: true,
+  });
   await assertAgentInstalled(scope, input.agentPackageId);
 
   const now = new Date();
-  // Admin pin → user_id IS NULL. Conceptual uniqueness on (app, agent,
-  // integration, authKey, coalesce(user_id, '')) — Drizzle can't target
-  // computed expressions with onConflictDoUpdate, so do a guarded
-  // select-then-insert/update. Concurrent admin upserts on the same key
-  // would race; we accept that (admin UI is single-user, the unique
-  // index would still reject a duplicate insert).
   const [existing] = await db
     .select({ id: integrationPins.id })
     .from(integrationPins)
@@ -212,7 +191,6 @@ export async function upsertIntegrationPin(
         eq(integrationPins.applicationId, scope.applicationId),
         eq(integrationPins.packageId, input.agentPackageId),
         eq(integrationPins.integrationPackageId, integrationPackageId),
-        eq(integrationPins.authKey, input.authKey),
         isNull(integrationPins.userId),
       ),
     )
@@ -228,7 +206,6 @@ export async function upsertIntegrationPin(
       applicationId: scope.applicationId,
       packageId: input.agentPackageId,
       integrationPackageId,
-      authKey: input.authKey,
       userId: null,
       connectionId: input.connectionId,
       createdBy: input.createdBy,
@@ -240,7 +217,7 @@ export async function upsertIntegrationPin(
   return {
     packageId: input.agentPackageId,
     integrationPackageId,
-    authKey: input.authKey,
+    authKey: conn.authKey,
     connectionId: input.connectionId,
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
@@ -251,11 +228,7 @@ export async function deleteIntegrationPin(
   scope: AppScope,
   integrationPackageId: string,
   agentPackageId: string,
-  authKey: string,
 ): Promise<{ deleted: boolean }> {
-  // Admin delete — admin pins only (userId IS NULL). Never touches member
-  // pins (those live under /api/me/integration-pins and are owned by the
-  // member).
   const result = await db
     .delete(integrationPins)
     .where(
@@ -263,7 +236,6 @@ export async function deleteIntegrationPin(
         eq(integrationPins.applicationId, scope.applicationId),
         eq(integrationPins.integrationPackageId, integrationPackageId),
         eq(integrationPins.packageId, agentPackageId),
-        eq(integrationPins.authKey, authKey),
         isNull(integrationPins.userId),
       ),
     )
@@ -285,12 +257,48 @@ async function assertAgentInstalled(scope: AppScope, agentPackageId: string): Pr
   if (!row) throw notFound(`Agent '${agentPackageId}' is not installed in this application`);
 }
 
+async function validatePinTarget(
+  scope: AppScope,
+  integrationPackageId: string,
+  connectionId: string,
+  opts: { requireShared?: boolean; allowOwnedBy?: string },
+): Promise<ConnectionRow> {
+  const [conn] = await db
+    .select()
+    .from(integrationConnections)
+    .where(eq(integrationConnections.id, connectionId))
+    .limit(1);
+  if (!conn) throw notFound(`Connection '${connectionId}' not found`);
+  if (conn.applicationId !== scope.applicationId) {
+    throw invalidRequest("Pinned connection belongs to a different application");
+  }
+  if (conn.integrationPackageId !== integrationPackageId) {
+    throw invalidRequest(
+      `Pinned connection belongs to integration '${conn.integrationPackageId}', not '${integrationPackageId}'`,
+    );
+  }
+  if (opts.requireShared) {
+    if (!conn.sharedWithOrg) {
+      throw invalidRequest(
+        "Pinned connection must be marked sharedWithOrg=true before it can be pinned for other members",
+      );
+    }
+  } else if (opts.allowOwnedBy !== undefined) {
+    const accessible = conn.userId === opts.allowOwnedBy || conn.sharedWithOrg;
+    if (!accessible) {
+      throw invalidRequest(
+        "Pinned connection must be owned by you or shared with the org before you can pin it",
+      );
+    }
+  }
+  return conn;
+}
+
 // ─────────────────────────── Member-pin CRUD ─────────────────────────────────
 
 export interface UpsertMemberPinInput {
   agentPackageId: string;
   integrationPackageId: string;
-  authKey: string;
   connectionId: string;
   userId: string;
 }
@@ -298,59 +306,19 @@ export interface UpsertMemberPinInput {
 /**
  * Upsert a member-scope pin (`integration_pins` row with `user_id` set).
  *
- * Member writes their own preference for this (agent, integration, auth) —
- * what used to be the R5 localStorage pick is now a persisted row the
- * resolver sees on every run (layer 4).
- *
- * Validation:
- *   1. Connection exists in the same application.
- *   2. Connection matches the (integration, authKey) target.
- *   3. Connection is **accessible to the caller** — owned by them OR
- *      `sharedWithOrg=true`. We refuse pinning a connection the caller
- *      can't actually use at run-time (would create an
- *      `override_connection_unavailable` on every run otherwise).
- *   4. Agent is installed in the application.
- *
- * Admin pin on the same (agent, integration, authKey) DOESN'T block the
- * write — the resolver's cascade already makes the admin pin win, and
- * disallowing the write would silently lose the member's preference
- * the moment the admin un-pins. The UI is the layer that hides the
- * picker when an admin pin exists (clearer UX).
+ * Member writes their own preference for this (agent, integration) —
+ * the persisted row the resolver sees on every run (layer 4 of the
+ * cascade).
  */
 export async function upsertMemberPin(
   scope: AppScope,
   input: UpsertMemberPinInput,
 ): Promise<PinSummary> {
-  // 1-3: validate the connection.
-  const [conn] = await db
-    .select()
-    .from(integrationConnections)
-    .where(eq(integrationConnections.id, input.connectionId))
-    .limit(1);
-  if (!conn) throw notFound(`Connection '${input.connectionId}' not found`);
-  if (conn.applicationId !== scope.applicationId) {
-    throw invalidRequest("Pinned connection belongs to a different application");
-  }
-  if (conn.integrationPackageId !== input.integrationPackageId) {
-    throw invalidRequest(
-      `Pinned connection belongs to integration '${conn.integrationPackageId}', not '${input.integrationPackageId}'`,
-    );
-  }
-  if (conn.authKey !== input.authKey) {
-    throw invalidRequest(`Pinned connection has authKey '${conn.authKey}', not '${input.authKey}'`);
-  }
-  const accessible = conn.userId === input.userId || conn.sharedWithOrg;
-  if (!accessible) {
-    throw invalidRequest(
-      "Pinned connection must be owned by you or shared with the org before you can pin it",
-    );
-  }
-
-  // 4: agent installed in the application.
+  const conn = await validatePinTarget(scope, input.integrationPackageId, input.connectionId, {
+    allowOwnedBy: input.userId,
+  });
   await assertAgentInstalled(scope, input.agentPackageId);
 
-  // Guarded upsert (same pattern as admin pins — Drizzle can't target the
-  // computed-coalesce unique index).
   const now = new Date();
   const [existing] = await db
     .select({ id: integrationPins.id })
@@ -360,7 +328,6 @@ export async function upsertMemberPin(
         eq(integrationPins.applicationId, scope.applicationId),
         eq(integrationPins.packageId, input.agentPackageId),
         eq(integrationPins.integrationPackageId, input.integrationPackageId),
-        eq(integrationPins.authKey, input.authKey),
         eq(integrationPins.userId, input.userId),
       ),
     )
@@ -376,7 +343,6 @@ export async function upsertMemberPin(
       applicationId: scope.applicationId,
       packageId: input.agentPackageId,
       integrationPackageId: input.integrationPackageId,
-      authKey: input.authKey,
       userId: input.userId,
       connectionId: input.connectionId,
       createdBy: input.userId,
@@ -388,7 +354,7 @@ export async function upsertMemberPin(
   return {
     packageId: input.agentPackageId,
     integrationPackageId: input.integrationPackageId,
-    authKey: input.authKey,
+    authKey: conn.authKey,
     connectionId: input.connectionId,
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
@@ -399,7 +365,6 @@ export async function deleteMemberPin(
   scope: AppScope,
   agentPackageId: string,
   integrationPackageId: string,
-  authKey: string,
   userId: string,
 ): Promise<{ deleted: boolean }> {
   const result = await db
@@ -409,7 +374,6 @@ export async function deleteMemberPin(
         eq(integrationPins.applicationId, scope.applicationId),
         eq(integrationPins.packageId, agentPackageId),
         eq(integrationPins.integrationPackageId, integrationPackageId),
-        eq(integrationPins.authKey, authKey),
         eq(integrationPins.userId, userId),
       ),
     )
@@ -419,12 +383,11 @@ export async function deleteMemberPin(
 
 /**
  * List the caller's own member pins for an agent. Drives the agent-page
- * picker — UI checks "is this (integ, authKey) already pinned by me?" and
+ * picker — UI checks "is this integration already pinned by me?" and
  * renders the collapsed "Using: X" row pointing at the pinned connection.
  */
 export interface MemberPinSummary {
   integrationPackageId: string;
-  authKey: string;
   connectionId: string;
 }
 
@@ -436,7 +399,6 @@ export async function listMemberPinsForAgent(
   const rows = await db
     .select({
       integrationPackageId: integrationPins.integrationPackageId,
-      authKey: integrationPins.authKey,
       connectionId: integrationPins.connectionId,
     })
     .from(integrationPins)
@@ -473,7 +435,7 @@ export async function updateConnectionMetadata(
 ): Promise<ConnectionRow> {
   if (input.sharedWithOrg === false) {
     const pins = await db
-      .select({ packageId: integrationPins.packageId, authKey: integrationPins.authKey })
+      .select({ packageId: integrationPins.packageId })
       .from(integrationPins)
       .where(eq(integrationPins.connectionId, connectionId))
       .limit(1);
@@ -527,13 +489,27 @@ export interface SharedConnectionSummary {
   label: string | null;
   ownerUserId: string | null;
   ownerEndUserId: string | null;
+  /**
+   * Display name of whoever created the connection — dashboard user name
+   * (Better Auth `user.name`) or end-user `name`/`externalId`. Null when
+   * the owner row was deleted. Drives the "who connected it" line in the
+   * agent-page picker so a member can tell a shared connection apart.
+   */
+  ownerName: string | null;
+  /**
+   * OAuth scopes currently granted to this connection. Empty for
+   * api_key/basic auths. The agent-page picker diffs these against the
+   * scopes the agent's selected tools require to flag under-scoped
+   * connections before run-kickoff.
+   */
+  scopesGranted: string[];
   sharedWithOrg: boolean;
   needsReconnection: boolean;
 }
 
 /**
  * List the connections an actor can pick from for a given
- * (application, integration). Used by the UI picker that lands in p4:
+ * (application, integration). Used by the UI picker:
  * own + shared, with caller-facing labels.
  */
 export async function listAccessibleConnections(
@@ -541,30 +517,20 @@ export async function listAccessibleConnections(
   integrationPackageId: string,
   actorFilter?: { userId?: string; endUserId?: string },
 ): Promise<SharedConnectionSummary[]> {
-  const conditions = [
+  const baseConditions = [
     eq(integrationConnections.applicationId, scope.applicationId),
     eq(integrationConnections.integrationPackageId, integrationPackageId),
   ];
 
-  // No actor filter = admin view (everything visible).
-  // Actor filter = own + shared.
   if (actorFilter) {
-    // Express as `(actor matches own) OR sharedWithOrg=true` — both via SQL.
-    // Drizzle's `or` would simplify; we use IN-list here because actorFilter
-    // has at most one of {userId, endUserId} populated.
-    const ownerIds: string[] = [];
-    if (actorFilter.userId) ownerIds.push(actorFilter.userId);
-    if (actorFilter.endUserId) ownerIds.push(actorFilter.endUserId);
-    // To avoid OR composition complexity, just do two queries and merge.
     const [own, shared] = await Promise.all([
-      ownerIds.length > 0
+      actorFilter.userId || actorFilter.endUserId
         ? db
             .select()
             .from(integrationConnections)
             .where(
               and(
-                eq(integrationConnections.applicationId, scope.applicationId),
-                eq(integrationConnections.integrationPackageId, integrationPackageId),
+                ...baseConditions,
                 actorFilter.userId
                   ? eq(integrationConnections.userId, actorFilter.userId)
                   : eq(integrationConnections.endUserId, actorFilter.endUserId!),
@@ -574,13 +540,7 @@ export async function listAccessibleConnections(
       db
         .select()
         .from(integrationConnections)
-        .where(
-          and(
-            eq(integrationConnections.applicationId, scope.applicationId),
-            eq(integrationConnections.integrationPackageId, integrationPackageId),
-            eq(integrationConnections.sharedWithOrg, true),
-          ),
-        ),
+        .where(and(...baseConditions, eq(integrationConnections.sharedWithOrg, true))),
     ]);
     const seen = new Set<string>();
     const merged: ConnectionRow[] = [];
@@ -589,31 +549,57 @@ export async function listAccessibleConnections(
       seen.add(r.id);
       merged.push(r);
     }
-    return merged.map(toSummary);
+    return attachOwnerNames(merged);
   }
 
   const rows = await db
     .select()
     .from(integrationConnections)
-    .where(and(...conditions));
-  return rows.map(toSummary);
+    .where(and(...baseConditions));
+  return attachOwnerNames(rows);
 }
 
-function toSummary(row: ConnectionRow): SharedConnectionSummary {
-  return {
+/**
+ * Resolve owner display names in two batched lookups (user + end_users)
+ * and project the connection rows into picker summaries. Keeps the dual
+ * own/shared query path untouched — names are a post-pass over whatever
+ * rows survived the merge.
+ */
+async function attachOwnerNames(rows: ConnectionRow[]): Promise<SharedConnectionSummary[]> {
+  const userIds = [...new Set(rows.map((r) => r.userId).filter((v): v is string => v !== null))];
+  const endUserIds = [
+    ...new Set(rows.map((r) => r.endUserId).filter((v): v is string => v !== null)),
+  ];
+
+  const [userRows, endUserRows] = await Promise.all([
+    userIds.length
+      ? db.select({ id: user.id, name: user.name }).from(user).where(inArray(user.id, userIds))
+      : Promise.resolve([] as { id: string; name: string }[]),
+    endUserIds.length
+      ? db
+          .select({ id: endUsers.id, name: endUsers.name, externalId: endUsers.externalId })
+          .from(endUsers)
+          .where(inArray(endUsers.id, endUserIds))
+      : Promise.resolve([] as { id: string; name: string | null; externalId: string | null }[]),
+  ]);
+
+  const userNames = new Map(userRows.map((u) => [u.id, u.name]));
+  const endUserNames = new Map(endUserRows.map((e) => [e.id, e.name ?? e.externalId]));
+
+  return rows.map((row) => ({
     id: row.id,
     authKey: row.authKey,
     accountId: row.accountId,
     label: row.label,
     ownerUserId: row.userId,
     ownerEndUserId: row.endUserId,
+    ownerName: row.userId
+      ? (userNames.get(row.userId) ?? null)
+      : row.endUserId
+        ? (endUserNames.get(row.endUserId) ?? null)
+        : null,
+    scopesGranted: row.scopesGranted ?? [],
     sharedWithOrg: row.sharedWithOrg,
     needsReconnection: row.needsReconnection,
-  };
+  }));
 }
-
-// `packages` import is currently unused but retained — `listIntegrationPins`
-// will gain agent-display-name enrichment in p5 (JOIN against packages.manifest
-// for the dropdown). Removing for now to satisfy unused-import lint.
-void packages;
-void inArray;

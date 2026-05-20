@@ -22,13 +22,21 @@ export function useIntegrationOAuthPopup() {
   const openOAuthPopup = useOAuthPopup("integration-oauth");
 
   const openPopup = useCallback(
-    async (input: { packageId: string; authKey: string; scopes?: string[] }) => {
+    async (input: {
+      packageId: string;
+      authKey: string;
+      scopes?: string[];
+      forceAccountSelect?: boolean;
+      connectionId?: string;
+    }) => {
       try {
         await openOAuthPopup(() =>
           initiateOAuth.mutateAsync({
             packageId: input.packageId,
             authKey: input.authKey,
             ...(input.scopes ? { scopes: input.scopes } : {}),
+            ...(input.forceAccountSelect ? { forceAccountSelect: true } : {}),
+            ...(input.connectionId ? { connectionId: input.connectionId } : {}),
           }),
         );
       } catch (err) {

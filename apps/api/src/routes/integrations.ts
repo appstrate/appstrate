@@ -31,6 +31,7 @@ import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { applicationPackages, packages } from "@appstrate/db/schema";
 import { getEnv } from "@appstrate/env";
+import { decodeJwtPayload } from "@appstrate/core/jwt";
 import {
   initiateIntegrationOAuth,
   handleIntegrationOAuthCallback,
@@ -100,6 +101,8 @@ const connectFieldsSchema = z.object({
 
 const connectOAuthSchema = z.object({
   scopes: z.array(z.string()).optional(),
+  forceAccountSelect: z.boolean().optional(),
+  connectionId: z.uuid().optional(),
 });
 
 const updateSettingsSchema = z.object({
@@ -249,10 +252,65 @@ export function createIntegrationsRouter() {
         });
         return c.html(popupHtmlError("Integration not found"));
       }
+      // Build the identity source for `extractIdentity`. Three layers,
+      // applied in order so later layers don't overwrite earlier ones:
+      //   1. Token response top-level (some IdPs put identity there).
+      //   2. `id_token` JWT claims — OIDC providers (Google, Microsoft,
+      //      Okta, …). No sig check: PKCE + signed state already vetted
+      //      the channel, we use the claims for identity hints only.
+      //   3. `userinfoUrl` GET — non-OIDC OAuth2 (GitHub, Slack, Notion,
+      //      …) returns identity from a Bearer-protected endpoint. Without
+      //      this fetch, `accountId` would fall back to the literal
+      //      "default" and every new connection collapses onto the same
+      //      row (the bug that made "Add another connection" silently
+      //      overwrite the existing one).
+      const identitySource: Record<string, unknown> = { ...result.tokenResponse };
+      const idToken = result.tokenResponse.id_token;
+      if (typeof idToken === "string") {
+        const claims = decodeJwtPayload(idToken);
+        if (claims) {
+          for (const [k, v] of Object.entries(claims)) {
+            if (identitySource[k] === undefined) identitySource[k] = v;
+          }
+        }
+      }
+      const authDecl = manifest.auths?.[result.authKey];
+      const userinfoUrl = authDecl?.userinfoUrl;
+      if (userinfoUrl) {
+        try {
+          const res = await fetch(userinfoUrl, {
+            headers: {
+              Authorization: `Bearer ${result.accessToken}`,
+              Accept: "application/json",
+              "User-Agent": "Appstrate",
+            },
+          });
+          if (res.ok) {
+            const body = (await res.json()) as unknown;
+            if (body && typeof body === "object") {
+              for (const [k, v] of Object.entries(body as Record<string, unknown>)) {
+                if (identitySource[k] === undefined) identitySource[k] = v;
+              }
+            }
+          } else {
+            logger.warn("Integration userinfo fetch non-2xx", {
+              packageId: result.packageId,
+              authKey: result.authKey,
+              status: res.status,
+            });
+          }
+        } catch (err) {
+          logger.warn("Integration userinfo fetch failed", {
+            packageId: result.packageId,
+            authKey: result.authKey,
+            err: String(err),
+          });
+        }
+      }
       const { accountId, identityClaims } = extractIdentity(
         manifest,
         result.authKey,
-        result.tokenResponse,
+        identitySource,
       );
       const credentials: Record<string, unknown> = {
         access_token: result.accessToken,
@@ -274,6 +332,7 @@ export function createIntegrationsRouter() {
         scopesGranted: result.scopesGranted,
         expiresAt: result.expiresAt ? new Date(result.expiresAt) : null,
         actor: result.actor,
+        ...(result.connectionId ? { connectionId: result.connectionId } : {}),
       });
       logger.info("Integration OAuth callback success", {
         packageId: result.packageId,
@@ -543,6 +602,8 @@ export function createIntegrationsRouter() {
         // through for the state record shape. Use a fixed sentinel so
         // the field is non-empty.
         connectionProfileId: "integration",
+        forceAccountSelect: body.forceAccountSelect ?? false,
+        ...(body.connectionId ? { connectionId: body.connectionId } : {}),
       });
       return c.json({ authUrl: result.authUrl, state: result.state });
     },
@@ -640,26 +701,24 @@ export function createIntegrationsRouter() {
   );
 
   router.put(
-    "/:packageId{@[^/]+/[^/]+}/pins/:agentPackageId{@[^/]+/[^/]+}/:authKey",
+    "/:packageId{@[^/]+/[^/]+}/pins/:agentPackageId{@[^/]+/[^/]+}",
     requirePermission("integrations", "install"),
     async (c) => {
       assertOrgAdmin(c);
       const packageId = c.req.param("packageId")!;
       const agentPackageId = c.req.param("agentPackageId")!;
-      const authKey = c.req.param("authKey")!;
       const scope = getAppScope(c);
       const body = parseBody(setPinSchema, await c.req.json());
       const userId = c.get("user")?.id ?? null;
       const pin = await upsertIntegrationPin(scope, packageId, {
         agentPackageId,
-        authKey,
         connectionId: body.connectionId,
         createdBy: userId,
       });
       await recordAuditFromContext(c, {
         action: "integration.pin.upserted",
         resourceType: "integration_pin",
-        resourceId: `${packageId}#${agentPackageId}#${authKey}`,
+        resourceId: `${packageId}#${agentPackageId}`,
         after: { connectionId: pin.connectionId },
       });
       return c.json(pin);
@@ -667,20 +726,19 @@ export function createIntegrationsRouter() {
   );
 
   router.delete(
-    "/:packageId{@[^/]+/[^/]+}/pins/:agentPackageId{@[^/]+/[^/]+}/:authKey",
+    "/:packageId{@[^/]+/[^/]+}/pins/:agentPackageId{@[^/]+/[^/]+}",
     requirePermission("integrations", "install"),
     async (c) => {
       assertOrgAdmin(c);
       const packageId = c.req.param("packageId")!;
       const agentPackageId = c.req.param("agentPackageId")!;
-      const authKey = c.req.param("authKey")!;
       const scope = getAppScope(c);
-      const result = await deleteIntegrationPin(scope, packageId, agentPackageId, authKey);
+      const result = await deleteIntegrationPin(scope, packageId, agentPackageId);
       if (result.deleted) {
         await recordAuditFromContext(c, {
           action: "integration.pin.deleted",
           resourceType: "integration_pin",
-          resourceId: `${packageId}#${agentPackageId}#${authKey}`,
+          resourceId: `${packageId}#${agentPackageId}`,
         });
       }
       return c.json(result);

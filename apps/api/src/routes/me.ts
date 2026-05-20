@@ -218,7 +218,6 @@ router.delete("/application-profile", requireAppContext(), async (c) => {
 const upsertMemberPinSchema = z.object({
   agentPackageId: z.string().min(1),
   integrationPackageId: z.string().min(1),
-  authKey: z.string().min(1),
   connectionId: z.uuid(),
 });
 
@@ -252,7 +251,7 @@ router.put("/integration-pins", requireAppContext(), async (c) => {
   await recordAuditFromContext(c, {
     action: "integration.member_pin.upserted",
     resourceType: "integration_pin",
-    resourceId: `${input.agentPackageId}|${input.integrationPackageId}|${input.authKey}`,
+    resourceId: `${input.agentPackageId}|${input.integrationPackageId}`,
     after: { connectionId: input.connectionId },
   });
   return c.json(result);
@@ -267,24 +266,15 @@ router.delete("/integration-pins", requireAppContext(), async (c) => {
   const scope = getAppScope(c);
   const agentPackageId = c.req.query("agentPackageId");
   const integrationPackageId = c.req.query("integrationPackageId");
-  const authKey = c.req.query("authKey");
-  if (!agentPackageId || !integrationPackageId || !authKey) {
-    throw unauthorized(
-      "agentPackageId, integrationPackageId and authKey query params are required",
-    );
+  if (!agentPackageId || !integrationPackageId) {
+    throw unauthorized("agentPackageId and integrationPackageId query params are required");
   }
-  const result = await deleteMemberPin(
-    scope,
-    agentPackageId,
-    integrationPackageId,
-    authKey,
-    user.id,
-  );
+  const result = await deleteMemberPin(scope, agentPackageId, integrationPackageId, user.id);
   if (result.deleted) {
     await recordAuditFromContext(c, {
       action: "integration.member_pin.deleted",
       resourceType: "integration_pin",
-      resourceId: `${agentPackageId}|${integrationPackageId}|${authKey}`,
+      resourceId: `${agentPackageId}|${integrationPackageId}`,
     });
   }
   return c.body(null, 204);

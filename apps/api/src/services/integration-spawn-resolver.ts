@@ -32,13 +32,23 @@ import {
   resolveHttpDelivery,
 } from "@appstrate/connect";
 import { getToolUrlPatterns } from "@appstrate/core/integration";
-import type { IntegrationManifest, ResolvedConnectionMap } from "@appstrate/core/integration";
+import type {
+  IntegrationManifest,
+  ResolvedConnection,
+  ResolvedConnectionMap,
+} from "@appstrate/core/integration";
+// ResolvedConnectionMap is consumed via input prop (`resolvedConnections`) below.
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 
 import { logger } from "../lib/logger.ts";
 import type { Actor } from "../lib/actor.ts";
-import { isIntegrationInstalled, loadActorConnection } from "./integration-connections.ts";
+import {
+  isIntegrationInstalled,
+  loadAccessibleConnectionById,
+  loadActorConnection,
+  type ResolvedConnectionRow,
+} from "./integration-connections.ts";
 import { fetchIntegrationManifest } from "./integration-service.ts";
 
 export interface ResolveIntegrationsInput {
@@ -54,11 +64,12 @@ export interface ResolveIntegrationsInput {
    */
   agentManifest: Record<string, unknown>;
   /**
-   * Snapshot of the 4-mechanism cascade frozen at run kickoff
-   * (`runs.resolved_connections`). When set, the spawn loader uses
-   * `snapshot[packageId][authKey].connectionId` to pin which connection
-   * row is decrypted — pin > run override > schedule override > fallback.
-   * When omitted, falls back to live actor-based lookup (own + shared).
+   * Snapshot of the cascade frozen at run kickoff
+   * (`runs.resolved_connections`). When set, the spawn loader looks up
+   * `snapshot[packageId].connectionId` to pick the one connection
+   * (admin pin / run override / schedule override / member pin / auto
+   * fallback). When omitted, falls back to live actor-based lookup
+   * (auto-pick when the actor has exactly one accessible connection).
    */
   resolvedConnections?: ResolvedConnectionMap | null;
 }
@@ -103,7 +114,7 @@ async function resolveOne(
   applicationId: string,
   actor: Actor,
   agentToolSelection: readonly string[] | undefined,
-  authSnapshot: ResolvedConnectionMap[string] | null,
+  resolvedConnection: ResolvedConnection | null,
 ): Promise<IntegrationSpawnSpec | null> {
   // (a) Package exists + integration type — read the latest manifest
   // straight off `packages.draft_manifest`. System integrations have
@@ -152,7 +163,7 @@ async function resolveOne(
     applicationId,
     actor,
     manifest,
-    authSnapshot,
+    resolvedConnection,
   );
   if (!deliveries) {
     // resolveDeliveries already logged the reason (missing connection,
@@ -278,21 +289,26 @@ interface ResolvedDeliveries {
 }
 
 /**
- * Resolve the per-auth delivery plans (env + http) for one integration.
- * Returns `null` when none of the integration's auths produced anything
- * usable (no connections, all decrypt failures, or pure-custom auths
- * that the platform doesn't know how to render).
+ * Resolve the delivery plan (env + http) for ONE connection on this
+ * integration. Returns `null` when the connection can't be loaded or
+ * its auth declares no usable delivery mapping.
  *
- * Iterates auths once, decrypts each connection once, then dispatches
- * fields to the two delivery branches independently — avoids double
- * decryption when one auth declares both `env` and `http`.
+ * The runtime model: one connection per integration. The connection
+ * carries its own `authKey` which selects the `manifest.auths[X]`
+ * declaration we extract delivery from. OAuth and api_key connections
+ * are interchangeable — the chosen one's shape drives credential
+ * injection.
+ *
+ * `resolvedConnection` (the cascade's frozen pick) is the authoritative
+ * source when present. Otherwise we fall back to a live auto-pick over
+ * the actor's accessible connections on this integration.
  */
 async function resolveDeliveries(
   packageId: string,
   applicationId: string,
   actor: Actor,
   manifest: IntegrationManifest,
-  authSnapshot: ResolvedConnectionMap[string] | null,
+  resolvedConnection: ResolvedConnection | null,
 ): Promise<ResolvedDeliveries | null> {
   const auths = manifest.auths ?? {};
   if (Object.keys(auths).length === 0) {
@@ -300,76 +316,86 @@ async function resolveDeliveries(
     return { spawnEnv: {} };
   }
 
+  // Load the one connection chosen by the cascade.
+  const row = resolvedConnection
+    ? await loadAccessibleConnectionById(resolvedConnection.connectionId, { applicationId, actor })
+    : await pickAnyAccessibleConnection(packageId, applicationId, actor, Object.keys(auths));
+
+  if (!row) {
+    logger.info("no resolved connection for integration; skipping delivery entries", {
+      packageId,
+      actorType: actor.type,
+      hadSnapshot: resolvedConnection !== null,
+    });
+    return null;
+  }
+
+  const auth = auths[row.authKey];
+  if (!auth) {
+    // The connection points at an authKey the manifest no longer declares
+    // (renamed/removed since the connection was created). Skip — the
+    // operator should clean up the orphan.
+    logger.warn("resolved connection points at unknown authKey; skipping", {
+      packageId,
+      authKey: row.authKey,
+      connectionId: row.id,
+    });
+    return null;
+  }
+
+  let fields: Record<string, string>;
+  try {
+    fields = decryptCredentialsToStringMap(row.credentialsEncrypted);
+  } catch (err) {
+    logger.warn("decrypt failed for integration connection", {
+      packageId,
+      authKey: row.authKey,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+
   const spawnEnv: Record<string, string> = {};
   const httpDeliveryAuths: NonNullable<IntegrationSpawnSpec["httpDeliveryAuths"]> = {};
   let resolvedAtLeastOne = false;
 
-  for (const [authKey, auth] of Object.entries(auths)) {
-    const pinnedConnectionId = authSnapshot?.[authKey]?.connectionId;
-    const row = await loadActorConnection(packageId, authKey, {
-      applicationId,
-      actor,
-      ...(pinnedConnectionId ? { connectionId: pinnedConnectionId } : {}),
-    });
-    if (!row) {
-      logger.info("no connection for integration auth; skipping delivery entries", {
-        packageId,
-        authKey,
-        actorType: actor.type,
-      });
-      continue;
-    }
-
-    let fields: Record<string, string>;
-    try {
-      fields = decryptCredentialsToStringMap(row.credentialsEncrypted);
-    } catch (err) {
-      logger.warn("decrypt failed for integration connection", {
-        packageId,
-        authKey,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      continue;
-    }
-
-    // ─── delivery.env ───
-    const envMap = auth.delivery?.env;
-    if (envMap && Object.keys(envMap).length > 0) {
-      for (const [envKey, conf] of Object.entries(envMap)) {
-        const value = readCredentialField(fields, conf.from);
-        if (value === undefined || value.length === 0) {
-          logger.info("delivery.env source field missing on credentials", {
-            packageId,
-            authKey,
-            envKey,
-            from: conf.from,
-          });
-          continue;
-        }
-        spawnEnv[envKey] = value;
-        resolvedAtLeastOne = true;
-      }
-    }
-
-    // ─── delivery.http (Phase 1.5) ───
-    const httpDecl = auth.delivery?.http;
-    if (httpDecl) {
-      const plan = resolveHttpDelivery(auth.type, fields, httpDecl);
-      if (!plan) {
-        logger.info("delivery.http produced no plan (auth missing required fields)", {
+  // ─── delivery.env ───
+  const envMap = auth.delivery?.env;
+  if (envMap && Object.keys(envMap).length > 0) {
+    for (const [envKey, conf] of Object.entries(envMap)) {
+      const value = readCredentialField(fields, conf.from);
+      if (value === undefined || value.length === 0) {
+        logger.info("delivery.env source field missing on credentials", {
           packageId,
-          authKey,
-          authType: auth.type,
+          authKey: row.authKey,
+          envKey,
+          from: conf.from,
         });
-      } else {
-        httpDeliveryAuths[authKey] = {
-          ...plan,
-          authType: auth.type,
-          authorizedUris: [...auth.authorizedUris],
-          expiresAtEpochMs: row.expiresAt ? row.expiresAt.getTime() : null,
-        };
-        resolvedAtLeastOne = true;
+        continue;
       }
+      spawnEnv[envKey] = value;
+      resolvedAtLeastOne = true;
+    }
+  }
+
+  // ─── delivery.http (Phase 1.5) ───
+  const httpDecl = auth.delivery?.http;
+  if (httpDecl) {
+    const plan = resolveHttpDelivery(auth.type, fields, httpDecl);
+    if (!plan) {
+      logger.info("delivery.http produced no plan (auth missing required fields)", {
+        packageId,
+        authKey: row.authKey,
+        authType: auth.type,
+      });
+    } else {
+      httpDeliveryAuths[row.authKey] = {
+        ...plan,
+        authType: auth.type,
+        authorizedUris: [...auth.authorizedUris],
+        expiresAtEpochMs: row.expiresAt ? row.expiresAt.getTime() : null,
+      };
+      resolvedAtLeastOne = true;
     }
   }
 
@@ -378,4 +404,27 @@ async function resolveDeliveries(
     spawnEnv,
     ...(Object.keys(httpDeliveryAuths).length > 0 ? { httpDeliveryAuths } : {}),
   };
+}
+
+/**
+ * Fallback used when no snapshot was passed (legacy paths, manual
+ * spawn). Walks the declared auths and returns the first connection
+ * found — same auto-pick semantics as the runtime resolver's layer 5
+ * fallback, single-candidate branch. Multi-candidate situations
+ * resolve by iteration order (declared-auth precedence); call sites
+ * that need deterministic ambiguity-handling go through `resolveConnectionsForRun`.
+ */
+async function pickAnyAccessibleConnection(
+  packageId: string,
+  applicationId: string,
+  actor: Actor,
+  declaredAuthKeys: string[],
+): Promise<ResolvedConnectionRow | null> {
+  for (const authKey of declaredAuthKeys) {
+    const row = await loadActorConnection(packageId, authKey, { applicationId, actor });
+    if (row) {
+      return { ...row, authKey };
+    }
+  }
+  return null;
 }

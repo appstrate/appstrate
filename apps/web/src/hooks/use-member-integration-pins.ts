@@ -7,6 +7,10 @@
  * a persisted DB row that the resolver sees on every run (cascade layer 4),
  * not an ephemeral browser-local value.
  *
+ * One pin per (agent, integration, member-scope). The pin's connection
+ * carries its own authKey; OAuth and api_key connections are
+ * interchangeable at runtime.
+ *
  * Query key includes the application id so two memberships in different
  * apps don't bleed pins through the cache. Member pins are also private
  * per actor — the API endpoint already filters by caller's user_id, so
@@ -20,7 +24,6 @@ import { useCurrentApplicationId } from "./use-current-application";
 
 export interface MemberIntegrationPin {
   integrationPackageId: string;
-  authKey: string;
   connectionId: string;
 }
 
@@ -47,7 +50,6 @@ export function useMemberIntegrationPins(agentPackageId: string | undefined) {
 export interface UpsertMemberPinInput {
   agentPackageId: string;
   integrationPackageId: string;
-  authKey: string;
   connectionId: string;
 }
 
@@ -60,7 +62,6 @@ export function useUpsertMemberIntegrationPin() {
       api<{
         packageId: string;
         integrationPackageId: string;
-        authKey: string;
         connectionId: string;
       }>("/me/integration-pins", {
         method: "PUT",
@@ -78,7 +79,6 @@ export function useUpsertMemberIntegrationPin() {
 export interface DeleteMemberPinInput {
   agentPackageId: string;
   integrationPackageId: string;
-  authKey: string;
 }
 
 export function useDeleteMemberIntegrationPin() {
@@ -90,7 +90,6 @@ export function useDeleteMemberIntegrationPin() {
       const qs = new URLSearchParams({
         agentPackageId: input.agentPackageId,
         integrationPackageId: input.integrationPackageId,
-        authKey: input.authKey,
       }).toString();
       return api<void>(`/me/integration-pins?${qs}`, { method: "DELETE" });
     },

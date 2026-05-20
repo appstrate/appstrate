@@ -58,6 +58,10 @@ import {
   type IntegrationManifestAuth,
 } from "../hooks/use-integrations";
 import { useIntegrations } from "../hooks/use-integrations";
+import { useDisconnectIntegrationConnection } from "../hooks/use-me-connections";
+import { useCurrentOrgId } from "../hooks/use-org";
+import { useCurrentApplicationId } from "../hooks/use-current-application";
+import { InlineConnectButton } from "../components/integration-connect/inline-connect-button";
 
 // ─────────────────────────────────────────────
 // OAuth client (admin) form
@@ -318,8 +322,21 @@ function AuthSection({
         />
       )}
 
-      {/* Connections — read-only audit list. Connect/disconnect live on
-          the agent surfaces. */}
+      {/* Connections — audit list with rename/share/disconnect handled
+          per row. The connect button here adds a NEW connection (intent
+          "connect", defaults scopes); reconnect/upgrade still live on
+          the agent surfaces where the per-agent scope context is known. */}
+      <div className="mb-2 flex items-center justify-end">
+        {(!isOAuth || status.hasOAuthClient) && (
+          <InlineConnectButton
+            packageId={packageId}
+            authKey={status.authKey}
+            intent="connect"
+            label={t("integration.auth.addAccount")}
+            forceAccountSelect={status.connections.length > 0}
+          />
+        )}
+      </div>
       {status.connections.length === 0 ? (
         <p className="text-muted-foreground text-sm">{t("integration.auth.noConnection")}</p>
       ) : (
@@ -378,20 +395,11 @@ function BlockUserConnectionsToggle({
 }
 
 /**
- * R2 — centralised pin management.
- *
- * Lists every existing pin for this integration as a table (Agent | Auth |
- * Connection | Delete) and exposes an inline "Pin a new agent" row so the
- * admin manages all pins from one place. Replaces the per-agent pin
- * widget that used to live on `AgentIntegrationsBlock`.
+ * Centralised pin management. One pin per (agent, integration) — admin
+ * picks which shared connection a given agent uses. Flat model: no
+ * authKey to disambiguate (the connection's own authKey is implicit).
  */
-function PinManagementSection({
-  packageId,
-  manifest,
-}: {
-  packageId: string;
-  manifest: IntegrationManifestView;
-}) {
+function PinManagementSection({ packageId }: { packageId: string }) {
   const { t } = useTranslation("settings");
   const { data: pins } = useIntegrationPins(packageId);
   const { data: connections } = useIntegrationConnections(packageId);
@@ -400,10 +408,8 @@ function PinManagementSection({
   const deletePin = useDeleteIntegrationPin();
 
   const [newAgent, setNewAgent] = useState("");
-  const [newAuthKey, setNewAuthKey] = useState("");
   const [newConnectionId, setNewConnectionId] = useState("");
 
-  const authKeys = Object.keys(manifest.auths ?? {});
   const pinnableConnections = (connections ?? []).filter((c) => c.sharedWithOrg === true);
 
   // Lookup helpers for the table
@@ -420,34 +426,29 @@ function PinManagementSection({
   };
 
   const onSubmitNewPin = () => {
-    if (!newAgent || !newAuthKey || !newConnectionId) return;
+    if (!newAgent || !newConnectionId) return;
     upsertPin.mutate(
       {
         packageId,
         agentPackageId: newAgent,
-        authKey: newAuthKey,
         connectionId: newConnectionId,
       },
       {
         onSuccess: () => {
           setNewAgent("");
-          setNewAuthKey("");
           setNewConnectionId("");
         },
       },
     );
   };
 
-  // Only include agents that aren't already pinned on every authKey — keeps
-  // the dropdown focused on actionable rows.
-  const pinnableAgents = (consumingAgents ?? []).filter((a) => {
-    const pinnedKeys = new Set(
-      (pins ?? [])
-        .filter((p) => p.packageId === a.packageId && p.integrationPackageId === packageId)
-        .map((p) => p.authKey),
-    );
-    return authKeys.some((k) => !pinnedKeys.has(k));
-  });
+  // Only include agents not already pinned.
+  const alreadyPinnedAgentIds = new Set(
+    (pins ?? []).filter((p) => p.integrationPackageId === packageId).map((p) => p.packageId),
+  );
+  const pinnableAgents = (consumingAgents ?? []).filter(
+    (a) => !alreadyPinnedAgentIds.has(a.packageId),
+  );
 
   return (
     <div
@@ -503,7 +504,6 @@ function PinManagementSection({
                         deletePin.mutate({
                           packageId,
                           agentPackageId: p.packageId,
-                          authKey: p.authKey,
                         })
                       }
                       title={t("integration.admin.pinManagement.delete")}
@@ -551,24 +551,6 @@ function PinManagementSection({
               ))}
             </select>
           </div>
-          <div className="min-w-[8rem]">
-            <Label className="text-muted-foreground mb-1 block text-[0.65rem]">
-              {t("integration.admin.pinManagement.colAuth")}
-            </Label>
-            <select
-              className="border-border bg-background w-full rounded border px-2 py-1 text-xs"
-              value={newAuthKey}
-              onChange={(e) => setNewAuthKey(e.target.value)}
-              data-testid="pin-add-auth"
-            >
-              <option value="">—</option>
-              {authKeys.map((k) => (
-                <option key={k} value={k}>
-                  {k}
-                </option>
-              ))}
-            </select>
-          </div>
           <div className="min-w-[12rem] flex-1">
             <Label className="text-muted-foreground mb-1 block text-[0.65rem]">
               {t("integration.admin.pinManagement.colConnection")}
@@ -580,19 +562,17 @@ function PinManagementSection({
               data-testid="pin-add-connection"
             >
               <option value="">—</option>
-              {pinnableConnections
-                .filter((c) => !newAuthKey || c.authKey === newAuthKey)
-                .map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {connectionDisplay(c.id)}
-                  </option>
-                ))}
+              {pinnableConnections.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {connectionDisplay(c.id)}
+                </option>
+              ))}
             </select>
           </div>
           <Button
             size="sm"
             onClick={onSubmitNewPin}
-            disabled={!newAgent || !newAuthKey || !newConnectionId || upsertPin.isPending}
+            disabled={!newAgent || !newConnectionId || upsertPin.isPending}
             data-testid="pin-add-submit"
           >
             {t("integration.admin.pinManagement.add")}
@@ -612,6 +592,9 @@ function ConnectionRow({
 }) {
   const { t } = useTranslation("settings");
   const updateConnection = useUpdateIntegrationConnection();
+  const disconnect = useDisconnectIntegrationConnection();
+  const orgId = useCurrentOrgId();
+  const applicationId = useCurrentApplicationId();
   const [editing, setEditing] = useState(false);
   const [draftLabel, setDraftLabel] = useState(connection.label ?? "");
   const accountLabel =
@@ -641,6 +624,16 @@ function ConnectionRow({
       },
       { onSuccess: () => setEditing(false) },
     );
+  };
+  const onDelete = () => {
+    if (!orgId || !applicationId) return;
+    if (!window.confirm(t("integration.connection.deleteConfirm"))) return;
+    disconnect.mutate({
+      packageId,
+      connectionId: connection.id,
+      orgId,
+      applicationId,
+    });
   };
   return (
     <div
@@ -755,6 +748,17 @@ function ConnectionRow({
         <span className="text-muted-foreground text-[0.65rem]">
           {t("integration.connection.shareWithOrg.help")}
         </span>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="ml-auto size-7"
+          onClick={onDelete}
+          disabled={disconnect.isPending}
+          title={t("integration.connection.delete")}
+          data-testid={`connection-delete-${connection.id}`}
+        >
+          <Trash2 className="text-destructive size-3.5" />
+        </Button>
       </div>
     </div>
   );
@@ -889,7 +893,7 @@ export function IntegrationDetailPage() {
         />
       )}
 
-      {installed && isAdmin && <PinManagementSection packageId={packageId} manifest={m} />}
+      {installed && isAdmin && <PinManagementSection packageId={packageId} />}
 
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Auths column (2/3) */}

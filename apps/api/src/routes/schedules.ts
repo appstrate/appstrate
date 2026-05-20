@@ -26,10 +26,10 @@ import { recordAuditFromContext } from "../services/audit.ts";
 import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
 import { runConfigOverrideSchema, scheduleInputSchema } from "../lib/jsonb-schemas.ts";
 
-// Per-(integration, authKey) connection picks frozen on the schedule
-// row (#199 mechanism #3). Same wire shape as the run-route's
-// connectionOverrides; loses to admin pins at fire time.
-const connectionOverridesSchema = z.record(z.string(), z.record(z.string(), z.string()));
+// Per-integration connection picks frozen on the schedule row (cascade
+// mechanism #3). Same wire shape as the run-route's connectionOverrides;
+// loses to admin pins at fire time. Shape: { "@scope/integration": "<connection_id>" }.
+const connectionOverridesSchema = z.record(z.string(), z.string());
 
 export const createScheduleSchema = z.object({
   name: z.string().optional(),

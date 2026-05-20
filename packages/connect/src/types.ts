@@ -69,6 +69,14 @@ export interface OAuthStateRecord {
     clientId?: string;
     /** Optional explicit client_secret (omitted for `none`). */
     clientSecret?: string;
+    /**
+     * Reconnect / upgrade-scopes target. When set, the callback hands
+     * this id to `saveIntegrationConnection` so the existing row is
+     * UPDATED in place (token refreshed, scopes possibly broadened)
+     * instead of inserting a duplicate. Absent = fresh connect, always
+     * INSERT.
+     */
+    connectionId?: string;
   };
 }
 

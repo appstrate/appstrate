@@ -43,7 +43,7 @@ export interface ParsedInput {
    * resolver's mechanism #2 and is persisted on `runs.connection_overrides`.
    * Shape: `{ "<integrationId>": { "<authKey>": "<connectionId>" } }`.
    */
-  connectionOverrides?: Record<string, Record<string, string>>;
+  connectionOverrides?: Record<string, string>;
 }
 
 interface RunRequestBody {
@@ -51,7 +51,7 @@ interface RunRequestBody {
   modelId?: string;
   proxyId?: string;
   config?: Record<string, unknown>;
-  connectionOverrides?: Record<string, Record<string, string>>;
+  connectionOverrides?: Record<string, string>;
 }
 
 function getArrayItems(prop: JSONSchema7): JSONSchema7 | undefined {
@@ -173,9 +173,9 @@ export async function parseRequestInput(
     );
   }
 
-  // `connectionOverrides` shape guard. Matches the Drizzle JSONB shape
-  // `Record<string, Record<string, string>>` — invalid bodies produce a
-  // 400 with a precise param so the picker UI can highlight the offender.
+  // `connectionOverrides` shape guard. Flat map: integrationId → connectionId.
+  // Invalid bodies produce a 400 with a precise param so the picker UI can
+  // highlight the offender.
   if (body.connectionOverrides !== undefined) {
     if (
       body.connectionOverrides === null ||
@@ -184,15 +184,10 @@ export async function parseRequestInput(
     ) {
       throw invalidRequest("`connectionOverrides` must be a JSON object", "connectionOverrides");
     }
-    for (const [intId, perAuth] of Object.entries(body.connectionOverrides)) {
-      if (
-        perAuth === null ||
-        typeof perAuth !== "object" ||
-        Array.isArray(perAuth) ||
-        Object.values(perAuth).some((v) => typeof v !== "string" || v.length === 0)
-      ) {
+    for (const [intId, connId] of Object.entries(body.connectionOverrides)) {
+      if (typeof connId !== "string" || connId.length === 0) {
         throw invalidRequest(
-          `\`connectionOverrides["${intId}"]\` must map authKey → non-empty connection id`,
+          `\`connectionOverrides["${intId}"]\` must be a non-empty connection id`,
           `connectionOverrides.${intId}`,
         );
       }

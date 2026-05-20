@@ -132,8 +132,8 @@ const expectedEndpoints = [
   "PATCH /api/integrations/{packageId}/connections/{connectionId}",
   "PATCH /api/integrations/{packageId}/settings",
   "GET /api/integrations/{packageId}/pins",
-  "PUT /api/integrations/{packageId}/pins/{agentPackageId}/{authKey}",
-  "DELETE /api/integrations/{packageId}/pins/{agentPackageId}/{authKey}",
+  "PUT /api/integrations/{packageId}/pins/{agentPackageId}",
+  "DELETE /api/integrations/{packageId}/pins/{agentPackageId}",
 
   // Providers
   "GET /api/providers",

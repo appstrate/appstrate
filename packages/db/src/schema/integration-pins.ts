@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Per-(application, agent, integration, authKey, user?) connection pin.
+ * Per-(application, agent, integration, user?) connection pin.
  *
  * Two scopes share this table, discriminated by `user_id`:
  *
@@ -59,8 +59,6 @@ export const integrationPins = pgTable(
     integrationPackageId: text("integration_package_id")
       .notNull()
       .references(() => packages.id, { onDelete: "cascade" }),
-    /** Auth key inside the integration manifest (`manifest.auths.{key}`). */
-    authKey: text("auth_key").notNull(),
     /**
      * Scope discriminator. NULL = admin force (whole org); NOT NULL = this
      * member's personal preference. End-users never own pins (they don't
@@ -77,16 +75,15 @@ export const integrationPins = pgTable(
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => [
-    // One row per (application, agent, integration, authKey, scope). The
+    // One row per (application, agent, integration, scope). The
     // coalesce trick keeps the unique constraint usable for both scopes —
     // empty-string sentinel on the NULL side avoids PostgreSQL's
     // "NULLs distinct in unique" caveat. Admin and member pins can
-    // therefore coexist on the same (agent, integration, authKey).
+    // therefore coexist on the same (agent, integration).
     uniqueIndex("idx_integration_pins_unique").on(
       table.applicationId,
       table.packageId,
       table.integrationPackageId,
-      table.authKey,
       sql`coalesce(${table.userId}, '')`,
     ),
     // Resolver hot path: fetch all pins for (app, agent) in one round trip,

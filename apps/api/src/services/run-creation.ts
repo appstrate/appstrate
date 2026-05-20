@@ -83,12 +83,12 @@ export interface CreateRunInput {
    * (#199). Flows into the resolver's mechanism #2 at kickoff and is
    * persisted on `runs.connection_overrides` for audit + replay.
    */
-  connectionOverrides?: Record<string, Record<string, string>> | null;
+  connectionOverrides?: Record<string, string> | null;
   /**
    * Schedule-frozen overrides loaded from `package_schedules.connection_overrides`
    * (scheduler path only). Resolver mechanism #3.
    */
-  scheduleConnectionOverrides?: Record<string, Record<string, string>> | null;
+  scheduleConnectionOverrides?: Record<string, string> | null;
   /** Only meaningful when `origin === "remote"` — ignored for platform origin. */
   sink?: SinkRequest;
   /** CLI-provided execution environment metadata (os, cli version, git sha, ...). */

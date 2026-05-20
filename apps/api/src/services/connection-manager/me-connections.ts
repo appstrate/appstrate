@@ -107,9 +107,23 @@ async function listAllActorIntegrationConnections(
   // Count installed agents per (application, integration) that declare this
   // integration in their dependencies. One scan over the unique (app, pkg)
   // pairs the user has connections to — single round trip.
+  //
+  // Use explicit `IN (...)` with `sql.join` instead of `= ANY(${arr})`:
+  // when Drizzle's sql-template binds a JS array, postgres.js wraps it as a
+  // single text param ("a,b,c") so PG sees `ANY('a,b,c')` and errors out.
+  // `sql.join` expands each element to its own parameter — round-trip safe
+  // with both PGlite and postgres-js.
   const uniqueAppIds = [...new Set(rows.map((r) => r.applicationId))];
   const reuseCount = new Map<string, number>();
   if (uniqueAppIds.length > 0 && uniquePackageIds.length > 0) {
+    const appIdList = sql.join(
+      uniqueAppIds.map((id) => sql`${id}`),
+      sql`, `,
+    );
+    const pkgIdList = sql.join(
+      uniquePackageIds.map((id) => sql`${id}`),
+      sql`, `,
+    );
     const countRows = (await db.execute(sql`
       SELECT ap.application_id AS app_id,
              keys.integ AS integration_id,
@@ -119,8 +133,8 @@ async function listAllActorIntegrationConnections(
       INNER JOIN LATERAL jsonb_object_keys(
         COALESCE(p.draft_manifest -> 'dependencies' -> 'integrations', '{}'::jsonb)
       ) AS keys(integ) ON TRUE
-      WHERE ap.application_id = ANY(${uniqueAppIds})
-        AND keys.integ = ANY(${uniquePackageIds})
+      WHERE ap.application_id IN (${appIdList})
+        AND keys.integ IN (${pkgIdList})
       GROUP BY ap.application_id, keys.integ
     `)) as unknown as { app_id: string; integration_id: string; agent_count: number }[];
     for (const r of countRows) {

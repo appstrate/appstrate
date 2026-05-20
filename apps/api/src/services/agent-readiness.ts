@@ -198,32 +198,34 @@ export async function validateAgentReadiness(params: AgentReadinessParams): Prom
 
 /**
  * Map a `ConnectionResolutionError` to the wire-format ValidationFieldError
- * the upstream 412 envelope expects (same shape the old
- * `collectIntegrationDependencyErrors` emitted, so the dashboard's
- * MissingConnectionsModal + webhook listeners don't need to change).
+ * the upstream 412 envelope expects.
  *
- * Field path: `integrations.{packageId}.{authKey}` (preserves backward
- * compatibility with the parser in `missing-connections-modal.tsx`).
- *
- * `requiredScopes` is smuggled on the field entry for the
- * insufficient_scopes case so the inline connect button can forward it
- * to the OAuth kickoff for incremental consent.
+ * Field path: `integrations.{packageId}` — one error per integration in
+ * the flat model. The dashboard's MissingConnectionsModal parses on the
+ * same prefix so existing UI plumbing still works.
  */
 export function translateResolutionError(e: ConnectionResolutionError): ValidationFieldError {
   const title = TITLE_BY_CODE[e.code];
   return {
-    field: `integrations.${e.integrationId}.${e.authKey}`,
+    field: `integrations.${e.integrationId}`,
     code: e.code,
     title,
     message: e.message,
-    ...(e.requiredScopes && e.requiredScopes.length > 0
-      ? { requiredScopes: e.requiredScopes }
-      : {}),
     // Smuggle the candidate ids on must_choose_connection so the modal
-    // can render a picker (read by `missing-connections-modal.tsx` via the
-    // same loose-typed field projection used for `requiredScopes`).
+    // can render a picker.
     ...(e.candidateConnectionIds && e.candidateConnectionIds.length > 0
       ? { candidateConnectionIds: e.candidateConnectionIds }
+      : {}),
+    // Smuggle scope-diff detail on insufficient_scopes so the UI can offer
+    // an upgrade (own connection) or a read-only error (foreign owner).
+    ...(e.code === "insufficient_scopes"
+      ? {
+          ...(e.connectionId ? { connectionId: e.connectionId } : {}),
+          ...(e.missingScopes && e.missingScopes.length > 0
+            ? { missingScopes: e.missingScopes }
+            : {}),
+          ...(e.ownedByActor !== undefined ? { ownedByActor: e.ownedByActor } : {}),
+        }
       : {}),
   } as ValidationFieldError;
 }
@@ -231,11 +233,11 @@ export function translateResolutionError(e: ConnectionResolutionError): Validati
 const TITLE_BY_CODE: Record<ConnectionResolutionError["code"], string> = {
   not_connected: "Integration Not Connected",
   needs_reconnection: "Needs Reconnection",
-  insufficient_scopes: "Insufficient Scopes",
   connection_blocked_by_admin: "Connection Blocked by Admin",
   pinned_connection_unavailable: "Pinned Connection Unavailable",
   override_connection_unavailable: "Override Connection Unavailable",
   must_choose_connection: "Multiple Connections Available — Pick One",
+  insufficient_scopes: "Insufficient Permissions",
 };
 
 /**

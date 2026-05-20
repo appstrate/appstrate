@@ -37,9 +37,8 @@ import {
   type ManifestIntegrationEntry,
 } from "@appstrate/core/dependencies";
 import {
-  expandGrantedScopes,
-  requiredAuthKeysForAgent,
   scopesContributedByTools,
+  expandGrantedScopes,
   type IntegrationManifest,
   type ConnectionOverrides,
   type ConnectionResolutionError,
@@ -58,24 +57,28 @@ type ConnectionRow = InferSelectModel<typeof integrationConnections>;
 type PinRow = InferSelectModel<typeof integrationPins>;
 
 /**
- * Per-integration requirement compiled from the agent manifest +
- * integration manifest. The pure resolver consumes this — it doesn't
- * need to know how the requiredScopes union was computed.
+ * Per-integration requirement compiled from the agent manifest. With the
+ * flat model the resolver only needs to know "this integration is
+ * needed" — the per-tool `requiredAuthKey` survives as input to OAuth
+ * consent (which scopes to request at first-connect), not as a runtime
+ * selector. Any connection on the integration is a valid runtime pick.
  */
 export interface IntegrationRequirement {
   integrationId: string;
   manifest: IntegrationManifest;
-  /** Auths the agent's tool selection actually needs at run-time. */
-  requiredAuthKeys: string[];
   /**
-   * Scopes the agent's tool selection requires per auth key. The
-   * resolver checks the granted set against this — expansion through
-   * `availableScopes.implies` is done here, not by the caller.
-   *
-   * Only meaningful for `oauth2` auths; api_key / basic / custom have
-   * opaque grants the IdP doesn't expose.
+   * True when the agent's `tools[]` selection is non-empty — i.e. the
+   * integration is actually used at run time. Empty-selection
+   * integrations are declared-but-inert and skipped by the resolver.
    */
-  requiredScopesByAuth: Record<string, string[]>;
+  hasSelectedTools: boolean;
+  /**
+   * The agent's selected tool names on this integration. Drives OAuth
+   * scope requirement inference (`scopesContributedByTools`) so the
+   * resolver can flag a resolved connection that lacks the scopes the
+   * selected tools need. Empty when no tools selected.
+   */
+  agentTools: readonly string[];
 }
 
 export interface ResolveConnectionsInput {
@@ -106,14 +109,27 @@ export interface ResolveConnectionsInput {
    * pins; their connection is selected by the API caller via run overrides).
    */
   actorUserId?: string | null;
+  /**
+   * Actor's `end_user.id` when the run is impersonated. Used only to
+   * decide whether a resolved-but-under-scoped connection is owned by the
+   * current actor (drives `ownedByActor` on `insufficient_scopes`).
+   */
+  actorEndUserId?: string | null;
 }
 
 // ─────────────────────────── Pure resolver (unit-tested) ──────────────────────
 
 /**
- * Walks the 5-mechanism cascade for each (integration, authKey) that
- * the agent requires. Pure — no DB, no async, no IO. Test with mock
- * arrays.
+ * Walks the 5-mechanism cascade per integration. One connection per
+ * integration, regardless of authKey — the chosen connection carries
+ * its own authKey, which drives credential injection downstream.
+ *
+ * Cascade per integration:
+ *   1. admin pin                 (pins where user_id IS NULL)
+ *   2. run override              (runs.connection_overrides)
+ *   3. schedule override         (package_schedules.connection_overrides)
+ *   4. member pin                (pins where user_id = actor.id)
+ *   5. fallback                  (actor's accessible connections on this integration)
  *
  * Admin pin always wins; member pins only apply when matching the
  * caller's `actorUserId` (which is null for end-users — they never own
@@ -128,53 +144,46 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
   for (const c of input.accessibleConnections) connectionIndex.set(c.id, c);
 
   for (const req of input.requirements) {
-    if (req.requiredAuthKeys.length === 0) continue; // Inert — agent picked 0 tools.
+    if (!req.hasSelectedTools) continue; // Inert — agent picked 0 tools.
 
-    const perAuth: Record<string, ResolvedConnection> = {};
+    const result = resolveOne({
+      integrationId: req.integrationId,
+      manifest: req.manifest,
+      agentTools: req.agentTools,
+      adminPinId: adminPins.get(req.integrationId) ?? null,
+      runOverrideId: input.runOverrides?.[req.integrationId] ?? null,
+      scheduleOverrideId: input.scheduleOverrides?.[req.integrationId] ?? null,
+      memberPinId: memberPins.get(req.integrationId) ?? null,
+      accessibleConnections: input.accessibleConnections,
+      connectionIndex,
+      actorUserId: input.actorUserId ?? null,
+      actorEndUserId: input.actorEndUserId ?? null,
+    });
 
-    for (const authKey of req.requiredAuthKeys) {
-      const key = pinKey(req.integrationId, authKey);
-      const result = resolveOne({
-        integrationId: req.integrationId,
-        authKey,
-        manifest: req.manifest,
-        requiredScopes: req.requiredScopesByAuth[authKey] ?? [],
-        adminPinId: adminPins.get(key) ?? null,
-        runOverrideId: input.runOverrides?.[req.integrationId]?.[authKey] ?? null,
-        scheduleOverrideId: input.scheduleOverrides?.[req.integrationId]?.[authKey] ?? null,
-        memberPinId: memberPins.get(key) ?? null,
-        accessibleConnections: input.accessibleConnections,
-        connectionIndex,
-      });
-
-      if (result.kind === "resolved") {
-        perAuth[authKey] = result.value;
-      } else {
-        errors.push(result.error);
-      }
-    }
-
-    if (Object.keys(perAuth).length > 0) {
-      resolved[req.integrationId] = perAuth;
+    if (result.kind === "resolved") {
+      resolved[req.integrationId] = result.value;
+    } else {
+      errors.push(result.error);
     }
   }
 
   return { resolved, errors };
 }
 
-// ─────────────────────────── Per-auth core ────────────────────────────────────
+// ─────────────────────────── Per-integration core ─────────────────────────────
 
 interface ResolveOneArgs {
   integrationId: string;
-  authKey: string;
   manifest: IntegrationManifest;
-  requiredScopes: string[];
+  agentTools: readonly string[];
   adminPinId: string | null;
   runOverrideId: string | null;
   scheduleOverrideId: string | null;
   memberPinId: string | null;
   accessibleConnections: ConnectionRow[];
   connectionIndex: Map<string, ConnectionRow>;
+  actorUserId: string | null;
+  actorEndUserId: string | null;
 }
 
 type ResolveOneResult =
@@ -188,7 +197,7 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
     if (!conn) {
       return errorOf(args, {
         code: "pinned_connection_unavailable",
-        message: `Pinned connection for ${args.integrationId} (${args.authKey}) is not accessible — it may have been deleted or unshared.`,
+        message: `Pinned connection for ${args.integrationId} is not accessible — it may have been deleted or unshared.`,
       });
     }
     return checkHealth(args, conn, "admin_pin");
@@ -200,7 +209,7 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
     if (!conn) {
       return errorOf(args, {
         code: "override_connection_unavailable",
-        message: `Run-override connection for ${args.integrationId} (${args.authKey}) is not accessible.`,
+        message: `Run-override connection for ${args.integrationId} is not accessible.`,
       });
     }
     return checkHealth(args, conn, "run_override");
@@ -212,7 +221,7 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
     if (!conn) {
       return errorOf(args, {
         code: "override_connection_unavailable",
-        message: `Schedule-override connection for ${args.integrationId} (${args.authKey}) is not accessible.`,
+        message: `Schedule-override connection for ${args.integrationId} is not accessible.`,
       });
     }
     return checkHealth(args, conn, "schedule_override");
@@ -224,21 +233,22 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
     if (!conn) {
       return errorOf(args, {
         code: "pinned_connection_unavailable",
-        message: `Your pinned connection for ${args.integrationId} (${args.authKey}) is no longer accessible — it may have been deleted or unshared.`,
+        message: `Your pinned connection for ${args.integrationId} is no longer accessible — it may have been deleted or unshared.`,
       });
     }
     return checkHealth(args, conn, "member_pin");
   }
 
-  // 5. Fallback — actor's accessible connections matching (integration, authKey).
+  // 5. Fallback — actor's accessible connections on this integration,
+  // any auth shape. The chosen connection carries its own authKey.
   const candidates = args.accessibleConnections.filter(
-    (c) => c.integrationPackageId === args.integrationId && c.authKey === args.authKey,
+    (c) => c.integrationPackageId === args.integrationId,
   );
 
   if (candidates.length === 0) {
     return errorOf(args, {
       code: "not_connected",
-      message: `Integration '${args.integrationId}' (${args.authKey}) has no connection accessible to this actor.`,
+      message: `Integration '${args.integrationId}' has no connection accessible to this actor.`,
     });
   }
 
@@ -251,7 +261,7 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
   // a member pin, so the next run skips this branch and resolves via layer 4.
   return errorOf(args, {
     code: "must_choose_connection",
-    message: `Multiple connections available for ${args.integrationId} (${args.authKey}) — pick one.`,
+    message: `Multiple connections available for ${args.integrationId} — pick one.`,
     candidateConnectionIds: candidates.map((c) => c.id),
   });
 }
@@ -264,23 +274,33 @@ function checkHealth(
   if (conn.needsReconnection) {
     return errorOf(args, {
       code: "needs_reconnection",
-      message: `Connection for ${args.integrationId} (${args.authKey}) needs to be reconnected.`,
+      message: `Connection for ${args.integrationId} needs to be reconnected.`,
     });
   }
 
-  // Scope check — oauth2 only.
-  const auth = args.manifest.auths?.[args.authKey];
-  if (auth?.type === "oauth2" && args.requiredScopes.length > 0) {
-    const granted = new Set(
-      expandGrantedScopes(conn.scopesGranted ?? [], args.manifest, args.authKey),
-    );
-    const missing = args.requiredScopes.filter((s) => !granted.has(s));
+  // Scope sufficiency on the RESOLVED connection only. The agent's
+  // selected tools dictate the required OAuth scopes for the connection's
+  // own auth; api_key/basic auths contribute no scopes so this is a no-op
+  // for them. Granted scopes are expanded through the manifest `implies`
+  // hierarchy before the diff so a parent grant covers its children.
+  const required = scopesContributedByTools({
+    manifest: args.manifest,
+    authKey: conn.authKey,
+    agentTools: args.agentTools,
+  });
+  if (required.length > 0) {
+    const granted = new Set(expandGrantedScopes(conn.scopesGranted, args.manifest, conn.authKey));
+    const missing = required.filter((s) => !granted.has(s));
     if (missing.length > 0) {
+      const ownedByActor =
+        (args.actorUserId !== null && conn.userId === args.actorUserId) ||
+        (args.actorEndUserId !== null && conn.endUserId === args.actorEndUserId);
       return errorOf(args, {
         code: "insufficient_scopes",
-        message: `Connection for ${args.integrationId} (${args.authKey}) is missing scopes: ${missing.join(", ")}.`,
-        requiredScopes: args.requiredScopes,
-        grantedScopes: conn.scopesGranted ?? [],
+        connectionId: conn.id,
+        missingScopes: missing,
+        ownedByActor,
+        message: `Connection for ${args.integrationId} is missing required permissions: ${missing.join(", ")}.`,
       });
     }
   }
@@ -289,25 +309,23 @@ function checkHealth(
 }
 
 function errorOf(
-  args: { integrationId: string; authKey: string },
-  partial: Omit<ConnectionResolutionError, "integrationId" | "authKey">,
+  args: { integrationId: string },
+  partial: Omit<ConnectionResolutionError, "integrationId">,
 ): ResolveOneResult {
   return {
     kind: "error",
     error: {
       integrationId: args.integrationId,
-      authKey: args.authKey,
       ...partial,
     },
   };
 }
 
-const pinKey = (integrationId: string, authKey: string): string => `${integrationId}|${authKey}`;
-
 /**
  * Partition pins into admin (`userId IS NULL`) and member (matching the
  * actor) buckets. Member pins for OTHER users are silently ignored —
- * each actor sees only their own pin.
+ * each actor sees only their own pin. Keyed by integrationId only — one
+ * pin per (agent, integration, scope).
  */
 function indexPins(
   pins: PinRow[],
@@ -316,11 +334,10 @@ function indexPins(
   const adminPins = new Map<string, string>();
   const memberPins = new Map<string, string>();
   for (const p of pins) {
-    const key = pinKey(p.integrationPackageId, p.authKey);
     if (p.userId === null) {
-      adminPins.set(key, p.connectionId);
+      adminPins.set(p.integrationPackageId, p.connectionId);
     } else if (actorUserId !== null && p.userId === actorUserId) {
-      memberPins.set(key, p.connectionId);
+      memberPins.set(p.integrationPackageId, p.connectionId);
     }
   }
   return { adminPins, memberPins };
@@ -358,6 +375,7 @@ export async function resolveConnectionsForRun(
   // /api/me/integration-pins. Passing null narrows the pin partition to
   // admin pins only, keeping the cascade tight for end-user runs.
   const actorUserId = input.actor.type === "user" ? input.actor.id : null;
+  const actorEndUserId = input.actor.type === "end_user" ? input.actor.id : null;
 
   // Load accessible connections + pins in parallel.
   const integrationIds = validReqs.map((r) => r.integrationId);
@@ -373,6 +391,7 @@ export async function resolveConnectionsForRun(
     runOverrides: input.runOverrides ?? null,
     scheduleOverrides: input.scheduleOverrides ?? null,
     actorUserId,
+    actorEndUserId,
   });
 }
 
@@ -383,17 +402,12 @@ async function buildRequirement(
   if (!res.ok) return null; // Missing/invalid manifests are surfaced separately by
   //                          collectIntegrationDependencyErrors during readiness
   //                          checks; the resolver ignores them.
-  const manifest = res.manifest;
-  const requiredAuthKeys = requiredAuthKeysForAgent(manifest, entry.tools);
-  const requiredScopesByAuth: Record<string, string[]> = {};
-  for (const authKey of requiredAuthKeys) {
-    requiredScopesByAuth[authKey] = scopesContributedByTools({
-      manifest,
-      authKey,
-      agentTools: entry.tools,
-    });
-  }
-  return { integrationId: entry.id, manifest, requiredAuthKeys, requiredScopesByAuth };
+  return {
+    integrationId: entry.id,
+    manifest: res.manifest,
+    hasSelectedTools: !!entry.tools && entry.tools.length > 0,
+    agentTools: entry.tools ?? [],
+  };
 }
 
 async function loadAccessibleConnections(

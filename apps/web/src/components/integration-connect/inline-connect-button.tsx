@@ -63,6 +63,19 @@ interface InlineConnectButtonProps {
   size?: "sm" | "default";
   /** Override button label entirely. */
   label?: string;
+  /**
+   * Force the OAuth IdP to render its account picker (via
+   * `prompt=select_account`). Used on "add another" CTAs so the user
+   * can actually authenticate as a different upstream account; without
+   * it the IdP silently reuses the signed-in session.
+   */
+  forceAccountSelect?: boolean;
+  /**
+   * Existing connection id to UPDATE in place (reconnect / upgrade).
+   * Omitted on fresh-connect CTAs — the callback then INSERTs a new
+   * row. Threaded all the way through the OAuth state record.
+   */
+  connectionId?: string;
 }
 
 export function InlineConnectButton({
@@ -72,6 +85,8 @@ export function InlineConnectButton({
   intent,
   size = "sm",
   label,
+  forceAccountSelect,
+  connectionId,
 }: InlineConnectButtonProps) {
   const { t } = useTranslation(["agents", "settings"]);
   const { data: detail } = useIntegrationDetail(packageId);
@@ -95,7 +110,13 @@ export function InlineConnectButton({
     const auth = auths[key];
     if (!auth) return;
     if (auth.type === "oauth2") {
-      void openPopup({ packageId, authKey: key, ...(scopes ? { scopes } : {}) });
+      void openPopup({
+        packageId,
+        authKey: key,
+        ...(scopes ? { scopes } : {}),
+        ...(forceAccountSelect ? { forceAccountSelect: true } : {}),
+        ...(connectionId ? { connectionId } : {}),
+      });
     } else {
       setFieldsAuthKey(key);
     }

@@ -40,7 +40,11 @@ import {
   forceRefreshIntegrationConnection,
   type IntegrationRefreshContext,
 } from "./integration-token-refresh.ts";
-import { assertIntegrationInstalled, loadActorConnection } from "./integration-connections.ts";
+import {
+  assertIntegrationInstalled,
+  loadAccessibleConnectionById,
+  loadActorConnection,
+} from "./integration-connections.ts";
 import { computeRequiredScopes } from "./integration-scope-resolver.ts";
 import { fetchIntegrationManifest } from "./integration-service.ts";
 
@@ -79,20 +83,15 @@ export async function resolveLiveIntegrationCredentials(
     agentPackageId: string;
     actor: Actor | null;
     /**
-     * Snapshot from `runs.resolved_connections` (#199). When present,
-     * the (packageId, authKey) entry's connectionId pins which row the
-     * MITM listener decrypts — so admin pins / run overrides survive
-     * past kickoff into the live credential surface.
-     *
-     * Typed as the DB JSONB shape (string `source`) rather than the
-     * union-narrowed `ResolvedConnectionMap` because Postgres JSONB
-     * widens unions to string on read — the resolver only consumes
-     * `connectionId` so the wider type is safe at this boundary.
+     * Snapshot from `runs.resolved_connections`. When present, the
+     * `[packageId].connectionId` entry pins which row the MITM listener
+     * decrypts — so the cascade's pick (admin pin / run override /
+     * schedule override / member pin / auto fallback) survives past
+     * kickoff into the live credential surface. One connection per
+     * integration; its authKey drives which `manifest.auths[X]`
+     * declaration is materialised.
      */
-    resolvedConnections?: Record<
-      string,
-      Record<string, { connectionId: string; source: string }>
-    > | null;
+    resolvedConnections?: Record<string, { connectionId: string; source: string }> | null;
   },
   options: ResolveLiveCredentialsOptions = {},
 ): Promise<LiveIntegrationCredentialsResult> {
@@ -116,142 +115,163 @@ export async function resolveLiveIntegrationCredentials(
     expiresAtEpochMs: {},
   };
 
-  const authSnapshot = context.resolvedConnections?.[packageId] ?? null;
-
-  for (const [authKey, authDef] of Object.entries(auths)) {
-    // Look up the connection row for the actor. Skip silently if none —
-    // matches the resolveIntegrationCredentials behaviour (the caller
-    // gets a partial payload and the MITM planner refuses requests on
-    // unauthorised URLs without crashing the integration).
-    const pinnedConnectionId = authSnapshot?.[authKey]?.connectionId;
-    const connection = await loadActorConnection(packageId, authKey, {
+  // Flat model: one connection per integration, chosen by the cascade
+  // at kickoff. The snapshot pins which row to load; without a snapshot
+  // (legacy/manual paths) fall back to the actor's accessible connections
+  // (first-found across declared auths — matches the spawn resolver).
+  const snapshotEntry = context.resolvedConnections?.[packageId] ?? null;
+  let connection: Awaited<ReturnType<typeof loadAccessibleConnectionById>> = null;
+  if (snapshotEntry) {
+    connection = await loadAccessibleConnectionById(snapshotEntry.connectionId, {
       applicationId: context.applicationId,
       actor: context.actor,
-      ...(pinnedConnectionId ? { connectionId: pinnedConnectionId } : {}),
     });
-    if (!connection) continue;
+  } else {
+    for (const declared of Object.keys(auths)) {
+      const row = await loadActorConnection(packageId, declared, {
+        applicationId: context.applicationId,
+        actor: context.actor,
+      });
+      if (row) {
+        connection = { ...row, authKey: declared };
+        break;
+      }
+    }
+  }
+  if (!connection) {
+    return out;
+  }
 
-    let fields = decryptToStringMap(connection.credentialsEncrypted, packageId, authKey);
-    if (!fields) continue;
+  const authKey = connection.authKey;
+  const authDef = auths[authKey];
+  if (authDef) {
+    // Single-iteration block — kept inside an `if` so the legacy multi-auth
+    // loop's local-let scoping doesn't need to change much. Falls through
+    // to the empty `out` when the connection's authKey no longer maps to
+    // a declared auth (manifest renamed since the connection was created).
+    {
+      let fields = decryptToStringMap(connection.credentialsEncrypted, packageId, authKey);
+      if (!fields) return out;
 
-    let expiresAtEpochMs: number | null = connection.expiresAt
-      ? connection.expiresAt.getTime()
-      : null;
+      let expiresAtEpochMs: number | null = connection.expiresAt
+        ? connection.expiresAt.getTime()
+        : null;
 
-    // Decide whether to refresh.
-    const needsRefresh =
-      authDef.type === "oauth2" &&
-      (options.forceRefresh === true || isWithinLeadWindow(connection.expiresAt));
+      // Decide whether to refresh.
+      const needsRefresh =
+        authDef.type === "oauth2" &&
+        (options.forceRefresh === true || isWithinLeadWindow(connection.expiresAt));
 
-    if (needsRefresh) {
-      const refreshContext = await buildOAuthRefreshContext(
-        packageId,
-        authKey,
-        authDef,
-        context.applicationId,
-      );
-      if (refreshContext) {
-        try {
-          const refreshed = await forceRefreshIntegrationConnection(
-            connection.id,
-            packageId,
-            authKey,
-            connection.credentialsEncrypted,
-            refreshContext,
-          );
-          fields = refreshed.fields;
-          expiresAtEpochMs = refreshed.expiresAt ? refreshed.expiresAt.getTime() : null;
-
-          // Niveau 2 Phase 6 — IdP-side scope shrink awareness. When the
-          // refresh response narrowed `scopesGranted` (user revoked some
-          // permissions in their account settings between issuance and
-          // refresh), cross-check against the union of `requiredScopes`
-          // across every installed agent and flip `needsReconnection`
-          // if the actor has dropped below that floor. Fast-path: skip
-          // the agent scan unless the refresh actually shrank scopes.
-          if (refreshed.shrinkDetected && refreshed.scopesGranted !== null) {
-            const granted = refreshed.scopesGranted;
-            const { required } = await computeRequiredScopes({
-              scope: { orgId: context.orgId, applicationId: context.applicationId },
-              integrationPackageId: packageId,
+      if (needsRefresh) {
+        const refreshContext = await buildOAuthRefreshContext(
+          packageId,
+          authKey,
+          authDef,
+          context.applicationId,
+        );
+        if (refreshContext) {
+          try {
+            const refreshed = await forceRefreshIntegrationConnection(
+              connection.id,
+              packageId,
               authKey,
-            });
-            const missing = required.filter((s) => !granted.includes(s));
-            if (missing.length > 0) {
-              await db
-                .update(integrationConnections)
-                .set({ needsReconnection: true, updatedAt: new Date() })
-                .where(eq(integrationConnections.id, connection.id));
-              logger.warn("Integration scope shrink dropped below required floor", {
-                runId: context.runId,
-                packageId,
+              connection.credentialsEncrypted,
+              refreshContext,
+            );
+            fields = refreshed.fields;
+            expiresAtEpochMs = refreshed.expiresAt ? refreshed.expiresAt.getTime() : null;
+
+            // Niveau 2 Phase 6 — IdP-side scope shrink awareness. When the
+            // refresh response narrowed `scopesGranted` (user revoked some
+            // permissions in their account settings between issuance and
+            // refresh), cross-check against the union of `requiredScopes`
+            // across every installed agent and flip `needsReconnection`
+            // if the actor has dropped below that floor. Fast-path: skip
+            // the agent scan unless the refresh actually shrank scopes.
+            if (refreshed.shrinkDetected && refreshed.scopesGranted !== null) {
+              const granted = refreshed.scopesGranted;
+              const { required } = await computeRequiredScopes({
+                scope: { orgId: context.orgId, applicationId: context.applicationId },
+                integrationPackageId: packageId,
                 authKey,
-                granted,
-                required,
-                missing,
               });
-            } else {
-              logger.info("Integration scope shrink absorbed (still covers required)", {
-                runId: context.runId,
-                packageId,
-                authKey,
-                granted,
-                required,
-              });
+              const missing = required.filter((s) => !granted.includes(s));
+              if (missing.length > 0) {
+                await db
+                  .update(integrationConnections)
+                  .set({ needsReconnection: true, updatedAt: new Date() })
+                  .where(eq(integrationConnections.id, connection.id));
+                logger.warn("Integration scope shrink dropped below required floor", {
+                  runId: context.runId,
+                  packageId,
+                  authKey,
+                  granted,
+                  required,
+                  missing,
+                });
+              } else {
+                logger.info("Integration scope shrink absorbed (still covers required)", {
+                  runId: context.runId,
+                  packageId,
+                  authKey,
+                  granted,
+                  required,
+                });
+              }
             }
-          }
-        } catch (err) {
-          if (err instanceof RefreshError && err.kind === "revoked") {
-            // 403 here propagates to the sidecar, which translates back
-            // to a 401 to the integration's MCP client. The
-            // needsReconnection flag has already been set by the helper.
-            logger.warn("Integration token refresh revoked", {
+          } catch (err) {
+            if (err instanceof RefreshError && err.kind === "revoked") {
+              // 403 here propagates to the sidecar, which translates back
+              // to a 401 to the integration's MCP client. The
+              // needsReconnection flag has already been set by the helper.
+              logger.warn("Integration token refresh revoked", {
+                runId: context.runId,
+                packageId,
+                authKey,
+                status: err.status,
+              });
+              throw forbidden(
+                `Integration '${packageId}' auth '${authKey}' needs re-connection (refresh token revoked)`,
+              );
+            }
+            // Transient failure (network, upstream 5xx, parse error). The
+            // cached credential may still be usable; surfacing 502 lets the
+            // sidecar's `refreshOnUnauthorized` cooldown back off without
+            // poisoning the connection row.
+            logger.warn("Integration token refresh transient error", {
               runId: context.runId,
               packageId,
               authKey,
-              status: err.status,
+              error: err instanceof Error ? err.message : String(err),
             });
-            throw forbidden(
-              `Integration '${packageId}' auth '${authKey}' needs re-connection (refresh token revoked)`,
+            throw badGateway(
+              `Integration '${packageId}' auth '${authKey}' token refresh failed upstream (transient)`,
             );
           }
-          // Transient failure (network, upstream 5xx, parse error). The
-          // cached credential may still be usable; surfacing 502 lets the
-          // sidecar's `refreshOnUnauthorized` cooldown back off without
-          // poisoning the connection row.
-          logger.warn("Integration token refresh transient error", {
-            runId: context.runId,
-            packageId,
-            authKey,
-            error: err instanceof Error ? err.message : String(err),
-          });
-          throw badGateway(
-            `Integration '${packageId}' auth '${authKey}' token refresh failed upstream (transient)`,
-          );
         }
       }
-    }
 
-    const http = authDef.delivery?.http;
-    if (http) {
-      const plan = resolveHttpDelivery(authDef.type, fields, http);
-      if (plan) {
-        out.deliveryPlans[authKey] = plan;
+      const http = authDef.delivery?.http;
+      if (http) {
+        const plan = resolveHttpDelivery(authDef.type, fields, http);
+        if (plan) {
+          out.deliveryPlans[authKey] = plan;
+        }
       }
-    }
 
-    out.auths.push({
-      authKey,
-      authType: authDef.type,
-      fields: Object.freeze({ ...fields }),
-      authorizedUris: Object.freeze([...authDef.authorizedUris]),
-      ...(authDef.audience !== undefined ? { audience: authDef.audience } : {}),
-      ...(connection.expiresAt ? { expiresAt: connection.expiresAt.toISOString() } : {}),
-      ...(connection.scopesGranted.length > 0
-        ? { scopesGranted: Object.freeze([...connection.scopesGranted]) }
-        : {}),
-    });
-    out.expiresAtEpochMs[authKey] = expiresAtEpochMs;
+      out.auths.push({
+        authKey,
+        authType: authDef.type,
+        fields: Object.freeze({ ...fields }),
+        authorizedUris: Object.freeze([...authDef.authorizedUris]),
+        ...(authDef.audience !== undefined ? { audience: authDef.audience } : {}),
+        ...(connection.expiresAt ? { expiresAt: connection.expiresAt.toISOString() } : {}),
+        ...(connection.scopesGranted.length > 0
+          ? { scopesGranted: Object.freeze([...connection.scopesGranted]) }
+          : {}),
+      });
+      out.expiresAtEpochMs[authKey] = expiresAtEpochMs;
+    }
   }
 
   return out;

@@ -89,17 +89,17 @@ export const integrationConnections = pgTable(
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => [
-    // One row per (integration, auth key, account, application, owner).
-    // The `coalesce` trick keeps the unique constraint usable for both
-    // owner types — empty string sentinel for the null side avoids
-    // PostgreSQL's "NULLs distinct in unique" caveat.
-    uniqueIndex("idx_integration_conn_unique").on(
+    // No uniqueness on (packageId, authKey, accountId, app, owner): an
+    // actor may hold multiple connections on the same integration auth
+    // (even pointing at the same upstream account — it's their call to
+    // keep duplicates or clean up). Reconnect / upgrade flows target a
+    // specific row via its `id` (threaded through the OAuth state).
+    // Replaced with a covering lookup index so the resolver's per-actor
+    // queries stay fast.
+    index("idx_integration_conn_lookup").on(
       table.integrationPackageId,
       table.authKey,
-      table.accountId,
       table.applicationId,
-      sql`coalesce(${table.userId}, '')`,
-      sql`coalesce(${table.endUserId}, '')`,
     ),
     index("idx_integration_conn_user")
       .on(table.userId)

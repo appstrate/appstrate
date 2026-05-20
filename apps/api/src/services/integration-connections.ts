@@ -129,6 +129,18 @@ export interface ActorConnectionRow {
 }
 
 /**
+ * Spawn-side connection row — carries the `authKey` so the spawn
+ * resolver can pick the right `manifest.auths[authKey].delivery`
+ * declaration without iterating every declared auth on the integration.
+ *
+ * Used after the connection resolver has chosen one connection per
+ * integration (flat model — no per-authKey iteration at runtime).
+ */
+export interface ResolvedConnectionRow extends ActorConnectionRow {
+  authKey: string;
+}
+
+/**
  * Lookup the actor's `integration_connections` row for `(packageId, authKey)`
  * scoped to `applicationId`. Returns `null` when no accessible connection
  * exists — callers decide whether that is a 404, a silent skip, or a 412
@@ -214,6 +226,41 @@ export async function loadActorConnection(
     expiresAt: picked.expiresAt,
     scopesGranted: picked.scopesGranted,
   };
+}
+
+/**
+ * Load a specific connection row by its id, scoped to the application
+ * and protected by the actor's access predicate (own OR shared). Used
+ * by the spawn resolver to decrypt the connection chosen by the cascade
+ * (admin pin / overrides / member pin / auto fallback) and return its
+ * authKey for downstream delivery selection.
+ */
+export async function loadAccessibleConnectionById(
+  connectionId: string,
+  context: { applicationId: string; actor: Actor },
+): Promise<ResolvedConnectionRow | null> {
+  const ownerPredicate =
+    context.actor.type === "user"
+      ? eq(integrationConnections.userId, context.actor.id)
+      : eq(integrationConnections.endUserId, context.actor.id);
+  const [row] = await db
+    .select({
+      id: integrationConnections.id,
+      authKey: integrationConnections.authKey,
+      credentialsEncrypted: integrationConnections.credentialsEncrypted,
+      expiresAt: integrationConnections.expiresAt,
+      scopesGranted: integrationConnections.scopesGranted,
+    })
+    .from(integrationConnections)
+    .where(
+      and(
+        eq(integrationConnections.id, connectionId),
+        eq(integrationConnections.applicationId, context.applicationId),
+        or(ownerPredicate, eq(integrationConnections.sharedWithOrg, true)),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
 }
 
 /**
@@ -449,12 +496,28 @@ export interface StoreConnectionInput {
   scopesGranted?: string[];
   expiresAt?: Date | null;
   actor: Actor;
+  /**
+   * When provided, UPDATE this specific row (reconnect / upgrade-scopes
+   * paths). Owner predicate is still applied as defence in depth — a
+   * stale id from another actor can never land on someone else's row.
+   * When omitted, always INSERT a new row — the user explicitly asked
+   * for a new connection and we let them own duplicates if they want.
+   */
+  connectionId?: string;
 }
 
 /**
- * Insert-or-update one connection row (per the unique index on
- * `(packageId, authKey, accountId, applicationId, owner)`). Returns the
- * persisted summary view.
+ * Persist a new connection (INSERT) or refresh an existing one
+ * (UPDATE — caller passes `connectionId`). Returns the persisted
+ * summary view.
+ *
+ * Why no upsert-by-accountId: the previous model collapsed every
+ * connection on the same `(packageId, authKey, accountId, app, owner)`
+ * tuple, and `accountId` defaulted to the literal "default" whenever
+ * the manifest didn't declare identity extraction. Result: "Add
+ * another connection" silently overwrote the existing row. The new
+ * model trusts the caller's intent — explicit connectionId = update;
+ * no id = insert.
  */
 export async function saveIntegrationConnection(
   scope: AppScope,
@@ -465,86 +528,68 @@ export async function saveIntegrationConnection(
   const ciphertext = encryptCredentials(input.credentials);
   const now = new Date();
 
-  // Manual upsert — Drizzle's `onConflictDoUpdate` won't engage with the
-  // `coalesce(nullable)` expression in the unique index. We try update
-  // first; if no row matched the owner predicate, fall back to insert.
   const ownerPredicate = userId
     ? eq(integrationConnections.userId, userId)
     : eq(integrationConnections.endUserId, endUserId!);
 
-  const updated = await db
-    .update(integrationConnections)
-    .set({
-      credentialsEncrypted: ciphertext,
-      identityClaims: input.identityClaims ?? {},
-      scopesGranted: input.scopesGranted ?? [],
-      needsReconnection: false,
-      expiresAt: input.expiresAt ?? null,
-      updatedAt: now,
-    })
-    .where(
-      and(
-        eq(integrationConnections.integrationPackageId, input.packageId),
-        eq(integrationConnections.authKey, input.authKey),
-        eq(integrationConnections.accountId, input.accountId),
-        eq(integrationConnections.applicationId, scope.applicationId),
-        ownerPredicate,
-      ),
-    )
-    .returning();
-
-  let row = updated[0];
-  if (!row) {
-    // Single-auth-per-integration-per-actor invariant: refuse the insert
-    // when the actor already has a connection on a DIFFERENT auth for
-    // this integration in this application. Multi-auth integrations
-    // (e.g. GitHub MCP with `oauth` + `pat`) would otherwise leave the
-    // PAT row as dead weight (the spawn resolver prefers oauth2 and the
-    // MITM gets ambiguous per-request behaviour). The actor disconnects
-    // first if they want to switch auth.
-    const existingOther = await db
-      .select({ authKey: integrationConnections.authKey })
-      .from(integrationConnections)
-      .where(
-        and(
-          eq(integrationConnections.integrationPackageId, input.packageId),
-          eq(integrationConnections.applicationId, scope.applicationId),
-          ownerPredicate,
-        ),
-      )
-      .limit(1);
-    if (existingOther[0] && existingOther[0].authKey !== input.authKey) {
-      throw conflict(
-        "integration_other_auth_connected",
-        `This integration is already connected via auth '${existingOther[0].authKey}'. Disconnect it before connecting via '${input.authKey}'.`,
-      );
-    }
-
-    const inserted = await db
-      .insert(integrationConnections)
-      .values({
-        integrationPackageId: input.packageId,
-        authKey: input.authKey,
+  // Reconnect / upgrade path — target row known up front.
+  if (input.connectionId) {
+    const updated = await db
+      .update(integrationConnections)
+      .set({
         accountId: input.accountId,
-        applicationId: scope.applicationId,
-        userId,
-        endUserId,
         credentialsEncrypted: ciphertext,
         identityClaims: input.identityClaims ?? {},
         scopesGranted: input.scopesGranted ?? [],
         needsReconnection: false,
         expiresAt: input.expiresAt ?? null,
-        createdAt: now,
         updatedAt: now,
       })
+      .where(
+        and(
+          eq(integrationConnections.id, input.connectionId),
+          eq(integrationConnections.applicationId, scope.applicationId),
+          ownerPredicate,
+        ),
+      )
       .returning();
-    row = inserted[0];
+    const row = updated[0];
+    if (!row) {
+      throw notFound(`Connection '${input.connectionId}' not found or not owned by caller`);
+    }
+    return rowToSummary(row);
   }
 
+  // No mono-auth-per-actor gate: an actor may hold N connections across
+  // any mix of declared auths (OAuth + PAT + custom). The runtime picks
+  // exactly one per run via the 5-layer resolver cascade (admin pin →
+  // run override → schedule override → member pin → fallback), and the
+  // member picker on the agent surface disambiguates when >1 candidate
+  // is accessible. Letting the user keep multiple shapes coexist matches
+  // real workflows — interactive OAuth in the UI + PAT for CI agents,
+  // for instance.
+  const inserted = await db
+    .insert(integrationConnections)
+    .values({
+      integrationPackageId: input.packageId,
+      authKey: input.authKey,
+      accountId: input.accountId,
+      applicationId: scope.applicationId,
+      userId,
+      endUserId,
+      credentialsEncrypted: ciphertext,
+      identityClaims: input.identityClaims ?? {},
+      scopesGranted: input.scopesGranted ?? [],
+      needsReconnection: false,
+      expiresAt: input.expiresAt ?? null,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning();
+  const row = inserted[0];
   if (!row) {
-    throw new Error("saveIntegrationConnection: upsert returned no row");
+    throw new Error("saveIntegrationConnection: insert returned no row");
   }
-
   return rowToSummary(row);
 }
 

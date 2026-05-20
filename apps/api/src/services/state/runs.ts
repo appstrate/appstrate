@@ -218,17 +218,14 @@ interface CreateRunParams {
    * pinned admin choices and fallback if absent. Null when the run used
    * defaults verbatim.
    */
-  connectionOverrides?: Record<string, Record<string, string>> | null;
+  connectionOverrides?: Record<string, string> | null;
   /**
-   * Snapshot of the resolver output at kickoff: per (integration, authKey),
-   * which connection id was actually picked and which mechanism produced
-   * the pick. Persisted on `runs.resolved_connections` so the credentials
+   * Snapshot of the resolver output at kickoff: per integration, which
+   * connection id was actually picked and which mechanism produced the
+   * pick. Persisted on `runs.resolved_connections` so the credentials
    * resolver (sidecar MITM refresh) can honour the pick long after kickoff.
    */
-  resolvedConnections?: Record<
-    string,
-    Record<string, { connectionId: string; source: string }>
-  > | null;
+  resolvedConnections?: Record<string, { connectionId: string; source: string }> | null;
   /**
    * `model_provider_credentials.id` snapshotted at run creation. Pinned
    * here so the OAuth model token resolver can reject any other

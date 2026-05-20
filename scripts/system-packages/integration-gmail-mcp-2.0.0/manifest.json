@@ -24,6 +24,14 @@
       "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth",
       "tokenUrl": "https://oauth2.googleapis.com/token",
       "refreshUrl": "https://oauth2.googleapis.com/token",
+      "userinfoUrl": "https://openidconnect.googleapis.com/v1/userinfo",
+      "extractTokenIdentity": {
+        "accountId": "$.email",
+        "sub": "$.sub",
+        "email": "$.email",
+        "name": "$.name",
+        "picture": "$.picture"
+      },
       "scopes": [
         "openid",
         "email",

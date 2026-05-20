@@ -83,6 +83,20 @@ export interface InitiateIntegrationOAuthInput {
   actor: Actor;
   /** Connection profile id (mirrors legacy OAuth flow for consistency). */
   connectionProfileId: string;
+  /**
+   * When true, append `prompt=select_account` to the authorize URL so the
+   * IdP shows the account picker instead of silently reusing the currently
+   * signed-in session. Set by the UI when the user explicitly asks to add
+   * a NEW connection — without it, the IdP would silently authorise the
+   * already signed-in account.
+   */
+  forceAccountSelect?: boolean;
+  /**
+   * Reconnect / upgrade-scopes target. Threaded into the OAuth state so
+   * the callback updates the named row instead of inserting a duplicate.
+   * Absent on fresh connects.
+   */
+  connectionId?: string;
 }
 
 export interface InitiateIntegrationOAuthResult {
@@ -132,6 +146,7 @@ export async function initiateIntegrationOAuth(
       tokenAuthMethod,
       clientId: input.clientId,
       clientSecret: input.clientSecret,
+      ...(input.connectionId ? { connectionId: input.connectionId } : {}),
     },
   };
   await store.set(state, record, OAUTH_STATE_TTL_SECONDS);
@@ -152,6 +167,7 @@ export async function initiateIntegrationOAuth(
     // Some IdPs require this on the authorize URL too (not just on the
     // token request); harmless when accepted-but-ignored.
     ...(input.audience ? { resource: input.audience } : {}),
+    ...(input.forceAccountSelect ? { prompt: "select_account" } : {}),
   });
 
   const authUrl = `${input.authorizationUrl}${input.authorizationUrl.includes("?") ? "&" : "?"}${params.toString()}`;
@@ -177,6 +193,12 @@ export interface IntegrationOAuthCallbackResult {
    * extraction (`extractTokenIdentity` JSONPaths) reads from here.
    */
   tokenResponse: Record<string, unknown>;
+  /**
+   * Pass-through of the reconnect/upgrade target id set at initiate
+   * time. The callback handler hands this to `saveIntegrationConnection`
+   * so the existing row is updated instead of a duplicate inserted.
+   */
+  connectionId?: string;
 }
 
 /**
@@ -248,5 +270,6 @@ export async function handleIntegrationOAuthCallback(
     scopeShortfall: parsed.scopeShortfall,
     scopeCreep: parsed.scopeCreep,
     tokenResponse: tokenData,
+    ...(integration.connectionId ? { connectionId: integration.connectionId } : {}),
   };
 }

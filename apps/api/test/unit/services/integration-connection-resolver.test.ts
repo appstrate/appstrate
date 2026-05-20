@@ -2,22 +2,19 @@
 
 /**
  * Unit tests for the pure `resolveConnections()` function — the
- * 4-mechanism cascade that decides which integration connection a run
- * uses per (integration, authKey).
+ * 5-mechanism cascade that decides which connection a run uses per
+ * integration. One connection per integration: the chosen row carries
+ * its own `authKey`, OAuth and api_key are interchangeable.
  *
- * Pure function, no DB. All inputs are arrays + plain objects. The
- * orchestrator that fans out to DB lives in the same module but isn't
- * tested here (covered by integration tests in P2).
+ * Pure function, no DB. All inputs are arrays + plain objects.
  *
  * Cascade order (highest → lowest):
- *   1. integration_pins                  → admin force
- *   2. runs.connection_overrides         → caller's run-time choice
- *   3. package_schedules.connection_overrides → schedule frozen
- *   4. fallback: own + shared accessible
+ *   1. integration_pins (user_id IS NULL)        → admin force
+ *   2. runs.connection_overrides                 → caller's run-time choice
+ *   3. package_schedules.connection_overrides    → schedule frozen
+ *   4. integration_pins (user_id = actor.id)     → member preference
+ *   5. fallback: own + shared accessible
  *      → 1 match = auto, 0 = not_connected, N = must_choose
- *
- * Each test asserts (a) the chosen connection.id (b) the resolution
- * source label, OR (a) the error code and (b) the structured detail.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -39,9 +36,7 @@ const APP_ID = "app_test";
 const USER_ID = "user_alice";
 const AGENT_ID = "@vendor/test-agent";
 
-function oauth2Manifest(overrides?: {
-  availableScopes?: { value: string; implies?: string[] }[];
-}): IntegrationManifest {
+function oauth2Manifest(): IntegrationManifest {
   return {
     manifestVersion: "1.0",
     type: "integration",
@@ -55,23 +50,7 @@ function oauth2Manifest(overrides?: {
         authorizationUrl: "https://idp/auth",
         tokenUrl: "https://idp/token",
         scopes: [],
-        ...(overrides?.availableScopes ? { availableScopes: overrides.availableScopes } : {}),
       },
-    },
-    tools: {},
-  } as unknown as IntegrationManifest;
-}
-
-function apiKeyManifest(): IntegrationManifest {
-  return {
-    manifestVersion: "1.0",
-    type: "integration",
-    name: INTEG,
-    version: "1.0.0",
-    displayName: "Test",
-    server: { type: "node", entryPoint: "index.js" },
-    auths: {
-      api: { type: "api_key" },
     },
     tools: {},
   } as unknown as IntegrationManifest;
@@ -102,14 +81,13 @@ function conn(input: Partial<ConnectionRow> & { authKey?: string }): ConnectionR
 }
 
 let pinSeq = 0;
-function pin(connectionId: string, authKey = "oauth", opts?: { userId?: string | null }): PinRow {
+function pin(connectionId: string, opts?: { userId?: string | null }): PinRow {
   pinSeq += 1;
   return {
     id: `pin_${pinSeq}`,
     applicationId: APP_ID,
     packageId: AGENT_ID,
     integrationPackageId: INTEG,
-    authKey,
     userId: opts?.userId ?? null,
     connectionId,
     createdBy: null,
@@ -119,25 +97,22 @@ function pin(connectionId: string, authKey = "oauth", opts?: { userId?: string |
 }
 
 /** Sugar — member pin scoped to the test's default user. */
-function memberPin(connectionId: string, authKey = "oauth"): PinRow {
-  return pin(connectionId, authKey, { userId: USER_ID });
+function memberPin(connectionId: string): PinRow {
+  return pin(connectionId, { userId: USER_ID });
 }
 
-function req(
-  manifest: IntegrationManifest,
-  opts?: { requiredAuthKeys?: string[]; requiredScopes?: Record<string, string[]> },
-): IntegrationRequirement {
+function req(manifest: IntegrationManifest, agentTools: string[] = []): IntegrationRequirement {
   return {
     integrationId: INTEG,
     manifest,
-    requiredAuthKeys: opts?.requiredAuthKeys ?? ["oauth"],
-    requiredScopesByAuth: opts?.requiredScopes ?? {},
+    hasSelectedTools: true,
+    agentTools,
   };
 }
 
 // ─────────────────────────── Cascade tests ────────────────────────────────────
 
-describe("resolveConnections — pin (cascade layer 1)", () => {
+describe("resolveConnections — admin pin (cascade layer 1)", () => {
   it("uses the pinned connection when present and accessible", () => {
     const c = conn({});
     const result = resolveConnections({
@@ -146,7 +121,7 @@ describe("resolveConnections — pin (cascade layer 1)", () => {
       pins: [pin(c.id)],
     });
     expect(result.errors).toEqual([]);
-    expect(result.resolved[INTEG]!.oauth).toEqual({
+    expect(result.resolved[INTEG]).toEqual({
       connectionId: c.id,
       source: "admin_pin",
     });
@@ -170,10 +145,10 @@ describe("resolveConnections — pin (cascade layer 1)", () => {
       requirements: [req(oauth2Manifest())],
       accessibleConnections: [pinned, overridden],
       pins: [pin(pinned.id)],
-      runOverrides: { [INTEG]: { oauth: overridden.id } },
+      runOverrides: { [INTEG]: overridden.id },
     });
-    expect(result.resolved[INTEG]!.oauth!.connectionId).toBe(pinned.id);
-    expect(result.resolved[INTEG]!.oauth!.source).toBe("admin_pin");
+    expect(result.resolved[INTEG]!.connectionId).toBe(pinned.id);
+    expect(result.resolved[INTEG]!.source).toBe("admin_pin");
   });
 
   it("pin wins over schedule override", () => {
@@ -183,9 +158,23 @@ describe("resolveConnections — pin (cascade layer 1)", () => {
       requirements: [req(oauth2Manifest())],
       accessibleConnections: [pinned, sched],
       pins: [pin(pinned.id)],
-      scheduleOverrides: { [INTEG]: { oauth: sched.id } },
+      scheduleOverrides: { [INTEG]: sched.id },
     });
-    expect(result.resolved[INTEG]!.oauth!.source).toBe("admin_pin");
+    expect(result.resolved[INTEG]!.source).toBe("admin_pin");
+  });
+
+  it("pin on a DIFFERENT auth shape still wins (oauth pin overrides agent's pat default)", () => {
+    // The reason the flat model exists: a PAT-pinned connection MUST win
+    // even when the agent's tools nominally declare requiredAuthKey: oauth.
+    const patConn = conn({ authKey: "pat" });
+    const oauthConn = conn({ authKey: "oauth" });
+    const result = resolveConnections({
+      requirements: [req(oauth2Manifest())],
+      accessibleConnections: [patConn, oauthConn],
+      pins: [pin(patConn.id)],
+    });
+    expect(result.resolved[INTEG]!.connectionId).toBe(patConn.id);
+    expect(result.resolved[INTEG]!.source).toBe("admin_pin");
   });
 });
 
@@ -196,9 +185,9 @@ describe("resolveConnections — run override (cascade layer 2)", () => {
       requirements: [req(oauth2Manifest())],
       accessibleConnections: [c],
       pins: [],
-      runOverrides: { [INTEG]: { oauth: c.id } },
+      runOverrides: { [INTEG]: c.id },
     });
-    expect(result.resolved[INTEG]!.oauth).toEqual({
+    expect(result.resolved[INTEG]).toEqual({
       connectionId: c.id,
       source: "run_override",
     });
@@ -211,10 +200,10 @@ describe("resolveConnections — run override (cascade layer 2)", () => {
       requirements: [req(oauth2Manifest())],
       accessibleConnections: [runChoice, sched],
       pins: [],
-      runOverrides: { [INTEG]: { oauth: runChoice.id } },
-      scheduleOverrides: { [INTEG]: { oauth: sched.id } },
+      runOverrides: { [INTEG]: runChoice.id },
+      scheduleOverrides: { [INTEG]: sched.id },
     });
-    expect(result.resolved[INTEG]!.oauth!.source).toBe("run_override");
+    expect(result.resolved[INTEG]!.source).toBe("run_override");
   });
 
   it("emits override_connection_unavailable when the override points nowhere", () => {
@@ -222,7 +211,7 @@ describe("resolveConnections — run override (cascade layer 2)", () => {
       requirements: [req(oauth2Manifest())],
       accessibleConnections: [],
       pins: [],
-      runOverrides: { [INTEG]: { oauth: "conn_ghost" } },
+      runOverrides: { [INTEG]: "conn_ghost" },
     });
     expect(result.errors[0]!.code).toBe("override_connection_unavailable");
   });
@@ -235,9 +224,9 @@ describe("resolveConnections — schedule override (cascade layer 3)", () => {
       requirements: [req(oauth2Manifest())],
       accessibleConnections: [c],
       pins: [],
-      scheduleOverrides: { [INTEG]: { oauth: c.id } },
+      scheduleOverrides: { [INTEG]: c.id },
     });
-    expect(result.resolved[INTEG]!.oauth!.source).toBe("schedule_override");
+    expect(result.resolved[INTEG]!.source).toBe("schedule_override");
   });
 });
 
@@ -250,7 +239,7 @@ describe("resolveConnections — member pin (cascade layer 4)", () => {
       pins: [memberPin(c.id)],
       actorUserId: USER_ID,
     });
-    expect(result.resolved[INTEG]!.oauth).toEqual({
+    expect(result.resolved[INTEG]).toEqual({
       connectionId: c.id,
       source: "member_pin",
     });
@@ -261,13 +250,13 @@ describe("resolveConnections — member pin (cascade layer 4)", () => {
     const result = resolveConnections({
       requirements: [req(oauth2Manifest())],
       accessibleConnections: [c],
-      pins: [pin(c.id, "oauth", { userId: "user_someone_else" })],
+      pins: [pin(c.id, { userId: "user_someone_else" })],
       actorUserId: USER_ID,
     });
-    expect(result.resolved[INTEG]!.oauth!.source).toBe("fallback_auto");
+    expect(result.resolved[INTEG]!.source).toBe("fallback_auto");
   });
 
-  it("admin pin wins over member pin (same agent, same auth)", () => {
+  it("admin pin wins over member pin (same agent, same integration)", () => {
     const adminChoice = conn({});
     const memberChoice = conn({});
     const result = resolveConnections({
@@ -276,8 +265,8 @@ describe("resolveConnections — member pin (cascade layer 4)", () => {
       pins: [pin(adminChoice.id), memberPin(memberChoice.id)],
       actorUserId: USER_ID,
     });
-    expect(result.resolved[INTEG]!.oauth!.connectionId).toBe(adminChoice.id);
-    expect(result.resolved[INTEG]!.oauth!.source).toBe("admin_pin");
+    expect(result.resolved[INTEG]!.connectionId).toBe(adminChoice.id);
+    expect(result.resolved[INTEG]!.source).toBe("admin_pin");
   });
 
   it("run override wins over member pin", () => {
@@ -287,15 +276,13 @@ describe("resolveConnections — member pin (cascade layer 4)", () => {
       requirements: [req(oauth2Manifest())],
       accessibleConnections: [memberChoice, runChoice],
       pins: [memberPin(memberChoice.id)],
-      runOverrides: { [INTEG]: { oauth: runChoice.id } },
+      runOverrides: { [INTEG]: runChoice.id },
       actorUserId: USER_ID,
     });
-    expect(result.resolved[INTEG]!.oauth!.source).toBe("run_override");
+    expect(result.resolved[INTEG]!.source).toBe("run_override");
   });
 
   it("member pin wins over the >1 fallback ambiguity", () => {
-    // Without the pin, the 2 candidates would surface must_choose. The
-    // pin disambiguates — that's its entire point.
     const picked = conn({});
     const other = conn({});
     const result = resolveConnections({
@@ -305,8 +292,8 @@ describe("resolveConnections — member pin (cascade layer 4)", () => {
       actorUserId: USER_ID,
     });
     expect(result.errors).toEqual([]);
-    expect(result.resolved[INTEG]!.oauth!.connectionId).toBe(picked.id);
-    expect(result.resolved[INTEG]!.oauth!.source).toBe("member_pin");
+    expect(result.resolved[INTEG]!.connectionId).toBe(picked.id);
+    expect(result.resolved[INTEG]!.source).toBe("member_pin");
   });
 
   it("emits pinned_connection_unavailable when the member pin points at a vanished connection", () => {
@@ -328,12 +315,11 @@ describe("resolveConnections — member pin (cascade layer 4)", () => {
       pins: [memberPin(c.id)],
       actorUserId: null,
     });
-    // No admin pin, no overrides, no member-pin-applicable → fallback auto.
-    expect(result.resolved[INTEG]!.oauth!.source).toBe("fallback_auto");
+    expect(result.resolved[INTEG]!.source).toBe("fallback_auto");
   });
 });
 
-describe("resolveConnections — fallback (cascade layer 4)", () => {
+describe("resolveConnections — fallback (cascade layer 5)", () => {
   it("auto-picks the single accessible connection", () => {
     const c = conn({});
     const result = resolveConnections({
@@ -341,7 +327,7 @@ describe("resolveConnections — fallback (cascade layer 4)", () => {
       accessibleConnections: [c],
       pins: [],
     });
-    expect(result.resolved[INTEG]!.oauth).toEqual({
+    expect(result.resolved[INTEG]).toEqual({
       connectionId: c.id,
       source: "fallback_auto",
     });
@@ -354,8 +340,8 @@ describe("resolveConnections — fallback (cascade layer 4)", () => {
       accessibleConnections: [adminShared],
       pins: [],
     });
-    expect(result.resolved[INTEG]!.oauth!.connectionId).toBe(adminShared.id);
-    expect(result.resolved[INTEG]!.oauth!.source).toBe("fallback_auto");
+    expect(result.resolved[INTEG]!.connectionId).toBe(adminShared.id);
+    expect(result.resolved[INTEG]!.source).toBe("fallback_auto");
   });
 
   it("emits not_connected when nothing matches", () => {
@@ -367,12 +353,11 @@ describe("resolveConnections — fallback (cascade layer 4)", () => {
     expect(result.errors).toHaveLength(1);
     expect(result.errors[0]!.code).toBe("not_connected");
     expect(result.errors[0]!.integrationId).toBe(INTEG);
-    expect(result.errors[0]!.authKey).toBe("oauth");
   });
 
-  it("emits must_choose_connection when >1 candidate", () => {
+  it("emits must_choose_connection when >1 candidate (any auth shape)", () => {
     const a = conn({});
-    const b = conn({});
+    const b = conn({ authKey: "pat" });
     const result = resolveConnections({
       requirements: [req(oauth2Manifest())],
       accessibleConnections: [a, b],
@@ -381,17 +366,6 @@ describe("resolveConnections — fallback (cascade layer 4)", () => {
     expect(result.errors).toHaveLength(1);
     expect(result.errors[0]!.code).toBe("must_choose_connection");
     expect(result.errors[0]!.candidateConnectionIds).toEqual(expect.arrayContaining([a.id, b.id]));
-  });
-
-  it("filters candidates by integrationId + authKey", () => {
-    // Connection matches integration but wrong auth — not a candidate.
-    const wrongAuth = conn({ authKey: "other" });
-    const result = resolveConnections({
-      requirements: [req(oauth2Manifest())],
-      accessibleConnections: [wrongAuth],
-      pins: [],
-    });
-    expect(result.errors[0]!.code).toBe("not_connected");
   });
 });
 
@@ -415,57 +389,10 @@ describe("resolveConnections — health checks", () => {
     });
     expect(pinResult.errors[0]!.code).toBe("needs_reconnection");
   });
-
-  it("emits insufficient_scopes when granted does not cover required", () => {
-    const c = conn({ scopesGranted: ["read"] });
-    const result = resolveConnections({
-      requirements: [req(oauth2Manifest(), { requiredScopes: { oauth: ["read", "write"] } })],
-      accessibleConnections: [c],
-      pins: [],
-    });
-    expect(result.errors[0]!.code).toBe("insufficient_scopes");
-    expect(result.errors[0]!.requiredScopes).toEqual(["read", "write"]);
-    expect(result.errors[0]!.grantedScopes).toEqual(["read"]);
-  });
-
-  it("expands granted scopes through implies hierarchy", () => {
-    // `admin` implies `read` + `write`. Connection granted `admin` covers both.
-    const m = oauth2Manifest({
-      availableScopes: [
-        { value: "admin", implies: ["read", "write"] },
-        { value: "read" },
-        { value: "write" },
-      ],
-    });
-    const c = conn({ scopesGranted: ["admin"] });
-    const result = resolveConnections({
-      requirements: [req(m, { requiredScopes: { oauth: ["read", "write"] } })],
-      accessibleConnections: [c],
-      pins: [],
-    });
-    expect(result.errors).toEqual([]);
-    expect(result.resolved[INTEG]!.oauth!.connectionId).toBe(c.id);
-  });
-
-  it("skips scope check for api_key auths (opaque grants)", () => {
-    const c = conn({ authKey: "api", scopesGranted: [] });
-    const result = resolveConnections({
-      requirements: [
-        req(apiKeyManifest(), {
-          requiredAuthKeys: ["api"],
-          requiredScopes: { api: ["read"] },
-        }),
-      ],
-      accessibleConnections: [c],
-      pins: [],
-    });
-    expect(result.errors).toEqual([]);
-    expect(result.resolved[INTEG]!.api!.connectionId).toBe(c.id);
-  });
 });
 
-describe("resolveConnections — multi-integration, multi-auth", () => {
-  it("handles each (integration, authKey) independently", () => {
+describe("resolveConnections — multi-integration", () => {
+  it("handles each integration independently", () => {
     const INTEG2 = "@vendor/other-integ";
     const c1 = conn({});
     const c2 = conn({ integrationPackageId: INTEG2 });
@@ -480,15 +407,15 @@ describe("resolveConnections — multi-integration, multi-auth", () => {
         {
           integrationId: INTEG2,
           manifest: m2,
-          requiredAuthKeys: ["oauth"],
-          requiredScopesByAuth: {},
+          hasSelectedTools: true,
+          agentTools: [],
         },
       ],
       accessibleConnections: [c1, c2],
       pins: [],
     });
-    expect(result.resolved[INTEG]!.oauth!.connectionId).toBe(c1.id);
-    expect(result.resolved[INTEG2]!.oauth!.connectionId).toBe(c2.id);
+    expect(result.resolved[INTEG]!.connectionId).toBe(c1.id);
+    expect(result.resolved[INTEG2]!.connectionId).toBe(c2.id);
   });
 
   it("partial resolution: integration A succeeds, B errors", () => {
@@ -501,8 +428,8 @@ describe("resolveConnections — multi-integration, multi-auth", () => {
         {
           integrationId: INTEG2,
           manifest: m2,
-          requiredAuthKeys: ["oauth"],
-          requiredScopesByAuth: {},
+          hasSelectedTools: true,
+          agentTools: [],
         },
       ],
       accessibleConnections: [c1],
@@ -515,7 +442,7 @@ describe("resolveConnections — multi-integration, multi-auth", () => {
   });
 });
 
-describe("resolveConnections — empty requirements / inert auth keys", () => {
+describe("resolveConnections — empty requirements / inert integrations", () => {
   it("returns empty result when no requirements", () => {
     const result = resolveConnections({
       requirements: [],
@@ -526,13 +453,85 @@ describe("resolveConnections — empty requirements / inert auth keys", () => {
     expect(result.errors).toEqual([]);
   });
 
-  it("skips integrations with no required auth keys (agent picked 0 tools)", () => {
+  it("skips integrations with no selected tools (declared-but-inert)", () => {
     const result = resolveConnections({
-      requirements: [req(oauth2Manifest(), { requiredAuthKeys: [] })],
+      requirements: [
+        {
+          integrationId: INTEG,
+          manifest: oauth2Manifest(),
+          hasSelectedTools: false,
+          agentTools: [],
+        },
+      ],
       accessibleConnections: [],
       pins: [],
     });
     expect(result.resolved).toEqual({});
     expect(result.errors).toEqual([]);
+  });
+});
+
+describe("resolveConnections — insufficient scopes on resolved connection", () => {
+  // Manifest where tool `t1` requires the `repo` scope on the oauth auth.
+  function scopedManifest(): IntegrationManifest {
+    return {
+      manifestVersion: "1.0",
+      type: "integration",
+      name: INTEG,
+      version: "1.0.0",
+      displayName: "Test",
+      server: { type: "node", entryPoint: "index.js" },
+      auths: {
+        oauth: {
+          type: "oauth2",
+          authorizationUrl: "https://idp/auth",
+          tokenUrl: "https://idp/token",
+          scopes: [],
+          availableScopes: [{ value: "repo", label: "Repo" }],
+        },
+      },
+      tools: { t1: { requiredScopes: ["repo"] } },
+    } as unknown as IntegrationManifest;
+  }
+
+  it("blocks when the resolved own connection lacks a required scope (ownedByActor=true)", () => {
+    const c = conn({ scopesGranted: [] });
+    const result = resolveConnections({
+      requirements: [req(scopedManifest(), ["t1"])],
+      accessibleConnections: [c],
+      pins: [],
+      actorUserId: USER_ID,
+    });
+    expect(result.resolved[INTEG]).toBeUndefined();
+    const err = result.errors[0]!;
+    expect(err.code).toBe("insufficient_scopes");
+    expect(err.connectionId).toBe(c.id);
+    expect(err.missingScopes).toEqual(["repo"]);
+    expect(err.ownedByActor).toBe(true);
+  });
+
+  it("resolves when the connection already grants the required scope", () => {
+    const c = conn({ scopesGranted: ["repo"] });
+    const result = resolveConnections({
+      requirements: [req(scopedManifest(), ["t1"])],
+      accessibleConnections: [c],
+      pins: [],
+      actorUserId: USER_ID,
+    });
+    expect(result.errors).toEqual([]);
+    expect(result.resolved[INTEG]?.connectionId).toBe(c.id);
+  });
+
+  it("flags ownedByActor=false when the under-scoped connection belongs to someone else", () => {
+    const foreign = conn({ userId: "user_someone_else", sharedWithOrg: true, scopesGranted: [] });
+    const result = resolveConnections({
+      requirements: [req(scopedManifest(), ["t1"])],
+      accessibleConnections: [foreign],
+      pins: [pin(foreign.id, { userId: USER_ID })],
+      actorUserId: USER_ID,
+    });
+    const err = result.errors[0]!;
+    expect(err.code).toBe("insufficient_scopes");
+    expect(err.ownedByActor).toBe(false);
   });
 });

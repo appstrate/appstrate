@@ -15,7 +15,6 @@ import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { integrationConnections } from "@appstrate/db/schema";
 import { collectIntegrationDependencyErrors } from "../../../src/services/dependency-validation.ts";
-import { ApiError } from "../../../src/lib/errors.ts";
 
 const INTEGRATION_ID = "@official/gmail";
 
@@ -394,17 +393,17 @@ describe("collectIntegrationDependencyErrors (additional cases)", () => {
   });
 });
 
-describe("saveIntegrationConnection — single-auth invariant", () => {
+describe("saveIntegrationConnection — multi-auth coexistence", () => {
   let ctx: TestContext;
   let actor: { type: "user"; id: string };
 
   beforeEach(async () => {
     await truncateAll();
-    ctx = await createTestContext({ orgSlug: "single-auth" });
+    ctx = await createTestContext({ orgSlug: "multi-auth" });
     actor = { type: "user", id: ctx.user.id };
   });
 
-  it("refuses a second connection on a different auth for the same actor/integration", async () => {
+  it("allows the same actor to hold connections across multiple auth shapes", async () => {
     // Multi-auth integration declaring both oauth + pat (mirrors GitHub MCP).
     const dualAuthId = "@official/dual";
     await seedPackage({
@@ -452,24 +451,19 @@ describe("saveIntegrationConnection — single-auth invariant", () => {
       },
     );
 
-    // Second connection on `pat` for the same actor must throw 409.
-    let caught: unknown;
-    try {
-      await saveIntegrationConnection(
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        {
-          packageId: dualAuthId,
-          authKey: "pat",
-          accountId: "u1",
-          credentials: { apiKey: "secret" },
-          actor,
-        },
-      );
-    } catch (err) {
-      caught = err;
-    }
-    expect(caught).toBeInstanceOf(ApiError);
-    expect((caught as ApiError).status).toBe(409);
-    expect((caught as ApiError).code).toBe("integration_other_auth_connected");
+    // Second connection on `pat` for the same actor — must succeed.
+    // The runtime resolver picks exactly one per run via the cascade
+    // (admin pin → run override → schedule override → member pin →
+    // fallback); coexistence is the user's prerogative.
+    await saveIntegrationConnection(
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      {
+        packageId: dualAuthId,
+        authKey: "pat",
+        accountId: "u1",
+        credentials: { apiKey: "secret" },
+        actor,
+      },
+    );
   });
 });

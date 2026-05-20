@@ -93,10 +93,7 @@ async function verifyRunToken(c: Context): Promise<{
      * (#199). The credentials resolver uses it to honour admin pins and
      * per-run overrides past the kickoff handoff.
      */
-    resolvedConnections: Record<
-      string,
-      Record<string, { connectionId: string; source: string }>
-    > | null;
+    resolvedConnections: Record<string, { connectionId: string; source: string }> | null;
   };
 }> {
   const authHeader = c.req.header("Authorization");

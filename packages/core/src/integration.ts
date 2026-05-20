@@ -350,6 +350,15 @@ const authSchema = z
     tokenUrl: z.string().optional(),
     refreshUrl: z.string().optional(),
     revokeUrl: z.string().optional(),
+    // Optional Bearer-protected endpoint returning a JSON object with
+    // identity claims about the freshly-authorised account. Called by the
+    // OAuth callback after a successful token exchange and merged into the
+    // identity source so `extractTokenIdentity` can pull stable per-account
+    // values (login, sub, email, …). Required for non-OIDC IdPs (GitHub,
+    // Slack, Notion, …) where the token response itself carries no identity
+    // — without it `accountId` falls back to the literal "default" and
+    // every connection collapses onto the same row.
+    userinfoUrl: z.string().optional(),
 
     // Endpoints — Mode B (RFC 9728 discovery)
     discovery: discoveryExplicitSchema.optional(),
@@ -888,13 +897,17 @@ export function validateAgentIntegrationScopes(
 // ────────────────────────────────────────────────────────────────────
 
 /**
- * Per-(integration, authKey) connection picks. Used on
- * `runs.connection_overrides` (caller's run-time choice) and
- * `package_schedules.connection_overrides` (frozen at schedule create).
+ * Per-integration connection picks. Used on `runs.connection_overrides`
+ * (caller's run-time choice) and `package_schedules.connection_overrides`
+ * (frozen at schedule create).
  *
- * Shape: `{ "@scope/integration": { "<authKey>": "<connection_id>" } }`.
+ * Shape: `{ "@scope/integration": "<connection_id>" }`. The chosen
+ * connection carries its own authKey — at runtime selection we don't
+ * discriminate between OAuth / api_key / basic / custom. The agent
+ * author's `tools.{name}.requiredAuthKey` informs OAuth-scope inference
+ * at consent time but never gates run-time credential choice.
  */
-export type ConnectionOverrides = Record<string, Record<string, string>>;
+export type ConnectionOverrides = Record<string, string>;
 
 /** Where a resolved connection came from — drives the audit + UI badge. */
 export type ConnectionResolutionSource =
@@ -905,7 +918,7 @@ export type ConnectionResolutionSource =
   | "fallback_auto"
   | "fallback_default";
 
-/** A single (integration, authKey) → connection result. */
+/** Per-integration resolution result. */
 export interface ResolvedConnection {
   connectionId: string;
   source: ConnectionResolutionSource;
@@ -916,26 +929,25 @@ export interface ResolvedConnection {
  * `runs.resolved_connections` so post-hoc audits don't depend on
  * still-mutable pin / connection state.
  *
- * Shape: `{ "@scope/integration": { "<authKey>": ResolvedConnection } }`.
+ * Shape: `{ "@scope/integration": ResolvedConnection }`.
  */
-export type ResolvedConnectionMap = Record<string, Record<string, ResolvedConnection>>;
+export type ResolvedConnectionMap = Record<string, ResolvedConnection>;
 
-/** Error codes the resolver emits per (integration, authKey). */
+/** Error codes the resolver emits per integration. */
 export type ConnectionResolutionErrorCode =
   | "not_connected"
   | "needs_reconnection"
-  | "insufficient_scopes"
   | "connection_blocked_by_admin"
   | "pinned_connection_unavailable"
   | "override_connection_unavailable"
-  | "must_choose_connection";
+  | "must_choose_connection"
+  | "insufficient_scopes";
 
 /**
- * One unresolved (integration, authKey) pair plus structured detail.
+ * One unresolved integration plus structured detail.
  *
  * - `not_connected` — actor has no own connection and no shared one matches.
  * - `needs_reconnection` — the chosen connection has the flag set.
- * - `insufficient_scopes` — granted scopes don't cover the required union.
  * - `connection_blocked_by_admin` — actor isn't admin and the (app, integration)
  *    has `block_user_connections=true`. Reported only at the
  *    CREATE-connection endpoint; the resolver never sees this case in
@@ -947,17 +959,26 @@ export type ConnectionResolutionErrorCode =
  *    invisible connection. Caller error.
  * - `must_choose_connection` — fallback found >1 candidate; the UI must
  *    prompt for a pick before retrying.
+ * - `insufficient_scopes` — the RESOLVED connection's granted OAuth scopes
+ *    don't cover what the agent's selected tools require on that connection's
+ *    auth. Run is blocked. If the actor owns the connection the UI offers an
+ *    incremental-consent upgrade; otherwise it surfaces a read-only error
+ *    (the connection belongs to someone else — only its owner can re-consent).
  */
 export interface ConnectionResolutionError {
   integrationId: string;
-  authKey: string;
   code: ConnectionResolutionErrorCode;
   /** Candidate connection ids when `code === "must_choose_connection"`. */
   candidateConnectionIds?: string[];
-  /** Required scopes when `code === "insufficient_scopes"`. */
-  requiredScopes?: string[];
-  /** Granted scopes when `code === "insufficient_scopes"`. */
-  grantedScopes?: string[];
+  /** The under-scoped connection when `code === "insufficient_scopes"`. */
+  connectionId?: string;
+  /** Scopes the agent needs that the connection lacks (insufficient_scopes). */
+  missingScopes?: string[];
+  /**
+   * True when the resolved connection belongs to the current actor — drives
+   * the upgrade-vs-error branch in the UI for `insufficient_scopes`.
+   */
+  ownedByActor?: boolean;
   message: string;
 }
 

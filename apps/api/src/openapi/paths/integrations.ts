@@ -522,6 +522,8 @@ export const integrationsPaths = {
               type: "object",
               properties: {
                 scopes: { type: "array", items: { type: "string" } },
+                forceAccountSelect: { type: "boolean" },
+                connectionId: { type: "string", format: "uuid" },
               },
             },
           },
@@ -617,6 +619,8 @@ export const integrationsPaths = {
                         "label",
                         "ownerUserId",
                         "ownerEndUserId",
+                        "ownerName",
+                        "scopesGranted",
                         "sharedWithOrg",
                         "needsReconnection",
                       ],
@@ -627,6 +631,8 @@ export const integrationsPaths = {
                         label: { type: ["string", "null"] },
                         ownerUserId: { type: ["string", "null"] },
                         ownerEndUserId: { type: ["string", "null"] },
+                        ownerName: { type: ["string", "null"] },
+                        scopesGranted: { type: "array", items: { type: "string" } },
                         sharedWithOrg: { type: "boolean" },
                         needsReconnection: { type: "boolean" },
                       },
@@ -815,17 +821,16 @@ export const integrationsPaths = {
       },
     },
   },
-  "/api/integrations/{packageId}/pins/{agentPackageId}/{authKey}": {
+  "/api/integrations/{packageId}/pins/{agentPackageId}": {
     put: {
       operationId: "upsertIntegrationPin",
       tags: ["Integrations"],
-      summary: "Pin an admin-shared connection to (agent, auth) for all members (admin)",
+      summary: "Pin an admin-shared connection to an agent for all members (admin)",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
         integrationPackageIdParam,
         agentPackageIdParam,
-        authKeyParam,
       ],
       requestBody: {
         required: true,
@@ -859,7 +864,6 @@ export const integrationsPaths = {
         { $ref: "#/components/parameters/XAppId" },
         integrationPackageIdParam,
         agentPackageIdParam,
-        authKeyParam,
       ],
       responses: {
         "200": {

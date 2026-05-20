@@ -91,6 +91,10 @@ export interface AccessibleIntegrationConnection {
   label: string | null;
   ownerUserId: string | null;
   ownerEndUserId: string | null;
+  /** Display name of the connection's creator (null if owner deleted). */
+  ownerName: string | null;
+  /** OAuth scopes granted to this connection (empty for api_key/basic). */
+  scopesGranted: string[];
   sharedWithOrg: boolean;
   needsReconnection: boolean;
 }
@@ -206,14 +210,25 @@ export function useInitiateIntegrationOAuth() {
       packageId,
       authKey,
       scopes,
+      forceAccountSelect,
+      connectionId,
     }: {
       packageId: string;
       authKey: string;
       scopes?: string[];
+      forceAccountSelect?: boolean;
+      connectionId?: string;
     }) =>
       api<{ authUrl: string; state: string }>(
         `/integrations/${encodeURI(packageId)}/auths/${encodeURI(authKey)}/connect/oauth2`,
-        { method: "POST", body: JSON.stringify({ scopes: scopes ?? [] }) },
+        {
+          method: "POST",
+          body: JSON.stringify({
+            scopes: scopes ?? [],
+            ...(forceAccountSelect ? { forceAccountSelect: true } : {}),
+            ...(connectionId ? { connectionId } : {}),
+          }),
+        },
       ),
     onError: () => toast.error(t("integration.connect.error")),
   });
@@ -372,16 +387,14 @@ export function useUpsertIntegrationPin() {
     mutationFn: ({
       packageId,
       agentPackageId,
-      authKey,
       connectionId,
     }: {
       packageId: string;
       agentPackageId: string;
-      authKey: string;
       connectionId: string;
     }) =>
       api<IntegrationPin>(
-        `/integrations/${encodeURI(packageId)}/pins/${encodeURI(agentPackageId)}/${encodeURI(authKey)}`,
+        `/integrations/${encodeURI(packageId)}/pins/${encodeURI(agentPackageId)}`,
         {
           method: "PUT",
           body: JSON.stringify({ connectionId }),
@@ -403,17 +416,9 @@ export function useDeleteIntegrationPin() {
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
   return useMutation({
-    mutationFn: ({
-      packageId,
-      agentPackageId,
-      authKey,
-    }: {
-      packageId: string;
-      agentPackageId: string;
-      authKey: string;
-    }) =>
+    mutationFn: ({ packageId, agentPackageId }: { packageId: string; agentPackageId: string }) =>
       api<{ deleted: boolean }>(
-        `/integrations/${encodeURI(packageId)}/pins/${encodeURI(agentPackageId)}/${encodeURI(authKey)}`,
+        `/integrations/${encodeURI(packageId)}/pins/${encodeURI(agentPackageId)}`,
         { method: "DELETE" },
       ),
     onSuccess: (_data, vars) => {

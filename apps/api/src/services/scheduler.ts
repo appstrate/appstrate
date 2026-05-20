@@ -62,7 +62,7 @@ interface ScheduleJobData {
    * `runs.connection_overrides` at fire time so the snapshot stays in sync
    * with the scheduler's intent. Loses to admin pins.
    */
-  connectionOverrides?: Record<string, Record<string, string>>;
+  connectionOverrides?: Record<string, string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -225,7 +225,7 @@ async function triggerScheduledRun(
     modelIdOverride?: string;
     proxyIdOverride?: string;
     versionOverride?: string;
-    connectionOverrides?: Record<string, Record<string, string>>;
+    connectionOverrides?: Record<string, string>;
   } = {},
 ) {
   // Populated once the agent loads so every failSchedule() call can
@@ -597,7 +597,7 @@ export async function createSchedule(
     modelIdOverride?: string | null;
     proxyIdOverride?: string | null;
     versionOverride?: string | null;
-    connectionOverrides?: Record<string, Record<string, string>> | null;
+    connectionOverrides?: Record<string, string> | null;
   },
 ): Promise<Schedule> {
   const id = `sched_${crypto.randomUUID()}`;
@@ -652,7 +652,7 @@ export async function updateSchedule(
     modelIdOverride?: string | null;
     proxyIdOverride?: string | null;
     versionOverride?: string | null;
-    connectionOverrides?: Record<string, Record<string, string>> | null;
+    connectionOverrides?: Record<string, string> | null;
   },
 ): Promise<Schedule | null> {
   const existing = await getSchedule(id, scope);
