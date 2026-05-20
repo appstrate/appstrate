@@ -23,6 +23,7 @@ import {
   endUsers,
   integrationConnections,
   integrationPins,
+  integrationOrgDefaults,
   packages,
   user,
 } from "@appstrate/db/schema";
@@ -270,7 +271,7 @@ async function assertAgentInstalled(scope: AppScope, agentPackageId: string): Pr
   if (!row) throw notFound(`Agent '${agentPackageId}' is not installed in this application`);
 }
 
-async function validatePinTarget(
+export async function validatePinTarget(
   scope: AppScope,
   integrationPackageId: string,
   connectionId: string,
@@ -447,15 +448,28 @@ export async function updateConnectionMetadata(
   input: UpdateConnectionMetadataInput,
 ): Promise<ConnectionRow> {
   if (input.sharedWithOrg === false) {
-    const pins = await db
-      .select({ packageId: integrationPins.packageId })
-      .from(integrationPins)
-      .where(eq(integrationPins.connectionId, connectionId))
-      .limit(1);
+    const [pins, orgDefaults] = await Promise.all([
+      db
+        .select({ packageId: integrationPins.packageId })
+        .from(integrationPins)
+        .where(eq(integrationPins.connectionId, connectionId))
+        .limit(1),
+      db
+        .select({ id: integrationOrgDefaults.id })
+        .from(integrationOrgDefaults)
+        .where(eq(integrationOrgDefaults.connectionId, connectionId))
+        .limit(1),
+    ]);
     if (pins.length > 0) {
       throw conflict(
         "connection_pinned",
         `Connection cannot be unshared while it is pinned to ${pins.length} agent(s). Remove the pin(s) first.`,
+      );
+    }
+    if (orgDefaults.length > 0) {
+      throw conflict(
+        "connection_pinned",
+        "Connection cannot be unshared while it is the org default for an integration. Remove the default first.",
       );
     }
   }

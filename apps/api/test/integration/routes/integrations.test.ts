@@ -13,7 +13,13 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import {
+  createTestContext,
+  authHeaders,
+  createTestUser,
+  addOrgMember,
+  type TestContext,
+} from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { eq, and } from "drizzle-orm";
 import {
@@ -547,5 +553,131 @@ describe("GET /api/integrations/callback (public — no session required)", () =
     const body = await res.text();
     expect(body).toContain("window.close");
     expect(body).toContain("access_denied");
+  });
+});
+
+describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default connection)", () => {
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "myorg" });
+    await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
+  });
+
+  /** Insert a connection owned by the org owner. `shared` toggles sharedWithOrg. */
+  async function seedConn(shared: boolean): Promise<string> {
+    const [row] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationPackageId: "@myorg/gmail",
+        authKey: "google",
+        accountId: "acct-1",
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        credentialsEncrypted: "x",
+        scopesGranted: ["openid", "email"],
+        sharedWithOrg: shared,
+      })
+      .returning({ id: integrationConnections.id });
+    return row!.id;
+  }
+
+  it("returns { default: null } when none is set", async () => {
+    const res = await app.request("/api/integrations/@myorg/gmail/default", {
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ default: null });
+  });
+
+  it("upserts a soft default and reads it back", async () => {
+    const connId = await seedConn(true);
+    const put = await app.request("/api/integrations/@myorg/gmail/default", {
+      method: "PUT",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ connectionId: connId }),
+    });
+    expect(put.status).toBe(200);
+    const created = (await put.json()) as { connectionId: string; enforce: boolean };
+    expect(created.connectionId).toBe(connId);
+    expect(created.enforce).toBe(false);
+
+    const get = await app.request("/api/integrations/@myorg/gmail/default", {
+      headers: authHeaders(ctx),
+    });
+    const body = (await get.json()) as {
+      default: { connectionId: string; enforce: boolean } | null;
+    };
+    expect(body.default?.connectionId).toBe(connId);
+  });
+
+  it("upsert replaces the existing default (one row per integration) and honors enforce", async () => {
+    const a = await seedConn(true);
+    const b = await seedConn(true);
+    await app.request("/api/integrations/@myorg/gmail/default", {
+      method: "PUT",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ connectionId: a }),
+    });
+    const put2 = await app.request("/api/integrations/@myorg/gmail/default", {
+      method: "PUT",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ connectionId: b, enforce: true }),
+    });
+    expect(put2.status).toBe(200);
+    const get = await app.request("/api/integrations/@myorg/gmail/default", {
+      headers: authHeaders(ctx),
+    });
+    const body = (await get.json()) as { default: { connectionId: string; enforce: boolean } };
+    expect(body.default.connectionId).toBe(b);
+    expect(body.default.enforce).toBe(true);
+  });
+
+  it("refuses a connection that is not sharedWithOrg (422)", async () => {
+    const connId = await seedConn(false);
+    const res = await app.request("/api/integrations/@myorg/gmail/default", {
+      method: "PUT",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ connectionId: connId }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("deletes the default", async () => {
+    const connId = await seedConn(true);
+    await app.request("/api/integrations/@myorg/gmail/default", {
+      method: "PUT",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ connectionId: connId }),
+    });
+    const del = await app.request("/api/integrations/@myorg/gmail/default", {
+      method: "DELETE",
+      headers: authHeaders(ctx),
+    });
+    expect(del.status).toBe(200);
+    expect(await del.json()).toEqual({ deleted: true });
+    const get = await app.request("/api/integrations/@myorg/gmail/default", {
+      headers: authHeaders(ctx),
+    });
+    expect((await get.json()) as { default: null }).toEqual({ default: null });
+  });
+
+  it("forbids a non-admin member from setting the default (403)", async () => {
+    const connId = await seedConn(true);
+    const member = await createTestUser({ email: "member@myorg.test" });
+    await addOrgMember(ctx.orgId, member.id, "member");
+    const memberHeaders = {
+      Cookie: member.cookie,
+      "X-Org-Id": ctx.orgId,
+      "X-Application-Id": ctx.defaultAppId,
+      "Content-Type": "application/json",
+    };
+    const res = await app.request("/api/integrations/@myorg/gmail/default", {
+      method: "PUT",
+      headers: memberHeaders,
+      body: JSON.stringify({ connectionId: connId }),
+    });
+    expect(res.status).toBe(403);
   });
 });

@@ -86,6 +86,11 @@ import {
   updateConnectionMetadata,
   upsertIntegrationPin,
 } from "../services/integration-pins-service.ts";
+import {
+  getOrgDefault,
+  upsertOrgDefault,
+  deleteOrgDefault,
+} from "../services/integration-org-defaults-service.ts";
 import { oauthStateStore } from "../services/connection-manager/oauth-state-store.ts";
 
 // ─────────────────────────────────────────────
@@ -112,6 +117,11 @@ const updateSettingsSchema = z.object({
 
 const setPinSchema = z.object({
   connectionId: z.uuid(),
+});
+
+const setOrgDefaultSchema = z.object({
+  connectionId: z.uuid(),
+  enforce: z.boolean().default(false),
 });
 
 const updateConnectionSchema = z
@@ -769,6 +779,65 @@ export function createIntegrationsRouter() {
           action: "integration.pin.deleted",
           resourceType: "integration_pin",
           resourceId: `${packageId}#${agentPackageId}`,
+        });
+      }
+      return c.json(result);
+    },
+  );
+
+  // ─── Org default connection (cross-agent governance) ─────────────────────
+  // One default connection per (application, integration) — the resolver
+  // baseline for every consuming agent (enforce → org-wide lock; soft →
+  // overridable by member pins). Admin-only.
+
+  router.get(
+    "/:packageId{@[^/]+/[^/]+}/default",
+    requirePermission("integrations", "read"),
+    async (c) => {
+      const packageId = c.req.param("packageId")!;
+      const scope = getAppScope(c);
+      const item = await getOrgDefault(scope, packageId);
+      return c.json({ default: item });
+    },
+  );
+
+  router.put(
+    "/:packageId{@[^/]+/[^/]+}/default",
+    requirePermission("integrations", "install"),
+    async (c) => {
+      assertOrgAdmin(c);
+      const packageId = c.req.param("packageId")!;
+      const scope = getAppScope(c);
+      const body = parseBody(setOrgDefaultSchema, await c.req.json());
+      const userId = c.get("user")?.id ?? null;
+      const def = await upsertOrgDefault(scope, packageId, {
+        connectionId: body.connectionId,
+        enforce: body.enforce,
+        createdBy: userId,
+      });
+      await recordAuditFromContext(c, {
+        action: "integration.org_default.upserted",
+        resourceType: "integration_org_default",
+        resourceId: packageId,
+        after: { connectionId: def.connectionId, enforce: def.enforce },
+      });
+      return c.json(def);
+    },
+  );
+
+  router.delete(
+    "/:packageId{@[^/]+/[^/]+}/default",
+    requirePermission("integrations", "install"),
+    async (c) => {
+      assertOrgAdmin(c);
+      const packageId = c.req.param("packageId")!;
+      const scope = getAppScope(c);
+      const result = await deleteOrgDefault(scope, packageId);
+      if (result.deleted) {
+        await recordAuditFromContext(c, {
+          action: "integration.org_default.deleted",
+          resourceType: "integration_org_default",
+          resourceId: packageId,
         });
       }
       return c.json(result);

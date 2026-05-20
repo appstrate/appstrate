@@ -51,6 +51,7 @@ import type { Actor } from "../lib/actor.ts";
 import { actorFilter } from "../lib/actor.ts";
 import type { AppScope } from "../lib/scope.ts";
 import { fetchIntegrationManifest } from "./integration-service.ts";
+import { listOrgDefaultsForResolver } from "./integration-org-defaults-service.ts";
 
 // ─────────────────────────────────── Types ────────────────────────────────────
 
@@ -413,17 +414,19 @@ export async function resolveConnectionsForRun(
   const actorUserId = input.actor.type === "user" ? input.actor.id : null;
   const actorEndUserId = input.actor.type === "end_user" ? input.actor.id : null;
 
-  // Load accessible connections + pins in parallel.
+  // Load accessible connections + pins + org defaults in parallel.
   const integrationIds = validReqs.map((r) => r.integrationId);
-  const [accessibleConnections, pins] = await Promise.all([
+  const [accessibleConnections, pins, orgDefaults] = await Promise.all([
     loadAccessibleConnections(input.actor, input.scope.applicationId, integrationIds),
     loadPins(input.scope.applicationId, input.packageId, integrationIds, actorUserId),
+    listOrgDefaultsForResolver(input.scope.applicationId),
   ]);
 
   return resolveConnections({
     requirements: validReqs,
     accessibleConnections,
     pins,
+    orgDefaults,
     runOverrides: input.runOverrides ?? null,
     scheduleOverrides: input.scheduleOverrides ?? null,
     actorUserId,

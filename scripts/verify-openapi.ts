@@ -135,6 +135,9 @@ const expectedEndpoints = [
   "GET /api/integrations/{packageId}/pins",
   "PUT /api/integrations/{packageId}/pins/{agentPackageId}",
   "DELETE /api/integrations/{packageId}/pins/{agentPackageId}",
+  "GET /api/integrations/{packageId}/default",
+  "PUT /api/integrations/{packageId}/default",
+  "DELETE /api/integrations/{packageId}/default",
 
   // Providers
   "GET /api/providers",

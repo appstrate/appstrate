@@ -60,6 +60,26 @@ const integrationPinSchema = {
   },
 } as const;
 
+const integrationOrgDefaultSchema = {
+  type: "object",
+  required: [
+    "integrationPackageId",
+    "connectionId",
+    "authKey",
+    "enforce",
+    "createdAt",
+    "updatedAt",
+  ],
+  properties: {
+    integrationPackageId: { type: "string" },
+    connectionId: { type: "string", format: "uuid" },
+    authKey: { type: "string" },
+    enforce: { type: "boolean" },
+    createdAt: { type: "string", format: "date-time" },
+    updatedAt: { type: "string", format: "date-time" },
+  },
+} as const;
+
 const integrationSummarySchema = {
   type: "object",
   required: ["id", "manifest", "orgId", "source"],
@@ -961,6 +981,100 @@ export const integrationsPaths = {
         { $ref: "#/components/parameters/XAppId" },
         integrationPackageIdParam,
         agentPackageIdParam,
+      ],
+      responses: {
+        "200": {
+          description: "Deleted",
+          headers: baseResponseHeaders,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["deleted"],
+                properties: { deleted: { type: "boolean" } },
+              },
+            },
+          },
+        },
+        "403": { $ref: "#/components/responses/Forbidden" },
+      },
+    },
+  },
+  "/api/integrations/{packageId}/default": {
+    get: {
+      operationId: "getIntegrationOrgDefault",
+      tags: ["Integrations"],
+      summary: "Get the org-wide default connection for this integration",
+      description:
+        "The cross-agent governance baseline: one default connection per (application, " +
+        "integration) used by every consuming agent. `enforce: true` locks every member; " +
+        "`enforce: false` is overridable by a member pin. Returns `{ default: null }` when unset.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        integrationPackageIdParam,
+      ],
+      responses: {
+        "200": {
+          description: "Org default (or null)",
+          headers: baseResponseHeaders,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["default"],
+                properties: {
+                  default: { anyOf: [integrationOrgDefaultSchema, { type: "null" }] },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    put: {
+      operationId: "upsertIntegrationOrgDefault",
+      tags: ["Integrations"],
+      summary: "Set the org-wide default connection for this integration (admin)",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        integrationPackageIdParam,
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["connectionId"],
+              properties: {
+                connectionId: { type: "string", format: "uuid" },
+                enforce: { type: "boolean", default: false },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Default set",
+          headers: baseResponseHeaders,
+          content: { "application/json": { schema: integrationOrgDefaultSchema } },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    delete: {
+      operationId: "deleteIntegrationOrgDefault",
+      tags: ["Integrations"],
+      summary: "Remove the org-wide default connection (admin)",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        integrationPackageIdParam,
       ],
       responses: {
         "200": {
