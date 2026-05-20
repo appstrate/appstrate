@@ -1,19 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for the pure `resolveConnections()` function — the
- * 5-mechanism cascade that decides which connection a run uses per
- * integration. One connection per integration: the chosen row carries
- * its own `authKey`, OAuth and api_key are interchangeable.
+ * Unit tests for the pure `resolveConnections()` function — the cascade
+ * that decides which connection a run uses per integration. One connection
+ * per integration: the chosen row carries its own `authKey`, OAuth and
+ * api_key are interchangeable.
  *
  * Pure function, no DB. All inputs are arrays + plain objects.
  *
  * Cascade order (highest → lowest):
- *   1. integration_pins (user_id IS NULL)        → admin force
- *   2. runs.connection_overrides                 → caller's run-time choice
- *   3. package_schedules.connection_overrides    → schedule frozen
- *   4. integration_pins (user_id = actor.id)     → member preference
- *   5. fallback: own + shared accessible
+ *   1. integration_pins (user_id IS NULL)        → admin force, per-agent
+ *   2. integration_org_defaults (enforce)        → org-wide force
+ *   3. runs.connection_overrides                 → caller's run-time choice
+ *   4. package_schedules.connection_overrides    → schedule frozen
+ *   5. integration_pins (user_id = actor.id)     → member preference
+ *   6. integration_org_defaults (soft)           → org-wide default
+ *   7. fallback: own + shared accessible
  *      → 1 match = auto, 0 = not_connected, N = must_choose
  */
 
@@ -533,5 +535,126 @@ describe("resolveConnections — insufficient scopes on resolved connection", ()
     const err = result.errors[0]!;
     expect(err.code).toBe("insufficient_scopes");
     expect(err.ownedByActor).toBe(false);
+  });
+});
+
+// ─────────────────────────── Org default (layers 2 & 6) ───────────────────────
+
+describe("resolveConnections — org default", () => {
+  const ENFORCE = (id: string) => ({ [INTEG]: { connectionId: id, enforce: true } });
+  const SOFT = (id: string) => ({ [INTEG]: { connectionId: id, enforce: false } });
+
+  it("ENFORCE default wins over run override, schedule override, and member pin", () => {
+    const def = conn({ sharedWithOrg: true });
+    const other = conn({});
+    const result = resolveConnections({
+      requirements: [req(oauth2Manifest())],
+      accessibleConnections: [def, other],
+      pins: [memberPin(other.id)],
+      runOverrides: { [INTEG]: other.id },
+      scheduleOverrides: { [INTEG]: other.id },
+      orgDefaults: ENFORCE(def.id),
+      actorUserId: USER_ID,
+    });
+    expect(result.resolved[INTEG]).toEqual({
+      connectionId: def.id,
+      source: "org_default_enforced",
+    });
+  });
+
+  it("per-agent admin pin beats the ENFORCE org default (agent-specific exception)", () => {
+    const pinned = conn({});
+    const def = conn({ sharedWithOrg: true });
+    const result = resolveConnections({
+      requirements: [req(oauth2Manifest())],
+      accessibleConnections: [pinned, def],
+      pins: [pin(pinned.id)],
+      orgDefaults: ENFORCE(def.id),
+    });
+    expect(result.resolved[INTEG]!.source).toBe("admin_pin");
+    expect(result.resolved[INTEG]!.connectionId).toBe(pinned.id);
+  });
+
+  it("ENFORCE default with an invisible connection → pinned_connection_unavailable", () => {
+    const result = resolveConnections({
+      requirements: [req(oauth2Manifest())],
+      accessibleConnections: [],
+      pins: [],
+      orgDefaults: ENFORCE("conn_ghost"),
+    });
+    expect(result.resolved[INTEG]).toBeUndefined();
+    expect(result.errors[0]!.code).toBe("pinned_connection_unavailable");
+  });
+
+  it("SOFT default kills must_choose: used when N candidates and no pin/override", () => {
+    const def = conn({ sharedWithOrg: true });
+    const otherA = conn({});
+    const otherB = conn({});
+    const result = resolveConnections({
+      requirements: [req(oauth2Manifest())],
+      accessibleConnections: [def, otherA, otherB],
+      pins: [],
+      orgDefaults: SOFT(def.id),
+      actorUserId: USER_ID,
+    });
+    expect(result.errors).toEqual([]);
+    expect(result.resolved[INTEG]).toEqual({ connectionId: def.id, source: "org_default" });
+  });
+
+  it("member pin beats the SOFT default (explicit preference wins)", () => {
+    const def = conn({ sharedWithOrg: true });
+    const mine = conn({});
+    const result = resolveConnections({
+      requirements: [req(oauth2Manifest())],
+      accessibleConnections: [def, mine],
+      pins: [memberPin(mine.id)],
+      orgDefaults: SOFT(def.id),
+      actorUserId: USER_ID,
+    });
+    expect(result.resolved[INTEG]!.source).toBe("member_pin");
+    expect(result.resolved[INTEG]!.connectionId).toBe(mine.id);
+  });
+
+  it("SOFT default falls through to fallback when its connection is gone (non-binding)", () => {
+    const onlyOne = conn({});
+    const result = resolveConnections({
+      requirements: [req(oauth2Manifest())],
+      accessibleConnections: [onlyOne],
+      pins: [],
+      orgDefaults: SOFT("conn_ghost"),
+      actorUserId: USER_ID,
+    });
+    expect(result.errors).toEqual([]);
+    expect(result.resolved[INTEG]).toEqual({ connectionId: onlyOne.id, source: "fallback_auto" });
+  });
+
+  it("a scope-deficient org default surfaces insufficient_scopes (checkHealth still runs)", () => {
+    const manifest = {
+      manifestVersion: "1.0",
+      type: "integration",
+      name: INTEG,
+      version: "1.0.0",
+      displayName: "Test",
+      server: { type: "node", entryPoint: "index.js" },
+      auths: {
+        oauth: {
+          type: "oauth2",
+          authorizationUrl: "https://idp/auth",
+          tokenUrl: "https://idp/token",
+          scopes: [],
+          availableScopes: [{ value: "repo", label: "Repo" }],
+        },
+      },
+      tools: { t1: { requiredScopes: ["repo"] } },
+    } as unknown as IntegrationManifest;
+    const def = conn({ sharedWithOrg: true, scopesGranted: [] });
+    const result = resolveConnections({
+      requirements: [req(manifest, ["t1"])],
+      accessibleConnections: [def],
+      pins: [],
+      orgDefaults: ENFORCE(def.id),
+    });
+    expect(result.resolved[INTEG]).toBeUndefined();
+    expect(result.errors[0]!.code).toBe("insufficient_scopes");
   });
 });

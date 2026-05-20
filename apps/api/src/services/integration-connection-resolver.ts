@@ -5,16 +5,18 @@
  * connection does this run use for each (integration, authKey)?".
  *
  * Replaces the connection-profile cascade for integrations with a flat
- * 5-mechanism model (see CLAUDE.md "Flat connections + pins"):
+ * model (see CLAUDE.md "Flat connections + pins"):
  *
- *   1. integration_pins                        → admin force
- *   2. runs.connection_overrides               → caller's run-time choice
- *   3. package_schedules.connection_overrides  → frozen at schedule create
- *   4. integration_pins (user_id = actor)      → member's persisted pick
+ *   1. integration_pins (user_id IS NULL)      → admin force, per-agent
+ *   2. integration_org_defaults (enforce)      → org-wide force, all agents
+ *   3. runs.connection_overrides               → caller's run-time choice
+ *   4. package_schedules.connection_overrides  → frozen at schedule create
+ *   5. integration_pins (user_id = actor)      → member's persisted pick
  *      per (user, app, agent, integration). Empty in OSS until the user
  *      explicitly picks via the agent-page picker; a server-side record
  *      the resolver sees on every run.
- *   5. fallback: actor's accessible connections
+ *   6. integration_org_defaults (soft)         → org-wide default, all agents
+ *   7. fallback: actor's accessible connections
  *      = own + (shared_with_org AND application match)
  *      → 1 match → auto, 0 → not_connected, N → must_choose
  *
@@ -103,6 +105,14 @@ export interface ResolveConnectionsInput {
   /** Schedule's frozen override map (package_schedules row). */
   scheduleOverrides?: ConnectionOverrides | null;
   /**
+   * Org-wide default connection per integration (application-scoped, all
+   * agents). `enforce: true` locks every actor (layer 2, just below the
+   * per-agent admin pin); `enforce: false` is a soft default (layer 6,
+   * just above the fallback — a member pin still wins). Absent in OSS
+   * until an admin sets one; the resolver then behaves exactly as before.
+   */
+  orgDefaults?: Record<string, { connectionId: string; enforce: boolean }> | null;
+  /**
    * Actor's `user.id` — used to match member pins (`pins.userId === actorUserId`)
    * in the cascade's layer 4. Null for end-users (they don't have member
    * pins; their connection is selected by the API caller via run overrides).
@@ -119,20 +129,24 @@ export interface ResolveConnectionsInput {
 // ─────────────────────────── Pure resolver (unit-tested) ──────────────────────
 
 /**
- * Walks the 5-mechanism cascade per integration. One connection per
- * integration, regardless of authKey — the chosen connection carries
- * its own authKey, which drives credential injection downstream.
+ * Walks the cascade per integration. One connection per integration,
+ * regardless of authKey — the chosen connection carries its own authKey,
+ * which drives credential injection downstream.
  *
  * Cascade per integration:
- *   1. admin pin                 (pins where user_id IS NULL)
- *   2. run override              (runs.connection_overrides)
- *   3. schedule override         (package_schedules.connection_overrides)
- *   4. member pin                (pins where user_id = actor.id)
- *   5. fallback                  (actor's accessible connections on this integration)
+ *   1. admin pin                 (pins where user_id IS NULL)         — per-agent force
+ *   2. org default ENFORCE       (orgDefaults[id].enforce === true)   — org-wide force
+ *   3. run override              (runs.connection_overrides)
+ *   4. schedule override         (package_schedules.connection_overrides)
+ *   5. member pin                (pins where user_id = actor.id)      — per-agent preference
+ *   6. org default SOFT          (orgDefaults[id].enforce === false)  — org-wide default
+ *   7. fallback                  (actor's accessible connections on this integration)
  *
- * Admin pin always wins; member pins only apply when matching the
- * caller's `actorUserId` (which is null for end-users — they never own
- * member pins).
+ * Force layers (admin pin, enforce default) sit at the top; the per-agent
+ * admin pin beats the org-wide enforce default (agent-specific exception).
+ * The soft default sits just above the fallback so a member's explicit pin
+ * still wins. Member pins only apply when matching the caller's
+ * `actorUserId` (null for end-users — they never own member pins).
  */
 export function resolveConnections(input: ResolveConnectionsInput): ConnectionResolutionResult {
   const resolved: ResolvedConnectionMap = {};
@@ -150,6 +164,7 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
       manifest: req.manifest,
       agentTools: req.agentTools,
       adminPinId: adminPins.get(req.integrationId) ?? null,
+      orgDefault: input.orgDefaults?.[req.integrationId] ?? null,
       runOverrideId: input.runOverrides?.[req.integrationId] ?? null,
       scheduleOverrideId: input.scheduleOverrides?.[req.integrationId] ?? null,
       memberPinId: memberPins.get(req.integrationId) ?? null,
@@ -176,6 +191,7 @@ interface ResolveOneArgs {
   manifest: IntegrationManifest;
   agentTools: readonly string[];
   adminPinId: string | null;
+  orgDefault: { connectionId: string; enforce: boolean } | null;
   runOverrideId: string | null;
   scheduleOverrideId: string | null;
   memberPinId: string | null;
@@ -202,7 +218,20 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
     return checkHealth(args, conn, "admin_pin");
   }
 
-  // 2. Run override.
+  // 2. Org default ENFORCE — org-wide force, locks every actor on every
+  // agent. Beaten only by the per-agent admin pin above.
+  if (args.orgDefault?.enforce) {
+    const conn = args.connectionIndex.get(args.orgDefault.connectionId);
+    if (!conn) {
+      return errorOf(args, {
+        code: "pinned_connection_unavailable",
+        message: `Org default connection for ${args.integrationId} is not accessible — it may have been deleted or unshared.`,
+      });
+    }
+    return checkHealth(args, conn, "org_default_enforced");
+  }
+
+  // 4. Run override.
   if (args.runOverrideId) {
     const conn = args.connectionIndex.get(args.runOverrideId);
     if (!conn) {
@@ -214,7 +243,7 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
     return checkHealth(args, conn, "run_override");
   }
 
-  // 3. Schedule override.
+  // 5. Schedule override.
   if (args.scheduleOverrideId) {
     const conn = args.connectionIndex.get(args.scheduleOverrideId);
     if (!conn) {
@@ -226,7 +255,7 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
     return checkHealth(args, conn, "schedule_override");
   }
 
-  // 4. Member pin — actor's persisted preference for this agent.
+  // 6. Member pin — actor's persisted preference for this agent.
   if (args.memberPinId) {
     const conn = args.connectionIndex.get(args.memberPinId);
     if (!conn) {
@@ -238,7 +267,15 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
     return checkHealth(args, conn, "member_pin");
   }
 
-  // 5. Fallback — actor's accessible connections on this integration,
+  // 7. Org default SOFT — org-wide baseline, just above the fallback. A
+  // missing connection (deleted/unshared) silently falls through to the
+  // fallback rather than erroring, since the default is non-binding.
+  if (args.orgDefault) {
+    const conn = args.connectionIndex.get(args.orgDefault.connectionId);
+    if (conn) return checkHealth(args, conn, "org_default");
+  }
+
+  // 8. Fallback — actor's accessible connections on this integration,
   // any auth shape. The chosen connection carries its own authKey.
   const candidates = args.accessibleConnections.filter(
     (c) => c.integrationPackageId === args.integrationId,

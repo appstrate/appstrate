@@ -912,9 +912,11 @@ export type ConnectionOverrides = Record<string, string>;
 /** Where a resolved connection came from — drives the audit + UI badge. */
 export type ConnectionResolutionSource =
   | "admin_pin"
+  | "org_default_enforced"
   | "run_override"
   | "schedule_override"
   | "member_pin"
+  | "org_default"
   | "fallback_auto";
 
 /** Per-integration resolution result. */
