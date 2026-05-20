@@ -47,6 +47,7 @@ import type { AppScope } from "../lib/scope.ts";
 import type { Actor } from "../lib/actor.ts";
 import { getPackage } from "./package-catalog.ts";
 import { fetchIntegrationManifest } from "./integration-service.ts";
+import { getOrgDefault } from "./integration-org-defaults-service.ts";
 import {
   resolveConnectionsForRun,
   isUserConnectionCreationBlocked,
@@ -646,25 +647,30 @@ export async function resolveAgentIntegrationPick(args: {
   const actorFilter = actor.type === "user" ? { userId: actor.id } : { endUserId: actor.id };
   const userId = actor.type === "user" ? actor.id : null;
 
-  const [candidatesRaw, adminPins, memberPins, blocked, resolution] = await Promise.all([
-    listAccessibleConnections(scope, integrationPackageId, actorFilter),
-    listIntegrationPins(scope, integrationPackageId),
-    userId
-      ? listMemberPinsForAgent(scope, agentPackageId, userId)
-      : Promise.resolve([] as MemberPinSummary[]),
-    isUserConnectionCreationBlocked(scope.applicationId, integrationPackageId),
-    resolveConnectionsForRun({
-      agentManifest,
-      packageId: agentPackageId,
-      actor,
-      scope: { orgId: scope.orgId, applicationId: scope.applicationId },
-    }),
-  ]);
+  const [candidatesRaw, adminPins, memberPins, blocked, orgDefault, resolution] = await Promise.all(
+    [
+      listAccessibleConnections(scope, integrationPackageId, actorFilter),
+      listIntegrationPins(scope, integrationPackageId),
+      userId
+        ? listMemberPinsForAgent(scope, agentPackageId, userId)
+        : Promise.resolve([] as MemberPinSummary[]),
+      isUserConnectionCreationBlocked(scope.applicationId, integrationPackageId),
+      getOrgDefault(scope, integrationPackageId),
+      resolveConnectionsForRun({
+        agentManifest,
+        packageId: agentPackageId,
+        actor,
+        scope: { orgId: scope.orgId, applicationId: scope.applicationId },
+      }),
+    ],
+  );
 
   const adminPinnedConnectionId =
     adminPins.find((p) => p.packageId === agentPackageId)?.connectionId ?? null;
   const memberPinnedConnectionId =
     memberPins.find((p) => p.integrationPackageId === integrationPackageId)?.connectionId ?? null;
+  const orgDefaultConnectionId = orgDefault?.connectionId ?? null;
+  const orgDefaultEnforced = orgDefault?.enforce ?? false;
 
   const candidates: IntegrationCandidate[] = candidatesRaw.map((c) => ({
     ...c,
@@ -685,7 +691,7 @@ export async function resolveAgentIntegrationPick(args: {
   if (resolved) {
     resolvedConnectionId = resolved.connectionId;
     status =
-      resolved.source === "admin_pin"
+      resolved.source === "admin_pin" || resolved.source === "org_default_enforced"
         ? "admin_locked"
         : resolved.source === "member_pin"
           ? "pinned"
@@ -700,9 +706,11 @@ export async function resolveAgentIntegrationPick(args: {
         status =
           adminPinnedConnectionId && adminPinnedConnectionId === err.connectionId
             ? "admin_locked"
-            : memberPinnedConnectionId && memberPinnedConnectionId === err.connectionId
-              ? "pinned"
-              : "auto";
+            : orgDefaultEnforced && orgDefaultConnectionId === err.connectionId
+              ? "admin_locked"
+              : memberPinnedConnectionId && memberPinnedConnectionId === err.connectionId
+                ? "pinned"
+                : "auto";
         break;
       case "must_choose_connection":
         status = "must_choose";
@@ -731,6 +739,8 @@ export async function resolveAgentIntegrationPick(args: {
     resolvedOwnedByActor,
     adminPinnedConnectionId,
     memberPinnedConnectionId,
+    orgDefaultConnectionId,
+    orgDefaultEnforced,
     canAddConnection: isAdmin || !blocked,
     candidates,
   };

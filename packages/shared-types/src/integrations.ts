@@ -206,6 +206,14 @@ export interface IntegrationAgentResolution {
   adminPinnedConnectionId: string | null;
   /** The actor's own member pin connection id, else null. */
   memberPinnedConnectionId: string | null;
+  /**
+   * Org-wide default connection id for this integration (all agents), or
+   * null when unset. `orgDefaultEnforced` distinguishes a hard lock
+   * (members can't override — surfaced like an admin pin) from a soft
+   * default the member can still override with their own pick.
+   */
+  orgDefaultConnectionId: string | null;
+  orgDefaultEnforced: boolean;
   /** Whether the actor may add a connection (admin OR not blocked). */
   canAddConnection: boolean;
   /** Own + shared connections, annotated for the dropdown. */
