@@ -119,9 +119,9 @@ describe("rewriteManifestForDistribution", () => {
         resolvedAt: "2026-05-17T10:00:00.000Z",
       },
     });
-    expect(rewritten.server.type).toBe("node");
-    expect(rewritten.server.entryPoint).toBe("./server/node_modules/x/dist/bin.js");
-    expect(rewritten.server.package).toBeUndefined();
+    expect(rewritten.server!.type).toBe("node");
+    expect(rewritten.server!.entryPoint).toBe("./server/node_modules/x/dist/bin.js");
+    expect(rewritten.server!.package).toBeUndefined();
     const meta = (rewritten._meta as Record<string, unknown>) ?? {};
     const res = meta.sourceResolution as Record<string, unknown>;
     expect(res.versionResolved).toBe("1.4.2");
@@ -171,8 +171,8 @@ describe("bundleIntegration — author sugars", () => {
         "server/index.js": ENC.encode("#!/usr/bin/env node\nconsole.log(1);\n"),
       },
     });
-    expect(result.manifest.server.type).toBe("node");
-    expect(result.manifest.server.entryPoint).toBe("./server/index.js");
+    expect(result.manifest.server!.type).toBe("node");
+    expect(result.manifest.server!.entryPoint).toBe("./server/index.js");
     const out = unzipArtifact(result.afps);
     expect(out["server/index.js"]).toBeDefined();
     const distributed = manifestFromTree(out);
@@ -265,11 +265,11 @@ describe("bundleIntegration — author sugars", () => {
       },
     });
 
-    expect(result.manifest.server.type).toBe("node");
-    expect(result.manifest.server.entryPoint).toBe(
+    expect(result.manifest.server!.type).toBe("node");
+    expect(result.manifest.server!.entryPoint).toBe(
       "./server/node_modules/@modelcontextprotocol/server-widget/dist/bin.js",
     );
-    expect(result.manifest.server.package).toBeUndefined();
+    expect(result.manifest.server!.package).toBeUndefined();
     const meta = (result.manifest._meta as Record<string, unknown>) ?? {};
     const res = meta.sourceResolution as Record<string, unknown>;
     expect(res).toMatchObject({
@@ -325,9 +325,9 @@ describe("bundleIntegration — author sugars", () => {
       },
     });
 
-    expect(result.manifest.server.type).toBe("uv");
-    expect(result.manifest.server.entryPoint).toBe("./server/bin/mcp-server-git");
-    expect(result.manifest.server.package).toBeUndefined();
+    expect(result.manifest.server!.type).toBe("uv");
+    expect(result.manifest.server!.entryPoint).toBe("./server/bin/mcp-server-git");
+    expect(result.manifest.server!.package).toBeUndefined();
     const meta = (result.manifest._meta as Record<string, unknown>) ?? {};
     const res = meta.sourceResolution as Record<string, unknown>;
     expect(res).toMatchObject({
@@ -418,7 +418,7 @@ describe("bundleIntegration — direct types (no sugar)", () => {
         "server/index.js": ENC.encode("/* mcp */\n"),
       },
     });
-    expect(result.manifest.server.type).toBe("node");
+    expect(result.manifest.server!.type).toBe("node");
     const out = unzipArtifact(result.afps);
     expect(out["server/index.js"]).toBeDefined();
   });
@@ -436,7 +436,7 @@ describe("bundleIntegration — direct types (no sugar)", () => {
         "INTEGRATION.md": ENC.encode("# x\n"),
       },
     });
-    expect(result.manifest.server.type).toBe("docker");
+    expect(result.manifest.server!.type).toBe("docker");
     const out = unzipArtifact(result.afps);
     expect(out["INTEGRATION.md"]).toBeDefined();
   });
@@ -448,8 +448,8 @@ describe("bundleIntegration — direct types (no sugar)", () => {
         transport: { type: "streamable-http" },
       }),
     });
-    expect(result.manifest.server.type).toBe("http");
-    expect(result.manifest.server.url).toBe("https://api.example.com/mcp");
+    expect(result.manifest.server!.type).toBe("http");
+    expect(result.manifest.server!.url).toBe("https://api.example.com/mcp");
   });
 });
 

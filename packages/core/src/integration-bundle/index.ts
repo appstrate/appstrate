@@ -133,6 +133,8 @@ async function runVendor(
   input: BundleIntegrationInput,
 ): Promise<VendorResult | null> {
   const server = manifest.server;
+  // Serverless integrations (apiCall-only) have nothing to vendor.
+  if (!server) return null;
   if (server.type !== "npx" && server.type !== "uvx") return null;
   if (!server.package) {
     // Already-vendored author input (entryPoint set, no package): no

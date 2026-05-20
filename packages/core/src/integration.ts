@@ -27,6 +27,21 @@ const scopedNameRegex = new RegExp(`^@${SLUG_PATTERN}\\/${SLUG_PATTERN}$`);
 // `manifestVersion` mirrors MCPB (`1.0` / `1.1`). Allow any 1.x.
 const manifestVersionRegex = /^1\.(0|[1-9]\d*)$/;
 
+/**
+ * Resumable-upload protocols an integration's generic `apiCall` tool can
+ * advertise — ported from the legacy `provider` `uploadProtocols`
+ * (AFPS v1 §7.7). Declared locally rather than imported from
+ * `./validation.ts` to preserve this module's circular-import guard.
+ */
+export const integrationUploadProtocolEnum = z.enum([
+  "google-resumable",
+  "s3-multipart",
+  "tus",
+  "ms-resumable",
+]);
+
+export type IntegrationUploadProtocol = z.infer<typeof integrationUploadProtocolEnum>;
+
 // ─────────────────────────────────────────────
 // Server runtime — closed enum + author sugars
 // ─────────────────────────────────────────────
@@ -524,6 +539,49 @@ const toolsRecordSchema = z.record(
 export type IntegrationToolMetadata = z.infer<typeof toolMetadataSchema>;
 
 // ─────────────────────────────────────────────
+// apiCall — generic credential-injecting HTTP tool
+// ─────────────────────────────────────────────
+
+/**
+ * `apiCall` opts the integration into a generic credential-injecting HTTP
+ * call tool (exposed to the agent as `{namespace}__api_call`), alongside
+ * any MCP server tools. It restores the legacy `provider` ergonomics: the
+ * agent calls an arbitrary URL bounded by the auth's `authorizedUris` and
+ * the sidecar injects the credential via the same `delivery.http`
+ * machinery the MITM proxy uses.
+ *
+ * Two shapes:
+ *  - **pure proxy** — `apiCall` declared with no `server` (the shape every
+ *    migrated provider takes): the integration spawns no MCP runner and
+ *    exposes only the generic tool.
+ *  - **hybrid** — `apiCall` alongside an MCP `server`: structured tools
+ *    plus a raw-API escape hatch.
+ *
+ * The generic tool is coarse-grained by design: bounded only by the
+ * auth's `authorizedUris` (no per-tool `urlPatterns` scope envelope), so
+ * it relies on the agent-declared `scopes[]` escape hatch for OAuth scope
+ * selection rather than per-tool inference.
+ */
+const apiCallSchema = z.object({
+  // Which declared auth supplies credentials + `authorizedUris` for the
+  // generic call. Optional when the integration declares exactly one
+  // auth; validated against `auths.{key}` at the root level otherwise.
+  authKey: z
+    .string()
+    .regex(/^[a-z][a-z0-9_]*$/, {
+      error: "apiCall.authKey must match an auths.{key}",
+    })
+    .optional(),
+
+  // Resumable-upload protocols the generic tool advertises (ported from
+  // the legacy provider `uploadProtocols`). When non-empty the runtime
+  // also exposes an upload helper tool.
+  uploadProtocols: z.array(integrationUploadProtocolEnum).optional(),
+});
+
+export type IntegrationApiCallConfig = z.infer<typeof apiCallSchema>;
+
+// ─────────────────────────────────────────────
 // Integration manifest (root)
 // ─────────────────────────────────────────────
 
@@ -571,7 +629,11 @@ export const integrationManifestSchema = z
       .optional(),
     _meta: z.looseObject({}).optional(),
 
-    server: serverSchema,
+    // Optional: an integration may omit `server` when it declares
+    // `apiCall` (a pure credential-injecting proxy — the migrated-provider
+    // shape). The root superRefine enforces "server OR apiCall".
+    server: serverSchema.optional(),
+    apiCall: apiCallSchema.optional(),
     transport: transportSchema.optional(),
     serverAuth: serverAuthSchema.optional(),
     auths: z
@@ -591,6 +653,52 @@ export const integrationManifestSchema = z
     tools: toolsRecordSchema.optional(),
   })
   .superRefine((m, ctx) => {
+    // An integration must do something: spawn/connect an MCP `server`, or
+    // expose the generic `apiCall` tool, or both.
+    if (!m.server && !m.apiCall) {
+      ctx.addIssue({
+        code: "custom",
+        message: "an integration must declare at least one of: server, apiCall",
+        path: ["server"],
+      });
+    }
+
+    // `apiCall` injects a credential, so it needs an auth to draw from.
+    if (m.apiCall) {
+      const authKeys = m.auths ? Object.keys(m.auths) : [];
+      if (authKeys.length === 0) {
+        ctx.addIssue({
+          code: "custom",
+          message: "apiCall requires at least one declared auth in auths.{key}",
+          path: ["apiCall"],
+        });
+      } else if (m.apiCall.authKey) {
+        if (!authKeys.includes(m.apiCall.authKey)) {
+          ctx.addIssue({
+            code: "custom",
+            message: `apiCall.authKey "${m.apiCall.authKey}" does not match any auths.{key}`,
+            path: ["apiCall", "authKey"],
+          });
+        }
+      } else if (authKeys.length > 1) {
+        ctx.addIssue({
+          code: "custom",
+          message: "apiCall.authKey is required when the integration declares multiple auths",
+          path: ["apiCall", "authKey"],
+        });
+      }
+    }
+
+    // `serverAuth` / `transport` describe how to reach an MCP server —
+    // meaningless without one.
+    if (m.serverAuth && !m.server) {
+      ctx.addIssue({
+        code: "custom",
+        message: "serverAuth is only valid when a server is declared",
+        path: ["serverAuth"],
+      });
+    }
+
     // `serverAuth` only makes sense for remote transports.
     if (m.serverAuth) {
       const transportType = m.transport?.type ?? "stdio";
@@ -667,6 +775,34 @@ export type IntegrationManifest = z.infer<typeof integrationManifestSchema>;
  */
 export function getDeclaredToolNames(manifest: IntegrationManifest): string[] {
   return manifest.tools ? Object.keys(manifest.tools) : [];
+}
+
+/**
+ * Tool name the generic `apiCall` capability is exposed under (before the
+ * `{namespace}__` prefix the sidecar's McpHost applies). Constant so the
+ * spawn resolver, the McpHost allowlist, and the agent editor agree.
+ */
+export const API_CALL_TOOL_NAME = "api_call";
+
+/**
+ * Resolve the effective `apiCall` configuration for an integration, or
+ * `null` when the integration didn't opt in. Returns the resolved
+ * `authKey` (explicit, or the lone declared auth) and the declared
+ * `uploadProtocols`. The manifest schema guarantees that when `apiCall`
+ * is present there is at least one auth and `authKey` is unambiguous, so
+ * the resolution here cannot fail for a validated manifest.
+ */
+export function getApiCallConfig(
+  manifest: IntegrationManifest,
+): { authKey: string; uploadProtocols: IntegrationUploadProtocol[] } | null {
+  if (!manifest.apiCall) return null;
+  const authKeys = manifest.auths ? Object.keys(manifest.auths) : [];
+  const authKey = manifest.apiCall.authKey ?? authKeys[0];
+  if (!authKey) return null;
+  return {
+    authKey,
+    uploadProtocols: manifest.apiCall.uploadProtocols ?? [],
+  };
 }
 
 /**

@@ -16,6 +16,8 @@ import {
   getAvailableScopes,
   getDeclaredToolNames,
   getToolRequiredScopes,
+  getApiCallConfig,
+  API_CALL_TOOL_NAME,
   validateAgentIntegrationScopes,
   type IntegrationManifest,
 } from "../src/integration.ts";
@@ -70,8 +72,8 @@ describe("integrationManifestSchema — happy paths", () => {
   it("accepts the minimal node manifest", () => {
     const parsed = integrationManifestSchema.parse(baseManifest());
     expect(parsed.type).toBe("integration");
-    expect(parsed.server.type).toBe("node");
-    expect(parsed.server.entryPoint).toBe("./server/index.js");
+    expect(parsed.server!.type).toBe("node");
+    expect(parsed.server!.entryPoint).toBe("./server/index.js");
   });
 
   it("accepts a docker manifest with digest", () => {
@@ -86,8 +88,8 @@ describe("integrationManifestSchema — happy paths", () => {
       },
     });
     const parsed = integrationManifestSchema.parse(m);
-    expect(parsed.server.type).toBe("docker");
-    const pkg = parsed.server.package;
+    expect(parsed.server!.type).toBe("docker");
+    const pkg = parsed.server!.package;
     expect(pkg).toBeDefined();
     if (pkg?.registryType === "oci") {
       expect(pkg.digest).toMatch(/^sha256:/);
@@ -213,8 +215,8 @@ describe("integrationManifestSchema — author sugars (npx/uvx)", () => {
       },
     });
     const parsed = integrationManifestSchema.parse(m);
-    expect(parsed.server.type).toBe("npx");
-    expect(parsed.server.package?.registryType).toBe("npm");
+    expect(parsed.server!.type).toBe("npx");
+    expect(parsed.server!.package?.registryType).toBe("npm");
   });
 
   it("accepts npx with entryPoint — bundler output (intermediate)", () => {
@@ -984,5 +986,85 @@ describe("validateAgentIntegrationScopes", () => {
       noCatalog,
     );
     expect(errors).toEqual([]);
+  });
+});
+
+describe("integrationManifestSchema — apiCall (generic credential-injecting tool)", () => {
+  const oauthAuth = {
+    type: "oauth2" as const,
+    authorizationUrl: "https://idp/a",
+    tokenUrl: "https://idp/t",
+    authorizedUris: ["https://api.example.com/*"],
+    delivery: { http: {} },
+  };
+
+  it("accepts a serverless apiCall integration (migrated-provider shape)", () => {
+    const m = baseManifest({ server: undefined, apiCall: {}, auths: { primary: oauthAuth } });
+    const parsed = integrationManifestSchema.parse(m);
+    expect(parsed.server).toBeUndefined();
+    expect(parsed.apiCall).toBeDefined();
+  });
+
+  it("accepts a hybrid apiCall + MCP server integration", () => {
+    const m = baseManifest({ apiCall: {}, auths: { primary: oauthAuth } });
+    const parsed = integrationManifestSchema.parse(m);
+    expect(parsed.server!.type).toBe("node");
+    expect(parsed.apiCall).toBeDefined();
+  });
+
+  it("rejects an integration with neither server nor apiCall", () => {
+    const r = integrationManifestSchema.safeParse(baseManifest({ server: undefined }));
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects apiCall with no declared auth", () => {
+    const r = integrationManifestSchema.safeParse(baseManifest({ server: undefined, apiCall: {} }));
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects apiCall.authKey that matches no auth", () => {
+    const r = integrationManifestSchema.safeParse(
+      baseManifest({
+        server: undefined,
+        apiCall: { authKey: "ghost" },
+        auths: { primary: oauthAuth },
+      }),
+    );
+    expect(r.success).toBe(false);
+  });
+
+  it("requires apiCall.authKey when multiple auths are declared", () => {
+    const r = integrationManifestSchema.safeParse(
+      baseManifest({
+        server: undefined,
+        apiCall: {},
+        auths: { primary: oauthAuth, secondary: oauthAuth },
+      }),
+    );
+    expect(r.success).toBe(false);
+  });
+
+  it("accepts uploadProtocols on apiCall and surfaces them via getApiCallConfig", () => {
+    const m = baseManifest({
+      server: undefined,
+      apiCall: { uploadProtocols: ["google-resumable"] },
+      auths: { primary: oauthAuth },
+    });
+    const parsed = integrationManifestSchema.parse(m);
+    const cfg = getApiCallConfig(parsed);
+    expect(cfg).toEqual({ authKey: "primary", uploadProtocols: ["google-resumable"] });
+  });
+
+  it("getApiCallConfig resolves the lone auth key and returns null when apiCall is absent", () => {
+    const withCall = integrationManifestSchema.parse(
+      baseManifest({ server: undefined, apiCall: {}, auths: { only: oauthAuth } }),
+    );
+    expect(getApiCallConfig(withCall)?.authKey).toBe("only");
+    const noCall = integrationManifestSchema.parse(baseManifest());
+    expect(getApiCallConfig(noCall)).toBeNull();
+  });
+
+  it("exposes a stable generic tool name", () => {
+    expect(API_CALL_TOOL_NAME).toBe("api_call");
   });
 });
