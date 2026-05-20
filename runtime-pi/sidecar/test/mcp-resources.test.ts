@@ -41,9 +41,28 @@ function makeDeps(overrides: Partial<AppDeps> = {}): AppDeps {
         }),
     ) as unknown as typeof fetch,
     runId: "run-test",
+    // The credential-proxy spillover path is exercised through the
+    // generic `{ns}__api_call` integration tool (provider_call retired).
+    apiCallIntegrationsProvider: () => [
+      {
+        namespace: "test",
+        packageId: "@test/integ",
+        fetchCredentials: integResCreds,
+        refreshCredentials: integResCreds,
+      },
+    ],
     ...overrides,
   };
 }
+
+const integResCreds = async (): Promise<CredentialsResponse> => ({
+  credentials: { access_token: "test-123" },
+  authorizedUris: ["https://api.example.com/**"],
+  allowAllUris: false,
+  credentialHeaderName: "Authorization",
+  credentialHeaderPrefix: "Bearer",
+  credentialFieldName: "access_token",
+});
 
 async function rpc(
   app: ReturnType<typeof createApp>,
@@ -87,9 +106,8 @@ describe("POST /mcp — provider_call resource spillover", () => {
     const res = await rpc(app, {
       method: "tools/call",
       params: {
-        name: "provider_call",
+        name: "test__api_call",
         arguments: {
-          providerId: "test-provider",
           target: "https://api.example.com/document.pdf",
         },
       },
@@ -121,9 +139,8 @@ describe("POST /mcp — provider_call resource spillover", () => {
     const res = await rpc(app, {
       method: "tools/call",
       params: {
-        name: "provider_call",
+        name: "test__api_call",
         arguments: {
-          providerId: "test-provider",
           target: "https://api.example.com/large.json",
         },
       },
@@ -154,9 +171,8 @@ describe("POST /mcp — provider_call resource spillover", () => {
     const callRes = await rpc(app, {
       method: "tools/call",
       params: {
-        name: "provider_call",
+        name: "test__api_call",
         arguments: {
-          providerId: "test-provider",
           target: "https://api.example.com/medium.json",
         },
       },
@@ -199,9 +215,8 @@ describe("POST /mcp — provider_call resource spillover", () => {
     const callRes = await rpc(app, {
       method: "tools/call",
       params: {
-        name: "provider_call",
+        name: "test__api_call",
         arguments: {
-          providerId: "test-provider",
           target: "https://api.example.com/large.pdf",
         },
       },
@@ -240,9 +255,8 @@ describe("POST /mcp — provider_call resource spillover", () => {
     const res = await rpc(app, {
       method: "tools/call",
       params: {
-        name: "provider_call",
+        name: "test__api_call",
         arguments: {
-          providerId: "test-provider",
           target: "https://api.example.com/ping",
         },
       },
@@ -276,9 +290,8 @@ describe("POST /mcp — resources/list + resources/read", () => {
     const callRes = await rpc(app, {
       method: "tools/call",
       params: {
-        name: "provider_call",
+        name: "test__api_call",
         arguments: {
-          providerId: "test-provider",
           target: "https://api.example.com/document.pdf",
         },
       },
@@ -318,9 +331,8 @@ describe("POST /mcp — resources/list + resources/read", () => {
     const callRes = await rpc(app, {
       method: "tools/call",
       params: {
-        name: "provider_call",
+        name: "test__api_call",
         arguments: {
-          providerId: "test-provider",
           target: "https://api.example.com/large.json",
         },
       },

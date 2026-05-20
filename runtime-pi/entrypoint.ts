@@ -40,7 +40,6 @@ import {
   prepareBundleForPi,
   emitRuntimeReady,
   startSinkHeartbeat,
-  readProviderRefs,
   type AppstrateToolCtx,
   type AppstrateCtxProvider,
 } from "@appstrate/runner-pi";
@@ -353,48 +352,31 @@ if (sidecarUrl) {
   }
 
   try {
-    const effectiveBundle = bundle ?? buildInContainerBundle(env.agentPrompt);
-
-    // `buildMcpDirectFactories` registers `provider_call` (only when
-    // the bundle declares providers — empty enum is rejected by the
-    // SDK), `run_history`, and `recall_memory` in one shot.
+    // `buildMcpDirectFactories` registers `run_history` and
+    // `recall_memory`, plus one forwarding factory per namespaced
+    // integration tool (including the generic `{ns}__api_call`).
     const factories = await buildMcpDirectFactories({
-      bundle: effectiveBundle,
       mcp: mcpClient,
       runId: AGENT_RUN_ID,
-      // The workspace is the path-safety root for `provider_call`'s
-      // `{ fromFile }` / `{ multipart }` body resolution. The container
-      // injects bundle files into this directory at boot, and the agent
-      // can only write inside it — `resolveSafePath` refuses anything
-      // else.
-      workspace: WORKSPACE,
-      emitProvider: (event) => {
-        void bridgedSink.handle(event as RunEvent);
-      },
       emit: (event) => {
         void bridgedSink.handle(event as RunEvent);
       },
     });
     extensionFactories.push(...factories);
 
-    // Wire the tool-side credentialed-call surface (4th `execute` arg). Same
-    // MCP path as the LLM-side `provider_call` — ADR-003 holds: credential
-    // is injected by the sidecar, never reaches the agent container.
-    const allowedProviderIds = new Set(readProviderRefs(effectiveBundle).map((r) => r.name));
+    // Wire the tool-side runtime context (4th `execute` arg). The legacy
+    // credentialed `provider_call` surface was retired with the AFPS
+    // provider package type — integrations now expose their own
+    // namespaced tools (including the generic `{ns}__api_call`) directly
+    // to the LLM. `readResource` stays: it resolves any MCP
+    // `resource_link` an integration tool may return for spilled blobs.
     const mcp = mcpClient;
     appstrateRuntimeCtx = {
-      providerCall: async (providerId, args) => {
-        if (!allowedProviderIds.has(providerId)) {
-          throw new Error(
-            `Tool tried to call provider '${providerId}' which is not declared in the agent bundle's dependencies.providers[]. ` +
-              `Allowed: ${[...allowedProviderIds].join(", ") || "(none)"}`,
-          );
-        }
-        const result = await mcp.callTool({
-          name: "provider_call",
-          arguments: { providerId, ...args },
-        });
-        return result as Awaited<ReturnType<AppstrateToolCtx["providerCall"]>>;
+      providerCall: async (providerId) => {
+        throw new Error(
+          `Tool tried to call provider '${providerId}', but the AFPS provider surface has been removed. ` +
+            `Use an integration tool ({ns}__api_call) instead.`,
+        );
       },
       readResource: async (uri) => {
         const result = await mcp.readResource({ uri });

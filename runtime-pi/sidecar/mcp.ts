@@ -473,155 +473,133 @@ function buildSidecarTools(options: MountMcpOptions): {
 } {
   const { blobStore, proxyDeps, tokenBudget, providerCallLimit } = options;
   const { config, fetchFn } = proxyDeps;
-  const providerCall: AppstrateToolDefinition = {
-    descriptor: {
-      name: "provider_call",
-      description:
-        "Make an authenticated request through the sidecar's credential-injecting proxy. " +
-        "The sidecar resolves the named provider's credentials and forwards the request to " +
-        "the supplied target URL. Use only with provider IDs declared in the agent bundle's " +
-        "`dependencies.providers[]`. Binary upstream responses spill to MCP `resources` and " +
-        "are returned as a `resource_link`.",
-      inputSchema: {
+  // Shared input schema for the credential-injecting proxy. The AFPS
+  // provider package type (and its served `provider_call` tool) is
+  // retired — the only tool built from this schema now is the generic
+  // `{ns}__api_call` per-integration tool, which clones this minus the
+  // `providerId` argument (the integration is implied by the tool name).
+  const CREDENTIAL_PROXY_INPUT_SCHEMA = {
+    type: "object",
+    additionalProperties: false,
+    required: ["providerId", "target"],
+    properties: {
+      providerId: {
+        type: "string",
+        description:
+          "Provider identifier as declared in `dependencies.providers[].id` (e.g. `@appstrate/gmail` or `gmail`).",
+        // The pattern source is `PROVIDER_ID_RE` in `helpers.ts` —
+        // shared with `executeProviderCall` so the same shape gates
+        // the MCP descriptor and the credential-proxy core.
+        pattern: PROVIDER_ID_PATTERN,
+      },
+      target: {
+        type: "string",
+        format: "uri",
+        description:
+          "Absolute target URL. Must match an entry in the provider's `authorizedUris` " +
+          "(or be a non-private URL if the provider is `allowAllUris`).",
+      },
+      method: {
+        type: "string",
+        enum: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"],
+        description: "HTTP method. Defaults to GET.",
+      },
+      headers: {
         type: "object",
-        additionalProperties: false,
-        required: ["providerId", "target"],
-        properties: {
-          providerId: {
-            type: "string",
-            description:
-              "Provider identifier as declared in `dependencies.providers[].id` (e.g. `@appstrate/gmail` or `gmail`).",
-            // The pattern source is `PROVIDER_ID_RE` in `helpers.ts` —
-            // shared with `executeProviderCall` so the same shape gates
-            // the MCP descriptor and the credential-proxy core.
-            pattern: PROVIDER_ID_PATTERN,
-          },
-          target: {
-            type: "string",
-            format: "uri",
-            description:
-              "Absolute target URL. Must match an entry in the provider's `authorizedUris` " +
-              "(or be a non-private URL if the provider is `allowAllUris`).",
-          },
-          method: {
-            type: "string",
-            enum: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"],
-            description: "HTTP method. Defaults to GET.",
-          },
-          headers: {
+        description:
+          "Additional headers to forward. Hop-by-hop headers and sidecar-control " +
+          "headers (X-Provider, X-Target, X-Substitute-Body, …) are filtered " +
+          "server-side.",
+        additionalProperties: { type: "string" },
+      },
+      body: {
+        description:
+          "Request body. Three shapes:\n" +
+          "  - string: text/JSON endpoints.\n" +
+          "  - { fromBytes: <base64>, encoding: 'base64' }: binary uploads. " +
+          "Standard base64 (RFC 4648 §4) only — no URL-safe alphabet, no whitespace.\n" +
+          "  - { multipart: [...] }: multipart/form-data uploads. The sidecar " +
+          "builds a `FormData` from the supplied parts and lets `fetch()` set the " +
+          "`Content-Type: multipart/form-data; boundary=…` header itself — any " +
+          "caller-supplied multipart Content-Type is stripped (the boundary token " +
+          "must match the body bytes). Each part is either " +
+          "`{ name, value }` (a string field) or " +
+          "`{ name, filename, bytes: <base64>, encoding: 'base64', contentType? }` " +
+          "(a file part). Decoded byte sizes summed across all parts must fit " +
+          "SIDECAR_MAX_REQUEST_BODY_BYTES.",
+        oneOf: [
+          { type: "string" },
+          {
             type: "object",
-            description:
-              "Additional headers to forward. Hop-by-hop headers and sidecar-control " +
-              "headers (X-Provider, X-Target, X-Substitute-Body, …) are filtered " +
-              "server-side.",
-            additionalProperties: { type: "string" },
+            additionalProperties: false,
+            required: ["fromBytes", "encoding"],
+            properties: {
+              fromBytes: { type: "string" },
+              encoding: { const: "base64" },
+            },
           },
-          body: {
-            description:
-              "Request body. Three shapes:\n" +
-              "  - string: text/JSON endpoints.\n" +
-              "  - { fromBytes: <base64>, encoding: 'base64' }: binary uploads. " +
-              "Standard base64 (RFC 4648 §4) only — no URL-safe alphabet, no whitespace.\n" +
-              "  - { multipart: [...] }: multipart/form-data uploads. The sidecar " +
-              "builds a `FormData` from the supplied parts and lets `fetch()` set the " +
-              "`Content-Type: multipart/form-data; boundary=…` header itself — any " +
-              "caller-supplied multipart Content-Type is stripped (the boundary token " +
-              "must match the body bytes). Each part is either " +
-              "`{ name, value }` (a string field) or " +
-              "`{ name, filename, bytes: <base64>, encoding: 'base64', contentType? }` " +
-              "(a file part). Decoded byte sizes summed across all parts must fit " +
-              "SIDECAR_MAX_REQUEST_BODY_BYTES.",
-            oneOf: [
-              { type: "string" },
-              {
-                type: "object",
-                additionalProperties: false,
-                required: ["fromBytes", "encoding"],
-                properties: {
-                  fromBytes: { type: "string" },
-                  encoding: { const: "base64" },
-                },
-              },
-              {
-                type: "object",
-                additionalProperties: false,
-                required: ["multipart"],
-                properties: {
-                  multipart: {
-                    type: "array",
-                    minItems: 1,
-                    maxItems: MAX_MULTIPART_PARTS,
-                    items: {
-                      oneOf: [
-                        {
-                          type: "object",
-                          additionalProperties: false,
-                          required: ["name", "value"],
-                          properties: {
-                            name: {
-                              type: "string",
-                              minLength: 1,
-                              maxLength: MAX_MULTIPART_NAME_LENGTH,
-                            },
-                            value: { type: "string" },
-                          },
+          {
+            type: "object",
+            additionalProperties: false,
+            required: ["multipart"],
+            properties: {
+              multipart: {
+                type: "array",
+                minItems: 1,
+                maxItems: MAX_MULTIPART_PARTS,
+                items: {
+                  oneOf: [
+                    {
+                      type: "object",
+                      additionalProperties: false,
+                      required: ["name", "value"],
+                      properties: {
+                        name: {
+                          type: "string",
+                          minLength: 1,
+                          maxLength: MAX_MULTIPART_NAME_LENGTH,
                         },
-                        {
-                          type: "object",
-                          additionalProperties: false,
-                          required: ["name", "filename", "bytes", "encoding"],
-                          properties: {
-                            name: {
-                              type: "string",
-                              minLength: 1,
-                              maxLength: MAX_MULTIPART_NAME_LENGTH,
-                            },
-                            filename: {
-                              type: "string",
-                              minLength: 1,
-                              maxLength: MAX_MULTIPART_FILENAME_LENGTH,
-                            },
-                            bytes: { type: "string" },
-                            encoding: { const: "base64" },
-                            contentType: {
-                              type: "string",
-                              maxLength: MAX_MULTIPART_CONTENT_TYPE_LENGTH,
-                            },
-                          },
-                        },
-                      ],
+                        value: { type: "string" },
+                      },
                     },
-                  },
+                    {
+                      type: "object",
+                      additionalProperties: false,
+                      required: ["name", "filename", "bytes", "encoding"],
+                      properties: {
+                        name: {
+                          type: "string",
+                          minLength: 1,
+                          maxLength: MAX_MULTIPART_NAME_LENGTH,
+                        },
+                        filename: {
+                          type: "string",
+                          minLength: 1,
+                          maxLength: MAX_MULTIPART_FILENAME_LENGTH,
+                        },
+                        bytes: { type: "string" },
+                        encoding: { const: "base64" },
+                        contentType: {
+                          type: "string",
+                          maxLength: MAX_MULTIPART_CONTENT_TYPE_LENGTH,
+                        },
+                      },
+                    },
+                  ],
                 },
               },
-            ],
+            },
           },
-          substituteBody: {
-            type: "boolean",
-            description:
-              "When true, the sidecar substitutes `{{credential}}` placeholders in the " +
-              "request body. Off by default to avoid accidental token leaks into payloads.",
-          },
-        },
+        ],
+      },
+      substituteBody: {
+        type: "boolean",
+        description:
+          "When true, the sidecar substitutes `{{credential}}` placeholders in the " +
+          "request body. Off by default to avoid accidental token leaks into payloads.",
       },
     },
-    handler: async (rawArgs) => {
-      // Run-scoped fan-out cap. Without this, an agent that issues N
-      // parallel `provider_call`s funnels their full payloads into the
-      // next LLM turn, blowing past upstream model TPM windows
-      // (issue #427). p-limit wraps the operation so the slot is held
-      // only for the duration of `credentialProxyInner` — no acquire/release
-      // pairing to manage.
-      const ctx = {
-        proxyDeps,
-        providerId: (rawArgs as { providerId?: string }).providerId ?? "",
-        label: "provider_call",
-      };
-      return providerCallLimit
-        ? await providerCallLimit(() => credentialProxyInner(rawArgs, ctx))
-        : await credentialProxyInner(rawArgs, ctx);
-    },
-  };
+  } as const;
 
   // provider→integration unification — build one generic `{ns}__api_call`
   // tool for an integration that opted into `apiCall`. Reuses the exact
@@ -635,7 +613,7 @@ function buildSidecarTools(options: MountMcpOptions): {
   // Built lazily (per `/mcp` request) by `mountMcp` because the set of
   // integrations is only known after the background bootstrap finishes.
   const makeApiCallTool = (integ: ApiCallIntegrationConfig): AppstrateToolDefinition => {
-    const baseSchema = providerCall.descriptor.inputSchema as {
+    const baseSchema = CREDENTIAL_PROXY_INPUT_SCHEMA as unknown as {
       properties: Record<string, unknown>;
       required?: string[];
       [k: string]: unknown;
@@ -1020,7 +998,7 @@ function buildSidecarTools(options: MountMcpOptions): {
     },
   };
 
-  return { firstParty: [providerCall, runHistory, recallMemory], makeApiCallTool };
+  return { firstParty: [runHistory, recallMemory], makeApiCallTool };
 }
 
 /**

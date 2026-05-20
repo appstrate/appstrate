@@ -31,9 +31,9 @@ import {
 } from "@appstrate/mcp-transport";
 import type { CallToolResult } from "@appstrate/mcp-transport";
 
-// Re-export shared symbols so in-tree consumers (provider-resolver,
-// provider-upload-resolver, parity tests if any survive) can keep
-// importing from `./upstream-meta` without churn.
+// Re-export shared symbols so in-tree consumers (the sidecar MCP host
+// and parity tests) can keep importing from `./upstream-meta` without
+// churn.
 export {
   UPSTREAM_HEADER_ALLOWLIST,
   UPSTREAM_META_KEY,

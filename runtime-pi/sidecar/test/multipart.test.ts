@@ -25,19 +25,32 @@ import { createApp, type AppDeps } from "../app.ts";
 import { MAX_REQUEST_BODY_SIZE } from "../helpers.ts";
 import type { CredentialsResponse } from "../helpers.ts";
 
+// The multipart body shape is exercised through the generic
+// `{ns}__api_call` integration tool — the only credential-injecting MCP
+// tool now that the AFPS provider package type (and `provider_call`) are
+// retired. The integration's credentials carry the same authorizedUris
+// the provider_call tests used.
+const integrationCreds = (): CredentialsResponse => ({
+  credentials: { access_token: "tok-abc" },
+  authorizedUris: ["https://api.example.com/**"],
+  allowAllUris: false,
+  credentialHeaderName: "Authorization",
+  credentialHeaderPrefix: "Bearer",
+  credentialFieldName: "access_token",
+});
+
 function makeMultipartDeps(overrides?: Partial<AppDeps>): AppDeps {
   return {
     config: { platformApiUrl: "http://mock:3000", runToken: "tok", proxyUrl: "" },
-    fetchCredentials: mock(
-      async (): Promise<CredentialsResponse> => ({
-        credentials: { access_token: "tok-abc" },
-        authorizedUris: ["https://api.example.com/**"],
-        allowAllUris: false,
-        credentialHeaderName: "Authorization",
-        credentialHeaderPrefix: "Bearer",
-        credentialFieldName: "access_token",
-      }),
-    ),
+    fetchCredentials: mock(async (): Promise<CredentialsResponse> => integrationCreds()),
+    apiCallIntegrationsProvider: () => [
+      {
+        namespace: "test",
+        packageId: "@appstrate/test",
+        fetchCredentials: async () => integrationCreds(),
+        refreshCredentials: async () => integrationCreds(),
+      },
+    ],
     cookieJar: new Map(),
     fetchFn: mock(
       async () =>
@@ -67,7 +80,7 @@ async function rpc(
   return { status: res.status, json: JSON.parse(await res.text()) };
 }
 
-describe("POST /mcp — provider_call multipart/form-data", () => {
+describe("POST /mcp — api_call multipart/form-data", () => {
   it("builds a FormData and lets fetch() pick a multipart Content-Type with boundary", async () => {
     let capturedContentType: string | null = null;
     const capturedFields: Record<string, string> = {};
@@ -116,9 +129,8 @@ describe("POST /mcp — provider_call multipart/form-data", () => {
     const res = await rpc(app, {
       method: "tools/call",
       params: {
-        name: "provider_call",
+        name: "test__api_call",
         arguments: {
-          providerId: "@appstrate/test",
           target: "https://api.example.com/sink",
           method: "POST",
           body: {
@@ -182,9 +194,8 @@ describe("POST /mcp — provider_call multipart/form-data", () => {
     await rpc(app, {
       method: "tools/call",
       params: {
-        name: "provider_call",
+        name: "test__api_call",
         arguments: {
-          providerId: "@appstrate/test",
           target: "https://api.example.com/sink",
           method: "POST",
           substituteBody: true,
@@ -231,9 +242,8 @@ describe("POST /mcp — provider_call multipart/form-data", () => {
     await rpc(app, {
       method: "tools/call",
       params: {
-        name: "provider_call",
+        name: "test__api_call",
         arguments: {
-          providerId: "@appstrate/test",
           target: "https://api.example.com/sink",
           method: "POST",
           body: {
@@ -265,9 +275,8 @@ describe("POST /mcp — provider_call multipart/form-data", () => {
     await rpc(app, {
       method: "tools/call",
       params: {
-        name: "provider_call",
+        name: "test__api_call",
         arguments: {
-          providerId: "@appstrate/test",
           target: "https://api.example.com/sink",
           method: "POST",
           headers: {
@@ -308,9 +317,8 @@ describe("POST /mcp — provider_call multipart/form-data", () => {
     await rpc(app, {
       method: "tools/call",
       params: {
-        name: "provider_call",
+        name: "test__api_call",
         arguments: {
-          providerId: "@appstrate/test",
           target: "https://api.example.com/sink",
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -334,9 +342,8 @@ describe("POST /mcp — provider_call multipart/form-data", () => {
     const res = await rpc(app, {
       method: "tools/call",
       params: {
-        name: "provider_call",
+        name: "test__api_call",
         arguments: {
-          providerId: "@appstrate/test",
           target: "https://api.example.com/sink",
           method: "POST",
           substituteBody: true,
@@ -362,9 +369,8 @@ describe("POST /mcp — provider_call multipart/form-data", () => {
     const res = await rpc(app, {
       method: "tools/call",
       params: {
-        name: "provider_call",
+        name: "test__api_call",
         arguments: {
-          providerId: "@appstrate/test",
           target: "https://api.example.com/sink",
           method: "POST",
           body: { multipart: "oops" as unknown as object[] },
@@ -385,9 +391,8 @@ describe("POST /mcp — provider_call multipart/form-data", () => {
     const res = await rpc(app, {
       method: "tools/call",
       params: {
-        name: "provider_call",
+        name: "test__api_call",
         arguments: {
-          providerId: "@appstrate/test",
           target: "https://api.example.com/sink",
           method: "POST",
           body: { multipart: tooMany },
@@ -405,9 +410,8 @@ describe("POST /mcp — provider_call multipart/form-data", () => {
     const res = await rpc(app, {
       method: "tools/call",
       params: {
-        name: "provider_call",
+        name: "test__api_call",
         arguments: {
-          providerId: "@appstrate/test",
           target: "https://api.example.com/sink",
           method: "POST",
           body: {
@@ -438,9 +442,8 @@ describe("POST /mcp — provider_call multipart/form-data", () => {
     const res = await rpc(app, {
       method: "tools/call",
       params: {
-        name: "provider_call",
+        name: "test__api_call",
         arguments: {
-          providerId: "@appstrate/test",
           target: "https://api.example.com/sink",
           method: "POST",
           body: {
@@ -472,9 +475,8 @@ describe("POST /mcp — provider_call multipart/form-data", () => {
     const res = await rpc(app, {
       method: "tools/call",
       params: {
-        name: "provider_call",
+        name: "test__api_call",
         arguments: {
-          providerId: "@appstrate/test",
           target: "https://api.example.com/sink",
           method: "POST",
           body: {
@@ -499,7 +501,7 @@ describe("POST /mcp — provider_call multipart/form-data", () => {
         inputSchema: { properties: { body?: { oneOf?: unknown[]; description?: string } } };
       }>;
     };
-    const proxy = result.tools.find((t) => t.name === "provider_call")!;
+    const proxy = result.tools.find((t) => t.name === "test__api_call")!;
     expect(proxy.inputSchema.properties.body?.oneOf?.length).toBe(3);
     expect(proxy.inputSchema.properties.body?.description).toContain("multipart");
   });
@@ -512,9 +514,8 @@ describe("POST /mcp — provider_call multipart/form-data", () => {
     const res = await rpc(app, {
       method: "tools/call",
       params: {
-        name: "provider_call",
+        name: "test__api_call",
         arguments: {
-          providerId: "@appstrate/test",
           target: "https://api.example.com/sink",
           method: "POST",
           body: { multipart: [{ name: "k", value: "v" }] },

@@ -51,9 +51,28 @@ function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
     cookieJar: new Map(),
     fetchFn: mock(async () => new Response("{}", { status: 200 })),
     isReady: () => true,
+    // The credential-proxy core is exercised through the generic
+    // `{ns}__api_call` integration tool (provider_call is retired).
+    apiCallIntegrationsProvider: () => [
+      {
+        namespace: "test",
+        packageId: "@test/integ",
+        fetchCredentials: defaultFetchCredentials,
+        refreshCredentials: defaultFetchCredentials,
+      },
+    ],
     ...overrides,
   };
 }
+
+const defaultFetchCredentials = async (): Promise<CredentialsResponse> => ({
+  credentials: { access_token: "test-123" },
+  authorizedUris: ["https://api.example.com/**"],
+  allowAllUris: false,
+  credentialHeaderName: "Authorization",
+  credentialHeaderPrefix: "Bearer",
+  credentialFieldName: "access_token",
+});
 
 async function rpc(
   app: ReturnType<typeof createApp>,
@@ -114,9 +133,20 @@ function buildTestApp(opts: {
 }): Hono {
   const app = new Hono();
   const blobStore = opts.blobStore ?? new BlobStore("run-test");
+  // The credential-proxy core (token-budget / blob spillover) is now
+  // exercised through the generic `{ns}__api_call` integration tool —
+  // `provider_call` was retired with the AFPS provider package type.
   mountMcp(app, {
     blobStore,
     ...(opts.tokenBudget ? { tokenBudget: opts.tokenBudget } : {}),
+    apiCallIntegrationsProvider: () => [
+      {
+        namespace: "test",
+        packageId: "@test/integ",
+        fetchCredentials: opts.deps.fetchCredentials,
+        refreshCredentials: opts.deps.fetchCredentials,
+      },
+    ],
     proxyDeps: {
       config: opts.deps.config,
       cookieJar: opts.deps.cookieJar,
@@ -149,9 +179,8 @@ describe("token-aware spill — dense JSON (issue #390 primary)", () => {
     const res = await rpc(app, {
       method: "tools/call",
       params: {
-        name: "provider_call",
+        name: "test__api_call",
         arguments: {
-          providerId: "test-provider",
           target: "https://api.example.com/items",
           method: "GET",
         },
@@ -184,9 +213,8 @@ describe("token-aware spill — dense JSON (issue #390 primary)", () => {
     const res = await rpc(app, {
       method: "tools/call",
       params: {
-        name: "provider_call",
+        name: "test__api_call",
         arguments: {
-          providerId: "test-provider",
           target: "https://api.example.com/items",
           method: "GET",
         },
@@ -235,9 +263,8 @@ describe("token-aware spill — cumulative pressure (issue #390 secondary)", () 
       const res = await rpc(app, {
         method: "tools/call",
         params: {
-          name: "provider_call",
+          name: "test__api_call",
           arguments: {
-            providerId: "test-provider",
             target: "https://api.example.com/items",
             method: "GET",
           },
@@ -279,9 +306,8 @@ describe("token-aware spill — `_meta` accounting", () => {
     const res = await rpc(app, {
       method: "tools/call",
       params: {
-        name: "provider_call",
+        name: "test__api_call",
         arguments: {
-          providerId: "test-provider",
           target: "https://api.example.com/items",
           method: "GET",
         },
@@ -315,9 +341,8 @@ describe("token-aware spill — `_meta` accounting", () => {
       const res = await rpc(app, {
         method: "tools/call",
         params: {
-          name: "provider_call",
+          name: "test__api_call",
           arguments: {
-            providerId: "test-provider",
             target: "https://api.example.com/items",
             method: "GET",
           },
@@ -401,9 +426,8 @@ describe("token-aware spill — backwards compatibility", () => {
     const res = await rpc(app, {
       method: "tools/call",
       params: {
-        name: "provider_call",
+        name: "test__api_call",
         arguments: {
-          providerId: "test-provider",
           target: "https://api.example.com/items",
           method: "GET",
         },
@@ -427,9 +451,8 @@ describe("token-aware spill — backwards compatibility", () => {
     const res = await rpc(app, {
       method: "tools/call",
       params: {
-        name: "provider_call",
+        name: "test__api_call",
         arguments: {
-          providerId: "test-provider",
           target: "https://api.example.com/items",
           method: "GET",
         },
@@ -467,9 +490,8 @@ describe("token-aware spill — env-var configuration via createApp", () => {
       const res = await rpc(app, {
         method: "tools/call",
         params: {
-          name: "provider_call",
+          name: "test__api_call",
           arguments: {
-            providerId: "test-provider",
             target: "https://api.example.com/items",
             method: "GET",
           },
@@ -522,9 +544,8 @@ describe("token-aware spill — fallback when blob store is full", () => {
     const res = await rpc(app, {
       method: "tools/call",
       params: {
-        name: "provider_call",
+        name: "test__api_call",
         arguments: {
-          providerId: "test-provider",
           target: "https://api.example.com/items",
           method: "GET",
         },
