@@ -248,12 +248,10 @@ function AuthSection({
   packageId,
   status,
   authDecl,
-  isAdmin,
 }: {
   packageId: string;
   status: IntegrationAuthStatus;
   authDecl: IntegrationManifestAuth;
-  isAdmin: boolean;
 }) {
   const { t } = useTranslation("settings");
   const isOAuth = status.type === "oauth2";
@@ -298,18 +296,6 @@ function AuthSection({
         </div>
       )}
 
-      {/* OAuth client section (admin only, oauth2 only) */}
-      {isOAuth && isAdmin && (
-        <div className="mb-3">
-          <OAuthClientForm packageId={packageId} authKey={status.authKey} />
-          {!status.hasOAuthClient && (
-            <p className="text-muted-foreground mt-2 text-xs">
-              {t("integration.auth.noOauthClient")}
-            </p>
-          )}
-        </div>
-      )}
-
       {isOAuth && (
         <RequiredScopesPanel
           packageId={packageId}
@@ -321,9 +307,18 @@ function AuthSection({
       {/* Connections — audit list with rename/share/disconnect handled
           per row. The connect button here adds a NEW connection (intent
           "connect", defaults scopes); reconnect/upgrade still live on
-          the agent surfaces where the per-agent scope context is known. */}
-      <div className="mb-2 flex items-center justify-end">
-        {(!isOAuth || status.hasOAuthClient) && (
+          the agent surfaces where the per-agent scope context is known.
+          OAuth client setup lives in the Accès tab — a missing client
+          blocks connecting, so surface a pointer instead of the button. */}
+      {isOAuth && !status.hasOAuthClient ? (
+        <p
+          className="text-muted-foreground mb-2 text-xs"
+          data-testid={`no-oauth-client-hint-${status.authKey}`}
+        >
+          {t("integration.auth.noClientHint")}
+        </p>
+      ) : (
+        <div className="mb-2 flex items-center justify-end">
           <InlineConnectButton
             packageId={packageId}
             authKey={status.authKey}
@@ -332,8 +327,8 @@ function AuthSection({
             forceAccountSelect={status.connections.length > 0}
             lockToAuthKey
           />
-        )}
-      </div>
+        </div>
+      )}
       {status.connections.length === 0 ? (
         <p className="text-muted-foreground text-sm">{t("integration.auth.noConnection")}</p>
       ) : (
@@ -343,6 +338,47 @@ function AuthSection({
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Admin OAuth client configuration — one registration form per declared
+ * oauth2 auth. These are the app-level client credentials registered with
+ * the IdP (the analog of a provider's admin-credentials config), a setup
+ * concern distinct from the per-actor connections in the Connexions tab.
+ */
+function OAuthClientsSection({
+  packageId,
+  oauthAuths,
+}: {
+  packageId: string;
+  oauthAuths: IntegrationAuthStatus[];
+}) {
+  const { t } = useTranslation("settings");
+  if (oauthAuths.length === 0) return null;
+  return (
+    <div
+      className="border-border bg-muted/30 mb-6 rounded-md border p-4"
+      data-testid="oauth-clients-section"
+    >
+      <div className="mb-3">
+        <h3 className="text-sm font-semibold">{t("integration.admin.oauthClients.title")}</h3>
+        <p className="text-muted-foreground mt-1 text-xs">
+          {t("integration.admin.oauthClients.help")}
+        </p>
+      </div>
+      <div className="space-y-4">
+        {oauthAuths.map((a) => (
+          <div key={a.authKey} className="space-y-1">
+            <div className="text-muted-foreground font-mono text-xs">{a.authKey}</div>
+            <OAuthClientForm packageId={packageId} authKey={a.authKey} />
+            {!a.hasOAuthClient && (
+              <p className="text-muted-foreground text-xs">{t("integration.auth.noOauthClient")}</p>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -1056,7 +1092,6 @@ export function IntegrationDetailPage() {
                       packageId={packageId}
                       status={authStatus}
                       authDecl={declared}
-                      isAdmin={isAdmin}
                     />
                   );
                 })
@@ -1072,6 +1107,10 @@ export function IntegrationDetailPage() {
               <ActivationHint onActivate={onActivate} pending={activate.isPending} />
             ) : (
               <>
+                <OAuthClientsSection
+                  packageId={packageId}
+                  oauthAuths={detail.auths.filter((a) => a.type === "oauth2")}
+                />
                 <BlockUserConnectionsToggle
                   packageId={packageId}
                   initialBlocked={summary?.blockUserConnections ?? false}
