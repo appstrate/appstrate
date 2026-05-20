@@ -1,0 +1,85 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/linkedin",
+  "version": "1.0.0",
+  "displayName": "LinkedIn",
+  "description": "Professional networking and B2B marketing platform",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "icon": "linkedin",
+  "keywords": ["social-media", "marketing", "crm"],
+  "apiCall": {},
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "required": true,
+      "authorizedUris": ["https://api.linkedin.com/**"],
+      "authorizationUrl": "https://www.linkedin.com/oauth/v2/authorization",
+      "tokenUrl": "https://www.linkedin.com/oauth/v2/accessToken",
+      "refreshUrl": "https://www.linkedin.com/oauth/v2/accessToken",
+      "scopes": ["openid", "profile", "email"],
+      "scopeSeparator": " ",
+      "pkceEnabled": true,
+      "tokenAuthMethod": "client_secret_post",
+      "availableScopes": [
+        {
+          "value": "openid",
+          "label": "OpenID Connect (required)"
+        },
+        {
+          "value": "profile",
+          "label": "Read name & profile picture"
+        },
+        {
+          "value": "email",
+          "label": "Read email address"
+        },
+        {
+          "value": "w_member_social",
+          "label": "Post on behalf of member"
+        },
+        {
+          "value": "r_organization_social",
+          "label": "Read organization posts"
+        },
+        {
+          "value": "w_organization_social",
+          "label": "Post on behalf of organization"
+        },
+        {
+          "value": "rw_organization_admin",
+          "label": "Manage organization pages"
+        },
+        {
+          "value": "r_ads",
+          "label": "Read ads data"
+        },
+        {
+          "value": "r_ads_reporting",
+          "label": "Read ads reporting"
+        },
+        {
+          "value": "rw_ads",
+          "label": "Manage ad campaigns"
+        },
+        {
+          "value": "r_basicprofile",
+          "label": "Read full profile (headline, positions)"
+        },
+        {
+          "value": "r_liteprofile",
+          "label": "Read basic profile (name, photo)"
+        }
+      ],
+      "delivery": {
+        "http": {
+          "headerName": "Authorization",
+          "headerPrefix": "Bearer",
+          "valueFrom": "accessToken"
+        }
+      }
+    }
+  }
+}

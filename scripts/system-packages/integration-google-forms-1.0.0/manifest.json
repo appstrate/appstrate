@@ -1,0 +1,60 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/google-forms",
+  "version": "1.0.0",
+  "displayName": "Google Forms",
+  "description": "Form creation and response collection by Google",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "icon": "googleforms",
+  "keywords": ["forms", "productivity"],
+  "apiCall": {},
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "required": true,
+      "authorizedUris": ["https://forms.googleapis.com/**"],
+      "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth",
+      "tokenUrl": "https://oauth2.googleapis.com/token",
+      "refreshUrl": "https://oauth2.googleapis.com/token",
+      "scopes": [
+        "https://www.googleapis.com/auth/forms.body.readonly",
+        "https://www.googleapis.com/auth/forms.responses.readonly"
+      ],
+      "scopeSeparator": " ",
+      "pkceEnabled": false,
+      "tokenAuthMethod": "client_secret_post",
+      "availableScopes": [
+        {
+          "value": "https://www.googleapis.com/auth/forms.body.readonly",
+          "label": "Read form structure"
+        },
+        {
+          "value": "https://www.googleapis.com/auth/forms.body",
+          "label": "Read and edit form structure"
+        },
+        {
+          "value": "https://www.googleapis.com/auth/forms.responses.readonly",
+          "label": "Read form responses"
+        },
+        {
+          "value": "https://www.googleapis.com/auth/drive.readonly",
+          "label": "Read Google Drive (list forms)"
+        },
+        {
+          "value": "https://www.googleapis.com/auth/drive",
+          "label": "Full Google Drive access"
+        }
+      ],
+      "delivery": {
+        "http": {
+          "headerName": "Authorization",
+          "headerPrefix": "Bearer",
+          "valueFrom": "accessToken"
+        }
+      }
+    }
+  }
+}

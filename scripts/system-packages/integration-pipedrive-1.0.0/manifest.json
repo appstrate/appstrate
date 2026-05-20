@@ -1,0 +1,101 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/pipedrive",
+  "version": "1.0.0",
+  "displayName": "Pipedrive",
+  "description": "Sales CRM and pipeline management platform",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "icon": "https://api.iconify.design/logos/pipedrive.svg",
+  "keywords": ["crm", "sales"],
+  "apiCall": {},
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "required": true,
+      "authorizedUris": ["https://api.pipedrive.com/**", "https://*.pipedrive.com/api/**"],
+      "authorizationUrl": "https://oauth.pipedrive.com/oauth/authorize",
+      "tokenUrl": "https://oauth.pipedrive.com/oauth/token",
+      "refreshUrl": "https://oauth.pipedrive.com/oauth/token",
+      "scopes": ["deals:read", "contacts:read", "users:read"],
+      "scopeSeparator": " ",
+      "pkceEnabled": false,
+      "tokenAuthMethod": "client_secret_basic",
+      "availableScopes": [
+        {
+          "value": "deals:read",
+          "label": "Read deals"
+        },
+        {
+          "value": "deals:full",
+          "label": "Full access to deals"
+        },
+        {
+          "value": "contacts:read",
+          "label": "Read persons and organizations"
+        },
+        {
+          "value": "contacts:full",
+          "label": "Full access to persons and organizations"
+        },
+        {
+          "value": "activities:read",
+          "label": "Read activities"
+        },
+        {
+          "value": "activities:full",
+          "label": "Full access to activities"
+        },
+        {
+          "value": "leads:read",
+          "label": "Read leads"
+        },
+        {
+          "value": "leads:full",
+          "label": "Full access to leads"
+        },
+        {
+          "value": "products:read",
+          "label": "Read products"
+        },
+        {
+          "value": "products:full",
+          "label": "Full access to products"
+        },
+        {
+          "value": "users:read",
+          "label": "Read user information"
+        },
+        {
+          "value": "mail:read",
+          "label": "Read mail"
+        },
+        {
+          "value": "mail:full",
+          "label": "Full access to mail"
+        },
+        {
+          "value": "recents:read",
+          "label": "Read recent changes"
+        },
+        {
+          "value": "search:read",
+          "label": "Search across items"
+        },
+        {
+          "value": "admin",
+          "label": "Admin access"
+        }
+      ],
+      "delivery": {
+        "http": {
+          "headerName": "Authorization",
+          "headerPrefix": "Bearer",
+          "valueFrom": "accessToken"
+        }
+      }
+    }
+  }
+}

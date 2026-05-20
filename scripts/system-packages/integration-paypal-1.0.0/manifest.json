@@ -1,0 +1,69 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/paypal",
+  "version": "1.0.0",
+  "displayName": "PayPal",
+  "description": "Online payment processing platform",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "icon": "paypal",
+  "keywords": ["payments", "finance"],
+  "apiCall": {},
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "required": true,
+      "authorizedUris": ["https://api-m.paypal.com/**", "https://api-m.sandbox.paypal.com/**"],
+      "authorizationUrl": "https://www.paypal.com/connect",
+      "tokenUrl": "https://api-m.paypal.com/v1/oauth2/token",
+      "refreshUrl": "https://api-m.paypal.com/v1/oauth2/token",
+      "scopes": ["openid", "email", "profile"],
+      "scopeSeparator": " ",
+      "pkceEnabled": false,
+      "tokenAuthMethod": "client_secret_basic",
+      "availableScopes": [
+        {
+          "value": "openid",
+          "label": "OpenID Connect"
+        },
+        {
+          "value": "email",
+          "label": "Read email address"
+        },
+        {
+          "value": "profile",
+          "label": "Read basic profile"
+        },
+        {
+          "value": "https://uri.paypal.com/services/payments/payment",
+          "label": "Accept payments"
+        },
+        {
+          "value": "https://uri.paypal.com/services/payments/refund",
+          "label": "Issue refunds"
+        },
+        {
+          "value": "https://uri.paypal.com/services/reporting/search/read",
+          "label": "Search transactions"
+        },
+        {
+          "value": "https://uri.paypal.com/services/invoicing",
+          "label": "Manage invoices"
+        },
+        {
+          "value": "https://uri.paypal.com/services/subscriptions",
+          "label": "Manage subscriptions"
+        }
+      ],
+      "delivery": {
+        "http": {
+          "headerName": "Authorization",
+          "headerPrefix": "Bearer",
+          "valueFrom": "accessToken"
+        }
+      }
+    }
+  }
+}

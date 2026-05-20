@@ -1,0 +1,70 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/dynamics365",
+  "version": "1.0.0",
+  "displayName": "Microsoft Dynamics 365",
+  "description": "Enterprise CRM and ERP platform by Microsoft",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "icon": "microsoftdynamics",
+  "keywords": ["crm", "sales", "erp"],
+  "apiCall": {},
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "required": true,
+      "authorizedUris": [
+        "https://*.dynamics.com/**",
+        "https://*.api.crm.dynamics.com/**",
+        "https://*.api.crm2.dynamics.com/**",
+        "https://*.api.crm3.dynamics.com/**",
+        "https://*.api.crm4.dynamics.com/**",
+        "https://*.api.crm5.dynamics.com/**",
+        "https://*.api.crm6.dynamics.com/**",
+        "https://*.api.crm7.dynamics.com/**",
+        "https://*.api.crm8.dynamics.com/**",
+        "https://*.api.crm9.dynamics.com/**",
+        "https://*.api.crm10.dynamics.com/**",
+        "https://*.api.crm11.dynamics.com/**"
+      ],
+      "authorizationUrl": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+      "tokenUrl": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+      "refreshUrl": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+      "scopes": ["https://dynamics.microsoft.com/user_impersonation", "offline_access"],
+      "scopeSeparator": " ",
+      "pkceEnabled": true,
+      "tokenAuthMethod": "client_secret_post",
+      "availableScopes": [
+        {
+          "value": "https://dynamics.microsoft.com/user_impersonation",
+          "label": "Access Dynamics 365 as the user"
+        },
+        {
+          "value": "offline_access",
+          "label": "Offline access (refresh tokens)"
+        },
+        {
+          "value": "openid",
+          "label": "OpenID Connect identity"
+        },
+        {
+          "value": "profile",
+          "label": "Read user profile"
+        },
+        {
+          "value": "email",
+          "label": "Read user email"
+        }
+      ],
+      "delivery": {
+        "http": {
+          "headerName": "Authorization",
+          "headerPrefix": "Bearer",
+          "valueFrom": "accessToken"
+        }
+      }
+    }
+  }
+}

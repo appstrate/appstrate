@@ -1,0 +1,77 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/zoom",
+  "version": "1.0.0",
+  "displayName": "Zoom",
+  "description": "Video conferencing and online meetings platform",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "icon": "zoom",
+  "keywords": ["video", "meetings"],
+  "apiCall": {},
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "required": true,
+      "authorizedUris": ["https://api.zoom.us/**"],
+      "authorizationUrl": "https://zoom.us/oauth/authorize",
+      "tokenUrl": "https://zoom.us/oauth/token",
+      "refreshUrl": "https://zoom.us/oauth/token",
+      "scopes": ["user:read:user", "meeting:read:list_meetings", "meeting:read:meeting"],
+      "scopeSeparator": " ",
+      "pkceEnabled": true,
+      "tokenAuthMethod": "client_secret_basic",
+      "availableScopes": [
+        {
+          "value": "user:read:user",
+          "label": "Read user profile"
+        },
+        {
+          "value": "meeting:read:list_meetings",
+          "label": "List meetings"
+        },
+        {
+          "value": "meeting:read:meeting",
+          "label": "Read meeting details"
+        },
+        {
+          "value": "meeting:write:meeting",
+          "label": "Create and update meetings"
+        },
+        {
+          "value": "meeting:delete:meeting",
+          "label": "Delete meetings"
+        },
+        {
+          "value": "recording:read:list_recording_files",
+          "label": "List cloud recordings"
+        },
+        {
+          "value": "recording:read:recording",
+          "label": "Read recording details"
+        },
+        {
+          "value": "webinar:read:list_webinars",
+          "label": "List webinars"
+        },
+        {
+          "value": "webinar:read:webinar",
+          "label": "Read webinar details"
+        },
+        {
+          "value": "report:read:list_meeting_participants",
+          "label": "Read meeting participants report"
+        }
+      ],
+      "delivery": {
+        "http": {
+          "headerName": "Authorization",
+          "headerPrefix": "Bearer",
+          "valueFrom": "accessToken"
+        }
+      }
+    }
+  }
+}

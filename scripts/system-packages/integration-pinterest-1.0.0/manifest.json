@@ -1,0 +1,73 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/pinterest",
+  "version": "1.0.0",
+  "displayName": "Pinterest",
+  "description": "Visual discovery and bookmarking platform",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "icon": "pinterest",
+  "keywords": ["social-media", "marketing"],
+  "apiCall": {},
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "required": true,
+      "authorizedUris": ["https://api.pinterest.com/**"],
+      "authorizationUrl": "https://www.pinterest.com/oauth/",
+      "tokenUrl": "https://api.pinterest.com/v5/oauth/token",
+      "refreshUrl": "https://api.pinterest.com/v5/oauth/token",
+      "scopes": ["user_accounts:read"],
+      "scopeSeparator": ",",
+      "pkceEnabled": false,
+      "tokenAuthMethod": "client_secret_basic",
+      "availableScopes": [
+        {
+          "value": "boards:read",
+          "label": "Read boards"
+        },
+        {
+          "value": "boards:write",
+          "label": "Create & edit boards"
+        },
+        {
+          "value": "pins:read",
+          "label": "Read pins"
+        },
+        {
+          "value": "pins:write",
+          "label": "Create & edit pins"
+        },
+        {
+          "value": "user_accounts:read",
+          "label": "Read user profile"
+        },
+        {
+          "value": "ads:read",
+          "label": "Read ads data"
+        },
+        {
+          "value": "ads:write",
+          "label": "Manage ads campaigns"
+        },
+        {
+          "value": "catalogs:read",
+          "label": "Read product catalogs"
+        },
+        {
+          "value": "catalogs:write",
+          "label": "Manage product catalogs"
+        }
+      ],
+      "delivery": {
+        "http": {
+          "headerName": "Authorization",
+          "headerPrefix": "Bearer",
+          "valueFrom": "accessToken"
+        }
+      }
+    }
+  }
+}

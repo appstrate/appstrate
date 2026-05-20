@@ -1,0 +1,33 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/mailchimp",
+  "version": "1.0.0",
+  "displayName": "Mailchimp",
+  "description": "Email marketing and automation platform",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "icon": "mailchimp",
+  "keywords": ["email-marketing", "marketing"],
+  "apiCall": {},
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "required": true,
+      "authorizedUris": ["https://*.api.mailchimp.com/**", "https://login.mailchimp.com/**"],
+      "authorizationUrl": "https://login.mailchimp.com/oauth2/authorize",
+      "tokenUrl": "https://login.mailchimp.com/oauth2/token",
+      "scopeSeparator": " ",
+      "pkceEnabled": false,
+      "tokenAuthMethod": "client_secret_post",
+      "delivery": {
+        "http": {
+          "headerName": "Authorization",
+          "headerPrefix": "Bearer",
+          "valueFrom": "accessToken"
+        }
+      }
+    }
+  }
+}

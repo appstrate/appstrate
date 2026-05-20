@@ -1,0 +1,81 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/salesforce",
+  "version": "1.0.0",
+  "displayName": "Salesforce",
+  "description": "Cloud-based CRM platform for sales, service, and marketing",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "icon": "salesforce",
+  "keywords": ["crm", "sales", "marketing"],
+  "apiCall": {},
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "required": true,
+      "authorizedUris": [
+        "https://*.salesforce.com/**",
+        "https://*.force.com/**",
+        "https://*.my.salesforce.com/**"
+      ],
+      "authorizationUrl": "https://login.salesforce.com/services/oauth2/authorize",
+      "tokenUrl": "https://login.salesforce.com/services/oauth2/token",
+      "refreshUrl": "https://login.salesforce.com/services/oauth2/token",
+      "scopes": ["api", "refresh_token", "offline_access"],
+      "scopeSeparator": " ",
+      "pkceEnabled": true,
+      "tokenAuthMethod": "client_secret_post",
+      "availableScopes": [
+        {
+          "value": "api",
+          "label": "Access REST API"
+        },
+        {
+          "value": "refresh_token",
+          "label": "Refresh token access"
+        },
+        {
+          "value": "offline_access",
+          "label": "Offline access (refresh tokens)"
+        },
+        {
+          "value": "full",
+          "label": "Full access to all resources"
+        },
+        {
+          "value": "chatter_api",
+          "label": "Access Chatter API"
+        },
+        {
+          "value": "wave_api",
+          "label": "Access Analytics API"
+        },
+        {
+          "value": "content",
+          "label": "Access content resources"
+        },
+        {
+          "value": "openid",
+          "label": "OpenID Connect identity"
+        },
+        {
+          "value": "profile",
+          "label": "Read user profile"
+        },
+        {
+          "value": "email",
+          "label": "Read user email"
+        }
+      ],
+      "delivery": {
+        "http": {
+          "headerName": "Authorization",
+          "headerPrefix": "Bearer",
+          "valueFrom": "accessToken"
+        }
+      }
+    }
+  }
+}

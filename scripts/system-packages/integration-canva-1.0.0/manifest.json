@@ -1,0 +1,93 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/canva",
+  "version": "1.0.0",
+  "displayName": "Canva",
+  "description": "Online graphic design and visual content platform",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "icon": "canva",
+  "keywords": ["design", "marketing"],
+  "apiCall": {},
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "required": true,
+      "authorizedUris": ["https://api.canva.com/**"],
+      "authorizationUrl": "https://www.canva.com/api/oauth/authorize",
+      "tokenUrl": "https://api.canva.com/rest/v1/oauth/token",
+      "refreshUrl": "https://api.canva.com/rest/v1/oauth/token",
+      "scopes": ["design:meta:read", "design:content:read", "profile:read"],
+      "scopeSeparator": " ",
+      "pkceEnabled": true,
+      "tokenAuthMethod": "client_secret_basic",
+      "availableScopes": [
+        {
+          "value": "design:meta:read",
+          "label": "Read design metadata"
+        },
+        {
+          "value": "design:content:read",
+          "label": "Read design content"
+        },
+        {
+          "value": "design:content:write",
+          "label": "Write design content"
+        },
+        {
+          "value": "design:permission:read",
+          "label": "Read design permissions"
+        },
+        {
+          "value": "design:permission:write",
+          "label": "Write design permissions"
+        },
+        {
+          "value": "folder:read",
+          "label": "Read folders"
+        },
+        {
+          "value": "folder:write",
+          "label": "Write folders"
+        },
+        {
+          "value": "asset:read",
+          "label": "Read assets"
+        },
+        {
+          "value": "asset:write",
+          "label": "Upload assets"
+        },
+        {
+          "value": "brandtemplate:meta:read",
+          "label": "Read brand template metadata"
+        },
+        {
+          "value": "brandtemplate:content:read",
+          "label": "Read brand template content"
+        },
+        {
+          "value": "profile:read",
+          "label": "Read user profile"
+        },
+        {
+          "value": "comment:read",
+          "label": "Read comments"
+        },
+        {
+          "value": "comment:write",
+          "label": "Write comments"
+        }
+      ],
+      "delivery": {
+        "http": {
+          "headerName": "Authorization",
+          "headerPrefix": "Bearer",
+          "valueFrom": "accessToken"
+        }
+      }
+    }
+  }
+}

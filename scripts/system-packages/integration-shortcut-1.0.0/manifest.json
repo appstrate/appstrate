@@ -1,0 +1,39 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/shortcut",
+  "version": "1.0.0",
+  "displayName": "Shortcut",
+  "description": "Project management platform for software development teams",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "icon": "shortcut",
+  "keywords": ["project-management", "issue-tracking", "development"],
+  "apiCall": {},
+  "auths": {
+    "primary": {
+      "type": "api_key",
+      "required": true,
+      "authorizedUris": ["https://api.app.shortcut.com/**"],
+      "credentials": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "api_key": {
+              "type": "string",
+              "description": "Shortcut API token (generate from Settings > API Tokens)"
+            }
+          },
+          "required": ["api_key"]
+        }
+      },
+      "delivery": {
+        "http": {
+          "headerName": "Shortcut-Token",
+          "valueFrom": "api_key"
+        }
+      }
+    }
+  }
+}

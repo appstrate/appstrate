@@ -1,0 +1,57 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/wrike",
+  "version": "1.0.0",
+  "displayName": "Wrike",
+  "description": "Collaborative work management platform for teams and enterprises",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "icon": "https://www.google.com/s2/favicons?domain=wrike.com&sz=128",
+  "keywords": ["project-management", "collaboration"],
+  "apiCall": {},
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "required": true,
+      "authorizedUris": ["https://www.wrike.com/api/**", "https://*.wrike.com/api/**"],
+      "authorizationUrl": "https://login.wrike.com/oauth2/authorize/v4",
+      "tokenUrl": "https://login.wrike.com/oauth2/token",
+      "refreshUrl": "https://login.wrike.com/oauth2/token",
+      "scopes": ["Default"],
+      "scopeSeparator": ",",
+      "pkceEnabled": false,
+      "tokenAuthMethod": "client_secret_post",
+      "availableScopes": [
+        {
+          "value": "Default",
+          "label": "Standard access to tasks, folders, projects"
+        },
+        {
+          "value": "wsReadOnly",
+          "label": "Read-only access to workspace"
+        },
+        {
+          "value": "wsReadWrite",
+          "label": "Full read-write access to workspace"
+        },
+        {
+          "value": "amReadOnlyWorkflow",
+          "label": "Read-only access to workflows"
+        },
+        {
+          "value": "amReadWriteWorkflow",
+          "label": "Read-write access to workflows"
+        }
+      ],
+      "delivery": {
+        "http": {
+          "headerName": "Authorization",
+          "headerPrefix": "Bearer",
+          "valueFrom": "accessToken"
+        }
+      }
+    }
+  }
+}

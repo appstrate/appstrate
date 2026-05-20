@@ -1,0 +1,77 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/discord",
+  "version": "1.0.0",
+  "displayName": "Discord",
+  "description": "Communication platform for communities and teams",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "icon": "discord",
+  "keywords": ["social-media", "messaging", "community"],
+  "apiCall": {},
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "required": true,
+      "authorizedUris": ["https://discord.com/api/**"],
+      "authorizationUrl": "https://discord.com/oauth2/authorize",
+      "tokenUrl": "https://discord.com/api/v10/oauth2/token",
+      "refreshUrl": "https://discord.com/api/v10/oauth2/token",
+      "scopes": ["identify"],
+      "scopeSeparator": " ",
+      "pkceEnabled": false,
+      "tokenAuthMethod": "client_secret_basic",
+      "availableScopes": [
+        {
+          "value": "identify",
+          "label": "Read user profile (id, username, avatar)"
+        },
+        {
+          "value": "email",
+          "label": "Read user email address"
+        },
+        {
+          "value": "guilds",
+          "label": "List user's guilds (servers)"
+        },
+        {
+          "value": "guilds.join",
+          "label": "Add user to a guild"
+        },
+        {
+          "value": "guilds.members.read",
+          "label": "Read user's guild member info"
+        },
+        {
+          "value": "connections",
+          "label": "View user's linked accounts"
+        },
+        {
+          "value": "bot",
+          "label": "Add bot to a guild"
+        },
+        {
+          "value": "webhook.incoming",
+          "label": "Create incoming webhooks"
+        },
+        {
+          "value": "applications.commands",
+          "label": "Register slash commands"
+        },
+        {
+          "value": "messages.read",
+          "label": "Read messages in channels"
+        }
+      ],
+      "delivery": {
+        "http": {
+          "headerName": "Authorization",
+          "headerPrefix": "Bearer",
+          "valueFrom": "accessToken"
+        }
+      }
+    }
+  }
+}

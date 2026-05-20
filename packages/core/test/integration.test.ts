@@ -1068,3 +1068,37 @@ describe("integrationManifestSchema — apiCall (generic credential-injecting to
     expect(API_CALL_TOOL_NAME).toBe("api_call");
   });
 });
+
+describe("integrationManifestSchema — allowAllUris (migrated provider parity)", () => {
+  it("accepts an auth with empty authorizedUris when allowAllUris is set", () => {
+    const m = baseManifest({
+      server: undefined,
+      apiCall: {},
+      auths: {
+        primary: {
+          type: "custom",
+          authorizedUris: [],
+          allowAllUris: true,
+          credentials: { schema: { type: "object", properties: { token: { type: "string" } } } },
+          delivery: { env: { TOKEN: { from: "token" } } },
+        },
+      },
+    });
+    expect(() => integrationManifestSchema.parse(m)).not.toThrow();
+  });
+
+  it("rejects an auth with empty authorizedUris and no allowAllUris", () => {
+    const m = baseManifest({
+      auths: {
+        primary: {
+          type: "oauth2",
+          authorizationUrl: "https://idp/a",
+          tokenUrl: "https://idp/t",
+          authorizedUris: [],
+          delivery: { http: {} },
+        },
+      },
+    });
+    expect(integrationManifestSchema.safeParse(m).success).toBe(false);
+  });
+});

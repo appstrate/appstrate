@@ -1,0 +1,45 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/woocommerce",
+  "version": "1.0.0",
+  "displayName": "WooCommerce",
+  "description": "E-commerce plugin for WordPress — manage products, orders, customers, and coupons",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "icon": "woo",
+  "keywords": ["e-commerce", "retail"],
+  "apiCall": {},
+  "auths": {
+    "primary": {
+      "type": "custom",
+      "required": true,
+      "authorizedUris": [],
+      "allowAllUris": true,
+      "credentials": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "site_url": {
+              "type": "string",
+              "description": "WooCommerce site URL (e.g. https://mystore.com)"
+            },
+            "consumer_key": {
+              "type": "string",
+              "description": "Consumer Key (starts with ck_)"
+            },
+            "consumer_secret": {
+              "type": "string",
+              "description": "Consumer Secret (starts with cs_)"
+            }
+          },
+          "required": ["site_url", "consumer_key", "consumer_secret"]
+        }
+      },
+      "delivery": {
+        "http": {}
+      }
+    }
+  }
+}

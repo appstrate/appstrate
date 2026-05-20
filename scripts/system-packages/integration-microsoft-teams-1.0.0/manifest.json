@@ -1,0 +1,83 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/microsoft-teams",
+  "version": "1.0.0",
+  "displayName": "Microsoft Teams",
+  "description": "Team collaboration and messaging platform by Microsoft",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "icon": "microsoftteams",
+  "keywords": ["messaging", "collaboration"],
+  "apiCall": {},
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "required": true,
+      "authorizedUris": ["https://graph.microsoft.com/**"],
+      "authorizationUrl": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+      "tokenUrl": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+      "refreshUrl": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+      "scopes": [
+        "Team.ReadBasic.All",
+        "Channel.ReadBasic.All",
+        "Chat.Read",
+        "User.Read",
+        "offline_access"
+      ],
+      "scopeSeparator": " ",
+      "pkceEnabled": true,
+      "tokenAuthMethod": "client_secret_post",
+      "availableScopes": [
+        {
+          "value": "Team.ReadBasic.All",
+          "label": "Read team names and descriptions"
+        },
+        {
+          "value": "Channel.ReadBasic.All",
+          "label": "Read channel names and descriptions"
+        },
+        {
+          "value": "ChannelMessage.Read.All",
+          "label": "Read channel messages"
+        },
+        {
+          "value": "Chat.Read",
+          "label": "Read user chats"
+        },
+        {
+          "value": "Chat.ReadWrite",
+          "label": "Read and write user chats"
+        },
+        {
+          "value": "ChatMessage.Send",
+          "label": "Send chat messages"
+        },
+        {
+          "value": "ChannelMessage.Send",
+          "label": "Send channel messages"
+        },
+        {
+          "value": "User.Read",
+          "label": "Read user profile"
+        },
+        {
+          "value": "User.ReadBasic.All",
+          "label": "Read all users' basic info"
+        },
+        {
+          "value": "offline_access",
+          "label": "Maintain access (refresh tokens)"
+        }
+      ],
+      "delivery": {
+        "http": {
+          "headerName": "Authorization",
+          "headerPrefix": "Bearer",
+          "valueFrom": "accessToken"
+        }
+      }
+    }
+  }
+}

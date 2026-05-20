@@ -1,0 +1,96 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/xero",
+  "version": "1.0.0",
+  "displayName": "Xero",
+  "description": "Cloud-based accounting and bookkeeping platform for small businesses",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "icon": "xero",
+  "keywords": ["accounting", "finance"],
+  "apiCall": {},
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "required": true,
+      "authorizedUris": ["https://api.xero.com/**"],
+      "authorizationUrl": "https://login.xero.com/identity/connect/authorize",
+      "tokenUrl": "https://identity.xero.com/connect/token",
+      "refreshUrl": "https://identity.xero.com/connect/token",
+      "scopes": [
+        "openid",
+        "profile",
+        "email",
+        "accounting.transactions.read",
+        "accounting.contacts.read",
+        "offline_access"
+      ],
+      "scopeSeparator": " ",
+      "pkceEnabled": true,
+      "tokenAuthMethod": "client_secret_basic",
+      "availableScopes": [
+        {
+          "value": "openid",
+          "label": "OpenID Connect"
+        },
+        {
+          "value": "profile",
+          "label": "User profile"
+        },
+        {
+          "value": "email",
+          "label": "User email"
+        },
+        {
+          "value": "offline_access",
+          "label": "Refresh tokens"
+        },
+        {
+          "value": "accounting.transactions.read",
+          "label": "Read transactions and invoices"
+        },
+        {
+          "value": "accounting.transactions",
+          "label": "Read/write transactions and invoices"
+        },
+        {
+          "value": "accounting.contacts.read",
+          "label": "Read contacts"
+        },
+        {
+          "value": "accounting.contacts",
+          "label": "Read/write contacts"
+        },
+        {
+          "value": "accounting.settings.read",
+          "label": "Read organisation settings"
+        },
+        {
+          "value": "accounting.settings",
+          "label": "Read/write organisation settings"
+        },
+        {
+          "value": "accounting.reports.read",
+          "label": "Read reports"
+        },
+        {
+          "value": "accounting.journals.read",
+          "label": "Read journals"
+        },
+        {
+          "value": "accounting.attachments",
+          "label": "Read/write attachments"
+        }
+      ],
+      "delivery": {
+        "http": {
+          "headerName": "Authorization",
+          "headerPrefix": "Bearer",
+          "valueFrom": "accessToken"
+        }
+      }
+    }
+  }
+}

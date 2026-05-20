@@ -1,0 +1,40 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/loom",
+  "version": "1.0.0",
+  "displayName": "Loom",
+  "description": "Video messaging platform — access video metadata, transcripts, and embed information",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "icon": "loom",
+  "keywords": ["video", "communication"],
+  "apiCall": {},
+  "auths": {
+    "primary": {
+      "type": "api_key",
+      "required": true,
+      "authorizedUris": ["https://www.loom.com/**", "https://developer.loom.com/**"],
+      "credentials": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "api_key": {
+              "type": "string",
+              "description": "Loom Developer API key"
+            }
+          },
+          "required": ["api_key"]
+        }
+      },
+      "delivery": {
+        "http": {
+          "headerName": "Authorization",
+          "headerPrefix": "Bearer",
+          "valueFrom": "api_key"
+        }
+      }
+    }
+  }
+}

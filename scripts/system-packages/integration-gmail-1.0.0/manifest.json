@@ -1,0 +1,76 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/gmail",
+  "version": "1.0.0",
+  "displayName": "Gmail",
+  "description": "Email service by Google",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "icon": "gmail",
+  "keywords": ["email", "productivity"],
+  "apiCall": {},
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "required": true,
+      "authorizedUris": ["https://gmail.googleapis.com/**", "https://www.googleapis.com/gmail/**"],
+      "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth",
+      "tokenUrl": "https://oauth2.googleapis.com/token",
+      "refreshUrl": "https://oauth2.googleapis.com/token",
+      "scopes": [
+        "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/gmail.send"
+      ],
+      "scopeSeparator": " ",
+      "pkceEnabled": false,
+      "tokenAuthMethod": "client_secret_post",
+      "availableScopes": [
+        {
+          "value": "https://www.googleapis.com/auth/gmail.readonly",
+          "label": "Read-only access"
+        },
+        {
+          "value": "https://www.googleapis.com/auth/gmail.send",
+          "label": "Send messages"
+        },
+        {
+          "value": "https://www.googleapis.com/auth/gmail.compose",
+          "label": "Compose & send drafts"
+        },
+        {
+          "value": "https://www.googleapis.com/auth/gmail.modify",
+          "label": "Read & write (no delete)"
+        },
+        {
+          "value": "https://www.googleapis.com/auth/gmail.labels",
+          "label": "Manage labels"
+        },
+        {
+          "value": "https://www.googleapis.com/auth/gmail.metadata",
+          "label": "Read metadata only"
+        },
+        {
+          "value": "https://www.googleapis.com/auth/gmail.insert",
+          "label": "Insert messages"
+        },
+        {
+          "value": "https://www.googleapis.com/auth/gmail.settings.basic",
+          "label": "Manage basic settings"
+        },
+        {
+          "value": "https://mail.google.com/",
+          "label": "Full mailbox access"
+        }
+      ],
+      "delivery": {
+        "http": {
+          "headerName": "Authorization",
+          "headerPrefix": "Bearer",
+          "valueFrom": "accessToken"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/github",
+  "version": "1.0.0",
+  "displayName": "GitHub",
+  "description": "Code hosting and collaboration platform",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "icon": "github",
+  "keywords": ["development", "code"],
+  "apiCall": {},
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "required": true,
+      "authorizedUris": ["https://api.github.com/**"],
+      "authorizationUrl": "https://github.com/login/oauth/authorize",
+      "tokenUrl": "https://github.com/login/oauth/access_token",
+      "scopes": ["repo", "read:user"],
+      "scopeSeparator": " ",
+      "pkceEnabled": false,
+      "tokenAuthMethod": "client_secret_post",
+      "availableScopes": [
+        {
+          "value": "repo",
+          "label": "Full repository access"
+        },
+        {
+          "value": "read:user",
+          "label": "Read user profile"
+        },
+        {
+          "value": "user:email",
+          "label": "Read user emails"
+        },
+        {
+          "value": "read:org",
+          "label": "Read org membership"
+        },
+        {
+          "value": "gist",
+          "label": "Create gists"
+        },
+        {
+          "value": "notifications",
+          "label": "Access notifications"
+        },
+        {
+          "value": "workflow",
+          "label": "Update GitHub Actions workflows"
+        }
+      ],
+      "delivery": {
+        "http": {
+          "headerName": "Authorization",
+          "headerPrefix": "Bearer",
+          "valueFrom": "accessToken"
+        }
+      }
+    }
+  }
+}

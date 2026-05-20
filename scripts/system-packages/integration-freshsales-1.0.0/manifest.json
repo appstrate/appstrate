@@ -1,0 +1,44 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/freshsales",
+  "version": "1.0.0",
+  "displayName": "Freshsales",
+  "description": "CRM platform for sales teams with AI-powered lead scoring",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "icon": "https://www.google.com/s2/favicons?domain=freshsales.io&sz=128",
+  "keywords": ["crm", "sales"],
+  "apiCall": {},
+  "auths": {
+    "primary": {
+      "type": "api_key",
+      "required": true,
+      "authorizedUris": ["https://*.myfreshworks.com/**", "https://*.freshsales.io/**"],
+      "credentials": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "api_key": {
+              "type": "string",
+              "description": "Freshsales API key (found in Settings > API Settings)"
+            },
+            "subdomain": {
+              "type": "string",
+              "description": "Your Freshworks subdomain (e.g. 'mycompany' from mycompany.myfreshworks.com)"
+            }
+          },
+          "required": ["api_key", "subdomain"]
+        }
+      },
+      "delivery": {
+        "http": {
+          "headerName": "Authorization",
+          "headerPrefix": "Token token=",
+          "valueFrom": "api_key"
+        }
+      }
+    }
+  }
+}

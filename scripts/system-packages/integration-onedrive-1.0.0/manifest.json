@@ -1,0 +1,69 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/onedrive",
+  "version": "1.0.0",
+  "displayName": "OneDrive",
+  "description": "Cloud file storage and sharing by Microsoft",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "icon": "microsoftonedrive",
+  "keywords": ["storage", "productivity"],
+  "apiCall": {},
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "required": true,
+      "authorizedUris": ["https://graph.microsoft.com/**"],
+      "authorizationUrl": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+      "tokenUrl": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+      "refreshUrl": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+      "scopes": ["Files.Read", "User.Read", "offline_access"],
+      "scopeSeparator": " ",
+      "pkceEnabled": true,
+      "tokenAuthMethod": "client_secret_post",
+      "availableScopes": [
+        {
+          "value": "Files.Read",
+          "label": "Read user files"
+        },
+        {
+          "value": "Files.Read.All",
+          "label": "Read all files user can access"
+        },
+        {
+          "value": "Files.ReadWrite",
+          "label": "Read and write user files"
+        },
+        {
+          "value": "Files.ReadWrite.All",
+          "label": "Read and write all files"
+        },
+        {
+          "value": "Sites.Read.All",
+          "label": "Read SharePoint sites"
+        },
+        {
+          "value": "Sites.ReadWrite.All",
+          "label": "Read and write SharePoint sites"
+        },
+        {
+          "value": "User.Read",
+          "label": "Read user profile"
+        },
+        {
+          "value": "offline_access",
+          "label": "Maintain access (refresh tokens)"
+        }
+      ],
+      "delivery": {
+        "http": {
+          "headerName": "Authorization",
+          "headerPrefix": "Bearer",
+          "valueFrom": "accessToken"
+        }
+      }
+    }
+  }
+}

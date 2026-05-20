@@ -158,15 +158,31 @@ async function resolveOne(
   // encoding a typical (multi-MB) integration bundle blows past Linux's
   // env var size limit.
   //
+  // provider→integration unification — expose the generic `api_call` tool
+  // when the manifest opts in AND the agent selected it (least-privilege:
+  // the catch-all tool is never auto-granted). `authorizedUris` come from
+  // the auth the apiCall config resolved to.
+  const apiCallCfg = getApiCallConfig(manifest);
+  const exposeApiCall =
+    apiCallCfg !== null && (agentToolSelection ?? []).includes(API_CALL_TOOL_NAME);
+  const apiCallAuth =
+    exposeApiCall && apiCallCfg ? manifest.auths?.[apiCallCfg.authKey] : undefined;
+  const apiCallAuthorizedUris = apiCallAuth?.authorizedUris ?? [];
+  const apiCallAllowAllUris = apiCallAuth?.allowAllUris ?? false;
+
   // An integration is viable if EITHER `delivery.env` OR `delivery.http`
   // resolved to something — pure-http integrations (no env vars) still
-  // need to spawn with an empty `spawnEnv`.
+  // need to spawn with an empty `spawnEnv`. apiCall integrations are
+  // viable on a resolved connection alone: their credentials flow at
+  // runtime through `/internal/integration-credentials`, and a `custom`
+  // auth (no server-side injection) legitimately resolves no delivery.
   const deliveries = await resolveDeliveries(
     packageId,
     applicationId,
     actor,
     manifest,
     resolvedConnection,
+    exposeApiCall,
   );
   if (!deliveries) {
     // resolveDeliveries already logged the reason (missing connection,
@@ -180,30 +196,11 @@ async function resolveOne(
   const namespace = packageId;
 
   // Phase 4 — narrow the MITM URL envelope to the union of urlPatterns
-  // declared on the agent-selected tools. Only emitted when EVERY
-  // selected tool declared non-empty `urlPatterns` (otherwise we'd
-  // refuse legitimate traffic from an under-declared tool, so we leave
-  // the field unset and fall back to the per-auth `authorizedUris`).
-  //
-  // Skipped entirely for `server.type === "http"` (Phase 7 remote MCP):
-  // there is no per-integration MITM listener on the runner side because
-  // there is no runner — the sidecar speaks MCP directly to the managed
-  // upstream. The upstream's tool-level RBAC + OAuth scope are the only
-  // gates that apply, by design.
+  // declared on the agent-selected tools (skipped for remote HTTP MCP).
   const isRemoteHttp = manifest.server?.type === "http";
   const toolUrlEnvelope = isRemoteHttp
     ? undefined
     : computeToolUrlEnvelope(manifest, agentToolSelection);
-
-  // provider→integration unification — expose the generic `api_call` tool
-  // when the manifest opts in AND the agent selected it (least-privilege:
-  // the catch-all tool is never auto-granted). `authorizedUris` come from
-  // the auth the apiCall config resolved to.
-  const apiCallCfg = getApiCallConfig(manifest);
-  const exposeApiCall =
-    apiCallCfg !== null && (agentToolSelection ?? []).includes(API_CALL_TOOL_NAME);
-  const apiCallAuthorizedUris =
-    exposeApiCall && apiCallCfg ? (manifest.auths?.[apiCallCfg.authKey]?.authorizedUris ?? []) : [];
 
   return {
     packageId,
@@ -232,6 +229,7 @@ async function resolveOne(
           apiCall: {
             authKey: apiCallCfg.authKey,
             authorizedUris: [...apiCallAuthorizedUris],
+            ...(apiCallAllowAllUris ? { allowAllUris: true } : {}),
             ...(apiCallCfg.uploadProtocols.length > 0
               ? { uploadProtocols: apiCallCfg.uploadProtocols }
               : {}),
@@ -339,6 +337,7 @@ async function resolveDeliveries(
   actor: Actor,
   manifest: IntegrationManifest,
   resolvedConnection: ResolvedConnection | null,
+  hasApiCall: boolean,
 ): Promise<ResolvedDeliveries | null> {
   const auths = manifest.auths ?? {};
   if (Object.keys(auths).length === 0) {
@@ -429,7 +428,10 @@ async function resolveDeliveries(
     }
   }
 
-  if (!resolvedAtLeastOne) return null;
+  // apiCall integrations stay viable on a resolved connection alone — a
+  // `custom` auth resolves no delivery plan but the credential fields are
+  // still served (for {{var}} substitution) via the live endpoint.
+  if (!resolvedAtLeastOne && !hasApiCall) return null;
   return {
     spawnEnv,
     ...(Object.keys(httpDeliveryAuths).length > 0 ? { httpDeliveryAuths } : {}),

@@ -1,0 +1,69 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/jira",
+  "version": "1.0.0",
+  "displayName": "Jira",
+  "description": "Project tracking and issue management platform by Atlassian",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "icon": "jira",
+  "keywords": ["project-management", "issue-tracking"],
+  "apiCall": {},
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "required": true,
+      "authorizedUris": ["https://api.atlassian.com/**"],
+      "authorizationUrl": "https://auth.atlassian.com/authorize",
+      "tokenUrl": "https://auth.atlassian.com/oauth/token",
+      "refreshUrl": "https://auth.atlassian.com/oauth/token",
+      "scopes": ["read:jira-work", "read:jira-user", "offline_access"],
+      "scopeSeparator": " ",
+      "pkceEnabled": false,
+      "tokenAuthMethod": "client_secret_post",
+      "availableScopes": [
+        {
+          "value": "read:jira-work",
+          "label": "Read project and issue data"
+        },
+        {
+          "value": "write:jira-work",
+          "label": "Create and edit issues"
+        },
+        {
+          "value": "read:jira-user",
+          "label": "Read user information"
+        },
+        {
+          "value": "manage:jira-project",
+          "label": "Manage project settings"
+        },
+        {
+          "value": "manage:jira-configuration",
+          "label": "Manage Jira global settings"
+        },
+        {
+          "value": "manage:jira-webhook",
+          "label": "Manage webhooks"
+        },
+        {
+          "value": "read:me",
+          "label": "Read authenticated user profile"
+        },
+        {
+          "value": "offline_access",
+          "label": "Refresh tokens for offline access"
+        }
+      ],
+      "delivery": {
+        "http": {
+          "headerName": "Authorization",
+          "headerPrefix": "Bearer",
+          "valueFrom": "accessToken"
+        }
+      }
+    }
+  }
+}

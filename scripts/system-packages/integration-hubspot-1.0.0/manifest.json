@@ -1,0 +1,65 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/hubspot",
+  "version": "1.0.0",
+  "displayName": "HubSpot",
+  "description": "CRM, marketing, and sales platform",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "icon": "hubspot",
+  "keywords": ["crm", "marketing"],
+  "apiCall": {},
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "required": true,
+      "authorizedUris": ["https://api.hubapi.com/**"],
+      "authorizationUrl": "https://app.hubspot.com/oauth/authorize",
+      "tokenUrl": "https://api.hubapi.com/oauth/v1/token",
+      "refreshUrl": "https://api.hubapi.com/oauth/v1/token",
+      "scopes": ["crm.objects.contacts.read"],
+      "scopeSeparator": " ",
+      "pkceEnabled": false,
+      "tokenAuthMethod": "client_secret_post",
+      "availableScopes": [
+        {
+          "value": "crm.objects.contacts.read",
+          "label": "Read contacts"
+        },
+        {
+          "value": "crm.objects.contacts.write",
+          "label": "Write contacts"
+        },
+        {
+          "value": "crm.objects.companies.read",
+          "label": "Read companies"
+        },
+        {
+          "value": "crm.objects.companies.write",
+          "label": "Write companies"
+        },
+        {
+          "value": "crm.objects.deals.read",
+          "label": "Read deals"
+        },
+        {
+          "value": "crm.objects.deals.write",
+          "label": "Write deals"
+        },
+        {
+          "value": "content",
+          "label": "Content access"
+        }
+      ],
+      "delivery": {
+        "http": {
+          "headerName": "Authorization",
+          "headerPrefix": "Bearer",
+          "valueFrom": "accessToken"
+        }
+      }
+    }
+  }
+}

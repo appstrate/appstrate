@@ -1,0 +1,77 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/typeform",
+  "version": "1.0.0",
+  "displayName": "Typeform",
+  "description": "Online form builder and survey platform",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "icon": "typeform",
+  "keywords": ["forms", "surveys"],
+  "apiCall": {},
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "required": true,
+      "authorizedUris": ["https://api.typeform.com/**"],
+      "authorizationUrl": "https://api.typeform.com/oauth/authorize",
+      "tokenUrl": "https://api.typeform.com/oauth/token",
+      "refreshUrl": "https://api.typeform.com/oauth/token",
+      "scopes": ["accounts:read", "forms:read", "responses:read", "offline"],
+      "scopeSeparator": " ",
+      "pkceEnabled": false,
+      "tokenAuthMethod": "client_secret_post",
+      "availableScopes": [
+        {
+          "value": "accounts:read",
+          "label": "Read account info"
+        },
+        {
+          "value": "forms:read",
+          "label": "Read forms"
+        },
+        {
+          "value": "forms:write",
+          "label": "Create and edit forms"
+        },
+        {
+          "value": "responses:read",
+          "label": "Read form responses"
+        },
+        {
+          "value": "responses:write",
+          "label": "Delete responses"
+        },
+        {
+          "value": "workspaces:read",
+          "label": "Read workspaces"
+        },
+        {
+          "value": "workspaces:write",
+          "label": "Create and edit workspaces"
+        },
+        {
+          "value": "webhooks:read",
+          "label": "Read webhooks"
+        },
+        {
+          "value": "webhooks:write",
+          "label": "Create and edit webhooks"
+        },
+        {
+          "value": "offline",
+          "label": "Enable refresh tokens"
+        }
+      ],
+      "delivery": {
+        "http": {
+          "headerName": "Authorization",
+          "headerPrefix": "Bearer",
+          "valueFrom": "accessToken"
+        }
+      }
+    }
+  }
+}

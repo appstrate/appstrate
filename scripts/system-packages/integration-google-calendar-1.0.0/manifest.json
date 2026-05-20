@@ -1,0 +1,61 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/google-calendar",
+  "version": "1.0.0",
+  "displayName": "Google Calendar",
+  "description": "Calendar and scheduling service by Google",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "icon": "googlecalendar",
+  "keywords": ["calendar", "productivity"],
+  "apiCall": {},
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "required": true,
+      "authorizedUris": ["https://www.googleapis.com/calendar/**"],
+      "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth",
+      "tokenUrl": "https://oauth2.googleapis.com/token",
+      "refreshUrl": "https://oauth2.googleapis.com/token",
+      "scopes": ["https://www.googleapis.com/auth/calendar.readonly"],
+      "scopeSeparator": " ",
+      "pkceEnabled": false,
+      "tokenAuthMethod": "client_secret_post",
+      "availableScopes": [
+        {
+          "value": "https://www.googleapis.com/auth/calendar.readonly",
+          "label": "Read-only access to calendars and events"
+        },
+        {
+          "value": "https://www.googleapis.com/auth/calendar",
+          "label": "Full calendar access (read & write)"
+        },
+        {
+          "value": "https://www.googleapis.com/auth/calendar.events",
+          "label": "Manage events on all calendars"
+        },
+        {
+          "value": "https://www.googleapis.com/auth/calendar.events.readonly",
+          "label": "Read events only"
+        },
+        {
+          "value": "https://www.googleapis.com/auth/calendar.settings.readonly",
+          "label": "Read calendar settings"
+        },
+        {
+          "value": "https://www.googleapis.com/auth/calendar.freebusy",
+          "label": "Read free/busy information"
+        }
+      ],
+      "delivery": {
+        "http": {
+          "headerName": "Authorization",
+          "headerPrefix": "Bearer",
+          "valueFrom": "accessToken"
+        }
+      }
+    }
+  }
+}

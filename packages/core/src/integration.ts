@@ -387,9 +387,16 @@ const authSchema = z
     extractTokenIdentity: z.record(z.string(), z.string()).optional(),
     requiredIdentityClaims: z.array(z.string()).optional(),
 
-    authorizedUris: z.array(z.string()).min(1, {
-      error: "auths.{key}.authorizedUris must declare at least one URI pattern",
-    }),
+    authorizedUris: z.array(z.string()),
+
+    // When true, the auth skips the `authorizedUris` allowlist for the
+    // generic `apiCall` tool — the agent may target any host (the SSRF
+    // blocklist for loopback / RFC1918 / metadata still applies). Mirrors
+    // the legacy `provider.definition.allowAllUris`; used by providers
+    // whose base URL is supplied by the user at connect time (self-hosted
+    // WooCommerce / WordPress, custom webhooks). The auth superRefine
+    // requires `authorizedUris` ≥ 1 unless this is set.
+    allowAllUris: z.boolean().optional(),
 
     // Catalog of OAuth scopes the upstream IdP exposes for this auth.
     // Mirrors `provider.definition.availableScopes`. Optional — when
@@ -421,6 +428,16 @@ const authSchema = z
     delivery: deliverySchema,
   })
   .superRefine((auth, ctx) => {
+    // `authorizedUris` must declare at least one pattern unless the auth
+    // opts into `allowAllUris` (SSRF blocklist still applies at runtime).
+    if (auth.authorizedUris.length === 0 && !auth.allowAllUris) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          "auths.{key}.authorizedUris must declare at least one URI pattern (or set allowAllUris)",
+        path: ["authorizedUris"],
+      });
+    }
     if (auth.type === "oauth2") {
       const hasExplicit = auth.authorizationUrl && auth.tokenUrl;
       const hasDiscovery = auth.discovery !== undefined;

@@ -405,6 +405,7 @@ export async function bootIntegrations(
           source,
           authKey: spec.apiCall.authKey,
           authorizedUris: spec.apiCall.authorizedUris,
+          ...(spec.apiCall.allowAllUris ? { allowAllUris: true } : {}),
         });
         apiCallIntegrations.push({
           namespace: spec.namespace,

@@ -1,0 +1,75 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/monday",
+  "version": "1.0.0",
+  "displayName": "Monday.com",
+  "description": "Work operating system for project management and team collaboration",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "icon": "https://api.iconify.design/logos/monday-icon.svg",
+  "keywords": ["project-management", "collaboration"],
+  "apiCall": {},
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "required": true,
+      "authorizedUris": ["https://api.monday.com/**"],
+      "authorizationUrl": "https://auth.monday.com/oauth2/authorize",
+      "tokenUrl": "https://auth.monday.com/oauth2/token",
+      "scopeSeparator": " ",
+      "pkceEnabled": false,
+      "tokenAuthMethod": "client_secret_post",
+      "availableScopes": [
+        {
+          "value": "me:read",
+          "label": "Read authenticated user info"
+        },
+        {
+          "value": "boards:read",
+          "label": "Read boards"
+        },
+        {
+          "value": "boards:write",
+          "label": "Create and modify boards"
+        },
+        {
+          "value": "workspaces:read",
+          "label": "Read workspaces"
+        },
+        {
+          "value": "workspaces:write",
+          "label": "Create and modify workspaces"
+        },
+        {
+          "value": "users:read",
+          "label": "Read users"
+        },
+        {
+          "value": "users:write",
+          "label": "Manage users"
+        },
+        {
+          "value": "account:read",
+          "label": "Read account info"
+        },
+        {
+          "value": "updates:read",
+          "label": "Read updates"
+        },
+        {
+          "value": "updates:write",
+          "label": "Create updates"
+        }
+      ],
+      "delivery": {
+        "http": {
+          "headerName": "Authorization",
+          "headerPrefix": "Bearer",
+          "valueFrom": "accessToken"
+        }
+      }
+    }
+  }
+}

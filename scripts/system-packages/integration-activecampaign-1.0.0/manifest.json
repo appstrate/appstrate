@@ -1,0 +1,44 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/activecampaign",
+  "version": "1.0.0",
+  "displayName": "ActiveCampaign",
+  "description": "Marketing automation and CRM platform — contacts, deals, campaigns, and automations",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "icon": "https://api.iconify.design/logos/active-campaign.svg",
+  "keywords": ["marketing", "crm"],
+  "apiCall": {},
+  "auths": {
+    "primary": {
+      "type": "api_key",
+      "required": true,
+      "authorizedUris": ["https://*.api-us1.com/**"],
+      "allowAllUris": true,
+      "credentials": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "account_name": {
+              "type": "string",
+              "description": "Your ActiveCampaign account name (subdomain from yourname.activehosted.com)"
+            },
+            "api_key": {
+              "type": "string",
+              "description": "API key from Settings → Developer"
+            }
+          },
+          "required": ["account_name", "api_key"]
+        }
+      },
+      "delivery": {
+        "http": {
+          "headerName": "Api-Token",
+          "valueFrom": "api_key"
+        }
+      }
+    }
+  }
+}

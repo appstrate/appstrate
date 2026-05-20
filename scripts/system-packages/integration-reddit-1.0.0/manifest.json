@@ -1,0 +1,93 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/reddit",
+  "version": "1.0.0",
+  "displayName": "Reddit",
+  "description": "Social news aggregation and discussion platform",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "icon": "reddit",
+  "keywords": ["social-media", "community"],
+  "apiCall": {},
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "required": true,
+      "authorizedUris": ["https://oauth.reddit.com/**"],
+      "authorizationUrl": "https://www.reddit.com/api/v1/authorize",
+      "tokenUrl": "https://www.reddit.com/api/v1/access_token",
+      "refreshUrl": "https://www.reddit.com/api/v1/access_token",
+      "scopes": ["identity", "read", "history"],
+      "scopeSeparator": " ",
+      "pkceEnabled": false,
+      "tokenAuthMethod": "client_secret_basic",
+      "availableScopes": [
+        {
+          "value": "identity",
+          "label": "Read user identity"
+        },
+        {
+          "value": "read",
+          "label": "Read posts & comments"
+        },
+        {
+          "value": "submit",
+          "label": "Submit posts & comments"
+        },
+        {
+          "value": "edit",
+          "label": "Edit posts & comments"
+        },
+        {
+          "value": "history",
+          "label": "Read voting & post history"
+        },
+        {
+          "value": "subscribe",
+          "label": "Manage subreddit subscriptions"
+        },
+        {
+          "value": "mysubreddits",
+          "label": "List subscribed subreddits"
+        },
+        {
+          "value": "vote",
+          "label": "Upvote & downvote"
+        },
+        {
+          "value": "save",
+          "label": "Save & unsave content"
+        },
+        {
+          "value": "privatemessages",
+          "label": "Read & send private messages"
+        },
+        {
+          "value": "report",
+          "label": "Report content"
+        },
+        {
+          "value": "flair",
+          "label": "Manage flairs"
+        },
+        {
+          "value": "modposts",
+          "label": "Moderate posts (approve/remove)"
+        },
+        {
+          "value": "modconfig",
+          "label": "Manage subreddit settings"
+        }
+      ],
+      "delivery": {
+        "http": {
+          "headerName": "Authorization",
+          "headerPrefix": "Bearer",
+          "valueFrom": "accessToken"
+        }
+      }
+    }
+  }
+}

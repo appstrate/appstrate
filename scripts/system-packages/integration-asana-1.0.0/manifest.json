@@ -1,0 +1,53 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/asana",
+  "version": "1.0.0",
+  "displayName": "Asana",
+  "description": "Work management platform for teams to organize and track projects",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "icon": "asana",
+  "keywords": ["project-management", "collaboration"],
+  "apiCall": {},
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "required": true,
+      "authorizedUris": ["https://app.asana.com/api/**"],
+      "authorizationUrl": "https://app.asana.com/-/oauth_authorize",
+      "tokenUrl": "https://app.asana.com/-/oauth_token",
+      "refreshUrl": "https://app.asana.com/-/oauth_token",
+      "scopes": ["default"],
+      "scopeSeparator": " ",
+      "pkceEnabled": false,
+      "tokenAuthMethod": "client_secret_post",
+      "availableScopes": [
+        {
+          "value": "default",
+          "label": "Full access to all resources"
+        },
+        {
+          "value": "openid",
+          "label": "OpenID Connect identity"
+        },
+        {
+          "value": "email",
+          "label": "Read user email"
+        },
+        {
+          "value": "profile",
+          "label": "Read user profile"
+        }
+      ],
+      "delivery": {
+        "http": {
+          "headerName": "Authorization",
+          "headerPrefix": "Bearer",
+          "valueFrom": "accessToken"
+        }
+      }
+    }
+  }
+}

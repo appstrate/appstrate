@@ -1,0 +1,61 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/linear",
+  "version": "1.0.0",
+  "displayName": "Linear",
+  "description": "Modern issue tracking and project management for software teams",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "icon": "linear",
+  "keywords": ["project-management", "issue-tracking", "development"],
+  "apiCall": {},
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "required": true,
+      "authorizedUris": ["https://api.linear.app/**"],
+      "authorizationUrl": "https://linear.app/oauth/authorize",
+      "tokenUrl": "https://api.linear.app/oauth/token",
+      "refreshUrl": "https://api.linear.app/oauth/token",
+      "scopes": ["read"],
+      "scopeSeparator": ",",
+      "pkceEnabled": true,
+      "tokenAuthMethod": "client_secret_post",
+      "availableScopes": [
+        {
+          "value": "read",
+          "label": "Read access to workspace data"
+        },
+        {
+          "value": "write",
+          "label": "Write access to workspace data"
+        },
+        {
+          "value": "issues:create",
+          "label": "Create new issues"
+        },
+        {
+          "value": "comments:create",
+          "label": "Create issue comments"
+        },
+        {
+          "value": "timeSchedule:write",
+          "label": "Manage time schedules"
+        },
+        {
+          "value": "admin",
+          "label": "Admin-level access"
+        }
+      ],
+      "delivery": {
+        "http": {
+          "headerName": "Authorization",
+          "headerPrefix": "Bearer",
+          "valueFrom": "accessToken"
+        }
+      }
+    }
+  }
+}

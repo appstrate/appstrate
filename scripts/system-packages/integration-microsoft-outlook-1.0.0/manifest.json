@@ -1,0 +1,73 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/microsoft-outlook",
+  "version": "1.0.0",
+  "displayName": "Microsoft Outlook",
+  "description": "Email and calendar service by Microsoft",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "icon": "microsoftoutlook",
+  "keywords": ["email", "productivity"],
+  "apiCall": {},
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "required": true,
+      "authorizedUris": ["https://graph.microsoft.com/**"],
+      "authorizationUrl": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+      "tokenUrl": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+      "refreshUrl": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+      "scopes": ["Mail.Read", "User.Read", "offline_access"],
+      "scopeSeparator": " ",
+      "pkceEnabled": true,
+      "tokenAuthMethod": "client_secret_post",
+      "availableScopes": [
+        {
+          "value": "Mail.Read",
+          "label": "Read user mail"
+        },
+        {
+          "value": "Mail.ReadWrite",
+          "label": "Read and write user mail"
+        },
+        {
+          "value": "Mail.Send",
+          "label": "Send mail"
+        },
+        {
+          "value": "Contacts.Read",
+          "label": "Read contacts"
+        },
+        {
+          "value": "Contacts.ReadWrite",
+          "label": "Read and write contacts"
+        },
+        {
+          "value": "Calendars.Read",
+          "label": "Read calendars"
+        },
+        {
+          "value": "Calendars.ReadWrite",
+          "label": "Read and write calendars"
+        },
+        {
+          "value": "User.Read",
+          "label": "Read user profile"
+        },
+        {
+          "value": "offline_access",
+          "label": "Maintain access (refresh tokens)"
+        }
+      ],
+      "delivery": {
+        "http": {
+          "headerName": "Authorization",
+          "headerPrefix": "Bearer",
+          "valueFrom": "accessToken"
+        }
+      }
+    }
+  }
+}

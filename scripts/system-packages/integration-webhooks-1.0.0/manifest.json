@@ -1,0 +1,45 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/webhooks",
+  "version": "1.0.0",
+  "displayName": "Webhooks",
+  "description": "Generic webhook provider — send HTTP requests to any URL with optional authentication",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "icon": "webhook",
+  "keywords": ["integration", "automation"],
+  "apiCall": {},
+  "auths": {
+    "primary": {
+      "type": "custom",
+      "required": true,
+      "authorizedUris": [],
+      "allowAllUris": true,
+      "credentials": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "webhook_url": {
+              "type": "string",
+              "description": "Target webhook URL"
+            },
+            "secret_header_name": {
+              "type": "string",
+              "description": "Custom authentication header name (e.g. X-Webhook-Secret) — optional"
+            },
+            "secret_header_value": {
+              "type": "string",
+              "description": "Secret value for the authentication header — optional"
+            }
+          },
+          "required": ["webhook_url"]
+        }
+      },
+      "delivery": {
+        "http": {}
+      }
+    }
+  }
+}

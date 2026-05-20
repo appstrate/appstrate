@@ -1,0 +1,49 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/google-sheets",
+  "version": "1.0.0",
+  "displayName": "Google Sheets",
+  "description": "Online spreadsheet editor",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "icon": "googlesheets",
+  "keywords": ["productivity", "spreadsheets"],
+  "apiCall": {},
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "required": true,
+      "authorizedUris": ["https://sheets.googleapis.com/**"],
+      "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth",
+      "tokenUrl": "https://oauth2.googleapis.com/token",
+      "refreshUrl": "https://oauth2.googleapis.com/token",
+      "scopes": ["https://www.googleapis.com/auth/spreadsheets.readonly"],
+      "scopeSeparator": " ",
+      "pkceEnabled": false,
+      "tokenAuthMethod": "client_secret_post",
+      "availableScopes": [
+        {
+          "value": "https://www.googleapis.com/auth/spreadsheets.readonly",
+          "label": "Read-only access"
+        },
+        {
+          "value": "https://www.googleapis.com/auth/spreadsheets",
+          "label": "Full spreadsheet access"
+        },
+        {
+          "value": "https://www.googleapis.com/auth/drive.file",
+          "label": "Per-file access (recommended)"
+        }
+      ],
+      "delivery": {
+        "http": {
+          "headerName": "Authorization",
+          "headerPrefix": "Bearer",
+          "valueFrom": "accessToken"
+        }
+      }
+    }
+  }
+}

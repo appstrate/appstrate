@@ -158,6 +158,11 @@ export interface IntegrationSpawnSpec {
     authKey: string;
     /** URI allowlist (verbatim from `auths.{authKey}.authorizedUris`). */
     authorizedUris: readonly string[];
+    /**
+     * Skip the `authorizedUris` allowlist (SSRF blocklist still applies).
+     * From `auths.{authKey}.allowAllUris` — for user-supplied base URLs.
+     */
+    allowAllUris?: boolean;
     /** Resumable-upload protocols the tool advertises (may be empty). */
     uploadProtocols?: readonly string[];
   };

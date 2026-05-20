@@ -1,0 +1,33 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/clickup",
+  "version": "1.0.0",
+  "displayName": "ClickUp",
+  "description": "Project management and productivity platform",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "icon": "clickup",
+  "keywords": ["productivity", "project-management"],
+  "apiCall": {},
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "required": true,
+      "authorizedUris": ["https://api.clickup.com/**"],
+      "authorizationUrl": "https://app.clickup.com/api",
+      "tokenUrl": "https://api.clickup.com/api/v2/oauth/token",
+      "scopeSeparator": " ",
+      "pkceEnabled": false,
+      "tokenAuthMethod": "client_secret_post",
+      "delivery": {
+        "http": {
+          "headerName": "Authorization",
+          "headerPrefix": "Bearer",
+          "valueFrom": "accessToken"
+        }
+      }
+    }
+  }
+}

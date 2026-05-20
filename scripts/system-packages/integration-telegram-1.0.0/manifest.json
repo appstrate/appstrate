@@ -1,0 +1,36 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/telegram",
+  "version": "1.0.0",
+  "displayName": "Telegram",
+  "description": "Messaging platform — send messages, manage bots, and interact with chats via the Bot API",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "icon": "telegram",
+  "keywords": ["messaging", "communications"],
+  "apiCall": {},
+  "auths": {
+    "primary": {
+      "type": "api_key",
+      "required": true,
+      "authorizedUris": ["https://api.telegram.org/**"],
+      "credentials": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "bot_token": {
+              "type": "string",
+              "description": "Bot API token from @BotFather (format: 123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11)"
+            }
+          },
+          "required": ["bot_token"]
+        }
+      },
+      "delivery": {
+        "http": {}
+      }
+    }
+  }
+}

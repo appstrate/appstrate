@@ -1,0 +1,60 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/quickbooks-online",
+  "version": "1.0.0",
+  "displayName": "QuickBooks Online",
+  "description": "Cloud accounting software by Intuit — invoicing, expenses, and financial reporting",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "icon": "quickbooks",
+  "keywords": ["accounting", "finance"],
+  "apiCall": {},
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "required": true,
+      "authorizedUris": [
+        "https://quickbooks.api.intuit.com/**",
+        "https://sandbox-quickbooks.api.intuit.com/**"
+      ],
+      "authorizationUrl": "https://appcenter.intuit.com/connect/oauth2",
+      "tokenUrl": "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer",
+      "refreshUrl": "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer",
+      "scopes": ["com.intuit.quickbooks.accounting"],
+      "scopeSeparator": " ",
+      "pkceEnabled": false,
+      "tokenAuthMethod": "client_secret_basic",
+      "availableScopes": [
+        {
+          "value": "com.intuit.quickbooks.accounting",
+          "label": "Accounting data (invoices, customers, payments)"
+        },
+        {
+          "value": "com.intuit.quickbooks.payment",
+          "label": "Payment processing"
+        },
+        {
+          "value": "openid",
+          "label": "OpenID Connect"
+        },
+        {
+          "value": "profile",
+          "label": "User profile"
+        },
+        {
+          "value": "email",
+          "label": "User email"
+        }
+      ],
+      "delivery": {
+        "http": {
+          "headerName": "Authorization",
+          "headerPrefix": "Bearer",
+          "valueFrom": "accessToken"
+        }
+      }
+    }
+  }
+}

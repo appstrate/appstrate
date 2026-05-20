@@ -50,8 +50,9 @@ export function createApiCallCredentialAdapter(opts: {
   source: IntegrationCredentialsSource;
   authKey: string;
   authorizedUris: readonly string[];
+  allowAllUris?: boolean;
 }): ApiCallCredentialAdapter {
-  const { source, authKey, authorizedUris } = opts;
+  const { source, authKey, authorizedUris, allowAllUris = false } = opts;
 
   const toPayload = (): ProxyCredentialsPayload => {
     const snap = source.snapshot();
@@ -62,7 +63,7 @@ export function createApiCallCredentialAdapter(opts: {
     return {
       credentials: fields,
       authorizedUris: [...authorizedUris],
-      allowAllUris: false,
+      allowAllUris,
       // `headerName === ""` (custom auth with no delivery.http) means no
       // server-side injection — the agent supplies its own auth via
       // `{{var}}` substitution, exactly like a legacy `custom` provider.
