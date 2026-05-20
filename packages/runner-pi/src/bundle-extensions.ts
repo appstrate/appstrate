@@ -6,11 +6,6 @@
  * {@link ExtensionFactory}s for the agent's selected built-in runtime
  * tools (output/log/note/pin/report).
  *
- * Provider packages are surfaced through the same `.pi/skills/` tree as
- * regular skills (one synthesised SKILL.md per provider, see
- * {@link synthesizeProviderSkill}) so Pi's `loadSkills()` lists them in
- * `<available_skills>` with the read-before-use directive the LLM follows.
- *
  * Tools are no longer AFPS packages: the former `@appstrate/{output,log,
  * note,pin,report}` tool packages are baked into the runtime image
  * (`./runtime-tools/builtin/`). `output` is always injected; the rest are
@@ -31,17 +26,12 @@ import * as fs from "node:fs/promises";
 import type { ExtensionFactory } from "@mariozechner/pi-coding-agent";
 import type { Bundle, BundlePackage } from "@appstrate/afps-runtime/bundle";
 import { parsePackageIdentity } from "@appstrate/afps-runtime/bundle";
-import {
-  ProviderSkillSynthesisError,
-  synthesizeProviderSkill,
-} from "./provider-skill-synthesis.ts";
 import { selectBuiltinRuntimeToolFactories } from "./runtime-tools/builtin/index.ts";
 
 export interface PrepareBundleOptions {
   /**
    * Agent workspace directory. The helper writes:
-   *   - `{workspaceDir}/.pi/skills/<packageId>/**`               (for Pi SDK skill discovery)
-   *   - `{workspaceDir}/.pi/skills/provider-<scope>-<name>/SKILL.md` (synthesised per provider)
+   *   - `{workspaceDir}/.pi/skills/<packageId>/**`  (for Pi SDK skill discovery)
    */
   workspaceDir: string;
   /**
@@ -51,10 +41,9 @@ export interface PrepareBundleOptions {
    */
   extensionWrapper?: (factory: ExtensionFactory, extensionId: string) => ExtensionFactory;
   /**
-   * Notified when a dep package fails to materialise (e.g. provider
-   * skill synthesis). The helper does NOT throw on per-package failures
-   * — it logs via this callback and continues so one broken package does
-   * not prevent the run.
+   * Notified when a dep package fails to materialise. The helper does NOT
+   * throw on per-package failures — it logs via this callback and
+   * continues so one broken package does not prevent the run.
    */
   onError?: (message: string, err?: unknown) => void;
 }
@@ -74,10 +63,13 @@ export async function prepareBundleForPi(
   bundle: Bundle,
   opts: PrepareBundleOptions,
 ): Promise<PreparedBundle> {
-  const onError = opts.onError ?? (() => {});
+  // `onError` is retained on the options for API stability (callers still
+  // pass it); per-package materialisation no longer has a fallible branch
+  // now that provider-skill synthesis is gone, so it is currently unused.
+  void opts.onError;
   const piDir = path.join(opts.workspaceDir, ".pi");
 
-  // ─── Step 1: materialise each dep package under its .pi/ subtree ───
+  // ─── Step 1: materialise each skill dep package under its .pi/ subtree ─
   for (const [identity, pkg] of bundle.packages) {
     if (identity === bundle.root) continue;
     const parsed = parsePackageIdentity(identity);
@@ -85,19 +77,6 @@ export async function prepareBundleForPi(
     const type = (pkg.manifest as { type?: unknown }).type;
     if (type === "skill") {
       await materialisePackage(pkg, path.join(piDir, "skills", parsed.packageId));
-    } else if (type === "provider") {
-      try {
-        const { skillName, content } = synthesizeProviderSkill(pkg);
-        const skillDir = path.join(piDir, "skills", skillName);
-        await fs.mkdir(skillDir, { recursive: true });
-        await fs.writeFile(path.join(skillDir, "SKILL.md"), content);
-      } catch (err) {
-        const detail =
-          err instanceof ProviderSkillSynthesisError || err instanceof Error
-            ? err.message
-            : String(err);
-        onError(`Failed to synthesise provider skill for '${parsed.packageId}': ${detail}`, err);
-      }
     }
   }
 

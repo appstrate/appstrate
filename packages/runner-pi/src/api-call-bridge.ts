@@ -9,9 +9,7 @@
  * whether the run executes inside a container (MCP) or in-process (AFPS
  * resolver).
  *
- * This is the integration counterpart to {@link buildProviderCallExtensionFactory}.
- * Unlike `provider_call` (one dispatcher tool keyed by a `providerId` enum),
- * the unified `api_call` surface exposes one tool per integration — the
+ * The unified `api_call` surface exposes one tool per integration — the
  * integration is implied by the tool name, not a parameter.
  */
 import { Type } from "@mariozechner/pi-ai";
@@ -27,11 +25,17 @@ import {
   type Tool as AfpsTool,
   type ToolContext as AfpsToolContext,
 } from "@appstrate/afps-runtime/resolvers";
-import type { ProviderEventEmitter } from "./provider-bridge.ts";
+
+/**
+ * Event emitter for credentialled-call telemetry. Receives
+ * `provider.called` / `provider.completed` / `provider.failed` events
+ * (named for historical continuity with the legacy provider surface).
+ */
+export type ProviderEventEmitter = (event: { type: string; [k: string]: unknown }) => void;
 
 // Pull body + responseMode JSON schemas from the canonical AFPS source so
 // the LLM-facing schema documents the discriminated body union. Same
-// rationale as provider-bridge.ts.
+// rationale as the legacy provider bridge.
 const SCHEMA_PROPERTIES =
   (providerCallRequestJsonSchema as { properties?: Record<string, unknown> }).properties ?? {};
 const BODY_SCHEMA = SCHEMA_PROPERTIES.body ?? {};

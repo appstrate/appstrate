@@ -16,16 +16,10 @@ export {
 } from "./bundle-extensions.ts";
 
 export {
-  buildProviderCallExtensionFactory,
-  readProviderRefs,
-  type BuildProviderCallExtensionFactoryOptions,
-  type ProviderEventEmitter,
-} from "./provider-bridge.ts";
-
-export {
   buildApiCallExtensionFactory,
   readIntegrationRefs,
   type BuildApiCallExtensionFactoryOptions,
+  type ProviderEventEmitter,
 } from "./api-call-bridge.ts";
 
 export {

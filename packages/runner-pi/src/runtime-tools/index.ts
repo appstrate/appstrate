@@ -3,8 +3,9 @@
 
 /**
  * Registry of runtime-injected tools — tools the runtime container
- * wires outside the AFPS bundle dependency tree (provider-call is NOT
- * here; it is bundle-driven and lives in `provider-bridge.ts`).
+ * wires outside the AFPS bundle dependency tree (the integration
+ * `{ns}__api_call` tool is NOT here; it is bundle-driven and lives in
+ * `api-call-bridge.ts`).
  *
  * Layout intentionally mirrors bundle tool packages
  * (`scripts/system-packages/tool-<name>-<version>/`): each tool is a

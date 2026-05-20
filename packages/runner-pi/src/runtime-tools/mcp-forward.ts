@@ -5,13 +5,13 @@
  * Generic Pi-extension factory for runtime-injected tools that forward
  * verbatim to the sidecar over MCP `tools/call`.
  *
- * This is the symmetric counterpart to `buildProviderCallExtensionFactory`:
- * `provider_call` is bundle-driven (one tool, dispatches by
- * `providerId`), and the runtime-injected tools (`run_history`,
- * `recall_memory`, …) are runtime-driven (one Pi-tool registration per
- * descriptor in {@link RUNTIME_INJECTED_TOOLS}). Hosting both factories
- * in `@appstrate/runner-pi` keeps the runtime container's
- * `mcp/direct.ts` orchestration-only — no per-tool boilerplate.
+ * This is the symmetric counterpart to `buildApiCallExtensionFactory`:
+ * `{ns}__api_call` is bundle-driven (one tool per integration), and the
+ * runtime-injected tools (`run_history`, `recall_memory`, …) are
+ * runtime-driven (one Pi-tool registration per descriptor in
+ * {@link RUNTIME_INJECTED_TOOLS}). Hosting both factories in
+ * `@appstrate/runner-pi` keeps the runtime container's `mcp/direct.ts`
+ * orchestration-only — no per-tool boilerplate.
  *
  * Why a single factory: each tool's wiring is a four-step recipe —
  *   1. emit `<tool>.called` with `toolCallId`/`runId`,
@@ -73,7 +73,7 @@ export function callToolResultToPi(result: CallToolResult): PiToolResult {
 }
 
 /**
- * Event emitter signature shared with `provider-bridge.ts`. Generic
+ * Event emitter signature shared with `api-call-bridge.ts`. Generic
  * shape so callers can route events into any sink (CloudEvents,
  * console, in-memory test recorder, …).
  */
