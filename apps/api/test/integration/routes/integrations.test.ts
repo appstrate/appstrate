@@ -4,7 +4,7 @@
  * Integration tests for `/api/integrations/*` (INTEGRATIONS_PROPOSAL
  * Phase 1.3 — marketplace UI backend).
  *
- * Covers: list/detail, install/uninstall, OAuth client CRUD, non-OAuth
+ * Covers: list/detail, activate/deactivate, OAuth client CRUD, non-OAuth
  * connect (api_key), connections list/delete, and the OAuth2 initiate
  * happy-path (response shape only — the full IdP token exchange is
  * covered hermetically in `packages/connect/test/integration-oauth.test.ts`).
@@ -80,19 +80,19 @@ describe("GET /api/integrations", () => {
     ctx = await createTestContext({ orgSlug: "myorg" });
   });
 
-  it("returns the org's integrations with `installed: false` by default", async () => {
+  it("returns the org's integrations with `active: false` by default", async () => {
     await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
     const res = await app.request("/api/integrations", { headers: authHeaders(ctx) });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { object: string; data: unknown[]; hasMore: boolean };
     expect(body.object).toBe("list");
-    const items = body.data as Array<{ id: string; installed: boolean }>;
+    const items = body.data as Array<{ id: string; active: boolean }>;
     const gmail = items.find((i) => i.id === "@myorg/gmail");
     expect(gmail).toBeDefined();
-    expect(gmail?.installed).toBe(false);
+    expect(gmail?.active).toBe(false);
   });
 
-  it("decorates `installed: true` when the integration is installed in the app", async () => {
+  it("decorates `active: true` when the integration is activated in the app", async () => {
     const pkg = await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
     await db.insert(applicationPackages).values({
       applicationId: ctx.defaultAppId,
@@ -100,9 +100,9 @@ describe("GET /api/integrations", () => {
       config: {},
     });
     const res = await app.request("/api/integrations", { headers: authHeaders(ctx) });
-    const body = (await res.json()) as { data: Array<{ id: string; installed: boolean }> };
+    const body = (await res.json()) as { data: Array<{ id: string; active: boolean }> };
     const gmail = body.data.find((i) => i.id === "@myorg/gmail");
-    expect(gmail?.installed).toBe(true);
+    expect(gmail?.active).toBe(true);
   });
 });
 
@@ -147,25 +147,25 @@ describe("GET /api/integrations/:packageId", () => {
   });
 });
 
-describe("POST/DELETE /api/integrations/:packageId/install", () => {
+describe("POST /api/integrations/:packageId/activate + DELETE .../deactivate", () => {
   let ctx: TestContext;
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "myorg" });
   });
 
-  it("installs and uninstalls the integration in the current app", async () => {
+  it("activates and deactivates the integration in the current app", async () => {
     await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
-    const install = await app.request("/api/integrations/@myorg/gmail/install", {
+    const activate = await app.request("/api/integrations/@myorg/gmail/activate", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({}),
     });
-    expect(install.status).toBe(201);
-    const body = (await install.json()) as { installed: boolean; installedAt: string };
-    expect(body.installed).toBe(true);
+    expect(activate.status).toBe(201);
+    const body = (await activate.json()) as { active: boolean; activatedAt: string };
+    expect(body.active).toBe(true);
 
-    const installedRow = await db
+    const activeRow = await db
       .select()
       .from(applicationPackages)
       .where(
@@ -174,13 +174,15 @@ describe("POST/DELETE /api/integrations/:packageId/install", () => {
           eq(applicationPackages.packageId, "@myorg/gmail"),
         ),
       );
-    expect(installedRow).toHaveLength(1);
+    expect(activeRow).toHaveLength(1);
 
-    const uninstall = await app.request("/api/integrations/@myorg/gmail/install", {
+    const deactivate = await app.request("/api/integrations/@myorg/gmail/deactivate", {
       method: "DELETE",
       headers: authHeaders(ctx),
     });
-    expect(uninstall.status).toBe(200);
+    expect(deactivate.status).toBe(200);
+    const deactivateBody = (await deactivate.json()) as { active: boolean };
+    expect(deactivateBody.active).toBe(false);
     const after = await db
       .select()
       .from(applicationPackages)
@@ -193,14 +195,14 @@ describe("POST/DELETE /api/integrations/:packageId/install", () => {
     expect(after).toHaveLength(0);
   });
 
-  it("refuses to install a non-integration package as integration (409)", async () => {
+  it("refuses to activate a non-integration package as integration (409)", async () => {
     await seedPackage({
       id: "@myorg/agent-x",
       orgId: ctx.orgId,
       type: "agent",
       source: "local",
     });
-    const res = await app.request("/api/integrations/@myorg/agent-x/install", {
+    const res = await app.request("/api/integrations/@myorg/agent-x/activate", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({}),
@@ -208,16 +210,16 @@ describe("POST/DELETE /api/integrations/:packageId/install", () => {
     expect(res.status).toBe(409);
   });
 
-  it("returns 409 on duplicate install", async () => {
+  it("returns 409 on duplicate activate", async () => {
     await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
     const headers = { ...authHeaders(ctx), "Content-Type": "application/json" };
-    const first = await app.request("/api/integrations/@myorg/gmail/install", {
+    const first = await app.request("/api/integrations/@myorg/gmail/activate", {
       method: "POST",
       headers,
       body: "{}",
     });
     expect(first.status).toBe(201);
-    const dup = await app.request("/api/integrations/@myorg/gmail/install", {
+    const dup = await app.request("/api/integrations/@myorg/gmail/activate", {
       method: "POST",
       headers,
       body: "{}",

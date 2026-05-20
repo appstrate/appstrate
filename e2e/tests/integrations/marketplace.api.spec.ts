@@ -7,7 +7,7 @@
  * Verifies the public REST surface end-to-end against a live API:
  *   - `GET /api/integrations` returns a list envelope
  *   - `GET /api/integrations/{pkgId}` returns 404 for an unknown package
- *   - `POST /api/integrations/{pkgId}/install` returns 404 for an unknown package
+ *   - `POST /api/integrations/{pkgId}/activate` returns 404 for an unknown package
  *   - `GET /api/integrations/{pkgId}/oauth-clients/{key}` returns 404 when none configured
  *   - The route shape — including the `@scope/name` path segment in URLs —
  *     parses correctly under the production Hono regex matcher
@@ -40,10 +40,10 @@ test.describe("Integration marketplace API surface", () => {
     expect(res.status()).toBe(404);
   });
 
-  test("POST /api/integrations/{packageId}/install returns 404 for unknown integration", async ({
+  test("POST /api/integrations/{packageId}/activate returns 404 for unknown integration", async ({
     apiClient,
   }) => {
-    const res = await apiClient.post("/integrations/@official/does-not-exist/install", {});
+    const res = await apiClient.post("/integrations/@official/does-not-exist/activate", {});
     expect(res.status()).toBe(404);
   });
 

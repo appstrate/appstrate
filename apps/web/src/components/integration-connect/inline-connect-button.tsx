@@ -76,6 +76,13 @@ interface InlineConnectButtonProps {
    * row. Threaded all the way through the OAuth state record.
    */
   connectionId?: string;
+  /**
+   * Force the primary single-button path bound to `authKey`, suppressing
+   * the multi-auth method-picker dropdown. Used on the integration detail
+   * page, where the button lives *inside* a per-auth section that already
+   * represents one method — offering the other methods there is nonsense.
+   */
+  lockToAuthKey?: boolean;
 }
 
 export function InlineConnectButton({
@@ -87,6 +94,7 @@ export function InlineConnectButton({
   label,
   forceAccountSelect,
   connectionId,
+  lockToAuthKey,
 }: InlineConnectButtonProps) {
   const { t } = useTranslation(["agents", "settings"]);
   const { data: detail } = useIntegrationDetail(packageId);
@@ -98,7 +106,10 @@ export function InlineConnectButton({
 
   const auths = detail?.manifest?.auths ?? {};
   const authKeys = Object.keys(auths);
-  const isMultiAuth = authKeys.length > 1;
+  // The method-picker dropdown only makes sense when one button stands in
+  // for the whole integration. When the button is locked to a section's
+  // authKey, render the single-button path bound to that method.
+  const showDropdown = authKeys.length > 1 && !lockToAuthKey;
   const displayName = detail?.manifest.displayName ?? packageId;
 
   // Guard: a fresh agent run might 412 before the integration manifest
@@ -135,7 +146,7 @@ export function InlineConnectButton({
 
   return (
     <>
-      {isMultiAuth ? (
+      {showDropdown ? (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button

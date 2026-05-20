@@ -3,13 +3,14 @@
 /**
  * Integration detail page (INTEGRATIONS_PROPOSAL Phase 1.3).
  *
- * Surfaces:
- *   - About / metadata (display name, version, author, license, repo, …)
- *   - Capabilities (server type, transport, tools dynamic, compatibility)
- *   - Auths — per-auth status with connect/disconnect, multi-account list,
- *     scope display, audience (RFC 8707), authorized URIs.
- *   - OAuth client (admin) — registration form for oauth2 auths whose
- *     IdP requires pre-registered client credentials.
+ * Header carries the activate/deactivate toggle. The body is split into
+ * three tabs:
+ *   - Connexions — per-auth status with connect, multi-account list, scope
+ *     display, audience (RFC 8707), authorized URIs, admin OAuth client form.
+ *   - Accès (admin) — governance: block member connections, org-wide default
+ *     connection, per-agent pin exceptions.
+ *   - À propos — metadata (version, author, license, repo, …), privacy
+ *     policy, keywords.
  *
  * OAuth connect drives a popup against `/api/integrations/.../connect/oauth2`,
  * polls for popup close, then refetches the detail to surface the new
@@ -18,29 +19,21 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate, useParams, Link } from "react-router-dom";
-import {
-  Boxes,
-  Trash2,
-  ShieldCheck,
-  Settings2,
-  AlertTriangle,
-  Pencil,
-  Check,
-  X,
-} from "lucide-react";
+import { useNavigate, useParams } from "react-router-dom";
+import { Trash2, ShieldCheck, Settings2, AlertTriangle, Pencil, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState } from "../components/page-states";
 import { usePermissions } from "../hooks/use-permissions";
 import {
   useIntegrationDetail,
-  useInstallIntegration,
-  useUninstallIntegration,
+  useActivateIntegration,
+  useDeactivateIntegration,
   useIntegrationOAuthClient,
   useUpsertIntegrationOAuthClient,
   useDeleteIntegrationOAuthClient,
@@ -198,7 +191,7 @@ function OAuthClientForm({ packageId, authKey }: { packageId: string; authKey: s
  *
  * The reconnect CTA was removed when connect/upgrade moved to agent
  * surfaces (architectural decision: connections are agent-driven; this
- * page is admin-leaning, for install + OAuth client registration). The
+ * page is admin-leaning, for activation + OAuth client registration). The
  * panel still surfaces the diff as audit info so admins can see at a
  * glance which permissions installed agents are asking for that no
  * actor has granted yet.
@@ -337,6 +330,7 @@ function AuthSection({
             intent="connect"
             label={t("integration.auth.addAccount")}
             forceAccountSelect={status.connections.length > 0}
+            lockToAuthKey
           />
         )}
       </div>
@@ -932,6 +926,26 @@ function MetadataBlock({ manifest }: { manifest: IntegrationManifestView }) {
 // Page
 // ─────────────────────────────────────────────
 
+/**
+ * Inline prompt shown inside the Connexions / Accès tabs when the
+ * integration is not yet active — connecting, governance and pins are
+ * meaningless until the integration is activated for this application.
+ */
+function ActivationHint({ onActivate, pending }: { onActivate: () => void; pending: boolean }) {
+  const { t } = useTranslation("settings");
+  return (
+    <div
+      className="border-border bg-muted/30 rounded-md border p-6 text-center"
+      data-testid="activation-hint"
+    >
+      <p className="text-muted-foreground mb-3 text-sm">{t("integrations.activate.hint")}</p>
+      <Button size="sm" onClick={onActivate} disabled={pending} data-testid="detail-activate-btn">
+        {t("integrations.btn.activate")}
+      </Button>
+    </div>
+  );
+}
+
 export function IntegrationDetailPage() {
   const { t } = useTranslation("settings");
   const { scope, name } = useParams<{ scope: string; name: string }>();
@@ -939,17 +953,19 @@ export function IntegrationDetailPage() {
   const packageId = scope && name ? `${scope}/${name}` : "";
   const { data: detail, isLoading, error } = useIntegrationDetail(packageId || undefined);
   const { data: integrations } = useIntegrations();
-  const install = useInstallIntegration();
-  const uninstall = useUninstallIntegration();
+  const activate = useActivateIntegration();
+  const deactivate = useDeactivateIntegration();
   const { isAdmin } = usePermissions();
+  const [tab, setTab] = useState("connections");
 
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={String(error)} />;
   if (!detail) return <ErrorState message="Integration not found" />;
 
   const summary = integrations?.find((i) => i.id === packageId);
-  const installed = Boolean(summary?.installed);
+  const active = Boolean(summary?.active);
   const m = detail.manifest;
+  const onActivate = () => activate.mutate(packageId);
 
   return (
     <div className="p-6">
@@ -962,27 +978,28 @@ export function IntegrationDetailPage() {
         ]}
         actions={
           <>
-            {installed ? (
+            {active ? (
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => {
-                  if (window.confirm(t("integrations.uninstall.confirm"))) {
-                    uninstall.mutate(packageId);
+                  if (window.confirm(t("integrations.deactivate.confirm"))) {
+                    deactivate.mutate(packageId);
                   }
                 }}
-                disabled={uninstall.isPending}
+                disabled={deactivate.isPending}
+                data-testid="detail-deactivate-btn"
               >
-                {t("integrations.btn.uninstall")}
+                {t("integrations.btn.deactivate")}
               </Button>
             ) : (
               <Button
                 size="sm"
-                onClick={() => install.mutate(packageId)}
-                disabled={install.isPending}
-                data-testid="detail-install-btn"
+                onClick={onActivate}
+                disabled={activate.isPending}
+                data-testid="detail-activate-btn"
               >
-                {t("integrations.btn.install")}
+                {t("integrations.btn.activate")}
               </Button>
             )}
             <Button variant="outline" size="sm" onClick={() => navigate("/integrations")}>
@@ -991,90 +1008,112 @@ export function IntegrationDetailPage() {
           </>
         }
       >
-        <p className="text-muted-foreground mt-1 font-mono text-xs">{packageId}</p>
+        <div className="mt-1 flex items-center gap-2">
+          <p className="text-muted-foreground font-mono text-xs">{packageId}</p>
+          {active ? (
+            <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[0.65rem] font-medium text-emerald-500">
+              {t("integrations.badge.active")}
+            </span>
+          ) : (
+            <span className="bg-warning/10 text-warning rounded px-1.5 py-0.5 text-[0.65rem] font-medium">
+              {t("integrations.badge.inactive")}
+            </span>
+          )}
+        </div>
         {m.description && <p className="mt-3 text-sm">{m.description}</p>}
       </PageHeader>
 
-      {installed && isAdmin && (
-        <BlockUserConnectionsToggle
-          packageId={packageId}
-          initialBlocked={summary?.blockUserConnections ?? false}
-        />
-      )}
-
-      {installed && isAdmin && <OrgDefaultSection packageId={packageId} />}
-      {installed && isAdmin && <PinManagementSection packageId={packageId} />}
-
-      <div className="grid gap-6 lg:grid-cols-3">
-        {/* Auths column (2/3) */}
-        <div className="space-y-4 lg:col-span-2">
-          <h3 className="flex items-center gap-2 text-sm font-semibold">
-            <Boxes size={16} />
-            {t("integration.section.auths")}
-          </h3>
-          {detail.auths.length > 1 && (
-            <div
-              className="border-border bg-muted/40 rounded-md border p-3 text-xs"
-              data-testid="multi-auth-banner"
-            >
-              <p className="mb-1 font-semibold">{t("integration.multiAuth.title")}</p>
-              <p className="text-muted-foreground">{t("integration.multiAuth.description")}</p>
-            </div>
+      <Tabs value={tab} onValueChange={setTab} className="mt-2">
+        <TabsList>
+          <TabsTrigger value="connections" data-testid="tab-connections">
+            {t("integration.tabs.connections")}
+          </TabsTrigger>
+          {isAdmin && (
+            <TabsTrigger value="access" data-testid="tab-access">
+              {t("integration.tabs.access")}
+            </TabsTrigger>
           )}
-          {detail.auths.length === 0 ? (
-            <p className="text-muted-foreground text-sm">
-              {/* Integration declares no auths — nothing to connect. */}—
-            </p>
+          <TabsTrigger value="about" data-testid="tab-about">
+            {t("integration.tabs.about")}
+          </TabsTrigger>
+        </TabsList>
+
+        {/* ─── Connexions ─── */}
+        <TabsContent value="connections" className="mt-4 space-y-4">
+          {!active ? (
+            <ActivationHint onActivate={onActivate} pending={activate.isPending} />
           ) : (
-            detail.auths.map((authStatus) => {
-              const declared = (m.auths ?? {})[authStatus.authKey];
-              if (!declared) return null;
-              return (
-                <AuthSection
-                  key={authStatus.authKey}
-                  packageId={packageId}
-                  status={authStatus}
-                  authDecl={declared}
-                  isAdmin={isAdmin}
-                />
-              );
-            })
+            <>
+              {detail.auths.length === 0 ? (
+                <p className="text-muted-foreground text-sm">{t("integration.auth.none")}</p>
+              ) : (
+                detail.auths.map((authStatus) => {
+                  const declared = (m.auths ?? {})[authStatus.authKey];
+                  if (!declared) return null;
+                  return (
+                    <AuthSection
+                      key={authStatus.authKey}
+                      packageId={packageId}
+                      status={authStatus}
+                      authDecl={declared}
+                      isAdmin={isAdmin}
+                    />
+                  );
+                })
+              )}
+            </>
           )}
-        </div>
+        </TabsContent>
 
-        {/* Metadata column (1/3) */}
-        <aside className="space-y-4">
-          <h3 className="text-sm font-semibold">{t("integration.section.metadata")}</h3>
-          <MetadataBlock manifest={m} />
-          {m.privacyPolicy && (
-            <p className="text-xs">
-              <span className="text-muted-foreground">{t("integration.field.privacyPolicy")}:</span>{" "}
-              <a
-                href={m.privacyPolicy}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-primary break-all underline"
-              >
-                {m.privacyPolicy}
-              </a>
-            </p>
-          )}
-          {m.keywords && m.keywords.length > 0 && (
-            <div className="flex flex-wrap gap-1">
-              {m.keywords.map((k) => (
-                <Badge key={k} variant="outline" className="text-[0.65rem]">
-                  {k}
-                </Badge>
-              ))}
-            </div>
-          )}
-          <p className="text-xs">
-            <Link to="/integrations" className="text-primary underline">
-              ← {t("integrations.title")}
-            </Link>
-          </p>
-        </aside>
-      </div>
+        {/* ─── Accès (admin governance) ─── */}
+        {isAdmin && (
+          <TabsContent value="access" className="mt-4">
+            {!active ? (
+              <ActivationHint onActivate={onActivate} pending={activate.isPending} />
+            ) : (
+              <>
+                <BlockUserConnectionsToggle
+                  packageId={packageId}
+                  initialBlocked={summary?.blockUserConnections ?? false}
+                />
+                <OrgDefaultSection packageId={packageId} />
+                <PinManagementSection packageId={packageId} />
+              </>
+            )}
+          </TabsContent>
+        )}
+
+        {/* ─── À propos (metadata) ─── */}
+        <TabsContent value="about" className="mt-4">
+          <div className="max-w-2xl space-y-4">
+            <MetadataBlock manifest={m} />
+            {m.privacyPolicy && (
+              <p className="text-xs">
+                <span className="text-muted-foreground">
+                  {t("integration.field.privacyPolicy")}:
+                </span>{" "}
+                <a
+                  href={m.privacyPolicy}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary break-all underline"
+                >
+                  {m.privacyPolicy}
+                </a>
+              </p>
+            )}
+            {m.keywords && m.keywords.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {m.keywords.map((k) => (
+                  <Badge key={k} variant="outline" className="text-[0.65rem]">
+                    {k}
+                  </Badge>
+                ))}
+              </div>
+            )}
+          </div>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

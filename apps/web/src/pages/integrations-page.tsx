@@ -1,33 +1,30 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AFPS integration marketplace (INTEGRATIONS_PROPOSAL Phase 1.3).
+ * AFPS integration catalogue (INTEGRATIONS_PROPOSAL Phase 1.3).
  *
- * Lists every integration accessible to the org (own + system), with:
- *   - Tabs: all / installed (per current application)
- *   - Search: by displayName, name, description, keywords
- *   - Per-card: install / uninstall, link to detail page
+ * Mirrors the providers page UX:
+ *   - Tabs: Activés (active in this app) / Installés (full catalogue).
+ *   - Search: by displayName, name, description, keywords.
+ *   - Per-card: an "Activé / Non activé" badge + a "Configurer" button
+ *     that opens the detail page. Activation/deactivation itself lives on
+ *     the detail page (mirrors providers' configure flow).
  *
- * Detail flows (per-auth connect, OAuth client registration, multi-account)
- * live on `<IntegrationDetailPage />`.
+ * Detail flows (activate, per-auth connect, OAuth client registration,
+ * governance) live on `<IntegrationDetailPage />`.
  */
 
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { Boxes, Search } from "lucide-react";
+import { Boxes, Search, Settings } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
-import {
-  useIntegrations,
-  useInstallIntegration,
-  useUninstallIntegration,
-  type IntegrationSummary,
-} from "../hooks/use-integrations";
+import { useIntegrations, type IntegrationSummary } from "../hooks/use-integrations";
 
 function matchesQuery(integration: IntegrationSummary, query: string): boolean {
   if (!query) return true;
@@ -41,20 +38,24 @@ function matchesQuery(integration: IntegrationSummary, query: string): boolean {
   );
 }
 
+function ActiveBadge({ active }: { active: boolean }) {
+  const { t } = useTranslation("settings");
+  return active ? (
+    <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[0.65rem] font-medium text-emerald-500">
+      {t("integrations.badge.active")}
+    </span>
+  ) : (
+    <span className="bg-warning/10 text-warning rounded px-1.5 py-0.5 text-[0.65rem] font-medium">
+      {t("integrations.badge.inactive")}
+    </span>
+  );
+}
+
 function IntegrationCard({ integration }: { integration: IntegrationSummary }) {
   const { t } = useTranslation("settings");
-  const install = useInstallIntegration();
-  const uninstall = useUninstallIntegration();
   const m = integration.manifest;
   const isSystem = integration.source === "system";
-  const isInstalled = Boolean(integration.installed);
-
-  const onInstall = () => install.mutate(integration.id);
-  const onUninstall = () => {
-    if (window.confirm(t("integrations.uninstall.confirm"))) {
-      uninstall.mutate(integration.id);
-    }
-  };
+  const isActive = Boolean(integration.active);
 
   return (
     <div
@@ -86,17 +87,16 @@ function IntegrationCard({ integration }: { integration: IntegrationSummary }) {
           </div>
           <p className="text-muted-foreground truncate font-mono text-xs">{integration.id}</p>
         </div>
+        <ActiveBadge active={isActive} />
       </div>
       {m.description && (
         <p className="text-muted-foreground mt-3 line-clamp-2 text-sm">{m.description}</p>
       )}
       <div className="mt-3 flex flex-wrap gap-1">
-        {isSystem && <Badge variant="secondary">{t("integrations.badge.system")}</Badge>}
-        {!isSystem && <Badge variant="secondary">{t("integrations.badge.org")}</Badge>}
-        {isInstalled && (
-          <Badge variant="default" className="bg-green-600 hover:bg-green-700">
-            {t("integrations.badge.installed")}
-          </Badge>
+        {isSystem ? (
+          <Badge variant="secondary">{t("integrations.badge.system")}</Badge>
+        ) : (
+          <Badge variant="secondary">{t("integrations.badge.org")}</Badge>
         )}
         {m.auths &&
           Object.entries(m.auths).map(([key, auth]) => (
@@ -105,31 +105,14 @@ function IntegrationCard({ integration }: { integration: IntegrationSummary }) {
             </Badge>
           ))}
       </div>
-      <div className="mt-auto flex items-center gap-2 pt-4">
-        <Button asChild variant="outline" size="sm">
-          <Link to={`/integrations/${integration.id}`}>{t("integrations.btn.viewDetail")}</Link>
-        </Button>
+      <div className="mt-auto flex items-center pt-4">
         <div className="flex-1" />
-        {isInstalled ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onUninstall}
-            disabled={uninstall.isPending}
-            data-testid="integration-uninstall-btn"
-          >
-            {t("integrations.btn.uninstall")}
-          </Button>
-        ) : (
-          <Button
-            size="sm"
-            onClick={onInstall}
-            disabled={install.isPending}
-            data-testid="integration-install-btn"
-          >
-            {t("integrations.btn.install")}
-          </Button>
-        )}
+        <Button asChild variant="outline" size="sm" data-testid="integration-configure-btn">
+          <Link to={`/integrations/${integration.id}`}>
+            <Settings size={14} className="mr-1" />
+            {t("integrations.btn.configure")}
+          </Link>
+        </Button>
       </div>
     </div>
   );
@@ -137,14 +120,14 @@ function IntegrationCard({ integration }: { integration: IntegrationSummary }) {
 
 export function IntegrationsPage() {
   const { t } = useTranslation("settings");
-  const [tab, setTab] = useState<"all" | "installed">("all");
+  const [tab, setTab] = useState<"active" | "all">("active");
   const [query, setQuery] = useState("");
   const { data: integrations, isLoading, error } = useIntegrations();
 
   const filtered = useMemo(() => {
     const list = integrations ?? [];
     return list.filter((i) => {
-      if (tab === "installed" && !i.installed) return false;
+      if (tab === "active" && !i.active) return false;
       return matchesQuery(i, query);
     });
   }, [integrations, tab, query]);
@@ -156,10 +139,10 @@ export function IntegrationsPage() {
       </PageHeader>
 
       <div className="mb-4 flex items-center gap-3">
-        <Tabs value={tab} onValueChange={(v) => setTab(v as "all" | "installed")}>
+        <Tabs value={tab} onValueChange={(v) => setTab(v as "active" | "all")}>
           <TabsList>
+            <TabsTrigger value="active">{t("integrations.tabs.active")}</TabsTrigger>
             <TabsTrigger value="all">{t("integrations.tabs.all")}</TabsTrigger>
-            <TabsTrigger value="installed">{t("integrations.tabs.installed")}</TabsTrigger>
           </TabsList>
         </Tabs>
         <div className="relative max-w-md flex-1">
@@ -184,9 +167,7 @@ export function IntegrationsPage() {
       ) : filtered.length === 0 ? (
         <EmptyState
           icon={Boxes}
-          message={
-            tab === "installed" ? t("integrations.empty.installed") : t("integrations.empty.all")
-          }
+          message={tab === "active" ? t("integrations.empty.active") : t("integrations.empty.all")}
         />
       ) : (
         <div

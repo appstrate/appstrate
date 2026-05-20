@@ -5,9 +5,9 @@
  *
  * Routes (all mounted under `/api/integrations`, app-scoped):
  *
- *   - `GET    /`                                     — list available + installed status
- *   - `POST   /:packageId/install`                   — install in current app
- *   - `DELETE /:packageId/install`                   — uninstall
+ *   - `GET    /`                                     — list available + active status
+ *   - `POST   /:packageId/activate`                  — activate in current app
+ *   - `DELETE /:packageId/deactivate`                — deactivate (non-destructive)
  *   - `GET    /:packageId`                           — manifest + per-auth status for caller
  *   - `GET    /:packageId/oauth-clients/:authKey`    — admin: read registered OAuth client
  *   - `PUT    /:packageId/oauth-clients/:authKey`    — admin: register/rotate OAuth client
@@ -186,9 +186,10 @@ export function createIntegrationsRouter() {
   router.get("/", requirePermission("integrations", "read"), async (c) => {
     const scope = getAppScope(c);
     const summaries = await listIntegrations(scope.orgId);
-    // Decorate with `installed` + `blockUserConnections` flags for the
-    // current application. `blockUserConnections` defaults to false for
-    // not-yet-installed rows (no per-app config row exists).
+    // Decorate with `active` + `blockUserConnections` flags for the
+    // current application. An integration is "active" when an
+    // application_packages row exists for it; `blockUserConnections`
+    // defaults to false for inactive rows (no per-app config row exists).
     const installedRows = await db
       .select({
         packageId: applicationPackages.packageId,
@@ -207,7 +208,7 @@ export function createIntegrationsRouter() {
       const row = installedMap.get(s.id);
       return {
         ...s,
-        installed: row !== undefined,
+        active: row !== undefined,
         blockUserConnections: row?.blockUserConnections ?? false,
       };
     });
@@ -369,10 +370,16 @@ export function createIntegrationsRouter() {
     return c.json(status);
   });
 
-  // ─── Install / uninstall ───────────────────
+  // ─── Activate / deactivate ─────────────────
+  //
+  // "Activating" creates the application_packages row; "deactivating"
+  // deletes it. Deactivation is non-destructive: connections, OAuth
+  // clients, pins and org defaults FK to (package, application) — not to
+  // application_packages — so they survive and are reused on reactivation
+  // (mirrors how disabling a provider keeps its credentials).
 
   router.post(
-    "/:packageId{@[^/]+/[^/]+}/install",
+    "/:packageId{@[^/]+/[^/]+}/activate",
     requirePermission("integrations", "install"),
     async (c) => {
       const packageId = c.req.param("packageId")!;
@@ -382,16 +389,16 @@ export function createIntegrationsRouter() {
       installSchema.parse(body);
       const row = await installPackage(scope, packageId);
       await recordAuditFromContext(c, {
-        action: "integration.installed",
+        action: "integration.activated",
         resourceType: "integration",
         resourceId: packageId,
       });
-      return c.json({ installed: true, installedAt: row.installedAt.toISOString() }, 201);
+      return c.json({ active: true, activatedAt: row.installedAt.toISOString() }, 201);
     },
   );
 
   router.delete(
-    "/:packageId{@[^/]+/[^/]+}/install",
+    "/:packageId{@[^/]+/[^/]+}/deactivate",
     requirePermission("integrations", "uninstall"),
     async (c) => {
       const packageId = c.req.param("packageId")!;
@@ -399,11 +406,11 @@ export function createIntegrationsRouter() {
       await assertIsIntegration(scope, packageId);
       await uninstallPackage(scope, packageId);
       await recordAuditFromContext(c, {
-        action: "integration.uninstalled",
+        action: "integration.deactivated",
         resourceType: "integration",
         resourceId: packageId,
       });
-      return c.json({ uninstalled: true });
+      return c.json({ active: false });
     },
   );
 

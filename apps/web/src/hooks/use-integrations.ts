@@ -138,40 +138,40 @@ export function useIntegrationAgentResolution(
   });
 }
 
-export function useInstallIntegration() {
+export function useActivateIntegration() {
   const { t } = useTranslation("settings");
   const qc = useQueryClient();
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
   return useMutation({
     mutationFn: (packageId: string) =>
-      api<{ installed: boolean; installedAt: string }>(
-        `/integrations/${encodeURI(packageId)}/install`,
+      api<{ active: boolean; activatedAt: string }>(
+        `/integrations/${encodeURI(packageId)}/activate`,
         { method: "POST", body: "{}" },
       ),
     onSuccess: () => {
-      toast.success(t("integrations.install.success"));
+      toast.success(t("integrations.activate.success"));
       qc.invalidateQueries({ queryKey: KEY(orgId, applicationId) });
     },
-    onError: () => toast.error(t("integrations.install.error")),
+    onError: () => toast.error(t("integrations.activate.error")),
   });
 }
 
-export function useUninstallIntegration() {
+export function useDeactivateIntegration() {
   const { t } = useTranslation("settings");
   const qc = useQueryClient();
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
   return useMutation({
     mutationFn: (packageId: string) =>
-      api<{ uninstalled: boolean }>(`/integrations/${encodeURI(packageId)}/install`, {
+      api<{ active: boolean }>(`/integrations/${encodeURI(packageId)}/deactivate`, {
         method: "DELETE",
       }),
     onSuccess: () => {
-      toast.success(t("integrations.uninstall.success"));
+      toast.success(t("integrations.deactivate.success"));
       qc.invalidateQueries({ queryKey: KEY(orgId, applicationId) });
     },
-    onError: () => toast.error(t("integrations.uninstall.error")),
+    onError: () => toast.error(t("integrations.deactivate.error")),
   });
 }
 

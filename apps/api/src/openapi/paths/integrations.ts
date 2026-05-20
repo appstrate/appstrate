@@ -88,7 +88,7 @@ const integrationSummarySchema = {
     manifest: { type: "object", additionalProperties: true },
     orgId: { type: ["string", "null"] },
     source: { type: "string", enum: ["local", "system"] },
-    installed: { type: "boolean" },
+    active: { type: "boolean" },
     blockUserConnections: { type: "boolean" },
   },
 } as const;
@@ -272,11 +272,11 @@ export const integrationsPaths = {
       },
     },
   },
-  "/api/integrations/{packageId}/install": {
+  "/api/integrations/{packageId}/activate": {
     post: {
-      operationId: "installIntegration",
+      operationId: "activateIntegration",
       tags: ["Integrations"],
-      summary: "Install an integration in the current application",
+      summary: "Activate an integration in the current application",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -292,16 +292,16 @@ export const integrationsPaths = {
       },
       responses: {
         "201": {
-          description: "Installed",
+          description: "Activated",
           headers: baseResponseHeaders,
           content: {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["installed", "installedAt"],
+                required: ["active", "activatedAt"],
                 properties: {
-                  installed: { type: "boolean" },
-                  installedAt: { type: "string", format: "date-time" },
+                  active: { type: "boolean" },
+                  activatedAt: { type: "string", format: "date-time" },
                 },
               },
             },
@@ -309,7 +309,7 @@ export const integrationsPaths = {
         },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
-          description: "Already installed or wrong package type",
+          description: "Already active or wrong package type",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -318,10 +318,12 @@ export const integrationsPaths = {
         },
       },
     },
+  },
+  "/api/integrations/{packageId}/deactivate": {
     delete: {
-      operationId: "uninstallIntegration",
+      operationId: "deactivateIntegration",
       tags: ["Integrations"],
-      summary: "Uninstall an integration from the current application",
+      summary: "Deactivate an integration in the current application (non-destructive)",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -329,14 +331,14 @@ export const integrationsPaths = {
       ],
       responses: {
         "200": {
-          description: "Uninstalled",
+          description: "Deactivated",
           headers: baseResponseHeaders,
           content: {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["uninstalled"],
-                properties: { uninstalled: { type: "boolean" } },
+                required: ["active"],
+                properties: { active: { type: "boolean" } },
               },
             },
           },

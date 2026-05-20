@@ -33,8 +33,9 @@ export interface IntegrationSummary {
   manifest: IntegrationManifestView;
   orgId: string | null;
   source: "local" | "system";
-  installed?: boolean;
-  /** Admin-only per-(app, integration) lock; defaults to false when not installed. */
+  /** True when an application_packages row exists for this (app, integration). */
+  active?: boolean;
+  /** Admin-only per-(app, integration) lock; defaults to false when inactive. */
   blockUserConnections?: boolean;
 }
 
