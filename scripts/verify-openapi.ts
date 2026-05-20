@@ -77,7 +77,6 @@ const expectedEndpoints = [
   "DELETE /api/agents/{scope}/{name}/persistence/memories/{id}",
   "DELETE /api/agents/{scope}/{name}/persistence/pinned/{id}",
   "PUT /api/agents/{scope}/{name}/skills",
-  "PUT /api/agents/{scope}/{name}/tools",
   "GET /api/agents/{scope}/{name}/model",
   "PUT /api/agents/{scope}/{name}/model",
   "GET /api/agents/{scope}/{name}/bundle",
@@ -236,22 +235,6 @@ const expectedEndpoints = [
   "POST /api/packages/skills/{scope}/{name}/versions/{version}/restore",
   "DELETE /api/packages/skills/{scope}/{name}/versions/{version}",
   "GET /api/packages/skills/{scope}/{name}/versions/{version}",
-
-  // Packages — Tools
-  "GET /api/packages/tools",
-  "POST /api/packages/tools",
-  "GET /api/packages/tools/{scope}/{name}",
-  "PUT /api/packages/tools/{scope}/{name}",
-  "DELETE /api/packages/tools/{scope}/{name}",
-  "GET /api/packages/tools/{id}",
-  "PUT /api/packages/tools/{id}",
-  "DELETE /api/packages/tools/{id}",
-  "GET /api/packages/tools/{scope}/{name}/versions",
-  "GET /api/packages/tools/{scope}/{name}/versions/info",
-  "POST /api/packages/tools/{scope}/{name}/versions",
-  "POST /api/packages/tools/{scope}/{name}/versions/{version}/restore",
-  "DELETE /api/packages/tools/{scope}/{name}/versions/{version}",
-  "GET /api/packages/tools/{scope}/{name}/versions/{version}",
 
   // Packages — Providers (package CRUD)
   "GET /api/packages/providers",
@@ -1013,7 +996,7 @@ const SKIP_FILES = new Set<string>([
   // see them.
   "routes/llm-proxy",
   // packages.ts iterates ROUTE_CONFIGS with template-literal paths
-  // (router.get(`/${path}/...`, …) where `path` ∈ {skills, tools, agents,
+  // (router.get(`/${path}/...`, …) where `path` ∈ {skills, agents,
   // providers}). All concrete paths are already enumerated in
   // expectedEndpoints, so check #1 catches drift on this file.
   "routes/packages",

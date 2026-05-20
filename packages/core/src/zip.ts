@@ -7,7 +7,6 @@ import {
   extractSkillMeta,
   type Manifest,
   type AgentManifest,
-  type ToolManifest,
   type PackageType,
   type ProviderManifest,
   type IntegrationManifest,
@@ -269,22 +268,6 @@ export function parsePackageZip(zipBuffer: Uint8Array, maxSize?: number): Parsed
         );
       }
       content = skillMd;
-      break;
-    }
-    case "tool": {
-      const toolManifest = manifest as ToolManifest;
-      const entrypoint = toolManifest.entrypoint;
-      if (!entrypoint || !files[entrypoint]) {
-        throw new PackageZipError(
-          "MISSING_CONTENT",
-          `Tool package must contain the file declared in entrypoint: "${entrypoint || "(missing)"}"`,
-        );
-      }
-      // Structural check only. `entrypoint` may point at either draft source
-      // or a published bundle (AFPS §3.4); source-level validation is an
-      // authoring-time concern handled by upload/import/publish pipelines
-      // via `validateToolSource` explicitly, not by the ZIP parser.
-      content = new TextDecoder().decode(files[entrypoint]!);
       break;
     }
     case "provider": {

@@ -49,9 +49,9 @@ export interface PlatformPackageDependency {
 }
 
 /**
- * Stable public fields of a loaded package (agent, skill, tool, provider).
+ * Stable public fields of a loaded package (agent, skill, provider).
  *
- * `prompt`, `skills`, `tools` are populated by the platform when it resolves
+ * `prompt`, `skills` are populated by the platform when it resolves
  * a package row — modules that render or reason about a package can read
  * them without re-implementing manifest traversal. They remain optional so
  * future package shapes (e.g. provider definitions with no prompt) stay
@@ -66,8 +66,6 @@ export interface PlatformPackage {
   readonly prompt?: string;
   /** Resolved skill dependencies declared in the manifest. */
   readonly skills?: ReadonlyArray<PlatformPackageDependency>;
-  /** Resolved tool dependencies declared in the manifest. */
-  readonly tools?: ReadonlyArray<PlatformPackageDependency>;
 }
 
 /**
@@ -361,7 +359,7 @@ export interface InlinePreflightResult {
   providerProfilesOverride: Record<string, string> | undefined;
   modelIdOverride: string | null;
   proxyIdOverride: string | null;
-  resolvedDeps: { skills: unknown; tools: unknown };
+  resolvedDeps: { skills: unknown };
 }
 
 // ---------------------------------------------------------------------------

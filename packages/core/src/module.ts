@@ -1101,7 +1101,7 @@ export interface PlatformServices {
     search(args: {
       query: string;
       orgId: string;
-      kind: "agent" | "skill" | "tool" | "provider";
+      kind: "agent" | "skill" | "provider";
       limit?: number;
     }): Promise<PlatformPackage[]>;
   };

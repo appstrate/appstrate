@@ -151,7 +151,7 @@ export const schemas = {
       enabled: { type: "boolean" },
       installedAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
-      packageType: { type: "string", enum: ["agent", "skill", "tool", "provider"] },
+      packageType: { type: "string", enum: ["agent", "skill", "provider"] },
       packageSource: { type: "string", enum: ["system", "local"] },
     },
   },
@@ -268,16 +268,6 @@ export const schemas = {
       description: { type: "string" },
     },
   },
-  AgentToolRef: {
-    type: "object",
-    required: ["id", "name"],
-    properties: {
-      id: { type: "string" },
-      version: { type: "string" },
-      name: { type: "string" },
-      description: { type: "string" },
-    },
-  },
   AgentListItem: {
     type: "object",
     required: ["id", "source", "type"],
@@ -297,7 +287,7 @@ export const schemas = {
       type: {
         type: "string",
         description: "Package type from manifest",
-        enum: ["agent", "skill", "tool", "provider"],
+        enum: ["agent", "skill", "provider"],
       },
       runningRuns: { type: "integer" },
       dependencies: {
@@ -305,7 +295,6 @@ export const schemas = {
         properties: {
           providers: { type: "object", additionalProperties: { type: "string" } },
           skills: { type: "object", additionalProperties: { type: "string" } },
-          tools: { type: "object", additionalProperties: { type: "string" } },
         },
       },
     },
@@ -380,7 +369,6 @@ export const schemas = {
         properties: {
           providers: { type: "array", items: { $ref: "#/components/schemas/ProviderStatus" } },
           skills: { type: "array", items: { $ref: "#/components/schemas/AgentSkillRef" } },
-          tools: { type: "array", items: { $ref: "#/components/schemas/AgentToolRef" } },
           integrations: {
             type: "array",
             items: {
@@ -1000,10 +988,6 @@ export const schemas = {
     description: "AFPS Skill manifest. See https://afps.appstrate.dev for field reference.",
     $ref: "https://afps.appstrate.dev/packages/schema/v1/skill.schema.json",
   },
-  ToolManifest: {
-    description: "AFPS Tool manifest. See https://afps.appstrate.dev for field reference.",
-    $ref: "https://afps.appstrate.dev/packages/schema/v1/tool.schema.json",
-  },
   ProviderManifest: {
     description: "AFPS Provider manifest. See https://afps.appstrate.dev for field reference.",
     $ref: "https://afps.appstrate.dev/packages/schema/v1/provider.schema.json",
@@ -1053,7 +1037,7 @@ export const schemas = {
       required: ["id", "type", "source", "name", "description", "installedIn"],
       properties: {
         id: { type: "string", description: "Package id (`pkg_…`)." },
-        type: { type: "string", enum: ["agent", "skill", "tool", "provider"] },
+        type: { type: "string", enum: ["agent", "skill", "provider"] },
         source: {
           type: "string",
           description:

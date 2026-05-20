@@ -85,19 +85,6 @@ export async function collectAgentReadinessErrors(
     });
   }
 
-  const missingTools = findMissingDependencies(
-    (manifest.dependencies?.tools ?? {}) as Record<string, string>,
-    agent.tools.map((e) => e.id),
-  );
-  for (const toolId of missingTools) {
-    errors.push({
-      field: `dependencies.tools.${toolId}`,
-      code: "missing_tool",
-      title: "Missing Tool",
-      message: `Required tool '${toolId}' is not installed`,
-    });
-  }
-
   const manifestProviders = resolveManifestProviders(manifest);
   errors.push(
     ...(await collectDependencyErrors(manifestProviders, providerProfiles, orgId, applicationId)),

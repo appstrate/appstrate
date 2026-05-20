@@ -75,7 +75,6 @@ const EMPTY_CONFIG_SCHEMA: JSONSchemaObject = { type: "object", properties: {} }
 const COMPANION_FILE_NAME: Record<PackageType, string> = {
   agent: "prompt.md",
   skill: "SKILL.md",
-  tool: "TOOL.md",
   provider: "PROVIDER.md",
   // Phase 1.0 — INTEGRATION.md is the optional agent-facing doc;
   // manifest.json carries the authoritative spec.
@@ -101,21 +100,18 @@ function AgentRunButtonInline({
 
   if (!detail) return null;
 
-  const { hasRequiredConfig, hasModel, hasPrompt, hasRequiredSkills, hasRequiredTools } = readiness;
+  const { hasRequiredConfig, hasModel, hasPrompt, hasRequiredSkills } = readiness;
   // Provider connection checks are handled by the ConnectionSummaryModal
-  const runDisabled =
-    !hasPrompt || !hasRequiredSkills || !hasRequiredTools || !hasRequiredConfig || !hasModel;
+  const runDisabled = !hasPrompt || !hasRequiredSkills || !hasRequiredConfig || !hasModel;
   const runDisabledTitle = !hasPrompt
     ? t("detail.titleEmptyPrompt")
     : !hasRequiredSkills
       ? t("detail.titleMissingSkill")
-      : !hasRequiredTools
-        ? t("detail.titleMissingTool")
-        : !hasRequiredConfig
-          ? t("detail.titleConfig")
-          : !hasModel
-            ? t("detail.titleModel")
-            : undefined;
+      : !hasRequiredConfig
+        ? t("detail.titleConfig")
+        : !hasModel
+          ? t("detail.titleModel")
+          : undefined;
 
   return (
     <RunAgentButton
@@ -347,7 +343,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       : []),
     {
       id: "content",
-      label: type === "tool" ? t("editor.tabSource") : t(`editor.tabContent.${type}`),
+      label: t(`editor.tabContent.${type}`),
     },
     { id: "usedBy", label: t("packages.usedBy") },
   ];
@@ -543,13 +539,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       {type !== "agent" && tab === "content" && pkgDetail && (
         <div className="border-border bg-card rounded-lg border p-4">
           <pre className="text-muted-foreground bg-muted/50 overflow-x-auto rounded-md p-3 font-mono text-xs whitespace-pre-wrap">
-            {type === "tool"
-              ? ((isHistoricalVersion && versionDetail?.sourceCode != null
-                  ? versionDetail.sourceCode
-                  : pkgDetail.sourceCode) ?? "")
-              : isHistoricalVersion && versionDetail?.content != null
-                ? versionDetail.content
-                : pkgDetail.content}
+            {isHistoricalVersion && versionDetail?.content != null
+              ? versionDetail.content
+              : pkgDetail.content}
           </pre>
         </div>
       )}

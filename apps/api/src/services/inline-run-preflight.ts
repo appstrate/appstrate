@@ -60,7 +60,7 @@ export interface InlineRunPreflightResult {
   providerProfilesOverride: Record<string, string> | undefined;
   modelIdOverride: string | null;
   proxyIdOverride: string | null;
-  resolvedDeps: Pick<LoadedPackage, "skills" | "tools">;
+  resolvedDeps: Pick<LoadedPackage, "skills">;
 }
 
 const providerProfilesSchema = z.record(z.string(), z.uuid()).optional();
@@ -171,12 +171,12 @@ export async function runInlinePreflight(params: {
   // when structural validation failed — the manifest-shape errors already
   // explain why. Fail-fast has thrown long before reaching here.
   let providerProfiles: ProviderProfileMap = {};
-  let resolvedDeps: Pick<LoadedPackage, "skills" | "tools"> = { skills: [], tools: [] };
+  let resolvedDeps: Pick<LoadedPackage, "skills"> = { skills: [] };
   if (manifest) {
-    // Inline manifests only embed registry ID refs for skills/tools; resolve
+    // Inline manifests only embed registry ID refs for skills; resolve
     // them against the org/system catalog up-front so both the readiness
     // probe here AND the downstream run pipeline (env-builder reads
-    // agent.skills / agent.tools) see the same resolved list.
+    // agent.skills) see the same resolved list.
     resolvedDeps = await resolveManifestCatalogDeps(manifest, orgId);
     const probeAgent = buildShadowLoadedPackage(
       generateShadowPackageId(),

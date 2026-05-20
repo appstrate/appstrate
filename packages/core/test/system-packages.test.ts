@@ -53,30 +53,6 @@ function skillManifest(name: string, version = "1.0.0") {
   });
 }
 
-function toolManifest(name: string, version = "1.0.0") {
-  return JSON.stringify({
-    name,
-    version,
-    type: "tool",
-    entrypoint: "index.ts",
-    tool: {
-      name: "my-tool",
-      description: "A test tool",
-      inputSchema: { type: "object" },
-    },
-  });
-}
-
-const validToolSource = `
-export default function(pi) {
-  pi.registerTool({
-    name: "tool",
-    execute(_id, params, signal) {
-      return { content: [{ type: "text", text: "ok" }] };
-    }
-  });
-}`;
-
 const validSkillContent = `---
 name: test-skill
 description: A test skill
@@ -136,18 +112,6 @@ describe("loadSystemPackages", () => {
     const result = await loadSystemPackages(testDir);
     expect(result.packages).toHaveLength(1);
     expect(result.packages[0]!.type).toBe("skill");
-  });
-
-  it("loads tool ZIPs", async () => {
-    const zip = makeZip({
-      "manifest.json": toolManifest("@test/my-tool"),
-      "index.ts": validToolSource,
-    });
-    await writeFile(join(testDir, "my-tool-1.0.0.afps"), zip);
-
-    const result = await loadSystemPackages(testDir);
-    expect(result.packages).toHaveLength(1);
-    expect(result.packages[0]!.type).toBe("tool");
   });
 
   it("loads multiple ZIPs", async () => {

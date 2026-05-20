@@ -40,20 +40,6 @@ function validSkillManifest() {
   });
 }
 
-function validToolManifest() {
-  return JSON.stringify({
-    name: "@test/my-tool",
-    version: "1.0.0",
-    type: "tool",
-    entrypoint: "tool.ts",
-    tool: {
-      name: "my_tool",
-      description: "A test tool",
-      inputSchema: { type: "object", properties: {} },
-    },
-  });
-}
-
 const validSkillContent = `---
 name: my-skill
 description: A test skill
@@ -90,16 +76,6 @@ function validIntegrationManifest() {
   });
 }
 
-const validToolSource = `
-export default function(pi) {
-  pi.registerTool({
-    name: "tool",
-    execute(_id, params, signal) {
-      return { content: [{ type: "text", text: "ok" }] };
-    }
-  });
-}`;
-
 // ─────────────────────────────────────────────
 // parsePackageZip
 // ─────────────────────────────────────────────
@@ -124,16 +100,6 @@ describe("parsePackageZip", () => {
     const result = parsePackageZip(zip);
     expect(result.type).toBe("skill");
     expect(result.content).toContain("my-skill");
-  });
-
-  it("valid tool ZIP", () => {
-    const zip = makeZip({
-      "manifest.json": validToolManifest(),
-      "tool.ts": validToolSource,
-    });
-    const result = parsePackageZip(zip);
-    expect(result.type).toBe("tool");
-    expect(result.content).toContain("registerTool");
   });
 
   it("valid provider ZIP (manifest-only)", () => {
@@ -254,16 +220,6 @@ describe("parsePackageZip", () => {
 
   it("skill missing SKILL.md", () => {
     const zip = makeZip({ "manifest.json": validSkillManifest() });
-    expect(() => parsePackageZip(zip)).toThrow(PackageZipError);
-    try {
-      parsePackageZip(zip);
-    } catch (e) {
-      expect((e as PackageZipError).code).toBe("MISSING_CONTENT");
-    }
-  });
-
-  it("tool missing entrypoint file", () => {
-    const zip = makeZip({ "manifest.json": validToolManifest() });
     expect(() => parsePackageZip(zip)).toThrow(PackageZipError);
     try {
       parsePackageZip(zip);
@@ -457,31 +413,6 @@ describe("zip bomb protection", () => {
 });
 
 // ─────────────────────────────────────────────
-// Tool entrypoint detection with prefix
-// ─────────────────────────────────────────────
-
-describe("tool entrypoint detection", () => {
-  it("folder-wrapped tool ZIP is parsed correctly", () => {
-    const zip = makeZip({
-      "wrapper/manifest.json": validToolManifest(),
-      "wrapper/tool.ts": validToolSource,
-    });
-    const result = parsePackageZip(zip);
-    expect(result.type).toBe("tool");
-    expect(result.content).toContain("registerTool");
-  });
-
-  it("ignores .d.ts files for tool detection", () => {
-    const zip = makeZip({
-      "manifest.json": validToolManifest(),
-      "types.d.ts": "declare module 'foo';",
-      "tool.ts": validToolSource,
-    });
-    const result = parsePackageZip(zip);
-    expect(result.type).toBe("tool");
-  });
-});
-
 // ─────────────────────────────────────────────
 // Wrapper folder stripping — parsePackageZip integration
 // ─────────────────────────────────────────────
@@ -553,27 +484,17 @@ describe("wrapper folder stripping (parsePackageZip)", () => {
   });
 
   it("nested folders inside wrapper are preserved", () => {
-    const toolManifest = JSON.stringify({
-      name: "@test/my-tool",
-      version: "1.0.0",
-      type: "tool",
-      entrypoint: "lib/tool.ts",
-      tool: {
-        name: "my_tool",
-        description: "A test tool",
-        inputSchema: { type: "object", properties: {} },
-      },
-    });
     const zip = makeZip({
-      "wrapper/manifest.json": toolManifest,
-      "wrapper/lib/tool.ts": validToolSource,
+      "wrapper/manifest.json": validSkillManifest(),
+      "wrapper/SKILL.md": validSkillContent,
+      "wrapper/lib/helper.ts": "export const x = 1;",
       "wrapper/scripts/helper.py": "print('hi')",
     });
     const result = parsePackageZip(zip);
-    expect(result.type).toBe("tool");
-    expect(result.files["lib/tool.ts"]).toBeDefined();
+    expect(result.type).toBe("skill");
+    expect(result.files["lib/helper.ts"]).toBeDefined();
     expect(result.files["scripts/helper.py"]).toBeDefined();
-    expect(result.files["wrapper/lib/tool.ts"]).toBeUndefined();
+    expect(result.files["wrapper/lib/helper.ts"]).toBeUndefined();
   });
 
   it("returned files have stripped keys", () => {

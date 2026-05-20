@@ -21,20 +21,18 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 
-const TABS = ["agents", "skills", "tools", "providers"] as const;
+const TABS = ["agents", "skills", "providers"] as const;
 type Tab = (typeof TABS)[number];
 
 const TYPE_MAP: Record<Tab, string> = {
   agents: "agent",
   skills: "skill",
-  tools: "tool",
   providers: "provider",
 };
 
 const DETAIL_PATH_MAP: Record<string, string> = {
   agent: "/agents",
   skill: "/skills",
-  tool: "/tools",
   provider: "/providers",
 };
 

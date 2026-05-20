@@ -307,6 +307,7 @@
       "dependencies": {
         "@appstrate/afps-runtime": "workspace:*",
         "@appstrate/mcp-transport": "workspace:*",
+        "ajv": "^8.20.0",
       },
       "devDependencies": {
         "@mariozechner/pi-ai": "^0.70.6",

@@ -8,9 +8,6 @@
   "description": "Tiny end-to-end exercise of the Python MCP runner: rolls 3d20 and reports the total.",
   "timeout": 120,
   "dependencies": {
-    "tools": {
-      "@appstrate/output": "^2.0.0"
-    },
     "integrations": {
       "@appstrate/dice": "^1.0.0"
     }

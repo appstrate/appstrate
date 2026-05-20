@@ -187,7 +187,7 @@ describe("package-catalog", () => {
       expect(agent).toBeNull();
     });
 
-    it("resolves skill and tool dependencies from manifest", async () => {
+    it("resolves skill dependencies from manifest", async () => {
       await seedPackage({
         orgId,
         id: `@${orgSlug}/my-skill`,
@@ -203,19 +203,6 @@ describe("package-catalog", () => {
 
       await seedPackage({
         orgId,
-        id: `@${orgSlug}/my-tool`,
-        type: "tool",
-        draftManifest: {
-          name: `@${orgSlug}/my-tool`,
-          displayName: "My Tool",
-          version: "0.1.0",
-          type: "tool",
-          description: "A test tool",
-        },
-      });
-
-      await seedPackage({
-        orgId,
         id: `@${orgSlug}/dep-agent`,
         draftManifest: {
           name: `@${orgSlug}/dep-agent`,
@@ -224,7 +211,6 @@ describe("package-catalog", () => {
           description: "Agent with deps",
           dependencies: {
             skills: { [`@${orgSlug}/my-skill`]: "^0.1.0" },
-            tools: { [`@${orgSlug}/my-tool`]: "^0.1.0" },
           },
         },
         draftContent: "Agent with dependencies",
@@ -237,47 +223,6 @@ describe("package-catalog", () => {
       expect(agent!.skills).toHaveLength(1);
       expect(agent!.skills[0]!.id).toBe(`@${orgSlug}/my-skill`);
       expect(agent!.skills[0]!.name).toBe("My Skill");
-      expect(agent!.tools).toHaveLength(1);
-      expect(agent!.tools[0]!.id).toBe(`@${orgSlug}/my-tool`);
-      expect(agent!.tools[0]!.name).toBe("My Tool");
-    });
-
-    it("resolves system tool dependencies", async () => {
-      // System tools have orgId: null
-      await seedPackage({
-        orgId: null,
-        id: "@appstrate/log",
-        type: "tool",
-        source: "system",
-        draftManifest: {
-          name: "@appstrate/log",
-          displayName: "Log",
-          version: "1.0.0",
-          type: "tool",
-          description: "Send log messages",
-        },
-      });
-
-      await seedPackage({
-        orgId,
-        id: `@${orgSlug}/sys-dep-agent`,
-        draftManifest: {
-          name: `@${orgSlug}/sys-dep-agent`,
-          version: "0.1.0",
-          type: "agent",
-          description: "Agent with system tool",
-          dependencies: {
-            tools: { "@appstrate/log": "*" },
-          },
-        },
-      });
-
-      const agent = await getPackage(`@${orgSlug}/sys-dep-agent`, orgId);
-
-      expect(agent).not.toBeNull();
-      expect(agent!.tools).toHaveLength(1);
-      expect(agent!.tools[0]!.id).toBe("@appstrate/log");
-      expect(agent!.tools[0]!.name).toBe("Log");
     });
 
     it("gracefully handles missing dependency packages", async () => {
@@ -288,9 +233,9 @@ describe("package-catalog", () => {
           name: `@${orgSlug}/missing-dep-agent`,
           version: "0.1.0",
           type: "agent",
-          description: "Agent referencing non-existent tool",
+          description: "Agent referencing non-existent skill",
           dependencies: {
-            tools: { "@nonexistent/tool": "*" },
+            skills: { "@nonexistent/skill": "*" },
           },
         },
       });
@@ -299,10 +244,10 @@ describe("package-catalog", () => {
 
       expect(agent).not.toBeNull();
       // Missing deps are silently ignored (not in DB -> not resolved)
-      expect(agent!.tools).toHaveLength(0);
+      expect(agent!.skills).toHaveLength(0);
     });
 
-    it("returns empty skills and tools when no dependencies exist", async () => {
+    it("returns empty skills when no dependencies exist", async () => {
       await seedPackage({
         orgId,
         id: `@${orgSlug}/nodep-agent`,
@@ -318,7 +263,6 @@ describe("package-catalog", () => {
 
       expect(agent).not.toBeNull();
       expect(agent!.skills).toHaveLength(0);
-      expect(agent!.tools).toHaveLength(0);
     });
   });
 });

@@ -13,7 +13,7 @@ import {
 import { CONFIG_BY_TYPE } from "../../../src/services/package-items/config.ts";
 
 const SKILL_CONFIG = CONFIG_BY_TYPE.skill;
-const TOOL_CONFIG = CONFIG_BY_TYPE.tool;
+const PROVIDER_CONFIG = CONFIG_BY_TYPE.provider;
 import {
   buildDependencies,
   collectAllDepIds,
@@ -38,7 +38,7 @@ describe("manifest-based dependency resolution", () => {
   // ── buildDependencies ─────────────────────────────────────
 
   describe("buildDependencies", () => {
-    it("builds dependencies from manifest skills + tools + providers", async () => {
+    it("builds dependencies from manifest skills + providers", async () => {
       await seedPackage({
         orgId,
         id: `@${orgSlug}/dep-skill`,
@@ -52,13 +52,13 @@ describe("manifest-based dependency resolution", () => {
       });
       await seedPackage({
         orgId,
-        id: `@${orgSlug}/dep-tool`,
-        type: "tool",
+        id: `@${orgSlug}/dep-provider`,
+        type: "provider",
         draftManifest: {
-          name: `@${orgSlug}/dep-tool`,
+          name: `@${orgSlug}/dep-provider`,
           version: "2.0.0",
-          type: "tool",
-          description: "A tool",
+          type: "provider",
+          description: "A provider",
         },
       });
       await seedPackage({
@@ -71,7 +71,7 @@ describe("manifest-based dependency resolution", () => {
           description: "Agent with deps",
           dependencies: {
             skills: { [`@${orgSlug}/dep-skill`]: "^1.0.0" },
-            tools: { [`@${orgSlug}/dep-tool`]: "^2.0.0" },
+            providers: { [`@${orgSlug}/dep-provider`]: "^2.0.0" },
           },
         },
       });
@@ -81,8 +81,8 @@ describe("manifest-based dependency resolution", () => {
       expect(deps).not.toBeNull();
       expect(deps!.skills).toBeDefined();
       expect(deps!.skills![`@${orgSlug}/dep-skill`]).toBe("1.0.0");
-      expect(deps!.tools).toBeDefined();
-      expect(deps!.tools![`@${orgSlug}/dep-tool`]).toBe("2.0.0");
+      expect(deps!.providers).toBeDefined();
+      expect(deps!.providers![`@${orgSlug}/dep-provider`]).toBe("2.0.0");
     });
 
     it("returns null when package has no dependencies", async () => {
@@ -110,16 +110,16 @@ describe("manifest-based dependency resolution", () => {
   // ── deleteOrgItem — in-use protection ─────────────────────
 
   describe("deleteOrgItem — in-use protection", () => {
-    it("blocks deletion when an agent depends on the tool", async () => {
+    it("blocks deletion when an agent depends on the provider", async () => {
       await seedPackage({
         orgId,
-        id: `@${orgSlug}/used-tool`,
-        type: "tool",
+        id: `@${orgSlug}/used-provider`,
+        type: "provider",
         draftManifest: {
-          name: `@${orgSlug}/used-tool`,
+          name: `@${orgSlug}/used-provider`,
           version: "1.0.0",
-          type: "tool",
-          description: "A tool",
+          type: "provider",
+          description: "A provider",
         },
       });
       await seedPackage({
@@ -129,14 +129,14 @@ describe("manifest-based dependency resolution", () => {
           name: `@${orgSlug}/consumer-agent`,
           version: "0.1.0",
           type: "agent",
-          description: "Uses the tool",
+          description: "Uses the provider",
           dependencies: {
-            tools: { [`@${orgSlug}/used-tool`]: "*" },
+            providers: { [`@${orgSlug}/used-provider`]: "*" },
           },
         },
       });
 
-      const result = await deleteOrgItem(orgId, `@${orgSlug}/used-tool`, TOOL_CONFIG);
+      const result = await deleteOrgItem(orgId, `@${orgSlug}/used-provider`, PROVIDER_CONFIG);
 
       expect(result.ok).toBe(false);
       expect(result.error).toBe("IN_USE");
@@ -144,7 +144,7 @@ describe("manifest-based dependency resolution", () => {
       expect(result.dependents![0]!.id).toBe(`@${orgSlug}/consumer-agent`);
     });
 
-    it("blocks deletion when a tool depends on the skill (cross-type)", async () => {
+    it("blocks deletion when a provider depends on the skill (cross-type)", async () => {
       await seedPackage({
         orgId,
         id: `@${orgSlug}/shared-skill`,
@@ -158,13 +158,13 @@ describe("manifest-based dependency resolution", () => {
       });
       await seedPackage({
         orgId,
-        id: `@${orgSlug}/consumer-tool`,
-        type: "tool",
+        id: `@${orgSlug}/consumer-provider`,
+        type: "provider",
         draftManifest: {
-          name: `@${orgSlug}/consumer-tool`,
+          name: `@${orgSlug}/consumer-provider`,
           version: "1.0.0",
-          type: "tool",
-          description: "Tool that uses the skill",
+          type: "provider",
+          description: "Provider that uses the skill",
           dependencies: {
             skills: { [`@${orgSlug}/shared-skill`]: "*" },
           },
@@ -176,23 +176,23 @@ describe("manifest-based dependency resolution", () => {
       expect(result.ok).toBe(false);
       expect(result.error).toBe("IN_USE");
       expect(result.dependents).toHaveLength(1);
-      expect(result.dependents![0]!.id).toBe(`@${orgSlug}/consumer-tool`);
+      expect(result.dependents![0]!.id).toBe(`@${orgSlug}/consumer-provider`);
     });
 
     it("allows deletion when no package depends on it", async () => {
       await seedPackage({
         orgId,
-        id: `@${orgSlug}/lonely-tool`,
-        type: "tool",
+        id: `@${orgSlug}/lonely-provider`,
+        type: "provider",
         draftManifest: {
-          name: `@${orgSlug}/lonely-tool`,
+          name: `@${orgSlug}/lonely-provider`,
           version: "1.0.0",
-          type: "tool",
-          description: "Unreferenced tool",
+          type: "provider",
+          description: "Unreferenced provider",
         },
       });
 
-      const result = await deleteOrgItem(orgId, `@${orgSlug}/lonely-tool`, TOOL_CONFIG);
+      const result = await deleteOrgItem(orgId, `@${orgSlug}/lonely-provider`, PROVIDER_CONFIG);
 
       expect(result.ok).toBe(true);
     });
@@ -242,19 +242,19 @@ describe("manifest-based dependency resolution", () => {
       const otherUser = await createTestUser({ email: "other@test.com" });
       const { org: otherOrg } = await createTestOrg(otherUser.id, { slug: "otherorg" });
 
-      // Tool in our org
+      // Provider in our org
       await seedPackage({
         orgId,
-        id: `@${orgSlug}/our-tool`,
-        type: "tool",
+        id: `@${orgSlug}/our-provider`,
+        type: "provider",
         draftManifest: {
-          name: `@${orgSlug}/our-tool`,
+          name: `@${orgSlug}/our-provider`,
           version: "1.0.0",
-          type: "tool",
-          description: "Our tool",
+          type: "provider",
+          description: "Our provider",
         },
       });
-      // Agent in OTHER org references our tool (shouldn't block our deletion)
+      // Agent in OTHER org references our provider (shouldn't block our deletion)
       await seedPackage({
         orgId: otherOrg.id,
         id: `@otherorg/their-agent`,
@@ -263,11 +263,11 @@ describe("manifest-based dependency resolution", () => {
           version: "0.1.0",
           type: "agent",
           description: "Other org agent",
-          dependencies: { tools: { [`@${orgSlug}/our-tool`]: "*" } },
+          dependencies: { providers: { [`@${orgSlug}/our-provider`]: "*" } },
         },
       });
 
-      const result = await deleteOrgItem(orgId, `@${orgSlug}/our-tool`, TOOL_CONFIG);
+      const result = await deleteOrgItem(orgId, `@${orgSlug}/our-provider`, PROVIDER_CONFIG);
 
       expect(result.ok).toBe(true);
     });
@@ -279,13 +279,13 @@ describe("manifest-based dependency resolution", () => {
     it("counts manifest-based dependencies correctly", async () => {
       await seedPackage({
         orgId,
-        id: `@${orgSlug}/counted-tool`,
-        type: "tool",
+        id: `@${orgSlug}/counted-provider`,
+        type: "provider",
         draftManifest: {
-          name: `@${orgSlug}/counted-tool`,
+          name: `@${orgSlug}/counted-provider`,
           version: "1.0.0",
-          type: "tool",
-          description: "Tool",
+          type: "provider",
+          description: "Provider",
         },
       });
       await seedPackage({
@@ -296,7 +296,7 @@ describe("manifest-based dependency resolution", () => {
           version: "0.1.0",
           type: "agent",
           description: "Agent 1",
-          dependencies: { tools: { [`@${orgSlug}/counted-tool`]: "*" } },
+          dependencies: { providers: { [`@${orgSlug}/counted-provider`]: "*" } },
         },
       });
       await seedPackage({
@@ -307,16 +307,19 @@ describe("manifest-based dependency resolution", () => {
           version: "0.1.0",
           type: "agent",
           description: "Agent 2",
-          dependencies: { tools: { [`@${orgSlug}/counted-tool`]: "*" } },
+          dependencies: { providers: { [`@${orgSlug}/counted-provider`]: "*" } },
         },
       });
 
-      await installPackage({ orgId: orgId, applicationId: applicationId }, `@${orgSlug}/counted-tool`);
-      const items = await listOrgItems(orgId, TOOL_CONFIG, applicationId);
-      const tool = items.find((i) => i.id === `@${orgSlug}/counted-tool`);
+      await installPackage(
+        { orgId: orgId, applicationId: applicationId },
+        `@${orgSlug}/counted-provider`,
+      );
+      const items = await listOrgItems(orgId, PROVIDER_CONFIG, applicationId);
+      const provider = items.find((i) => i.id === `@${orgSlug}/counted-provider`);
 
-      expect(tool).toBeDefined();
-      expect(tool!.usedByAgents).toBe(2);
+      expect(provider).toBeDefined();
+      expect(provider!.usedByAgents).toBe(2);
     });
 
     it("returns 0 for unreferenced items", async () => {
@@ -332,7 +335,10 @@ describe("manifest-based dependency resolution", () => {
         },
       });
 
-      await installPackage({ orgId: orgId, applicationId: applicationId }, `@${orgSlug}/unused-skill`);
+      await installPackage(
+        { orgId: orgId, applicationId: applicationId },
+        `@${orgSlug}/unused-skill`,
+      );
       const items = await listOrgItems(orgId, SKILL_CONFIG, applicationId);
       const skill = items.find((i) => i.id === `@${orgSlug}/unused-skill`);
 
@@ -347,14 +353,14 @@ describe("manifest-based dependency resolution", () => {
     it("returns dependent packages in agents array", async () => {
       await seedPackage({
         orgId,
-        id: `@${orgSlug}/detail-tool`,
-        type: "tool",
+        id: `@${orgSlug}/detail-provider`,
+        type: "provider",
         draftManifest: {
-          name: `@${orgSlug}/detail-tool`,
-          displayName: "Detail Tool",
+          name: `@${orgSlug}/detail-provider`,
+          displayName: "Detail Provider",
           version: "1.0.0",
-          type: "tool",
-          description: "A tool",
+          type: "provider",
+          description: "A provider",
         },
       });
       await seedPackage({
@@ -365,12 +371,12 @@ describe("manifest-based dependency resolution", () => {
           displayName: "Using Agent",
           version: "0.1.0",
           type: "agent",
-          description: "Uses tool",
-          dependencies: { tools: { [`@${orgSlug}/detail-tool`]: "*" } },
+          description: "Uses provider",
+          dependencies: { providers: { [`@${orgSlug}/detail-provider`]: "*" } },
         },
       });
 
-      const item = await getOrgItem(orgId, `@${orgSlug}/detail-tool`, TOOL_CONFIG);
+      const item = await getOrgItem(orgId, `@${orgSlug}/detail-provider`, PROVIDER_CONFIG);
 
       expect(item).not.toBeNull();
       expect(item!.agents).toHaveLength(1);
@@ -380,23 +386,23 @@ describe("manifest-based dependency resolution", () => {
     it("returns empty agents array when unused", async () => {
       await seedPackage({
         orgId,
-        id: `@${orgSlug}/orphan-tool`,
-        type: "tool",
+        id: `@${orgSlug}/orphan-provider`,
+        type: "provider",
         draftManifest: {
-          name: `@${orgSlug}/orphan-tool`,
+          name: `@${orgSlug}/orphan-provider`,
           version: "1.0.0",
-          type: "tool",
+          type: "provider",
           description: "Orphan",
         },
       });
 
-      const item = await getOrgItem(orgId, `@${orgSlug}/orphan-tool`, TOOL_CONFIG);
+      const item = await getOrgItem(orgId, `@${orgSlug}/orphan-provider`, PROVIDER_CONFIG);
 
       expect(item).not.toBeNull();
       expect(item!.agents).toHaveLength(0);
     });
 
-    it("includes cross-type dependents (tool depends on skill)", async () => {
+    it("includes cross-type dependents (provider depends on skill)", async () => {
       await seedPackage({
         orgId,
         id: `@${orgSlug}/base-skill`,
@@ -410,14 +416,14 @@ describe("manifest-based dependency resolution", () => {
       });
       await seedPackage({
         orgId,
-        id: `@${orgSlug}/dependent-tool`,
-        type: "tool",
+        id: `@${orgSlug}/dependent-provider`,
+        type: "provider",
         draftManifest: {
-          name: `@${orgSlug}/dependent-tool`,
-          displayName: "Dependent Tool",
+          name: `@${orgSlug}/dependent-provider`,
+          displayName: "Dependent Provider",
           version: "1.0.0",
-          type: "tool",
-          description: "Tool using skill",
+          type: "provider",
+          description: "Provider using skill",
           dependencies: { skills: { [`@${orgSlug}/base-skill`]: "*" } },
         },
       });
@@ -426,14 +432,14 @@ describe("manifest-based dependency resolution", () => {
 
       expect(item).not.toBeNull();
       expect(item!.agents).toHaveLength(1);
-      expect(item!.agents[0]!.id).toBe(`@${orgSlug}/dependent-tool`);
+      expect(item!.agents[0]!.id).toBe(`@${orgSlug}/dependent-provider`);
     });
   });
 
   // ── collectAllDepIds — transitive resolution ──────────────
 
   describe("collectAllDepIds — transitive resolution", () => {
-    it("collects transitive deps (agent → tool → skill)", async () => {
+    it("collects transitive deps (agent → provider → skill)", async () => {
       await seedPackage({
         orgId,
         id: `@${orgSlug}/deep-skill`,
@@ -447,13 +453,13 @@ describe("manifest-based dependency resolution", () => {
       });
       await seedPackage({
         orgId,
-        id: `@${orgSlug}/mid-tool`,
-        type: "tool",
+        id: `@${orgSlug}/mid-provider`,
+        type: "provider",
         draftManifest: {
-          name: `@${orgSlug}/mid-tool`,
+          name: `@${orgSlug}/mid-provider`,
           version: "1.0.0",
-          type: "tool",
-          description: "Tool depending on skill",
+          type: "provider",
+          description: "Provider depending on skill",
           dependencies: { skills: { [`@${orgSlug}/deep-skill`]: "*" } },
         },
       });
@@ -464,14 +470,14 @@ describe("manifest-based dependency resolution", () => {
           name: `@${orgSlug}/top-agent`,
           version: "0.1.0",
           type: "agent",
-          description: "Agent depending on tool",
-          dependencies: { tools: { [`@${orgSlug}/mid-tool`]: "*" } },
+          description: "Agent depending on provider",
+          dependencies: { providers: { [`@${orgSlug}/mid-provider`]: "*" } },
         },
       });
 
       const deps = await collectAllDepIds(`@${orgSlug}/top-agent`);
 
-      expect(deps.toolIds).toContain(`@${orgSlug}/mid-tool`);
+      expect(deps.providerIds).toContain(`@${orgSlug}/mid-provider`);
       expect(deps.skillIds).toContain(`@${orgSlug}/deep-skill`);
     });
 
@@ -489,25 +495,25 @@ describe("manifest-based dependency resolution", () => {
       });
       await seedPackage({
         orgId,
-        id: `@${orgSlug}/tool-a`,
-        type: "tool",
+        id: `@${orgSlug}/provider-a`,
+        type: "provider",
         draftManifest: {
-          name: `@${orgSlug}/tool-a`,
+          name: `@${orgSlug}/provider-a`,
           version: "1.0.0",
-          type: "tool",
-          description: "Tool A",
+          type: "provider",
+          description: "Provider A",
           dependencies: { skills: { [`@${orgSlug}/shared-skill`]: "*" } },
         },
       });
       await seedPackage({
         orgId,
-        id: `@${orgSlug}/tool-b`,
-        type: "tool",
+        id: `@${orgSlug}/provider-b`,
+        type: "provider",
         draftManifest: {
-          name: `@${orgSlug}/tool-b`,
+          name: `@${orgSlug}/provider-b`,
           version: "1.0.0",
-          type: "tool",
-          description: "Tool B",
+          type: "provider",
+          description: "Provider B",
           dependencies: { skills: { [`@${orgSlug}/shared-skill`]: "*" } },
         },
       });
@@ -520,9 +526,9 @@ describe("manifest-based dependency resolution", () => {
           type: "agent",
           description: "Diamond",
           dependencies: {
-            tools: {
-              [`@${orgSlug}/tool-a`]: "*",
-              [`@${orgSlug}/tool-b`]: "*",
+            providers: {
+              [`@${orgSlug}/provider-a`]: "*",
+              [`@${orgSlug}/provider-b`]: "*",
             },
           },
         },
@@ -530,34 +536,34 @@ describe("manifest-based dependency resolution", () => {
 
       const deps = await collectAllDepIds(`@${orgSlug}/diamond-agent`);
 
-      expect(deps.toolIds).toHaveLength(2);
+      expect(deps.providerIds).toHaveLength(2);
       expect(deps.skillIds).toHaveLength(1);
       expect(deps.skillIds).toContain(`@${orgSlug}/shared-skill`);
     });
 
-    it("handles cycles without infinite loop (tool A → tool B → tool A)", async () => {
+    it("handles cycles without infinite loop (provider A → provider B → provider A)", async () => {
       await seedPackage({
         orgId,
-        id: `@${orgSlug}/cycle-tool-a`,
-        type: "tool",
+        id: `@${orgSlug}/cycle-provider-a`,
+        type: "provider",
         draftManifest: {
-          name: `@${orgSlug}/cycle-tool-a`,
+          name: `@${orgSlug}/cycle-provider-a`,
           version: "1.0.0",
-          type: "tool",
+          type: "provider",
           description: "Cycle A",
-          dependencies: { tools: { [`@${orgSlug}/cycle-tool-b`]: "*" } },
+          dependencies: { providers: { [`@${orgSlug}/cycle-provider-b`]: "*" } },
         },
       });
       await seedPackage({
         orgId,
-        id: `@${orgSlug}/cycle-tool-b`,
-        type: "tool",
+        id: `@${orgSlug}/cycle-provider-b`,
+        type: "provider",
         draftManifest: {
-          name: `@${orgSlug}/cycle-tool-b`,
+          name: `@${orgSlug}/cycle-provider-b`,
           version: "1.0.0",
-          type: "tool",
+          type: "provider",
           description: "Cycle B",
-          dependencies: { tools: { [`@${orgSlug}/cycle-tool-a`]: "*" } },
+          dependencies: { providers: { [`@${orgSlug}/cycle-provider-a`]: "*" } },
         },
       });
       await seedPackage({
@@ -567,17 +573,17 @@ describe("manifest-based dependency resolution", () => {
           name: `@${orgSlug}/cycle-agent`,
           version: "0.1.0",
           type: "agent",
-          description: "Agent with cyclic tools",
-          dependencies: { tools: { [`@${orgSlug}/cycle-tool-a`]: "*" } },
+          description: "Agent with cyclic providers",
+          dependencies: { providers: { [`@${orgSlug}/cycle-provider-a`]: "*" } },
         },
       });
 
       const deps = await collectAllDepIds(`@${orgSlug}/cycle-agent`);
 
-      // Both tools collected, no infinite loop
-      expect(deps.toolIds).toHaveLength(2);
-      expect(deps.toolIds).toContain(`@${orgSlug}/cycle-tool-a`);
-      expect(deps.toolIds).toContain(`@${orgSlug}/cycle-tool-b`);
+      // Both providers collected, no infinite loop
+      expect(deps.providerIds).toHaveLength(2);
+      expect(deps.providerIds).toContain(`@${orgSlug}/cycle-provider-a`);
+      expect(deps.providerIds).toContain(`@${orgSlug}/cycle-provider-b`);
     });
 
     it("returns empty when package has no dependencies", async () => {
@@ -595,7 +601,7 @@ describe("manifest-based dependency resolution", () => {
       const deps = await collectAllDepIds(`@${orgSlug}/no-deps-agent`);
 
       expect(deps.skillIds).toHaveLength(0);
-      expect(deps.toolIds).toHaveLength(0);
+      expect(deps.providerIds).toHaveLength(0);
       expect(deps.providerIds).toHaveLength(0);
     });
 
@@ -603,7 +609,7 @@ describe("manifest-based dependency resolution", () => {
       const deps = await collectAllDepIds("@nonexistent/pkg");
 
       expect(deps.skillIds).toHaveLength(0);
-      expect(deps.toolIds).toHaveLength(0);
+      expect(deps.providerIds).toHaveLength(0);
       expect(deps.providerIds).toHaveLength(0);
     });
   });

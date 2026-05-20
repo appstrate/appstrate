@@ -110,7 +110,15 @@ describe("runtime-tools directory layout", () => {
 
   it("each tool has its own directory with `tool.ts` + `TOOL.md`", async () => {
     const entries = await readdir(RUNTIME_TOOLS_DIR, { withFileTypes: true });
-    const toolDirs = entries.filter((e) => e.isDirectory()).map((e) => e.name);
+    // `builtin/` holds the in-process built-in runtime tools (output/log/
+    // note/pin/report — the former `tool` packages baked into the runner).
+    // They are NOT MCP-forwarding injected tools, so they don't follow the
+    // one-dir-per-`RUNTIME_INJECTED_TOOLS`-entry + `tool.ts`/`TOOL.md`
+    // contract this block locks.
+    const toolDirs = entries
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+      .filter((name) => name !== "builtin");
 
     // One directory per registered tool. If a directory exists without
     // a corresponding entry in `RUNTIME_INJECTED_TOOLS`, fail loudly —

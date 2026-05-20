@@ -3,16 +3,18 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 
 /**
- * Tests for the output system tool.
+ * Tests for the output built-in runtime tool.
  *
- * Since the extension reads process.env.OUTPUT_SCHEMA at import time,
- * we must set the env var BEFORE dynamically importing the module.
- * Each test uses a fresh import via cache-busting query string.
+ * Since the tool reads process.env.OUTPUT_SCHEMA at factory-call time,
+ * we set the env var BEFORE invoking the factory. Each test uses a fresh
+ * dynamic import via a cache-busting query string so the module-level
+ * `RUN_ID` / Ajv instance are re-evaluated cleanly.
  *
- * The source lives in system-packages/tool-output-2.0.0/tool.ts but
- * depends on @mariozechner/pi-ai (installed in runtime-pi/node_modules).
- * We import from system-packages — Bun resolves the Pi SDK via the
- * runtime-pi workspace's node_modules.
+ * The source lives in packages/runner-pi/src/runtime-tools/builtin/output.ts
+ * (named export `outputTool`) since the `tool` AFPS package type was removed
+ * and the five former system tools were baked into the runner. It depends on
+ * @mariozechner/pi-ai (installed in runtime-pi/node_modules); Bun resolves the
+ * Pi SDK via the runtime-pi workspace's node_modules.
  */
 
 /** Helper: create a mock pi that captures registered tools. */
@@ -26,13 +28,13 @@ function createMockPi() {
   };
 }
 
-/** Absolute path to the output extension source. */
+/** Absolute path to the output built-in runtime tool source. */
 const OUTPUT_PATH = new URL(
-  "../../scripts/system-packages/tool-output-2.0.0/tool.ts",
+  "../../packages/runner-pi/src/runtime-tools/builtin/output.ts",
   import.meta.url,
 ).pathname;
 
-/** Helper: import the extension with a fresh module evaluation. */
+/** Helper: import the tool with a fresh module evaluation. */
 async function importExtension(envValue?: string) {
   if (envValue !== undefined) {
     process.env.OUTPUT_SCHEMA = envValue;
@@ -42,7 +44,7 @@ async function importExtension(envValue?: string) {
 
   const cacheBuster = `${Date.now()}-${Math.random()}`;
   const mod = await import(`${OUTPUT_PATH}?v=${cacheBuster}`);
-  const factory = mod.default;
+  const factory = mod.outputTool;
 
   const pi = createMockPi();
   factory(pi);

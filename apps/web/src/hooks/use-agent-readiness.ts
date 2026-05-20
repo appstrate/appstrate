@@ -43,13 +43,6 @@ export function useAgentReadiness(
             detail.dependencies.skills.map((s: { id: string }) => s.id),
           ).length === 0
         : true,
-      hasRequiredTools: detail
-        ? findMissingDependencies(
-            (detail.manifest?.dependencies as Record<string, Record<string, string>> | undefined)
-              ?.tools ?? {},
-            detail.dependencies.tools.map((e: { id: string }) => e.id),
-          ).length === 0
-        : true,
     };
   }, [detail, agentModelId, orgModels, configSchemaOverride]);
 }

@@ -9,11 +9,11 @@ import {
 import type { DepEntry } from "../src/dependencies.ts";
 
 describe("extractDependencies", () => {
-  it("manifest with skills and tools", () => {
+  it("manifest with skills and providers", () => {
     const manifest = {
       dependencies: {
         skills: { "@acme/skill-a": "^1.0.0", "@acme/skill-b": "~2.0.0" },
-        tools: { "@acme/ext-c": ">=1.0.0" },
+        providers: { "@acme/svc-c": ">=1.0.0" },
       },
     };
     const deps = extractDependencies(manifest);
@@ -25,9 +25,9 @@ describe("extractDependencies", () => {
     expect(skillA!.depType).toBe("skill");
     expect(skillA!.versionRange).toBe("^1.0.0");
 
-    const extC = deps.find((d) => d.depName === "ext-c");
-    expect(extC).toBeDefined();
-    expect(extC!.depType).toBe("tool");
+    const svcC = deps.find((d) => d.depName === "svc-c");
+    expect(svcC).toBeDefined();
+    expect(svcC!.depType).toBe("provider");
   });
 
   it("manifest without dependencies", () => {
@@ -67,18 +67,18 @@ describe("extractDependencies", () => {
     expect(slack!.versionRange).toBe("^1.0.0");
   });
 
-  it("manifest with skills, tools, and providers", () => {
+  it("manifest with skills, providers, and integrations", () => {
     const manifest = {
       dependencies: {
         skills: { "@acme/skill-a": "^1.0.0" },
-        tools: { "@acme/ext-a": "^1.0.0" },
+        integrations: { "@acme/gmail-mcp": "^1.0.0" },
         providers: { "@acme/slack": "^1.0.0" },
       },
     };
     const deps = extractDependencies(manifest);
     expect(deps).toHaveLength(3);
     expect(deps.find((d) => d.depType === "skill")).toBeDefined();
-    expect(deps.find((d) => d.depType === "tool")).toBeDefined();
+    expect(deps.find((d) => d.depType === "integration")).toBeDefined();
     expect(deps.find((d) => d.depType === "provider")).toBeDefined();
   });
 
@@ -235,7 +235,7 @@ describe("detectCycle", () => {
   it("valid DAG — no cycle", async () => {
     const deps: DepEntry[] = [
       { depScope: "@acme", depName: "pkg-b", depType: "skill", versionRange: "^1.0.0" },
-      { depScope: "@acme", depName: "pkg-c", depType: "tool", versionRange: "^1.0.0" },
+      { depScope: "@acme", depName: "pkg-c", depType: "provider", versionRange: "^1.0.0" },
     ];
     const resolveDeps = async (_scope: string, name: string): Promise<DepEntry[]> => {
       if (name === "pkg-b") {

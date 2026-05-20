@@ -45,7 +45,8 @@
   },
   "dependencies": {
     "@appstrate/afps-runtime": "workspace:*",
-    "@appstrate/mcp-transport": "workspace:*"
+    "@appstrate/mcp-transport": "workspace:*",
+    "ajv": "^8.20.0"
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "^0.70.6",

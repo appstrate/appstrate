@@ -108,14 +108,13 @@ export function buildShadowLoadedPackage(
   id: string,
   manifest: AgentManifest,
   prompt: string,
-  deps: Pick<LoadedPackage, "skills" | "tools"> = { skills: [], tools: [] },
+  deps: Pick<LoadedPackage, "skills"> = { skills: [] },
 ): LoadedPackage {
   return {
     id,
     manifest,
     prompt,
     skills: deps.skills,
-    tools: deps.tools,
     source: "local",
   };
 }

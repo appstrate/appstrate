@@ -12,15 +12,13 @@ export function parseDraftManifest(value: unknown): Partial<Manifest> {
   return asRecord(value) as Partial<Manifest>;
 }
 
-/** Extract skill, tool, and provider IDs from a manifest's dependencies section. */
+/** Extract skill and provider IDs from a manifest's dependencies section. */
 export function extractDepsFromManifest(manifest: Partial<Manifest>) {
   const dependencies = asRecord(manifest.dependencies);
   const skillsMap = asRecord(dependencies.skills) as Record<string, string>;
-  const toolsMap = asRecord(dependencies.tools) as Record<string, string>;
   const providersMap = asRecord(dependencies.providers) as Record<string, string>;
   return {
     skillIds: Object.keys(skillsMap).filter(Boolean),
-    toolIds: Object.keys(toolsMap).filter(Boolean),
     providerIds: Object.keys(providersMap).filter(Boolean),
   };
 }

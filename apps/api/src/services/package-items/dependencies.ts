@@ -20,9 +20,8 @@ import { extractDepsFromManifest, parseDraftManifest } from "../../lib/manifest-
  */
 export async function collectAllDepIds(
   rootPackageId: string,
-): Promise<{ skillIds: string[]; toolIds: string[]; providerIds: string[] }> {
+): Promise<{ skillIds: string[]; providerIds: string[] }> {
   const skills = new Set<string>();
-  const tools = new Set<string>();
   const providers = new Set<string>();
   const visited = new Set<string>();
 
@@ -32,15 +31,14 @@ export async function collectAllDepIds(
     .from(packages)
     .where(eq(packages.id, rootPackageId))
     .limit(1);
-  if (!rootPkg) return { skillIds: [], toolIds: [], providerIds: [] };
+  if (!rootPkg) return { skillIds: [], providerIds: [] };
 
   const rootDeps = extractDepsFromManifest(parseDraftManifest(rootPkg.draftManifest));
   for (const id of rootDeps.skillIds) skills.add(id);
-  for (const id of rootDeps.toolIds) tools.add(id);
   for (const id of rootDeps.providerIds) providers.add(id);
 
   // BFS: process unvisited deps in batches
-  let frontier = [...skills, ...tools, ...providers];
+  let frontier = [...skills, ...providers];
   visited.add(rootPackageId);
 
   while (frontier.length > 0) {
@@ -63,12 +61,6 @@ export async function collectAllDepIds(
           nextFrontier.push(id);
         }
       }
-      for (const id of deps.toolIds) {
-        if (!tools.has(id)) {
-          tools.add(id);
-          nextFrontier.push(id);
-        }
-      }
       for (const id of deps.providerIds) {
         if (!providers.has(id)) {
           providers.add(id);
@@ -81,7 +73,6 @@ export async function collectAllDepIds(
 
   return {
     skillIds: [...skills],
-    toolIds: [...tools],
     providerIds: [...providers],
   };
 }
@@ -89,7 +80,7 @@ export async function collectAllDepIds(
 /** Build dependencies object from a package's manifest (transitive). */
 export async function buildDependencies(packageId: string): Promise<Dependencies | null> {
   const allDeps = await collectAllDepIds(packageId);
-  const allDepIds = [...allDeps.skillIds, ...allDeps.toolIds, ...allDeps.providerIds];
+  const allDepIds = [...allDeps.skillIds, ...allDeps.providerIds];
   if (allDepIds.length === 0) return null;
 
   const depRows = await db
@@ -109,7 +100,6 @@ export async function buildDependencies(packageId: string): Promise<Dependencies
   });
 
   const skills: Record<string, string> = {};
-  const tools: Record<string, string> = {};
   const providers: Record<string, string> = {};
 
   for (const row of rows) {
@@ -118,18 +108,15 @@ export async function buildDependencies(packageId: string): Promise<Dependencies
     const scopedName = `@${row.registryScope}/${row.registryName}`;
     const version = row.version;
     if (row.type === "skill") skills[scopedName] = version;
-    else if (row.type === "tool") tools[scopedName] = version;
     else if (row.type === "provider") providers[scopedName] = version;
   }
 
   const hasSkills = Object.keys(skills).length > 0;
-  const hasTools = Object.keys(tools).length > 0;
   const hasProviders = Object.keys(providers).length > 0;
-  if (!hasSkills && !hasTools && !hasProviders) return null;
+  if (!hasSkills && !hasProviders) return null;
 
   const result: Dependencies = {};
   if (hasSkills) result.skills = skills;
-  if (hasTools) result.tools = tools;
   if (hasProviders) result.providers = providers;
   return result;
 }
@@ -143,7 +130,6 @@ export async function getPackageDepFiles(
   const allDeps = await collectAllDepIds(packageId);
   const typeToIds: Record<string, string[]> = {
     skill: allDeps.skillIds,
-    tool: allDeps.toolIds,
     provider: allDeps.providerIds,
   };
   const depIds = typeToIds[cfg.type] ?? [];

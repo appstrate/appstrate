@@ -56,7 +56,6 @@ export const agentsPaths = {
                     dependencies: {
                       providers: { "@appstrate/gmail": "^1.0.0" },
                       skills: {},
-                      tools: {},
                     },
                   },
                   {
@@ -74,7 +73,6 @@ export const agentsPaths = {
                     dependencies: {
                       providers: { "@appstrate/github": "^1.0.0" },
                       skills: { "@appstrate/summarize": "^1.0.0" },
-                      tools: {},
                     },
                   },
                 ],
@@ -562,65 +560,6 @@ export const agentsPaths = {
                 properties: {
                   packageId: { type: "string" },
                   skillIds: { type: "array", items: { type: "string" } },
-                  message: { type: "string" },
-                },
-              },
-            },
-          },
-        },
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-  },
-  "/api/agents/{scope}/{name}/tools": {
-    put: {
-      operationId: "updateAgentTools",
-      tags: ["Agents"],
-      summary: "Update linked tools",
-      description: "Set the tool references for a user agent.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-      ],
-      requestBody: {
-        required: true,
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              required: ["toolIds"],
-              properties: {
-                toolIds: {
-                  type: "array",
-                  items: {
-                    type: "string",
-                    pattern: "^@[a-z0-9]([a-z0-9-]*[a-z0-9])?/[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-      responses: {
-        "200": {
-          description: "Tools updated",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  packageId: { type: "string" },
-                  toolIds: { type: "array", items: { type: "string" } },
                   message: { type: "string" },
                 },
               },

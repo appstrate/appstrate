@@ -218,11 +218,10 @@ COPY --chown=pi:pi runtime-pi/mcp/        ./mcp/
 COPY --chown=pi:pi runtime-pi/*.ts        ./
 COPY --from=deps --chown=pi:pi /build/runtime-pi/dist/entrypoint.js ./dist/entrypoint.js
 
-# Agent workspace. AFPS tools ship pre-bundled with their deps inlined
-# (AFPS §3.4, via `@appstrate/core/tool-bundler`), so nothing under
-# `/workspace` needs to resolve against npm packages. The only
-# externals the bundled entrypoints keep are the Pi SDK pair, resolved
-# from `/runtime/packages/runner-pi/node_modules` by `prepareBundleForPi`.
+# Agent workspace. Bundled package entrypoints keep only the Pi SDK
+# pair external, resolved from `/runtime/packages/runner-pi/node_modules`
+# by `prepareBundleForPi`, so nothing under `/workspace` needs to
+# resolve against npm packages.
 RUN mkdir -p /workspace && chown pi:pi /workspace
 
 USER pi:pi

@@ -86,8 +86,8 @@ export function createLibraryRouter() {
     const grouped: Record<string, Entry[]> = {
       agent: [],
       skill: [],
-      tool: [],
       provider: [],
+      integration: [],
     };
     for (const pkg of pkgMap.values()) {
       grouped[pkg.type]?.push(pkg);

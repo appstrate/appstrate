@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Appstrate
 
 /**
- * Log Tool — Emit user-facing log messages with explicit severity levels.
+ * Log built-in tool — Emit user-facing log messages with severity levels.
  *
- * Allows the agent to communicate progress, milestones, warnings,
- * and errors to end users via the platform's log viewer.
+ * Formerly the `@appstrate/log` tool package; baked into the runtime
+ * image. Emits a `log.written` event on stdout, harvested by the agent
+ * entrypoint into the run's progress log.
  */
 
 import { Type } from "@mariozechner/pi-ai";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionFactory } from "@mariozechner/pi-coding-agent";
 
 const RUN_ID = process.env.AGENT_RUN_ID ?? "unknown";
 
@@ -16,7 +18,7 @@ function emit(obj: Record<string, unknown>): void {
   process.stdout.write(JSON.stringify({ ...obj, timestamp: Date.now(), runId: RUN_ID }) + "\n");
 }
 
-export default function (pi: ExtensionAPI) {
+export const logTool: ExtensionFactory = (pi: ExtensionAPI) => {
   pi.registerTool({
     name: "log",
     label: "Log",
@@ -40,4 +42,4 @@ export default function (pi: ExtensionAPI) {
       };
     },
   });
-}
+};

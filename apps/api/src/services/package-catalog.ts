@@ -48,14 +48,13 @@ function mapDependencies(
     });
 }
 
-function pickSkillsAndTools(
+function pickSkills(
   depRefs: NonNullable<DbPackageRow["depRefs"]>,
   manifest: AgentManifest,
-): Pick<LoadedPackage, "skills" | "tools"> {
+): Pick<LoadedPackage, "skills"> {
   const deps = manifest.dependencies ?? {};
   return {
     skills: mapDependencies(depRefs, "skill", (deps.skills ?? {}) as Record<string, string>),
-    tools: mapDependencies(depRefs, "tool", (deps.tools ?? {}) as Record<string, string>),
   };
 }
 
@@ -65,7 +64,7 @@ function dbRowToLoadedPackage(row: DbPackageRow): LoadedPackage {
     id: row.id,
     manifest,
     prompt: row.draftContent,
-    ...pickSkillsAndTools(row.depRefs ?? [], manifest),
+    ...pickSkills(row.depRefs ?? [], manifest),
     source: (row.source as "system" | "local") ?? "local",
     updatedAt: row.updatedAt,
   };
@@ -77,8 +76,8 @@ async function resolveDepRefs(
   orgId: string,
 ): Promise<NonNullable<DbPackageRow["depRefs"]>> {
   const m = parseDraftManifest(manifest);
-  const { skillIds, toolIds, providerIds } = extractDepsFromManifest(m);
-  const allDepIds = [...skillIds, ...toolIds, ...providerIds];
+  const { skillIds, providerIds } = extractDepsFromManifest(m);
+  const allDepIds = [...skillIds, ...providerIds];
   if (allDepIds.length === 0) return [];
 
   const conditions = [inArray(packages.id, allDepIds), orgOrSystemFilter(orgId)];
@@ -100,19 +99,19 @@ async function resolveDepRefs(
 }
 
 /**
- * Resolve the skills + tools declared in an inline manifest's `dependencies`
+ * Resolve the skills declared in an inline manifest's `dependencies`
  * against the org/system catalog. Inline manifests only embed ID refs
  * (`"@scope/name": "^1.0.0"`), so the shadow LoadedPackage needs the same
  * mapped-dep shape as a persisted package before it reaches
- * `validateAgentReadiness`. Returns empty arrays when the manifest declares
- * no skill/tool deps — no DB read happens in that case.
+ * `validateAgentReadiness`. Returns an empty array when the manifest declares
+ * no skill deps — no DB read happens in that case.
  */
 export async function resolveManifestCatalogDeps(
   manifest: AgentManifest,
   orgId: string,
-): Promise<Pick<LoadedPackage, "skills" | "tools">> {
+): Promise<Pick<LoadedPackage, "skills">> {
   const depRefs = await resolveDepRefs(manifest, orgId);
-  return pickSkillsAndTools(depRefs, manifest);
+  return pickSkills(depRefs, manifest);
 }
 
 /**

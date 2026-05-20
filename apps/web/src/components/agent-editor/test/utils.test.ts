@@ -99,7 +99,7 @@ describe("getResourceEntries / setResourceEntries", () => {
 
   it("returns empty array when no deps", () => {
     const m = { dependencies: { providers: {} } };
-    expect(getResourceEntries(m, "tools")).toEqual([]);
+    expect(getResourceEntries(m, "skills")).toEqual([]);
   });
 
   it("roundtrips through set/get", () => {

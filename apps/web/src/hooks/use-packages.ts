@@ -25,7 +25,6 @@ import type {
 const PACKAGE_CONFIG = {
   agent: { path: "agents" },
   skill: { path: "skills" },
-  tool: { path: "tools" },
   provider: { path: "providers" },
   // Phase 1.0 — read-only surface (proposal §4.1). UI for browse +
   // connect lands in Phase 1.3; this stub keeps the package-type
@@ -37,7 +36,6 @@ const PACKAGE_CONFIG = {
 type PackageDetailMap = {
   agent: AgentDetail;
   skill: OrgPackageItemDetail;
-  tool: OrgPackageItemDetail;
   provider: OrgPackageItemDetail;
   integration: OrgPackageItemDetail;
 };

@@ -158,12 +158,6 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
         ...(s.name ? { name: s.name } : {}),
         ...(s.description ? { description: s.description } : {}),
       })),
-      tools: agent.tools.map((e) => ({
-        id: e.id,
-        ...(e.version ? { version: e.version } : {}),
-        ...(e.name ? { name: e.name } : {}),
-        ...(e.description ? { description: e.description } : {}),
-      })),
       integrations: parseManifestIntegrations(m as Record<string, unknown>).map((e) => ({
         id: e.id,
         version: e.version,

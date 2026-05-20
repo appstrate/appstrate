@@ -41,7 +41,7 @@ import {
 import { orgSettingsSchema } from "../services/organizations.ts";
 
 // --- User-agent schemas (routes/user-agents.ts) ---
-import { updateSkillsSchema, updateToolsSchema } from "../routes/user-agents.ts";
+import { updateSkillsSchema } from "../routes/user-agents.ts";
 
 // --- Welcome schemas (routes/welcome.ts) ---
 import { welcomeSetupSchema } from "../routes/welcome.ts";
@@ -231,12 +231,6 @@ const coreSchemas: ZodSchemaEntry[] = [
     path: "/api/agents/{scope}/{name}/skills",
     jsonSchema: toJsonSchema(updateSkillsSchema),
     description: "Update agent skills",
-  },
-  {
-    method: "PUT",
-    path: "/api/agents/{scope}/{name}/tools",
-    jsonSchema: toJsonSchema(updateToolsSchema),
-    description: "Update agent tools",
   },
 
   // ─── Welcome ────────────────────────────────────────────────────────────

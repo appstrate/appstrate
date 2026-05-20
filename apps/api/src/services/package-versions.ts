@@ -26,7 +26,6 @@ import { planCreateVersionOutcome, planTagReassignment } from "@appstrate/core/v
 import { buildDependencies } from "./package-items/dependencies.ts";
 import { parseScopedName } from "@appstrate/core/naming";
 import { zipArtifact } from "@appstrate/core/zip";
-import { buildPublishedToolArchive } from "@appstrate/core/tool-bundler";
 import { asRecord, asRecordOrNull } from "@appstrate/core/safe-json";
 import { downloadPackageFiles } from "./package-items/storage.ts";
 import { toISO } from "../lib/date-helpers.ts";
@@ -584,7 +583,8 @@ export async function createVersionFromDraft(params: {
       // Locally-created agents have no stored files — minimal ZIP is correct
       zipBuffer = buildMinimalZip(finalManifest, content);
     }
-  } else if (pkg.type === "skill") {
+  } else {
+    // pkg.type === "skill" — bundle the stored files + rewritten manifest.
     const files = await downloadPackageFiles("skills", orgId, packageId);
     if (!files) {
       throw new Error(
@@ -594,24 +594,6 @@ export async function createVersionFromDraft(params: {
     const entries: Record<string, Uint8Array> = { ...files };
     entries["manifest.json"] = new TextEncoder().encode(JSON.stringify(finalManifest, null, 2));
     zipBuffer = Buffer.from(zipArtifact(entries, 6));
-  } else {
-    // pkg.type === "tool" — bundle the draft's entrypoint into a
-    // self-contained `tool.js` and rewrite `manifest.entrypoint`
-    // accordingly (AFPS §3.4). See `@appstrate/core/tool-bundler`.
-    const files = await downloadPackageFiles("tools", orgId, packageId);
-    if (!files) {
-      throw new Error(
-        `Cannot create version for ${packageId}: package files not found in storage. Re-upload the package before creating a version.`,
-      );
-    }
-    const toolIdForLogs = typeof finalManifest.name === "string" ? finalManifest.name : packageId;
-    const built = await buildPublishedToolArchive({
-      files,
-      manifest: finalManifest,
-      toolId: toolIdForLogs,
-    });
-    finalManifest = built.manifest;
-    zipBuffer = Buffer.from(built.archive);
   }
 
   // Check for duplicate content — reject if identical to the latest version

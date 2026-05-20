@@ -59,12 +59,12 @@ export const libraryPaths = {
                     type: "object",
                     description:
                       "Packages grouped by type. Every group is always present (possibly empty).",
-                    required: ["agent", "skill", "tool", "provider"],
+                    required: ["agent", "skill", "provider", "integration"],
                     properties: {
                       agent: { $ref: "#/components/schemas/LibraryPackageList" },
                       skill: { $ref: "#/components/schemas/LibraryPackageList" },
-                      tool: { $ref: "#/components/schemas/LibraryPackageList" },
                       provider: { $ref: "#/components/schemas/LibraryPackageList" },
+                      integration: { $ref: "#/components/schemas/LibraryPackageList" },
                     },
                   },
                 },
@@ -87,7 +87,6 @@ export const libraryPaths = {
                     },
                   ],
                   skill: [],
-                  tool: [],
                   provider: [
                     {
                       id: "pkg_gmail",
@@ -98,6 +97,7 @@ export const libraryPaths = {
                       installedIn: ["app_default", "app_staging"],
                     },
                   ],
+                  integration: [],
                 },
               },
             },

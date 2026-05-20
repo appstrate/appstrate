@@ -31,6 +31,7 @@ import { initSystemProxies } from "../services/proxy-registry.ts";
 import { initSystemModelProviderKeys } from "../services/model-registry.ts";
 import { registerModelProviders } from "../services/model-providers/registry.ts";
 import { initRunLimits } from "../services/run-limits.ts";
+import { migrateAgentRuntimeTools } from "../services/migrate-runtime-tools.ts";
 import { initProxyLimits } from "../services/proxy-limits.ts";
 import {
   initSystemPackages,
@@ -74,6 +75,12 @@ export async function boot(): Promise<void> {
     });
     await applyCoreMigrations();
   }
+
+  // Data migration: agent `dependencies.tools` → `runtimeTools` (the
+  // `tool` package type was removed; tools are now built-in runtime
+  // tools). Runs after core migrations, before modules + system-package
+  // sync. Fail-loud on unknown third-party tool ids.
+  await migrateAgentRuntimeTools();
 
   // Bootstrap-token reconciliation (#344). If the env still carries an
   // AUTH_BOOTSTRAP_TOKEN but at least one org exists, the token is dead —

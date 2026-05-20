@@ -5,7 +5,7 @@ import { db } from "@appstrate/db/client";
 import { applicationPackages, packages } from "@appstrate/db/schema";
 import type { Package } from "@appstrate/db/schema";
 import { extractDependencies } from "@appstrate/core/dependencies";
-import { buildPackageId, parseScopedName } from "@appstrate/core/naming";
+import { buildPackageId } from "@appstrate/core/naming";
 import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
 import { type PackageTypeConfig } from "./config.ts";
 import { deletePackageFiles } from "./storage.ts";
@@ -101,19 +101,6 @@ export async function createOrgItem(
   if (!finalManifest.name) finalManifest.name = packageId;
   if (item.name) finalManifest.displayName = item.name;
   if (item.description) finalManifest.description = item.description;
-
-  // Tool packages require entrypoint + tool interface per AFPS spec
-  if (cfg.type === "tool") {
-    if (!finalManifest.entrypoint) finalManifest.entrypoint = "tool.ts";
-    if (!finalManifest.tool) {
-      const name = parseScopedName(packageId)?.name ?? item.id;
-      finalManifest.tool = {
-        name,
-        description: item.description ?? item.name ?? name,
-        inputSchema: { type: "object", properties: {} },
-      };
-    }
-  }
 
   try {
     const [row] = await db

@@ -200,7 +200,6 @@ export async function resolveRegistryAgent(
     manifest,
     prompt,
     skills: deps.skills,
-    tools: deps.tools,
     source: pkg.source,
     ...(pkg.updatedAt ? { updatedAt: pkg.updatedAt } : {}),
   };

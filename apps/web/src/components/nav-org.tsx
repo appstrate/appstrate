@@ -8,7 +8,6 @@ import {
   Activity,
   Calendar,
   Wrench,
-  Puzzle,
   Plug,
   Webhook,
   Loader2,
@@ -56,10 +55,7 @@ export function NavOrg() {
     { path: "/schedules", label: t("nav.schedules"), icon: Calendar },
   ];
 
-  const resourceItems = [
-    { path: "/skills", label: t("nav.skills"), icon: Wrench },
-    { path: "/tools", label: t("nav.tools"), icon: Puzzle },
-  ];
+  const resourceItems = [{ path: "/skills", label: t("nav.skills"), icon: Wrench }];
 
   const integrationItems = [
     { path: "/providers", label: t("nav.connectors"), icon: Plug },

@@ -45,7 +45,6 @@ export interface LoadedPackage {
   manifest: AgentManifest;
   prompt: string;
   skills: ToolMeta[];
-  tools: ToolMeta[];
   source: "system" | "local";
   updatedAt?: Date;
 }

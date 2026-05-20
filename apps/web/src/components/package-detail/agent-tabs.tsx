@@ -39,8 +39,8 @@ export function AgentRunsTab({
 
   if (!detail) return null;
 
-  const { hasRequiredConfig, hasPrompt, hasRequiredSkills, hasRequiredTools } = readiness;
-  const runDisabled = !hasPrompt || !hasRequiredSkills || !hasRequiredTools || !hasRequiredConfig;
+  const { hasRequiredConfig, hasPrompt, hasRequiredSkills } = readiness;
+  const runDisabled = !hasPrompt || !hasRequiredSkills || !hasRequiredConfig;
 
   return (
     <RunList

@@ -604,8 +604,7 @@
                         "providers": {
                           "@appstrate/gmail": "^1.0.0"
                         },
-                        "skills": {},
-                        "tools": {}
+                        "skills": {}
                       }
                     },
                     {
@@ -626,8 +625,7 @@
                         },
                         "skills": {
                           "@appstrate/summarize": "^1.0.0"
-                        },
-                        "tools": {}
+                        }
                       }
                     }
                   ]
@@ -1416,94 +1414,6 @@
         }
       }
     },
-    "/api/agents/{scope}/{name}/tools": {
-      "put": {
-        "operationId": "updateAgentTools",
-        "tags": ["Agents"],
-        "summary": "Update linked tools",
-        "description": "Set the tool references for a user agent.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          },
-          {
-            "$ref": "#/components/parameters/PackageScope"
-          },
-          {
-            "$ref": "#/components/parameters/PackageName"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": ["toolIds"],
-                "properties": {
-                  "toolIds": {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "pattern": "^@[a-z0-9]([a-z0-9-]*[a-z0-9])?/[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Tools updated",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "packageId": {
-                      "type": "string"
-                    },
-                    "toolIds": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      }
-    },
     "/api/agents/{scope}/{name}/provider-profiles": {
       "get": {
         "operationId": "getAgentProviderProfiles",
@@ -2032,6 +1942,16 @@
                   "config": {
                     "type": "object",
                     "description": "Per-run config override. Deep-merged with the per-application persisted config (`application_packages.config`): override leaves replace, plain-object children merge recursively, arrays are replaced wholesale, `null` at a leaf sets the value to null (validated as missing for required string fields), missing keys fall through. Re-validated against the manifest config schema after the merge — a 400 `invalid_config` is returned if the merged result violates the schema. Top-level `null` is rejected (returns 400) — omit the field to inherit persisted defaults, send `{}` for an explicit empty override. Mirrors the OpenAPI Assistants `runs.create { instructions, model, tools }` and Argo Workflows `submitOptions.parameters` SOTA — every client (UI, CLI, SDK) reaches the same resolved config for the same `(persisted, override)` pair."
+                  },
+                  "connectionOverrides": {
+                    "type": "object",
+                    "description": "Per-(integration, authKey) connection picks for THIS run (flat-connections mechanism #2). Shape: `{ \"@scope/integration\": { \"<authKey>\": \"<connection_id>\" } }`. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor.",
+                    "additionalProperties": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    }
                   }
                 }
               },
@@ -3798,6 +3718,16 @@
                   "versionOverride": {
                     "type": "string",
                     "description": "Pin the agent version every run triggered by this schedule. Literal label or dist-tag."
+                  },
+                  "connectionOverrides": {
+                    "type": "object",
+                    "description": "Per-(integration, authKey) connection picks frozen on the schedule row (flat-connections mechanism #3). Shape: `{ \"@scope/integration\": { \"<authKey>\": \"<connection_id>\" } }`. Loses to admin pins (#1), beats actor-fallback (#4). Stored on `package_schedules.connection_overrides` and replayed on every fire.",
+                    "additionalProperties": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    }
                   }
                 }
               }
@@ -3999,6 +3929,16 @@
                   },
                   "versionOverride": {
                     "type": ["string", "null"]
+                  },
+                  "connectionOverrides": {
+                    "type": ["object", "null"],
+                    "description": "Per-(integration, authKey) connection picks frozen on the schedule. Pass `null` to clear.",
+                    "additionalProperties": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    }
                   }
                 }
               }
@@ -4683,6 +4623,2254 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/integrations": {
+      "get": {
+        "operationId": "listIntegrations",
+        "tags": ["Integrations"],
+        "summary": "List available integrations",
+        "description": "List every AFPS integration accessible to the current org (own + system), enriched with an `installed` flag for the current application.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Integration list",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["object", "data", "hasMore"],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["id", "manifest", "orgId", "source"],
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "manifest": {
+                            "type": "object",
+                            "additionalProperties": true
+                          },
+                          "orgId": {
+                            "type": ["string", "null"]
+                          },
+                          "source": {
+                            "type": "string",
+                            "enum": ["local", "system"]
+                          },
+                          "active": {
+                            "type": "boolean"
+                          },
+                          "blockUserConnections": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/integrations/callback": {
+      "get": {
+        "operationId": "integrationsOAuthCallback",
+        "tags": ["Integrations"],
+        "summary": "Integration OAuth2 callback (popup)",
+        "description": "Browser-side OAuth callback. Exchanges code + state for tokens, persists the connection, and returns an HTML page that closes the popup window.",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Authorization code returned by the IdP"
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "OAuth state parameter (UUID)"
+          },
+          {
+            "name": "error",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "OAuth error code (if the IdP rejected the request)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "HTML response that closes the popup",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/integrations/{packageId}": {
+      "get": {
+        "operationId": "getIntegration",
+        "tags": ["Integrations"],
+        "summary": "Get integration detail + per-auth status",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "packageId",
+            "in": "path",
+            "required": true,
+            "description": "Integration package id (e.g. `@official/gmail`).",
+            "schema": {
+              "type": "string",
+              "pattern": "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Integration detail",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["manifest", "auths"],
+                  "properties": {
+                    "manifest": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "auths": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "authKey",
+                          "type",
+                          "required",
+                          "scopes",
+                          "audience",
+                          "connections",
+                          "hasOAuthClient"
+                        ],
+                        "properties": {
+                          "authKey": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string",
+                            "enum": ["oauth2", "oauth1", "api_key", "basic", "custom"]
+                          },
+                          "required": {
+                            "type": "boolean"
+                          },
+                          "scopes": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "audience": {
+                            "type": ["string", "null"]
+                          },
+                          "connections": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "required": [
+                                "id",
+                                "packageId",
+                                "authKey",
+                                "accountId",
+                                "identityClaims",
+                                "scopesGranted",
+                                "needsReconnection",
+                                "expiresAt",
+                                "ownerType",
+                                "ownerId",
+                                "createdAt",
+                                "updatedAt"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "packageId": {
+                                  "type": "string"
+                                },
+                                "authKey": {
+                                  "type": "string"
+                                },
+                                "accountId": {
+                                  "type": "string"
+                                },
+                                "identityClaims": {
+                                  "type": ["object", "null"],
+                                  "additionalProperties": true
+                                },
+                                "scopesGranted": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "needsReconnection": {
+                                  "type": "boolean"
+                                },
+                                "expiresAt": {
+                                  "type": ["string", "null"],
+                                  "format": "date-time"
+                                },
+                                "ownerType": {
+                                  "type": "string",
+                                  "enum": ["user", "end_user"]
+                                },
+                                "ownerId": {
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "type": ["string", "null"]
+                                },
+                                "sharedWithOrg": {
+                                  "type": "boolean"
+                                },
+                                "createdAt": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "updatedAt": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                }
+                              }
+                            }
+                          },
+                          "hasOAuthClient": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/integrations/{packageId}/activate": {
+      "post": {
+        "operationId": "activateIntegration",
+        "tags": ["Integrations"],
+        "summary": "Activate an integration in the current application",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "packageId",
+            "in": "path",
+            "required": true,
+            "description": "Integration package id (e.g. `@official/gmail`).",
+            "schema": {
+              "type": "string",
+              "pattern": "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Activated",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["active", "activatedAt"],
+                  "properties": {
+                    "active": {
+                      "type": "boolean"
+                    },
+                    "activatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Already active or wrong package type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/integrations/{packageId}/deactivate": {
+      "delete": {
+        "operationId": "deactivateIntegration",
+        "tags": ["Integrations"],
+        "summary": "Deactivate an integration in the current application (non-destructive)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "packageId",
+            "in": "path",
+            "required": true,
+            "description": "Integration package id (e.g. `@official/gmail`).",
+            "schema": {
+              "type": "string",
+              "pattern": "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deactivated",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["active"],
+                  "properties": {
+                    "active": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/integrations/{packageId}/oauth-clients/{authKey}": {
+      "get": {
+        "operationId": "getIntegrationOAuthClient",
+        "tags": ["Integrations"],
+        "summary": "Read the registered OAuth client for an integration auth",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "packageId",
+            "in": "path",
+            "required": true,
+            "description": "Integration package id (e.g. `@official/gmail`).",
+            "schema": {
+              "type": "string",
+              "pattern": "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"
+            }
+          },
+          {
+            "name": "authKey",
+            "in": "path",
+            "required": true,
+            "description": "Auth key as declared in the manifest's `auths` map.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]*$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OAuth client",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "applicationId",
+                    "integrationPackageId",
+                    "authKey",
+                    "clientId",
+                    "hasClientSecret",
+                    "redirectUri",
+                    "createdAt",
+                    "updatedAt"
+                  ],
+                  "properties": {
+                    "applicationId": {
+                      "type": "string"
+                    },
+                    "integrationPackageId": {
+                      "type": "string"
+                    },
+                    "authKey": {
+                      "type": "string"
+                    },
+                    "clientId": {
+                      "type": "string"
+                    },
+                    "hasClientSecret": {
+                      "type": "boolean"
+                    },
+                    "redirectUri": {
+                      "type": ["string", "null"]
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "put": {
+        "operationId": "upsertIntegrationOAuthClient",
+        "tags": ["Integrations"],
+        "summary": "Register or rotate the OAuth client for an integration auth",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "packageId",
+            "in": "path",
+            "required": true,
+            "description": "Integration package id (e.g. `@official/gmail`).",
+            "schema": {
+              "type": "string",
+              "pattern": "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"
+            }
+          },
+          {
+            "name": "authKey",
+            "in": "path",
+            "required": true,
+            "description": "Auth key as declared in the manifest's `auths` map.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]*$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["clientId"],
+                "properties": {
+                  "clientId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "clientSecret": {
+                    "type": "string"
+                  },
+                  "redirectUri": {
+                    "type": "string",
+                    "format": "uri"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Upserted",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "applicationId",
+                    "integrationPackageId",
+                    "authKey",
+                    "clientId",
+                    "hasClientSecret",
+                    "redirectUri",
+                    "createdAt",
+                    "updatedAt"
+                  ],
+                  "properties": {
+                    "applicationId": {
+                      "type": "string"
+                    },
+                    "integrationPackageId": {
+                      "type": "string"
+                    },
+                    "authKey": {
+                      "type": "string"
+                    },
+                    "clientId": {
+                      "type": "string"
+                    },
+                    "hasClientSecret": {
+                      "type": "boolean"
+                    },
+                    "redirectUri": {
+                      "type": ["string", "null"]
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteIntegrationOAuthClient",
+        "tags": ["Integrations"],
+        "summary": "Delete the OAuth client for an integration auth",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "packageId",
+            "in": "path",
+            "required": true,
+            "description": "Integration package id (e.g. `@official/gmail`).",
+            "schema": {
+              "type": "string",
+              "pattern": "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"
+            }
+          },
+          {
+            "name": "authKey",
+            "in": "path",
+            "required": true,
+            "description": "Auth key as declared in the manifest's `auths` map.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]*$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["deleted"],
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/integrations/{packageId}/auths/{authKey}/required-scopes": {
+      "get": {
+        "operationId": "getIntegrationRequiredScopes",
+        "tags": ["Integrations"],
+        "summary": "Compute the OAuth scope union the kickoff will request",
+        "description": "Returns the niveau 2 scope envelope for `(application, integration, auth)`: the manifest defaults, the dynamic union inferred from installed agents (via `tools.{name}.requiredScopes`), the actor's currently-granted scopes (high-water-mark across accounts), the strict union that the OAuth kickoff actually requests, the subset that's not yet granted (drives the incremental-consent UI), and a per-agent breakdown for the 'which agent asked for X' surface.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "packageId",
+            "in": "path",
+            "required": true,
+            "description": "Integration package id (e.g. `@official/gmail`).",
+            "schema": {
+              "type": "string",
+              "pattern": "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"
+            }
+          },
+          {
+            "name": "authKey",
+            "in": "path",
+            "required": true,
+            "description": "Auth key as declared in the manifest's `auths` map.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]*$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Scope envelope",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "defaults",
+                    "required",
+                    "granted",
+                    "union",
+                    "missingFromGranted",
+                    "breakdown"
+                  ],
+                  "properties": {
+                    "defaults": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "required": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "granted": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "union": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "missingFromGranted": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "breakdown": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["agentId", "viaTools", "viaExplicit"],
+                        "properties": {
+                          "agentId": {
+                            "type": "string"
+                          },
+                          "viaTools": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "viaExplicit": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/integrations/{packageId}/auths/{authKey}/connect/fields": {
+      "post": {
+        "operationId": "connectIntegrationFields",
+        "tags": ["Integrations"],
+        "summary": "Connect an api_key / basic / custom integration auth",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "packageId",
+            "in": "path",
+            "required": true,
+            "description": "Integration package id (e.g. `@official/gmail`).",
+            "schema": {
+              "type": "string",
+              "pattern": "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"
+            }
+          },
+          {
+            "name": "authKey",
+            "in": "path",
+            "required": true,
+            "description": "Auth key as declared in the manifest's `auths` map.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]*$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["credentials"],
+                "properties": {
+                  "credentials": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Connection stored",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "packageId",
+                    "authKey",
+                    "accountId",
+                    "identityClaims",
+                    "scopesGranted",
+                    "needsReconnection",
+                    "expiresAt",
+                    "ownerType",
+                    "ownerId",
+                    "createdAt",
+                    "updatedAt"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "packageId": {
+                      "type": "string"
+                    },
+                    "authKey": {
+                      "type": "string"
+                    },
+                    "accountId": {
+                      "type": "string"
+                    },
+                    "identityClaims": {
+                      "type": ["object", "null"],
+                      "additionalProperties": true
+                    },
+                    "scopesGranted": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "needsReconnection": {
+                      "type": "boolean"
+                    },
+                    "expiresAt": {
+                      "type": ["string", "null"],
+                      "format": "date-time"
+                    },
+                    "ownerType": {
+                      "type": "string",
+                      "enum": ["user", "end_user"]
+                    },
+                    "ownerId": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": ["string", "null"]
+                    },
+                    "sharedWithOrg": {
+                      "type": "boolean"
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/integrations/{packageId}/auths/{authKey}/connect/oauth2": {
+      "post": {
+        "operationId": "initiateIntegrationOAuth",
+        "tags": ["Integrations"],
+        "summary": "Initiate the OAuth2 PKCE flow for an integration auth",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "packageId",
+            "in": "path",
+            "required": true,
+            "description": "Integration package id (e.g. `@official/gmail`).",
+            "schema": {
+              "type": "string",
+              "pattern": "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"
+            }
+          },
+          {
+            "name": "authKey",
+            "in": "path",
+            "required": true,
+            "description": "Auth key as declared in the manifest's `auths` map.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]*$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "scopes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "forceAccountSelect": {
+                    "type": "boolean"
+                  },
+                  "connectionId": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authorize URL",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["authUrl", "state"],
+                  "properties": {
+                    "authUrl": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "state": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/integrations/{packageId}/connections": {
+      "get": {
+        "operationId": "listIntegrationConnections",
+        "tags": ["Integrations"],
+        "summary": "List the caller's connections for an integration",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "packageId",
+            "in": "path",
+            "required": true,
+            "description": "Integration package id (e.g. `@official/gmail`).",
+            "schema": {
+              "type": "string",
+              "pattern": "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Connection list",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["object", "data", "hasMore"],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "packageId",
+                          "authKey",
+                          "accountId",
+                          "identityClaims",
+                          "scopesGranted",
+                          "needsReconnection",
+                          "expiresAt",
+                          "ownerType",
+                          "ownerId",
+                          "createdAt",
+                          "updatedAt"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "packageId": {
+                            "type": "string"
+                          },
+                          "authKey": {
+                            "type": "string"
+                          },
+                          "accountId": {
+                            "type": "string"
+                          },
+                          "identityClaims": {
+                            "type": ["object", "null"],
+                            "additionalProperties": true
+                          },
+                          "scopesGranted": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "needsReconnection": {
+                            "type": "boolean"
+                          },
+                          "expiresAt": {
+                            "type": ["string", "null"],
+                            "format": "date-time"
+                          },
+                          "ownerType": {
+                            "type": "string",
+                            "enum": ["user", "end_user"]
+                          },
+                          "ownerId": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": ["string", "null"]
+                          },
+                          "sharedWithOrg": {
+                            "type": "boolean"
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "updatedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        }
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/integrations/{packageId}/accessible-connections": {
+      "get": {
+        "operationId": "listAccessibleIntegrationConnections",
+        "tags": ["Integrations"],
+        "summary": "List own + shared connections the actor could pick at run-time",
+        "description": "Drives the R3 pre-run picker on agent pages — returns every connection the caller could resolve to for this integration at run kickoff (own connections and connections others shared with the org). Same predicate as the spawn-time resolver's fallback step.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "packageId",
+            "in": "path",
+            "required": true,
+            "description": "Integration package id (e.g. `@official/gmail`).",
+            "schema": {
+              "type": "string",
+              "pattern": "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Accessible connection list",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["object", "data", "hasMore"],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "authKey",
+                          "accountId",
+                          "label",
+                          "ownerUserId",
+                          "ownerEndUserId",
+                          "ownerName",
+                          "scopesGranted",
+                          "sharedWithOrg",
+                          "needsReconnection"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "authKey": {
+                            "type": "string"
+                          },
+                          "accountId": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": ["string", "null"]
+                          },
+                          "ownerUserId": {
+                            "type": ["string", "null"]
+                          },
+                          "ownerEndUserId": {
+                            "type": ["string", "null"]
+                          },
+                          "ownerName": {
+                            "type": ["string", "null"]
+                          },
+                          "scopesGranted": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "sharedWithOrg": {
+                            "type": "boolean"
+                          },
+                          "needsReconnection": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/integrations/{packageId}/agent-resolution/{agentPackageId}": {
+      "get": {
+        "operationId": "resolveAgentIntegrationConnection",
+        "tags": ["Integrations"],
+        "summary": "Resolve which connection an agent uses for an integration",
+        "description": "Single-source verdict for the agent-page connection picker. Returns which connection the next run would use (admin pin → run/schedule override → member pin → fallback + scope check), the annotated candidate list (own + shared, each with the scopes it lacks for the agent's selected tools), and the admin/member pin + blocked state. Computed by the same resolver the runtime uses so the UI never re-implements the cascade.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "packageId",
+            "in": "path",
+            "required": true,
+            "description": "Integration package id (e.g. `@official/gmail`).",
+            "schema": {
+              "type": "string",
+              "pattern": "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"
+            }
+          },
+          {
+            "name": "agentPackageId",
+            "in": "path",
+            "required": true,
+            "description": "Agent package id (e.g. `@acme/my-agent`).",
+            "schema": {
+              "type": "string",
+              "pattern": "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resolution verdict",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "status",
+                    "resolvedConnectionId",
+                    "resolvedMissingScopes",
+                    "resolvedOwnedByActor",
+                    "adminPinnedConnectionId",
+                    "memberPinnedConnectionId",
+                    "canAddConnection",
+                    "candidates"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "admin_locked",
+                        "pinned",
+                        "auto",
+                        "must_choose",
+                        "none",
+                        "stale",
+                        "needs_reconnection"
+                      ]
+                    },
+                    "resolvedConnectionId": {
+                      "type": ["string", "null"]
+                    },
+                    "resolvedMissingScopes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "resolvedOwnedByActor": {
+                      "type": "boolean"
+                    },
+                    "adminPinnedConnectionId": {
+                      "type": ["string", "null"]
+                    },
+                    "memberPinnedConnectionId": {
+                      "type": ["string", "null"]
+                    },
+                    "canAddConnection": {
+                      "type": "boolean"
+                    },
+                    "candidates": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "authKey",
+                          "accountId",
+                          "label",
+                          "ownerUserId",
+                          "ownerEndUserId",
+                          "ownerName",
+                          "scopesGranted",
+                          "sharedWithOrg",
+                          "needsReconnection",
+                          "missingScopes",
+                          "isOwn"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "authKey": {
+                            "type": "string"
+                          },
+                          "accountId": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": ["string", "null"]
+                          },
+                          "ownerUserId": {
+                            "type": ["string", "null"]
+                          },
+                          "ownerEndUserId": {
+                            "type": ["string", "null"]
+                          },
+                          "ownerName": {
+                            "type": ["string", "null"]
+                          },
+                          "scopesGranted": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "sharedWithOrg": {
+                            "type": "boolean"
+                          },
+                          "needsReconnection": {
+                            "type": "boolean"
+                          },
+                          "missingScopes": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "isOwn": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/integrations/{packageId}/connections/{connectionId}": {
+      "patch": {
+        "operationId": "updateIntegrationConnectionMetadata",
+        "tags": ["Integrations"],
+        "summary": "Update an integration connection's label and/or sharedWithOrg flag",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "packageId",
+            "in": "path",
+            "required": true,
+            "description": "Integration package id (e.g. `@official/gmail`).",
+            "schema": {
+              "type": "string",
+              "pattern": "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"
+            }
+          },
+          {
+            "name": "connectionId",
+            "in": "path",
+            "required": true,
+            "description": "Integration connection id (UUID).",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": ["string", "null"],
+                    "maxLength": 80
+                  },
+                  "sharedWithOrg": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["id", "label", "sharedWithOrg", "updatedAt"],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "label": {
+                      "type": ["string", "null"]
+                    },
+                    "sharedWithOrg": {
+                      "type": "boolean"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Connection is pinned and cannot be unshared",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/integrations/{packageId}/settings": {
+      "patch": {
+        "operationId": "updateIntegrationSettings",
+        "tags": ["Integrations"],
+        "summary": "Toggle the per-(app, integration) block_user_connections gate (admin)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "packageId",
+            "in": "path",
+            "required": true,
+            "description": "Integration package id (e.g. `@official/gmail`).",
+            "schema": {
+              "type": "string",
+              "pattern": "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["blockUserConnections"],
+                "properties": {
+                  "blockUserConnections": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["blocked"],
+                  "properties": {
+                    "blocked": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/integrations/{packageId}/pins": {
+      "get": {
+        "operationId": "listIntegrationPins",
+        "tags": ["Integrations"],
+        "summary": "List admin pins for this integration in this application",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "packageId",
+            "in": "path",
+            "required": true,
+            "description": "Integration package id (e.g. `@official/gmail`).",
+            "schema": {
+              "type": "string",
+              "pattern": "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pin list",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["object", "data", "hasMore"],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "packageId",
+                          "integrationPackageId",
+                          "authKey",
+                          "connectionId",
+                          "createdAt",
+                          "updatedAt"
+                        ],
+                        "properties": {
+                          "packageId": {
+                            "type": "string"
+                          },
+                          "integrationPackageId": {
+                            "type": "string"
+                          },
+                          "authKey": {
+                            "type": "string"
+                          },
+                          "connectionId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "updatedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        }
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/integrations/{packageId}/consuming-agents": {
+      "get": {
+        "operationId": "listAgentsConsumingIntegration",
+        "tags": ["Integrations"],
+        "summary": "List installed agents whose deps declare this integration",
+        "description": "Drives the centralised pin management table on the integration detail page (R2): admins pick an installed-agent target without leaving the integration view.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "packageId",
+            "in": "path",
+            "required": true,
+            "description": "Integration package id (e.g. `@official/gmail`).",
+            "schema": {
+              "type": "string",
+              "pattern": "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Consuming agents",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["object", "data", "hasMore"],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["packageId", "displayName"],
+                        "properties": {
+                          "packageId": {
+                            "type": "string"
+                          },
+                          "displayName": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/integrations/{packageId}/pins/{agentPackageId}": {
+      "put": {
+        "operationId": "upsertIntegrationPin",
+        "tags": ["Integrations"],
+        "summary": "Pin an admin-shared connection to an agent for all members (admin)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "packageId",
+            "in": "path",
+            "required": true,
+            "description": "Integration package id (e.g. `@official/gmail`).",
+            "schema": {
+              "type": "string",
+              "pattern": "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"
+            }
+          },
+          {
+            "name": "agentPackageId",
+            "in": "path",
+            "required": true,
+            "description": "Agent package id (e.g. `@acme/my-agent`).",
+            "schema": {
+              "type": "string",
+              "pattern": "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["connectionId"],
+                "properties": {
+                  "connectionId": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Pinned",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "packageId",
+                    "integrationPackageId",
+                    "authKey",
+                    "connectionId",
+                    "createdAt",
+                    "updatedAt"
+                  ],
+                  "properties": {
+                    "packageId": {
+                      "type": "string"
+                    },
+                    "integrationPackageId": {
+                      "type": "string"
+                    },
+                    "authKey": {
+                      "type": "string"
+                    },
+                    "connectionId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteIntegrationPin",
+        "tags": ["Integrations"],
+        "summary": "Remove an admin pin (admin)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "packageId",
+            "in": "path",
+            "required": true,
+            "description": "Integration package id (e.g. `@official/gmail`).",
+            "schema": {
+              "type": "string",
+              "pattern": "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"
+            }
+          },
+          {
+            "name": "agentPackageId",
+            "in": "path",
+            "required": true,
+            "description": "Agent package id (e.g. `@acme/my-agent`).",
+            "schema": {
+              "type": "string",
+              "pattern": "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["deleted"],
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/integrations/{packageId}/default": {
+      "get": {
+        "operationId": "getIntegrationOrgDefault",
+        "tags": ["Integrations"],
+        "summary": "Get the org-wide default connection for this integration",
+        "description": "The cross-agent governance baseline: one default connection per (application, integration) used by every consuming agent. `enforce: true` locks every member; `enforce: false` is overridable by a member pin. Returns `{ default: null }` when unset.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "packageId",
+            "in": "path",
+            "required": true,
+            "description": "Integration package id (e.g. `@official/gmail`).",
+            "schema": {
+              "type": "string",
+              "pattern": "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Org default (or null)",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["default"],
+                  "properties": {
+                    "default": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "integrationPackageId",
+                            "connectionId",
+                            "authKey",
+                            "enforce",
+                            "createdAt",
+                            "updatedAt"
+                          ],
+                          "properties": {
+                            "integrationPackageId": {
+                              "type": "string"
+                            },
+                            "connectionId": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "authKey": {
+                              "type": "string"
+                            },
+                            "enforce": {
+                              "type": "boolean"
+                            },
+                            "createdAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "updatedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "upsertIntegrationOrgDefault",
+        "tags": ["Integrations"],
+        "summary": "Set the org-wide default connection for this integration (admin)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "packageId",
+            "in": "path",
+            "required": true,
+            "description": "Integration package id (e.g. `@official/gmail`).",
+            "schema": {
+              "type": "string",
+              "pattern": "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["connectionId"],
+                "properties": {
+                  "connectionId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "enforce": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Default set",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "integrationPackageId",
+                    "connectionId",
+                    "authKey",
+                    "enforce",
+                    "createdAt",
+                    "updatedAt"
+                  ],
+                  "properties": {
+                    "integrationPackageId": {
+                      "type": "string"
+                    },
+                    "connectionId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "authKey": {
+                      "type": "string"
+                    },
+                    "enforce": {
+                      "type": "boolean"
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteIntegrationOrgDefault",
+        "tags": ["Integrations"],
+        "summary": "Remove the org-wide default connection (admin)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "packageId",
+            "in": "path",
+            "required": true,
+            "description": "Integration package id (e.g. `@official/gmail`).",
+            "schema": {
+              "type": "string",
+              "pattern": "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["deleted"],
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -9824,6 +12012,429 @@
         }
       }
     },
+    "/api/me/connections": {
+      "get": {
+        "operationId": "listMyConnections",
+        "tags": ["Profile"],
+        "summary": "List the caller's connections across every org/app",
+        "description": "Unified user-scope view that merges provider connections and integration connections under a single shape, grouped by source package. Crosses orgs/applications by design — does NOT require `X-Org-Id`.",
+        "responses": {
+          "200": {
+            "description": "Connection groups",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["object", "data", "hasMore"],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "kind",
+                          "sourceId",
+                          "displayName",
+                          "logo",
+                          "totalConnections",
+                          "connections"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": ["provider", "integration"]
+                          },
+                          "sourceId": {
+                            "type": "string"
+                          },
+                          "displayName": {
+                            "type": "string"
+                          },
+                          "logo": {
+                            "type": "string"
+                          },
+                          "totalConnections": {
+                            "type": "integer"
+                          },
+                          "connections": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "required": [
+                                "connectionId",
+                                "kind",
+                                "label",
+                                "scopesGranted",
+                                "connectedAt",
+                                "needsReconnection",
+                                "expiresAt",
+                                "identity",
+                                "profile",
+                                "authKey",
+                                "sharedWithOrg",
+                                "reusedByAgents",
+                                "org",
+                                "application"
+                              ],
+                              "properties": {
+                                "connectionId": {
+                                  "type": "string"
+                                },
+                                "kind": {
+                                  "type": "string",
+                                  "enum": ["provider", "integration"]
+                                },
+                                "label": {
+                                  "type": ["string", "null"]
+                                },
+                                "scopesGranted": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "connectedAt": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "needsReconnection": {
+                                  "type": "boolean"
+                                },
+                                "expiresAt": {
+                                  "oneOf": [
+                                    {
+                                      "type": "string",
+                                      "format": "date-time"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "identity": {
+                                  "type": ["string", "null"]
+                                },
+                                "reusedByAgents": {
+                                  "type": ["integer", "null"]
+                                },
+                                "profile": {
+                                  "oneOf": [
+                                    {
+                                      "type": "object",
+                                      "required": ["id", "name", "isDefault"],
+                                      "properties": {
+                                        "id": {
+                                          "type": "string"
+                                        },
+                                        "name": {
+                                          "type": "string"
+                                        },
+                                        "isDefault": {
+                                          "type": "boolean"
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "authKey": {
+                                  "type": ["string", "null"]
+                                },
+                                "sharedWithOrg": {
+                                  "type": "boolean"
+                                },
+                                "org": {
+                                  "type": "object",
+                                  "required": ["id", "name"],
+                                  "properties": {
+                                    "id": {
+                                      "type": "string"
+                                    },
+                                    "name": {
+                                      "type": "string"
+                                    }
+                                  }
+                                },
+                                "application": {
+                                  "type": "object",
+                                  "required": ["id", "name"],
+                                  "properties": {
+                                    "id": {
+                                      "type": "string"
+                                    },
+                                    "name": {
+                                      "type": "string"
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/me/integration-pins": {
+      "get": {
+        "operationId": "listMyIntegrationPins",
+        "tags": ["Profile"],
+        "summary": "List the caller's member-scope integration pins for an agent",
+        "description": "Returns the caller's own (integration, authKey) → connectionId pins for the given agent. Used by the agent-page picker to render the collapsed default row. Member-only; end-user callers receive an empty list. Requires `X-Application-Id`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "agentPackageId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Agent package id whose pins to list."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Member pins for the agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["object", "data", "hasMore"],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["integrationPackageId", "authKey", "connectionId"],
+                        "properties": {
+                          "integrationPackageId": {
+                            "type": "string"
+                          },
+                          "authKey": {
+                            "type": "string"
+                          },
+                          "connectionId": {
+                            "type": "string",
+                            "format": "uuid"
+                          }
+                        }
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      },
+      "put": {
+        "operationId": "upsertMyIntegrationPin",
+        "tags": ["Profile"],
+        "summary": "Pin a connection for the caller's runs of an agent",
+        "description": "Persists the caller's preference for a (integration, authKey) on this agent. Sits at cascade layer 4 — wins over the fallback ambiguity but loses to admin pins / run / schedule overrides. Replaces the previous R5 localStorage pick. Idempotent — repeated calls update the row in place.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["agentPackageId", "integrationPackageId", "authKey", "connectionId"],
+                "properties": {
+                  "agentPackageId": {
+                    "type": "string"
+                  },
+                  "integrationPackageId": {
+                    "type": "string"
+                  },
+                  "authKey": {
+                    "type": "string"
+                  },
+                  "connectionId": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Member pin set",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "packageId",
+                    "integrationPackageId",
+                    "authKey",
+                    "connectionId",
+                    "createdAt",
+                    "updatedAt"
+                  ],
+                  "properties": {
+                    "packageId": {
+                      "type": "string"
+                    },
+                    "integrationPackageId": {
+                      "type": "string"
+                    },
+                    "authKey": {
+                      "type": "string"
+                    },
+                    "connectionId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed (connection wrong integration/auth, or not accessible to caller)."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteMyIntegrationPin",
+        "tags": ["Profile"],
+        "summary": "Clear the caller's pin on a (agent, integration, authKey)",
+        "description": "Removes the caller's member pin so the resolver falls back to layer 5 (accessible connections). Idempotent — 204 even when no row exists.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "agentPackageId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "integrationPackageId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authKey",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Pin cleared (or never existed)"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/me/connections/{connectionId}": {
+      "delete": {
+        "operationId": "deleteMyConnection",
+        "tags": ["Profile"],
+        "summary": "Delete one of the caller's own connections (destructive)",
+        "description": "Removes the `integration_connections` row globally. ON DELETE CASCADE vacates every reference (admin pins, member pins, run snapshots, schedule overrides). Intent is destructive: 'I never want to use this credential anywhere again'. Surfaced only from the /connections management page — agent-surface unlinks now drop the member pin instead (see `DELETE /api/me/integration-pins`).",
+        "parameters": [
+          {
+            "name": "connectionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Connection deleted (or never existed)"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
     "/api/me/models": {
       "get": {
         "operationId": "listMyModels",
@@ -10536,6 +13147,265 @@
         }
       }
     },
+    "/internal/integration-credentials/{scope}/{name}": {
+      "get": {
+        "operationId": "getIntegrationCredentials",
+        "tags": ["Internal"],
+        "summary": "Fetch live credentials + HTTP delivery plans for an installed integration",
+        "description": "Sidecar-only. Auth via Bearer run token. Backs the MITM `MitmCredentialSource.current()` + `.deliveryPlans()` calls — returns per-auth resolved credentials + `HttpDeliveryPlan` derived from the integration's `manifest.auths.{key}.delivery.http` declaration. OAuth2 tokens are proactively refreshed when within `OAUTH_REFRESH_LEAD_MS` of expiry. Verifies that the run's agent declares this integration in `dependencies.integrations` AND that the integration is installed on the run's application.",
+        "security": [
+          {
+            "bearerExecToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Live credentials + delivery plans + per-auth expiries.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["auths", "deliveryPlans", "expiresAtEpochMs"],
+                  "properties": {
+                    "auths": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["authKey", "authType", "fields", "authorizedUris"],
+                        "properties": {
+                          "authKey": {
+                            "type": "string"
+                          },
+                          "authType": {
+                            "type": "string"
+                          },
+                          "fields": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "string"
+                            }
+                          },
+                          "authorizedUris": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "audience": {
+                            "type": "string"
+                          },
+                          "expiresAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "scopesGranted": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "deliveryPlans": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "object",
+                        "required": ["headerName", "headerPrefix", "value", "allowServerOverride"],
+                        "properties": {
+                          "headerName": {
+                            "type": "string"
+                          },
+                          "headerPrefix": {
+                            "type": "string"
+                          },
+                          "value": {
+                            "type": "string"
+                          },
+                          "allowServerOverride": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    },
+                    "expiresAtEpochMs": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": ["integer", "null"]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Refresh token revoked upstream — the integration connection has been flagged `needsReconnection` and the sidecar should surface this to the integration's MCP client as a 401.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "502": {
+            "description": "Transient OAuth refresh failure upstream (network error, IdP 5xx, malformed response). The cached credential may still be valid; the sidecar's listener cooldown will back off and retry on the next 401.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/integration-credentials/{scope}/{name}/refresh": {
+      "post": {
+        "operationId": "refreshIntegrationCredentials",
+        "tags": ["Internal"],
+        "summary": "Force-refresh OAuth2 credentials for an installed integration",
+        "description": "Sidecar-only. Same response shape as the GET endpoint; forces a refresh of every OAuth2 auth on this integration regardless of remaining token lifetime. Called by the MITM listener's `refreshOnUnauthorized` hook when upstream returns 401. Non-OAuth2 auths are returned unchanged.",
+        "security": [
+          {
+            "bearerExecToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Refreshed credentials + delivery plans + per-auth expiries.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["auths", "deliveryPlans", "expiresAtEpochMs"],
+                  "properties": {
+                    "auths": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "deliveryPlans": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "object"
+                      }
+                    },
+                    "expiresAtEpochMs": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": ["integer", "null"]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Refresh token revoked upstream — same semantics as the GET endpoint.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "502": {
+            "description": "Transient OAuth refresh failure upstream — same semantics as the GET endpoint.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/integration-bundle/{scope}/{name}": {
+      "get": {
+        "operationId": "getIntegrationBundle",
+        "tags": ["Internal"],
+        "summary": "Fetch the AFPS bundle bytes for an installed integration",
+        "description": "Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise the integration's MCP server before spawning a runner container. The endpoint verifies that the run's agent declares this integration in `dependencies.integrations` AND that the integration is installed on the run's application — orthogonal access control to the credentials endpoint. Returns the raw ZIP archive (`application/zip`).",
+        "security": [
+          {
+            "bearerExecToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "AFPS bundle bytes (ZIP).",
+            "content": {
+              "application/zip": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Agent does not declare this integration as a dependency OR the integration is not installed on this application.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
     "/api/welcome/setup": {
       "post": {
         "operationId": "welcomeSetup",
@@ -10959,7 +13829,7 @@
         "operationId": "importPackage",
         "tags": ["Packages"],
         "summary": "Import a package from ZIP",
-        "description": "Import a package (agent, skill, tool, or provider) from a ZIP file. The ZIP must contain a valid manifest.json. The package scope does not need to match your organization — cross-org packages are imported read-only (fork to modify). Rate-limited to 10 requests/minute. Returns 409 if the target package has unpublished draft changes — re-submit with ?force=true to overwrite.",
+        "description": "Import a package (agent, skill, or provider) from a ZIP file. The ZIP must contain a valid manifest.json. The package scope does not need to match your organization — cross-org packages are imported read-only (fork to modify). Rate-limited to 10 requests/minute. Returns 409 if the target package has unpublished draft changes — re-submit with ?force=true to overwrite.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -11018,7 +13888,7 @@
                     },
                     "type": {
                       "type": "string",
-                      "description": "Package type (agent/skill/tool/provider)"
+                      "description": "Package type (agent/skill/provider)"
                     },
                     "version": {
                       "type": "string",
@@ -11113,7 +13983,7 @@
         "operationId": "importPackageFromGithub",
         "tags": ["Packages"],
         "summary": "Import a package from a GitHub URL",
-        "description": "Import a package (agent, skill, tool, or provider) from a public GitHub repository URL. The URL must point to a directory containing a valid manifest.json. The package scope does not need to match your organization — cross-org packages are imported read-only (fork to modify). Rate-limited to 10 requests/minute.",
+        "description": "Import a package (agent, skill, or provider) from a public GitHub repository URL. The URL must point to a directory containing a valid manifest.json. The package scope does not need to match your organization — cross-org packages are imported read-only (fork to modify). Rate-limited to 10 requests/minute.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -11162,7 +14032,7 @@
                     },
                     "type": {
                       "type": "string",
-                      "description": "Package type (agent/skill/tool/provider)"
+                      "description": "Package type (agent/skill/provider)"
                     },
                     "version": {
                       "type": "string",
@@ -12149,776 +15019,6 @@
         }
       }
     },
-    "/api/packages/tools": {
-      "get": {
-        "operationId": "listTools",
-        "tags": ["Packages"],
-        "summary": "List tools",
-        "description": "List all tools (system + org) in the organization.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Tool list",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["object", "data", "hasMore"],
-                  "properties": {
-                    "object": {
-                      "type": "string",
-                      "enum": ["list"]
-                    },
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/OrgPackageItem"
-                      }
-                    },
-                    "hasMore": {
-                      "type": "boolean"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
-        }
-      },
-      "post": {
-        "operationId": "createTool",
-        "tags": ["Packages"],
-        "summary": "Create a tool",
-        "description": "Create a new tool in the organization packages.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": ["id", "content"],
-                "properties": {
-                  "id": {
-                    "type": "string",
-                    "description": "Unique tool ID (kebab-case)"
-                  },
-                  "name": {
-                    "type": "string",
-                    "description": "Display name (optional)"
-                  },
-                  "description": {
-                    "type": "string",
-                    "description": "Tool description (optional)"
-                  },
-                  "content": {
-                    "type": "string",
-                    "description": "Tool TypeScript source (Pi SDK ExtensionFactory: export default function(pi: ExtensionAPI) { pi.registerTool(...) })"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Tool created",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "packageId": {
-                      "type": "string"
-                    },
-                    "lockVersion": {
-                      "type": "integer"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          }
-        }
-      }
-    },
-    "/api/packages/tools/{scope}/{name}/versions/info": {
-      "get": {
-        "operationId": "getToolVersionInfo",
-        "tags": ["Packages"],
-        "summary": "Get version info for a tool (latest published + draft)",
-        "description": "Returns the latest published version and the current draft version from the manifest.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          },
-          {
-            "$ref": "#/components/parameters/PackageScope"
-          },
-          {
-            "$ref": "#/components/parameters/PackageName"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Version info",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "latestPublishedVersion": {
-                      "type": ["string", "null"]
-                    },
-                    "activeVersion": {
-                      "type": ["string", "null"]
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      }
-    },
-    "/api/packages/tools/{scope}/{name}/versions": {
-      "get": {
-        "operationId": "listToolVersions",
-        "tags": ["Packages"],
-        "summary": "List tool versions",
-        "description": "List all published versions for a tool.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          },
-          {
-            "$ref": "#/components/parameters/PackageScope"
-          },
-          {
-            "$ref": "#/components/parameters/PackageName"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Version list",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "versions": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/AgentVersion"
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      },
-      "post": {
-        "operationId": "createToolVersion",
-        "tags": ["Packages"],
-        "summary": "Create a version from draft",
-        "description": "Create an immutable version snapshot from the current tool draft. Version is determined by the manifest version field unless overridden.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          },
-          {
-            "$ref": "#/components/parameters/PackageScope"
-          },
-          {
-            "$ref": "#/components/parameters/PackageName"
-          }
-        ],
-        "requestBody": {
-          "required": false,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "version": {
-                    "type": "string",
-                    "description": "Optional semver version override (e.g. from bump selector)"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Version created",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "integer"
-                    },
-                    "version": {
-                      "type": "string"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          }
-        }
-      }
-    },
-    "/api/packages/tools/{scope}/{name}/versions/{version}/restore": {
-      "post": {
-        "operationId": "restoreToolVersion",
-        "tags": ["Packages"],
-        "summary": "Restore a tool version into the draft",
-        "description": "Restore a previously published version into the tool draft. Does not create a new version.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          },
-          {
-            "$ref": "#/components/parameters/PackageScope"
-          },
-          {
-            "$ref": "#/components/parameters/PackageName"
-          },
-          {
-            "name": "version",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Version to restore (exact, dist-tag, or semver range)"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Version restored",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "message": {
-                      "type": "string"
-                    },
-                    "restoredVersion": {
-                      "type": "string"
-                    },
-                    "lockVersion": {
-                      "type": "integer"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "description": "Concurrent modification"
-          }
-        }
-      }
-    },
-    "/api/packages/tools/{scope}/{name}/versions/{version}": {
-      "get": {
-        "operationId": "getToolVersionDetail",
-        "tags": ["Packages"],
-        "summary": "Get tool version detail",
-        "description": "Resolve a version query and return versioned tool data including content extracted from ZIP.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          },
-          {
-            "$ref": "#/components/parameters/PackageScope"
-          },
-          {
-            "$ref": "#/components/parameters/PackageName"
-          },
-          {
-            "name": "version",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Version query — exact version, dist-tag, or semver range"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Versioned tool detail",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "integer"
-                    },
-                    "version": {
-                      "type": "string"
-                    },
-                    "manifest": {
-                      "$ref": "#/components/schemas/ToolManifest"
-                    },
-                    "content": {
-                      "type": ["string", "null"]
-                    },
-                    "yanked": {
-                      "type": "boolean"
-                    },
-                    "yankedReason": {
-                      "type": ["string", "null"]
-                    },
-                    "integrity": {
-                      "type": "string"
-                    },
-                    "artifactSize": {
-                      "type": "integer"
-                    },
-                    "createdAt": {
-                      "type": ["string", "null"],
-                      "format": "date-time"
-                    },
-                    "distTags": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      },
-      "delete": {
-        "operationId": "deleteToolVersion",
-        "tags": ["Packages"],
-        "summary": "Delete a tool version",
-        "description": "Permanently delete a tool version. Reassigns affected dist-tags to the next best stable version.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          },
-          {
-            "$ref": "#/components/parameters/PackageScope"
-          },
-          {
-            "$ref": "#/components/parameters/PackageName"
-          },
-          {
-            "name": "version",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Version deleted",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      }
-    },
-    "/api/packages/tools/{scope}/{name}": {
-      "get": {
-        "operationId": "getTool",
-        "tags": ["Packages"],
-        "summary": "Get tool detail",
-        "description": "Get a tool's full details including content.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          },
-          {
-            "$ref": "#/components/parameters/PackageScope"
-          },
-          {
-            "$ref": "#/components/parameters/PackageName"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Tool detail",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OrgPackageItemDetail"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      },
-      "put": {
-        "operationId": "updateTool",
-        "tags": ["Packages"],
-        "summary": "Update a tool",
-        "description": "Update a tool in the organization packages. Built-in tools cannot be modified.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          },
-          {
-            "$ref": "#/components/parameters/PackageScope"
-          },
-          {
-            "$ref": "#/components/parameters/PackageName"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "name": {
-                    "type": "string",
-                    "description": "Display name"
-                  },
-                  "description": {
-                    "type": "string"
-                  },
-                  "content": {
-                    "type": "string"
-                  },
-                  "version": {
-                    "type": "string",
-                    "description": "Semver version (X.Y.Z)"
-                  },
-                  "scopedName": {
-                    "type": "string",
-                    "description": "Registry scoped name (@scope/name)"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Tool updated",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "packageId": {
-                      "type": "string"
-                    },
-                    "lockVersion": {
-                      "type": "integer"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      },
-      "delete": {
-        "operationId": "deleteTool",
-        "tags": ["Packages"],
-        "summary": "Delete a tool",
-        "description": "Delete a tool from the organization packages. Built-in tools cannot be deleted.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          },
-          {
-            "$ref": "#/components/parameters/PackageScope"
-          },
-          {
-            "$ref": "#/components/parameters/PackageName"
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Tool deleted",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "description": "Tool is referenced by agents or required by other packages",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "string",
-                      "enum": ["IN_USE", "DEPENDED_ON"],
-                      "description": "IN_USE: referenced by agents. DEPENDED_ON: required by other packages."
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "agents": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string"
-                          },
-                          "displayName": {
-                            "type": "string"
-                          }
-                        }
-                      },
-                      "description": "Agents referencing this tool (for IN_USE)"
-                    },
-                    "dependents": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string"
-                          },
-                          "displayName": {
-                            "type": "string"
-                          }
-                        }
-                      },
-                      "description": "Packages depending on this tool (for DEPENDED_ON)"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/packages/agents": {
       "get": {
         "operationId": "listAgentPackages",
@@ -13053,7 +15153,7 @@
         "operationId": "getAgentPackage",
         "tags": ["Packages"],
         "summary": "Get agent detail",
-        "description": "Returns agent detail including providers, config, state, skills, and tools.",
+        "description": "Returns agent detail including providers, config, state, and skills.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -13702,7 +15802,7 @@
                     },
                     "type": {
                       "type": "string",
-                      "enum": ["agent", "skill", "tool", "provider"]
+                      "enum": ["agent", "skill", "provider"]
                     },
                     "forkedFrom": {
                       "type": "string",
@@ -14722,248 +16822,12 @@
         }
       }
     },
-    "/api/packages/tools/{id}": {
-      "get": {
-        "operationId": "getToolById",
-        "tags": ["Packages"],
-        "summary": "Get tool detail by ID",
-        "description": "Get a tool's full details by unscoped package ID.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          },
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package ID (unscoped)"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Tool detail",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OrgPackageItemDetail"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      },
-      "put": {
-        "operationId": "updateToolById",
-        "tags": ["Packages"],
-        "summary": "Update a tool by ID",
-        "description": "Update a tool by unscoped package ID. Built-in tools cannot be modified.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          },
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package ID (unscoped)"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "name": {
-                    "type": "string",
-                    "description": "Display name"
-                  },
-                  "description": {
-                    "type": "string"
-                  },
-                  "content": {
-                    "type": "string"
-                  },
-                  "version": {
-                    "type": "string",
-                    "description": "Semver version (X.Y.Z)"
-                  },
-                  "scopedName": {
-                    "type": "string",
-                    "description": "Registry scoped name (@scope/name)"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Tool updated",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "packageId": {
-                      "type": "string"
-                    },
-                    "lockVersion": {
-                      "type": "integer"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      },
-      "delete": {
-        "operationId": "deleteToolById",
-        "tags": ["Packages"],
-        "summary": "Delete a tool by ID",
-        "description": "Delete a tool by unscoped package ID. Built-in tools cannot be deleted.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          },
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package ID (unscoped)"
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Tool deleted",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "description": "Tool is referenced by agents or required by other packages",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "string",
-                      "enum": ["IN_USE", "DEPENDED_ON"],
-                      "description": "IN_USE: referenced by agents. DEPENDED_ON: required by other packages."
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "agents": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string"
-                          },
-                          "displayName": {
-                            "type": "string"
-                          }
-                        }
-                      },
-                      "description": "Agents referencing this tool (for IN_USE)"
-                    },
-                    "dependents": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string"
-                          },
-                          "displayName": {
-                            "type": "string"
-                          }
-                        }
-                      },
-                      "description": "Packages depending on this tool (for DEPENDED_ON)"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/packages/agents/{id}": {
       "get": {
         "operationId": "getAgentPackageById",
         "tags": ["Packages"],
         "summary": "Get agent detail by ID",
-        "description": "Returns agent detail including providers, config, state, skills, and tools by unscoped package ID.",
+        "description": "Returns agent detail including providers, config, state, and skills by unscoped package ID.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -18343,7 +20207,7 @@
           },
           "packageType": {
             "type": "string",
-            "enum": ["agent", "skill", "tool", "provider"]
+            "enum": ["agent", "skill", "provider"]
           },
           "packageSource": {
             "type": "string",
@@ -18557,24 +20421,6 @@
           }
         }
       },
-      "AgentToolRef": {
-        "type": "object",
-        "required": ["id", "name"],
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "version": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string"
-          }
-        }
-      },
       "AgentListItem": {
         "type": "object",
         "required": ["id", "source", "type"],
@@ -18615,7 +20461,7 @@
           "type": {
             "type": "string",
             "description": "Package type from manifest",
-            "enum": ["agent", "skill", "tool", "provider"]
+            "enum": ["agent", "skill", "provider"]
           },
           "runningRuns": {
             "type": "integer"
@@ -18630,12 +20476,6 @@
                 }
               },
               "skills": {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "string"
-                }
-              },
-              "tools": {
                 "type": "object",
                 "additionalProperties": {
                   "type": "string"
@@ -18773,10 +20613,33 @@
                   "$ref": "#/components/schemas/AgentSkillRef"
                 }
               },
-              "tools": {
+              "integrations": {
                 "type": "array",
                 "items": {
-                  "$ref": "#/components/schemas/AgentToolRef"
+                  "type": "object",
+                  "required": ["id", "version"],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "string"
+                    },
+                    "tools": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Niveau 2 tool allowlist (optional)"
+                    },
+                    "scopes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Niveau 2 explicit scope escape hatch (optional)"
+                    }
+                  }
                 }
               }
             }
@@ -20182,10 +22045,6 @@
         "description": "AFPS Skill manifest. See https://afps.appstrate.dev for field reference.",
         "$ref": "https://afps.appstrate.dev/packages/schema/v1/skill.schema.json"
       },
-      "ToolManifest": {
-        "description": "AFPS Tool manifest. See https://afps.appstrate.dev for field reference.",
-        "$ref": "https://afps.appstrate.dev/packages/schema/v1/tool.schema.json"
-      },
       "ProviderManifest": {
         "description": "AFPS Provider manifest. See https://afps.appstrate.dev for field reference.",
         "$ref": "https://afps.appstrate.dev/packages/schema/v1/provider.schema.json"
@@ -20233,7 +22092,7 @@
             },
             "type": {
               "type": "string",
-              "enum": ["agent", "skill", "tool", "provider"]
+              "enum": ["agent", "skill", "provider"]
             },
             "source": {
               "type": "string",

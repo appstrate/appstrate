@@ -13,7 +13,6 @@ const defaults: InlineRunLimits = {
   manifest_bytes: 65536,
   prompt_bytes: 200_000,
   max_skills: 20,
-  max_tools: 20,
   max_authorized_uris: 50,
   wildcard_uri_allowed: false,
   retention_days: 30,
@@ -197,18 +196,16 @@ describe("validateInlineManifest — structural", () => {
 // ---------------------------------------------------------------------------
 
 describe("validateInlineManifest — dependency caps", () => {
-  function depsManifest(skillCount: number, toolCount: number): Record<string, unknown> {
+  function depsManifest(skillCount: number): Record<string, unknown> {
     const skills: Record<string, string> = {};
-    const tools: Record<string, string> = {};
     for (let i = 0; i < skillCount; i++) skills[`@sys/skill-${i}`] = "1.0.0";
-    for (let i = 0; i < toolCount; i++) tools[`@sys/tool-${i}`] = "1.0.0";
-    return baseManifest({ dependencies: { skills, tools } });
+    return baseManifest({ dependencies: { skills } });
   }
 
   it("rejects too many skills", () => {
     const tight = { ...defaults, max_skills: 2 };
     const result = validateInlineManifest({
-      manifest: depsManifest(3, 0),
+      manifest: depsManifest(3),
       prompt: "ok",
       limits: tight,
     });
@@ -216,21 +213,10 @@ describe("validateInlineManifest — dependency caps", () => {
     expect(result.errors.some((e) => e.includes("skills: too many"))).toBe(true);
   });
 
-  it("rejects too many tools", () => {
-    const tight = { ...defaults, max_tools: 1 };
-    const result = validateInlineManifest({
-      manifest: depsManifest(0, 3),
-      prompt: "ok",
-      limits: tight,
-    });
-    expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes("tools: too many"))).toBe(true);
-  });
-
   it("accepts exactly cap-many deps", () => {
-    const tight = { ...defaults, max_skills: 2, max_tools: 2 };
+    const tight = { ...defaults, max_skills: 2 };
     const result = validateInlineManifest({
-      manifest: depsManifest(2, 2),
+      manifest: depsManifest(2),
       prompt: "ok",
       limits: tight,
     });
@@ -356,11 +342,21 @@ describe("validateInlineManifest — wildcard/uri caps", () => {
 
 describe("validateInlineManifest — error aggregation", () => {
   it("reports multiple independent violations in one pass", () => {
-    const tight = { ...defaults, max_skills: 0, max_tools: 0 };
+    const tight = { ...defaults, max_skills: 0, max_authorized_uris: 0 };
     const manifest = baseManifest({
+      type: "provider",
+      displayName: "P",
       dependencies: {
         skills: { "@x/a": "1.0.0" },
-        tools: { "@x/b": "1.0.0" },
+      },
+      definition: {
+        authMode: "api_key",
+        authorizedUris: ["a", "b"],
+        credentials: {
+          schema: { type: "object", properties: { apikey: { type: "string" } } },
+          fieldName: "apikey",
+        },
+        credentialHeaderName: "X-Api-Key",
       },
     });
     const result = validateInlineManifest({

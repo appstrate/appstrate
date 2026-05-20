@@ -28,7 +28,7 @@ function buildManifest(overrides: Partial<AgentManifest> = {}): AgentManifest {
     type: "agent",
     description: "Test",
     schemaVersion: "1.0",
-    dependencies: { skills: {}, tools: {}, providers: {} },
+    dependencies: { skills: {}, providers: {} },
     ...overrides,
   } as AgentManifest;
 }
@@ -39,7 +39,6 @@ function buildAgent(overrides: Partial<LoadedPackage> = {}): LoadedPackage {
     manifest: buildManifest(),
     prompt: "do the thing",
     skills: [],
-    tools: [],
     source: "local",
     ...overrides,
   };
@@ -70,17 +69,16 @@ describe("collectAgentReadinessErrors", () => {
     });
   });
 
-  it("flags missing skills + missing tools together", async () => {
+  it("flags missing skills", async () => {
     const manifest = buildManifest({
       dependencies: {
         skills: { "@test/skill-a": "1.0.0" },
-        tools: { "@test/tool-a": "1.0.0" },
         providers: {},
       },
     });
 
     const errors = await collectAgentReadinessErrors({
-      agent: buildAgent({ manifest, skills: [], tools: [] }),
+      agent: buildAgent({ manifest, skills: [] }),
       providerProfiles: {},
       orgId: "org-1",
       applicationId: "app-1",
@@ -88,14 +86,12 @@ describe("collectAgentReadinessErrors", () => {
 
     const codes = errors.map((e) => e.code);
     expect(codes).toContain("missing_skill");
-    expect(codes).toContain("missing_tool");
   });
 
   it("aggregates empty prompt + missing skill in stable order", async () => {
     const manifest = buildManifest({
       dependencies: {
         skills: { "@test/skill-a": "1.0.0" },
-        tools: {},
         providers: {},
       },
     });
@@ -146,7 +142,6 @@ describe("validateAgentReadiness (throwing)", () => {
     const manifest = buildManifest({
       dependencies: {
         skills: { "@test/skill-a": "1.0.0" },
-        tools: {},
         providers: {},
       },
     });

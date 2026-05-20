@@ -42,7 +42,6 @@ import { OrgSettingsAppOauthPage } from "./pages/org-settings/app/oauth";
 import { ApiKeysPage } from "./pages/api-keys-page";
 import { EndUsersPage } from "./pages/end-users-page";
 import { SkillsPage } from "./pages/skills-page";
-import { ToolsPage } from "./pages/tools-page";
 import { ProvidersPage } from "./pages/providers-page";
 import { IntegrationsPage } from "./pages/integrations-page";
 import { IntegrationDetailPage } from "./pages/integration-detail";
@@ -383,7 +382,6 @@ export function App() {
             <Route path="/schedules/:id" element={<ScheduleDetailPage />} />
             <Route path="/schedules/:id/edit" element={<ScheduleEditPage />} />
             <Route path="/skills" element={<SkillsPage />} />
-            <Route path="/tools" element={<ToolsPage />} />
             <Route path="/providers" element={<ProvidersPage />} />
             <Route path="/integrations" element={<IntegrationsPage />} />
             <Route path="/integrations/:scope/:name" element={<IntegrationDetailPage />} />
@@ -401,13 +399,6 @@ export function App() {
             <Route
               path="/skills/:scope/:name/:version"
               element={<UnifiedPackageDetailPage type="skill" />}
-            />
-            <Route path="/tools/new" element={<PackageEditorPage type="tool" />} />
-            <Route path="/tools/:scope/:name/edit" element={<PackageEditorPage type="tool" />} />
-            <Route path="/tools/:scope/:name" element={<UnifiedPackageDetailPage type="tool" />} />
-            <Route
-              path="/tools/:scope/:name/:version"
-              element={<UnifiedPackageDetailPage type="tool" />}
             />
             <Route path="/providers/new" element={<PackageEditorPage type="provider" />} />
             <Route

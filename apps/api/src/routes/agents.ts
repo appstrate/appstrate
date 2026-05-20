@@ -106,7 +106,6 @@ export function createAgentsRouter() {
         dependencies: {
           providers: (manifest.dependencies?.providers ?? {}) as Record<string, string>,
           skills: (manifest.dependencies?.skills ?? {}) as Record<string, string>,
-          tools: (manifest.dependencies?.tools ?? {}) as Record<string, string>,
         },
         runningRuns: runningCounts[row.id] ?? 0,
         source: row.source ?? "local",

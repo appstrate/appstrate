@@ -4,7 +4,6 @@ import { describe, expect, it } from "bun:test";
 import {
   validateManifest,
   extractSkillMeta,
-  validateToolSource,
   extractManifestMetadata,
   getDefaultAdminCredentialSchema,
   validateProviderCredentialKeys,
@@ -34,21 +33,6 @@ function validSkillManifest(overrides?: Record<string, unknown>) {
     name: "@test/my-skill",
     version: "1.0.0",
     type: "skill",
-    ...overrides,
-  };
-}
-
-function validToolManifest(overrides?: Record<string, unknown>) {
-  return {
-    name: "@test/my-tool",
-    version: "1.0.0",
-    type: "tool",
-    entrypoint: "tool.ts",
-    tool: {
-      name: "my_tool",
-      description: "A test tool",
-      inputSchema: { type: "object", properties: {} },
-    },
     ...overrides,
   };
 }
@@ -85,12 +69,6 @@ describe("validateManifest", () => {
 
   it("valid skill manifest", () => {
     const result = validateManifest(validSkillManifest());
-    expect(result.valid).toBe(true);
-    expect(result.errors).toHaveLength(0);
-  });
-
-  it("valid tool manifest", () => {
-    const result = validateManifest(validToolManifest());
     expect(result.valid).toBe(true);
     expect(result.errors).toHaveLength(0);
   });
@@ -173,23 +151,24 @@ describe("validateManifest", () => {
     expect(m.providersConfiguration).toBeUndefined();
   });
 
-  it("agent with dependencies (skills/tools/providers)", () => {
+  it("agent with dependencies (skills/providers) + runtimeTools", () => {
     const result = validateManifest(
       validAgentManifest({
         dependencies: {
           providers: { "@test/google": "^1.0.0" },
           skills: { "@test/skill": "^1.0.0", "@test/other": "~2.3.0" },
-          tools: { "@test/ext": ">=0.1.0" },
         },
+        runtimeTools: ["log", "note"],
       }),
     );
     expect(result.valid).toBe(true);
-    const deps = (result.manifest as Record<string, unknown>).dependencies as Record<
-      string,
-      unknown
-    >;
+    const m = result.manifest as Record<string, unknown>;
+    const deps = m.dependencies as Record<string, unknown>;
     expect(deps.skills).toEqual({ "@test/skill": "^1.0.0", "@test/other": "~2.3.0" });
-    expect(deps.tools).toEqual({ "@test/ext": ">=0.1.0" });
+    expect(deps.providers).toEqual({ "@test/google": "^1.0.0" });
+    // The former `dependencies.tools` package map is gone; selectable runtime
+    // tools are declared via the top-level `runtimeTools` field instead.
+    expect(m.runtimeTools).toEqual(["log", "note"]);
   });
 
   it("agent with integrations declared as bare version string (legacy)", () => {
@@ -640,25 +619,6 @@ describe("validateManifest", () => {
     expect(result.errors).toHaveLength(0);
   });
 
-  it("default tool manifest (content-module-factory + createOrgItem enrichment) is valid", () => {
-    // Mirrors makeContentPackageModule("tool") + createOrgItem tool enrichment
-    const manifest = {
-      name: "@test-org/my-tool",
-      version: "1.0.0",
-      type: "tool",
-      schemaVersion: "1.0",
-      entrypoint: "tool.ts",
-      tool: {
-        name: "my-tool",
-        description: "Tool",
-        inputSchema: { type: "object", properties: {} },
-      },
-    };
-    const result = validateManifest(manifest);
-    expect(result.valid).toBe(true);
-    expect(result.errors).toHaveLength(0);
-  });
-
   it("default provider manifest (POST /api/providers) is valid", () => {
     // Mirrors the manifest built by strate/apps/api/src/routes/providers.ts
     const manifest = {
@@ -997,83 +957,6 @@ description: A skill without name
     expect(result.name).toBe("");
     expect(result.description).toBe("");
     expect(result.warnings.some((w) => w.includes("frontmatter"))).toBe(true);
-  });
-});
-
-// ─────────────────────────────────────────────
-// validateToolSource
-// ─────────────────────────────────────────────
-
-describe("validateToolSource", () => {
-  const validTool = `
-import { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-
-export default function(pi: ExtensionAPI) {
-  pi.registerTool({
-    name: "my-tool",
-    description: "Does stuff",
-    parameters: {},
-    execute(_toolCallId, params, signal) {
-      return { content: [{ type: "text", text: "hello" }] };
-    }
-  });
-}`;
-
-  it("valid tool source", () => {
-    const result = validateToolSource(validTool);
-    expect(result.valid).toBe(true);
-    expect(result.errors).toHaveLength(0);
-    expect(result.warnings).toHaveLength(0);
-  });
-
-  it("missing export default", () => {
-    const source = `function setup(pi) { pi.registerTool({ execute(_id, p, s) { return { content: [] }; } }); }`;
-    const result = validateToolSource(source);
-    expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes("export default"))).toBe(true);
-  });
-
-  it("missing registerTool — warning only", () => {
-    const source = `export default function(pi) { return { content: [{ type: "text", text: "x" }] }; }`;
-    const result = validateToolSource(source);
-    expect(result.valid).toBe(true);
-    expect(result.warnings.some((w) => w.includes("registerTool"))).toBe(true);
-  });
-
-  it("execute with single param — error", () => {
-    const source = `
-export default function(pi) {
-  pi.registerTool({
-    name: "t",
-    execute(params) {
-      return { content: [{ type: "text", text: "x" }] };
-    }
-  });
-}`;
-    const result = validateToolSource(source);
-    expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes("only one parameter"))).toBe(true);
-  });
-
-  it("unbalanced braces — no false positive (brace counting removed)", () => {
-    const source = `export default function(pi) {
-  pi.registerTool({
-    name: "t",
-    execute(_id, params, signal) {
-      return { content: [{ type: "text", text: "x" }] };
-    }
-  });`;
-    const result = validateToolSource(source);
-    // Brace counting was removed because it produced false positives
-    // (e.g. braces inside template literals or comments). The source
-    // is otherwise structurally valid, so validation should pass.
-    expect(result.valid).toBe(true);
-  });
-
-  it("empty source", () => {
-    const result = validateToolSource("   ");
-    expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes("empty"))).toBe(true);
   });
 });
 

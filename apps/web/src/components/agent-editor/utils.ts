@@ -38,19 +38,6 @@ export function caretRange(version: string): string {
 
 // ─── Default state ──────────────────────────────────────────
 
-/**
- * IDs of the platform's "stdlib" tools — pre-selected when the user
- * opens the new-agent editor. Versions are filled in by package-editor
- * once `usePackageList("tool")` has loaded the canonical caret range
- * from the registry, so the template never carries a placeholder.
- */
-export const DEFAULT_SYSTEM_TOOL_IDS: readonly string[] = [
-  "@appstrate/log",
-  "@appstrate/output",
-  "@appstrate/pin",
-  "@appstrate/note",
-];
-
 export function defaultEditorState(orgSlug?: string, userEmail?: string): AgentEditorState {
   return {
     manifest: {
@@ -89,25 +76,6 @@ export function defaultSkillManifest(
   };
 }
 
-export function defaultToolManifest(orgSlug?: string, userEmail?: string): Record<string, unknown> {
-  return {
-    $schema: AFPS_SCHEMA_URLS.tool,
-    schemaVersion: "1.1",
-    type: "tool",
-    name: orgSlug ? `@${orgSlug}/` : "",
-    version: "1.0.0",
-    displayName: "",
-    description: "",
-    author: userEmail ?? "",
-    entrypoint: "tool.ts",
-    tool: {
-      name: "my_tool",
-      description: "Tool",
-      inputSchema: { type: "object", properties: {} },
-    },
-  };
-}
-
 export function defaultProviderManifest(
   orgSlug?: string,
   userEmail?: string,
@@ -136,9 +104,30 @@ export function defaultProviderManifest(
 
 export const DEFAULT_SKILL_CONTENT = "---\nname: \ndescription: \n---\n\n";
 
-export const DEFAULT_TOOL_CONTENT = "";
+// ─── Runtime tools (manifest.runtimeTools) ──────────────────
 
-export const DEFAULT_TOOL_SOURCE = `import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";\n\nexport default function (pi: ExtensionAPI) {\n  pi.registerTool({\n    name: "my_tool",\n    description: "Describe what this tool does",\n    parameters: {},\n    execute(_toolCallId, _params, _signal) {\n      return { content: [{ type: "text", text: "Hello" }] };\n    },\n  });\n}\n`;
+/**
+ * Read the agent manifest's top-level `runtimeTools: string[]` — the
+ * selectable built-in runtime tools the agent author opted into. The
+ * mandatory `output` tool is never stored here. Tolerates a missing or
+ * malformed field by returning an empty array.
+ */
+export function getRuntimeTools(m: Record<string, unknown>): string[] {
+  const raw = m.runtimeTools;
+  return Array.isArray(raw) ? raw.filter((v): v is string => typeof v === "string") : [];
+}
+
+/**
+ * Write the selected runtime tool ids back into the manifest. An empty
+ * selection drops the field entirely so the manifest stays minimal.
+ */
+export function setRuntimeTools(m: Record<string, unknown>, tools: string[]): void {
+  if (tools.length > 0) {
+    m.runtimeTools = tools;
+  } else {
+    delete m.runtimeTools;
+  }
+}
 
 // ─── Manifest accessors ─────────────────────────────────────
 
@@ -185,7 +174,7 @@ export const setProviderEntries = writeManifestProviders;
 
 export function getResourceEntries(
   m: Record<string, unknown>,
-  type: "skills" | "tools" | "integrations",
+  type: "skills" | "integrations",
 ): ResourceEntry[] {
   // Integrations: version from `dependencies.integrations`, tools/scopes
   // from the top-level `integrations` block (niveau 2 scope model).
@@ -204,7 +193,7 @@ export function getResourceEntries(
 
 export function setResourceEntries(
   m: Record<string, unknown>,
-  type: "skills" | "tools" | "integrations",
+  type: "skills" | "integrations",
   entries: ResourceEntry[],
 ): void {
   if (!m.dependencies) m.dependencies = {};

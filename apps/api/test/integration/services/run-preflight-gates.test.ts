@@ -29,7 +29,6 @@ function loadedPackage(id: string, timeoutOverride?: number): LoadedPackage {
     } as unknown as LoadedPackage["manifest"],
     prompt: "x",
     skills: [],
-    tools: [],
     source: "local",
   };
 }

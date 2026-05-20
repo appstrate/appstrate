@@ -1,16 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Appstrate
 
 /**
- * Output Tool — Return data as the run result.
+ * Output built-in tool — Return data as the run result.
  *
  * Single complete call: each invocation REPLACES the previous output.
  * When OUTPUT_SCHEMA is set, the schema is exposed to the LLM via the tool
  * parameters (constrained decoding) AND validated at execute time. On
  * validation failure, an error is returned to the agent so it can retry.
+ *
+ * Formerly the `@appstrate/output` tool package; baked into the runtime
+ * image after the `tool` package type was removed. Behaviour (stdout
+ * `output.emitted` event → run-result aggregate) is unchanged.
  */
 
 import { Type } from "@mariozechner/pi-ai";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionFactory } from "@mariozechner/pi-coding-agent";
 import Ajv, { type ValidateFunction } from "ajv";
 
 const RUN_ID = process.env.AGENT_RUN_ID ?? "unknown";
@@ -59,7 +64,7 @@ function formatErrors(validator: ValidateFunction): string {
     .join("\n");
 }
 
-export default function (pi: ExtensionAPI) {
+export const outputTool: ExtensionFactory = (pi: ExtensionAPI) => {
   const { schema, validator } = loadSchema();
 
   pi.registerTool({
@@ -87,6 +92,7 @@ export default function (pi: ExtensionAPI) {
                 `Please call output() again with all required fields correctly typed.`,
             },
           ],
+          details: undefined,
           isError: true,
         };
       }
@@ -98,4 +104,4 @@ export default function (pi: ExtensionAPI) {
       };
     },
   });
-}
+};

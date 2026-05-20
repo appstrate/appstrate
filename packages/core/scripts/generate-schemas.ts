@@ -13,7 +13,6 @@ import { toJSONSchema } from "zod/v4/core";
 import {
   agentManifestSchema,
   skillManifestSchema,
-  toolManifestSchema,
   providerManifestSchema,
   afpsJsonSchemaOverride,
 } from "@afps-spec/schema";
@@ -38,12 +37,6 @@ const appstrateSchemas = [
     title: "Appstrate Skill Manifest",
     description: "Appstrate skill manifest — AFPS skill with no extensions.",
     schema: skillManifestSchema,
-  },
-  {
-    filename: "tool.schema.json",
-    title: "Appstrate Tool Manifest",
-    description: "Appstrate tool manifest — AFPS tool with no extensions.",
-    schema: toolManifestSchema,
   },
   {
     filename: "provider.schema.json",

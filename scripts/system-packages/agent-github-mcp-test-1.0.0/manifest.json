@@ -8,9 +8,6 @@
   "description": "Smoke test for AFPS Integrations Phase 7 (remote Streamable HTTP MCP) against GitHub's hosted MCP server. Calls `get_me` and reports the authenticated user — proves that the sidecar's auth-type-agnostic header injection works with an api_key (Bearer PAT) auth.",
   "timeout": 60,
   "dependencies": {
-    "tools": {
-      "@appstrate/output": "^2.0.0"
-    },
     "integrations": {
       "@appstrate/github-mcp": "^1.0.0"
     }

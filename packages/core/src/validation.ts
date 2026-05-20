@@ -6,7 +6,6 @@ import { SLUG_PATTERN } from "./naming.ts";
 import {
   agentManifestSchema as afpsAgentManifestSchema,
   skillManifestSchema as afpsSkillManifestSchema,
-  toolManifestSchema as afpsToolManifestSchema,
   providerManifestSchema as afpsProviderManifestSchema,
   authModeEnum as afpsAuthModeEnum,
   setupGuide as afpsSetupGuide,
@@ -17,6 +16,7 @@ import {
   uploadProtocolEnum as afpsUploadProtocolEnum,
 } from "@afps-spec/schema";
 import { integrationManifestSchema, type IntegrationManifest } from "./integration.ts";
+import { SELECTABLE_RUNTIME_TOOLS } from "./runtime-tools-catalog.ts";
 
 export { integrationManifestSchema, type IntegrationManifest };
 
@@ -28,7 +28,7 @@ export { integrationManifestSchema, type IntegrationManifest };
 export const scopedNameRegex = new RegExp(`^@${SLUG_PATTERN}\\/${SLUG_PATTERN}$`);
 
 /** Zod enum for supported AFPS package types (Phase 1.0 adds `integration`). */
-export const packageTypeEnum = z.enum(["agent", "skill", "tool", "provider", "integration"]);
+export const packageTypeEnum = z.enum(["agent", "skill", "provider", "integration"]);
 /** Union type of supported package types. */
 export type PackageType = z.infer<typeof packageTypeEnum>;
 /** Array of all valid package type strings. */
@@ -38,7 +38,6 @@ export const PACKAGE_TYPES = packageTypeEnum.options;
 export const AFPS_SCHEMA_URLS: Record<PackageType, string> = {
   agent: "https://afps.appstrate.dev/packages/schema/v1/agent.schema.json",
   skill: "https://afps.appstrate.dev/packages/schema/v1/skill.schema.json",
-  tool: "https://afps.appstrate.dev/packages/schema/v1/tool.schema.json",
   provider: "https://afps.appstrate.dev/packages/schema/v1/provider.schema.json",
   integration: "https://afps.dev/schema/v1/integration.schema.json",
 };
@@ -56,7 +55,6 @@ export const manifestSchema = z.looseObject({
   dependencies: z
     .looseObject({
       skills: z.record(z.string(), z.string()).optional(),
-      tools: z.record(z.string(), z.string()).optional(),
       providers: z.record(z.string(), z.string()).optional(),
       // Phase 1.0 — proposal §4.2.3. Additive: legacy `providers`
       // remains valid; the manifest may reference both sets while
@@ -113,11 +111,16 @@ export const agentManifestSchema = afpsAgentManifestSchema.extend({
   dependencies: z
     .looseObject({
       skills: z.record(z.string().regex(scopedNameRegex), z.string()).optional(),
-      tools: z.record(z.string().regex(scopedNameRegex), z.string()).optional(),
       providers: z.record(z.string().regex(scopedNameRegex), z.string()).optional(),
       integrations: z.record(z.string().regex(scopedNameRegex), z.string()).optional(),
     })
     .optional(),
+  // First-party runtime tools enabled for this agent. `output` is always
+  // injected (MANDATORY) and is NOT listed here; only the opt-in tools
+  // (log/note/pin/report) are selectable. Replaces the former
+  // `dependencies.tools` package references (the `tool` package type was
+  // removed — these tools are baked into the runtime image).
+  runtimeTools: z.array(z.enum(SELECTABLE_RUNTIME_TOOLS)).optional(),
   // Niveau 2 — per-integration runtime policy. Keys mirror
   // `dependencies.integrations[id]`. `tools[]` is the allowlist exposed
   // to the agent's LLM via the sidecar's McpHost (Phase 3); empty or
@@ -159,21 +162,6 @@ export const skillManifestSchema = afpsSkillManifestSchema.extend({
 
 /** Inferred type from the skill manifest schema. */
 export type SkillManifest = z.infer<typeof skillManifestSchema>;
-
-// ─────────────────────────────────────────────
-// Tool manifest schema — extends AFPS with core enhancements
-// ─────────────────────────────────────────────
-
-/** Zod schema for tool manifests — extends AFPS with relaxed optional metadata. */
-export const toolManifestSchema = afpsToolManifestSchema.extend({
-  description: z.string().optional(),
-  keywords: z.array(z.string()).optional(),
-  license: z.string().optional(),
-  repository: z.string().optional(),
-});
-
-/** Inferred type from the tool manifest schema. */
-export type ToolManifest = z.infer<typeof toolManifestSchema>;
 
 // ─────────────────────────────────────────────
 // Provider manifest schema — extends AFPS (superRefine inherited)
@@ -498,13 +486,7 @@ export type ValidateManifestResult =
   | {
       valid: true;
       errors: [];
-      manifest:
-        | Manifest
-        | AgentManifest
-        | SkillManifest
-        | ToolManifest
-        | ProviderManifest
-        | IntegrationManifest;
+      manifest: Manifest | AgentManifest | SkillManifest | ProviderManifest | IntegrationManifest;
     }
   | { valid: false; errors: string[]; manifest?: undefined };
 
@@ -513,7 +495,6 @@ function parseWithSchema(
     | typeof manifestSchema
     | typeof agentManifestSchema
     | typeof skillManifestSchema
-    | typeof toolManifestSchema
     | typeof providerManifestSchema
     | typeof integrationManifestSchema,
   raw: unknown,
@@ -550,11 +531,9 @@ export function validateManifest(raw: unknown): ValidateManifestResult {
           ? skillManifestSchema
           : type === "provider"
             ? providerManifestSchema
-            : type === "tool"
-              ? toolManifestSchema
-              : type === "integration"
-                ? integrationManifestSchema
-                : manifestSchema;
+            : type === "integration"
+              ? integrationManifestSchema
+              : manifestSchema;
     return parseWithSchema(schema, raw);
   }
   // No `type` field — run the base schema so every missing-field error is
@@ -607,37 +586,6 @@ export function extractSkillMeta(content: string): {
   return { name, description, warnings };
 }
 
-/** Result of tool source code validation with errors and warnings. */
-export interface ToolSourceValidationResult {
-  valid: boolean;
-  errors: string[];
-  warnings: string[];
-}
-
-function stripLineComments(source: string): string {
-  return source
-    .split("\n")
-    .map((line) => {
-      const idx = line.indexOf("//");
-      return idx === -1 ? line : line.slice(0, idx);
-    })
-    .join("\n");
-}
-
-function countParams(paramStr: string): number {
-  const trimmed = paramStr.trim();
-  if (trimmed === "") return 0;
-
-  let depth = 0;
-  let count = 1;
-  for (const ch of trimmed) {
-    if (ch === "<" || ch === "(") depth++;
-    else if (ch === ">" || ch === ")") depth--;
-    else if (ch === "," && depth === 0) count++;
-  }
-  return count;
-}
-
 /** Optional metadata fields extracted from a manifest, with DB column naming conventions. */
 export interface ManifestMetadata {
   description?: string;
@@ -658,67 +606,6 @@ export function extractManifestMetadata(manifest: Partial<Manifest>): ManifestMe
   if (manifest.repository !== undefined) metadata.repositoryUrl = manifest.repository;
   if (manifest.displayName !== undefined) metadata.displayName = manifest.displayName;
   return metadata;
-}
-
-/**
- * Validate a tool's TypeScript source code for structural correctness.
- * Checks for export default, registerTool() call, non-empty tool name, and correct execute signature.
- * @param source - The TypeScript source code of the tool
- * @returns Validation result with errors (structural issues) and warnings (best-practice suggestions)
- */
-export function validateToolSource(source: string): ToolSourceValidationResult {
-  const errors: string[] = [];
-  const warnings: string[] = [];
-
-  if (source.trim().length === 0) {
-    return { valid: false, errors: ["Tool content is empty"], warnings };
-  }
-
-  if (!/export\s+default\b/.test(source)) {
-    errors.push(
-      "Tool must have an `export default function`. " +
-        "Example: export default function(pi: ToolAPI) { ... }",
-    );
-  }
-
-  if (!/\.registerTool\s*\(/.test(source)) {
-    warnings.push(
-      "Tool does not call `pi.registerTool()`. " + "Make sure to register at least one tool.",
-    );
-  }
-
-  // Check for empty tool name in registerTool({ name: "" })
-  if (/registerTool\s*\(\s*\{[^}]{0,200}name\s*:\s*["']\s*["']/.test(source)) {
-    errors.push(
-      "Tool `name` must not be empty in `registerTool()`. " +
-        'Example: pi.registerTool({ name: "my_tool", ... })',
-    );
-  }
-
-  const cleaned = stripLineComments(source);
-  const executeMatches = [...cleaned.matchAll(/execute\s*\(([^)]{0,500})\)/g)];
-  for (const match of executeMatches) {
-    const paramStr = match[1]!;
-    const paramCount = countParams(paramStr);
-    if (paramCount === 1) {
-      errors.push(
-        "The `execute` signature has only one parameter. " +
-          "The Pi SDK calls execute(toolCallId, params, signal) — with a single parameter, " +
-          "your function will receive the toolCallId (string) instead of params. " +
-          "Fix: execute(_toolCallId, params, signal) { ... }",
-      );
-      break;
-    }
-  }
-
-  if (executeMatches.length > 0 && !/content\s*:/.test(cleaned)) {
-    warnings.push(
-      "The `execute` function does not seem to return `{ content: [...] }`. " +
-        'Expected format: { content: [{ type: "text", text: "..." }] }',
-    );
-  }
-
-  return { valid: errors.length === 0, errors, warnings };
 }
 
 // ─────────────────────────────────────────────

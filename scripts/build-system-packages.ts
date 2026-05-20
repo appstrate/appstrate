@@ -7,8 +7,7 @@
  * Output:   system-packages/{type}-{name}-{version}.afps
  *
  * Each source directory must contain a manifest.json. All files in the
- * directory are bundled into the archive. Tool packages also get their
- * entrypoint source validated.
+ * directory are bundled into the archive.
  *
  * Usage:
  *   bun run scripts/build-system-packages.ts           # build archives
@@ -16,10 +15,9 @@
  */
 import { readdir, readFile, stat, writeFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
-import { validateManifest, validateToolSource } from "@appstrate/core/validation";
+import { validateManifest } from "@appstrate/core/validation";
 import { zipArtifact } from "@appstrate/core/zip";
 import { computeIntegrity } from "@appstrate/core/integrity";
-import { buildPublishedToolArchive } from "@appstrate/core/tool-bundler";
 
 const checkOnly = process.argv.includes("--check");
 const SOURCES_DIR = join(import.meta.dir, "system-packages");
@@ -76,23 +74,7 @@ async function main() {
     const manifest = result.manifest;
     const type = manifest.type as string;
 
-    // Tool-specific: validate entrypoint source
-    if (type === "tool") {
-      const entrypoint = (manifest as Record<string, unknown>).entrypoint as string;
-      const source = await readFile(join(dirPath, entrypoint), "utf-8");
-      const toolValidation = validateToolSource(source);
-      if (!toolValidation.valid) {
-        console.error(
-          `INVALID SOURCE: ${dirName}/${entrypoint} — ${toolValidation.errors.join(", ")}`,
-        );
-        process.exit(1);
-      }
-      for (const w of toolValidation.warnings) {
-        console.warn(`  WARN: ${dirName}/${entrypoint} — ${w}`);
-      }
-    }
-
-    // Collect all files — needed for bundling (tools) and zipping (all types)
+    // Collect all files — bundled into the archive.
     const files = await readdir(dirPath);
     const zipEntries: Record<string, Uint8Array> = {};
     for (const file of files) {
@@ -102,22 +84,7 @@ async function main() {
       zipEntries[file] = new Uint8Array(await readFile(filePath));
     }
 
-    // Tool-specific: rebundle via the same helper used by the API
-    // publish path so system packages ship the identical §3.4 archive
-    // layout (self-contained `tool.js` + rewritten entrypoint). Run
-    // this even in --check mode so CI catches tools that won't bundle.
-    let zipBytes: Uint8Array;
-    if (type === "tool") {
-      const toolId = (manifest as Record<string, unknown>).name as string;
-      const built = await buildPublishedToolArchive({
-        files: zipEntries,
-        manifest: manifest as Record<string, unknown>,
-        toolId,
-      });
-      zipBytes = built.archive;
-    } else {
-      zipBytes = zipArtifact(zipEntries);
-    }
+    const zipBytes: Uint8Array = zipArtifact(zipEntries);
 
     if (checkOnly) {
       console.log(`  ${dirName} [${type}] ✓`);

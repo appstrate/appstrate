@@ -1,25 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Appstrate
 
 /**
- * Note Tool — Append a discovery or learning to the long-term archive.
+ * Note built-in tool — Append a discovery or learning to the long-term archive.
  *
- * AFPS 1.5: replaces `add_memory`. Archive memories are NOT injected
- * into the system prompt — the agent retrieves them on demand via the
- * `recall_memory` tool. Use this for insights worth remembering across
- * runs (e.g. "Gmail API paginates at 100 results", "User prefers CSV
- * format").
- *
- * Memories carry an optional `scope` ("actor" | "shared"):
- * - "actor" (default) keeps the note private to the calling actor —
- *   well-suited for personal preferences and observations. Scheduled runs,
- *   manual triggers, and different members each maintain their own archive.
- * - "shared" makes the note visible to every actor. Use for facts that
- *   are universal to the app: API quirks, org conventions, the structure
- *   of a shared resource.
+ * Formerly the `@appstrate/note` tool package; baked into the runtime
+ * image. Archive memories are NOT injected into the system prompt — the
+ * agent retrieves them on demand via `recall_memory`. Emits a
+ * `memory.added` event on stdout, persisted at run finalize.
  */
 
 import { Type } from "@mariozechner/pi-ai";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionFactory } from "@mariozechner/pi-coding-agent";
 
 const RUN_ID = process.env.AGENT_RUN_ID ?? "unknown";
 
@@ -27,7 +19,7 @@ function emit(obj: Record<string, unknown>): void {
   process.stdout.write(JSON.stringify({ ...obj, timestamp: Date.now(), runId: RUN_ID }) + "\n");
 }
 
-export default function (pi: ExtensionAPI) {
+export const noteTool: ExtensionFactory = (pi: ExtensionAPI) => {
   pi.registerTool({
     name: "note",
     label: "Note",
@@ -60,4 +52,4 @@ export default function (pi: ExtensionAPI) {
       };
     },
   });
-}
+};

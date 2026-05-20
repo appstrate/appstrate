@@ -1,28 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Appstrate
 
 /**
- * Pin Tool — Upsert a named pinned slot for the next run.
+ * Pin built-in tool — Upsert a named pinned slot for the next run.
  *
- * AFPS 1.5: replaces `set_checkpoint`. Pinned slots are rendered into
- * the system prompt on every run. Last-write-wins per `(scope, key)` —
- * design each value to be self-contained.
- *
- * `key` identifies the slot. The legacy carry-over checkpoint lives at
- * `key="checkpoint"`. Other keys (e.g. "persona", "goals") create
- * additional named pinned blocks rendered alongside the checkpoint.
- *
- * Scope ("actor" | "shared"):
- * - "actor" (default) gives every actor their own private copy. Scheduled
- *   runs (which carry the schedule owner's identity), manual triggers, and
- *   different members each maintain a separate slot.
- * - "shared" makes the slot app-wide. Use this when the slot tracks a
- *   resource shared across actors (a synced repo, a shared inbox, a shared
- *   database) — otherwise an agent triggered both manually and by a
- *   schedule will desynchronise and repeat work.
+ * Formerly the `@appstrate/pin` tool package; baked into the runtime
+ * image. Pinned slots are rendered into the system prompt on every run;
+ * last-write-wins per `(scope, key)`. Emits a `pinned.set` event on
+ * stdout, persisted at run finalize.
  */
 
 import { Type } from "@mariozechner/pi-ai";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionFactory } from "@mariozechner/pi-coding-agent";
 
 const RUN_ID = process.env.AGENT_RUN_ID ?? "unknown";
 
@@ -30,7 +19,7 @@ function emit(obj: Record<string, unknown>): void {
   process.stdout.write(JSON.stringify({ ...obj, timestamp: Date.now(), runId: RUN_ID }) + "\n");
 }
 
-export default function (pi: ExtensionAPI) {
+export const pinTool: ExtensionFactory = (pi: ExtensionAPI) => {
   pi.registerTool({
     name: "pin",
     label: "Pin",
@@ -74,4 +63,4 @@ export default function (pi: ExtensionAPI) {
       };
     },
   });
-}
+};

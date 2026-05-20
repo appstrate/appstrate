@@ -13,7 +13,6 @@ import { packageNewPath } from "../lib/package-paths";
 const emojiMap: Record<PackageType, string> = {
   agent: "⚡",
   skill: "🧠",
-  tool: "🔧",
   provider: "🔌",
   // Phase 1.0 — see use-packages.ts comment.
   integration: "🧩",

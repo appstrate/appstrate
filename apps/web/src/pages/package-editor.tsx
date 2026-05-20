@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useParams, useNavigate, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { TriangleAlert } from "lucide-react";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { usePackageDetail, usePackageList } from "../hooks/use-packages";
+import { usePackageDetail } from "../hooks/use-packages";
 import type { OrgPackageItemDetail } from "@appstrate/shared-types";
 import type { PackageType } from "@appstrate/core/validation";
 import { useAuth } from "../hooks/use-auth";
@@ -18,6 +16,7 @@ import { UnsavedChangesModal } from "../components/unsaved-changes-modal";
 import { MetadataSection } from "../components/agent-editor/metadata-section";
 import { SchemaSection } from "../components/agent-editor/schema-section";
 import { ResourceSection } from "../components/agent-editor/resource-section";
+import { RuntimeToolsSection } from "../components/agent-editor/runtime-tools-section";
 import { PromptEditor } from "../components/agent-editor/prompt-editor";
 import { ProviderPicker } from "../components/agent-editor/provider-picker";
 import { JsonEditor } from "../components/json-editor";
@@ -31,13 +30,8 @@ import type { MetadataState } from "../components/agent-editor/metadata-section"
 import {
   defaultEditorState,
   defaultSkillManifest,
-  defaultToolManifest,
   defaultProviderManifest,
   DEFAULT_SKILL_CONTENT,
-  DEFAULT_TOOL_CONTENT,
-  DEFAULT_TOOL_SOURCE,
-  DEFAULT_SYSTEM_TOOL_IDS,
-  caretRange,
   getManifestName,
   manifestToMetadata,
   metadataToManifestPatch,
@@ -46,17 +40,18 @@ import {
   setProviderEntries,
   getResourceEntries,
   setResourceEntries,
+  getRuntimeTools,
+  setRuntimeTools,
   toResourceEntry,
   fieldsToSchema,
 } from "../components/agent-editor/utils";
 import type { SchemaField } from "../components/agent-editor/schema-section";
-import { agentSchema, skillSchema, toolSchema } from "@appstrate/core/schemas";
+import { agentSchema, skillSchema } from "@appstrate/core/schemas";
 import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
 
 const PACKAGE_SCHEMAS: Record<string, object | undefined> = {
   agent: agentSchema,
   skill: skillSchema,
-  tool: toolSchema,
 };
 
 type GenericEditorTab =
@@ -65,10 +60,9 @@ type GenericEditorTab =
   | "providers"
   | "schema"
   | "skills"
-  | "tools"
+  | "runtimeTools"
   | "integrations"
   | "content"
-  | "source"
   | "json";
 
 // ─── Agent Editor Inner Form ────────────────────────────────────────
@@ -80,7 +74,7 @@ function AgentEditorInner({
   isEdit,
 }: {
   initialState: AgentEditorState;
-  resolvedDeps: { skills: unknown[]; tools: unknown[] } | null;
+  resolvedDeps: { skills: unknown[] } | null;
   packageId: string | undefined;
   isEdit: boolean;
 }) {
@@ -117,43 +111,6 @@ function AgentEditorInner({
     },
   });
 
-  // Pre-populate the platform's "stdlib" tools (log/output/pin/note)
-  // once on first mount in create mode, after the registry's package list
-  // resolves. We resolve caret ranges from the canonical version here
-  // instead of hardcoding `*` placeholders in `defaultEditorState` and
-  // migrating later — that earlier approach raced when multiple
-  // `VersionSelect` instances tried to migrate in the same React batch.
-  // The `populated` ref makes this a one-shot: removing a system tool
-  // afterwards must not re-add it.
-  const { data: toolsList } = usePackageList("tool");
-  const populatedRef = useRef(false);
-  useEffect(() => {
-    if (populatedRef.current) return;
-    if (isEdit) return;
-    if (!toolsList || toolsList.length === 0) return;
-
-    const presetTools: Record<string, string> = {};
-    for (const id of DEFAULT_SYSTEM_TOOL_IDS) {
-      const item = toolsList.find((i) => i.id === id);
-      if (item?.version) {
-        presetTools[id] = caretRange(item.version);
-      }
-    }
-    populatedRef.current = true;
-    if (Object.keys(presetTools).length === 0) return;
-
-    setState((s) => {
-      const m = { ...s.manifest };
-      const deps = { ...((m.dependencies as Record<string, unknown> | undefined) ?? {}) };
-      const existing = (deps.tools as Record<string, string> | undefined) ?? {};
-      // Don't override anything the user has already touched (e.g. a
-      // toggle/version pick that landed before the items list resolved).
-      deps.tools = { ...presetTools, ...existing };
-      m.dependencies = deps;
-      return { ...s, manifest: m };
-    });
-  }, [isEdit, toolsList, setState]);
-
   const metadata = useMemo(() => manifestToMetadata(state.manifest), [state.manifest]);
   const onMetadataChange = (m: MetadataState) => updateManifest(metadataToManifestPatch(m));
 
@@ -178,7 +135,7 @@ function AgentEditorInner({
     }
   };
 
-  // Sync resolved skill/tool metadata from server (names, descriptions)
+  // Sync resolved skill metadata from server (names, descriptions)
   useEffect(() => {
     if (!resolvedDeps) return;
     setState((prev) => {
@@ -191,16 +148,7 @@ function AgentEditorInner({
           description?: string;
         }[]
       ).map(toResourceEntry);
-      const tools = (
-        resolvedDeps.tools as {
-          id: string;
-          version?: string;
-          name?: string;
-          description?: string;
-        }[]
-      ).map(toResourceEntry);
       setResourceEntries(m, "skills", skills);
-      setResourceEntries(m, "tools", tools);
       return { ...prev, manifest: m };
     });
   }, [resolvedDeps, setState]);
@@ -214,7 +162,7 @@ function AgentEditorInner({
     { id: "providers", label: t("editor.tabServices") },
     { id: "schema", label: t("editor.tabSchema") },
     { id: "skills", label: t("editor.tabSkills") },
-    { id: "tools", label: t("editor.tabTools") },
+    { id: "runtimeTools", label: t("editor.tabRuntimeTools") },
     { id: "integrations", label: t("editor.tabIntegrations") },
     { id: "json", label: t("editor.tabJson") },
   ];
@@ -295,37 +243,17 @@ function AgentEditorInner({
           }}
         />
       )}
-      {activeTab === "tools" && (
-        <>
-          {(
-            state.manifest.output as
-              | { schema?: { properties?: Record<string, unknown> } }
-              | undefined
-          )?.schema?.properties &&
-            !getResourceEntries(state.manifest, "tools").some(
-              (e) => e.id === "@appstrate/output",
-            ) && (
-              <Alert variant="warning" className="mb-4">
-                <TriangleAlert className="h-4 w-4" />
-                <AlertDescription>{t("editor.outputToolWarning")}</AlertDescription>
-              </Alert>
-            )}
-          <ResourceSection
-            type="tool"
-            title={t("editor.tabTools")}
-            emptyLabel={t("editor.toolsEmpty")}
-            selectedEntries={getResourceEntries(state.manifest, "tools")}
-            onChange={(updater) => {
-              setState((s) => {
-                const prev = getResourceEntries(s.manifest, "tools");
-                const next = typeof updater === "function" ? updater(prev) : updater;
-                const m = { ...s.manifest };
-                setResourceEntries(m, "tools", next);
-                return { ...s, manifest: m };
-              });
-            }}
-          />
-        </>
+      {activeTab === "runtimeTools" && (
+        <RuntimeToolsSection
+          selected={getRuntimeTools(state.manifest)}
+          onChange={(next) => {
+            setState((s) => {
+              const m = { ...s.manifest };
+              setRuntimeTools(m, next);
+              return { ...s, manifest: m };
+            });
+          }}
+        />
       )}
       {activeTab === "integrations" && (
         <ResourceSection
@@ -366,7 +294,6 @@ function AgentEditorInner({
 
 interface PackageEditorState extends EditorStateBase {
   content: string;
-  sourceCode?: string;
 }
 
 function PackageEditorInner({
@@ -375,7 +302,7 @@ function PackageEditorInner({
   packageId,
   isEdit,
 }: {
-  type: "skill" | "tool";
+  type: "skill";
   initialState: PackageEditorState;
   packageId: string | undefined;
   isEdit: boolean;
@@ -403,23 +330,16 @@ function PackageEditorInner({
     toWireBody: (s) => ({
       manifest: s.manifest,
       content: s.content,
-      ...(s.sourceCode !== undefined ? { sourceCode: s.sourceCode } : {}),
     }),
     validate: (s) => {
       const { id } = getManifestName(s.manifest);
       if (!id || !s.manifest.displayName) {
         return { error: t("editor.errorRequired"), tab: "general" };
       }
-      if (type === "skill" && !s.content.trim()) {
+      if (!s.content.trim()) {
         return {
           error: t("editor.errorContent", { defaultValue: "Le contenu est requis." }),
           tab: "content",
-        };
-      }
-      if (type === "tool" && !s.sourceCode?.trim()) {
-        return {
-          error: t("editor.errorContent", { defaultValue: "Le contenu est requis." }),
-          tab: "source",
         };
       }
       return null;
@@ -435,9 +355,6 @@ function PackageEditorInner({
   const pkgTabs: Array<{ id: GenericEditorTab; label: string }> = [
     { id: "general", label: t("editor.tabGeneral") },
     { id: "content", label: t(`editor.tabContent.${type}`) },
-    ...(type === "tool"
-      ? [{ id: "source" as GenericEditorTab, label: t("editor.tabSource") }]
-      : []),
     { id: "json", label: t("editor.tabJson") },
   ];
 
@@ -470,14 +387,6 @@ function PackageEditorInner({
           value={state.content}
           onChange={(content) => setState((s) => ({ ...s, content }))}
           language="markdown"
-        />
-      )}
-
-      {activeTab === "source" && type === "tool" && (
-        <ContentEditor
-          value={state.sourceCode ?? ""}
-          onChange={(sourceCode) => setState((s) => ({ ...s, sourceCode }))}
-          language="typescript"
         />
       )}
 
@@ -590,33 +499,25 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
     return <Navigate to="/" replace />;
   }
 
-  // Skill/Tool editor (agent/provider returned early above — pkgQuery is always OrgPackageItemDetail here)
+  // Skill editor (agent/provider/integration returned early above — pkgQuery is always OrgPackageItemDetail here)
   const pkgDetail = pkgQuery.data as OrgPackageItemDetail | undefined;
-
-  const defaultManifest =
-    type === "tool"
-      ? defaultToolManifest(currentOrg?.slug, user?.email)
-      : defaultSkillManifest(currentOrg?.slug, user?.email);
-  const defaultContent = type === "tool" ? DEFAULT_TOOL_CONTENT : DEFAULT_SKILL_CONTENT;
 
   const initialState: PackageEditorState =
     isEdit && pkgDetail
       ? {
           manifest: pkgDetail.manifest ?? {},
           content: pkgDetail.content ?? "",
-          ...(type === "tool" ? { sourceCode: pkgDetail.sourceCode ?? "" } : {}),
           lockVersion: pkgDetail.lockVersion,
         }
       : {
-          manifest: defaultManifest,
-          content: defaultContent,
-          ...(type === "tool" ? { sourceCode: DEFAULT_TOOL_SOURCE } : {}),
+          manifest: defaultSkillManifest(currentOrg?.slug, user?.email),
+          content: DEFAULT_SKILL_CONTENT,
         };
 
   return (
     <PackageEditorInner
       key={packageId ?? "new"}
-      type={type}
+      type="skill"
       initialState={initialState}
       packageId={packageId}
       isEdit={isEdit}

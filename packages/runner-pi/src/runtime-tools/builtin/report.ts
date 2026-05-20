@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Appstrate
 
 /**
- * Report Tool — Generate a markdown report as part of the run result.
+ * Report built-in tool — Generate a markdown report as part of the run result.
  *
- * Each call appends content to the final report (separated by double
- * newlines). The platform renders the accumulated markdown in a dedicated
- * "Report" tab visible to the user.
+ * Formerly the `@appstrate/report` tool package; baked into the runtime
+ * image. Each call appends markdown to the run report (separated by
+ * newlines). Emits a `report.appended` event on stdout.
  */
 
 import { Type } from "@mariozechner/pi-ai";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionFactory } from "@mariozechner/pi-coding-agent";
 
 const RUN_ID = process.env.AGENT_RUN_ID ?? "unknown";
 
@@ -17,7 +18,7 @@ function emit(obj: Record<string, unknown>): void {
   process.stdout.write(JSON.stringify({ ...obj, timestamp: Date.now(), runId: RUN_ID }) + "\n");
 }
 
-export default function (pi: ExtensionAPI) {
+export const reportTool: ExtensionFactory = (pi: ExtensionAPI) => {
   pi.registerTool({
     name: "report",
     label: "Report",
@@ -37,4 +38,4 @@ export default function (pi: ExtensionAPI) {
       };
     },
   });
-}
+};
