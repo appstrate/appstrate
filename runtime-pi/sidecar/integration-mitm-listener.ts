@@ -56,9 +56,12 @@ import { createServer as netCreateServer, connect as netConnect, type Socket } f
 import type {
   HttpDeliveryPlan,
   IntegrationCredentialsPayload,
-  MitmRequestContext,
-} from "@appstrate/connect/integrations";
-import { planMitmAction, type CaBundle } from "@appstrate/connect/integrations";
+} from "@appstrate/connect/integration-credentials";
+import {
+  planMitmAction,
+  type MitmRequestContext,
+} from "@appstrate/connect/integration-mitm-planner";
+import type { CaBundle } from "@appstrate/connect/proxy-ca-planner";
 import { HOP_BY_HOP_HEADERS, matchesAuthorizedUriSpec } from "@appstrate/connect/proxy-primitives";
 import type { CertMinter } from "./integration-cert-minter.ts";
 

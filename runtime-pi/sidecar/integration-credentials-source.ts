@@ -25,7 +25,7 @@ import type {
   HttpDeliveryPlan,
   IntegrationCredentialsPayload,
   ResolvedAuthCredentials,
-} from "@appstrate/connect/integrations";
+} from "@appstrate/connect/integration-credentials";
 import type { MitmCredentialSource } from "./integration-mitm-listener.ts";
 import { logger } from "./logger.ts";
 

@@ -42,7 +42,7 @@ import {
   type AppstrateMcpClient,
   type AppstrateToolDefinition,
 } from "@appstrate/mcp-transport";
-import { planCaBundle, type CaBundle } from "@appstrate/connect/integrations";
+import { planCaBundle, type CaBundle } from "@appstrate/connect/proxy-ca-planner";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 
 import { McpHost } from "./mcp-host.ts";

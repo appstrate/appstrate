@@ -42,7 +42,7 @@ import type {
   CaGenerationOutput,
   CaGenerationRequest,
   CertGenerator,
-} from "@appstrate/connect/integrations";
+} from "@appstrate/connect/proxy-ca-planner";
 
 // ─────────────────────────────────────────────
 // Public types
