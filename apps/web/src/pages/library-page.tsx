@@ -21,19 +21,17 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 
-const TABS = ["agents", "skills", "providers"] as const;
+const TABS = ["agents", "skills"] as const;
 type Tab = (typeof TABS)[number];
 
 const TYPE_MAP: Record<Tab, string> = {
   agents: "agent",
   skills: "skill",
-  providers: "provider",
 };
 
 const DETAIL_PATH_MAP: Record<string, string> = {
   agent: "/agents",
   skill: "/skills",
-  provider: "/providers",
 };
 
 export function LibraryPage() {

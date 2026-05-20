@@ -12,7 +12,6 @@ import { useOrg } from "../../hooks/use-org";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { useModels } from "../../hooks/use-models";
 import { useBilling } from "../../hooks/use-billing";
-import { useProviders } from "../../hooks/use-providers";
 import { api } from "../../api";
 import { CheckCircle2 } from "lucide-react";
 import type { OrgInvitation } from "@appstrate/shared-types";
@@ -27,7 +26,6 @@ export function OnboardingDoneStep() {
 
   const { data: models } = useModels();
   const { data: billing } = useBilling({ enabled: features.billing && !!orgId });
-  const { data: providers } = useProviders();
   const { data: orgData } = useQuery({
     queryKey: ["org-members", orgId],
     queryFn: () => api<{ invitations: OrgInvitation[] }>(`/orgs/${orgId}`),
@@ -35,7 +33,6 @@ export function OnboardingDoneStep() {
   });
 
   const defaultModel = models?.find((m) => m.isDefault);
-  const configuredProviders = (providers ?? []).filter((p) => p.enabled);
   const invitationCount = orgData?.invitations?.length ?? 0;
 
   if (!orgId) return null;
@@ -85,27 +82,6 @@ export function OnboardingDoneStep() {
               <h3 className="text-sm font-semibold">{t("onboarding.summaryModel")}</h3>
               <span className="text-muted-foreground text-sm">
                 {defaultModel ? defaultModel.label : t("onboarding.summaryModelNone")}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <div className="border-border bg-card rounded-lg border p-4">
-          <div className="flex items-center gap-3">
-            <CheckCircle2
-              size={20}
-              className={
-                configuredProviders.length > 0
-                  ? "shrink-0 text-green-500"
-                  : "text-muted-foreground shrink-0"
-              }
-            />
-            <div className="flex-1">
-              <h3 className="text-sm font-semibold">{t("onboarding.summaryProviders")}</h3>
-              <span className="text-muted-foreground text-sm">
-                {configuredProviders.length > 0
-                  ? t("onboarding.summaryProvidersCount", { count: configuredProviders.length })
-                  : t("onboarding.summaryProvidersNone")}
               </span>
             </div>
           </div>

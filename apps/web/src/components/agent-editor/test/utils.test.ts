@@ -5,8 +5,6 @@ import {
   caretRange,
   defaultEditorState,
   getManifestName,
-  getProviderEntries,
-  setProviderEntries,
   getResourceEntries,
   setResourceEntries,
   schemaToFields,
@@ -31,61 +29,6 @@ describe("getManifestName", () => {
 
   it("handles missing name", () => {
     expect(getManifestName({})).toEqual({ scope: "", id: "" });
-  });
-});
-
-// ─── Provider entries ───────────────────────────────────────
-
-describe("getProviderEntries / setProviderEntries", () => {
-  it("reads providers from manifest", () => {
-    const m = {
-      dependencies: { providers: { "@org/gmail": "1.0.0", "@org/slack": "2.0.0" } },
-      providersConfiguration: {
-        "@org/gmail": { scopes: ["gmail.readonly"] },
-      },
-    };
-    const entries = getProviderEntries(m);
-    expect(entries).toHaveLength(2);
-    expect(entries[0]).toEqual({
-      id: "@org/gmail",
-      version: "1.0.0",
-      scopes: ["gmail.readonly"],
-    });
-    expect(entries[1]).toEqual({
-      id: "@org/slack",
-      version: "2.0.0",
-      scopes: [],
-    });
-  });
-
-  it("roundtrips through set/get", () => {
-    const entries = [
-      {
-        id: "@org/gmail",
-        version: "1.0.0",
-        scopes: ["gmail.send"],
-      },
-      { id: "@org/slack", version: "*", scopes: [] },
-    ];
-    const m: Record<string, unknown> = { dependencies: { providers: {} } };
-    setProviderEntries(m, entries);
-    const result = getProviderEntries(m);
-    expect(result).toEqual(entries);
-  });
-
-  it("filters empty ids", () => {
-    const m: Record<string, unknown> = { dependencies: { providers: {} } };
-    setProviderEntries(m, [
-      { id: "", version: "*", scopes: [] },
-      { id: "@org/gmail", version: "1.0.0", scopes: [] },
-    ]);
-    expect(getProviderEntries(m)).toHaveLength(1);
-  });
-
-  it("cleans up providersConfiguration when no config needed", () => {
-    const m: Record<string, unknown> = { dependencies: { providers: {} } };
-    setProviderEntries(m, [{ id: "@org/gmail", version: "1.0.0", scopes: [] }]);
-    expect(m.providersConfiguration).toBeUndefined();
   });
 });
 

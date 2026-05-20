@@ -4,8 +4,6 @@ import { useTranslation } from "react-i18next";
 import { Unplug } from "lucide-react";
 import { EmptyState } from "../page-states";
 import { usePackageDetail } from "../../hooks/use-packages";
-import { ProviderConnectionCard } from "../provider-connection-card";
-import { AppProfileProvidersBlock } from "../app-profile-providers-block";
 import { AgentIntegrationsBlock } from "./agent-integrations-block";
 import type { AgentDetail } from "@appstrate/shared-types";
 
@@ -16,11 +14,9 @@ interface AgentConnectionsSectionProps {
 }
 
 /**
- * Phase B.2 — unified "Connexions" tab: providers (existing) +
- * integrations (Phase B.1). The two surfaces share the tab because they
- * both gate `Run` via the same `validateAgentReadiness` pipeline on the
- * backend; collapsing them here keeps the user's mental model in one
- * place ("everything I need to connect before this agent works").
+ * Agent "Connexions" tab — lists the integrations the agent declares and
+ * gates `Run` via the same `validateAgentReadiness` pipeline on the
+ * backend.
  */
 export function AgentConnectionsSection({
   packageId,
@@ -32,12 +28,10 @@ export function AgentConnectionsSection({
   const detail = providedDetail ?? fetchedDetail;
   if (!detail) return null;
 
-  const providers = detail.dependencies.providers;
   const integrations = detail.dependencies.integrations ?? [];
-  const hasProviders = providers.length > 0;
   const hasIntegrations = integrations.length > 0;
 
-  if (!hasProviders && !hasIntegrations) {
+  if (!hasIntegrations) {
     return (
       <EmptyState
         message={t("detail.emptyConnections")}
@@ -48,50 +42,11 @@ export function AgentConnectionsSection({
     );
   }
 
-  const { agentAppProfileId, agentAppProfileName } = detail;
-
   return (
     <div className="space-y-6">
-      {hasProviders && (
-        <section className="space-y-2">
-          {hasIntegrations && (
-            <h3 className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
-              {t("detail.providersSectionTitle")}
-            </h3>
-          )}
-          {agentAppProfileId && agentAppProfileName ? (
-            <AppProfileProvidersBlock
-              appProfileId={agentAppProfileId}
-              appProfileName={agentAppProfileName}
-              providers={providers}
-              packageId={packageId}
-            />
-          ) : (
-            <div className="space-y-2">
-              {providers.map((svc) => (
-                <ProviderConnectionCard
-                  key={svc.id}
-                  providerId={svc.id}
-                  packageId={packageId}
-                  scopesRequired={svc.scopesRequired}
-                  scopesMissing={svc.scopesMissing}
-                />
-              ))}
-            </div>
-          )}
-        </section>
-      )}
-
-      {hasIntegrations && (
-        <section className="space-y-2">
-          {hasProviders && (
-            <h3 className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
-              {t("detail.integrationsSectionTitle")}
-            </h3>
-          )}
-          <AgentIntegrationsBlock entries={integrations} agentPackageId={packageId} />
-        </section>
-      )}
+      <section className="space-y-2">
+        <AgentIntegrationsBlock entries={integrations} agentPackageId={packageId} />
+      </section>
     </div>
   );
 }

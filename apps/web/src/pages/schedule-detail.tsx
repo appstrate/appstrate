@@ -21,17 +21,14 @@ import { JsonView } from "../components/json-view";
 import { RunList } from "../components/run-list";
 import { NextRunPreview } from "../components/next-run-preview";
 import { usePaginatedRuns } from "../hooks/use-paginated-runs";
-import { ProviderConnectionCard } from "../components/provider-connection-card";
-import { AppProfileProvidersBlock } from "../components/app-profile-providers-block";
 import { ScheduleStatusBadge } from "../components/schedule-status-badge";
 import { ProfileLabel } from "../components/profile-label";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { useScheduleById, useUpdateSchedule, useDeleteSchedule } from "../hooks/use-schedules";
-import { usePackageDetail, useAgents } from "../hooks/use-packages";
+import { useAgents } from "../hooks/use-packages";
 import { useScheduleProviderReadiness } from "../hooks/use-schedule-readiness";
-import { useConnectionProfiles } from "../hooks/use-connection-profiles";
 import { formatDateField } from "../lib/markdown";
-import { MoreHorizontal, Pencil, Trash2, Play, Pause, Calendar, Clock } from "lucide-react";
+import { MoreHorizontal, Pencil, Trash2, Play, Pause, Clock } from "lucide-react";
 
 export function ScheduleDetailPage() {
   const { t } = useTranslation(["agents", "common"]);
@@ -43,16 +40,8 @@ export function ScheduleDetailPage() {
   const updateSchedule = useUpdateSchedule();
   const deleteSchedule = useDeleteSchedule();
 
-  const { data: agentDetail } = usePackageDetail("agent", schedule?.packageId);
-  const hasProviders = (agentDetail?.dependencies?.providers?.length ?? 0) > 0;
-
-  const tabs = hasProviders
-    ? (["runs", "providers", "details"] as const)
-    : (["runs", "details"] as const);
-
-  const needsSetup = hasProviders && schedule?.readiness?.status !== "ready";
-  const defaultTab = needsSetup ? "providers" : "runs";
-  const [activeTab, setActiveTab] = useTabWithHash(tabs, defaultTab);
+  const tabs = ["runs", "details"] as const;
+  const [activeTab, setActiveTab] = useTabWithHash(tabs, "runs");
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   if (isLoading) return <LoadingState />;
@@ -109,9 +98,6 @@ export function ScheduleDetailPage() {
         >
           <TabsList className="mt-3">
             <TabsTrigger value="runs">{t("schedule.tabRuns")}</TabsTrigger>
-            {hasProviders && (
-              <TabsTrigger value="providers">{t("schedule.tabProviders")}</TabsTrigger>
-            )}
             <TabsTrigger value="details">{t("schedule.tabDetails")}</TabsTrigger>
           </TabsList>
         </PageHeader>
@@ -119,12 +105,6 @@ export function ScheduleDetailPage() {
         <TabsContent value="runs">
           <ScheduleHistory schedule={schedule} />
         </TabsContent>
-
-        {hasProviders && (
-          <TabsContent value="providers">
-            <ScheduleProviders schedule={schedule} />
-          </TabsContent>
-        )}
 
         <TabsContent value="details">
           <ScheduleParams schedule={schedule} />
@@ -251,66 +231,6 @@ function ScheduleParams({
         </div>
       )}
     </>
-  );
-}
-
-// ─── Providers Tab ───────────────────────────────────────
-
-function ScheduleProviders({
-  schedule,
-}: {
-  schedule: NonNullable<ReturnType<typeof useScheduleById>["data"]>;
-}) {
-  const { t } = useTranslation(["agents"]);
-  const { agentProviders } = useScheduleProviderReadiness(schedule);
-  const { data: userProfiles } = useConnectionProfiles();
-
-  const isAppProfile = schedule.profileType === "app";
-  const appProfileId = isAppProfile ? schedule.connectionProfileId : undefined;
-
-  // For user profile schedules, only the profile owner can connect/disconnect
-  const isProfileOwner = userProfiles?.some((p) => p.id === schedule.connectionProfileId) ?? false;
-
-  if (agentProviders.length === 0) {
-    return <EmptyState message={t("schedule.noProviders")} icon={Calendar} compact />;
-  }
-
-  if (isAppProfile && appProfileId) {
-    return (
-      <AppProfileProvidersBlock
-        appProfileId={appProfileId}
-        appProfileName={schedule.profileName ?? "-"}
-        providers={agentProviders}
-      />
-    );
-  }
-
-  // User profile schedule — show provider cards directly
-  return (
-    <div className="border-border bg-card rounded-lg border">
-      <div className="border-border flex items-center gap-2 border-b px-4 py-3">
-        <ProfileLabel
-          profileType={schedule.profileType}
-          profileName={schedule.profileName}
-          profileOwnerName={schedule.profileOwnerName}
-          iconSize="size-4"
-          className="text-muted-foreground text-sm font-medium"
-        />
-        <UIBadge variant="outline" className="px-1 py-0 text-[10px]">
-          {schedule.profileType}
-        </UIBadge>
-      </div>
-      <div className="space-y-2 p-2">
-        {agentProviders.map((providerId) => (
-          <ProviderConnectionCard
-            key={providerId}
-            providerId={providerId}
-            readOnly={!isProfileOwner}
-            viewProfileId={schedule.connectionProfileId}
-          />
-        ))}
-      </div>
-    </div>
   );
 }
 

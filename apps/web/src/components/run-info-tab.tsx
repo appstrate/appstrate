@@ -6,14 +6,8 @@ import { cn } from "../lib/utils";
 import { JsonView } from "./json-view";
 import { SectionCard } from "./section-card";
 import { EmptyState } from "./page-states";
-import { ProviderStatusRow } from "./provider-status-row";
 import { RunTrigger } from "./run-trigger";
-import { useProviders } from "../hooks/use-providers";
-import {
-  ACTIVE_RUN_STATUSES,
-  type EnrichedRun,
-  type RunProviderSnapshot,
-} from "@appstrate/shared-types";
+import { ACTIVE_RUN_STATUSES, type EnrichedRun } from "@appstrate/shared-types";
 
 interface RunInfoTabProps {
   run: EnrichedRun;
@@ -46,8 +40,6 @@ function formatTimestamp(value: string | Date | null | undefined): string | null
 
 export function RunInfoTab({ run }: RunInfoTabProps) {
   const { t } = useTranslation(["agents", "settings"]);
-  const { data: providers } = useProviders();
-  const providerStatuses = run.providerStatuses as RunProviderSnapshot[] | null;
   const input = run.input as Record<string, unknown> | null;
   const config = run.config as Record<string, unknown> | null;
   const usage = run.tokenUsage as {
@@ -88,30 +80,6 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
         )}
         <InfoCard label={t("exec.infoTrigger")} value={<RunTrigger run={run} />} />
       </div>
-
-      {/* Connections */}
-      {providerStatuses && providerStatuses.length > 0 && (
-        <SectionCard title={t("exec.infoConnections")}>
-          <div className="space-y-1.5">
-            {providerStatuses.map((svc) => {
-              const providerMeta = providers?.find((p) => p.id === svc.id);
-              return (
-                <ProviderStatusRow
-                  key={svc.id}
-                  id={svc.id}
-                  status={svc.status}
-                  source={svc.source}
-                  profileName={svc.profileName}
-                  profileOwnerName={svc.profileOwnerName}
-                  scopesSufficient={svc.scopesSufficient}
-                  displayName={providerMeta?.displayName ?? svc.id}
-                  iconUrl={providerMeta?.iconUrl}
-                />
-              );
-            })}
-          </div>
-        </SectionCard>
-      )}
 
       {/* Input */}
       {input && Object.keys(input).length > 0 && (

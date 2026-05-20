@@ -14,13 +14,11 @@ import {
   useDeleteAppProfile,
   useAppProfileAgents,
 } from "../hooks/use-connection-profiles";
-import { useProviders } from "../hooks/use-providers";
 import { useAgents } from "../hooks/use-packages";
 import { useAllSchedules } from "../hooks/use-schedules";
-import { ProviderConnectionCard } from "../components/provider-connection-card";
 import { PackageCard } from "../components/package-card";
 import { ScheduleCard } from "../components/schedule-card";
-import { Calendar, Pencil, Trash2, FolderOpen, Workflow } from "lucide-react";
+import { Calendar, Pencil, Trash2, Workflow } from "lucide-react";
 
 export function AppProfileDetailPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -28,7 +26,6 @@ export function AppProfileDetailPage() {
   const navigate = useNavigate();
 
   const { data: appProfiles, isLoading: profilesLoading } = useAppProfiles();
-  const { data: providers } = useProviders();
   const { data: agents } = useAgents();
   const { data: allSchedules } = useAllSchedules();
   const { data: linkedAgentRefs } = useAppProfileAgents(id);
@@ -44,8 +41,6 @@ export function AppProfileDetailPage() {
 
   const profile = appProfiles?.find((p) => p.id === id);
   if (!profile) return <ErrorState message={t("appProfiles.notFound")} />;
-
-  const enabledProviders = (providers ?? []).filter((p) => p.enabled);
 
   // Schedules using this profile
   const relatedSchedules = (allSchedules ?? []).filter((s) => s.connectionProfileId === id);
@@ -99,26 +94,6 @@ export function AppProfileDetailPage() {
         }
       />
 
-      {/* ─── Providers ──────────────────────────────────── */}
-      <section className="mb-8 space-y-3">
-        <h3 className="text-muted-foreground text-sm font-medium">{t("appProfiles.bindings")}</h3>
-
-        {enabledProviders.length === 0 ? (
-          <EmptyState message={t("appProfiles.noBindings")} icon={FolderOpen} compact />
-        ) : (
-          <div className="space-y-2">
-            {enabledProviders.map((provider) => (
-              <ProviderConnectionCard
-                key={provider.id}
-                providerId={provider.id}
-                appProfileId={id}
-                appProfileName={profile.name}
-              />
-            ))}
-          </div>
-        )}
-      </section>
-
       {/* ─── Agents liés ──────────────────────────────────── */}
       <section className="mb-8 space-y-3">
         <h3 className="text-muted-foreground text-sm font-medium">
@@ -142,7 +117,6 @@ export function AppProfileDetailPage() {
                   source={agent.source}
                   runningRuns={agent.runningRuns}
                   keywords={agent.keywords}
-                  providerIds={agent.dependencies?.providers}
                 />
               ))}
             </div>

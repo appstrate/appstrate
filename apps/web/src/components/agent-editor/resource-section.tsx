@@ -42,7 +42,7 @@ export function VersionSelect({
   value,
   onChange,
 }: {
-  type: PackageType | "agent" | "provider";
+  type: PackageType | "agent";
   packageId: string;
   value: string;
   onChange: (version: string) => void;

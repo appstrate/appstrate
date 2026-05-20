@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { LucideIcon } from "lucide-react";
-import { Plug, Wrench } from "lucide-react";
+import { Wrench } from "lucide-react";
 import { usePackageList } from "../hooks/use-packages";
 
 export interface ItemTabConfig {
-  type: "skill" | "provider";
+  type: "skill";
   useData: () => {
     data:
       | {
@@ -32,14 +32,6 @@ const ITEM_TAB_CONFIGS: ItemTabConfig[] = [
     emptyHintKey: "packages.emptyItemsHint",
     emptyIcon: Wrench,
   },
-  {
-    type: "provider",
-    useData: () => usePackageList("provider"),
-    emptyMessageKey: "packages.emptyItems",
-    emptyHintKey: "packages.emptyItemsHint",
-    emptyIcon: Plug,
-  },
 ];
 
 export const skillTabConfig: ItemTabConfig = ITEM_TAB_CONFIGS[0]!;
-export const providerTabConfig: ItemTabConfig = ITEM_TAB_CONFIGS[1]!;

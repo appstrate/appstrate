@@ -59,9 +59,6 @@ interface PackageActionsDropdownProps {
   onDeleteRuns?: () => void;
   onAddSchedule?: () => void;
   onDeleteMemories?: () => void;
-  // Provider-specific
-  hasCredentials?: boolean;
-  onDeleteCredentials?: () => void;
   // Skill/Tool-specific
   canDeletePackage?: boolean;
   onDeletePackage?: () => void;
@@ -93,8 +90,6 @@ export function PackageActionsDropdown({
   onDeleteRuns,
   onAddSchedule,
   onDeleteMemories,
-  hasCredentials,
-  onDeleteCredentials,
   canDeletePackage,
   onDeletePackage,
   canUninstall,
@@ -215,20 +210,6 @@ export function PackageActionsDropdown({
                   {t("detail.clearMemories")}
                 </DropdownMenuItem>
               )}
-            </>
-          )}
-
-          {/* ── Delete credentials (provider-only) ── */}
-          {isAdmin && type === "provider" && hasCredentials && onDeleteCredentials && (
-            <>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onSelect={onDeleteCredentials}
-                className="text-destructive focus:text-destructive"
-              >
-                <Trash2 size={14} />
-                {t("providers.deleteCredentials", { ns: "settings" })}
-              </DropdownMenuItem>
             </>
           )}
 

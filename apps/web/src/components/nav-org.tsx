@@ -8,7 +8,6 @@ import {
   Activity,
   Calendar,
   Wrench,
-  Plug,
   Webhook,
   Loader2,
   Users,
@@ -58,7 +57,6 @@ export function NavOrg() {
   const resourceItems = [{ path: "/skills", label: t("nav.skills"), icon: Wrench }];
 
   const integrationItems = [
-    { path: "/providers", label: t("nav.connectors"), icon: Plug },
     { path: "/integrations", label: t("nav.integrations"), icon: Boxes },
     ...(isAdmin && features.webhooks
       ? [{ path: "/webhooks", label: t("nav.webhooks"), icon: Webhook }]

@@ -18,10 +18,8 @@ import { SchemaSection } from "../components/agent-editor/schema-section";
 import { ResourceSection } from "../components/agent-editor/resource-section";
 import { RuntimeToolsSection } from "../components/agent-editor/runtime-tools-section";
 import { PromptEditor } from "../components/agent-editor/prompt-editor";
-import { ProviderPicker } from "../components/agent-editor/provider-picker";
 import { JsonEditor } from "../components/json-editor";
 import { ContentEditor } from "../components/package-editor/content-editor";
-import { ProviderEditorInner } from "../components/provider-editor/provider-editor-inner";
 import { Spinner } from "../components/spinner";
 import { EditorShell } from "../components/editor-shell";
 
@@ -30,14 +28,11 @@ import type { MetadataState } from "../components/agent-editor/metadata-section"
 import {
   defaultEditorState,
   defaultSkillManifest,
-  defaultProviderManifest,
   DEFAULT_SKILL_CONTENT,
   getManifestName,
   manifestToMetadata,
   metadataToManifestPatch,
   manifestToSchemaFields,
-  getProviderEntries,
-  setProviderEntries,
   getResourceEntries,
   setResourceEntries,
   getRuntimeTools,
@@ -57,7 +52,6 @@ const PACKAGE_SCHEMAS: Record<string, object | undefined> = {
 type GenericEditorTab =
   | "general"
   | "prompt"
-  | "providers"
   | "schema"
   | "skills"
   | "runtimeTools"
@@ -159,7 +153,6 @@ function AgentEditorInner({
   const agentTabs: Array<{ id: GenericEditorTab; label: string }> = [
     { id: "general", label: t("editor.tabGeneral") },
     { id: "prompt", label: t("editor.tabContent.agent") },
-    { id: "providers", label: t("editor.tabServices") },
     { id: "schema", label: t("editor.tabSchema") },
     { id: "skills", label: t("editor.tabSkills") },
     { id: "runtimeTools", label: t("editor.tabRuntimeTools") },
@@ -192,16 +185,6 @@ function AgentEditorInner({
         <PromptEditor
           value={state.prompt}
           onChange={(prompt) => setState((s) => ({ ...s, prompt }))}
-        />
-      )}
-      {activeTab === "providers" && (
-        <ProviderPicker
-          value={getProviderEntries(state.manifest)}
-          onChange={(entries) => {
-            const m = { ...state.manifest };
-            setProviderEntries(m, entries);
-            setState((s) => ({ ...s, manifest: m }));
-          }}
         />
       )}
       {activeTab === "schema" && (
@@ -466,28 +449,6 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
         resolvedDeps={agentDetail?.dependencies ?? null}
         packageId={packageId}
         isEdit={isEdit}
-      />
-    );
-  }
-
-  // Provider editor — uses package detail (manifest as source of truth)
-  if (type === "provider") {
-    const providerDetail = pkgQuery.data as OrgPackageItemDetail | undefined;
-
-    return (
-      <ProviderEditorInner
-        key={packageId ?? "new"}
-        initialState={
-          isEdit && providerDetail
-            ? {
-                manifest: providerDetail.manifest ?? {},
-                content: providerDetail.content ?? "",
-                lockVersion: providerDetail.lockVersion,
-              }
-            : { manifest: defaultProviderManifest(currentOrg?.slug, user?.email), content: "" }
-        }
-        isEdit={isEdit}
-        packageId={packageId}
       />
     );
   }

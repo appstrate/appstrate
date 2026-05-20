@@ -16,7 +16,6 @@ import {
 import { formatDateField } from "../../lib/markdown";
 import { LoadingState, EmptyState } from "../../components/page-states";
 import { ConfirmModal } from "../../components/confirm-modal";
-import { useProviders } from "../../hooks/use-providers";
 import { resolveScopeLabel } from "../../lib/scope-labels";
 import type { MeConnectionEntry, MeConnectionSourceGroup } from "@appstrate/shared-types";
 import type { AvailableScope } from "@appstrate/core/validation";
@@ -307,7 +306,6 @@ function SourceGroupCard({
 export function PreferencesConnectorsPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { data: groups, isLoading } = useMyConnections();
-  const { data: providerConfigs } = useProviders();
 
   const disconnectProvider = useDisconnectProviderConnection();
   const disconnectIntegration = useDisconnectIntegrationConnection();
@@ -358,9 +356,8 @@ export function PreferencesConnectorsPage() {
     });
   };
 
-  const scopesForGroup = (group: MeConnectionSourceGroup): AvailableScope[] | undefined => {
-    if (group.kind !== "provider") return undefined;
-    return providerConfigs?.find((p) => p.id === group.sourceId)?.availableScopes;
+  const scopesForGroup = (_group: MeConnectionSourceGroup): AvailableScope[] | undefined => {
+    return undefined;
   };
 
   return (
@@ -377,7 +374,7 @@ export function PreferencesConnectorsPage() {
       <div className="border-border bg-card mb-4 rounded-lg border p-5">
         <p className="text-muted-foreground text-sm">
           {t("connectors.descriptionUnified")}{" "}
-          <Link to="/providers" className="text-primary text-sm no-underline hover:underline">
+          <Link to="/integrations" className="text-primary text-sm no-underline hover:underline">
             {t("connectors.connectMore")}
           </Link>
         </p>
@@ -389,7 +386,7 @@ export function PreferencesConnectorsPage() {
           hint={t("connectors.noConnectionsHint")}
           icon={Unplug}
         >
-          <Link to="/providers">
+          <Link to="/integrations">
             <Button variant="outline">{t("connectors.goToConnectors")}</Button>
           </Link>
         </EmptyState>

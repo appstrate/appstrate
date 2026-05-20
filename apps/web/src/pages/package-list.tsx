@@ -22,12 +22,10 @@ export interface CardItem {
   source?: "system" | "local";
   runningRuns?: number;
   keywords?: string[];
-  providerIds?: string[];
   usedByAgents?: number;
   unreadCount?: number;
   statusBadge?: ReactNode;
   actions?: ReactNode;
-  iconUrl?: string;
   autoInstalled?: boolean;
 }
 
@@ -109,7 +107,6 @@ export function PackageList() {
     source: f.source,
     runningRuns: f.runningRuns,
     keywords: f.keywords,
-    providerIds: Object.keys(f.dependencies.providers ?? {}),
     unreadCount: unreadCounts?.[f.id],
   }));
 

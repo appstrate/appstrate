@@ -16,12 +16,7 @@ import {
   type SchemaWrapper,
 } from "@appstrate/core/form";
 import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
-import {
-  parseManifestIntegrations,
-  parseManifestProviders,
-  writeManifestIntegrations,
-  writeManifestProviders,
-} from "@appstrate/core/dependencies";
+import { parseManifestIntegrations, writeManifestIntegrations } from "@appstrate/core/dependencies";
 
 // ─── Version ranges ─────────────────────────────────────────
 
@@ -50,9 +45,7 @@ export function defaultEditorState(orgSlug?: string, userEmail?: string): AgentE
       description: "",
       author: userEmail ?? "",
       timeout: 300,
-      dependencies: {
-        providers: {},
-      },
+      dependencies: {},
     },
     prompt: "",
   };
@@ -73,32 +66,6 @@ export function defaultSkillManifest(
     displayName: "",
     description: "",
     author: userEmail ?? "",
-  };
-}
-
-export function defaultProviderManifest(
-  orgSlug?: string,
-  userEmail?: string,
-): Record<string, unknown> {
-  return {
-    $schema: AFPS_SCHEMA_URLS.provider,
-    schemaVersion: "1.1",
-    type: "provider",
-    name: orgSlug ? `@${orgSlug}/` : "",
-    version: "1.0.0",
-    displayName: "",
-    description: "",
-    author: userEmail ?? "",
-    definition: {
-      authMode: "oauth2",
-      oauth2: {
-        authorizationUrl: "",
-        tokenUrl: "",
-        scopeSeparator: " ",
-        pkceEnabled: true,
-        tokenAuthMethod: "client_secret_post",
-      },
-    },
   };
 }
 
@@ -168,9 +135,6 @@ export function metadataToManifestPatch(m: MetadataState): Record<string, unknow
 export function getDeps(m: Record<string, unknown>): Record<string, unknown> {
   return (m.dependencies ?? {}) as Record<string, unknown>;
 }
-
-export const getProviderEntries = parseManifestProviders;
-export const setProviderEntries = writeManifestProviders;
 
 export function getResourceEntries(
   m: Record<string, unknown>,

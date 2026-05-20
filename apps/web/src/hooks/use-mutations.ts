@@ -346,7 +346,6 @@ export function useCreatePackage(type: PackageType) {
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["packages"] });
       if (type === "agent") qc.invalidateQueries({ queryKey: ["agents"] });
-      if (type === "provider") invalidateProviderQueries(qc);
       if (data.packageId) {
         navigate(packageDetailPath(type, data.packageId));
       }
@@ -374,58 +373,9 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["packages"] });
       if (type === "agent") qc.invalidateQueries({ queryKey: ["agents"] });
-      if (type === "provider") invalidateProviderQueries(qc);
       qc.invalidateQueries({ queryKey: ["version-info"] });
       navigate(packageDetailPath(type, packageId));
     },
-    onError: onMutationError,
-  });
-}
-
-// --- Provider mutations ---
-
-function invalidateProviderQueries(qc: ReturnType<typeof useQueryClient>) {
-  const cfg = PACKAGE_CONFIG.provider;
-  qc.invalidateQueries({ queryKey: ["providers"] });
-  qc.invalidateQueries({ queryKey: ["packages", cfg.path] });
-  qc.invalidateQueries({ queryKey: ["version-info"] });
-  qc.invalidateQueries({ queryKey: ["available-providers"] });
-}
-
-export function useConfigureProviderCredentials() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({
-      providerId,
-      credentials,
-      enabled,
-      invalidateConnections,
-    }: {
-      providerId: string;
-      credentials?: Record<string, string>;
-      enabled?: boolean;
-      invalidateConnections?: boolean;
-    }) => {
-      return api(`/providers/credentials/${providerId}`, {
-        method: "PUT",
-        body: JSON.stringify({ credentials, enabled, invalidateConnections }),
-      });
-    },
-    onSuccess: () => {
-      invalidateProviderQueries(qc);
-      toast.success(i18n.t("settings:providers.credentialsSaved"));
-    },
-    onError: onMutationError,
-  });
-}
-
-export function useDeleteProviderCredentials() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (providerId: string) => {
-      return api(`/providers/credentials/${providerId}`, { method: "DELETE" });
-    },
-    onSuccess: () => invalidateProviderQueries(qc),
     onError: onMutationError,
   });
 }

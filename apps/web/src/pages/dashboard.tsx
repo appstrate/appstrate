@@ -48,7 +48,6 @@ export function DashboardPage() {
       description?: string | null;
       source?: string;
       keywords?: string[];
-      providerIds?: string[];
       runningRuns?: number;
     }
   >();
@@ -59,7 +58,6 @@ export function DashboardPage() {
         description: f.description,
         source: f.source,
         keywords: f.keywords,
-        providerIds: Object.keys(f.dependencies.providers ?? {}),
         runningRuns: f.runningRuns,
       });
     }
@@ -144,7 +142,6 @@ export function DashboardPage() {
                     source={agent?.source as "system" | "local" | undefined}
                     runningRuns={agent?.runningRuns}
                     keywords={agent?.keywords}
-                    providerIds={agent?.providerIds}
                     unreadCount={unreadCounts?.[agentId]}
                   />
                 </div>

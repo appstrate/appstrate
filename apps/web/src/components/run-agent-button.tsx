@@ -2,21 +2,17 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
 import { Play } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "./spinner";
 import { RunModal } from "./run-modal";
-import { ConnectionSummaryModal } from "./connection-summary-modal";
 import {
   MissingConnectionsModal,
   type MissingIntegrationFieldError,
 } from "./missing-connections-modal";
 import { useRunAgent } from "../hooks/use-mutations";
 import { usePackageDetail } from "../hooks/use-packages";
-import { hasDisconnectedProviders } from "../lib/provider-status";
-import { packageDetailPath } from "../lib/package-paths";
 import { usePermissions } from "../hooks/use-permissions";
 import { ApiError } from "../api";
 import type { AgentDetail } from "@appstrate/shared-types";
@@ -46,10 +42,8 @@ export function RunAgentButton({
   showLabel = false,
 }: RunAgentButtonProps) {
   const { t } = useTranslation(["agents"]);
-  const navigate = useNavigate();
   const { isMember } = usePermissions();
   const runAgent = useRunAgent(packageId);
-  const [summaryOpen, setSummaryOpen] = useState(false);
   const [inputOpen, setInputOpen] = useState(false);
   const [missingErrors, setMissingErrors] = useState<MissingIntegrationFieldError[] | null>(null);
 
@@ -84,13 +78,8 @@ export function RunAgentButton({
 
   const detail: AgentDetail | undefined = providedDetail ?? fetchedDetail;
 
-  const providers = detail?.dependencies?.providers ?? [];
-  const hasProviders = providers.length > 0;
-  const hasDisconnected = hasDisconnectedProviders(providers);
-
-  /** Called after the connection summary is confirmed (or skipped if no providers). */
-  const proceedAfterSummary = () => {
-    setSummaryOpen(false);
+  /** Start the run: open the input modal when the agent declares input, else fire directly. */
+  const startRun = () => {
     const agentHasInput =
       !!detail?.input?.schema?.properties && Object.keys(detail.input.schema.properties).length > 0;
     if (!agentHasInput) {
@@ -98,15 +87,6 @@ export function RunAgentButton({
       return;
     }
     setInputOpen(true);
-  };
-
-  /** Start the run agent: show summary if providers, otherwise proceed directly. */
-  const startRun = () => {
-    if (hasProviders) {
-      setSummaryOpen(true);
-    } else {
-      proceedAfterSummary();
-    }
   };
 
   const handleClick = (e: React.MouseEvent) => {
@@ -139,9 +119,6 @@ export function RunAgentButton({
           className="relative"
         >
           {isPending ? <Spinner /> : t("detail.run")}
-          {hasDisconnected && !isPending && (
-            <span className="bg-warning absolute -top-1 -right-1 size-2.5 rounded-full" />
-          )}
         </Button>
       ) : (
         <Button
@@ -153,26 +130,7 @@ export function RunAgentButton({
           title={disabled ? disabledTitle : t("detail.run")}
         >
           {isPending ? <Spinner /> : <Play size={14} />}
-          {hasDisconnected && !isPending && (
-            <span className="bg-warning absolute -top-1 -right-1 size-2.5 rounded-full" />
-          )}
         </Button>
-      )}
-
-      {/* Connection summary — always shown before run when agent has providers */}
-      {detail && (
-        <ConnectionSummaryModal
-          open={summaryOpen}
-          onClose={() => setSummaryOpen(false)}
-          onConfirm={proceedAfterSummary}
-          onConfigureConnections={() => {
-            setSummaryOpen(false);
-            navigate(`${packageDetailPath("agent", packageId)}#connectors`);
-          }}
-          providers={detail.dependencies?.providers ?? []}
-          appProfileName={detail.agentAppProfileName}
-          isPending={runAgent.isPending}
-        />
       )}
 
       {detail && (

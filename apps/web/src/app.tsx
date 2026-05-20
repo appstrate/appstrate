@@ -22,7 +22,6 @@ import { WelcomePage } from "./pages/welcome";
 import { OnboardingCreateStep } from "./pages/onboarding/create-step";
 import { OnboardingPlanStep } from "./pages/onboarding/plan-step";
 import { OnboardingModelStep } from "./pages/onboarding/model-step";
-import { OnboardingProvidersStep } from "./pages/onboarding/providers-step";
 import { OnboardingMembersStep } from "./pages/onboarding/members-step";
 import { OnboardingDoneStep } from "./pages/onboarding/done-step";
 import { OnboardingWaitingStep } from "./pages/onboarding/waiting-step";
@@ -42,7 +41,6 @@ import { OrgSettingsAppOauthPage } from "./pages/org-settings/app/oauth";
 import { ApiKeysPage } from "./pages/api-keys-page";
 import { EndUsersPage } from "./pages/end-users-page";
 import { SkillsPage } from "./pages/skills-page";
-import { ProvidersPage } from "./pages/providers-page";
 import { IntegrationsPage } from "./pages/integrations-page";
 import { IntegrationDetailPage } from "./pages/integration-detail";
 import { AppProfileDetailPage } from "./pages/app-profile-detail";
@@ -353,7 +351,6 @@ export function App() {
           <Route path="/onboarding/create" element={<OnboardingCreateStep />} />
           <Route path="/onboarding/plan" element={<OnboardingPlanStep />} />
           <Route path="/onboarding/model" element={<OnboardingModelStep />} />
-          <Route path="/onboarding/providers" element={<OnboardingProvidersStep />} />
           <Route path="/onboarding/members" element={<OnboardingMembersStep />} />
           <Route path="/onboarding/complete" element={<OnboardingDoneStep />} />
           <Route
@@ -382,7 +379,6 @@ export function App() {
             <Route path="/schedules/:id" element={<ScheduleDetailPage />} />
             <Route path="/schedules/:id/edit" element={<ScheduleEditPage />} />
             <Route path="/skills" element={<SkillsPage />} />
-            <Route path="/providers" element={<ProvidersPage />} />
             <Route path="/integrations" element={<IntegrationsPage />} />
             <Route path="/integrations/:scope/:name" element={<IntegrationDetailPage />} />
             <Route
@@ -399,19 +395,6 @@ export function App() {
             <Route
               path="/skills/:scope/:name/:version"
               element={<UnifiedPackageDetailPage type="skill" />}
-            />
-            <Route path="/providers/new" element={<PackageEditorPage type="provider" />} />
-            <Route
-              path="/providers/:scope/:name/edit"
-              element={<PackageEditorPage type="provider" />}
-            />
-            <Route
-              path="/providers/:scope/:name"
-              element={<UnifiedPackageDetailPage type="provider" />}
-            />
-            <Route
-              path="/providers/:scope/:name/:version"
-              element={<UnifiedPackageDetailPage type="provider" />}
             />
             <Route path="/library" element={<LibraryPage />} />
             <Route

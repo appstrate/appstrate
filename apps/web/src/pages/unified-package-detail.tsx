@@ -18,8 +18,6 @@ import type { AgentDetail, OrgPackageItemDetail, PackageType } from "@appstrate/
 import type { JSONSchemaObject } from "@appstrate/core/form";
 import { usePackageOwnership } from "../hooks/use-org";
 import { usePermissions } from "../hooks/use-permissions";
-import { useProviders, useProviderCallbackUrl } from "../hooks/use-providers";
-import { useDeleteProviderCredentials } from "../hooks/use-mutations";
 import { usePackageInstallState, useTogglePackageInstall } from "../hooks/use-library";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
 import { LoadingState } from "../components/page-states";
@@ -38,8 +36,6 @@ import { VersionHistory } from "../components/version-history";
 import { DiffTab } from "../components/diff-tab";
 import { CreateVersionModal } from "../components/create-version-modal";
 import { ForkPackageModal } from "../components/fork-package-modal";
-import { ProviderCredentialsForm } from "../components/provider-credentials-form";
-import { ProviderConnectButton } from "../components/provider-connect-button";
 // Agent-specific components
 import { AgentActions } from "../components/package-detail/agent-actions";
 import {
@@ -170,13 +166,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const { data: orgProxies } = useProxies();
   const { data: orgModels } = useModels();
 
-  // Provider-specific data (ProviderConfig with adminCredentialSchema, setupGuide, etc.)
-  const providersQuery = useProviders();
-  const callbackUrlQuery = useProviderCallbackUrl();
-  const providerConfig =
-    type === "provider" ? providersQuery.data?.find((p) => p.id === packageId) : undefined;
-  const callbackUrl = type === "provider" ? callbackUrlQuery.data : undefined;
-
   // Agents list for "Used by" tab enrichment
   const { data: allAgents } = useAgents();
 
@@ -214,13 +203,12 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const downloadPackage = usePackageDownload(scope, name);
   const downloadBundle = useAgentBundleExport(scope, name);
   const deletePkgMutation = useDeletePackage(type);
-  const deleteCredentialsMutation = useDeleteProviderCredentials();
   const uninstallMutation = useTogglePackageInstall();
   const currentAppId = useCurrentApplicationId();
   const { installedAppNames, isInstalledInCurrentApp } = usePackageInstallState(packageId);
   const [forkOpen, setForkOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{
-    type: "deleteCredentials" | "deletePackage" | "uninstallPackage";
+    type: "deletePackage" | "uninstallPackage";
     description: string;
   } | null>(null);
 
@@ -251,8 +239,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       const val = agentDetail?.config?.current?.[key];
       return val === undefined || val === null || val === "";
     });
-  const defaultTab: DetailTab =
-    type === "agent" ? "runs" : type === "provider" ? "configuration" : "content";
+  const defaultTab: DetailTab = type === "agent" ? "runs" : "content";
   const [tab, setTab] = useTabWithHash<DetailTab>(allValidTabs, defaultTab);
   // Reset tab if it becomes invalid
   useEffect(() => {
@@ -338,9 +325,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   ];
 
   const pkgTabs: Array<{ id: DetailTab; label: string }> = [
-    ...(isAdmin && type === "provider"
-      ? [{ id: "configuration" as DetailTab, label: t("providers.configure", { ns: "settings" }) }]
-      : []),
     {
       id: "content",
       label: t(`editor.tabContent.${type}`),
@@ -413,13 +397,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                 onDownload={downloadPackage}
                 onCreateVersion={() => setCreateVersionOpen(true)}
                 onFork={() => setForkOpen(true)}
-                hasCredentials={providerConfig?.hasCredentials}
-                onDeleteCredentials={() => {
-                  setConfirmAction({
-                    type: "deleteCredentials",
-                    description: t("providers.deleteCredentialsConfirm", { ns: "settings" }),
-                  });
-                }}
                 canDeletePackage={!!pkgDetail && pkgDetail.agents.length === 0}
                 onDeletePackage={() => {
                   if (!pkgDetail) return;
@@ -546,16 +523,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         </div>
       )}
 
-      {type === "provider" && tab === "configuration" && providerConfig && (
-        <div className="border-border bg-card rounded-lg border p-4">
-          <ProviderCredentialsForm
-            provider={providerConfig}
-            callbackUrl={callbackUrl}
-            footer={<ProviderConnectButton provider={providerConfig} />}
-          />
-        </div>
-      )}
-
       {type !== "agent" &&
         tab === "usedBy" &&
         pkgDetail &&
@@ -577,7 +544,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                   type="agent"
                   source={agent.source}
                   keywords={agent.keywords}
-                  providerIds={Object.keys(agent.dependencies.providers ?? {})}
                   runningRuns={agent.runningRuns}
                 />
               ))}
@@ -620,11 +586,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         onClose={() => setConfirmAction(null)}
         title={t("btn.confirm", { ns: "common" })}
         description={confirmAction?.description ?? ""}
-        isPending={
-          deleteCredentialsMutation.isPending ||
-          deletePkgMutation.isPending ||
-          uninstallMutation.isPending
-        }
+        isPending={deletePkgMutation.isPending || uninstallMutation.isPending}
         confirmLabel={
           confirmAction?.type === "uninstallPackage"
             ? t("packages.uninstall", { ns: "settings" })
@@ -633,9 +595,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         onConfirm={() => {
           if (!confirmAction) return;
           const close = () => setConfirmAction(null);
-          if (confirmAction.type === "deleteCredentials") {
-            deleteCredentialsMutation.mutate(packageId, { onSuccess: close });
-          } else if (confirmAction.type === "uninstallPackage") {
+          if (confirmAction.type === "uninstallPackage") {
             if (!currentAppId) return;
             uninstallMutation.mutate(
               { applicationId: currentAppId, packageId, installed: true },
