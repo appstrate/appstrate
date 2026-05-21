@@ -2,7 +2,7 @@
 // Copyright 2026 Appstrate
 
 /**
- * Unit tests for the Zod-first provider_call argument schema (Task 1).
+ * Unit tests for the Zod-first api_call argument schema (Task 1).
  *
  * Verifies:
  *  - Valid argument shapes parse correctly via apiCallRequestSchema

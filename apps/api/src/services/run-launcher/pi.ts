@@ -149,7 +149,7 @@ export async function runPlatformContainer(
       proxyUrl: plan.proxyUrl ?? undefined,
       llm: sidecarLlm,
       // Propagate the resolved model's context window so the sidecar's
-      // TokenBudget can spill `provider_call` outputs that would push the
+      // TokenBudget can spill `api_call` outputs that would push the
       // cumulative tool-output token count past the upstream model's
       // hard limit (#464). Both values are nullable on `org_models`
       // rows; we forward whatever survives the catalog cascade — the

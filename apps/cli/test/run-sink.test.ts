@@ -374,22 +374,22 @@ describe("createConsoleSink — human mode", () => {
   it("matches start and end events via toolCallId in verbose mode", async () => {
     const sink = createConsoleSink({ verbosity: "verbose" });
     await sink.handle(
-      progressEvent("Tool: provider_call", {
-        tool: "provider_call",
+      progressEvent("Tool: api_call", {
+        tool: "api_call",
         args: { url: "/foo" },
         toolCallId: "call_aaaaaaaaaaaaaaaa",
       }),
     );
     await sink.handle(
-      progressEvent("Tool: provider_call", {
-        tool: "provider_call",
+      progressEvent("Tool: api_call", {
+        tool: "api_call",
         args: { url: "/bar" },
         toolCallId: "call_bbbbbbbbbbbbbbbb",
       }),
     );
     await sink.handle(
-      progressEvent("Tool result: provider_call", {
-        tool: "provider_call",
+      progressEvent("Tool result: api_call", {
+        tool: "api_call",
         result: "ok",
         isError: false,
         toolCallId: "call_aaaaaaaaaaaaaaaa",

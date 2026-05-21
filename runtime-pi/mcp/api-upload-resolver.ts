@@ -169,7 +169,7 @@ export class McpApiUploadResolver {
         protocol: req.uploadProtocol,
         status: 0,
         headers: {},
-        error: `provider_upload: cannot read ${JSON.stringify(req.fromFile)}: ${getErrorMessage(err)}`,
+        error: `api_upload: cannot read ${JSON.stringify(req.fromFile)}: ${getErrorMessage(err)}`,
         bytesSent: 0,
       };
     }
@@ -179,7 +179,7 @@ export class McpApiUploadResolver {
         protocol: req.uploadProtocol,
         status: 0,
         headers: {},
-        error: `provider_upload: file ${JSON.stringify(req.fromFile)} is empty — chunked uploads require ≥1 byte`,
+        error: `api_upload: file ${JSON.stringify(req.fromFile)} is empty — chunked uploads require ≥1 byte`,
         bytesSent: 0,
       };
     }
@@ -189,7 +189,7 @@ export class McpApiUploadResolver {
         protocol: req.uploadProtocol,
         status: 0,
         headers: {},
-        error: `provider_upload: file ${totalBytes} bytes exceeds streaming ceiling ${MAX_STREAMED_BODY_SIZE} (${Math.round(MAX_STREAMED_BODY_SIZE / 1024 / 1024)} MB). Set MAX_STREAMED_BODY_SIZE on the runtime to raise it.`,
+        error: `api_upload: file ${totalBytes} bytes exceeds streaming ceiling ${MAX_STREAMED_BODY_SIZE} (${Math.round(MAX_STREAMED_BODY_SIZE / 1024 / 1024)} MB). Set MAX_STREAMED_BODY_SIZE on the runtime to raise it.`,
         bytesSent: 0,
       };
     }
@@ -508,7 +508,7 @@ async function* chunkBytes(
   }
   if (offset !== totalBytes) {
     throw new Error(
-      `provider_upload: stream ended at byte ${offset}, expected ${totalBytes}. File may have been truncated mid-upload.`,
+      `api_upload: stream ended at byte ${offset}, expected ${totalBytes}. File may have been truncated mid-upload.`,
     );
   }
 }

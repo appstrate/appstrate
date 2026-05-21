@@ -36,7 +36,7 @@ export interface RuntimeReadyPayload {
   bootDurationMs: number;
   /**
    * Runtime ↔ platform wire protocol version. MAJOR.MINOR — runners on
-   * `2.0` advertise MCP-native tool surfaces (`provider_call`,
+   * `2.0` advertise MCP-native tool surfaces (`{ns}__api_call`,
    * `run_history`, `recall_memory`) and resource URIs. Old consumers
    * that don't read the field are unaffected (additive on the event
    * envelope).

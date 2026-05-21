@@ -21,7 +21,7 @@ export interface SidecarConfig {
   llm?: LlmProxyConfig;
   /**
    * Upstream model's total context window (tokens). When set, the sidecar's
-   * {@link TokenBudget} adds a pre-flight guard: a `provider_call` whose
+   * {@link TokenBudget} adds a pre-flight guard: an `api_call` whose
    * inline emission would push cumulative tool-output tokens past
    * `modelContextWindow - modelMaxTokens` (reserve for the response) spills
    * to the blob store instead — preventing a parallel batch of large

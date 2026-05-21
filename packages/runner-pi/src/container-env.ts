@@ -46,7 +46,7 @@ export interface RuntimePiEnvOptions {
   sidecarProxyLlmUrl?: string;
   /**
    * When `true`, no sidecar will be attached to the run. The entrypoint
-   * skips the MCP wiring phase entirely (no `provider_call`, `run_history`,
+   * skips the MCP wiring phase entirely (no `{ns}__api_call`, `run_history`,
    * `recall_memory` tools), `SIDECAR_URL` is not emitted, and the agent
    * talks to the upstream LLM directly via {@link sidecarProxyLlmUrl} or
    * the model's native baseUrl. Only valid for runs that declare no

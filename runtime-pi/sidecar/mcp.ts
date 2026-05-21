@@ -1170,7 +1170,7 @@ interface ResponseToToolResultOptions {
    * stripped) before serialisation.
    *
    * Defaults to false on the `api_call` path so an existing agent
-   * connection sees no wire-format change. The `provider_upload` Pi
+   * connection sees no wire-format change. The `api_upload` Pi
    * tool always passes `true`.
    */
   attachUpstreamMeta?: boolean;

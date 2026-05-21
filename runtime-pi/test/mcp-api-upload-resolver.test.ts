@@ -2,7 +2,7 @@
 
 /**
  * Integration tests for `McpApiUploadResolver` — the
- * orchestrator behind `provider_upload`.
+ * orchestrator behind `api_upload`.
  *
  * Test shape mirrors `mcp-provider-resolver.test.ts`: an in-process
  * MCP pair where the server-side handler stands in for the sidecar's

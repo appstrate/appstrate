@@ -16,13 +16,14 @@ Sidecars are spawned per-run with all runtime configuration (run token, platform
 
 ## MCP tools
 
-The `/mcp` endpoint advertises three first-party tools, all backed by the platform's per-run-token internal endpoints:
+The `/mcp` endpoint advertises two first-party tools, both backed by the platform's per-run-token internal endpoints:
 
 | Tool            | Purpose                                                                                                                                                                                            |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `provider_call` | Credential-injecting outbound proxy. Routed by `providerId`, validated against `authorizedUris`.                                                                                                   |
 | `run_history`   | Past-run metadata via the platform's per-run-token internal endpoint.                                                                                                                              |
 | `recall_memory` | Read the unified `package_persistence` archive — enumerates prior `note()` appends and (optionally) named pinned slots set via `pin()`. Replaces the legacy "Memory" prompt section (ADR-012/013). |
+
+Outbound credentialled HTTP access is exposed per integration as `{ns}__api_call` (credential-injecting outbound proxy, validated against `authorizedUris`), spawned alongside the first-party tools — see "AFPS Integrations runtime" in the platform-level `CLAUDE.md`.
 
 The agent's primary completions are served by the HTTP `/llm/*` route the Pi SDK calls natively; the sidecar does not expose a completions tool. Sub-agent workflows are handled platform-side by spawning a separate run.
 
@@ -30,7 +31,7 @@ Third-party MCP servers can be mounted alongside the first-party tools via `Subp
 
 ## Binary safety
 
-`provider_call` upstream responses are byte-exact: the sidecar reads the upstream body via `arrayBuffer()` and either returns the bytes inline (text under the per-call token cap and within the run-level cumulative budget — see "Token-aware context budgeting" below) or stores them in the run-scoped `BlobStore` and returns a `resource_link` block. No `.text()` decode, no UTF-8 round-trip, no implicit Content-Type rewriting.
+`{ns}__api_call` upstream responses are byte-exact: the sidecar reads the upstream body via `arrayBuffer()` and either returns the bytes inline (text under the per-call token cap and within the run-level cumulative budget — see "Token-aware context budgeting" below) or stores them in the run-scoped `BlobStore` and returns a `resource_link` block. No `.text()` decode, no UTF-8 round-trip, no implicit Content-Type rewriting.
 
 The only path that decodes the request body to UTF-8 is the optional `substituteBody: true` argument, which performs `{{variable}}` placeholder substitution on a buffered body.
 
@@ -41,10 +42,10 @@ The only path that decodes the request body to UTF-8 is the optional `substitute
 | `MAX_RESPONSE_SIZE`               | 256 KB | Default cap on upstream response bytes returned inline to the agent.                                                                                                                                                                                     |
 | `ABSOLUTE_MAX_RESPONSE_SIZE`      | 32 MB  | Ceiling on upstream bytes the sidecar buffers before refusing — only applied when a `BlobStore` is configured (otherwise `MAX_RESPONSE_SIZE` is the cap). Sized to cover real-world binaries (PDFs, images, archives) routed through the spillover path. |
 | `MAX_SUBSTITUTE_BODY_SIZE`        | 5 MB   | Maximum buffered request body size accepted with `substituteBody`.                                                                                                                                                                                       |
-| `STREAMING_THRESHOLD`             | 1 MB   | Above this `Content-Length` `provider_call` switches to streaming.                                                                                                                                                                                       |
+| `STREAMING_THRESHOLD`             | 1 MB   | Above this `Content-Length` `api_call` switches to streaming.                                                                                                                                                                                            |
 | `MAX_STREAMED_BODY_SIZE`          | 100 MB | Ceiling on streamed request and response bodies.                                                                                                                                                                                                         |
 | `INLINE_RESPONSE_THRESHOLD_BYTES` | 32 KB  | Legacy byte threshold; only consulted when no `TokenBudget` is configured. Production always wires a budget — see "Token-aware context budgeting" below.                                                                                                 |
-| `OUTBOUND_TIMEOUT_MS`             | 30 s   | Upstream `provider_call` request timeout.                                                                                                                                                                                                                |
+| `OUTBOUND_TIMEOUT_MS`             | 30 s   | Upstream `api_call` request timeout.                                                                                                                                                                                                                     |
 | `LLM_PROXY_TIMEOUT_MS`            | 5 min  | `/llm/*` HTTP passthrough timeout (long enough for streamed completions).                                                                                                                                                                                |
 
 When the upstream response exceeds the inline threshold, the bytes are stored in the run-scoped `BlobStore` (256 MB cap, ULID URIs, traversal-safe) and the tool returns a `resource_link` block. The agent reads the bytes on demand via `client.readResource({ uri })`.
@@ -61,7 +62,7 @@ The sidecar layers two token-aware checks on top of the byte caps (see `token-bu
 | `SIDECAR_RUN_TOOL_OUTPUT_BUDGET_TOKENS` | 100 000 tokens | Cumulative ceiling per run. As the agent's tool outputs accumulate, the inline path tightens; once the ceiling is breached, every text response spills. Tightened from 200 K after issue #427 — keeps a default-context run well under upstream TPM windows. Operators on 1 M-context Sonnet 4.6 deployments can raise this. |
 | `SIDECAR_API_CALL_CONCURRENCY`          | 3              | Maximum number of concurrent `api_call` MCP invocations a single run can issue. Caps fan-out so the next LLM turn cannot be stuffed with N parallel-fetched payloads at once (issue #427).                                                                                                                                   |
 
-Token estimation uses the Anthropic-recommended **3.5 chars/token** heuristic — deterministic, allocation-free, suitable for the hot path of every `provider_call`. The official `@anthropic-ai/tokenizer` is no longer accurate for Claude 3+ models, and a real tokenizer (tiktoken / `count_tokens` API) would add 5-50 ms per call to the credential-injection round-trip.
+Token estimation uses the Anthropic-recommended **3.5 chars/token** heuristic — deterministic, allocation-free, suitable for the hot path of every `api_call`. The official `@anthropic-ai/tokenizer` is no longer accurate for Claude 3+ models, and a real tokenizer (tiktoken / `count_tokens` API) would add 5-50 ms per call to the credential-injection round-trip.
 
 Each text-path tool result carries an `appstrate://token-budget` `_meta` payload so the agent runtime can surface accounting and react to structured truncation events:
 
@@ -91,18 +92,18 @@ Each text-path tool result carries an `appstrate://token-budget` `_meta` payload
 
 The AFPS provider tool exposes `body.fromFile` so agents can upload workspace files without base64-encoding them into a JSON tool argument. **The sidecar has no workspace mount and no knowledge of `fromFile`** — that contract is purely runtime-side:
 
-1. The agent calls `provider_call` with `{ body: { fromFile: "report.pdf" } }`.
+1. The agent calls `{ns}__api_call` with `{ body: { fromFile: "report.pdf" } }`.
 2. The runner-pi `McpProviderResolver` (in container mode) — or `RemoteAppstrateProviderResolver` (in CLI mode) — reads the workspace bytes locally via `resolveBodyForFetch` (path-safe, lstat-checked).
 3. JSON-RPC has no native byte type, so the resolver base64-encodes the bytes and ships them over MCP as `body: { fromBytes: <base64>, encoding: "base64" }`.
-4. The sidecar's `provider_call` MCP handler decodes once and forwards the bytes byte-for-byte to upstream — never seeing the source path.
+4. The sidecar's `api_call` MCP handler decodes once and forwards the bytes byte-for-byte to upstream — never seeing the source path.
 
-The MCP `provider_call.body` schema accepts either `string` (text/JSON) or `{ fromBytes, encoding: "base64" }` (binary). The `{ fromFile }`, `{ multipart }`, and inline-`Uint8Array` shapes are runtime-side conveniences resolved client-side before MCP — the sidecar only sees the canonical wire forms.
+The MCP `api_call.body` schema accepts either `string` (text/JSON) or `{ fromBytes, encoding: "base64" }` (binary). The `{ fromFile }`, `{ multipart }`, and inline-`Uint8Array` shapes are runtime-side conveniences resolved client-side before MCP — the sidecar only sees the canonical wire forms.
 
 The download counterpart (`responseMode.toFile`) is the same in reverse: the resolver reads the response bytes (inline text block or `resource_link` → `resources/read`) and writes them to the workspace before handing a `{ kind: "file", path, size, sha256 }` summary back to the agent.
 
 ## Upstream response-header propagation
 
-`provider_call` ships upstream HTTP `status`, an allowlist of response headers, and the post-redirect terminal URL back to the agent-side resolver via the MCP `_meta` field, namespaced as `appstrate/upstream`:
+`{ns}__api_call` ships upstream HTTP `status`, an allowlist of response headers, and the post-redirect terminal URL back to the agent-side resolver via the MCP `_meta` field, namespaced as `appstrate/upstream`:
 
 ```jsonc
 {
@@ -127,7 +128,7 @@ The runtime-side parser at [`runtime-pi/mcp/upstream-meta.ts`](../mcp/upstream-m
 
 ## Redirect handling
 
-`provider_call` follows 30x redirects manually (`redirect: "manual"`) on the buffered path so `Set-Cookie` from intermediate hops is captured into the per-provider jar (Bun's native `redirect: "follow"` only exposes the terminal hop's cookies — see #473). Three defence-in-depth rules apply to every hop:
+`{ns}__api_call` follows 30x redirects manually (`redirect: "manual"`) on the buffered path so `Set-Cookie` from intermediate hops is captured into the per-integration jar (Bun's native `redirect: "follow"` only exposes the terminal hop's cookies — see #473). Three defence-in-depth rules apply to every hop:
 
 1. **Per-hop SSRF blocklist** — every candidate hop is checked against the same blocklist as the initial URL (loopback, RFC1918, link-local, cloud metadata, `host.docker.internal`). Applies regardless of `allowAllUris` — a compromised upstream cannot pivot the proxy into `http://169.254.169.254/…`.
 2. **Per-hop `authorizedUris`** — when the provider declared `authorizedUris`, every hop must match. Off-allowlist redirects fail closed with a structured `403 Redirect blocked (unauthorized)` and the raw hop URL never appears in the error message (defence against capability-bearing redirect URLs).
@@ -141,9 +142,9 @@ Cap: `MAX_REDIRECTS = 10` (mirrors Bun's native default).
 
 **Provider-author guidance**: if your API redirects between hosts (DigitalOcean Spaces signed URLs, Dropbox API ⇄ content, multi-region failover), declare every host in `authorizedUris`. The Bearer survives intra-allowlist hops; cross-allowlist redirects are refused.
 
-## Chunked uploads (`provider_upload`)
+## Chunked uploads (`api_upload`)
 
-Files larger than `MAX_REQUEST_BODY_SIZE` (default 10 MB) cannot fit in a single `provider_call` envelope after base64 inflation. The runtime exposes a separate `provider_upload` Pi tool that orchestrates chunked uploads using the existing `provider_call` per chunk:
+Files larger than `MAX_REQUEST_BODY_SIZE` (default 10 MB) cannot fit in a single `api_call` envelope after base64 inflation. The runtime exposes a separate `{ns}__api_upload` Pi tool that orchestrates chunked uploads using the existing `{ns}__api_call` per chunk:
 
 | Protocol           | Providers                                             | Notes                                                              |
 | ------------------ | ----------------------------------------------------- | ------------------------------------------------------------------ |
@@ -152,9 +153,9 @@ Files larger than `MAX_REQUEST_BODY_SIZE` (default 10 MB) cannot fit in a single
 | `tus`              | Cloudflare Stream, Vimeo, tusd, IETF Resumable Drafts | PATCH with `Upload-Offset`; HEAD for resume (out of scope)         |
 | `ms-resumable`     | OneDrive, SharePoint, Microsoft Graph                 | Chunks must be 320-KiB aligned, ≤60 MiB                            |
 
-Critically, **the sidecar is not modified**: each chunk transits through the existing `provider_call` MCP tool. Credential injection, `authorizedUris` enforcement, and SSRF protection apply per chunk identically. The chunking state machine lives in [`runtime-pi/mcp/upload-adapters/`](../mcp/upload-adapters/) — one ~150 LoC file per protocol — and never sees credentials.
+Critically, **the sidecar is not modified**: each chunk transits through the existing `{ns}__api_call` MCP tool. Credential injection, `authorizedUris` enforcement, and SSRF protection apply per chunk identically. The chunking state machine lives in [`runtime-pi/mcp/upload-adapters/`](../mcp/upload-adapters/) — one ~150 LoC file per protocol — and never sees credentials.
 
-A provider opts into `provider_upload` by declaring `definition.uploadProtocols: string[]` in its manifest. The tool is registered by the runtime only when ≥1 declared provider supports a known protocol; absent declarations, the tool isn't advertised.
+A provider opts into `api_upload` by declaring `definition.uploadProtocols: string[]` in its manifest. The tool is registered by the runtime only when ≥1 declared provider supports a known protocol; absent declarations, the tool isn't advertised.
 
 The resolver streams the file off disk via `Bun.file().stream()`, slices it into `partSizeBytes`-sized chunks, computes a streaming SHA-256 over the bytes committed to the wire, and surfaces it in the result so post-upload byte-equivalence is verifiable. End-to-end memory ceiling is one chunk in the runtime + one chunk in the sidecar — bounded by `MAX_REQUEST_BODY_SIZE` regardless of file size.
 
@@ -162,7 +163,7 @@ Cancellation honours `ctx.signal` between chunks; on abort, the resolver issues 
 
 ## What lives outside this README
 
-- The resolver-side contract — file resolution, `responseMode` logic, `byteLength` thresholds — is documented next to the code in [`packages/afps-runtime/src/resolvers/provider-tool.ts`](../../packages/afps-runtime/src/resolvers/provider-tool.ts).
-- The `provider_upload` adapter contracts, chunker semantics, and per-protocol error surfaces are documented next to the code in [`runtime-pi/mcp/provider-upload-resolver.ts`](../mcp/provider-upload-resolver.ts) and [`runtime-pi/mcp/upload-adapters/`](../mcp/upload-adapters/).
+- The resolver-side contract — file resolution, `responseMode` logic, `byteLength` thresholds — is documented next to the code in [`packages/afps-runtime/src/resolvers/http-call-core.ts`](../../packages/afps-runtime/src/resolvers/http-call-core.ts).
+- The `api_upload` adapter contracts, chunker semantics, and per-protocol error surfaces are documented next to the code in [`runtime-pi/mcp/api-upload-resolver.ts`](../mcp/api-upload-resolver.ts) and [`runtime-pi/mcp/upload-adapters/`](../mcp/upload-adapters/).
 - Sidecar lifecycle, network isolation, parallel container startup, and credential reporting paths are documented in the platform-level [`CLAUDE.md`](../../CLAUDE.md) under "Sidecar Protocol".
 - Provider auth modes (`oauth2` / `oauth1` / `api_key` / `basic` / `custom`) and the `credentialHeaderName` / `credentialHeaderPrefix` injection contract live in `@appstrate/connect`.

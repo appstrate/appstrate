@@ -83,7 +83,7 @@ export const STREAMING_THRESHOLD = 1 * 1024 * 1024;
  */
 export const MAX_STREAMED_BODY_SIZE = 100 * 1024 * 1024;
 
-// ─── Zod schemas for provider_call arguments ─────────────────────────────────
+// ─── Zod schemas for api_call arguments ──────────────────────────────────────
 // Single source of truth: derive the JSON schema surfaced to the LLM and the
 // runtime validation in execute() from these definitions. Aligned with CLAUDE.md:
 // "All route request bodies validated with Zod .safeParse()."
@@ -223,7 +223,7 @@ const responseModeSchema = z
   })
   .optional();
 
-/** Zod schema for `provider_call` arguments — validated at runtime in execute(). */
+/** Zod schema for `api_call` arguments — validated at runtime in execute(). */
 export const apiCallRequestSchema = z.object({
   method: z
     .enum(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"])
@@ -303,7 +303,7 @@ export interface ApiCallMeta {
 }
 
 /**
- * Public type for provider_call arguments. Structurally compatible with
+ * Public type for api_call arguments. Structurally compatible with
  * `z.infer<typeof apiCallRequestSchema>` plus a `Uint8Array` variant
  * on `body` (for programmatic callers who already have bytes in memory —
  * this variant cannot be expressed in JSON Schema and is not surfaced to
@@ -520,7 +520,7 @@ export function makeApiCallTool(
       if (!parsed.success) {
         throw new ResolverError(
           "RESOLVER_BODY_INVALID",
-          `Invalid provider_call arguments: ${parsed.error.issues
+          `Invalid api_call arguments: ${parsed.error.issues
             .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
             .join(", ")}`,
         );
@@ -618,7 +618,7 @@ function defaultApiCallToolName(integrationId: string): string {
  * uploading.
  *
  * `/tmp` is included because every agent that writes a file then
- * uploads it via `provider_call` defaults to `/tmp/output.xlsx` (Python
+ * uploads it via `api_call` defaults to `/tmp/output.xlsx` (Python
  * `tempfile`, bash `mktemp`, …). The agent container is isolated
  * (per-run, no host bind-mount) and the sidecar — which performs the
  * actual upstream call — has no workspace mount, so the file is read
@@ -1465,7 +1465,7 @@ export interface SerializeFetchResponseContext {
  * Read once via `arrayBuffer()` (NEVER `text()`) so binary bytes are
  * preserved end-to-end — the regression fixed by issues #149 / #151 in
  * the sidecar resurfaced when the runtime moved from `curl` to typed
- * `<provider>_call` tools, because the client-side serializer still
+ * `{ns}__api_call` tools, because the client-side serializer still
  * stringified bytes as UTF-8. Decoding now follows a strict whitelist
  * (text/*, application/json, application/xml, +json/+xml suffixes,
  * `; charset=...`); everything else round-trips as base64 (`inline`)

@@ -26,7 +26,7 @@
  *
  * Tool surface: one AFPS `Tool` per apiCall integration, named
  * `{ns}__api_call` to match the platform's namespacing — NOT a single
- * `provider_call` dispatcher keyed by a providerId enum.
+ * `api_call` dispatcher keyed by a providerId enum.
  */
 
 import type { Bundle, Tool } from "./types.ts";
@@ -504,8 +504,7 @@ export interface RemoteAppstrateIntegrationResolverOptions {
  *
  * The credential-proxy route is provider/integration-agnostic — it gates on
  * the resolved connection's `authorizedUris` and injects the configured
- * header, identically for the legacy `provider_call` and the unified
- * `api_call` surface.
+ * header, identically across every `{ns}__api_call` surface.
  */
 export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallResolver {
   private readonly instance: string;
