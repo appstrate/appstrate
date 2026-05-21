@@ -12,7 +12,6 @@ import { packageDetailPath, packageListPath } from "../lib/package-paths";
 const emojiMap: Record<PackageType, string> = {
   agent: "⚡",
   skill: "🧠",
-  provider: "🔌",
   // Phase 1.0 — integrations have no editor route; this entry keeps
   // the Record exhaustive so the package-type enum can grow without
   // hand-cascading every UI lookup. UI lands in Phase 1.3.
@@ -22,14 +21,12 @@ const emojiMap: Record<PackageType, string> = {
 const breadcrumbNewKeys: Record<PackageType, string> = {
   agent: "editor.breadcrumbNew",
   skill: "editor.breadcrumbNewSkill",
-  provider: "editor.breadcrumbNewProvider",
   integration: "editor.breadcrumbNew",
 };
 
 const listLabelKeys: Record<PackageType, { key: string; ns?: string }> = {
   agent: { key: "detail.breadcrumb" },
   skill: { key: "packages.type.skills", ns: "settings" },
-  provider: { key: "packages.type.providers", ns: "settings" },
   // Falls back to the package id until i18n entries are added in Phase 1.3.
   integration: { key: "packages.type.integrations", ns: "settings" },
 };

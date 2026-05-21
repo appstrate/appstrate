@@ -6,13 +6,47 @@ import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
 import { onMutationError } from "./use-mutations";
 import { invalidateConnectionRelated } from "./invalidation";
-import type {
-  ConnectionProfile,
-  ConnectionInfo,
-  UserConnectionProviderGroup,
-  EnrichedBinding,
-  MeConnectionSourceGroup,
-} from "@appstrate/shared-types";
+import type { ConnectionProfile, MeConnectionSourceGroup } from "@appstrate/shared-types";
+
+// Provider-connection view types. The provider package type was removed;
+// these hooks no longer have a backing endpoint but the types are retained
+// locally so the dashboard UI keeps compiling during the transition.
+export interface ConnectionInfo {
+  id: string;
+  connectionProfileId: string;
+  providerId: string;
+  orgId: string;
+  scopesGranted?: string[];
+  needsReconnection: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+interface UserConnectionEntry {
+  connectionId: string;
+  scopesGranted: string[];
+  connectedAt: string;
+  profile: { id: string; name: string; isDefault: boolean };
+  application: { id: string; name: string };
+}
+interface UserConnectionOrgGroup {
+  orgId: string;
+  orgName: string;
+  connections: UserConnectionEntry[];
+}
+interface UserConnectionProviderGroup {
+  providerId: string;
+  displayName: string;
+  logo: string;
+  totalConnections: number;
+  orgs: UserConnectionOrgGroup[];
+}
+interface EnrichedBinding {
+  providerId: string;
+  sourceProfileId: string;
+  sourceProfileName: string;
+  boundByUserName: string | null;
+  connected: boolean;
+}
 
 interface ProfileWithConnections extends ConnectionProfile {
   connectionCount: number;

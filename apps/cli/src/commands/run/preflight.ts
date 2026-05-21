@@ -27,16 +27,27 @@ import { spawn } from "node:child_process";
 import { confirm, spinner } from "../../lib/ui.ts";
 import { CLI_USER_AGENT } from "../../lib/version.ts";
 import { normalizeInstance } from "../../lib/instance-url.ts";
-import type { ReadinessProviderEntry, ReadinessReport } from "@appstrate/shared-types";
 import { getErrorMessage } from "@appstrate/core/errors";
 
 /**
- * Backwards-compatible alias for callers that named the missing entry
- * type after the CLI's array name. Canonical type lives in
- * `@appstrate/shared-types`.
+ * Readiness report shape returned by the (now server-side-only) preflight.
+ * The provider package type was removed, so the CLI no longer queries a
+ * dedicated readiness endpoint — these types are retained for the structured
+ * abort/error surface and remain locally defined.
  */
+export interface ReadinessProviderEntry {
+  providerId: string;
+  connectionProfileId: string | null;
+  reason: string;
+  message: string;
+}
+export interface ReadinessReport {
+  ready: boolean;
+  missing: ReadinessProviderEntry[];
+}
+
+/** Backwards-compatible alias for callers that named the missing entry type. */
 export type ReadinessMissingEntry = ReadinessProviderEntry;
-export type { ReadinessReport };
 
 export class PreflightAbortError extends Error {
   constructor(

@@ -9,7 +9,6 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useMyConnections } from "../../hooks/use-connection-profiles";
 import {
-  useDisconnectProviderConnection,
   useDisconnectIntegrationConnection,
   useUpdateMeIntegrationConnection,
 } from "../../hooks/use-me-connections";
@@ -137,7 +136,7 @@ function ConnectionRow({
   // Identity (account email / profile name)
   if (conn.identity) {
     rows.push({
-      label: conn.kind === "provider" ? t("connectors.profileLabel") : t("connectors.account"),
+      label: t("connectors.account"),
       value: conn.identity,
     });
   }
@@ -268,9 +267,7 @@ function SourceGroupCard({
             <div className="flex items-center gap-2">
               <h3 className="text-[0.95rem] font-semibold">{group.displayName}</h3>
               <span className="text-muted-foreground border-border rounded-full border bg-transparent px-2 py-px text-[0.65rem] tracking-wide uppercase">
-                {group.kind === "provider"
-                  ? t("connectors.kindProvider")
-                  : t("connectors.kindIntegration")}
+                {t("connectors.kindIntegration")}
               </span>
             </div>
             <span className="text-muted-foreground text-sm">
@@ -307,38 +304,25 @@ export function PreferencesConnectorsPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { data: groups, isLoading } = useMyConnections();
 
-  const disconnectProvider = useDisconnectProviderConnection();
   const disconnectIntegration = useDisconnectIntegrationConnection();
   const updateIntegration = useUpdateMeIntegrationConnection();
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [confirmState, setConfirmState] = useState<
-    | {
-        kind: "provider";
-        providerId: string;
-        displayName: string;
-        identity: string | null;
-        connectionId: string;
-        orgId: string;
-        applicationId: string;
-      }
-    | {
-        kind: "integration";
-        packageId: string;
-        displayName: string;
-        identity: string | null;
-        connectionId: string;
-        orgId: string;
-        applicationId: string;
-        /**
-         * Number of agents that consume this integration in the application —
-         * surfaced in the confirm dialog so the user understands the blast
-         * radius before deleting the connection globally.
-         */
-        reusedByAgents: number;
-      }
-    | null
-  >(null);
+  const [confirmState, setConfirmState] = useState<{
+    kind: "integration";
+    packageId: string;
+    displayName: string;
+    identity: string | null;
+    connectionId: string;
+    orgId: string;
+    applicationId: string;
+    /**
+     * Number of agents that consume this integration in the application —
+     * surfaced in the confirm dialog so the user understands the blast
+     * radius before deleting the connection globally.
+     */
+    reusedByAgents: number;
+  } | null>(null);
 
   const totalConnections = useMemo(
     () => (groups ?? []).reduce((s, g) => s + g.totalConnections, 0),
@@ -405,59 +389,37 @@ export function PreferencesConnectorsPage() {
                   <ConnectionRow
                     conn={conn}
                     availableScopes={availableScopes}
-                    disconnecting={
-                      conn.kind === "provider"
-                        ? disconnectProvider.isPending
-                        : disconnectIntegration.isPending
-                    }
+                    disconnecting={disconnectIntegration.isPending}
                     updating={updateIntegration.isPending}
                     onDisconnect={() =>
-                      setConfirmState(
-                        conn.kind === "provider"
-                          ? {
-                              kind: "provider",
-                              providerId: group.sourceId,
-                              displayName: group.displayName,
-                              identity: conn.identity,
-                              connectionId: conn.connectionId,
-                              orgId: conn.org.id,
-                              applicationId: conn.application.id,
-                            }
-                          : {
-                              kind: "integration",
-                              packageId: group.sourceId,
-                              displayName: group.displayName,
-                              identity: conn.identity,
-                              connectionId: conn.connectionId,
-                              orgId: conn.org.id,
-                              applicationId: conn.application.id,
-                              reusedByAgents: conn.reusedByAgents ?? 0,
-                            },
-                      )
+                      setConfirmState({
+                        kind: "integration",
+                        packageId: group.sourceId,
+                        displayName: group.displayName,
+                        identity: conn.identity,
+                        connectionId: conn.connectionId,
+                        orgId: conn.org.id,
+                        applicationId: conn.application.id,
+                        reusedByAgents: conn.reusedByAgents ?? 0,
+                      })
                     }
-                    onUpdateLabel={
-                      conn.kind === "integration"
-                        ? (label) =>
-                            updateIntegration.mutate({
-                              packageId: group.sourceId,
-                              connectionId: conn.connectionId,
-                              orgId: conn.org.id,
-                              applicationId: conn.application.id,
-                              label,
-                            })
-                        : undefined
+                    onUpdateLabel={(label) =>
+                      updateIntegration.mutate({
+                        packageId: group.sourceId,
+                        connectionId: conn.connectionId,
+                        orgId: conn.org.id,
+                        applicationId: conn.application.id,
+                        label,
+                      })
                     }
-                    onToggleShare={
-                      conn.kind === "integration"
-                        ? (next) =>
-                            updateIntegration.mutate({
-                              packageId: group.sourceId,
-                              connectionId: conn.connectionId,
-                              orgId: conn.org.id,
-                              applicationId: conn.application.id,
-                              sharedWithOrg: next,
-                            })
-                        : undefined
+                    onToggleShare={(next) =>
+                      updateIntegration.mutate({
+                        packageId: group.sourceId,
+                        connectionId: conn.connectionId,
+                        orgId: conn.org.id,
+                        applicationId: conn.application.id,
+                        sharedWithOrg: next,
+                      })
                     }
                   />
                 )}
@@ -488,34 +450,18 @@ export function PreferencesConnectorsPage() {
           }
           return base;
         })()}
-        isPending={
-          confirmState?.kind === "provider"
-            ? disconnectProvider.isPending
-            : disconnectIntegration.isPending
-        }
+        isPending={disconnectIntegration.isPending}
         onConfirm={() => {
           if (!confirmState) return;
-          if (confirmState.kind === "provider") {
-            disconnectProvider.mutate(
-              {
-                providerId: confirmState.providerId,
-                connectionId: confirmState.connectionId,
-                orgId: confirmState.orgId,
-                applicationId: confirmState.applicationId,
-              },
-              { onSuccess: () => setConfirmState(null) },
-            );
-          } else {
-            disconnectIntegration.mutate(
-              {
-                packageId: confirmState.packageId,
-                connectionId: confirmState.connectionId,
-                orgId: confirmState.orgId,
-                applicationId: confirmState.applicationId,
-              },
-              { onSuccess: () => setConfirmState(null) },
-            );
-          }
+          disconnectIntegration.mutate(
+            {
+              packageId: confirmState.packageId,
+              connectionId: confirmState.connectionId,
+              orgId: confirmState.orgId,
+              applicationId: confirmState.applicationId,
+            },
+            { onSuccess: () => setConfirmState(null) },
+          );
         }}
       />
     </>

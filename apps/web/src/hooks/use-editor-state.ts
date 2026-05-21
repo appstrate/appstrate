@@ -113,7 +113,6 @@ export function useEditorState<S extends EditorStateBase>(
     });
     qc.invalidateQueries({ queryKey: ["packages"] });
     if (packageType === "agent") qc.invalidateQueries({ queryKey: ["agents"] });
-    if (packageType === "provider") qc.invalidateQueries({ queryKey: ["providers"] });
   }, [state, isEdit, packageId, packageType, qc, toWireBody]);
 
   const handleSubmit = useCallback(

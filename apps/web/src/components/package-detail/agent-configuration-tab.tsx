@@ -164,10 +164,9 @@ function ProxySection({ packageId }: { packageId: string }) {
 function AppProfileSection({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["agents", "settings"]);
   const { data: appProfiles } = useAppProfiles();
-  const { data: detail } = usePackageDetail("agent", packageId);
   const setAgentAppProfile = useSetAgentAppProfile(packageId);
   const isEmpty = !appProfiles || appProfiles.length === 0;
-  const currentAppProfileId = detail?.agentAppProfileId;
+  const currentAppProfileId: string | null | undefined = undefined;
 
   return (
     <div className="border-border bg-card space-y-3 rounded-lg border p-4">

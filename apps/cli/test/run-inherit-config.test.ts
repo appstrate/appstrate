@@ -39,7 +39,6 @@ describe("fetchRunConfigPayload", () => {
         modelId: "claude-sonnet",
         proxyId: null,
         versionPin: "1.0.0",
-        requiredProviders: ["@afps/gmail"],
       },
     });
     const payload = await fetchRunConfigPayload({
@@ -53,7 +52,6 @@ describe("fetchRunConfigPayload", () => {
     });
     expect(payload?.modelId).toBe("claude-sonnet");
     expect(payload?.versionPin).toBe("1.0.0");
-    expect(payload?.requiredProviders).toEqual(["@afps/gmail"]);
   });
 
   it("returns null on 404 (no inheritance)", async () => {
@@ -113,7 +111,6 @@ describe("mergeRunConfig — priority order", () => {
         modelId: null,
         proxyId: null,
         versionPin: null,
-        requiredProviders: [],
       },
       flagConfig: { retries: 5 },
       hasExplicitSpec: false,
@@ -127,7 +124,6 @@ describe("mergeRunConfig — priority order", () => {
       modelId: "inherited-model",
       proxyId: null,
       versionPin: null,
-      requiredProviders: [],
     };
     expect(mergeRunConfig({ inherited, hasExplicitSpec: false }).modelId).toBe("inherited-model");
     expect(
@@ -149,7 +145,6 @@ describe("mergeRunConfig — priority order", () => {
       modelId: null,
       proxyId: null,
       versionPin: "1.2.3",
-      requiredProviders: [],
     };
     expect(mergeRunConfig({ inherited, hasExplicitSpec: false }).versionPin).toBe("1.2.3");
     expect(mergeRunConfig({ inherited, hasExplicitSpec: true }).versionPin).toBeNull();
@@ -162,21 +157,6 @@ describe("mergeRunConfig — priority order", () => {
     expect(merged.modelId).toBeNull();
     expect(merged.proxyId).toBeNull();
     expect(merged.versionPin).toBeNull();
-    expect(merged.requiredProviders).toEqual([]);
-  });
-
-  it("requiredProviders flows through unchanged", () => {
-    const merged = mergeRunConfig({
-      inherited: {
-        config: {},
-        modelId: null,
-        proxyId: null,
-        versionPin: null,
-        requiredProviders: ["@a/p", "@b/p"],
-      },
-      hasExplicitSpec: false,
-    });
-    expect(merged.requiredProviders).toEqual(["@a/p", "@b/p"]);
   });
 });
 
@@ -224,7 +204,6 @@ describe("deepMergeConfig", () => {
         modelId: null,
         proxyId: null,
         versionPin: null,
-        requiredProviders: [],
       },
       flagConfig: { providers: { slack: { token: "new" } } },
       hasExplicitSpec: false,
@@ -244,6 +223,5 @@ function stubPayload() {
     modelId: null,
     proxyId: null,
     versionPin: null,
-    requiredProviders: [],
   };
 }

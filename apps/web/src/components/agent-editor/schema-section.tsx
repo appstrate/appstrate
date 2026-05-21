@@ -25,7 +25,10 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { toSlug, toLiveSlug, toCredentialKey, toLiveCredentialKey } from "../../lib/strings";
-import { CREDENTIAL_KEY_RE } from "@appstrate/core/validation";
+/** Credential keys must be underscore-based to satisfy the sidecar
+ *  substitution contract (lowercase letters, digits and underscores;
+ *  must start with a letter). */
+const CREDENTIAL_KEY_RE = /^[a-z][a-z0-9_]*$/;
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";

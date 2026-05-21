@@ -26,7 +26,6 @@ import { ProfileLabel } from "../components/profile-label";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { useScheduleById, useUpdateSchedule, useDeleteSchedule } from "../hooks/use-schedules";
 import { useAgents } from "../hooks/use-packages";
-import { useScheduleProviderReadiness } from "../hooks/use-schedule-readiness";
 import { formatDateField } from "../lib/markdown";
 import { MoreHorizontal, Pencil, Trash2, Play, Pause, Clock } from "lucide-react";
 
@@ -137,20 +136,7 @@ function LiveScheduleStatusBadge({
 }: {
   schedule: NonNullable<ReturnType<typeof useScheduleById>["data"]>;
 }) {
-  const { allReady, isLoading, totalProviders } = useScheduleProviderReadiness(schedule);
-
-  const effectiveReady = isLoading ? schedule.readiness.status === "ready" : allReady;
-  const effectiveHasProviders = isLoading
-    ? schedule.readiness.totalProviders > 0
-    : totalProviders > 0;
-
-  return (
-    <ScheduleStatusBadge
-      enabled={schedule.enabled ?? true}
-      hasProviders={effectiveHasProviders}
-      allReady={effectiveReady}
-    />
-  );
+  return <ScheduleStatusBadge enabled={schedule.enabled ?? true} />;
 }
 
 // ─── Params Tab ──────────────────────────────────────────
@@ -246,7 +232,7 @@ function ScheduleHistory({
   const agentName =
     agents?.find((f) => f.id === schedule.packageId)?.displayName ?? schedule.packageId;
 
-  const isActive = schedule.enabled && schedule.readiness.status === "ready";
+  const isActive = schedule.enabled;
 
   // Use the same hook as RunList so React Query deduplicates the fetch.
   // We only need the first run for the "next run" preview row.

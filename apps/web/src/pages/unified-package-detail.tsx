@@ -71,7 +71,6 @@ const EMPTY_CONFIG_SCHEMA: JSONSchemaObject = { type: "object", properties: {} }
 const COMPANION_FILE_NAME: Record<PackageType, string> = {
   agent: "prompt.md",
   skill: "SKILL.md",
-  provider: "PROVIDER.md",
   // Phase 1.0 — INTEGRATION.md is the optional agent-facing doc;
   // manifest.json carries the authoritative spec.
   integration: "INTEGRATION.md",

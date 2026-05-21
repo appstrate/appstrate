@@ -41,8 +41,6 @@ export interface InheritedRunConfig {
   proxyId: string | null;
   /** Pinned version label, when the user did not provide an explicit @spec. */
   versionPin: string | null;
-  /** Provider ids declared on the package's manifest. Empty when run-config was not consulted. */
-  requiredProviders: string[];
   /** True when the API call returned 200; false when it 404'd or was skipped. */
   inherited: boolean;
 }
@@ -157,7 +155,6 @@ export function mergeRunConfig(inputs: MergeRunConfigInputs): InheritedRunConfig
     modelId,
     proxyId,
     versionPin,
-    requiredProviders: inherited?.requiredProviders ?? [],
     inherited: inherited !== null,
   };
 }

@@ -14,14 +14,6 @@ export function useAgentReadiness(
   return useMemo(() => {
     const configSchema = configSchemaOverride ?? detail?.config?.schema;
     return {
-      allConnected: detail
-        ? detail.dependencies.providers.every(
-            (s) => s.status === "connected" && s.scopesSufficient !== false,
-          )
-        : false,
-      hasReconnectionNeeded: detail
-        ? detail.dependencies.providers.some((s) => s.status === "needs_reconnection")
-        : false,
       hasRequiredConfig: detail
         ? (configSchema?.required || []).every((key) => {
             const val = (detail.config?.current || {})[key];
