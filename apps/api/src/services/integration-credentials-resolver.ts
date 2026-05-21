@@ -40,11 +40,7 @@ import {
   buildIntegrationOAuthRefreshContext,
   decryptIntegrationConnectionFields,
 } from "./integration-token-refresh.ts";
-import {
-  assertIntegrationActive,
-  loadAccessibleConnectionById,
-  pickAnyAccessibleConnection,
-} from "./integration-connections.ts";
+import { assertIntegrationActive, selectAccessibleConnection } from "./integration-connections.ts";
 import { computeRequiredScopes } from "./integration-scope-resolver.ts";
 import { fetchIntegrationManifest } from "./integration-service.ts";
 
@@ -118,15 +114,12 @@ export async function resolveLiveIntegrationCredentials(
   // (legacy/manual paths) fall back to the actor's accessible connections
   // (first-found across declared auths — matches the spawn resolver).
   const snapshotEntry = context.resolvedConnections?.[integrationId] ?? null;
-  const connection = snapshotEntry
-    ? await loadAccessibleConnectionById(snapshotEntry.connectionId, {
-        applicationId: context.applicationId,
-        actor: context.actor,
-      })
-    : await pickAnyAccessibleConnection(integrationId, Object.keys(auths), {
-        applicationId: context.applicationId,
-        actor: context.actor,
-      });
+  const connection = await selectAccessibleConnection(
+    integrationId,
+    Object.keys(auths),
+    snapshotEntry?.connectionId ?? null,
+    { applicationId: context.applicationId, actor: context.actor },
+  );
   if (!connection) {
     return out;
   }

@@ -47,11 +47,7 @@ import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 
 import { logger } from "../lib/logger.ts";
 import type { Actor } from "../lib/actor.ts";
-import {
-  isIntegrationActive,
-  loadAccessibleConnectionById,
-  pickAnyAccessibleConnection,
-} from "./integration-connections.ts";
+import { isIntegrationActive, selectAccessibleConnection } from "./integration-connections.ts";
 import { fetchIntegrationManifest } from "./integration-service.ts";
 
 export interface ResolveIntegrationsInput {
@@ -353,12 +349,12 @@ async function resolveDeliveries(
   }
 
   // Load the one connection chosen by the cascade.
-  const row = resolvedConnection
-    ? await loadAccessibleConnectionById(resolvedConnection.connectionId, { applicationId, actor })
-    : await pickAnyAccessibleConnection(integrationId, Object.keys(auths), {
-        applicationId,
-        actor,
-      });
+  const row = await selectAccessibleConnection(
+    integrationId,
+    Object.keys(auths),
+    resolvedConnection?.connectionId ?? null,
+    { applicationId, actor },
+  );
 
   if (!row) {
     logger.info("no resolved connection for integration; skipping delivery entries", {

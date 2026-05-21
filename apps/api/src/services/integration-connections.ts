@@ -285,6 +285,24 @@ export async function pickAnyAccessibleConnection(
 }
 
 /**
+ * Single source of truth for "which connection does this integration use":
+ * load the resolver-pinned row when a snapshot is present, otherwise fall
+ * back to the auto-pick. Shared by the spawn resolver (boot) and the live
+ * credentials resolver (runtime) so the two paths can never diverge on
+ * connection selection.
+ */
+export async function selectAccessibleConnection(
+  packageId: string,
+  declaredAuthKeys: string[],
+  snapshotConnectionId: string | null,
+  context: { applicationId: string; actor: Actor },
+): Promise<ResolvedConnectionRow | null> {
+  return snapshotConnectionId
+    ? loadAccessibleConnectionById(snapshotConnectionId, context)
+    : pickAnyAccessibleConnection(packageId, declaredAuthKeys, context);
+}
+
+/**
  * `true` when the integration is active in the app — i.e. recorded in
  * `application_packages` (activation installs the row, deactivation removes
  * it). Use {@link assertIntegrationActive} when the caller needs a
