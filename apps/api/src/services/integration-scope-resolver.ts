@@ -32,8 +32,7 @@
  * union across accounts so the re-consent prompt requests the strict
  * superset, regardless of which account the user picks at the IdP.
  *
- * Both functions are read-only and safe to call from non-mutating
- * routes (e.g. the `/required-scopes` debug endpoint).
+ * Both functions are read-only and safe to call from non-mutating routes.
  */
 
 import { and, eq } from "drizzle-orm";
@@ -42,20 +41,14 @@ import { applicationPackages, integrationConnections, packages } from "@appstrat
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { scopesContributedByTools } from "@appstrate/core/integration";
 
-import type { ScopeBreakdownEntry } from "@appstrate/shared-types";
-
 import type { Actor } from "../lib/actor.ts";
 import { actorFilter } from "../lib/actor.ts";
 import type { AppScope } from "../lib/scope.ts";
 import { getIntegration } from "./integration-service.ts";
 
-export type { ScopeBreakdownEntry };
-
 export interface ComputeRequiredScopesResult {
   /** Union over all agents — the set to add to the IdP authorize request. */
   required: string[];
-  /** Per-agent decomposition. Empty when no installed agent depends on this integration. */
-  breakdown: ScopeBreakdownEntry[];
 }
 
 export interface ScopeResolverInput {
@@ -80,20 +73,20 @@ export async function computeRequiredScopes(
 ): Promise<ComputeRequiredScopesResult> {
   const integration = await getIntegration(input.scope.orgId, input.integrationPackageId);
   if (!integration) {
-    return { required: [], breakdown: [] };
+    return { required: [] };
   }
 
   // Resolve the auth this kickoff is for. Unknown auth key = nothing to
   // contribute (the kickoff route guards earlier, but be defensive).
   if (!integration.manifest.auths || !integration.manifest.auths[input.authKey]) {
-    return { required: [], breakdown: [] };
+    return { required: [] };
   }
 
   // Walk installed agents. We need the manifest of each to read its
   // `dependencies.integrations` rich form; that lives on `draftManifest`,
   // same column the runtime resolver reads at spawn time.
   const installed = await db
-    .select({ id: packages.id, draftManifest: packages.draftManifest })
+    .select({ draftManifest: packages.draftManifest })
     .from(applicationPackages)
     .innerJoin(packages, eq(packages.id, applicationPackages.packageId))
     .where(
@@ -103,7 +96,6 @@ export async function computeRequiredScopes(
       ),
     );
 
-  const breakdown: ScopeBreakdownEntry[] = [];
   const required = new Set<string>();
 
   for (const agent of installed) {
@@ -124,14 +116,11 @@ export async function computeRequiredScopes(
     });
     const viaExplicit = entry.scopes ? [...entry.scopes] : [];
 
-    if (viaTools.length === 0 && viaExplicit.length === 0) continue;
-
-    breakdown.push({ agentId: agent.id, viaTools, viaExplicit });
     for (const s of viaTools) required.add(s);
     for (const s of viaExplicit) required.add(s);
   }
 
-  return { required: [...required], breakdown };
+  return { required: [...required] };
 }
 
 /**

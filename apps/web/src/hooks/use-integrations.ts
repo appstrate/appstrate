@@ -19,7 +19,6 @@ import type {
   IntegrationOAuthClient,
   IntegrationOrgDefault,
   IntegrationPin,
-  IntegrationRequiredScopes,
   IntegrationSummary,
 } from "@appstrate/shared-types";
 import { api, apiList, type ListEnvelope } from "../api";
@@ -43,7 +42,6 @@ export type {
   IntegrationOAuthClient,
   IntegrationPickStatus,
   IntegrationPin,
-  IntegrationRequiredScopes,
   IntegrationSummary,
 } from "@appstrate/shared-types";
 
@@ -180,28 +178,6 @@ export function useConnectIntegrationFields() {
       });
     },
     onError: () => toast.error(t("integration.connect.error")),
-  });
-}
-
-/**
- * Niveau 2 Phase 5 — fetch the scope union the next OAuth kickoff will
- * request for `(packageId, authKey)`. Polled at integration-detail page
- * load so the UI can show a "Reconnect to grant additional permissions"
- * CTA when `missingFromGranted.length > 0` (incremental consent flow).
- */
-export function useIntegrationRequiredScopes(
-  packageId: string | undefined,
-  authKey: string | undefined,
-) {
-  const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
-  return useQuery({
-    queryKey: [...KEY(orgId, applicationId), "required-scopes", packageId, authKey] as const,
-    enabled: Boolean(orgId && applicationId && packageId && authKey),
-    queryFn: () =>
-      api<IntegrationRequiredScopes>(
-        `/integrations/${encodeURI(packageId!)}/auths/${encodeURI(authKey!)}/required-scopes`,
-      ),
   });
 }
 

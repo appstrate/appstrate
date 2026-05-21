@@ -91,47 +91,6 @@ export interface IntegrationOAuthClient {
 }
 
 /**
- * Niveau 2 Phase 5 — wire shape for
- * `GET /api/integrations/:packageId/auths/:authKey/required-scopes`.
- *
- *  - `defaults` — manifest defaults for this auth.
- *  - `required` — union of `requiredScopes` across every installed agent
- *    that depends on this integration (filtered by `requiredAuthKey` for
- *    multi-auth integrations).
- *  - `granted` — actor's current high-water-mark across all their
- *    connections on this integration auth.
- *  - `union` — `defaults ∪ required ∪ granted` — what the OAuth kickoff
- *    will actually request (incremental consent).
- *  - `missingFromGranted` — scopes that the union demands but the actor
- *    hasn't granted yet → drives the "Reconnect to grant new
- *    permissions" CTA.
- *  - `breakdown` — per-agent decomposition for the audit / "why is this
- *    permission required?" surface.
- */
-/**
- * Per-agent breakdown of scope contributions — the audit / "which agent
- * asked for this permission" surface. Shared wire element: the backend
- * resolver builds it, the frontend renders it.
- */
-export interface ScopeBreakdownEntry {
-  /** Fully-scoped agent package id (`@scope/name`). */
-  agentId: string;
-  /** Scopes inferred from the agent's declared (or implicit) `tools[]`. */
-  viaTools: string[];
-  /** Scopes the agent declared explicitly via `scopes[]`. */
-  viaExplicit: string[];
-}
-
-export interface IntegrationRequiredScopes {
-  defaults: string[];
-  required: string[];
-  granted: string[];
-  union: string[];
-  missingFromGranted: string[];
-  breakdown: ScopeBreakdownEntry[];
-}
-
-/**
  * One connection an actor can pick from for a given (application,
  * integration): own + shared-with-org, with caller-facing display fields.
  * Wire shape for `GET /api/integrations/:packageId/accessible-connections`.

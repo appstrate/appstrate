@@ -22,9 +22,7 @@ export type {
   IntegrationOrgDefault,
   IntegrationPickStatus,
   IntegrationPin,
-  IntegrationRequiredScopes,
   IntegrationSummary,
-  ScopeBreakdownEntry,
 } from "./integrations.ts";
 
 export type { UserProfile, RunLog } from "@appstrate/db/schema";

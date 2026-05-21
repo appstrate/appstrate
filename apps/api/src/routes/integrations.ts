@@ -56,7 +56,6 @@ import { getAppScope } from "../lib/scope.ts";
 import { recordAuditFromContext } from "./../services/audit.ts";
 import { installPackage, uninstallPackage } from "../services/application-packages.ts";
 import { listIntegrations, getIntegration } from "../services/integration-service.ts";
-import { expandScopesGranted } from "@appstrate/core/integration";
 import {
   assertIsIntegration,
   connectIntegrationWithFields,
@@ -430,43 +429,6 @@ export function createIntegrationsRouter() {
         throw notFound(`No OAuth client registered for '${packageId}' auth '${authKey}'`);
       const { clientSecret: _clientSecret, ...publicShape } = client;
       return c.json(publicShape satisfies IntegrationOAuthClient);
-    },
-  );
-
-  // Phase 2 (niveau 2 scope model) — surface the scope union the OAuth
-  // kickoff is going to request. UI uses this to show "this integration
-  // will request: X, Y, Z" before the user clicks Connect, and to detect
-  // the "agent install needs an upgrade" case (required ⊄ granted).
-  router.get(
-    "/:packageId{@[^/]+/[^/]+}/auths/:authKey/required-scopes",
-    requirePermission("integrations", "read"),
-    async (c) => {
-      const packageId = c.req.param("packageId")!;
-      const authKey = c.req.param("authKey")!;
-      const scope = getAppScope(c);
-      const actor = getActor(c);
-      const { manifest, auth } = await readIntegrationAuth(scope, packageId, authKey);
-      const [computed, granted] = await Promise.all([
-        computeRequiredScopes({ scope, integrationPackageId: packageId, authKey }),
-        getCurrentScopesGranted({
-          scope,
-          integrationPackageId: packageId,
-          authKey,
-          actor,
-        }),
-      ]);
-      const defaults = auth.scopes ?? [];
-      const union = [...new Set([...defaults, ...computed.required, ...granted])];
-      const effective = new Set(expandScopesGranted(granted, manifest, authKey));
-      const missingFromGranted = union.filter((s) => !effective.has(s));
-      return c.json({
-        defaults,
-        required: computed.required,
-        granted,
-        union,
-        missingFromGranted,
-        breakdown: computed.breakdown,
-      });
     },
   );
 

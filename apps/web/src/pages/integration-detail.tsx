@@ -20,7 +20,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "react-router-dom";
-import { Trash2, ShieldCheck, Settings2, AlertTriangle, Pencil, Check, X } from "lucide-react";
+import { Trash2, ShieldCheck, Settings2, Pencil, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -37,7 +37,6 @@ import {
   useIntegrationOAuthClient,
   useUpsertIntegrationOAuthClient,
   useDeleteIntegrationOAuthClient,
-  useIntegrationRequiredScopes,
   useUpdateIntegrationConnection,
   useUpdateIntegrationSettings,
   useIntegrationPins,
@@ -187,54 +186,6 @@ function OAuthClientForm({ packageId, authKey }: { packageId: string; authKey: s
 // ─────────────────────────────────────────────
 
 /**
- * Read-only diff between agent-required scopes and actor-granted scopes.
- *
- * The reconnect CTA was removed when connect/upgrade moved to agent
- * surfaces (architectural decision: connections are agent-driven; this
- * page is admin-leaning, for activation + OAuth client registration). The
- * panel still surfaces the diff as audit info so admins can see at a
- * glance which permissions installed agents are asking for that no
- * actor has granted yet.
- */
-function RequiredScopesPanel({
-  packageId,
-  authKey,
-  hasConnection,
-}: {
-  packageId: string;
-  authKey: string;
-  hasConnection: boolean;
-}) {
-  const { t } = useTranslation("settings");
-  const { data } = useIntegrationRequiredScopes(packageId, authKey);
-  if (!data) return null;
-  if (!hasConnection) return null;
-  if (data.missingFromGranted.length === 0) return null;
-  return (
-    <div
-      className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-amber-700 dark:text-amber-300"
-      data-testid={`required-scopes-warning-${authKey}`}
-    >
-      <div className="mb-2 flex items-center gap-2">
-        <AlertTriangle size={14} />
-        <span className="text-sm font-semibold">{t("integration.scopes.missing")}</span>
-      </div>
-      <p className="text-foreground/90 mb-2 text-xs">
-        {t("integration.scopes.missing.description")}
-      </p>
-      <ul
-        className="list-inside list-disc font-mono text-xs"
-        data-testid={`required-scopes-missing-${authKey}`}
-      >
-        {data.missingFromGranted.map((s) => (
-          <li key={s}>{s}</li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-/**
  * Per-auth read-only block. The connect/disconnect surfaces moved to
  * the agent flow (AgentIntegrationsBlock + MissingConnectionsModal) —
  * see the section banner. This block keeps:
@@ -242,7 +193,6 @@ function RequiredScopesPanel({
  *     authorized URIs.
  *   - Admin-only OAuth client registration form (oauth2).
  *   - Read-only connection list with scope + expiry info (no disconnect).
- *   - RequiredScopesPanel — passive diff display (no reconnect CTA).
  */
 function AuthSection({
   packageId,
@@ -294,14 +244,6 @@ function AuthSection({
             </p>
           )}
         </div>
-      )}
-
-      {isOAuth && (
-        <RequiredScopesPanel
-          packageId={packageId}
-          authKey={status.authKey}
-          hasConnection={status.connections.length > 0}
-        />
       )}
 
       {/* Connections — audit list with rename/share/disconnect handled

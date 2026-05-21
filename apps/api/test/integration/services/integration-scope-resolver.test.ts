@@ -101,7 +101,6 @@ describe("integration-scope-resolver", () => {
         authKey: "primary",
       });
       expect(out.required).toEqual([]);
-      expect(out.breakdown).toEqual([]);
     });
 
     it("returns empty when the integration package itself isn't visible", async () => {
@@ -134,9 +133,6 @@ describe("integration-scope-resolver", () => {
         authKey: "primary",
       });
       expect(out.required).toEqual(["read"]);
-      expect(out.breakdown).toHaveLength(1);
-      expect(out.breakdown[0]!.agentId).toBe("@scope/agent-reader");
-      expect(out.breakdown[0]!.viaTools).toEqual(["read"]);
     });
 
     it("unions scopes across multiple installed agents (dedupes overlap)", async () => {
@@ -160,7 +156,6 @@ describe("integration-scope-resolver", () => {
         authKey: "primary",
       });
       expect(out.required.sort()).toEqual(["read", "send"]);
-      expect(out.breakdown).toHaveLength(3);
     });
 
     it("agent declaring the dep without a selection contributes zero scopes (least-privilege)", async () => {
@@ -181,10 +176,9 @@ describe("integration-scope-resolver", () => {
         authKey: "primary",
       });
       expect(out.required).toEqual([]);
-      expect(out.breakdown).toEqual([]);
     });
 
-    it("includes explicit agent.scopes[] in the breakdown and union", async () => {
+    it("includes explicit agent.scopes[] in the union", async () => {
       await seedPackage({
         id: "@scope/agent-manual",
         orgId: ctx.orgId,
@@ -206,9 +200,6 @@ describe("integration-scope-resolver", () => {
         authKey: "primary",
       });
       expect(out.required.sort()).toEqual(["delete", "read"]);
-      const entry = out.breakdown[0]!;
-      expect(entry.viaTools).toEqual(["read"]);
-      expect(entry.viaExplicit).toEqual(["delete"]);
     });
 
     it("agent that declared rich form with empty tools[] contributes only its explicit scopes", async () => {
@@ -233,8 +224,6 @@ describe("integration-scope-resolver", () => {
         authKey: "primary",
       });
       expect(out.required).toEqual(["read"]);
-      expect(out.breakdown[0]!.viaTools).toEqual([]);
-      expect(out.breakdown[0]!.viaExplicit).toEqual(["read"]);
     });
 
     it("skips agents whose dep doesn't reference this integration", async () => {
