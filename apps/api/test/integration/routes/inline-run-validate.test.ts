@@ -184,19 +184,19 @@ describe("POST /api/runs/inline/validate", () => {
 
   it("aggregates structural manifest errors with dep-cap violations", async () => {
     // The manifest is missing `type`, which breaks AFPS dispatch and emits
-    // base-schema issues (name/version/type). At the same time the provider
-    // deps exceed `max_authorized_uris` — a cap that reads the raw manifest
-    // shape and must surface alongside structural errors, not after a short-
-    // circuit. This is the regression guard for the fall-through change in
+    // base-schema issues (name/version/type). At the same time the skill
+    // deps exceed `max_skills` — a cap that reads the raw manifest shape and
+    // must surface alongside structural errors, not after a short-circuit.
+    // This is the regression guard for the fall-through change in
     // `inline-manifest-validation.ts` and `packages/core/validation.ts`.
-    const providers: Record<string, string> = {};
-    for (let i = 0; i < 200; i++) providers[`@test/provider-${i}`] = "1.0.0";
+    const skills: Record<string, string> = {};
+    for (let i = 0; i < 200; i++) skills[`@test/skill-${i}`] = "1.0.0";
     const manifest = {
       // `type` intentionally omitted to trigger base-schema aggregation
       name: "@inline/broken",
       version: "0.0.0",
       schemaVersion: "1.0",
-      dependencies: { skills: {}, providers },
+      dependencies: { skills },
     };
 
     const res = await post({ manifest, prompt: "hi" });
@@ -210,7 +210,7 @@ describe("POST /api/runs/inline/validate", () => {
     const messages = (body.errors ?? []).map((e) => `${e.field}: ${e.message}`).join("\n");
     // Structural failure surfaces (missing type) AND the dep-cap still fires.
     expect(messages).toMatch(/manifest\.type/i);
-    expect(messages).toMatch(/providers.*too many|dependencies\.providers/i);
+    expect(messages).toMatch(/skills.*too many|dependencies\.skills/i);
   });
 
   it("does not duplicate config errors across preflight stages", async () => {

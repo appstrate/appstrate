@@ -54,7 +54,6 @@ export const agentsPaths = {
                     type: "agent",
                     runningRuns: 1,
                     dependencies: {
-                      providers: { "@appstrate/gmail": "^1.0.0" },
                       skills: {},
                     },
                   },
@@ -71,7 +70,6 @@ export const agentsPaths = {
                     type: "agent",
                     runningRuns: 0,
                     dependencies: {
-                      providers: { "@appstrate/github": "^1.0.0" },
                       skills: { "@appstrate/summarize": "^1.0.0" },
                     },
                   },

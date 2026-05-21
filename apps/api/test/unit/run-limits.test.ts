@@ -43,8 +43,6 @@ describe("run-limits registry", () => {
     expect(inline.manifest_bytes).toBe(65536);
     expect(inline.prompt_bytes).toBe(200_000);
     expect(inline.max_skills).toBe(20);
-    expect(inline.max_authorized_uris).toBe(50);
-    expect(inline.wildcard_uri_allowed).toBe(false);
     expect(inline.retention_days).toBe(30);
   });
 

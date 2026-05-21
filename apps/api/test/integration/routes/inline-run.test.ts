@@ -104,33 +104,6 @@ describe("POST /api/runs/inline — validation", () => {
     expect(body.detail ?? "").toMatch(/manifest|bytes/i);
   });
 
-  it("rejects a manifest with wildcard authorizedUris when wildcard_uri_allowed=false", async () => {
-    // Wildcard rejection targets embedded provider definitions
-    // (manifest.definition), not the providers dependency map. Use a
-    // provider-type inline manifest to exercise the branch.
-    const manifest = {
-      name: "@inline/r-provider",
-      displayName: "Inline Provider",
-      version: "0.0.0",
-      type: "provider",
-      description: "Inline",
-      schemaVersion: "1.0",
-      definition: {
-        authMode: "api_key",
-        authorizedUris: ["https://api.example.com", "*"],
-        credentials: {
-          schema: { type: "object", properties: { apikey: { type: "string" } } },
-          fieldName: "apikey",
-        },
-        credentialHeaderName: "X-Api-Key",
-      },
-    };
-    const res = await post({ manifest, prompt: "hi" });
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { detail?: string };
-    expect(body.detail ?? "").toMatch(/wildcard/i);
-  });
-
   it("rejects unauthenticated requests with 401", async () => {
     const res = await app.request("/api/runs/inline", {
       method: "POST",

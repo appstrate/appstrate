@@ -1415,7 +1415,7 @@ export const packagesPaths = {
                   packageId: { type: "string", description: "New package ID under org scope" },
                   type: {
                     type: "string",
-                    enum: ["agent", "skill", "provider"],
+                    enum: ["agent", "skill", "integration"],
                   },
                   forkedFrom: { type: "string", description: "Source package ID" },
                 },

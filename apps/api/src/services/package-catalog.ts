@@ -76,8 +76,8 @@ async function resolveDepRefs(
   orgId: string,
 ): Promise<NonNullable<DbPackageRow["depRefs"]>> {
   const m = parseDraftManifest(manifest);
-  const { skillIds, providerIds } = extractDepsFromManifest(m);
-  const allDepIds = [...skillIds, ...providerIds];
+  const { skillIds } = extractDepsFromManifest(m);
+  const allDepIds = [...skillIds];
   if (allDepIds.length === 0) return [];
 
   const conditions = [inArray(packages.id, allDepIds), orgOrSystemFilter(orgId)];

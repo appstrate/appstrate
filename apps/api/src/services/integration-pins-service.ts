@@ -36,11 +36,7 @@ import type {
   IntegrationPickStatus,
   IntegrationPin,
 } from "@appstrate/shared-types";
-import {
-  requiredScopesForAgent,
-  expandScopesGranted,
-  type IntegrationManifest,
-} from "@appstrate/core/integration";
+import { missingScopesForConnection } from "@appstrate/core/integration";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { conflict, notFound, invalidRequest } from "../lib/errors.ts";
 import type { AppScope } from "../lib/scope.ts";
@@ -601,20 +597,6 @@ async function attachOwnerNames(rows: ConnectionRow[]): Promise<SharedConnection
 
 // ─────────────────────────── Agent-page picker resolution ─────────────────────
 
-/** Scopes the agent's selected tools/scopes need on `authKey` that `granted` lacks. */
-function missingScopesForConnection(
-  manifest: IntegrationManifest,
-  authKey: string,
-  granted: string[],
-  agentTools: readonly string[],
-  agentScopes: readonly string[],
-): string[] {
-  const required = requiredScopesForAgent({ manifest, authKey, agentTools, agentScopes });
-  if (required.length === 0) return [];
-  const expanded = new Set(expandScopesGranted(granted, manifest, authKey));
-  return required.filter((s) => !expanded.has(s));
-}
-
 /**
  * The single-source verdict for the agent-page connection picker: which
  * connection the next run would use for this (agent, integration, actor),
@@ -678,7 +660,13 @@ export async function resolveAgentIntegrationPick(args: {
   const candidates: IntegrationCandidate[] = candidatesRaw.map((c) => ({
     ...c,
     missingScopes: manifest
-      ? missingScopesForConnection(manifest, c.authKey, c.scopesGranted, agentTools, agentScopes)
+      ? missingScopesForConnection({
+          manifest,
+          authKey: c.authKey,
+          granted: c.scopesGranted,
+          agentTools,
+          agentScopes,
+        })
       : [],
     isOwn: actor.type === "user" ? c.ownerUserId === actor.id : c.ownerEndUserId === actor.id,
   }));

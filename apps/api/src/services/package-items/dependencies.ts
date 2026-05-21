@@ -18,11 +18,8 @@ import { extractDepsFromManifest, parseDraftManifest } from "../../lib/manifest-
  * Collect all transitive dependency IDs via BFS, grouped by type.
  * Handles cycles via a visited set. Batches DB reads per iteration.
  */
-export async function collectAllDepIds(
-  rootPackageId: string,
-): Promise<{ skillIds: string[]; providerIds: string[] }> {
+export async function collectAllDepIds(rootPackageId: string): Promise<{ skillIds: string[] }> {
   const skills = new Set<string>();
-  const providers = new Set<string>();
   const visited = new Set<string>();
 
   // Seed: read root manifest
@@ -31,14 +28,13 @@ export async function collectAllDepIds(
     .from(packages)
     .where(eq(packages.id, rootPackageId))
     .limit(1);
-  if (!rootPkg) return { skillIds: [], providerIds: [] };
+  if (!rootPkg) return { skillIds: [] };
 
   const rootDeps = extractDepsFromManifest(parseDraftManifest(rootPkg.draftManifest));
   for (const id of rootDeps.skillIds) skills.add(id);
-  for (const id of rootDeps.providerIds) providers.add(id);
 
   // BFS: process unvisited deps in batches
-  let frontier = [...skills, ...providers];
+  let frontier = [...skills];
   visited.add(rootPackageId);
 
   while (frontier.length > 0) {
@@ -61,26 +57,19 @@ export async function collectAllDepIds(
           nextFrontier.push(id);
         }
       }
-      for (const id of deps.providerIds) {
-        if (!providers.has(id)) {
-          providers.add(id);
-          nextFrontier.push(id);
-        }
-      }
     }
     frontier = nextFrontier;
   }
 
   return {
     skillIds: [...skills],
-    providerIds: [...providers],
   };
 }
 
 /** Build dependencies object from a package's manifest (transitive). */
 export async function buildDependencies(packageId: string): Promise<Dependencies | null> {
   const allDeps = await collectAllDepIds(packageId);
-  const allDepIds = [...allDeps.skillIds, ...allDeps.providerIds];
+  const allDepIds = [...allDeps.skillIds];
   if (allDepIds.length === 0) return null;
 
   const depRows = await db
@@ -123,7 +112,6 @@ export async function getPackageDepFiles(
   const allDeps = await collectAllDepIds(packageId);
   const typeToIds: Record<string, string[]> = {
     skill: allDeps.skillIds,
-    provider: allDeps.providerIds,
   };
   const depIds = typeToIds[cfg.type] ?? [];
 

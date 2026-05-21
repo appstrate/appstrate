@@ -34,8 +34,7 @@ import {
   type ManifestIntegrationEntry,
 } from "@appstrate/core/dependencies";
 import {
-  requiredScopesForAgent,
-  expandScopesGranted,
+  missingScopesForConnection,
   type IntegrationManifest,
   type ConnectionOverrides,
   type ConnectionResolutionError,
@@ -326,27 +325,24 @@ function checkHealth(
   // own auth; api_key/basic auths contribute no scopes so this is a no-op
   // for them. Granted scopes are expanded through the manifest `implies`
   // hierarchy before the diff so a parent grant covers its children.
-  const required = requiredScopesForAgent({
+  const missing = missingScopesForConnection({
     manifest: args.manifest,
     authKey: conn.authKey,
+    granted: conn.scopesGranted,
     agentTools: args.agentTools,
     agentScopes: args.agentScopes,
   });
-  if (required.length > 0) {
-    const granted = new Set(expandScopesGranted(conn.scopesGranted, args.manifest, conn.authKey));
-    const missing = required.filter((s) => !granted.has(s));
-    if (missing.length > 0) {
-      const ownedByActor =
-        (args.actorUserId !== null && conn.userId === args.actorUserId) ||
-        (args.actorEndUserId !== null && conn.endUserId === args.actorEndUserId);
-      return errorOf(args, {
-        code: "insufficient_scopes",
-        connectionId: conn.id,
-        missingScopes: missing,
-        ownedByActor,
-        message: `Connection for ${args.integrationId} is missing required permissions: ${missing.join(", ")}.`,
-      });
-    }
+  if (missing.length > 0) {
+    const ownedByActor =
+      (args.actorUserId !== null && conn.userId === args.actorUserId) ||
+      (args.actorEndUserId !== null && conn.endUserId === args.actorEndUserId);
+    return errorOf(args, {
+      code: "insufficient_scopes",
+      connectionId: conn.id,
+      missingScopes: missing,
+      ownedByActor,
+      message: `Connection for ${args.integrationId} is missing required permissions: ${missing.join(", ")}.`,
+    });
   }
 
   return { kind: "resolved", value: { connectionId: conn.id, source } };

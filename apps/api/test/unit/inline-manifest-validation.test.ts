@@ -13,8 +13,6 @@ const defaults: InlineRunLimits = {
   manifest_bytes: 65536,
   prompt_bytes: 200_000,
   max_skills: 20,
-  max_authorized_uris: 50,
-  wildcard_uri_allowed: false,
   retention_days: 30,
 };
 
@@ -49,8 +47,6 @@ describe("validateInlineManifest — happy path", () => {
       manifest: baseManifest({
         dependencies: {
           skills: { "@sys/skill-a": "1.0.0", "@sys/skill-b": "^1" },
-          tools: { "@sys/tool-a": "1.0.0" },
-          providers: { "@sys/gmail": "1.0.0" },
         },
       }),
       prompt: "Use the tools.",
@@ -221,19 +217,6 @@ describe("validateInlineManifest — dependency caps", () => {
       limits: tight,
     });
     expect(result.valid).toBe(true);
-  });
-
-  it("rejects too many providers", () => {
-    const providers: Record<string, string> = {};
-    for (let i = 0; i < 5; i++) providers[`@sys/p-${i}`] = "1.0.0";
-    const tight = { ...defaults, max_authorized_uris: 3 };
-    const result = validateInlineManifest({
-      manifest: baseManifest({ dependencies: { providers } }),
-      prompt: "ok",
-      limits: tight,
-    });
-    expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes("providers: too many"))).toBe(true);
   });
 });
 

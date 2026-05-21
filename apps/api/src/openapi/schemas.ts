@@ -114,7 +114,7 @@ export const schemas = {
       enabled: { type: "boolean" },
       installedAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
-      packageType: { type: "string", enum: ["agent", "skill", "provider"] },
+      packageType: { type: "string", enum: ["agent", "skill", "integration"] },
       packageSource: { type: "string", enum: ["system", "local"] },
     },
   },
@@ -250,13 +250,12 @@ export const schemas = {
       type: {
         type: "string",
         description: "Package type from manifest",
-        enum: ["agent", "skill", "provider"],
+        enum: ["agent", "skill", "integration"],
       },
       runningRuns: { type: "integer" },
       dependencies: {
         type: "object",
         properties: {
-          providers: { type: "object", additionalProperties: { type: "string" } },
           skills: { type: "object", additionalProperties: { type: "string" } },
         },
       },
@@ -932,7 +931,7 @@ export const schemas = {
       required: ["id", "type", "source", "name", "description", "installedIn"],
       properties: {
         id: { type: "string", description: "Package id (`pkg_…`)." },
-        type: { type: "string", enum: ["agent", "skill", "provider"] },
+        type: { type: "string", enum: ["agent", "skill", "integration"] },
         source: {
           type: "string",
           description:

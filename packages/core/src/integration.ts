@@ -980,6 +980,26 @@ export function expandScopesGranted(
 }
 
 /**
+ * Scopes the agent's selected tools/scopes require on `authKey` that the
+ * connection's `granted` set lacks. Combines {@link requiredScopesForAgent}
+ * with {@link expandScopesGranted} (so a parent grant covers its implied
+ * children) — the single source of truth for the insufficient-scopes diff
+ * used by both the connection resolver and the agent-page picker.
+ */
+export function missingScopesForConnection(input: {
+  manifest: IntegrationManifest;
+  authKey: string;
+  granted: readonly string[];
+  agentTools: readonly string[] | undefined;
+  agentScopes: readonly string[] | undefined;
+}): string[] {
+  const required = requiredScopesForAgent(input);
+  if (required.length === 0) return [];
+  const expanded = new Set(expandScopesGranted(input.granted, input.manifest, input.authKey));
+  return required.filter((s) => !expanded.has(s));
+}
+
+/**
  * Union of every OAuth scope advertised across the integration's auths.
  * Used by {@link validateAgentIntegrationScopes} to refuse agent-declared
  * scopes that no auth on this integration even claims to support. When

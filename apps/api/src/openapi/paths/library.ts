@@ -59,11 +59,10 @@ export const libraryPaths = {
                     type: "object",
                     description:
                       "Packages grouped by type. Every group is always present (possibly empty).",
-                    required: ["agent", "skill", "provider", "integration"],
+                    required: ["agent", "skill", "integration"],
                     properties: {
                       agent: { $ref: "#/components/schemas/LibraryPackageList" },
                       skill: { $ref: "#/components/schemas/LibraryPackageList" },
-                      provider: { $ref: "#/components/schemas/LibraryPackageList" },
                       integration: { $ref: "#/components/schemas/LibraryPackageList" },
                     },
                   },
@@ -87,17 +86,16 @@ export const libraryPaths = {
                     },
                   ],
                   skill: [],
-                  provider: [
+                  integration: [
                     {
                       id: "pkg_gmail",
-                      type: "provider",
+                      type: "integration",
                       source: "system",
                       name: "Gmail",
-                      description: "Google Mail OAuth provider.",
+                      description: "Google Mail OAuth integration.",
                       installedIn: ["app_default", "app_staging"],
                     },
                   ],
-                  integration: [],
                 },
               },
             },

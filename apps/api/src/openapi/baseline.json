@@ -601,9 +601,6 @@
                       "type": "agent",
                       "runningRuns": 1,
                       "dependencies": {
-                        "providers": {
-                          "@appstrate/gmail": "^1.0.0"
-                        },
                         "skills": {}
                       }
                     },
@@ -620,9 +617,6 @@
                       "type": "agent",
                       "runningRuns": 0,
                       "dependencies": {
-                        "providers": {
-                          "@appstrate/github": "^1.0.0"
-                        },
                         "skills": {
                           "@appstrate/summarize": "^1.0.0"
                         }
@@ -13221,7 +13215,7 @@
                     },
                     "type": {
                       "type": "string",
-                      "enum": ["agent", "skill", "provider"]
+                      "enum": ["agent", "skill", "integration"]
                     },
                     "forkedFrom": {
                       "type": "string",
@@ -14970,7 +14964,7 @@
             "required": false,
             "schema": {
               "type": "string",
-              "enum": ["agent", "skill", "provider", "integration"]
+              "enum": ["agent", "skill", "integration"]
             },
             "description": "Filter by package type"
           }
@@ -16194,7 +16188,7 @@
             }
           },
           {
-            "name": "X-Provider",
+            "name": "X-Integration",
             "in": "header",
             "required": true,
             "description": "Scoped integration package name (e.g. `@afps/gmail`).",
@@ -16334,7 +16328,7 @@
             }
           },
           {
-            "name": "X-Provider",
+            "name": "X-Integration",
             "in": "header",
             "required": true,
             "description": "Scoped integration package name (e.g. `@afps/gmail`).",
@@ -16481,7 +16475,7 @@
             }
           },
           {
-            "name": "X-Provider",
+            "name": "X-Integration",
             "in": "header",
             "required": true,
             "description": "Scoped integration package name (e.g. `@afps/gmail`).",
@@ -16628,7 +16622,7 @@
             }
           },
           {
-            "name": "X-Provider",
+            "name": "X-Integration",
             "in": "header",
             "required": true,
             "description": "Scoped integration package name (e.g. `@afps/gmail`).",
@@ -16775,7 +16769,7 @@
             }
           },
           {
-            "name": "X-Provider",
+            "name": "X-Integration",
             "in": "header",
             "required": true,
             "description": "Scoped integration package name (e.g. `@afps/gmail`).",
@@ -17257,15 +17251,12 @@
                     "packages": {
                       "type": "object",
                       "description": "Packages grouped by type. Every group is always present (possibly empty).",
-                      "required": ["agent", "skill", "provider", "integration"],
+                      "required": ["agent", "skill", "integration"],
                       "properties": {
                         "agent": {
                           "$ref": "#/components/schemas/LibraryPackageList"
                         },
                         "skill": {
-                          "$ref": "#/components/schemas/LibraryPackageList"
-                        },
-                        "provider": {
                           "$ref": "#/components/schemas/LibraryPackageList"
                         },
                         "integration": {
@@ -17301,17 +17292,16 @@
                       }
                     ],
                     "skill": [],
-                    "provider": [
+                    "integration": [
                       {
                         "id": "pkg_gmail",
-                        "type": "provider",
+                        "type": "integration",
                         "source": "system",
                         "name": "Gmail",
-                        "description": "Google Mail OAuth provider.",
+                        "description": "Google Mail OAuth integration.",
                         "installedIn": ["app_default", "app_staging"]
                       }
-                    ],
-                    "integration": []
+                    ]
                   }
                 }
               }
@@ -17619,7 +17609,7 @@
           },
           "packageType": {
             "type": "string",
-            "enum": ["agent", "skill", "provider"]
+            "enum": ["agent", "skill", "integration"]
           },
           "packageSource": {
             "type": "string",
@@ -17873,7 +17863,7 @@
           "type": {
             "type": "string",
             "description": "Package type from manifest",
-            "enum": ["agent", "skill", "provider"]
+            "enum": ["agent", "skill", "integration"]
           },
           "runningRuns": {
             "type": "integer"
@@ -17881,12 +17871,6 @@
           "dependencies": {
             "type": "object",
             "properties": {
-              "providers": {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "string"
-                }
-              },
               "skills": {
                 "type": "object",
                 "additionalProperties": {
@@ -19129,7 +19113,7 @@
             },
             "type": {
               "type": "string",
-              "enum": ["agent", "skill", "provider"]
+              "enum": ["agent", "skill", "integration"]
             },
             "source": {
               "type": "string",
