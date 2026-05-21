@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/brevo",
   "version": "1.0.0",
-  "displayName": "Brevo",
+  "displayName": "Brevo (API)",
   "description": "Email marketing and CRM platform",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "brevo",
   "keywords": ["email", "marketing", "crm"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "api_key",

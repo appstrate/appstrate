@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/discord",
   "version": "1.0.0",
-  "displayName": "Discord",
+  "displayName": "Discord (API)",
   "description": "Communication platform for communities and teams",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "discord",
   "keywords": ["social-media", "messaging", "community"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "oauth2",

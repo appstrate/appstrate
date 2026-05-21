@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/google-contacts",
   "version": "1.0.0",
-  "displayName": "Google Contacts",
+  "displayName": "Google Contacts (API)",
   "description": "Contact management service by Google",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "googlecontacts",
   "keywords": ["contacts", "productivity"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "oauth2",

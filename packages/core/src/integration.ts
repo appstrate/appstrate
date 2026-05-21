@@ -60,6 +60,12 @@ export const integrationServerTypeEnum = z.enum([
   "binary",
   "docker",
   "http",
+  // Serverless: no MCP server spawned/connected — the integration exposes the
+  // single generic credential-injecting `api_call` tool, bounded by its auth's
+  // `authorizedUris`. Unifies the former `apiCall` block into the `server.type`
+  // discriminator so there is one declaration model for what an integration
+  // does (spawn a runner | connect a remote MCP | expose api_call).
+  "api_call",
   // Author-time sugars — converted by `afps bundle` (Phase 1.05).
   "npx",
   "uvx",
@@ -150,6 +156,17 @@ const serverSchema = z
     variables: z.record(z.string(), serverVariableSchema).optional(),
     mcpConfig: mcpConfigSchema.optional(),
     toolsDynamic: z.boolean().optional(),
+
+    // `api_call`-only sugars (the former top-level `apiCall` block). Which
+    // declared auth supplies credentials + `authorizedUris` for the generic
+    // call (optional when the integration declares exactly one auth), and the
+    // resumable-upload protocols the generic tool advertises. Forbidden on any
+    // other server.type (enforced in the superRefine below).
+    authKey: z
+      .string()
+      .regex(/^[a-z][a-z0-9_]*$/, { error: "server.authKey must match an auths.{key}" })
+      .optional(),
+    uploadProtocols: z.array(integrationUploadProtocolEnum).optional(),
   })
   .superRefine((server, ctx) => {
     // Exactly one of {entryPoint, package, url} per type
@@ -271,6 +288,28 @@ const serverSchema = z
         }
         break;
       }
+      case "api_call": {
+        // Serverless: no runner to point at. The credential-injecting tool is
+        // bounded by its auth's `authorizedUris` (cross-validated against
+        // `auths.{key}` in the root superRefine, which has the auth map).
+        if (hasEntry || hasPackage || hasUrl) {
+          ctx.addIssue({
+            code: "custom",
+            message: 'server.entryPoint/package/url forbidden when server.type is "api_call"',
+            path: hasEntry ? ["entryPoint"] : hasPackage ? ["package"] : ["url"],
+          });
+        }
+        break;
+      }
+    }
+
+    // `authKey` / `uploadProtocols` are api_call-only sugars.
+    if (server.type !== "api_call" && (server.authKey !== undefined || server.uploadProtocols)) {
+      ctx.addIssue({
+        code: "custom",
+        message: 'server.authKey/uploadProtocols are only valid when server.type is "api_call"',
+        path: server.authKey !== undefined ? ["authKey"] : ["uploadProtocols"],
+      });
     }
 
     // D32: caTrustEnv is required for binaries.
@@ -556,49 +595,6 @@ const toolsRecordSchema = z.record(
 export type IntegrationToolMetadata = z.infer<typeof toolMetadataSchema>;
 
 // ─────────────────────────────────────────────
-// apiCall — generic credential-injecting HTTP tool
-// ─────────────────────────────────────────────
-
-/**
- * `apiCall` opts the integration into a generic credential-injecting HTTP
- * call tool (exposed to the agent as `{namespace}__api_call`), alongside
- * any MCP server tools. It restores the legacy `provider` ergonomics: the
- * agent calls an arbitrary URL bounded by the auth's `authorizedUris` and
- * the sidecar injects the credential via the same `delivery.http`
- * machinery the MITM proxy uses.
- *
- * Two shapes:
- *  - **pure proxy** — `apiCall` declared with no `server` (the shape every
- *    migrated provider takes): the integration spawns no MCP runner and
- *    exposes only the generic tool.
- *  - **hybrid** — `apiCall` alongside an MCP `server`: structured tools
- *    plus a raw-API escape hatch.
- *
- * The generic tool is coarse-grained by design: bounded only by the
- * auth's `authorizedUris` (no per-tool `urlPatterns` scope envelope), so
- * it relies on the agent-declared `scopes[]` escape hatch for OAuth scope
- * selection rather than per-tool inference.
- */
-const apiCallSchema = z.object({
-  // Which declared auth supplies credentials + `authorizedUris` for the
-  // generic call. Optional when the integration declares exactly one
-  // auth; validated against `auths.{key}` at the root level otherwise.
-  authKey: z
-    .string()
-    .regex(/^[a-z][a-z0-9_]*$/, {
-      error: "apiCall.authKey must match an auths.{key}",
-    })
-    .optional(),
-
-  // Resumable-upload protocols the generic tool advertises (ported from
-  // the legacy provider `uploadProtocols`). When non-empty the runtime
-  // also exposes an upload helper tool.
-  uploadProtocols: z.array(integrationUploadProtocolEnum).optional(),
-});
-
-export type IntegrationApiCallConfig = z.infer<typeof apiCallSchema>;
-
-// ─────────────────────────────────────────────
 // Integration manifest (root)
 // ─────────────────────────────────────────────
 
@@ -646,11 +642,12 @@ export const integrationManifestSchema = z
       .optional(),
     _meta: z.looseObject({}).optional(),
 
-    // Optional: an integration may omit `server` when it declares
-    // `apiCall` (a pure credential-injecting proxy — the migrated-provider
-    // shape). The root superRefine enforces "server OR apiCall".
+    // Every integration declares a `server` — its `type` is the single
+    // discriminator for what the integration does: spawn a runner
+    // (node|python|binary|…), connect a remote MCP (http), or expose the
+    // generic credential-injecting tool (api_call). Optional only so the root
+    // superRefine can emit a friendly "must declare a server" error.
     server: serverSchema.optional(),
-    apiCall: apiCallSchema.optional(),
     transport: transportSchema.optional(),
     serverAuth: serverAuthSchema.optional(),
     auths: z
@@ -670,38 +667,37 @@ export const integrationManifestSchema = z
     tools: toolsRecordSchema.optional(),
   })
   .superRefine((m, ctx) => {
-    // An integration must do something: spawn/connect an MCP `server`, or
-    // expose the generic `apiCall` tool, or both.
-    if (!m.server && !m.apiCall) {
+    // An integration must declare a `server` — its `type` says what it does.
+    if (!m.server) {
       ctx.addIssue({
         code: "custom",
-        message: "an integration must declare at least one of: server, apiCall",
+        message: "an integration must declare a server",
         path: ["server"],
       });
     }
 
-    // `apiCall` injects a credential, so it needs an auth to draw from.
-    if (m.apiCall) {
+    // `api_call` injects a credential, so it needs an auth to draw from.
+    if (m.server?.type === "api_call") {
       const authKeys = m.auths ? Object.keys(m.auths) : [];
       if (authKeys.length === 0) {
         ctx.addIssue({
           code: "custom",
-          message: "apiCall requires at least one declared auth in auths.{key}",
-          path: ["apiCall"],
+          message: 'server.type "api_call" requires at least one declared auth in auths.{key}',
+          path: ["server"],
         });
-      } else if (m.apiCall.authKey) {
-        if (!authKeys.includes(m.apiCall.authKey)) {
+      } else if (m.server.authKey) {
+        if (!authKeys.includes(m.server.authKey)) {
           ctx.addIssue({
             code: "custom",
-            message: `apiCall.authKey "${m.apiCall.authKey}" does not match any auths.{key}`,
-            path: ["apiCall", "authKey"],
+            message: `server.authKey "${m.server.authKey}" does not match any auths.{key}`,
+            path: ["server", "authKey"],
           });
         }
       } else if (authKeys.length > 1) {
         ctx.addIssue({
           code: "custom",
-          message: "apiCall.authKey is required when the integration declares multiple auths",
-          path: ["apiCall", "authKey"],
+          message: "server.authKey is required when the integration declares multiple auths",
+          path: ["server", "authKey"],
         });
       }
     }
@@ -802,23 +798,23 @@ export function getDeclaredToolNames(manifest: IntegrationManifest): string[] {
 export const API_CALL_TOOL_NAME = "api_call";
 
 /**
- * Resolve the effective `apiCall` configuration for an integration, or
- * `null` when the integration didn't opt in. Returns the resolved
- * `authKey` (explicit, or the lone declared auth) and the declared
- * `uploadProtocols`. The manifest schema guarantees that when `apiCall`
- * is present there is at least one auth and `authKey` is unambiguous, so
- * the resolution here cannot fail for a validated manifest.
+ * Resolve the effective `api_call` configuration for an integration, or
+ * `null` when `server.type !== "api_call"`. Returns the resolved `authKey`
+ * (explicit `server.authKey`, or the lone declared auth) and the declared
+ * `server.uploadProtocols`. The manifest schema guarantees that for an
+ * `api_call` server there is at least one auth and `authKey` is unambiguous,
+ * so the resolution here cannot fail for a validated manifest.
  */
 export function getApiCallConfig(
   manifest: IntegrationManifest,
 ): { authKey: string; uploadProtocols: IntegrationUploadProtocol[] } | null {
-  if (!manifest.apiCall) return null;
+  if (manifest.server?.type !== "api_call") return null;
   const authKeys = manifest.auths ? Object.keys(manifest.auths) : [];
-  const authKey = manifest.apiCall.authKey ?? authKeys[0];
+  const authKey = manifest.server.authKey ?? authKeys[0];
   if (!authKey) return null;
   return {
     authKey,
-    uploadProtocols: manifest.apiCall.uploadProtocols ?? [],
+    uploadProtocols: manifest.server.uploadProtocols ?? [],
   };
 }
 
@@ -866,23 +862,56 @@ export function getToolUrlPatterns(
 export function requiredAuthKeysForAgent(
   manifest: IntegrationManifest,
   agentTools: readonly string[] | undefined,
+  agentScopes?: readonly string[] | undefined,
 ): string[] {
-  if (!agentTools || agentTools.length === 0) return [];
+  const hasTools = !!agentTools && agentTools.length > 0;
+  const hasScopes = !!agentScopes && agentScopes.length > 0;
+  // "Active" = the agent declared a usage. MCP integrations express it via
+  // selected tools; apiCall integrations (former providers) expose no tools,
+  // so selected oauth scopes are the only signal. Neither → inert, no auth.
+  if (!hasTools && !hasScopes) return [];
   const declaredAuths = manifest.auths ? Object.keys(manifest.auths) : [];
   if (declaredAuths.length === 0) return [];
   if (declaredAuths.length === 1) return declaredAuths;
 
   const toolsRecord = manifest.tools ?? {};
   const out = new Set<string>();
-  for (const toolName of agentTools) {
+  for (const toolName of agentTools ?? []) {
     const tool = toolsRecord[toolName];
     if (!tool || !tool.requiredAuthKey) continue;
     if (declaredAuths.includes(tool.requiredAuthKey)) out.add(tool.requiredAuthKey);
   }
-  // Fallback: if the selected tools didn't pin any auth (none declared
-  // `requiredAuthKey`), require every declared auth — the agent must
-  // pick a side at consent rather than silently get a free pass.
+  // Scope-only selection (apiCall integrations) maps each selected scope to
+  // the auth(s) whose `availableScopes` catalog declares it.
+  if (hasScopes) {
+    for (const authKey of declaredAuths) {
+      const catalog = manifest.auths?.[authKey]?.availableScopes ?? [];
+      const values = new Set(catalog.map((s) => s.value));
+      if (agentScopes!.some((s) => values.has(s))) out.add(authKey);
+    }
+  }
+  // Fallback: if neither tools nor scopes pinned an auth, require every
+  // declared auth — the agent must pick a side at consent rather than
+  // silently get a free pass.
   return out.size === 0 ? declaredAuths : [...out];
+}
+
+/**
+ * Required oauth scopes for an agent's use of (integration, authKey): the
+ * union of tool-inferred scopes ({@link scopesContributedByTools}) and the
+ * agent's explicitly-selected scopes. apiCall integrations expose no tools,
+ * so the explicit selection is the only scope signal there. Mirrors the
+ * union `integration-scope-resolver` already applies for the org breakdown.
+ */
+export function requiredScopesForAgent(input: {
+  manifest: IntegrationManifest;
+  authKey: string;
+  agentTools: readonly string[] | undefined;
+  agentScopes: readonly string[] | undefined;
+}): string[] {
+  const viaTools = scopesContributedByTools(input);
+  const viaExplicit = input.agentScopes ? [...input.agentScopes] : [];
+  return [...new Set([...viaTools, ...viaExplicit])];
 }
 
 /**

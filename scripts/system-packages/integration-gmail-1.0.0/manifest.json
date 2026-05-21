@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/gmail",
   "version": "1.0.0",
-  "displayName": "Gmail",
+  "displayName": "Gmail (API)",
   "description": "Email service by Google",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "gmail",
   "keywords": ["email", "productivity"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "oauth2",

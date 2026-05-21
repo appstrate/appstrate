@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/wordpress",
   "version": "1.0.0",
-  "displayName": "WordPress",
+  "displayName": "WordPress (API)",
   "description": "Content management system — manage posts, pages, media, and users via the REST API",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "wordpress",
   "keywords": ["cms", "content"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "custom",

@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/activecampaign",
   "version": "1.0.0",
-  "displayName": "ActiveCampaign",
+  "displayName": "ActiveCampaign (API)",
   "description": "Marketing automation and CRM platform — contacts, deals, campaigns, and automations",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "https://api.iconify.design/logos/active-campaign.svg",
   "keywords": ["marketing", "crm"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "api_key",

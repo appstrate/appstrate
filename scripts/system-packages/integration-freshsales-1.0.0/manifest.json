@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/freshsales",
   "version": "1.0.0",
-  "displayName": "Freshsales",
+  "displayName": "Freshsales (API)",
   "description": "CRM platform for sales teams with AI-powered lead scoring",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "https://www.google.com/s2/favicons?domain=freshsales.io&sz=128",
   "keywords": ["crm", "sales"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "api_key",

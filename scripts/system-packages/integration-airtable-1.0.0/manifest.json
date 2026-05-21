@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/airtable",
   "version": "1.0.0",
-  "displayName": "Airtable",
+  "displayName": "Airtable (API)",
   "description": "Low-code platform for building collaborative databases and apps",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "airtable",
   "keywords": ["project-management", "database", "collaboration"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "oauth2",

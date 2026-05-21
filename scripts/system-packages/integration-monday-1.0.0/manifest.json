@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/monday",
   "version": "1.0.0",
-  "displayName": "Monday.com",
+  "displayName": "Monday.com (API)",
   "description": "Work operating system for project management and team collaboration",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "https://api.iconify.design/logos/monday-icon.svg",
   "keywords": ["project-management", "collaboration"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "oauth2",

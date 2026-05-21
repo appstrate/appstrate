@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/telegram",
   "version": "1.0.0",
-  "displayName": "Telegram",
+  "displayName": "Telegram (API)",
   "description": "Messaging platform — send messages, manage bots, and interact with chats via the Bot API",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "telegram",
   "keywords": ["messaging", "communications"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "api_key",

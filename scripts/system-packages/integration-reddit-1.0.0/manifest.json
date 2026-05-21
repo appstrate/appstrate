@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/reddit",
   "version": "1.0.0",
-  "displayName": "Reddit",
+  "displayName": "Reddit (API)",
   "description": "Social news aggregation and discussion platform",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "reddit",
   "keywords": ["social-media", "community"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "oauth2",

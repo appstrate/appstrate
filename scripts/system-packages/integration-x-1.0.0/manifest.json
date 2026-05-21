@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/x",
   "version": "1.0.0",
-  "displayName": "X (Twitter)",
+  "displayName": "X (Twitter) (API)",
   "description": "Social media platform for microblogging and real-time engagement",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "x",
   "keywords": ["social-media", "marketing"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "oauth2",

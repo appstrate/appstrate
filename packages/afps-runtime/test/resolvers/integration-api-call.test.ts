@@ -82,7 +82,7 @@ function apiKeyIntegrationManifest(
 ) {
   return {
     integration: {
-      apiCall: { authKey: "main" },
+      server: { type: "api_call", authKey: "main" },
       auths: {
         main: {
           type: "api_key",
@@ -152,11 +152,11 @@ describe("readApiCallIntegrationMeta", () => {
     expect(readApiCallIntegrationMeta(bundle, { name: "@acme/mcp", version: "^1" })).toBeNull();
   });
 
-  it("infers the single auth when apiCall.authKey is omitted", () => {
+  it("infers the single auth when server.authKey is omitted", () => {
     const root = makePackage("@acme/agent", "1.0.0", "agent", {});
     const integ = makePackage("@acme/api", "1.0.0", "integration", {
       "integration.json": JSON.stringify({
-        apiCall: {},
+        server: { type: "api_call" },
         auths: {
           only: {
             type: "api_key",
@@ -201,7 +201,7 @@ describe("LocalIntegrationResolver", () => {
     const root = makePackage("@acme/agent", "1.0.0", "agent", {});
     const integ = makePackage("@acme/oauth", "1.0.0", "integration", {
       "integration.json": JSON.stringify({
-        apiCall: { authKey: "main" },
+        server: { type: "api_call", authKey: "main" },
         auths: {
           main: {
             type: "oauth2",

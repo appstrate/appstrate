@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/basecamp",
   "version": "1.0.0",
-  "displayName": "Basecamp",
+  "displayName": "Basecamp (API)",
   "description": "Project management and team communication platform",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "basecamp",
   "keywords": ["project-management", "collaboration"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "oauth2",

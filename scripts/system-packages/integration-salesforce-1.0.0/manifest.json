@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/salesforce",
   "version": "1.0.0",
-  "displayName": "Salesforce",
+  "displayName": "Salesforce (API)",
   "description": "Cloud-based CRM platform for sales, service, and marketing",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "salesforce",
   "keywords": ["crm", "sales", "marketing"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "oauth2",

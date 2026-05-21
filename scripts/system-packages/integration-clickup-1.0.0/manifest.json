@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/clickup",
   "version": "1.0.0",
-  "displayName": "ClickUp",
+  "displayName": "ClickUp (API)",
   "description": "Project management and productivity platform",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "clickup",
   "keywords": ["productivity", "project-management"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "oauth2",

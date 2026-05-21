@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/asana",
   "version": "1.0.0",
-  "displayName": "Asana",
+  "displayName": "Asana (API)",
   "description": "Work management platform for teams to organize and track projects",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "asana",
   "keywords": ["project-management", "collaboration"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "oauth2",

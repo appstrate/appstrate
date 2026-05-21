@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/google-forms",
   "version": "1.0.0",
-  "displayName": "Google Forms",
+  "displayName": "Google Forms (API)",
   "description": "Form creation and response collection by Google",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "googleforms",
   "keywords": ["forms", "productivity"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "oauth2",

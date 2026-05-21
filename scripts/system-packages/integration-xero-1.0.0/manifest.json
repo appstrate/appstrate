@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/xero",
   "version": "1.0.0",
-  "displayName": "Xero",
+  "displayName": "Xero (API)",
   "description": "Cloud-based accounting and bookkeeping platform for small businesses",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "xero",
   "keywords": ["accounting", "finance"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "oauth2",

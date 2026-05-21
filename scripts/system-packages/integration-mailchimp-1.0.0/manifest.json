@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/mailchimp",
   "version": "1.0.0",
-  "displayName": "Mailchimp",
+  "displayName": "Mailchimp (API)",
   "description": "Email marketing and automation platform",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "mailchimp",
   "keywords": ["email-marketing", "marketing"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "oauth2",

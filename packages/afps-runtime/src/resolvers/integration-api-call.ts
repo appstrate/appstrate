@@ -137,7 +137,7 @@ export function readApiCallIntegrationMeta(
 function projectApiCallMeta(name: string, parsed: unknown): ApiCallIntegrationMeta | null {
   if (!parsed || typeof parsed !== "object") return null;
   const m = parsed as {
-    apiCall?: { authKey?: string };
+    server?: { type?: string; authKey?: string };
     auths?: Record<
       string,
       {
@@ -148,13 +148,13 @@ function projectApiCallMeta(name: string, parsed: unknown): ApiCallIntegrationMe
       }
     >;
   };
-  if (!m.apiCall) return null;
+  if (m.server?.type !== "api_call") return null;
   const auths = m.auths ?? {};
   const authKeys = Object.keys(auths);
   if (authKeys.length === 0) return null;
-  // `apiCall.authKey` is optional when there's exactly one auth; otherwise it
+  // `server.authKey` is optional when there's exactly one auth; otherwise it
   // disambiguates. Fall back to the single declared auth.
-  const authKey = m.apiCall.authKey ?? (authKeys.length === 1 ? authKeys[0]! : undefined);
+  const authKey = m.server.authKey ?? (authKeys.length === 1 ? authKeys[0]! : undefined);
   if (!authKey) return null;
   const auth = auths[authKey];
   if (!auth) return null;

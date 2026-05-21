@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/google-calendar",
   "version": "1.0.0",
-  "displayName": "Google Calendar",
+  "displayName": "Google Calendar (API)",
   "description": "Calendar and scheduling service by Google",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "googlecalendar",
   "keywords": ["calendar", "productivity"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "oauth2",

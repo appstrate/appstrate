@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/jira",
   "version": "1.0.0",
-  "displayName": "Jira",
+  "displayName": "Jira (API)",
   "description": "Project tracking and issue management platform by Atlassian",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "jira",
   "keywords": ["project-management", "issue-tracking"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "oauth2",

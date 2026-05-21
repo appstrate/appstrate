@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/slack",
   "version": "1.0.0",
-  "displayName": "Slack",
+  "displayName": "Slack (API)",
   "description": "Team messaging and workflow automation",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "slack",
   "keywords": ["messaging", "productivity"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "oauth2",

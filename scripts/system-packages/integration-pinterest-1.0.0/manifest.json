@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/pinterest",
   "version": "1.0.0",
-  "displayName": "Pinterest",
+  "displayName": "Pinterest (API)",
   "description": "Visual discovery and bookmarking platform",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "pinterest",
   "keywords": ["social-media", "marketing"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "oauth2",

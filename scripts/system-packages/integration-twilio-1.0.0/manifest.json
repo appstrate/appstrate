@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/twilio",
   "version": "1.0.0",
-  "displayName": "Twilio",
+  "displayName": "Twilio (API)",
   "description": "Cloud communications platform for SMS, voice, and messaging",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "twilio",
   "keywords": ["messaging", "communications"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "api_key",

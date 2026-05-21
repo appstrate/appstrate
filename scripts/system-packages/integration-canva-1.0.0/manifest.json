@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/canva",
   "version": "1.0.0",
-  "displayName": "Canva",
+  "displayName": "Canva (API)",
   "description": "Online graphic design and visual content platform",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "canva",
   "keywords": ["design", "marketing"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "oauth2",

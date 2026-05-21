@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/youtube",
   "version": "1.0.0",
-  "displayName": "YouTube",
+  "displayName": "YouTube (API)",
   "description": "Video sharing and streaming platform by Google",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "youtube",
   "keywords": ["social-media", "video", "marketing"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "oauth2",

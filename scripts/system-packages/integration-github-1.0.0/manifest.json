@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/github",
   "version": "1.0.0",
-  "displayName": "GitHub",
+  "displayName": "GitHub (API)",
   "description": "Code hosting and collaboration platform",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "github",
   "keywords": ["development", "code"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "oauth2",

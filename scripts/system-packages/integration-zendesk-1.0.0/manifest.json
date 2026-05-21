@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/zendesk",
   "version": "1.0.0",
-  "displayName": "Zendesk",
+  "displayName": "Zendesk (API)",
   "description": "Customer service and support ticketing platform",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "zendesk",
   "keywords": ["crm", "support", "customer-service"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "api_key",

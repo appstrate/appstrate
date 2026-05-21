@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/quickbooks-online",
   "version": "1.0.0",
-  "displayName": "QuickBooks Online",
+  "displayName": "QuickBooks Online (API)",
   "description": "Cloud accounting software by Intuit — invoicing, expenses, and financial reporting",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "quickbooks",
   "keywords": ["accounting", "finance"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "oauth2",

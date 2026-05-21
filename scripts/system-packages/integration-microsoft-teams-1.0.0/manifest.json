@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/microsoft-teams",
   "version": "1.0.0",
-  "displayName": "Microsoft Teams",
+  "displayName": "Microsoft Teams (API)",
   "description": "Team collaboration and messaging platform by Microsoft",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "microsoftteams",
   "keywords": ["messaging", "collaboration"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "oauth2",

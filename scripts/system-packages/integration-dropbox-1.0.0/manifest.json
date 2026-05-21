@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/dropbox",
   "version": "1.0.0",
-  "displayName": "Dropbox",
+  "displayName": "Dropbox (API)",
   "description": "Cloud file storage, sync, and sharing platform",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "dropbox",
   "keywords": ["storage", "productivity"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "oauth2",

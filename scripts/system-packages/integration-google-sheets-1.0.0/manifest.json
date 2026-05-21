@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/google-sheets",
   "version": "1.0.0",
-  "displayName": "Google Sheets",
+  "displayName": "Google Sheets (API)",
   "description": "Online spreadsheet editor",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "googlesheets",
   "keywords": ["productivity", "spreadsheets"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "oauth2",

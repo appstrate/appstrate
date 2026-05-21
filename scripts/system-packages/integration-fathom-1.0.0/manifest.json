@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/fathom",
   "version": "1.0.0",
-  "displayName": "Fathom",
+  "displayName": "Fathom (API)",
   "description": "AI meeting recorder with transcripts and summaries",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "https://cdn.simpleicons.org/fathom",
   "keywords": ["meetings", "productivity"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "api_key",

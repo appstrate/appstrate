@@ -2,13 +2,13 @@
 
 /*
  * One-shot migration: convert legacy provider system-package sources
- * into apiCall integrations (provider to integration unification).
+ * into `server.type: "api_call"` integrations (provider to integration unification).
  *
  * For each scripts/system-packages/provider-X/manifest.json:
  *   - oauth1 providers are SKIPPED (not ported, see Trello / chantier
  *     decision); the source dir is left untouched for manual handling.
  *   - everything else is rewritten to a serverless integration manifest
- *     (apiCall + a single auths.primary) under
+ *     (`server.type: "api_call"` + a single auths.primary) under
  *     scripts/system-packages/integration-NAME-VERSION/, and the original
  *     provider source dir is removed.
  *
@@ -119,13 +119,15 @@ function convert(p: ProviderManifest): Record<string, unknown> {
     type: "integration",
     name: p.name,
     version: p.version,
-    displayName: p.displayName,
+    // " (API)" suffix differentiates raw-REST (server.type api_call)
+    // integrations from MCP integrations of the same service in the catalogue.
+    displayName: p.displayName.endsWith("(API)") ? p.displayName : `${p.displayName} (API)`,
     ...(p.description ? { description: p.description } : {}),
     license: "Apache-2.0",
     author: "Appstrate",
     ...(p.iconUrl ? { icon: p.iconUrl } : {}),
     ...(p.categories?.length ? { keywords: p.categories } : {}),
-    apiCall: {},
+    server: { type: "api_call" },
     auths: { primary: auth },
   };
 }

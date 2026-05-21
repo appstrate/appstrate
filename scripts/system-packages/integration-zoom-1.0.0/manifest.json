@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/zoom",
   "version": "1.0.0",
-  "displayName": "Zoom",
+  "displayName": "Zoom (API)",
   "description": "Video conferencing and online meetings platform",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "zoom",
   "keywords": ["video", "meetings"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "oauth2",

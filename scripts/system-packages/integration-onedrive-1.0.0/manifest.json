@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/onedrive",
   "version": "1.0.0",
-  "displayName": "OneDrive",
+  "displayName": "OneDrive (API)",
   "description": "Cloud file storage and sharing by Microsoft",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "microsoftonedrive",
   "keywords": ["storage", "productivity"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "oauth2",

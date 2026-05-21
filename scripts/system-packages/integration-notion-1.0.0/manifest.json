@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/notion",
   "version": "1.0.0",
-  "displayName": "Notion",
+  "displayName": "Notion (API)",
   "description": "All-in-one workspace for notes and docs",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "notion",
   "keywords": ["productivity", "documentation"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "oauth2",

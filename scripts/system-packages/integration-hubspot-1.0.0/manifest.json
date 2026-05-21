@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/hubspot",
   "version": "1.0.0",
-  "displayName": "HubSpot",
+  "displayName": "HubSpot (API)",
   "description": "CRM, marketing, and sales platform",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "hubspot",
   "keywords": ["crm", "marketing"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "oauth2",

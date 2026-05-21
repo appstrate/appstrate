@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/loom",
   "version": "1.0.0",
-  "displayName": "Loom",
+  "displayName": "Loom (API)",
   "description": "Video messaging platform — access video metadata, transcripts, and embed information",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "loom",
   "keywords": ["video", "communication"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "api_key",

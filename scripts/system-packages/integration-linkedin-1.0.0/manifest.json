@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/linkedin",
   "version": "1.0.0",
-  "displayName": "LinkedIn",
+  "displayName": "LinkedIn (API)",
   "description": "Professional networking and B2B marketing platform",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "linkedin",
   "keywords": ["social-media", "marketing", "crm"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "oauth2",

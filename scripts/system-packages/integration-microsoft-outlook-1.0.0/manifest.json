@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/microsoft-outlook",
   "version": "1.0.0",
-  "displayName": "Microsoft Outlook",
+  "displayName": "Microsoft Outlook (API)",
   "description": "Email and calendar service by Microsoft",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "microsoftoutlook",
   "keywords": ["email", "productivity"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "oauth2",

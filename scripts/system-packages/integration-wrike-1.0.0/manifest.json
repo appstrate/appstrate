@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/wrike",
   "version": "1.0.0",
-  "displayName": "Wrike",
+  "displayName": "Wrike (API)",
   "description": "Collaborative work management platform for teams and enterprises",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "https://www.google.com/s2/favicons?domain=wrike.com&sz=128",
   "keywords": ["project-management", "collaboration"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "oauth2",

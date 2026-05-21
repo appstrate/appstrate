@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/intercom",
   "version": "1.0.0",
-  "displayName": "Intercom",
+  "displayName": "Intercom (API)",
   "description": "Customer messaging and support platform",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "intercom",
   "keywords": ["customer-support", "messaging"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "oauth2",

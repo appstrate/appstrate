@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/teamwork",
   "version": "1.0.0",
-  "displayName": "Teamwork",
+  "displayName": "Teamwork (API)",
   "description": "Project management and collaboration platform for client work",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "https://api.iconify.design/logos/teamwork.svg",
   "keywords": ["project-management", "collaboration"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "api_key",

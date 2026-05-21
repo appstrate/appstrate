@@ -4,13 +4,15 @@
   "type": "integration",
   "name": "@appstrate/webhooks",
   "version": "1.0.0",
-  "displayName": "Webhooks",
+  "displayName": "Webhooks (API)",
   "description": "Generic webhook provider — send HTTP requests to any URL with optional authentication",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "webhook",
   "keywords": ["integration", "automation"],
-  "apiCall": {},
+  "server": {
+    "type": "api_call"
+  },
   "auths": {
     "primary": {
       "type": "custom",
