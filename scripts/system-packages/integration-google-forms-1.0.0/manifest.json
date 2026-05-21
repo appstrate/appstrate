@@ -26,6 +26,7 @@
         "https://www.googleapis.com/auth/forms.responses.readonly"
       ],
       "scopeSeparator": " ",
+      "authorizationParams": { "access_type": "offline", "prompt": "consent" },
       "pkceEnabled": false,
       "tokenAuthMethod": "client_secret_post",
       "availableScopes": [

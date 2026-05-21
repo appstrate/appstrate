@@ -68,8 +68,11 @@ const inflightRefreshes = new Map<string, Promise<IntegrationRefreshResult>>();
 
 /**
  * Force-refresh the OAuth2 access token for an integration connection.
- * No-op (returns current creds) when the connection has no refresh_token
- * or the manifest auth isn't OAuth2.
+ * No-op (returns current creds) when the manifest auth isn't OAuth2 or no
+ * per-app OAuth client is registered (`refreshContext` absent). When the auth
+ * IS refreshable but the stored credentials carry no refresh_token, the token
+ * is unrecoverable: returns the current creds AND flags needsReconnection so
+ * the surface prompts a re-connect.
  *
  * On success: writes the new ciphertext + expiresAt + clears needsReconnection.
  * On `invalid_grant`: throws RefreshError(kind="revoked") AND flips
@@ -126,6 +129,26 @@ async function doRefresh(
   // Read both.
   const refreshToken = current.refresh_token ?? current.refreshToken;
   if (!refreshToken) {
+    // We only reach `doRefresh` when a refresh was actually warranted — the
+    // caller is either inside the proactive lead window (token expiring) or
+    // recovering from an upstream 401. With no refresh_token there is no way
+    // to recover: the access token is or will be dead. Flag the connection so
+    // the agent/dashboard surfaces a re-connect prompt instead of silently
+    // serving a token that 401s on every call. (Root cause for Google was a
+    // missing `access_type=offline` on the authorize URL — see
+    // `auths.{key}.authorizationParams` — so the IdP never issued one.)
+    logger.warn(
+      "Integration connection unrefreshable — no refresh_token; flagging needsReconnection",
+      {
+        packageId,
+        authKey,
+        connectionId,
+      },
+    );
+    await db
+      .update(integrationConnections)
+      .set({ needsReconnection: true, updatedAt: new Date() })
+      .where(eq(integrationConnections.id, connectionId));
     return { fields: current, expiresAt: null, scopesGranted: null, shrinkDetected: false };
   }
 

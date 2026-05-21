@@ -23,6 +23,7 @@
       "refreshUrl": "https://oauth2.googleapis.com/token",
       "scopes": ["https://www.googleapis.com/auth/contacts.readonly"],
       "scopeSeparator": " ",
+      "authorizationParams": { "access_type": "offline", "prompt": "consent" },
       "pkceEnabled": false,
       "tokenAuthMethod": "client_secret_post",
       "availableScopes": [

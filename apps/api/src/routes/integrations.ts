@@ -575,6 +575,7 @@ export function createIntegrationsRouter() {
         scopes,
         scopeSeparator: auth.scopeSeparator,
         audience: auth.audience,
+        ...(auth.authorizationParams ? { authorizationParams: auth.authorizationParams } : {}),
         redirectUri,
         orgId: scope.orgId,
         applicationId: scope.applicationId,

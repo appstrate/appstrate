@@ -75,6 +75,14 @@ export interface InitiateIntegrationOAuthInput {
   scopeSeparator?: string;
   /** RFC 8707 `resource` parameter when the auth declares `audience`. */
   audience?: string;
+  /**
+   * Extra static query params merged verbatim into the authorize URL
+   * (from `manifest.auths.{key}.authorizationParams`). Used by IdPs that
+   * gate refresh-token issuance on an authorize-time flag (e.g. Google's
+   * `access_type=offline` + `prompt=consent`). Merged last so a manifest
+   * can override the dynamic `prompt`.
+   */
+  authorizationParams?: Record<string, string>;
   /** Platform redirect URI — same callback for all integration flows. */
   redirectUri: string;
   /** Org / app / actor context — propagated to the callback handler. */
@@ -165,6 +173,10 @@ export async function initiateIntegrationOAuth(
     // token request); harmless when accepted-but-ignored.
     ...(input.audience ? { resource: input.audience } : {}),
     ...(input.forceAccountSelect ? { prompt: "select_account" } : {}),
+    // Merged last: a manifest's authorizationParams (e.g. Google's
+    // access_type=offline + prompt=consent) wins over the dynamic prompt
+    // so refresh-token issuance is never silently suppressed.
+    ...(input.authorizationParams ?? {}),
   });
 
   const authUrl = `${input.authorizationUrl}${input.authorizationUrl.includes("?") ? "&" : "?"}${params.toString()}`;

@@ -124,6 +124,46 @@ describe("initiateIntegrationOAuth", () => {
     expect(url.searchParams.get("client_id")).toBe("c");
   });
 
+  it("merges authorizationParams into the authorize URL (e.g. Google access_type=offline)", async () => {
+    const result = await initiateIntegrationOAuth(store, {
+      packageId: "@official/google-drive",
+      authKey: "primary",
+      authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+      tokenUrl: "https://oauth2.googleapis.com/token",
+      clientId: "abc.apps.googleusercontent.com",
+      clientSecret: "secret",
+      authorizationParams: { access_type: "offline", prompt: "consent" },
+      redirectUri: "http://localhost:3000/cb",
+      orgId: "o",
+      applicationId: "a",
+      actor: { type: "user", id: "u" },
+    });
+    const url = new URL(result.authUrl);
+    expect(url.searchParams.get("access_type")).toBe("offline");
+    expect(url.searchParams.get("prompt")).toBe("consent");
+  });
+
+  it("lets authorizationParams override the dynamic forceAccountSelect prompt", async () => {
+    const result = await initiateIntegrationOAuth(store, {
+      packageId: "@official/google-drive",
+      authKey: "primary",
+      authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+      tokenUrl: "https://oauth2.googleapis.com/token",
+      clientId: "c",
+      clientSecret: "s",
+      authorizationParams: { access_type: "offline", prompt: "consent" },
+      forceAccountSelect: true,
+      redirectUri: "http://localhost:3000/cb",
+      orgId: "o",
+      applicationId: "a",
+      actor: { type: "user", id: "u" },
+    });
+    // Manifest authorizationParams is merged last → its `prompt=consent` wins
+    // over forceAccountSelect's `prompt=select_account`, so Google still
+    // re-issues a refresh_token on re-consent.
+    expect(new URL(result.authUrl).searchParams.get("prompt")).toBe("consent");
+  });
+
   it("captures end_user actor", async () => {
     const { state } = await initiateIntegrationOAuth(store, {
       packageId: "@x/y",

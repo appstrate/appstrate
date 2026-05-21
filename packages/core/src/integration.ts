@@ -421,6 +421,19 @@ const authSchema = z
     scopes: z.array(z.string()).optional(),
     scopeSeparator: z.string().optional(),
     pkceEnabled: z.boolean().optional(),
+
+    // Extra static query parameters merged verbatim into the OAuth2
+    // authorize URL (oauth2 only). Mirrors the legacy
+    // `provider.definition.oauth2.authorizationParams` that the
+    // provider→integration migration dropped. Required by IdPs that gate
+    // refresh-token issuance on an authorize-time flag — notably Google,
+    // which only returns a `refresh_token` when `access_type=offline` (and
+    // re-issues one on re-consent only with `prompt=consent`). Without it
+    // the access token expires after ~1h with no way to refresh, forcing a
+    // manual reconnect. Merged last in {@link initiateIntegrationOAuth} so
+    // a manifest can override the dynamic `prompt`; it must not redeclare
+    // the core PKCE/identity params (client_id, redirect_uri, state, …).
+    authorizationParams: z.record(z.string(), z.string()).optional(),
     tokenAuthMethod: z.enum(["client_secret_post", "client_secret_basic", "none"]).optional(),
 
     extractTokenIdentity: z.record(z.string(), z.string()).optional(),
