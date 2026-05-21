@@ -18,15 +18,17 @@
  * which `integration_connections` row is decrypted; an optional
  * connection id (from `X-Connection-Profile-Id`) pins a specific row.
  *
- * Mirrors `runtime-pi/sidecar/api-call-credentials.ts:toPayload` so the
- * external-runner path and the in-container path build the exact same
- * payload from a manifest auth's `delivery.http` plan.
+ * Both this external-runner path and the in-container sidecar path
+ * (`api-call-credentials.ts`) build the payload via the shared
+ * `buildProxyCredentialsPayload` helper in `@appstrate/connect`, so the
+ * payload shape and injection contract cannot drift between them.
  */
 
 import {
   RefreshError,
   decryptCredentialsToStringMap,
   resolveHttpDelivery,
+  buildProxyCredentialsPayload,
   type ProxyCredentialsPayload,
 } from "@appstrate/connect";
 import type { Actor } from "../../lib/actor.ts";
@@ -47,14 +49,6 @@ import { db } from "@appstrate/db/client";
 import { integrationOauthClients } from "@appstrate/db/schema";
 import { decryptCredentials } from "@appstrate/connect";
 import type { IntegrationManifest } from "@appstrate/core/integration";
-
-/**
- * Synthetic credential field holding the rendered injection token. Named
- * defensively so it can't collide with a real manifest credential field
- * (which must match `/^[a-z][a-z0-9_]*$/`). Mirrors the sidecar's
- * `API_CALL_INJECTED_FIELD`.
- */
-const INJECTED_FIELD = "__appstrate_credential_proxy_token__";
 
 /** Errors mapped by the route to 404 (credential not found). */
 export class IntegrationCredentialNotFoundError extends Error {
@@ -261,25 +255,16 @@ function buildPayloadFromFields(
   const authDef = manifest.auths?.[authKey];
   if (!authDef) return null;
 
-  const payloadFields: Record<string, string> = { ...fields };
-
   const http = authDef.delivery?.http;
   const plan = http ? resolveHttpDelivery(authDef.type, fields, http) : null;
-  if (plan) payloadFields[INJECTED_FIELD] = plan.value;
 
-  return {
-    credentials: payloadFields,
-    authorizedUris: [...authDef.authorizedUris],
-    // Integrations always declare ≥1 authorizedUri unless allowAllUris is set.
+  // Integrations always declare ≥1 authorizedUri unless allowAllUris is set.
+  return buildProxyCredentialsPayload({
+    fields,
+    plan,
+    authorizedUris: authDef.authorizedUris,
     allowAllUris: authDef.allowAllUris === true,
-    // `headerName === ""` (custom auth with no delivery.http) means no
-    // server-side injection — the agent supplies its own auth via
-    // `{{var}}` substitution, exactly like a legacy `custom` provider.
-    ...(plan && plan.headerName
-      ? { credentialHeaderName: plan.headerName, credentialHeaderPrefix: plan.headerPrefix }
-      : {}),
-    credentialFieldName: INJECTED_FIELD,
-  };
+  });
 }
 
 function decryptToStringMap(

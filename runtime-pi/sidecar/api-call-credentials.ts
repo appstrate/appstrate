@@ -26,14 +26,8 @@
  */
 
 import type { ProxyCredentialsPayload } from "@appstrate/connect/proxy-primitives";
+import { buildProxyCredentialsPayload } from "@appstrate/connect/integration-credentials";
 import type { IntegrationCredentialsSource } from "./integration-credentials-source.ts";
-
-/**
- * Synthetic credential field holding the rendered injection token. Named
- * defensively so it can't collide with a real manifest credential field
- * (which must match `/^[a-z][a-z0-9_]*$/`).
- */
-export const API_CALL_INJECTED_FIELD = "__appstrate_api_call_token__";
 
 export interface ApiCallCredentialAdapter {
   fetchCredentials: (providerId: string) => Promise<ProxyCredentialsPayload>;
@@ -56,22 +50,14 @@ export function createApiCallCredentialAdapter(opts: {
 
   const toPayload = (): ProxyCredentialsPayload => {
     const snap = source.snapshot();
-    const plan = snap.deliveryPlans[authKey];
+    const plan = snap.deliveryPlans[authKey] ?? null;
     const auth = snap.auths.find((a) => a.authKey === authKey);
-    const fields: Record<string, string> = { ...(auth?.fields ?? {}) };
-    if (plan) fields[API_CALL_INJECTED_FIELD] = plan.value;
-    return {
-      credentials: fields,
-      authorizedUris: [...authorizedUris],
+    return buildProxyCredentialsPayload({
+      fields: auth?.fields ?? {},
+      plan,
+      authorizedUris,
       allowAllUris,
-      // `headerName === ""` (custom auth with no delivery.http) means no
-      // server-side injection — the agent supplies its own auth via
-      // `{{var}}` substitution, exactly like a legacy `custom` provider.
-      ...(plan && plan.headerName
-        ? { credentialHeaderName: plan.headerName, credentialHeaderPrefix: plan.headerPrefix }
-        : {}),
-      credentialFieldName: API_CALL_INJECTED_FIELD,
-    };
+    });
   };
 
   return {

@@ -11,6 +11,7 @@
  */
 
 import { describe, it, expect, mock } from "bun:test";
+import { PROXY_INJECTED_FIELD } from "@appstrate/connect/integration-credentials";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { createApp, buildSidecarRuntimeDeps, type AppDeps } from "../app.ts";
@@ -494,12 +495,12 @@ describe("StreamableHTTPClientTransport interop (smoke test)", () => {
 
 describe("POST /mcp — api_call (provider→integration unification)", () => {
   const integrationCreds = (token = "integ-tok-1") => ({
-    credentials: { __appstrate_api_call_token__: token },
+    credentials: { [PROXY_INJECTED_FIELD]: token },
     authorizedUris: ["https://gmail.googleapis.com/**"],
     allowAllUris: false,
     credentialHeaderName: "Authorization",
     credentialHeaderPrefix: "Bearer",
-    credentialFieldName: "__appstrate_api_call_token__",
+    credentialFieldName: PROXY_INJECTED_FIELD,
   });
 
   async function makeApiCallApp(overrides?: Partial<AppDeps>) {

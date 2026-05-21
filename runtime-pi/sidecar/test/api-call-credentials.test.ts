@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import {
-  createApiCallCredentialAdapter,
-  API_CALL_INJECTED_FIELD,
-} from "../api-call-credentials.ts";
+import { createApiCallCredentialAdapter } from "../api-call-credentials.ts";
+import { PROXY_INJECTED_FIELD } from "@appstrate/connect/integration-credentials";
 import type { IntegrationCredentialsSource } from "../integration-credentials-source.ts";
 
 function fakeSource(
@@ -52,8 +50,8 @@ describe("createApiCallCredentialAdapter", () => {
     const creds = await adapter.fetchCredentials("@scope/integ");
     expect(creds.credentialHeaderName).toBe("Authorization");
     expect(creds.credentialHeaderPrefix).toBe("Bearer ");
-    expect(creds.credentialFieldName).toBe(API_CALL_INJECTED_FIELD);
-    expect(creds.credentials[API_CALL_INJECTED_FIELD]).toBe("AT");
+    expect(creds.credentialFieldName).toBe(PROXY_INJECTED_FIELD);
+    expect(creds.credentials[PROXY_INJECTED_FIELD]).toBe("AT");
     // The raw auth fields stay available for {{var}} substitution.
     expect(creds.credentials.access_token).toBe("AT");
     expect(creds.authorizedUris).toEqual(["https://api.example.com/**"]);

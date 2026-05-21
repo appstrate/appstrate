@@ -8,6 +8,7 @@
  */
 
 import type { IntegrationManifest } from "@appstrate/core/integration";
+import type { ProxyCredentialsPayload } from "./proxy-primitives.ts";
 import { decryptCredentials } from "./encryption.ts";
 
 /**
@@ -198,6 +199,46 @@ export function resolveHttpDelivery(
     headerPrefix,
     value,
     allowServerOverride: http.allowServerOverride === true,
+  };
+}
+
+/**
+ * Synthetic credential field holding the rendered injection token. Named
+ * defensively so it can't collide with a real manifest credential field
+ * (which must match `/^[a-z][a-z0-9_]*$/`). The payload self-describes the
+ * field name via `credentialFieldName`, so this value is opaque to consumers.
+ */
+export const PROXY_INJECTED_FIELD = "__appstrate_credential_proxy_token__";
+
+/**
+ * Synthesise the {@link ProxyCredentialsPayload} that `proxyCall` /
+ * `executeProviderCall` consume, from an auth's decrypted `fields` and its
+ * resolved {@link HttpDeliveryPlan}. Single source of truth shared by the
+ * external-runner path (`apps/api` credential-proxy resolver) and the
+ * in-container path (sidecar `api-call-credentials`), so the payload shape
+ * and injection contract cannot drift between them.
+ *
+ * `plan === null` (e.g. `custom` auth with no `delivery.http`, or a plan
+ * whose `headerName` is empty) means no server-side header injection — the
+ * agent supplies its own auth via `{{var}}` substitution against `credentials`.
+ */
+export function buildProxyCredentialsPayload(opts: {
+  fields: Readonly<Record<string, string>>;
+  plan: HttpDeliveryPlan | null;
+  authorizedUris: readonly string[];
+  allowAllUris?: boolean;
+}): ProxyCredentialsPayload {
+  const { fields, plan, authorizedUris, allowAllUris = false } = opts;
+  const credentials: Record<string, string> = { ...fields };
+  if (plan) credentials[PROXY_INJECTED_FIELD] = plan.value;
+  return {
+    credentials,
+    authorizedUris: [...authorizedUris],
+    allowAllUris,
+    ...(plan && plan.headerName
+      ? { credentialHeaderName: plan.headerName, credentialHeaderPrefix: plan.headerPrefix }
+      : {}),
+    credentialFieldName: PROXY_INJECTED_FIELD,
   };
 }
 

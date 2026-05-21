@@ -52,6 +52,8 @@ export {
   decryptCredentialsToStringMap,
   readCredentialField,
   resolveHttpDelivery,
+  buildProxyCredentialsPayload,
+  PROXY_INJECTED_FIELD,
 } from "./integration-credentials.ts";
 export type {
   ResolvedAuthCredentials,
