@@ -165,7 +165,21 @@ export async function updateOrgItem(
 }
 
 /** List items of a type accessible to an application (system + installed). */
-export async function listOrgItems(orgId: string, cfg: PackageTypeConfig, applicationId: string) {
+export async function listOrgItems(
+  orgId: string,
+  cfg: PackageTypeConfig,
+  applicationId: string,
+  opts?: { activeOnly?: boolean },
+) {
+  // Default: catalogue view — system packages (always visible) + org packages
+  // installed in this app. `activeOnly` narrows to packages that are actually
+  // active in THIS app: an enabled `application_packages` row, dropping the
+  // "system always shows" branch. Used by the agent editor's integration
+  // picker so it only offers usable integrations (server-side filter — the
+  // full catalogue can be large).
+  const installFilter = opts?.activeOnly
+    ? and(isNotNull(applicationPackages.packageId), eq(applicationPackages.enabled, true))
+    : or(eq(packages.source, "system"), isNotNull(applicationPackages.packageId));
   const data = await db
     .select({
       id: packages.id,
@@ -194,7 +208,7 @@ export async function listOrgItems(orgId: string, cfg: PackageTypeConfig, applic
         orgOrSystemFilter(orgId),
         eq(packages.type, cfg.type),
         notEphemeralFilter(),
-        or(eq(packages.source, "system"), isNotNull(applicationPackages.packageId)),
+        installFilter,
       ),
     )
     .orderBy(

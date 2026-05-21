@@ -1017,6 +1017,8 @@
   "agentEditor.integrations.add": "Add integration",
   "agentEditor.integrations.empty": "No integrations linked. Click \"Add\" to link one.",
   "agentEditor.integrations.remove": "Remove",
+  "agentEditor.integrations.apiCall.label": "Generic API call (api_call)",
+  "agentEditor.integrations.apiCall.description": "Lets the agent make authenticated HTTP calls to this integration. Credentials are injected server-side; the scopes below bound the access.",
   "agentEditor.integrations.tools.title": "Allowed tools",
   "agentEditor.integrations.tools.noneNotice": "No tool selected — the integration is declared but exposes nothing to the agent. Tick the tools you need or use \"Select all\".",
   "agentEditor.integrations.tools.explicitNotice": "Only the ticked tools will be exposed to the agent at runtime. Required OAuth scopes are inferred automatically.",

@@ -37,7 +37,7 @@ import type {
   IntegrationPin,
 } from "@appstrate/shared-types";
 import {
-  scopesContributedByTools,
+  requiredScopesForAgent,
   expandGrantedScopes,
   type IntegrationManifest,
 } from "@appstrate/core/integration";
@@ -601,14 +601,15 @@ async function attachOwnerNames(rows: ConnectionRow[]): Promise<SharedConnection
 
 // ─────────────────────────── Agent-page picker resolution ─────────────────────
 
-/** Scopes the agent's selected tools need on `authKey` that `granted` lacks. */
+/** Scopes the agent's selected tools/scopes need on `authKey` that `granted` lacks. */
 function missingScopesForConnection(
   manifest: IntegrationManifest,
   authKey: string,
   granted: string[],
   agentTools: readonly string[],
+  agentScopes: readonly string[],
 ): string[] {
-  const required = scopesContributedByTools({ manifest, authKey, agentTools });
+  const required = requiredScopesForAgent({ manifest, authKey, agentTools, agentScopes });
   if (required.length === 0) return [];
   const expanded = new Set(expandGrantedScopes(granted, manifest, authKey));
   return required.filter((s) => !expanded.has(s));
@@ -637,9 +638,11 @@ export async function resolveAgentIntegrationPick(args: {
   const agent = await getPackage(agentPackageId, scope.orgId);
   if (!agent) throw notFound(`Agent '${agentPackageId}' not found in this organization`);
   const agentManifest = agent.manifest as unknown as Record<string, unknown>;
-  const agentTools =
-    parseManifestIntegrations(agentManifest).find((e) => e.id === integrationPackageId)?.tools ??
-    [];
+  const agentEntry = parseManifestIntegrations(agentManifest).find(
+    (e) => e.id === integrationPackageId,
+  );
+  const agentTools = agentEntry?.tools ?? [];
+  const agentScopes = agentEntry?.scopes ?? [];
 
   const manifestRes = await fetchIntegrationManifest(integrationPackageId);
   const manifest = manifestRes.ok ? manifestRes.manifest : null;
@@ -675,7 +678,7 @@ export async function resolveAgentIntegrationPick(args: {
   const candidates: IntegrationCandidate[] = candidatesRaw.map((c) => ({
     ...c,
     missingScopes: manifest
-      ? missingScopesForConnection(manifest, c.authKey, c.scopesGranted, agentTools)
+      ? missingScopesForConnection(manifest, c.authKey, c.scopesGranted, agentTools, agentScopes)
       : [],
     isOwn: actor.type === "user" ? c.ownerUserId === actor.id : c.ownerEndUserId === actor.id,
   }));

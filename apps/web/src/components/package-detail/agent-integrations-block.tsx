@@ -25,11 +25,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+  useIntegrations,
   useIntegrationDetail,
   useIntegrationConnections,
   useAgentsConsumingIntegration,
   useIntegrationAgentResolution,
   type AgentIntegrationEntry,
+  type IntegrationAuthStatus,
   type IntegrationCandidate,
   type IntegrationConnection,
   type IntegrationManifestView,
@@ -73,6 +75,15 @@ interface AgentIntegrationsBlockProps {
  * stale or the actor hits Run before refreshing.
  */
 export function AgentIntegrationsBlock({ entries, agentPackageId }: AgentIntegrationsBlockProps) {
+  // The list carries `active` (installed + enabled in this app). An agent can
+  // declare an integration that was never activated here (or got disabled);
+  // those cards render a read-only "not active" state instead of a connect
+  // affordance, mirroring the run-time `integration_not_active` gate.
+  const { data: integrations } = useIntegrations();
+  const activeIds = integrations
+    ? new Set(integrations.filter((i) => i.active).map((i) => i.id))
+    : null;
+
   if (entries.length === 0) return null;
 
   return (
@@ -82,6 +93,10 @@ export function AgentIntegrationsBlock({ entries, agentPackageId }: AgentIntegra
           key={entry.id}
           packageId={entry.id}
           agentTools={entry.tools}
+          agentScopes={entry.scopes}
+          // Optimistic while the list loads (null) so the card doesn't flash
+          // a "not active" state; once loaded, gate strictly on membership.
+          appActive={activeIds ? activeIds.has(entry.id) : true}
           {...(agentPackageId ? { agentPackageId } : {})}
         />
       ))}
@@ -92,14 +107,20 @@ export function AgentIntegrationsBlock({ entries, agentPackageId }: AgentIntegra
 interface IntegrationConnectionCardProps {
   packageId: string;
   agentTools: string[] | undefined;
+  agentScopes: string[] | undefined;
+  /** Whether the integration is active (installed + enabled) in this app. */
+  appActive: boolean;
   agentPackageId?: string;
 }
 
 function IntegrationConnectionCard({
   packageId,
   agentTools,
+  agentScopes,
+  appActive,
   agentPackageId,
 }: IntegrationConnectionCardProps) {
+  const { t } = useTranslation(["agents"]);
   const { data: detail, isPending: detailPending } = useIntegrationDetail(packageId);
   const displayName = detail?.manifest.displayName ?? packageId;
 
@@ -113,13 +134,35 @@ function IntegrationConnectionCard({
     );
   }
 
+  // Not active in this application → no connection is possible. Show a
+  // disabled, explanatory control rather than a picker/connect button that
+  // the run-time gate would reject with `integration_not_active`.
+  if (!appActive) {
+    return (
+      <CardShell title={displayName} subtitle={packageId}>
+        <span
+          className="text-destructive max-w-[18rem] text-right text-xs"
+          data-testid={`integration-inactive-${packageId}`}
+        >
+          {t("detail.integrationInactive")}
+        </span>
+      </CardShell>
+    );
+  }
+
   // Member pre-run picker — surfaces ambiguity (>1 candidates) BEFORE Run.
   // Admin pin management has moved to the integration detail page (R2);
   // this block now carries only member-facing widgets. The picker is
   // integration-level (flat model — one connection per integration,
   // regardless of auth shape).
-  const hasSelectedTools = (agentTools?.length ?? 0) > 0;
-  const showMemberPicker = !!agentPackageId && hasSelectedTools;
+  //
+  // "Active" = the agent declared a usage for this integration. For MCP
+  // integrations that's a tool selection; for apiCall integrations (former
+  // providers) there are no discrete tools — the usage is the selected
+  // oauth scopes. Gating on tools alone made apiCall integrations
+  // structurally unconnectable from the agent page.
+  const isActive = (agentTools?.length ?? 0) > 0 || (agentScopes?.length ?? 0) > 0;
+  const showMemberPicker = !!agentPackageId && isActive;
 
   // The dropdown is the unified per-integration control — it lists every
   // accessible connection AND carries "add a connection" entries, so it
@@ -133,6 +176,7 @@ function IntegrationConnectionCard({
           integrationPackageId={packageId}
           agentPackageId={agentPackageId!}
           manifest={detail.manifest}
+          authStatuses={detail.auths}
           displayName={displayName}
         />
       </CardShell>
@@ -143,10 +187,35 @@ function IntegrationConnectionCard({
     <FallbackConnectCard
       packageId={packageId}
       manifest={detail.manifest}
+      authStatuses={detail.auths}
       displayName={displayName}
       agentTools={agentTools}
+      agentScopes={agentScopes}
     />
   );
+}
+
+/**
+ * Auth keys the actor can actually start a connect flow on. oauth2 auths
+ * require an admin-registered OAuth client (`hasOAuthClient`); without one
+ * the server refuses connect with 403. Non-oauth2 auths (api_key / basic /
+ * custom) carry no client and are always connectable via the fields modal.
+ * Mirrors the gate the integration detail page applies.
+ */
+function connectableAuthKeys(
+  manifest: IntegrationManifestView,
+  authStatuses: IntegrationAuthStatus[],
+): Set<string> {
+  const out = new Set<string>();
+  const declared = manifest.auths ?? {};
+  for (const key of Object.keys(declared)) {
+    if (declared[key]?.type !== "oauth2") {
+      out.add(key);
+      continue;
+    }
+    if (authStatuses.find((s) => s.authKey === key)?.hasOAuthClient) out.add(key);
+  }
+  return out;
 }
 
 /**
@@ -160,15 +229,19 @@ function IntegrationConnectionCard({
 function FallbackConnectCard({
   packageId,
   manifest,
+  authStatuses,
   displayName,
   agentTools,
+  agentScopes,
 }: {
   packageId: string;
   manifest: IntegrationManifestView;
+  authStatuses: IntegrationAuthStatus[];
   displayName: string;
   agentTools: string[] | undefined;
+  agentScopes: string[] | undefined;
 }) {
-  const { t } = useTranslation(["agents"]);
+  const { t } = useTranslation(["agents", "settings"]);
   const { data: connections, isPending: connsPending } = useIntegrationConnections(packageId);
   const { data: consumingAgents } = useAgentsConsumingIntegration(packageId);
 
@@ -182,7 +255,12 @@ function FallbackConnectCard({
     );
   }
 
-  const status = deriveIntegrationStatus({ manifest, connections: connections ?? [], agentTools });
+  const status = deriveIntegrationStatus({
+    manifest,
+    connections: connections ?? [],
+    agentTools,
+    agentScopes,
+  });
   const action = resolveAction(status, manifest);
 
   // The connected connection drives the reuse hint below. We used to also
@@ -209,9 +287,19 @@ function FallbackConnectCard({
   // different ones across agents.
   const addAnotherAuthKey = status.kind === "ok" && status.authKey ? status.authKey : null;
 
+  // An oauth2 connect/reconnect needs an admin-registered OAuth client; the
+  // server returns 403 otherwise. Surface the pointer instead of a button
+  // doomed to fail — mirrors the integration detail page's gate.
+  const connectable = connectableAuthKeys(manifest, authStatuses);
+  const actionBlockedNoClient = !!action && !connectable.has(action.authKey);
+
   return (
     <CardShell title={displayName} subtitle={packageId} extraSubtitle={reuseInfo}>
-      {action ? (
+      {actionBlockedNoClient ? (
+        <span className="text-muted-foreground max-w-[18rem] text-right text-xs">
+          {t("settings:integration.auth.noClientHint")}
+        </span>
+      ) : action ? (
         <InlineConnectButton
           packageId={packageId}
           authKey={action.authKey}
@@ -271,11 +359,13 @@ function MemberConnectionPicker({
   integrationPackageId,
   agentPackageId,
   manifest,
+  authStatuses,
   displayName,
 }: {
   integrationPackageId: string;
   agentPackageId: string;
   manifest: IntegrationManifestView;
+  authStatuses: IntegrationAuthStatus[];
   displayName: string;
 }) {
   const { t } = useTranslation(["agents", "settings"]);
@@ -290,7 +380,11 @@ function MemberConnectionPicker({
   const [fieldsAuthKey, setFieldsAuthKey] = useState<string | null>(null);
 
   const auths = manifest.auths ?? {};
-  const authKeys = Object.keys(auths);
+  // Only auths the actor can actually connect: oauth2 needs an admin OAuth
+  // client (else the connect 403s); api_key/basic/custom always can. Without
+  // this the "add connection" entries offered a flow doomed to 403.
+  const connectable = connectableAuthKeys(manifest, authStatuses);
+  const authKeys = Object.keys(auths).filter((k) => connectable.has(k));
   const typeLabel = (authKey: string): string | null => {
     const type = auths[authKey]?.type;
     return type ? t(`settings:integration.auth.type.${type}`) : null;
@@ -403,6 +497,22 @@ function MemberConnectionPicker({
     );
   }
 
+  // No existing connection AND no auth the actor can connect on (every
+  // oauth2 auth lacks an admin-registered OAuth client) → point at the
+  // admin setup instead of an empty dropdown that would only 403.
+  if (!hasCandidates && authKeys.length === 0) {
+    return (
+      <div data-testid={`member-picker-${integrationPackageId}`}>
+        <span
+          className="text-muted-foreground text-xs"
+          data-testid={`member-pick-no-client-${integrationPackageId}`}
+        >
+          {t("settings:integration.auth.noClientHint")}
+        </span>
+      </div>
+    );
+  }
+
   return (
     <div data-testid={`member-picker-${integrationPackageId}`}>
       <DropdownMenu>
@@ -488,7 +598,7 @@ function MemberConnectionPicker({
               </span>
             </DropdownMenuItem>
           )}
-          {canAddConnection && hasCandidates && <DropdownMenuSeparator />}
+          {canAddConnection && hasCandidates && authKeys.length > 0 && <DropdownMenuSeparator />}
           {canAddConnection &&
             authKeys.map((k) => {
               const tl = typeLabel(k);
@@ -642,16 +752,19 @@ function deriveIntegrationStatus(input: {
   manifest: IntegrationManifestView;
   connections: { authKey: string; scopesGranted: string[]; needsReconnection: boolean }[];
   agentTools: string[] | undefined;
+  agentScopes: string[] | undefined;
 }): IntegrationStatus {
-  const { manifest, connections, agentTools } = input;
+  const { manifest, connections, agentTools, agentScopes } = input;
   const auths = manifest.auths ?? {};
   if (Object.keys(auths).length === 0) return { kind: "ok", authKey: "" };
 
-  const hasSelectedTools = (agentTools?.length ?? 0) > 0;
-  // No tools picked → integration is declared but inert; surface as
-  // "ok" with empty authKey so the card doesn't render a "connect" CTA
-  // for an unused integration. The picker is the place to opt in.
-  if (!hasSelectedTools) return { kind: "ok", authKey: "" };
+  // "Active" = the agent declared a usage: selected tools (MCP integrations)
+  // or selected oauth scopes (apiCall integrations, which expose no discrete
+  // tools). Nothing selected → integration is declared but inert; surface as
+  // "ok" with empty authKey so the card doesn't render a "connect" CTA for an
+  // unused integration. The picker is the place to opt in.
+  const isActive = (agentTools?.length ?? 0) > 0 || (agentScopes?.length ?? 0) > 0;
+  if (!isActive) return { kind: "ok", authKey: "" };
 
   if (connections.length === 0) return { kind: "not_connected" };
 

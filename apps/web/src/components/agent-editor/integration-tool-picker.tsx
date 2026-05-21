@@ -20,10 +20,14 @@
  * `setResourceEntries('integrations')`.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { expandGrantedScopes } from "@appstrate/core/integration";
+import {
+  expandGrantedScopes,
+  getApiCallConfig,
+  API_CALL_TOOL_NAME,
+} from "@appstrate/core/integration";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Spinner } from "../spinner";
 import { useIntegrationDetail } from "../../hooks/use-integrations";
@@ -39,6 +43,17 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
   const { t } = useTranslation("settings");
   const { data: detail, isLoading } = useIntegrationDetail(packageId);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+
+  // apiCall integrations expose the generic `api_call` tool, which the runtime
+  // injects only when it's present in the agent's `tools[]`. Default it on when
+  // the integration is freshly added (`tools` still undefined) so the
+  // integration works out of the box; the user can uncheck it below.
+  useEffect(() => {
+    if (!detail || getApiCallConfig(detail.manifest) === null) return;
+    if (entry.tools !== undefined) return;
+    onChange({ ...entry, tools: [API_CALL_TOOL_NAME] });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detail, entry.tools]);
 
   if (isLoading) {
     return (
@@ -58,6 +73,19 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
   const declaredTools = detail.manifest.tools ?? {};
   const declaredToolNames = Object.keys(declaredTools);
   const hasToolCatalog = declaredToolNames.length > 0;
+
+  // apiCall integrations (former providers) expose the generic `api_call`
+  // tool instead of discrete MCP tools. Surface it as a selectable tool so
+  // the agent author can opt in (the runtime gates injection on it).
+  const isApiCall = getApiCallConfig(detail.manifest) !== null;
+  const apiCallSelected = (entry.tools ?? []).includes(API_CALL_TOOL_NAME);
+  const toggleApiCall = () => {
+    const current = entry.tools ?? [];
+    const next = current.includes(API_CALL_TOOL_NAME)
+      ? current.filter((tool) => tool !== API_CALL_TOOL_NAME)
+      : [...current, API_CALL_TOOL_NAME];
+    onChange({ ...entry, tools: next });
+  };
 
   // Aggregate scope catalog across every auth — the resolver treats them
   // as a single namespace per integration (Phase 0). Dedup by `value`,
@@ -139,7 +167,7 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
   // without grepping the codebase — typical root cause is a DB
   // manifest that predates the niveau 2 fields and needs a server
   // reboot to drift-heal.
-  if (!hasToolCatalog && !hasScopeCatalog) {
+  if (!hasToolCatalog && !hasScopeCatalog && !isApiCall) {
     return (
       <div className="bg-muted/30 text-muted-foreground mt-2 rounded-md border p-3 text-[11px]">
         {t("agentEditor.integrations.tools.noCatalog")}
@@ -152,6 +180,23 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
       className="bg-muted/30 mt-2 space-y-3 rounded-md border p-3"
       onClick={(e) => e.stopPropagation()}
     >
+      {isApiCall && (
+        <label className="flex cursor-pointer items-start gap-2">
+          <Checkbox
+            checked={apiCallSelected}
+            onCheckedChange={toggleApiCall}
+            data-testid={`integ-apicall-${packageId}`}
+          />
+          <span className="flex flex-col">
+            <span className="text-xs font-medium">
+              {t("agentEditor.integrations.apiCall.label")}
+            </span>
+            <span className="text-muted-foreground text-[11px]">
+              {t("agentEditor.integrations.apiCall.description")}
+            </span>
+          </span>
+        </label>
+      )}
       {hasToolCatalog && (
         <div>
           <div className="mb-2 flex items-center justify-between gap-2">

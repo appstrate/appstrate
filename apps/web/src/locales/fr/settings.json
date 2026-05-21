@@ -1017,6 +1017,8 @@
   "agentEditor.integrations.add": "Ajouter une intégration",
   "agentEditor.integrations.empty": "Aucune intégration liée. Cliquez sur \"Ajouter\" pour en lier une.",
   "agentEditor.integrations.remove": "Retirer",
+  "agentEditor.integrations.apiCall.label": "Appel API générique (api_call)",
+  "agentEditor.integrations.apiCall.description": "Autorise l'agent à effectuer des appels HTTP authentifiés vers cette intégration. Les identifiants sont injectés côté serveur ; les scopes ci-dessous délimitent l'accès.",
   "agentEditor.integrations.tools.title": "Outils autorisés",
   "agentEditor.integrations.tools.noneNotice": "Aucun outil sélectionné — l'intégration est déclarée mais n'expose rien à l'agent. Cochez les outils nécessaires ou utilisez « Tout sélectionner ».",
   "agentEditor.integrations.tools.explicitNotice": "Seuls les outils cochés seront exposés à l'agent à l'exécution. Les scopes OAuth requis sont inférés automatiquement.",

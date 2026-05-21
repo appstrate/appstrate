@@ -20,9 +20,10 @@ import type { AppScope } from "../lib/scope.ts";
 import {
   expandGrantedScopes,
   requiredAuthKeysForAgent,
-  scopesContributedByTools,
+  requiredScopesForAgent,
 } from "@appstrate/core/integration";
 import { fetchIntegrationManifest } from "./integration-service.ts";
+import { getInstalledPackage } from "./application-packages.ts";
 
 // ---------------------------------------------------------------------------
 // Integration dependency validation
@@ -42,7 +43,8 @@ export interface IntegrationDependencyError {
     | "needs_reconnection"
     | "insufficient_scopes"
     | "package_not_found"
-    | "not_installed_or_invalid_manifest";
+    | "not_installed_or_invalid_manifest"
+    | "integration_not_active";
   requiredScopes?: string[];
   grantedScopes?: string[];
   missingScopes?: string[];
@@ -132,11 +134,28 @@ async function checkOne(
     return;
   }
   const manifest = res.manifest;
-  const requiredAuthKeys = requiredAuthKeysForAgent(manifest, entry.tools);
+
+  // The integration must be active in THIS application: an enabled
+  // `application_packages` row. A package present in the catalogue (system or
+  // org-published) but never activated here cannot be connected or run — a
+  // stale agent declaration fails with a clear "not active" error rather than
+  // a downstream connection one. Checked after package existence (so a wholly
+  // missing package still reads as `package_not_found`).
+  const installed = await getInstalledPackage(scope, entry.id);
+  if (!installed || !installed.enabled) {
+    push(
+      { packageId: entry.id, authKey: null, reason: "integration_not_active" },
+      "Integration Not Active",
+      `Integration '${entry.id}' is not active in this application`,
+    );
+    return;
+  }
+
+  const requiredAuthKeys = requiredAuthKeysForAgent(manifest, entry.tools, entry.scopes);
   if (requiredAuthKeys.length === 0) {
     // No auth required — either the integration declares none, or the
-    // agent picked 0 tools (niveau 2: dep declared but inert, no
-    // connection gate at run-kickoff).
+    // agent picked neither tools nor scopes (niveau 2: dep declared but
+    // inert, no connection gate at run-kickoff).
     return;
   }
 
@@ -213,10 +232,11 @@ async function checkOne(
     // checked at runtime by the upstream MCP, not here.
     if (auth.type !== "oauth2") continue;
 
-    const requiredScopes = scopesContributedByTools({
+    const requiredScopes = requiredScopesForAgent({
       manifest,
       authKey,
       agentTools: entry.tools,
+      agentScopes: entry.scopes,
     });
     if (requiredScopes.length === 0) continue;
 

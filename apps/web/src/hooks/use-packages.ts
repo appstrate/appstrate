@@ -40,13 +40,15 @@ type PackageDetailMap = {
   integration: OrgPackageItemDetail;
 };
 
-function usePackageList(type: PackageType) {
+function usePackageList(type: PackageType, opts?: { activeOnly?: boolean }) {
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
   const cfg = PACKAGE_CONFIG[type];
+  const activeOnly = opts?.activeOnly ?? false;
   return useQuery({
-    queryKey: ["packages", cfg.path, orgId, applicationId],
-    queryFn: () => apiList<OrgPackageItem>(`/packages/${cfg.path}`),
+    queryKey: ["packages", cfg.path, orgId, applicationId, activeOnly ? "active" : "all"],
+    queryFn: () =>
+      apiList<OrgPackageItem>(`/packages/${cfg.path}${activeOnly ? "?active=true" : ""}`),
     enabled: !!orgId && !!applicationId,
   });
 }

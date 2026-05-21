@@ -12,7 +12,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage } from "../../helpers/seed.ts";
+import { seedPackage, seedInstalledPackage } from "../../helpers/seed.ts";
 import { integrationConnections } from "@appstrate/db/schema";
 import { collectIntegrationDependencyErrors } from "../../../src/services/dependency-validation.ts";
 
@@ -86,6 +86,7 @@ describe("collectIntegrationDependencyErrors", () => {
       source: "local",
       draftManifest: gmailManifest(),
     });
+    await seedInstalledPackage(ctx.defaultAppId, INTEGRATION_ID);
   });
 
   it("returns no errors when the agent declares no integrations", async () => {
@@ -124,6 +125,43 @@ describe("collectIntegrationDependencyErrors", () => {
     );
     expect(integrationErrors).toHaveLength(1);
     expect(integrationErrors[0]?.reason).toBe("package_not_found");
+  });
+
+  it("flags integration_not_active when the package exists but is not installed in the app", async () => {
+    // Seeded in the org catalogue, but NOT installed (no application_packages
+    // row) in the default app — a stale agent declaration.
+    const inactiveId = "@official/slack";
+    await seedPackage({
+      id: inactiveId,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: { ...gmailManifest(), name: inactiveId },
+    });
+    const { integrationErrors } = await collectIntegrationDependencyErrors(
+      {
+        dependencies: { integrations: { [inactiveId]: "^1.0.0" } },
+        integrations: { [inactiveId]: { tools: ["list_messages"] } },
+      } as Record<string, unknown>,
+      actor,
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+    );
+    expect(integrationErrors).toHaveLength(1);
+    expect(integrationErrors[0]).toMatchObject({
+      packageId: inactiveId,
+      authKey: null,
+      reason: "integration_not_active",
+    });
+  });
+
+  it("flags integration_not_active when the install is disabled", async () => {
+    await seedInstalledPackage(ctx.defaultAppId, INTEGRATION_ID, { enabled: false });
+    const { integrationErrors } = await collectIntegrationDependencyErrors(
+      agentManifest({ version: "^1.0.0", tools: ["list_messages"] }),
+      actor,
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+    );
+    expect(integrationErrors[0]?.reason).toBe("integration_not_active");
   });
 
   it("flags needs_reconnection when the connection's needs_reconnection flag is set", async () => {
@@ -261,6 +299,7 @@ describe("collectIntegrationDependencyErrors", () => {
         },
       },
     });
+    await seedInstalledPackage(ctx.defaultAppId, INTEGRATION_ID);
     await db.insert(integrationConnections).values({
       integrationPackageId: INTEGRATION_ID,
       authKey: "primary",
@@ -310,6 +349,7 @@ describe("collectIntegrationDependencyErrors", () => {
         },
       },
     });
+    await seedInstalledPackage(ctx.defaultAppId, "@official/github");
     await db.insert(integrationConnections).values({
       integrationPackageId: "@official/github",
       authKey: pat,
@@ -350,6 +390,7 @@ describe("collectIntegrationDependencyErrors (additional cases)", () => {
       source: "local",
       draftManifest: gmailManifest(),
     });
+    await seedInstalledPackage(ctx.defaultAppId, INTEGRATION_ID);
   });
 
   it("returns a not_connected entry when the actor isn't connected", async () => {
@@ -435,6 +476,7 @@ describe("saveIntegrationConnection — multi-auth coexistence", () => {
         },
       },
     });
+    await seedInstalledPackage(ctx.defaultAppId, dualAuthId);
 
     const { saveIntegrationConnection } =
       await import("../../../src/services/integration-connections.ts");

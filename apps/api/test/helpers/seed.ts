@@ -13,6 +13,7 @@
 import { db } from "./db.ts";
 import {
   packages,
+  applicationPackages,
   runs,
   runLogs,
   applications,
@@ -61,6 +62,27 @@ export async function seedPackage(
 
 /** Alias for seedPackage — the default type is already "agent". */
 export const seedAgent = seedPackage;
+
+/**
+ * Install (activate) a package in an application — creates the
+ * `application_packages` row the runtime gate requires for a package to be
+ * usable in that app. Idempotent.
+ */
+export async function seedInstalledPackage(
+  applicationId: string,
+  packageId: string,
+  overrides?: Partial<InferInsertModel<typeof applicationPackages>>,
+): Promise<void> {
+  await db
+    .insert(applicationPackages)
+    .values({ applicationId, packageId, ...overrides })
+    .onConflictDoUpdate({
+      target: [applicationPackages.applicationId, applicationPackages.packageId],
+      // Apply overrides on conflict so callers can flip e.g. `enabled` on an
+      // already-installed package; no-op write when there are none.
+      set: overrides && Object.keys(overrides).length > 0 ? overrides : { applicationId },
+    });
+}
 
 // ─── Package Versions ─────────────────────────────────────
 

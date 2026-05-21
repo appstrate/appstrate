@@ -37,6 +37,7 @@ export interface MissingIntegrationFieldError {
     | "must_choose_connection"
     | "package_not_found"
     | "not_installed_or_invalid_manifest"
+    | "integration_not_active"
     | string;
   title?: string;
   message: string;
@@ -147,6 +148,14 @@ function MissingRow({
   const { data: connections } = useIntegrationConnections(isMustChooseCode ? packageId : undefined);
   const isReconnect = err.code === "needs_reconnection" || err.code === "insufficient_scopes";
   const isMustChoose = err.code === "must_choose_connection";
+  // Structural failures (integration not active in the app, package missing
+  // or invalid manifest) can't be fixed by connecting — an admin must
+  // activate the integration or the agent must drop the dependency. Suppress
+  // the connect CTA so the user isn't sent into a guaranteed failure.
+  const isStructural =
+    err.code === "integration_not_active" ||
+    err.code === "package_not_found" ||
+    err.code === "not_installed_or_invalid_manifest";
   const Icon = isMustChoose ? Users : isReconnect ? AlertTriangle : XCircle;
   const colorClass = isMustChoose
     ? "text-amber-500"
@@ -182,7 +191,7 @@ function MissingRow({
             </div>
           </div>
         </div>
-        {!isMustChoose && targetAuthKey && (
+        {!isMustChoose && !isStructural && targetAuthKey && (
           <InlineConnectButton
             packageId={packageId}
             authKey={targetAuthKey}

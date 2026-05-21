@@ -188,11 +188,13 @@ export function createIntegrationsRouter() {
     const summaries = await listIntegrations(scope.orgId);
     // Decorate with `active` + `blockUserConnections` flags for the
     // current application. An integration is "active" when an
-    // application_packages row exists for it; `blockUserConnections`
-    // defaults to false for inactive rows (no per-app config row exists).
+    // application_packages row exists for it AND that install is enabled;
+    // `blockUserConnections` defaults to false for inactive rows (no
+    // per-app config row exists).
     const installedRows = await db
       .select({
         packageId: applicationPackages.packageId,
+        enabled: applicationPackages.enabled,
         blockUserConnections: applicationPackages.blockUserConnections,
       })
       .from(applicationPackages)
@@ -208,7 +210,7 @@ export function createIntegrationsRouter() {
       const row = installedMap.get(s.id);
       return {
         ...s,
-        active: row !== undefined,
+        active: row !== undefined && row.enabled,
         blockUserConnections: row?.blockUserConnections ?? false,
       };
     });

@@ -383,6 +383,12 @@ async function loadAndSyncSystemPackages(): Promise<void> {
       .onConflictDoUpdate({
         target: packages.id,
         set: {
+          // `type` must heal in place: a packageId can change type across
+          // versions (e.g. a former `provider` reseeded as `integration`
+          // after the provider→integration unification). Without this, an
+          // existing row keeps its stale `provider` type and never surfaces
+          // in the integration list.
+          type,
           draftManifest: manifest as unknown as Record<string, unknown>,
           draftContent: entry.content,
           source: "system",

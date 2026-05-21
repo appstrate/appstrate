@@ -103,12 +103,17 @@ function memberPin(connectionId: string): PinRow {
   return pin(connectionId, { userId: USER_ID });
 }
 
-function req(manifest: IntegrationManifest, agentTools: string[] = []): IntegrationRequirement {
+function req(
+  manifest: IntegrationManifest,
+  agentTools: string[] = [],
+  agentScopes: string[] = [],
+): IntegrationRequirement {
   return {
     integrationId: INTEG,
     manifest,
     hasSelectedTools: true,
     agentTools,
+    agentScopes,
   };
 }
 
@@ -411,6 +416,7 @@ describe("resolveConnections — multi-integration", () => {
           manifest: m2,
           hasSelectedTools: true,
           agentTools: [],
+          agentScopes: [],
         },
       ],
       accessibleConnections: [c1, c2],
@@ -432,6 +438,7 @@ describe("resolveConnections — multi-integration", () => {
           manifest: m2,
           hasSelectedTools: true,
           agentTools: [],
+          agentScopes: [],
         },
       ],
       accessibleConnections: [c1],
@@ -463,6 +470,7 @@ describe("resolveConnections — empty requirements / inert integrations", () =>
           manifest: oauth2Manifest(),
           hasSelectedTools: false,
           agentTools: [],
+          agentScopes: [],
         },
       ],
       accessibleConnections: [],

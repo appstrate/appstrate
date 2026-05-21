@@ -38,7 +38,7 @@ import {
   type ManifestIntegrationEntry,
 } from "@appstrate/core/dependencies";
 import {
-  scopesContributedByTools,
+  requiredScopesForAgent,
   expandGrantedScopes,
   type IntegrationManifest,
   type ConnectionOverrides,
@@ -76,11 +76,17 @@ export interface IntegrationRequirement {
   hasSelectedTools: boolean;
   /**
    * The agent's selected tool names on this integration. Drives OAuth
-   * scope requirement inference (`scopesContributedByTools`) so the
+   * scope requirement inference (`requiredScopesForAgent`) so the
    * resolver can flag a resolved connection that lacks the scopes the
    * selected tools need. Empty when no tools selected.
    */
   agentTools: readonly string[];
+  /**
+   * The agent's explicitly-selected oauth scopes on this integration.
+   * apiCall integrations (former providers) expose no tools, so this is
+   * the only scope signal for them. Empty when none selected.
+   */
+  agentScopes: readonly string[];
 }
 
 export interface ResolveConnectionsInput {
@@ -158,12 +164,15 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
   for (const c of input.accessibleConnections) connectionIndex.set(c.id, c);
 
   for (const req of input.requirements) {
-    if (!req.hasSelectedTools) continue; // Inert — agent picked 0 tools.
+    // Inert only when the agent picked neither tools nor scopes. apiCall
+    // integrations expose no tools, so scope selection keeps them active.
+    if (!req.hasSelectedTools && req.agentScopes.length === 0) continue;
 
     const result = resolveOne({
       integrationId: req.integrationId,
       manifest: req.manifest,
       agentTools: req.agentTools,
+      agentScopes: req.agentScopes,
       adminPinId: adminPins.get(req.integrationId) ?? null,
       orgDefault: input.orgDefaults?.[req.integrationId] ?? null,
       runOverrideId: input.runOverrides?.[req.integrationId] ?? null,
@@ -191,6 +200,7 @@ interface ResolveOneArgs {
   integrationId: string;
   manifest: IntegrationManifest;
   agentTools: readonly string[];
+  agentScopes: readonly string[];
   adminPinId: string | null;
   orgDefault: { connectionId: string; enforce: boolean } | null;
   runOverrideId: string | null;
@@ -320,10 +330,11 @@ function checkHealth(
   // own auth; api_key/basic auths contribute no scopes so this is a no-op
   // for them. Granted scopes are expanded through the manifest `implies`
   // hierarchy before the diff so a parent grant covers its children.
-  const required = scopesContributedByTools({
+  const required = requiredScopesForAgent({
     manifest: args.manifest,
     authKey: conn.authKey,
     agentTools: args.agentTools,
+    agentScopes: args.agentScopes,
   });
   if (required.length > 0) {
     const granted = new Set(expandGrantedScopes(conn.scopesGranted, args.manifest, conn.authKey));
@@ -446,6 +457,7 @@ async function buildRequirement(
     manifest: res.manifest,
     hasSelectedTools: !!entry.tools && entry.tools.length > 0,
     agentTools: entry.tools ?? [],
+    agentScopes: entry.scopes ?? [],
   };
 }
 

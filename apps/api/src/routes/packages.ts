@@ -373,7 +373,11 @@ function makeListHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
     const applicationId = c.get("applicationId");
-    const items = await listOrgItems(orgId, rcfg.cfg, applicationId);
+    // `?active=true` narrows to packages active (installed + enabled) in this
+    // app — the agent editor's integration picker uses it so it doesn't pull
+    // the whole catalogue.
+    const activeOnly = c.req.query("active") === "true";
+    const items = await listOrgItems(orgId, rcfg.cfg, applicationId, { activeOnly });
     const enriched = await enrichWithCreatorNames(items);
     return c.json(listResponse(enriched));
   };
