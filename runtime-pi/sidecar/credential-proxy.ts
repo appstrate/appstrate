@@ -37,7 +37,7 @@ import {
   substituteVars,
   findUnresolvedPlaceholders,
   OUTBOUND_TIMEOUT_MS,
-  PROVIDER_ID_RE,
+  INTEGRATION_ID_RE,
   type CredentialsResponse,
   type SidecarConfig,
 } from "./helpers.ts";
@@ -371,7 +371,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
 
   // 1. Validate providerId format (defence in depth — callers should
   //    have already done this, but cheap to repeat).
-  if (!PROVIDER_ID_RE.test(providerId)) {
+  if (!INTEGRATION_ID_RE.test(providerId)) {
     return { ok: false, status: 400, error: "Invalid X-Integration format" };
   }
 

@@ -122,7 +122,7 @@ function makeApiCallExtension(
         opts.emitProvider({
           type: "api_call.called",
           runId: opts.runId,
-          providerId: integrationId,
+          integrationId,
           toolCallId,
           timestamp: startedAt,
         });
@@ -140,7 +140,7 @@ function makeApiCallExtension(
           opts.emitProvider({
             type: "api_call.completed",
             runId: opts.runId,
-            providerId: integrationId,
+            integrationId,
             toolCallId,
             durationMs: Date.now() - startedAt,
             isError: result.isError === true,
@@ -158,7 +158,7 @@ function makeApiCallExtension(
           opts.emitProvider({
             type: "api_call.failed",
             runId: opts.runId,
-            providerId: integrationId,
+            integrationId,
             toolCallId,
             durationMs: Date.now() - startedAt,
             error: err instanceof Error ? err.message : String(err),

@@ -69,7 +69,7 @@ export const tusAdapter: UploadAdapter = {
     if (meta) headers["Upload-Metadata"] = meta;
 
     const res = await ctx.apiCall({
-      providerId: ctx.providerId,
+      integrationId: ctx.integrationId,
       target: ctx.target,
       method: "POST",
       headers,
@@ -114,7 +114,7 @@ export const tusAdapter: UploadAdapter = {
     }
     ctx.hashUpdate(chunk.bytes);
     const res = await ctx.apiCall({
-      providerId: ctx.providerId,
+      integrationId: ctx.integrationId,
       target: s.sessionUrl,
       method: "PATCH",
       headers: {
@@ -180,7 +180,7 @@ export const tusAdapter: UploadAdapter = {
     if (!s.sessionUrl) return;
     try {
       await ctx.apiCall({
-        providerId: ctx.providerId,
+        integrationId: ctx.integrationId,
         target: s.sessionUrl,
         method: "DELETE",
         headers: { "Tus-Resumable": TUS_VERSION },

@@ -79,7 +79,7 @@ export const s3MultipartAdapter: UploadAdapter = {
       if (typeof v === "string") headers[k] = v;
     }
     const res = await ctx.apiCall({
-      providerId: ctx.providerId,
+      integrationId: ctx.integrationId,
       target: url,
       method: "POST",
       headers,
@@ -127,7 +127,7 @@ export const s3MultipartAdapter: UploadAdapter = {
       `partNumber=${partNumber}&uploadId=${encodeURIComponent(s.uploadId)}`,
     );
     const res = await ctx.apiCall({
-      providerId: ctx.providerId,
+      integrationId: ctx.integrationId,
       target: url,
       method: "PUT",
       headers: {
@@ -165,7 +165,7 @@ export const s3MultipartAdapter: UploadAdapter = {
     const url = appendQuery(ctx.target, `uploadId=${encodeURIComponent(s.uploadId)}`);
     const xml = buildCompleteMultipartUploadXml(s.parts);
     const res = await ctx.apiCall({
-      providerId: ctx.providerId,
+      integrationId: ctx.integrationId,
       target: url,
       method: "POST",
       headers: { "Content-Type": "application/xml" },
@@ -193,7 +193,7 @@ export const s3MultipartAdapter: UploadAdapter = {
     const url = appendQuery(ctx.target, `uploadId=${encodeURIComponent(s.uploadId)}`);
     try {
       await ctx.apiCall({
-        providerId: ctx.providerId,
+        integrationId: ctx.integrationId,
         target: url,
         method: "DELETE",
       });

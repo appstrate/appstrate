@@ -144,7 +144,7 @@ describe("RedisEventBuffer", () => {
   // Regression: the runner can emit multiple events whose
   // `JSON.stringify(event)` collapses to the same string — e.g. 10 parallel
   // `api_call.called` events that complete in the same millisecond with
-  // identical providerId/method/target/status/durationMs and a
+  // identical integrationId/method/target/status/durationMs and a
   // `toolCallId: undefined` field that JSON drops. In a Redis sorted set,
   // ZADD with an existing member updates the score instead of inserting a
   // new entry, so all 10 would collapse into one entry and 9 sequences
@@ -161,7 +161,7 @@ describe("RedisEventBuffer", () => {
         type: "api_call.called",
         runId,
         timestamp: 1700000000000,
-        providerId: "@appstrate/gmail",
+        integrationId: "@appstrate/gmail",
         method: "GET",
         target: "https://www.googleapis.com/gmail/v1/users/me/messages",
         status: 200,

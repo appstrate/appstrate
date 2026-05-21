@@ -35,7 +35,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
  * abort/error surface and remain locally defined.
  */
 export interface ReadinessProviderEntry {
-  providerId: string;
+  integrationId: string;
   reason: string;
   message: string;
 }
@@ -151,7 +151,7 @@ export async function preflightCheck(inputs: PreflightInputs): Promise<Readiness
   // Interactive — print summary, prompt, poll.
   process.stderr.write(`\n⚠ Missing connections:\n`);
   for (const entry of initial.missing) {
-    process.stderr.write(`  - ${entry.providerId}: ${entry.message}\n`);
+    process.stderr.write(`  - ${entry.integrationId}: ${entry.message}\n`);
   }
   process.stderr.write(`\n  Connect: ${connectUrl}\n\n`);
 
@@ -268,7 +268,7 @@ export function assertSameOrigin(candidate: string, instance: string): void {
 }
 
 function formatMissingMessage(missing: ReadinessMissingEntry[]): string {
-  const ids = missing.map((m) => m.providerId).join(", ");
+  const ids = missing.map((m) => m.integrationId).join(", ");
   return `${missing.length} connection(s) missing: ${ids}`;
 }
 

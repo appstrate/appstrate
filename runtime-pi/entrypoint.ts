@@ -365,9 +365,9 @@ if (sidecarUrl) {
     // `resource_link` an integration tool may return for spilled blobs.
     const mcp = mcpClient;
     appstrateRuntimeCtx = {
-      apiCall: async (providerId) => {
+      apiCall: async (integrationId) => {
         throw new Error(
-          `Tool tried to call provider '${providerId}', but the AFPS provider surface has been removed. ` +
+          `Tool tried to call '${integrationId}' via the retired ctx.apiCall surface. ` +
             `Use an integration tool ({ns}__api_call) instead.`,
         );
       },
@@ -389,16 +389,14 @@ if (sidecarUrl) {
   // SIDECAR_URL past this point.
   delete process.env.SIDECAR_URL;
 } else {
-  // No sidecar attached — wire a stub tool ctx that rejects any provider
-  // call. The bundle's manifest should not declare providers in this path
-  // (the platform's `pi.ts` only takes this branch when providers[] is
-  // empty), but a misconfigured bundle still gets a clear error rather
-  // than a null-deref.
+  // No sidecar attached — wire a stub tool ctx that rejects any
+  // credentialed call. Integrations expose their own {ns}__api_call MCP
+  // tools when a sidecar is present; without one a misconfigured bundle
+  // still gets a clear error rather than a null-deref.
   appstrateRuntimeCtx = {
-    apiCall: async (providerId) => {
+    apiCall: async (integrationId) => {
       throw new Error(
-        `Tool tried to call provider '${providerId}' but this run was launched without a sidecar — ` +
-          `the bundle declared no providers in dependencies.providers[].`,
+        `Tool tried to call '${integrationId}' but this run was launched without a sidecar.`,
       );
     },
     readResource: async (uri) => {

@@ -75,7 +75,7 @@ describe("preflightCheck", () => {
   it("polls until ready after browser handoff", async () => {
     const missing = [
       {
-        providerId: "@afps/gmail",
+        integrationId: "@afps/gmail",
         reason: "no_connection",
         message: "not connected",
       },
@@ -111,7 +111,7 @@ describe("preflightCheck", () => {
         ready: false,
         missing: [
           {
-            providerId: "@afps/gmail",
+            integrationId: "@afps/gmail",
             reason: "no_connection",
             message: "not connected",
           },
@@ -140,7 +140,7 @@ describe("preflightCheck", () => {
         ready: false,
         missing: [
           {
-            providerId: "@afps/gmail",
+            integrationId: "@afps/gmail",
             reason: "no_connection",
             message: "not connected",
           },
@@ -183,7 +183,7 @@ describe("preflightCheck", () => {
         ready: false,
         missing: [
           {
-            providerId: "@afps/gmail",
+            integrationId: "@afps/gmail",
             reason: "no_connection",
             message: "not connected",
           },
@@ -213,7 +213,7 @@ describe("preflightCheck", () => {
   it("throws preflight_timeout when polling exceeds the configured budget", async () => {
     const missing = [
       {
-        providerId: "@afps/gmail",
+        integrationId: "@afps/gmail",
         reason: "no_connection",
         message: "not connected",
       },
@@ -261,7 +261,7 @@ describe("preflightCheck", () => {
   it("uses capped exponential backoff between polls", async () => {
     const missing = [
       {
-        providerId: "@afps/gmail",
+        integrationId: "@afps/gmail",
         reason: "no_connection",
         message: "not connected",
       },

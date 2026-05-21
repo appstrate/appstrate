@@ -62,7 +62,7 @@ import {
   MAX_MCP_ENVELOPE_SIZE,
   MAX_REQUEST_BODY_SIZE,
   MAX_RESPONSE_SIZE,
-  PROVIDER_ID_RE,
+  INTEGRATION_ID_RE,
   substituteVars,
 } from "./helpers.ts";
 import { TokenBudget } from "./token-budget.ts";
@@ -103,18 +103,18 @@ import {
  * the status code rather than the absence of `_meta` — the runtime
  * parser now requires `_meta` on every CallToolResult.
  */
-const PROVIDER_CALL_PREFLIGHT_META: Record<string, unknown> = {
+const API_CALL_PREFLIGHT_META: Record<string, unknown> = {
   [UPSTREAM_META_KEY]: buildPreflightUpstreamMeta(),
 };
 
 /**
- * JSON Schema `pattern` mirroring `PROVIDER_ID_RE` from `helpers.ts` —
+ * JSON Schema `pattern` mirroring `INTEGRATION_ID_RE` from `helpers.ts` —
  * the source of truth shared with `executeApiCall`. We strip the
  * leading/trailing slashes and the regex flags so JSON Schema
  * validators (AJV / the MCP SDK / inspectors) see a portable
  * ECMA-compatible string. Anchors are preserved.
  */
-const PROVIDER_ID_PATTERN = PROVIDER_ID_RE.source;
+const INTEGRATION_ID_PATTERN = INTEGRATION_ID_RE.source;
 
 /**
  * Re-exported alias for the JSON-RPC envelope cap so call sites in this
@@ -179,7 +179,7 @@ function validateMcpHostHeader(req: Request): Response | undefined {
  * request post-validation. Header names are matched case-insensitively
  * (HTTP header semantics).
  */
-const PROVIDER_CALL_FORBIDDEN_HEADERS = new Set<string>([
+const API_CALL_FORBIDDEN_HEADERS = new Set<string>([
   "x-integration",
   "x-target",
   "x-substitute-body",
@@ -204,7 +204,7 @@ function sanitiseApiCallHeaders(raw: Record<string, string> | undefined): {
   const headers: Record<string, string> = {};
   const dropped: string[] = [];
   for (const [name, value] of Object.entries(raw)) {
-    if (PROVIDER_CALL_FORBIDDEN_HEADERS.has(name.toLowerCase())) {
+    if (API_CALL_FORBIDDEN_HEADERS.has(name.toLowerCase())) {
       dropped.push(name);
       continue;
     }
@@ -331,7 +331,7 @@ function multipartError(
       content: [{ type: "text", text }],
       ...(structuredContent ? { structuredContent } : {}),
       isError: true,
-      _meta: PROVIDER_CALL_PREFLIGHT_META,
+      _meta: API_CALL_PREFLIGHT_META,
     },
   };
 }
@@ -486,10 +486,10 @@ function buildSidecarTools(options: MountMcpOptions): {
         type: "string",
         description:
           "Provider identifier as declared in `dependencies.providers[].id` (e.g. `@appstrate/gmail` or `gmail`).",
-        // The pattern source is `PROVIDER_ID_RE` in `helpers.ts` —
+        // The pattern source is `INTEGRATION_ID_RE` in `helpers.ts` —
         // shared with `executeApiCall` so the same shape gates
         // the MCP descriptor and the credential-proxy core.
-        pattern: PROVIDER_ID_PATTERN,
+        pattern: INTEGRATION_ID_PATTERN,
       },
       target: {
         type: "string",
@@ -781,7 +781,7 @@ function buildSidecarTools(options: MountMcpOptions): {
             },
           ],
           isError: true,
-          _meta: PROVIDER_CALL_PREFLIGHT_META,
+          _meta: API_CALL_PREFLIGHT_META,
         };
       }
 
@@ -797,7 +797,7 @@ function buildSidecarTools(options: MountMcpOptions): {
             },
           ],
           isError: true,
-          _meta: PROVIDER_CALL_PREFLIGHT_META,
+          _meta: API_CALL_PREFLIGHT_META,
         };
       }
 
@@ -864,7 +864,7 @@ function buildSidecarTools(options: MountMcpOptions): {
               },
             ],
             isError: true,
-            _meta: PROVIDER_CALL_PREFLIGHT_META,
+            _meta: API_CALL_PREFLIGHT_META,
           };
         }
         const decoded = decodeStrictBase64(args.body.fromBytes);
@@ -879,7 +879,7 @@ function buildSidecarTools(options: MountMcpOptions): {
               },
             ],
             isError: true,
-            _meta: PROVIDER_CALL_PREFLIGHT_META,
+            _meta: API_CALL_PREFLIGHT_META,
           };
         }
         if (decoded.byteLength > MAX_REQUEST_BODY_SIZE) {
@@ -906,7 +906,7 @@ function buildSidecarTools(options: MountMcpOptions): {
               },
             },
             isError: true,
-            _meta: PROVIDER_CALL_PREFLIGHT_META,
+            _meta: API_CALL_PREFLIGHT_META,
           };
         }
         buffered = decoded.buffer.slice(
@@ -948,7 +948,7 @@ function buildSidecarTools(options: MountMcpOptions): {
           // on every CallToolResult — surface `status: 0` so the agent
           // can distinguish "no upstream contact" from "upstream
           // returned 5xx" via the status code.
-          _meta: PROVIDER_CALL_PREFLIGHT_META,
+          _meta: API_CALL_PREFLIGHT_META,
         };
       }
       return responseToToolResult(result.response, {

@@ -36,8 +36,8 @@ import type { UploadProtocol } from "../mcp/upload-adapters/index.ts";
 /**
  * The per-integration `{ns}__api_call` MCP tool name the resolver
  * dispatches each chunk through. In the integration-era port the
- * resolver's `providerId` field carries this tool name (the integration
- * is implied by the tool name; no `providerId` argument is sent). The
+ * resolver's `integrationId` field carries this tool name (the integration
+ * is implied by the tool name; no `integrationId` argument is sent). The
  * in-process mock registers a tool under this exact name.
  */
 const API_CALL_TOOL = "x__api_call";
@@ -252,7 +252,7 @@ describe("McpApiUploadResolver — google-resumable", () => {
       const resolver = new McpApiUploadResolver(mcp);
       const result = await resolver.executeUpload(
         {
-          providerId: API_CALL_TOOL,
+          integrationId: API_CALL_TOOL,
           target: "https://example.test/upload?uploadType=resumable",
           fromFile: "big.bin",
           uploadProtocol: "google-resumable" as UploadProtocol,
@@ -287,7 +287,7 @@ describe("McpApiUploadResolver — google-resumable", () => {
       const resolver = new McpApiUploadResolver(mcp);
       const result = await resolver.executeUpload(
         {
-          providerId: API_CALL_TOOL,
+          integrationId: API_CALL_TOOL,
           target: "https://example.test/upload?uploadType=resumable",
           fromFile: "big.bin",
           uploadProtocol: "google-resumable",
@@ -331,7 +331,7 @@ describe("McpApiUploadResolver — google-resumable", () => {
       const resolver = new McpApiUploadResolver(mcp);
       const result = await resolver.executeUpload(
         {
-          providerId: API_CALL_TOOL,
+          integrationId: API_CALL_TOOL,
           target: "https://example.test/upload?uploadType=resumable",
           fromFile: "big.bin",
           uploadProtocol: "google-resumable",
@@ -457,7 +457,7 @@ describe("McpApiUploadResolver — s3-multipart", () => {
       const resolver = new McpApiUploadResolver(mcp);
       const result = await resolver.executeUpload(
         {
-          providerId: API_CALL_TOOL,
+          integrationId: API_CALL_TOOL,
           target: "https://s3.test/bucket/uploaded.bin",
           fromFile: "big.bin",
           uploadProtocol: "s3-multipart",
@@ -490,7 +490,7 @@ describe("McpApiUploadResolver — s3-multipart", () => {
       const resolver = new McpApiUploadResolver(mcp);
       const result = await resolver.executeUpload(
         {
-          providerId: API_CALL_TOOL,
+          integrationId: API_CALL_TOOL,
           target: "https://s3.test/bucket/x",
           fromFile: "big.bin",
           uploadProtocol: "s3-multipart",
@@ -534,7 +534,7 @@ describe("McpApiUploadResolver — s3-multipart", () => {
       const resolver = new McpApiUploadResolver(mcp);
       const result = await resolver.executeUpload(
         {
-          providerId: API_CALL_TOOL,
+          integrationId: API_CALL_TOOL,
           target: "https://s3.test/bucket/x",
           fromFile: "big.bin",
           uploadProtocol: "s3-multipart",
@@ -632,7 +632,7 @@ describe("McpApiUploadResolver — tus", () => {
       const resolver = new McpApiUploadResolver(mcp);
       const result = await resolver.executeUpload(
         {
-          providerId: API_CALL_TOOL,
+          integrationId: API_CALL_TOOL,
           target: "https://tus.test/files",
           fromFile: "big.bin",
           uploadProtocol: "tus",
@@ -682,7 +682,7 @@ describe("McpApiUploadResolver — tus", () => {
       const resolver = new McpApiUploadResolver(mcp);
       const result = await resolver.executeUpload(
         {
-          providerId: API_CALL_TOOL,
+          integrationId: API_CALL_TOOL,
           target: "https://tus.test/files",
           fromFile: "big.bin",
           uploadProtocol: "tus",
@@ -745,7 +745,7 @@ describe("McpApiUploadResolver — tus", () => {
       const resolver = new McpApiUploadResolver(mcp);
       const result = await resolver.executeUpload(
         {
-          providerId: API_CALL_TOOL,
+          integrationId: API_CALL_TOOL,
           target: "https://tus.test/files",
           fromFile: "big.bin",
           uploadProtocol: "tus",
@@ -844,7 +844,7 @@ describe("McpApiUploadResolver — ms-resumable", () => {
       const resolver = new McpApiUploadResolver(mcp);
       const result = await resolver.executeUpload(
         {
-          providerId: API_CALL_TOOL,
+          integrationId: API_CALL_TOOL,
           target: "https://graph.test/me/drive/root:/foo.bin:/createUploadSession",
           fromFile: "big.bin",
           uploadProtocol: "ms-resumable",
@@ -885,7 +885,7 @@ describe("McpApiUploadResolver — cross-cutting", () => {
       const resolver = new McpApiUploadResolver(mcp);
       const result = await resolver.executeUpload(
         {
-          providerId: API_CALL_TOOL,
+          integrationId: API_CALL_TOOL,
           target: "https://example.test/upload?uploadType=resumable",
           fromFile: "../../../etc/passwd",
           uploadProtocol: "google-resumable",
@@ -912,7 +912,7 @@ describe("McpApiUploadResolver — cross-cutting", () => {
       const resolver = new McpApiUploadResolver(mcp);
       const result = await resolver.executeUpload(
         {
-          providerId: API_CALL_TOOL,
+          integrationId: API_CALL_TOOL,
           target: "https://example.test/x",
           fromFile: "big.bin",
           uploadProtocol: "unknown-protocol" as never,
@@ -939,7 +939,7 @@ describe("McpApiUploadResolver — cross-cutting", () => {
       const resolver = new McpApiUploadResolver(mcp);
       const result = await resolver.executeUpload(
         {
-          providerId: API_CALL_TOOL,
+          integrationId: API_CALL_TOOL,
           target: "https://example.test/upload?uploadType=resumable",
           fromFile: "empty.bin",
           uploadProtocol: "google-resumable",
@@ -977,7 +977,7 @@ describe("McpApiUploadResolver — cross-cutting", () => {
       const resolver = new McpApiUploadResolver(mcp);
       const result = await resolver.executeUpload(
         {
-          providerId: API_CALL_TOOL,
+          integrationId: API_CALL_TOOL,
           target: "https://example.test/upload?uploadType=resumable",
           fromFile: "huge.bin",
           uploadProtocol: "google-resumable",
@@ -1019,7 +1019,7 @@ describe("McpApiUploadResolver — cross-cutting", () => {
       const resolver = new McpApiUploadResolver(mcp);
       const result = await resolver.executeUpload(
         {
-          providerId: API_CALL_TOOL,
+          integrationId: API_CALL_TOOL,
           target: "https://example.test/upload?uploadType=resumable",
           fromFile: "big.bin",
           uploadProtocol: "google-resumable",
@@ -1066,7 +1066,7 @@ describe("McpApiUploadResolver — cancellation parity", () => {
       const resolver = new McpApiUploadResolver(mcp);
       const result = await resolver.executeUpload(
         {
-          providerId: API_CALL_TOOL,
+          integrationId: API_CALL_TOOL,
           target: "https://s3.test/bucket/x",
           fromFile: "big.bin",
           uploadProtocol: "s3-multipart",
@@ -1112,7 +1112,7 @@ describe("McpApiUploadResolver — cancellation parity", () => {
       const resolver = new McpApiUploadResolver(mcp);
       const result = await resolver.executeUpload(
         {
-          providerId: API_CALL_TOOL,
+          integrationId: API_CALL_TOOL,
           target: "https://tus.test/files",
           fromFile: "big.bin",
           uploadProtocol: "tus",
@@ -1155,7 +1155,7 @@ describe("McpApiUploadResolver — cancellation parity", () => {
       const resolver = new McpApiUploadResolver(mcp);
       const result = await resolver.executeUpload(
         {
-          providerId: API_CALL_TOOL,
+          integrationId: API_CALL_TOOL,
           target: "https://graph.test/me/drive/root:/foo.bin:/createUploadSession",
           fromFile: "big.bin",
           uploadProtocol: "ms-resumable",
@@ -1217,7 +1217,7 @@ describe("McpApiUploadResolver — cancellation parity", () => {
       const resolver = new McpApiUploadResolver(mcp);
       const result = await resolver.executeUpload(
         {
-          providerId: API_CALL_TOOL,
+          integrationId: API_CALL_TOOL,
           target: "https://example.test/upload?uploadType=resumable",
           fromFile: "big.bin",
           uploadProtocol: "google-resumable",
@@ -1282,7 +1282,7 @@ describe("McpApiUploadResolver — s3-multipart ETag round-trip", () => {
       const resolver = new McpApiUploadResolver(mcp);
       const result = await resolver.executeUpload(
         {
-          providerId: API_CALL_TOOL,
+          integrationId: API_CALL_TOOL,
           target: "https://s3.test/bucket/x",
           fromFile: "big.bin",
           uploadProtocol: "s3-multipart",

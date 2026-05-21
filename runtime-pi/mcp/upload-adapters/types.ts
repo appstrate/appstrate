@@ -86,7 +86,7 @@ export type AdapterApiCall = (req: AdapterApiCallRequest) => Promise<AdapterApiC
 
 export interface AdapterApiCallRequest {
   /** The `{ns}__api_call` tool name — pinned for the whole upload. */
-  providerId: string;
+  integrationId: string;
   target: string;
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD";
   headers?: Record<string, string>;
@@ -101,7 +101,7 @@ export interface AdapterApiCallRequest {
  * and adapter-supplied metadata.
  */
 export interface AdapterContext {
-  providerId: string;
+  integrationId: string;
   /** Original target URL from the agent. The adapter MAY substitute
    *  per-protocol session URLs after init. */
   target: string;

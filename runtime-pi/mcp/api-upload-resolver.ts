@@ -17,7 +17,7 @@
  *
  * The chunked-upload resolver dispatches each chunk through the
  * per-integration `{ns}__api_call` tool. The integration is implied by
- * the tool name, so no separate `providerId` arg is sent — `req.providerId`
+ * the tool name, so no separate `integrationId` arg is sent — `req.integrationId`
  * carries the `{ns}__api_call` tool name the wrapper dispatches to.
  *
  * Lifecycle
@@ -83,9 +83,9 @@ export interface ProviderUploadRequest {
   /**
    * The `{ns}__api_call` MCP tool name to dispatch each chunk through.
    * The integration is implied by the tool name, so this string IS the
-   * tool name and no separate `providerId` arg is sent.
+   * tool name and no separate `integrationId` arg is sent.
    */
-  providerId: string;
+  integrationId: string;
   target: string;
   fromFile: string;
   uploadProtocol: UploadProtocol;
@@ -224,7 +224,7 @@ export class McpApiUploadResolver {
     let bytesAcked = 0;
 
     const adapterCtx: AdapterContext = {
-      providerId: req.providerId,
+      integrationId: req.integrationId,
       target: req.target,
       totalBytes,
       metadata: req.metadata ?? {},
@@ -360,11 +360,11 @@ export class McpApiUploadResolver {
    */
   private makeApiCall(signal: AbortSignal) {
     return async (req: AdapterApiCallRequest): Promise<AdapterApiCallResponse> => {
-      // `req.providerId` is the per-integration `{ns}__api_call` tool
-      // name. That tool does NOT accept a `providerId` argument (the
+      // `req.integrationId` is the per-integration `{ns}__api_call` tool
+      // name. That tool does NOT accept a `integrationId` argument (the
       // integration is fixed by the tool name), so we dispatch to the
       // named tool and omit it.
-      const toolName = req.providerId;
+      const toolName = req.integrationId;
       const args: Record<string, unknown> = {
         target: req.target,
         method: req.method,

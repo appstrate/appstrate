@@ -3,24 +3,23 @@
 /**
  * Capabilities exposed to a custom tool's `execute` callback as the 4th argument.
  *
- * `providerCall` is the credentialed-call surface for tools, mirroring the
- * LLM-side `provider_call` MCP tool. The credential is injected server-side
+ * `apiCall` is the credentialed-call surface for tools, mirroring the
+ * LLM-side `{ns}__api_call` MCP tool. The credential is injected server-side
  * by the sidecar — the tool never sees the raw key (ADR-003 invariant).
  *
  * `readResource` resolves an MCP `resource_link` URI (typically
- * `appstrate://provider-response/{runId}/{ulid}`) returned by `providerCall`
+ * `appstrate://provider-response/{runId}/{ulid}`) returned by `apiCall`
  * when the upstream response exceeds `INLINE_RESPONSE_THRESHOLD` (32 KB).
  * Without this, a tool that fetches large payloads would have to call the
  * sidecar's MCP `resources/read` over HTTP itself — duplicated boilerplate
  * across every tool that consumes large API responses.
  *
- * The runtime that materialises this context (and validates `providerId`
- * against the agent bundle's `dependencies.providers[]`) lives in
+ * The runtime that materialises this context lives in
  * `runtime-pi/entrypoint.ts`. Tool authors only consume the type.
  */
 export interface AppstrateToolCtx {
-  providerCall: (
-    providerId: string,
+  apiCall: (
+    integrationId: string,
     args: {
       method?: string;
       target: string;

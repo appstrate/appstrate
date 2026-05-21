@@ -7,7 +7,7 @@ import type { ApiCallDeps } from "./credential-proxy.ts";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import { BlobStore } from "./blob-store.ts";
 import {
-  DEFAULT_PROVIDER_CALL_CONCURRENCY,
+  DEFAULT_API_CALL_CONCURRENCY,
   LLM_PROXY_TIMEOUT_MS,
   filterHeaders,
   isBlockedUrl,
@@ -352,7 +352,7 @@ export function buildSidecarRuntimeDeps(deps: AppDeps): SidecarRuntimeDeps {
     reserveTokens: tokenBudget.reserveTokens,
   });
   const apiCallLimit: LimitFunction = pLimit(
-    readPositiveIntEnv("SIDECAR_PROVIDER_CALL_CONCURRENCY", DEFAULT_PROVIDER_CALL_CONCURRENCY),
+    readPositiveIntEnv("SIDECAR_API_CALL_CONCURRENCY", DEFAULT_API_CALL_CONCURRENCY),
   );
   const proxyDeps: ApiCallDeps = {
     config: deps.config,

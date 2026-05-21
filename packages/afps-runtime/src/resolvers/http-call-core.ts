@@ -250,10 +250,10 @@ export const apiCallRequestSchema = z.object({
 });
 
 /**
- * JSON schema for `provider_call` arguments — derived once from
+ * JSON schema for `api_call` arguments — derived once from
  * `apiCallRequestSchema`. Exported so non-Zod consumers (notably
  * `@appstrate/runner-pi`'s container-mode dispatcher, which composes its
- * own parameters object around a `providerId` enum) can paste in the
+ * own parameters object per `{ns}__api_call` tool) can paste in the
  * canonical discriminated body / responseMode shapes without re-deriving
  * them. Without this, the LLM-facing schema for `body` is `{}` (any) and
  * models routinely JSON-stringify object bodies — `{ fromFile: "x" }`
@@ -545,7 +545,7 @@ export function makeApiCallTool(
             timestamp: Date.now(),
             runId: ctx.runId,
             toolCallId: ctx.toolCallId,
-            providerId: meta.name,
+            integrationId: meta.name,
             method: req.method,
             target: req.target,
             status: 0,
@@ -562,7 +562,7 @@ export function makeApiCallTool(
           timestamp: Date.now(),
           runId: ctx.runId,
           toolCallId: ctx.toolCallId,
-          providerId: meta.name,
+          integrationId: meta.name,
           method: req.method,
           target: req.target,
           status: response.status,
@@ -598,16 +598,16 @@ export function makeApiCallTool(
  * integration resolvers always pass `{ns}__api_call`, so this fallback
  * mostly serves tests.
  */
-function slugifyProviderId(providerId: string): string {
-  return providerId.replace(/^@/, "").replace(/[^a-zA-Z0-9_]/g, "_");
+function slugifyIntegrationId(integrationId: string): string {
+  return integrationId.replace(/^@/, "").replace(/[^a-zA-Z0-9_]/g, "_");
 }
 
 /**
  * The default tool name {@link makeApiCallTool} registers for a given
- * provider id. Internal: only consumed inside this file.
+ * integration id. Internal: only consumed inside this file.
  */
-function defaultApiCallToolName(providerId: string): string {
-  return `${slugifyProviderId(providerId)}_call`;
+function defaultApiCallToolName(integrationId: string): string {
+  return `${slugifyIntegrationId(integrationId)}_call`;
 }
 
 /**

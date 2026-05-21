@@ -87,7 +87,7 @@ describe("makeApiCallTool", () => {
     expect(events).toHaveLength(1);
     expect(events[0]!.type).toBe("api_call.called");
     expect(events[0]!.status).toBe(201);
-    expect(events[0]!.providerId).toBe("@acme/ok");
+    expect(events[0]!.integrationId).toBe("@acme/ok");
   });
 
   it("marks tool results as isError on 4xx/5xx", async () => {

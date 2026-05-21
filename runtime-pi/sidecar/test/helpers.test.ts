@@ -10,7 +10,7 @@ import {
   matchesAuthorizedUri,
   MAX_MCP_ENVELOPE_SIZE,
   MAX_REQUEST_BODY_SIZE,
-  PROVIDER_ID_RE,
+  INTEGRATION_ID_RE,
   MAX_RESPONSE_SIZE,
   ABSOLUTE_MAX_RESPONSE_SIZE,
   OUTBOUND_TIMEOUT_MS,
@@ -52,23 +52,23 @@ describe("constants", () => {
     expect(MAX_MCP_ENVELOPE_SIZE).toBeGreaterThanOrEqual(minEnvelopeNeeded);
   });
 
-  it("PROVIDER_ID_RE accepts simple IDs", () => {
-    expect(PROVIDER_ID_RE.test("gmail")).toBe(true);
-    expect(PROVIDER_ID_RE.test("click-up")).toBe(true);
-    expect(PROVIDER_ID_RE.test("a")).toBe(true);
+  it("INTEGRATION_ID_RE accepts simple IDs", () => {
+    expect(INTEGRATION_ID_RE.test("gmail")).toBe(true);
+    expect(INTEGRATION_ID_RE.test("click-up")).toBe(true);
+    expect(INTEGRATION_ID_RE.test("a")).toBe(true);
   });
 
-  it("PROVIDER_ID_RE accepts scoped IDs", () => {
-    expect(PROVIDER_ID_RE.test("@appstrate/gmail")).toBe(true);
-    expect(PROVIDER_ID_RE.test("@my-org/provider")).toBe(true);
+  it("INTEGRATION_ID_RE accepts scoped IDs", () => {
+    expect(INTEGRATION_ID_RE.test("@appstrate/gmail")).toBe(true);
+    expect(INTEGRATION_ID_RE.test("@my-org/provider")).toBe(true);
   });
 
-  it("PROVIDER_ID_RE rejects invalid IDs", () => {
-    expect(PROVIDER_ID_RE.test("")).toBe(false);
-    expect(PROVIDER_ID_RE.test("UPPER")).toBe(false);
-    expect(PROVIDER_ID_RE.test("../etc/passwd")).toBe(false);
-    expect(PROVIDER_ID_RE.test("has spaces")).toBe(false);
-    expect(PROVIDER_ID_RE.test("-starts-with-dash")).toBe(false);
+  it("INTEGRATION_ID_RE rejects invalid IDs", () => {
+    expect(INTEGRATION_ID_RE.test("")).toBe(false);
+    expect(INTEGRATION_ID_RE.test("UPPER")).toBe(false);
+    expect(INTEGRATION_ID_RE.test("../etc/passwd")).toBe(false);
+    expect(INTEGRATION_ID_RE.test("has spaces")).toBe(false);
+    expect(INTEGRATION_ID_RE.test("-starts-with-dash")).toBe(false);
   });
 });
 

@@ -182,9 +182,9 @@ function makeExtension(
 
         const result = await resolver.executeUpload(
           {
-            // `providerId` carries the sibling `{ns}__api_call` tool name
+            // `integrationId` carries the sibling `{ns}__api_call` tool name
             // the resolver dispatches each chunk through.
-            providerId: apiCallTool,
+            integrationId: apiCallTool,
             target: args.target,
             fromFile: args.fromFile,
             uploadProtocol: protocol as UploadProtocol,

@@ -12,7 +12,7 @@
 export { isBlockedHost, isBlockedUrl } from "./ssrf.ts";
 
 // Accepts both simple IDs (gmail) and scoped IDs (@appstrate/gmail)
-export const PROVIDER_ID_RE = /^(@[a-z0-9][a-z0-9-]*\/)?[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
+export const INTEGRATION_ID_RE = /^(@[a-z0-9][a-z0-9-]*\/)?[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
 // Default cap on upstream response bytes the sidecar buffers before
 // returning them inline. Set generously enough that typical provider
@@ -31,9 +31,9 @@ export const LLM_PROXY_TIMEOUT_MS = 1_800_000; // 30 minutes (patched from 300_0
  * Three matches the typical browsing concurrency a single LLM turn can
  * usefully exploit while leaving headroom under most providers' per-IP
  * rate limits. Operators can override via
- * `SIDECAR_PROVIDER_CALL_CONCURRENCY`.
+ * `SIDECAR_API_CALL_CONCURRENCY`.
  */
-export const DEFAULT_PROVIDER_CALL_CONCURRENCY = 3;
+export const DEFAULT_API_CALL_CONCURRENCY = 3;
 
 /** Absolute hard-cap for any body-size env override. Above this, raising
  *  the limit requires real engineering (streaming refactor, chunked
