@@ -856,8 +856,8 @@ export function getToolUrlPatterns(
  * to the lone key).
  *
  * Pure function. Single source of truth for the frontend status badge
- * (`agent-integrations-block.tsx`) and the backend gate
- * (`collectIntegrationDependencyErrors`), so the two cannot drift.
+ * (`agent-integrations-block.tsx`) and the backend run-readiness gate
+ * (`agent-readiness.ts`), so the two cannot drift.
  */
 export function requiredAuthKeysForAgent(
   manifest: IntegrationManifest,

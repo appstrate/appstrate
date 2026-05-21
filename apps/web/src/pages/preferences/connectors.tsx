@@ -7,8 +7,8 @@ import { Unplug, Pencil, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { useMyConnections } from "../../hooks/use-connection-profiles";
 import {
+  useMyConnections,
   useDisconnectIntegrationConnection,
   useUpdateMeIntegrationConnection,
 } from "../../hooks/use-me-connections";

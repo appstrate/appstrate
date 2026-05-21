@@ -195,8 +195,8 @@ export interface OrgInvitation {
 import type { SchemaWrapper } from "@appstrate/core/form";
 
 // --- Unified Me Connections (R1 refactor) ----------------
-// User-scope view that merges provider connections and integration
-// connections under a single shape. Backs `GET /api/me/connections`.
+// User-scope view of a user's integration connections under a single
+// shape. Backs `GET /api/me/connections`.
 
 export type MeConnectionKind = "integration";
 
@@ -204,26 +204,23 @@ export interface MeConnectionEntry {
   /** Stable connection id (uuid). */
   connectionId: string;
   kind: MeConnectionKind;
-  /** Display label set by the user (integration only — providers have profile names). */
+  /** Display label set by the user. */
   label: string | null;
   scopesGranted: string[];
   connectedAt: string;
   needsReconnection: boolean;
   expiresAt: string | null;
-  /** Human-friendly identity (accountEmail, sub claim, profile name). */
+  /** Human-friendly identity (accountEmail, sub claim). */
   identity: string | null;
-  /** Provider only — which profile the connection is attached to. */
-  profile: { id: string; name: string; isDefault: boolean } | null;
-  /** Integration only — which auth slot this connection satisfies. */
+  /** Which auth slot this connection satisfies. */
   authKey: string | null;
-  /** Integration only — admin/owner sharing toggle (per-org). */
+  /** Admin/owner sharing toggle (per-org). */
   sharedWithOrg: boolean;
   /**
-   * Integration only — number of installed agents in this connection's
-   * application that declare this integration in their dependencies. Used
-   * by the UI to surface "reused by N agents" so members understand that
-   * the connection is shared across the org's agents rather than per-agent.
-   * `null` for providers (their reuse model is per-profile, surfaced elsewhere).
+   * Number of installed agents in this connection's application that
+   * declare this integration in their dependencies. Used by the UI to
+   * surface "reused by N agents" so members understand that the connection
+   * is shared across the org's agents rather than per-agent.
    */
   reusedByAgents: number | null;
   /** Where this connection lives (the connection is keyed per-app). */
@@ -233,7 +230,7 @@ export interface MeConnectionEntry {
 
 export interface MeConnectionSourceGroup {
   kind: MeConnectionKind;
-  /** Package id (provider or integration). */
+  /** Integration package id. */
   sourceId: string;
   displayName: string;
   logo: string;

@@ -7,7 +7,6 @@ export * from "./applications.ts";
 export * from "./profiles.ts";
 export * from "./packages.ts";
 export * from "./runs.ts";
-export * from "./connections.ts";
 export * from "./integrations.ts";
 export * from "./integration-pins.ts";
 export * from "./integration-org-defaults.ts";

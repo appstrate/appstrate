@@ -179,7 +179,6 @@ async function listAllActorIntegrationConnections(
       needsReconnection: row.needsReconnection,
       expiresAt: row.expiresAt ? row.expiresAt.toISOString() : null,
       identity,
-      profile: null,
       authKey: row.authKey,
       sharedWithOrg: row.sharedWithOrg,
       reusedByAgents: reuseCount.get(`${row.applicationId}|${row.packageId}`) ?? 0,

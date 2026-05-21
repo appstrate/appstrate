@@ -159,18 +159,6 @@ export function useDisconnect() {
   });
 }
 
-export function useDeleteAllConnections() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: () => api("/app-profiles/connections", { method: "DELETE" }),
-    onSuccess: () => {
-      invalidateConnectionRelated(qc);
-      qc.invalidateQueries({ queryKey: ["connection-profiles"] });
-    },
-    onError: onMutationError,
-  });
-}
-
 export function useImportPackage() {
   const qc = useQueryClient();
   const navigate = useNavigate();

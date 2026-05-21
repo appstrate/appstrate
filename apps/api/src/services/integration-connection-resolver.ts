@@ -450,8 +450,8 @@ async function buildRequirement(
 ): Promise<IntegrationRequirement | null> {
   const res = await fetchIntegrationManifest(entry.id);
   if (!res.ok) return null; // Missing/invalid manifests are surfaced separately by
-  //                          collectIntegrationDependencyErrors during readiness
-  //                          checks; the resolver ignores them.
+  //                          the run-readiness check (agent-readiness.ts); the
+  //                          resolver ignores them.
   return {
     integrationId: entry.id,
     manifest: res.manifest,

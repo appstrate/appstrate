@@ -11,12 +11,25 @@
  * SPA's currently-active context for that single request.
  */
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import i18n from "../i18n";
-import { api, apiFetch } from "../api";
+import { api, apiFetch, apiList } from "../api";
+import type { MeConnectionSourceGroup } from "@appstrate/shared-types";
 import { invalidateConnectionRelated } from "./invalidation";
 import { onMutationError } from "./use-mutations";
+
+/**
+ * Unified user-scope connection list (integration connections), grouped by
+ * source package. Backs the `/preferences/connectors` page. Crosses
+ * orgs/applications: no header context required.
+ */
+export function useMyConnections() {
+  return useQuery({
+    queryKey: ["me-connections"],
+    queryFn: () => apiList<MeConnectionSourceGroup>("/me/connections"),
+  });
+}
 
 interface OrgAppHeaders {
   orgId: string;

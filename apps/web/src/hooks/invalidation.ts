@@ -3,10 +3,9 @@
 import type { QueryClient } from "@tanstack/react-query";
 
 /**
- * Invalidate all connection/provider-related query caches.
- *
- * Covers user connections, app profiles, bindings, agent details,
- * and provider status. Over-invalidation is negligible because
+ * Invalidate all connection-related query caches: the user-scope
+ * connection list, the per-integration caches, and the agent details
+ * that surface connection status. Over-invalidation is negligible because
  * React Query's staleTime prevents unnecessary refetches.
  *
  * Connection queries are scoped by the current application via X-Application-Id header
@@ -14,12 +13,9 @@ import type { QueryClient } from "@tanstack/react-query";
  * switching apps triggers a full query removal via useCurrentApplication.
  */
 export function invalidateConnectionRelated(qc: QueryClient) {
-  qc.invalidateQueries({ queryKey: ["available-providers"] });
-  qc.invalidateQueries({ queryKey: ["user-connections"] });
-  qc.invalidateQueries({ queryKey: ["profile-connections"] });
-  qc.invalidateQueries({ queryKey: ["app-profile-bindings"] });
-  qc.invalidateQueries({ queryKey: ["app-connection-profiles"] });
+  qc.invalidateQueries({ queryKey: ["me-connections"] });
+  qc.invalidateQueries({ queryKey: ["integrations"] });
+  qc.invalidateQueries({ queryKey: ["me-integration-pins"] });
   qc.invalidateQueries({ queryKey: ["packages", "agent"] });
   qc.invalidateQueries({ queryKey: ["agents"] });
-  qc.invalidateQueries({ queryKey: ["agent-provider-profiles"] });
 }

@@ -100,24 +100,17 @@ export async function buildDependencies(packageId: string): Promise<Dependencies
   });
 
   const skills: Record<string, string> = {};
-  const providers: Record<string, string> = {};
 
   for (const row of rows) {
     if (!row.registryScope || !row.registryName) continue;
     if (!row.version) continue;
     const scopedName = `@${row.registryScope}/${row.registryName}`;
-    const version = row.version;
-    if (row.type === "skill") skills[scopedName] = version;
-    else if (row.type === "provider") providers[scopedName] = version;
+    if (row.type === "skill") skills[scopedName] = row.version;
   }
 
-  const hasSkills = Object.keys(skills).length > 0;
-  const hasProviders = Object.keys(providers).length > 0;
-  if (!hasSkills && !hasProviders) return null;
+  if (Object.keys(skills).length === 0) return null;
 
-  const result: Dependencies = {};
-  if (hasSkills) result.skills = skills;
-  if (hasProviders) result.providers = providers;
+  const result: Dependencies = { skills };
   return result;
 }
 

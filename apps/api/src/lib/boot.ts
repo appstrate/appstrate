@@ -31,7 +31,6 @@ import { initSystemProxies } from "../services/proxy-registry.ts";
 import { initSystemModelProviderKeys } from "../services/model-registry.ts";
 import { registerModelProviders } from "../services/model-providers/registry.ts";
 import { initRunLimits } from "../services/run-limits.ts";
-import { migrateAgentRuntimeTools } from "../services/migrate-runtime-tools.ts";
 import { initProxyLimits } from "../services/proxy-limits.ts";
 import {
   initSystemPackages,
@@ -75,12 +74,6 @@ export async function boot(): Promise<void> {
     });
     await applyCoreMigrations();
   }
-
-  // Data migration: agent `dependencies.tools` → `runtimeTools` (the
-  // `tool` package type was removed; tools are now built-in runtime
-  // tools). Runs after core migrations, before modules + system-package
-  // sync. Fail-loud on unknown third-party tool ids.
-  await migrateAgentRuntimeTools();
 
   // Bootstrap-token reconciliation (#344). If the env still carries an
   // AUTH_BOOTSTRAP_TOKEN but at least one org exists, the token is dead —
@@ -384,10 +377,8 @@ async function loadAndSyncSystemPackages(): Promise<void> {
         target: packages.id,
         set: {
           // `type` must heal in place: a packageId can change type across
-          // versions (e.g. a former `provider` reseeded as `integration`
-          // after the provider→integration unification). Without this, an
-          // existing row keeps its stale `provider` type and never surfaces
-          // in the integration list.
+          // versions, so a reseed updates it rather than keeping the stale
+          // value (which would drop the row out of its catalogue list).
           type,
           draftManifest: manifest as unknown as Record<string, unknown>,
           draftContent: entry.content,
