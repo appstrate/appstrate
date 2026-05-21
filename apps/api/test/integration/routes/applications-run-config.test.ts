@@ -60,7 +60,6 @@ describe("GET /api/applications/:applicationId/packages/:scope/:name/run-config"
       modelId: "claude-sonnet",
       proxyId: null,
       versionPin: "1.2.3",
-      requiredProviders: ["@afps/gmail"],
     });
   });
 

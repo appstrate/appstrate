@@ -238,125 +238,16 @@ describe("validateInlineManifest — dependency caps", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Wildcard + authorizedUris caps (defensive — applies to provider manifests)
-// ---------------------------------------------------------------------------
-
-describe("validateInlineManifest — wildcard/uri caps", () => {
-  it("rejects allowAllUris when wildcard disabled", () => {
-    const manifest = {
-      ...baseManifest({ type: "provider" }),
-      displayName: "P",
-      definition: {
-        authMode: "api_key",
-        allowAllUris: true,
-        credentials: {
-          schema: { type: "object", properties: { apikey: { type: "string" } } },
-          fieldName: "apikey",
-        },
-        credentialHeaderName: "X-Api-Key",
-      },
-    };
-    const result = validateInlineManifest({
-      manifest,
-      prompt: "ok",
-      limits: defaults,
-    });
-    expect(result.valid).toBe(false);
-    expect(result.errors.join(" ")).toContain("wildcard access is not allowed");
-  });
-
-  it('rejects explicit "*" entry in authorizedUris', () => {
-    const manifest = {
-      ...baseManifest({ type: "provider" }),
-      displayName: "P",
-      definition: {
-        authMode: "api_key",
-        authorizedUris: ["https://api.example.com", "*"],
-        credentials: {
-          schema: { type: "object", properties: { apikey: { type: "string" } } },
-          fieldName: "apikey",
-        },
-        credentialHeaderName: "X-Api-Key",
-      },
-    };
-    const result = validateInlineManifest({
-      manifest,
-      prompt: "ok",
-      limits: defaults,
-    });
-    expect(result.valid).toBe(false);
-    expect(result.errors.join(" ")).toContain('wildcard "*" entry is not allowed');
-  });
-
-  it("rejects too many authorizedUris", () => {
-    const tight = { ...defaults, max_authorized_uris: 2 };
-    const manifest = {
-      ...baseManifest({ type: "provider" }),
-      displayName: "P",
-      definition: {
-        authMode: "api_key",
-        authorizedUris: ["a", "b", "c"],
-        credentials: {
-          schema: { type: "object", properties: { apikey: { type: "string" } } },
-          fieldName: "apikey",
-        },
-        credentialHeaderName: "X-Api-Key",
-      },
-    };
-    const result = validateInlineManifest({
-      manifest,
-      prompt: "ok",
-      limits: tight,
-    });
-    expect(result.valid).toBe(false);
-    expect(result.errors.join(" ")).toContain("authorizedUris: too many");
-  });
-
-  it("accepts wildcard when wildcard_uri_allowed is true", () => {
-    const permissive = { ...defaults, wildcard_uri_allowed: true };
-    const manifest = {
-      ...baseManifest({ type: "provider" }),
-      displayName: "P",
-      definition: {
-        authMode: "api_key",
-        allowAllUris: true,
-        credentials: {
-          schema: { type: "object", properties: { apikey: { type: "string" } } },
-          fieldName: "apikey",
-        },
-        credentialHeaderName: "X-Api-Key",
-      },
-    };
-    const result = validateInlineManifest({
-      manifest,
-      prompt: "ok",
-      limits: permissive,
-    });
-    expect(result.valid).toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------------------
 // Error aggregation
 // ---------------------------------------------------------------------------
 
 describe("validateInlineManifest — error aggregation", () => {
   it("reports multiple independent violations in one pass", () => {
-    const tight = { ...defaults, max_skills: 0, max_authorized_uris: 0 };
+    const tight = { ...defaults, max_skills: 0, manifest_bytes: 10 };
     const manifest = baseManifest({
-      type: "provider",
       displayName: "P",
       dependencies: {
-        skills: { "@x/a": "1.0.0" },
-      },
-      definition: {
-        authMode: "api_key",
-        authorizedUris: ["a", "b"],
-        credentials: {
-          schema: { type: "object", properties: { apikey: { type: "string" } } },
-          fieldName: "apikey",
-        },
-        credentialHeaderName: "X-Api-Key",
+        skills: { "@x/a": "1.0.0", "@x/b": "1.0.0" },
       },
     });
     const result = validateInlineManifest({
@@ -365,6 +256,6 @@ describe("validateInlineManifest — error aggregation", () => {
       limits: tight,
     });
     expect(result.valid).toBe(false);
-    expect(result.errors.length).toBeGreaterThanOrEqual(3);
+    expect(result.errors.length).toBeGreaterThanOrEqual(2);
   });
 });

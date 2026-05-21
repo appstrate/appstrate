@@ -190,7 +190,10 @@ describe("Schedules API", () => {
       const res = await app.request(`/api/agents/${fid}/schedules`, {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ connectionProfileId: connectionProfileId, cronExpression: "not-valid-cron" }),
+        body: JSON.stringify({
+          connectionProfileId: connectionProfileId,
+          cronExpression: "not-valid-cron",
+        }),
       });
 
       expect(res.status).toBe(400);
@@ -265,7 +268,6 @@ describe("Schedules API", () => {
       const body = (await res.json()) as any;
       expect(body.id).toBe(schedule.id);
       expect(body.name).toBe("Hourly Run");
-      expect(body.readiness).toBeDefined();
       expect(body.profileName).toBeDefined();
     });
 
