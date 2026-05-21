@@ -32,25 +32,24 @@ See [`examples/self-hosting/README.md`](../../examples/self-hosting/README.md#ve
 
 ## Commands
 
-| Command                 | Purpose                                                                         |
-| ----------------------- | ------------------------------------------------------------------------------- |
-| `appstrate install`     | Install Appstrate locally (Tier 0) or bring up a Docker stack (Tiers 1/2/3).    |
-| `appstrate start`       | Start the installed Docker stack (`docker compose up -d`).                      |
-| `appstrate stop`        | Stop the stack — containers off, volumes preserved.                             |
-| `appstrate restart`     | Restart all containers.                                                         |
-| `appstrate logs`        | Stream Compose logs (with `-f` and an optional service-name positional).        |
-| `appstrate status`      | Show container status (`docker compose ps`).                                    |
-| `appstrate uninstall`   | Tear down. Default keeps volumes; `--purge` wipes data + the install dir.       |
-| `appstrate login`       | Sign into an instance via RFC 8628 device-flow. Tokens land in the OS keyring.  |
-| `appstrate logout`      | Revoke the active session server-side and wipe local credentials.               |
-| `appstrate whoami`      | Print the identity attached to the active profile.                              |
-| `appstrate token`       | Print metadata about the stored access + refresh tokens (debug).                |
-| `appstrate org`         | List, switch, or create organizations pinned on the active profile.             |
-| `appstrate app`         | List, switch, or create applications pinned on the active profile.              |
-| `appstrate api`         | Authenticated HTTP passthrough to the Appstrate API.                            |
-| `appstrate openapi`     | Explore the active profile's OpenAPI schema without flooding stdout.            |
-| `appstrate run`         | Execute an agent locally — by package id or from a `.afps`/`.afps-bundle` path. |
-| `appstrate connections` | Manage connection profiles (default + alternates) on the active profile.        |
+| Command               | Purpose                                                                         |
+| --------------------- | ------------------------------------------------------------------------------- |
+| `appstrate install`   | Install Appstrate locally (Tier 0) or bring up a Docker stack (Tiers 1/2/3).    |
+| `appstrate start`     | Start the installed Docker stack (`docker compose up -d`).                      |
+| `appstrate stop`      | Stop the stack — containers off, volumes preserved.                             |
+| `appstrate restart`   | Restart all containers.                                                         |
+| `appstrate logs`      | Stream Compose logs (with `-f` and an optional service-name positional).        |
+| `appstrate status`    | Show container status (`docker compose ps`).                                    |
+| `appstrate uninstall` | Tear down. Default keeps volumes; `--purge` wipes data + the install dir.       |
+| `appstrate login`     | Sign into an instance via RFC 8628 device-flow. Tokens land in the OS keyring.  |
+| `appstrate logout`    | Revoke the active session server-side and wipe local credentials.               |
+| `appstrate whoami`    | Print the identity attached to the active profile.                              |
+| `appstrate token`     | Print metadata about the stored access + refresh tokens (debug).                |
+| `appstrate org`       | List, switch, or create organizations pinned on the active profile.             |
+| `appstrate app`       | List, switch, or create applications pinned on the active profile.              |
+| `appstrate api`       | Authenticated HTTP passthrough to the Appstrate API.                            |
+| `appstrate openapi`   | Explore the active profile's OpenAPI schema without flooding stdout.            |
+| `appstrate run`       | Execute an agent locally — by package id or from a `.afps`/`.afps-bundle` path. |
 
 All commands accept `--profile <name>` to target a specific profile (see [Profiles](#profiles)).
 
@@ -544,18 +543,15 @@ Run-config inheritance (model, proxy, agent config, version pin) is fetched from
 
 **Selected flags**
 
-| Flag                         | Purpose                                                                                                                                                |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `--connection-profile <ref>` | Connection profile to use for credential-proxy calls (UUID or name). Overrides the sticky default pinned via `appstrate connections profile switch`.   |
-| `--cp <ref>`                 | Alias for `--connection-profile`.                                                                                                                      |
-| `--provider-profile <kv>`    | Per-provider override `providerId=<id\|name>`. Repeatable.                                                                                             |
-| `--proxy <id>`               | Proxy id to associate with the run (overrides the per-app inherited value).                                                                            |
-| `--no-inherit`               | Skip per-application run-config inheritance — flags + env vars + defaults only.                                                                        |
-| `--no-preflight`             | Skip the connections-readiness preflight (CI mode; fails fast on missing connections via the structured-error path).                                   |
-| `--preflight-timeout <s>`    | Maximum seconds to poll for connections during the preflight. Default `300`.                                                                           |
-| `--json`                     | Emit canonical RunEvents as JSONL on stdout. Forces non-interactive preflight.                                                                         |
-| `-v, --verbose`              | Verbose tool-call output: pretty-print args + reveal full results (~2 KB). Honoured only in human mode (without `--json`). Env: `APPSTRATE_VERBOSE=1`. |
-| `-q, --quiet`                | Suppress per-tool output lines (name, args, result). Errors and final summary still print. Mutually exclusive with `--verbose`.                        |
+| Flag                      | Purpose                                                                                                                                                |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--proxy <id>`            | Proxy id to associate with the run (overrides the per-app inherited value).                                                                            |
+| `--no-inherit`            | Skip per-application run-config inheritance — flags + env vars + defaults only.                                                                        |
+| `--no-preflight`          | Skip the connections-readiness preflight (CI mode; fails fast on missing connections via the structured-error path).                                   |
+| `--preflight-timeout <s>` | Maximum seconds to poll for connections during the preflight. Default `300`.                                                                           |
+| `--json`                  | Emit canonical RunEvents as JSONL on stdout. Forces non-interactive preflight.                                                                         |
+| `-v, --verbose`           | Verbose tool-call output: pretty-print args + reveal full results (~2 KB). Honoured only in human mode (without `--json`). Env: `APPSTRATE_VERBOSE=1`. |
+| `-q, --quiet`             | Suppress per-tool output lines (name, args, result). Errors and final summary still print. Mutually exclusive with `--verbose`.                        |
 
 **Tool-call rendering**
 
@@ -573,21 +569,7 @@ The full flag set is documented under `appstrate run --help`.
 
 **Preflight readiness**
 
-Before launching, the CLI calls `GET /api/agents/{scope}/{name}/readiness` to check that every required provider has a healthy connection under the resolved profile context. Missing or expired connections in an interactive terminal trigger a prompt to open `${instance}/preferences/connectors` in a browser, then poll until ready or `--preflight-timeout` is reached. In `--json` or non-TTY contexts, the run aborts with exit code 1 and a structured error containing `{ code: "connections_missing", missing, connectUrl }` on stdout.
-
-### `appstrate connections`
-
-Manage connection profiles for the active CLI profile. Profiles let you keep parallel sets of provider credentials (e.g. "personal Gmail" vs "work Gmail") and switch between them per run.
-
-```sh
-appstrate connections list                           # List connections for the current profile
-appstrate connections profile list                   # List all profiles owned by the user
-appstrate connections profile current                # Print the pinned default
-appstrate connections profile switch work            # Pin "work" as the default for credential-proxy calls
-appstrate connections profile create "freelance"     # Create a new non-default profile
-```
-
-`switch` writes the resolved profile UUID to `connectionProfileId` in `~/.config/appstrate/config.toml`. `appstrate run` and any other credential-proxy callers honour it via the `X-Connection-Profile-Id` header until overridden by `--connection-profile`.
+Before launching, the CLI calls `GET /api/agents/{scope}/{name}/readiness` to check that every required integration has a healthy connection. Missing or expired connections in an interactive terminal trigger a prompt to open `${instance}/preferences/connectors` in a browser, then poll until ready or `--preflight-timeout` is reached. In `--json` or non-TTY contexts, the run aborts with exit code 1 and a structured error containing `{ code: "connections_missing", missing, connectUrl }` on stdout.
 
 ## Profiles
 

@@ -12,7 +12,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import type {
-  AccessibleIntegrationConnection,
   ConsumingAgentSummary,
   IntegrationAgentResolution,
   IntegrationConnection,
@@ -30,7 +29,6 @@ import { useCurrentApplicationId } from "./use-current-application";
 // Re-export wire types for component consumers — canonical definitions
 // live in `@appstrate/shared-types/integrations.ts`.
 export type {
-  AccessibleIntegrationConnection,
   AgentIntegrationEntry,
   ConsumingAgentSummary,
   IntegrationAgentResolution,
@@ -85,26 +83,6 @@ export function useIntegrationConnections(packageId: string | undefined) {
     queryFn: async () => {
       const envelope = await api<ListEnvelope<IntegrationConnection>>(
         `/integrations/${encodeURI(packageId!)}/connections`,
-      );
-      return envelope.data;
-    },
-  });
-}
-
-/**
- * R3 — own + shared connections the actor could resolve to at run-kickoff.
- * Powers the pre-run picker rendered on agent surfaces when more than one
- * candidate exists (avoids the must_choose 412 recovery loop).
- */
-export function useAccessibleIntegrationConnections(packageId: string | undefined) {
-  const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
-  return useQuery({
-    queryKey: [...KEY(orgId, applicationId), "accessible-connections", packageId] as const,
-    enabled: Boolean(orgId && applicationId && packageId),
-    queryFn: async () => {
-      const envelope = await api<ListEnvelope<AccessibleIntegrationConnection>>(
-        `/integrations/${encodeURI(packageId!)}/accessible-connections`,
       );
       return envelope.data;
     },

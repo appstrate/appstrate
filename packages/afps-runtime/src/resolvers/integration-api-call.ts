@@ -488,10 +488,6 @@ export interface RemoteAppstrateIntegrationResolverOptions {
   sessionId?: string;
   /** Extra headers attached to every credential-proxy call (e.g. `X-Run-Id`). */
   extraHeaders?: Record<string, string>;
-  /** Default connection profile id (`X-Connection-Profile-Id`). */
-  connectionProfileId?: string;
-  /** Per-integration profile id overrides (`@scope/name` → uuid). */
-  integrationProfileOverrides?: Record<string, string>;
   /** Override the low-level HTTP client. Defaults to the global `fetch`. */
   fetch?: typeof fetch;
 }
@@ -514,8 +510,6 @@ export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallRes
   private readonly endUserId: string | undefined;
   private readonly sessionId: string;
   private readonly extraHeaders: Record<string, string>;
-  private readonly connectionProfileId: string | undefined;
-  private readonly integrationProfileOverrides: Record<string, string>;
   private readonly fetchImpl: typeof fetch;
 
   constructor(opts: RemoteAppstrateIntegrationResolverOptions) {
@@ -530,8 +524,6 @@ export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallRes
     this.endUserId = opts.endUserId;
     this.sessionId = opts.sessionId ?? crypto.randomUUID();
     this.extraHeaders = opts.extraHeaders ?? {};
-    this.connectionProfileId = opts.connectionProfileId;
-    this.integrationProfileOverrides = opts.integrationProfileOverrides ?? {};
     this.fetchImpl = opts.fetch ?? fetch;
   }
 
@@ -563,8 +555,6 @@ export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallRes
         allowStreaming: true,
         workspace: ctx.workspace,
       });
-      const profileForCall =
-        this.integrationProfileOverrides[meta.name] ?? this.connectionProfileId;
       const baseHeaders: Record<string, string> = {
         Authorization: `Bearer ${this.apiKey}`,
         "X-Application-Id": this.applicationId,
@@ -573,7 +563,6 @@ export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallRes
         "X-Integration": meta.name,
         "X-Target": req.target,
         ...(this.endUserId ? { "Appstrate-User": this.endUserId } : {}),
-        ...(profileForCall ? { "X-Connection-Profile-Id": profileForCall } : {}),
         ...this.extraHeaders,
         ...(req.headers ?? {}),
       };

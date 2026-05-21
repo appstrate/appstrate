@@ -487,8 +487,7 @@ export const schedules = pgTable(
       .notNull()
       .references(() => packages.id, { onDelete: "cascade" }),
     // Actor the scheduled run executes as. Exactly one of userId / endUserId
-    // is set (or both null for an org-level / system-owned schedule). Replaces
-    // the legacy connectionProfileId FK once connection profiles were removed.
+    // is set (or both null for an org-level / system-owned schedule).
     userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
     endUserId: text("end_user_id").references(() => endUsers.id, {
       onDelete: "cascade",
