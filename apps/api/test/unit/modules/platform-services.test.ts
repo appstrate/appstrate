@@ -60,10 +60,6 @@ describe("ModuleInitContext.services — platform service wiring", () => {
     expect(typeof services.applications.getDefault).toBe("function");
   });
 
-  it("wires connections helpers", () => {
-    expect(typeof services.connections.listAllForActor).toBe("function");
-  });
-
   it("wires run lifecycle operations", () => {
     expect(typeof services.runs.get).toBe("function");
     expect(typeof services.runs.listLogs).toBe("function");

@@ -23,10 +23,8 @@ import {
   modelProviderCredentials,
   orgModels,
   connectionProfiles,
-  userProviderConnections,
   orgInvitations,
   packageVersions,
-  applicationProviderCredentials,
 } from "@appstrate/db/schema";
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 
@@ -404,86 +402,6 @@ export async function seedConnectionProfile(
     })
     .returning();
   return profile!;
-}
-
-// ─── User Provider Connections ────────────────────────────
-
-type UserConnectionInsert = Partial<InferInsertModel<typeof userProviderConnections>> & {
-  connectionProfileId: string;
-  providerId: string;
-  orgId: string;
-  providerCredentialId: string;
-};
-
-export async function seedUserConnection(
-  overrides: UserConnectionInsert,
-): Promise<InferSelectModel<typeof userProviderConnections>> {
-  const [conn] = await db
-    .insert(userProviderConnections)
-    .values({
-      credentialsEncrypted: "test-encrypted",
-      ...overrides,
-    })
-    .returning();
-  return conn!;
-}
-
-// ─── Provider Credentials ────────────────────────────────
-
-type ProviderCredentialsInsert = Partial<
-  InferInsertModel<typeof applicationProviderCredentials>
-> & {
-  applicationId: string;
-  providerId: string;
-};
-
-export async function seedProviderCredentials(
-  overrides: ProviderCredentialsInsert,
-): Promise<InferInsertModel<typeof applicationProviderCredentials> & { id: string }> {
-  const values = {
-    enabled: true,
-    credentialsEncrypted: "test-admin-encrypted",
-    ...overrides,
-  };
-  const [row] = await db
-    .insert(applicationProviderCredentials)
-    .values(values)
-    .onConflictDoUpdate({
-      target: [
-        applicationProviderCredentials.applicationId,
-        applicationProviderCredentials.providerId,
-      ],
-      set: values,
-    })
-    .returning();
-  return { ...values, id: row!.id };
-}
-
-// ─── Connections (with auto-created provider credentials) ──
-
-import { saveConnection } from "@appstrate/connect";
-
-/**
- * Seed a user connection with auto-created applicationProviderCredentials.
- * Simplifies tests by handling the providerCredentialId requirement.
- */
-export async function seedConnectionForApp(
-  connectionProfileId: string,
-  providerId: string,
-  orgId: string,
-  applicationId: string,
-  credentials: Record<string, unknown>,
-  options?: { scopesGranted?: string[]; expiresAt?: string | null },
-): Promise<void> {
-  // Ensure provider package exists (FK target for applicationProviderCredentials)
-  await seedPackage({ orgId: null, id: providerId, type: "provider", source: "system" }).catch(
-    () => {},
-  );
-  const cred = await seedProviderCredentials({ applicationId, providerId });
-  await saveConnection(db, connectionProfileId, providerId, orgId, credentials, {
-    providerCredentialId: cred.id,
-    ...options,
-  });
 }
 
 // ─── Invitations ──────────────────────────────────────────

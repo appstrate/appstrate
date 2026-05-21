@@ -56,7 +56,6 @@ describe("Module loader — ctx.services injection end-to-end", () => {
     expect(s.models).toBeDefined();
     expect(s.packages).toBeDefined();
     expect(s.applications).toBeDefined();
-    expect(s.connections).toBeDefined();
     expect(s.runs).toBeDefined();
     expect(s.inline).toBeDefined();
     expect(s.realtime).toBeDefined();

@@ -46,7 +46,6 @@ import { createRunsEventsRouter } from "../../src/routes/runs-events.ts";
 import { createRunsRemoteRouter } from "../../src/routes/runs-remote.ts";
 import { createSchedulesRouter } from "../../src/routes/schedules.ts";
 import { createUserAgentsRouter } from "../../src/routes/user-agents.ts";
-import { createProvidersRouter } from "../../src/routes/providers.ts";
 import { createApiKeysRouter } from "../../src/routes/api-keys.ts";
 import { createProxiesRouter } from "../../src/routes/proxies.ts";
 import { createModelsRouter } from "../../src/routes/models.ts";
@@ -64,7 +63,6 @@ import { createCredentialProxyRouter } from "../../src/routes/credential-proxy.t
 import { createLlmProxyRouter } from "../../src/routes/llm-proxy.ts";
 import { getDiscoveredModules } from "./test-modules.ts";
 import healthRouter from "../../src/routes/health.ts";
-import { createConnectionsRouter } from "../../src/routes/connections.ts";
 import { createIntegrationsRouter } from "../../src/routes/integrations.ts";
 import orgsRouter from "../../src/routes/organizations.ts";
 import meRouter from "../../src/routes/me.ts";
@@ -184,8 +182,6 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
     "/api/api-keys",
     "/api/notifications",
     "/api/packages",
-    "/api/providers",
-    "/api/connections",
     "/api/integrations",
     "/api/app-profiles",
     ...extraModules.flatMap((m) => m.appScopedPaths ?? []),
@@ -241,7 +237,6 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
     // `apps/api/src/index.ts` → `registerModuleRoutes`.
     if (moduleRouter) app.route("/", moduleRouter);
   }
-  app.route("/api/providers", createProvidersRouter());
   app.route("/api/api-keys", createApiKeysRouter());
   app.route("/api/proxies", createProxiesRouter());
   app.route("/api/models", createModelsRouter());
@@ -252,7 +247,6 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.route("/api/app-profiles", createAppProfilesRouter());
   app.route("/api", profileRouter);
   app.route("/api/realtime", createRealtimeRouter());
-  app.route("/api/connections", createConnectionsRouter());
   app.route("/api/integrations", createIntegrationsRouter());
   app.route("/api/credential-proxy", createCredentialProxyRouter());
   app.route("/api/llm-proxy", createLlmProxyRouter());
