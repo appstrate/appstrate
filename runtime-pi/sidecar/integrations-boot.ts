@@ -412,6 +412,12 @@ export async function bootIntegrations(
           packageId: spec.packageId,
           fetchCredentials: credAdapter.fetchCredentials,
           refreshCredentials: credAdapter.refreshCredentials,
+          // Resumable-upload protocols the manifest declared (plumbed via
+          // the spawn resolver). When non-empty the sidecar also advertises
+          // `{ns}__api_upload`; the agent-side resolver drives it.
+          ...(spec.apiCall.uploadProtocols && spec.apiCall.uploadProtocols.length > 0
+            ? { uploadProtocols: spec.apiCall.uploadProtocols }
+            : {}),
         });
         logger.info("integration api_call registered", {
           packageId: spec.packageId,

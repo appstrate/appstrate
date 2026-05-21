@@ -33,6 +33,7 @@ import {
   callToolResultToPi,
   RUNTIME_INJECTED_TOOLS,
 } from "@appstrate/runner-pi";
+import { buildApiUploadToolFactory, isApiUploadToolName } from "./api-upload-extension.ts";
 
 /**
  * 3-line capability prompt (D5.1). Spliceable into a bundle's system
@@ -49,6 +50,14 @@ interface BuildMcpDirectFactoriesOptions {
   mcp: AppstrateMcpClient;
   runId: string;
   emit: (event: { type: string; [k: string]: unknown }) => void;
+  /**
+   * Workspace root the agent's files live under. Required to resolve the
+   * `fromFile` argument of `{ns}__api_upload` tools (resumable upload) —
+   * the sidecar advertises those tools but the chunked upload is
+   * orchestrated agent-side because the workspace is not visible to the
+   * credential-isolated sidecar.
+   */
+  workspace: string;
 }
 
 /**
@@ -113,6 +122,24 @@ function buildIntegrationToolFactories(
   const factories: ExtensionFactory[] = [];
   for (const tool of advertised) {
     if (claimed.has(tool.name)) continue;
+    // `{ns}__api_upload` tools are advertised by the sidecar (so the
+    // gating + schema live in one place) but executed agent-side: the
+    // resolver reads the workspace file, chunks it, and dispatches each
+    // chunk back through the sibling `{ns}__api_call` tool. Route them to
+    // the dedicated resolver instead of forwarding verbatim (a verbatim
+    // forward would hit the sidecar's advertise-only error handler).
+    if (isApiUploadToolName(tool.name)) {
+      factories.push(
+        ...buildApiUploadToolFactory({
+          tool,
+          mcp: opts.mcp,
+          runId: opts.runId,
+          workspace: opts.workspace,
+          emit: opts.emit,
+        }),
+      );
+      continue;
+    }
     factories.push((pi) => {
       pi.registerTool({
         name: tool.name,

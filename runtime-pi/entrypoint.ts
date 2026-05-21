@@ -351,6 +351,7 @@ if (sidecarUrl) {
     const factories = await buildMcpDirectFactories({
       mcp: mcpClient,
       runId: AGENT_RUN_ID,
+      workspace: WORKSPACE,
       emit: (event) => {
         void bridgedSink.handle(event as RunEvent);
       },

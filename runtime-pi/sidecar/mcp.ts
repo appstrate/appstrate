@@ -470,6 +470,7 @@ function validateMultipartParts(parts: unknown): MultipartValidationOk | Multipa
 function buildSidecarTools(options: MountMcpOptions): {
   firstParty: AppstrateToolDefinition[];
   makeApiCallTool: (integ: ApiCallIntegrationConfig) => AppstrateToolDefinition;
+  makeApiUploadTool: (integ: ApiCallIntegrationConfig) => AppstrateToolDefinition | null;
 } {
   const { blobStore, proxyDeps, tokenBudget, providerCallLimit } = options;
   const { config, fetchFn } = proxyDeps;
@@ -647,6 +648,100 @@ function buildSidecarTools(options: MountMcpOptions): {
         providerCallLimit
           ? await providerCallLimit(() => credentialProxyInner(rawArgs, ctx))
           : await credentialProxyInner(rawArgs, ctx),
+    };
+  };
+
+  // provider→integration unification (resumable upload) — advertise a
+  // `{ns}__api_upload` tool for an integration whose `apiCall` declared
+  // ≥1 `uploadProtocols`. The sidecar ONLY advertises this tool: the
+  // descriptor (gating enum + JSON schema) lives here so it cannot drift,
+  // but the chunked upload itself is orchestrated agent-side
+  // (`runtime-pi/mcp/api-upload-extension.ts`, wired by `direct.ts`),
+  // because the workspace file the agent uploads is not visible to the
+  // credential-isolated sidecar. The agent-side resolver dispatches each
+  // chunk back through this integration's `{ns}__api_call` tool, so
+  // credential injection + `authorizedUris` + SSRF hardening still apply
+  // per chunk. If a misconfigured client calls `{ns}__api_upload`
+  // directly against the sidecar (instead of via the agent extension),
+  // the handler returns a structured tool-level error rather than
+  // attempting an impossible no-workspace upload.
+  const makeApiUploadTool = (integ: ApiCallIntegrationConfig): AppstrateToolDefinition | null => {
+    const protocols = (integ.uploadProtocols ?? []).filter(
+      (p): p is string => typeof p === "string" && p.length > 0,
+    );
+    if (protocols.length === 0) return null;
+    return {
+      descriptor: {
+        name: `${integ.namespace}__api_upload`,
+        description:
+          `Upload a workspace file (>5 MB friendly) to the "${integ.packageId}" integration's ` +
+          "API over a chunked resumable protocol. Bytes flow through the credential-injecting " +
+          "proxy per chunk; the agent never holds credentials. Returns the upstream's final " +
+          "response (file ID, ETag, …) plus a SHA-256 of the bytes uploaded for verification. " +
+          "Pick the `uploadProtocol` the API speaks: " +
+          "`google-resumable` (Drive, Cloud Storage, YouTube, Photos), " +
+          "`s3-multipart` (S3 / R2 / MinIO / Backblaze B2), " +
+          "`tus` (Cloudflare Stream, Vimeo, tusd), " +
+          "`ms-resumable` (OneDrive, SharePoint, Graph).",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["target", "fromFile", "uploadProtocol"],
+          properties: {
+            target: {
+              type: "string",
+              format: "uri",
+              description:
+                "Initial upload endpoint (Drive: `…?uploadType=resumable`; S3: object URL; " +
+                "tus: tus endpoint; MS: `…:/createUploadSession`). Must match the integration " +
+                "auth's `authorizedUris`.",
+            },
+            fromFile: {
+              type: "string",
+              description: "Workspace-relative path to the file to upload.",
+            },
+            uploadProtocol: {
+              type: "string",
+              enum: protocols,
+              description:
+                "Wire protocol the upstream API speaks. The integration manifest's " +
+                "`apiCall.uploadProtocols` gates which protocols are legal here.",
+            },
+            metadata: {
+              type: "object",
+              additionalProperties: true,
+              description:
+                "Per-protocol metadata. Drive: file metadata JSON (`{ name, parents, mimeType }`). " +
+                "S3: header overrides (`Content-Type`, `x-amz-meta-*`). " +
+                "tus: free-form key/value (encoded as `Upload-Metadata`). " +
+                "MS Graph: `{ item: { ... } }` envelope.",
+            },
+            partSizeBytes: {
+              type: "integer",
+              minimum: 1,
+              description:
+                "Chunk size in bytes. Defaults are protocol-tuned (Google: 8 MiB; S3: 5 MiB; " +
+                "tus: 4 MiB; MS: 5 MiB). Constraints: Google 256-KiB aligned; S3 ≥5 MiB except " +
+                "the last; MS ≤60 MiB and 320-KiB aligned.",
+            },
+          },
+        },
+      },
+      // Advertise-only: the upload is executed agent-side (workspace
+      // access), so a direct sidecar invocation cannot succeed.
+      handler: async () => ({
+        content: [
+          {
+            type: "text",
+            text:
+              `${integ.namespace}__api_upload is orchestrated agent-side and cannot run against ` +
+              "the sidecar directly (the workspace file is not visible here). It is exposed to " +
+              "the LLM as a runtime tool that chunks the file and dispatches each part through " +
+              `${integ.namespace}__api_call.`,
+          },
+        ],
+        isError: true,
+      }),
     };
   };
 
@@ -998,7 +1093,7 @@ function buildSidecarTools(options: MountMcpOptions): {
     },
   };
 
-  return { firstParty: [runHistory, recallMemory], makeApiCallTool };
+  return { firstParty: [runHistory, recallMemory], makeApiCallTool, makeApiUploadTool };
 }
 
 /**
@@ -1486,6 +1581,17 @@ export interface ApiCallIntegrationConfig {
   fetchCredentials: ProviderCallDeps["fetchCredentials"];
   /** Force-refresh on a mid-run 401 and re-resolve. */
   refreshCredentials: NonNullable<ProviderCallDeps["refreshCredentials"]>;
+  /**
+   * Resumable-upload protocols this integration's `apiCall` declared
+   * (`manifest.apiCall.uploadProtocols`). When non-empty the sidecar
+   * ALSO advertises a `{ns}__api_upload` tool alongside `{ns}__api_call`.
+   * The sidecar only ADVERTISES it (gating + schema live here); the
+   * actual chunked upload is orchestrated agent-side by `direct.ts`'s
+   * resolver (which has workspace access — the sidecar does not) and
+   * dispatched chunk-by-chunk back through this integration's
+   * `{ns}__api_call` tool. Empty / omitted → no upload tool.
+   */
+  uploadProtocols?: readonly string[];
 }
 
 export interface MountMcpOptions {
@@ -1570,7 +1676,7 @@ export interface MountMcpOptions {
 const INTEGRATION_BOOT_WAIT_MS = 30_000;
 
 export function mountMcp(app: Hono, options: MountMcpOptions): void {
-  const { firstParty, makeApiCallTool } = buildSidecarTools(options);
+  const { firstParty, makeApiCallTool, makeApiUploadTool } = buildSidecarTools(options);
   const firstPartyNames = new Set(firstParty.map((t) => t.descriptor.name));
   const resources = options.blobStore ? buildBlobResourceProvider(options.blobStore) : undefined;
   // Cache the await so only the first `/mcp` request pays the wait —
@@ -1672,10 +1778,19 @@ export function mountMcp(app: Hono, options: MountMcpOptions): void {
     // provider→integration unification — build the generic `api_call`
     // tools lazily from the (post-bootstrap) integration set, alongside
     // the spawned-integration MCP tools.
-    const apiCallExtras = (options.apiCallIntegrationsProvider?.() ?? []).map(makeApiCallTool);
-    const dynamicExtras = [...(options.additionalToolsProvider?.() ?? []), ...apiCallExtras].filter(
-      (t) => !firstPartyNames.has(t.descriptor.name),
-    );
+    const apiCallIntegrations = options.apiCallIntegrationsProvider?.() ?? [];
+    const apiCallExtras = apiCallIntegrations.map(makeApiCallTool);
+    // Advertise a `{ns}__api_upload` tool alongside `{ns}__api_call` for
+    // every integration that declared `apiCall.uploadProtocols`. Gated +
+    // null-filtered inside makeApiUploadTool.
+    const apiUploadExtras = apiCallIntegrations
+      .map(makeApiUploadTool)
+      .filter((t): t is AppstrateToolDefinition => t !== null);
+    const dynamicExtras = [
+      ...(options.additionalToolsProvider?.() ?? []),
+      ...apiCallExtras,
+      ...apiUploadExtras,
+    ].filter((t) => !firstPartyNames.has(t.descriptor.name));
     const tools = [...firstParty, ...dynamicExtras];
     const server = createMcpServer(
       tools,
