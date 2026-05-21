@@ -171,10 +171,10 @@ describe("HOP_BY_HOP_HEADERS + filterHeaders", () => {
   it("honours extraSkip (lowercase keys)", () => {
     const out = filterHeaders(
       {
-        "x-provider": "gmail",
+        "x-integration": "gmail",
         "x-keep": "yes",
       },
-      new Set(["x-provider"]),
+      new Set(["x-integration"]),
     );
     expect(out).toEqual({ "x-keep": "yes" });
   });

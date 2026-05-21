@@ -75,7 +75,7 @@ describe("isCanonicalRunEvent", () => {
     expect(isCanonicalRunEvent({ ...baseEnvelope, type: "@my-org/audit.logged", payload: 1 })).toBe(
       false,
     );
-    expect(isCanonicalRunEvent({ ...baseEnvelope, type: "provider.called", method: "GET" })).toBe(
+    expect(isCanonicalRunEvent({ ...baseEnvelope, type: "api_call.called", method: "GET" })).toBe(
       false,
     );
   });

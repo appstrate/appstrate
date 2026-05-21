@@ -3,7 +3,7 @@
 import { Hono, type Context } from "hono";
 import pLimit, { type LimitFunction } from "p-limit";
 import { mountMcp } from "./mcp.ts";
-import type { ProviderCallDeps } from "./credential-proxy.ts";
+import type { ApiCallDeps } from "./credential-proxy.ts";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import { BlobStore } from "./blob-store.ts";
 import {
@@ -315,7 +315,7 @@ export interface SidecarRuntimeDeps {
   blobStore: BlobStore;
   tokenBudget: TokenBudget;
   providerCallLimit: LimitFunction;
-  proxyDeps: ProviderCallDeps;
+  proxyDeps: ApiCallDeps;
 }
 
 /**
@@ -354,7 +354,7 @@ export function buildSidecarRuntimeDeps(deps: AppDeps): SidecarRuntimeDeps {
   const providerCallLimit: LimitFunction = pLimit(
     readPositiveIntEnv("SIDECAR_PROVIDER_CALL_CONCURRENCY", DEFAULT_PROVIDER_CALL_CONCURRENCY),
   );
-  const proxyDeps: ProviderCallDeps = {
+  const proxyDeps: ApiCallDeps = {
     config: deps.config,
     cookieJar: deps.cookieJar,
     fetchFn,

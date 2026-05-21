@@ -48,7 +48,7 @@
 import {
   resolveSafeFile,
   MAX_STREAMED_BODY_SIZE,
-  type ProviderCallContext,
+  type ApiCallContext,
 } from "@appstrate/afps-runtime/resolvers";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
@@ -143,7 +143,7 @@ export class McpApiUploadResolver {
    */
   async executeUpload(
     req: ProviderUploadRequest,
-    ctx: ProviderCallContext,
+    ctx: ApiCallContext,
   ): Promise<ProviderUploadResult> {
     const adapter = ADAPTERS[req.uploadProtocol];
     if (!adapter) {

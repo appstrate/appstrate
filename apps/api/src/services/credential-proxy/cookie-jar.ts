@@ -3,7 +3,7 @@
 /**
  * Credential-proxy cookie jar — per-session persistent cookie storage
  * across successive proxyCall() invocations. Needed for multi-step
- * OAuth flows where a provider's first response sets a session cookie
+ * OAuth flows where an integration's first response sets a session cookie
  * that subsequent calls must carry back.
  *
  * Two backends:
@@ -26,15 +26,20 @@ import { logger } from "../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 
 /**
- * Abstract cookie jar store. Keyed by `(sessionId, providerKey)` since
- * a single X-Session-Id can drive calls across multiple providers, each
+ * Abstract cookie jar store. Keyed by `(sessionId, integrationKey)` since
+ * a single X-Session-Id can drive calls across multiple integrations, each
  * of which has its own cookie scope.
  */
 export interface CookieJarStore {
-  /** Read cookies for a provider within a session. Returns [] when absent. */
-  get(sessionId: string, providerKey: string): Promise<string[]>;
-  /** Replace cookies for a provider within a session. Resets the TTL. */
-  set(sessionId: string, providerKey: string, cookies: string[], ttlSeconds: number): Promise<void>;
+  /** Read cookies for an integration within a session. Returns [] when absent. */
+  get(sessionId: string, integrationKey: string): Promise<string[]>;
+  /** Replace cookies for an integration within a session. Resets the TTL. */
+  set(
+    sessionId: string,
+    integrationKey: string,
+    cookies: string[],
+    ttlSeconds: number,
+  ): Promise<void>;
   /** Release all resources (timers, connections). */
   shutdown(): Promise<void>;
 }
@@ -52,15 +57,15 @@ export class InMemoryCookieJarStore implements CookieJarStore {
     this.softLimit = opts?.softLimit ?? 1024;
   }
 
-  private cacheKey(sessionId: string, providerKey: string): string {
-    return `${sessionId}::${providerKey}`;
+  private cacheKey(sessionId: string, integrationKey: string): string {
+    return `${sessionId}::${integrationKey}`;
   }
 
-  async get(sessionId: string, providerKey: string): Promise<string[]> {
-    const entry = this.store.get(this.cacheKey(sessionId, providerKey));
+  async get(sessionId: string, integrationKey: string): Promise<string[]> {
+    const entry = this.store.get(this.cacheKey(sessionId, integrationKey));
     if (!entry) return [];
     if (entry.expiresAt <= Date.now()) {
-      this.store.delete(this.cacheKey(sessionId, providerKey));
+      this.store.delete(this.cacheKey(sessionId, integrationKey));
       return [];
     }
     return entry.cookies;
@@ -68,12 +73,12 @@ export class InMemoryCookieJarStore implements CookieJarStore {
 
   async set(
     sessionId: string,
-    providerKey: string,
+    integrationKey: string,
     cookies: string[],
     ttlSeconds: number,
   ): Promise<void> {
     const now = Date.now();
-    this.store.set(this.cacheKey(sessionId, providerKey), {
+    this.store.set(this.cacheKey(sessionId, integrationKey), {
       cookies,
       expiresAt: now + ttlSeconds * 1000,
     });
@@ -116,13 +121,13 @@ export class RedisCookieJarStore implements CookieJarStore {
     this.client = client ?? (getRedisConnection() as unknown as RedisCookieJarClient);
   }
 
-  private cacheKey(sessionId: string, providerKey: string): string {
-    return `cp:jar:${sessionId}:${providerKey}`;
+  private cacheKey(sessionId: string, integrationKey: string): string {
+    return `cp:jar:${sessionId}:${integrationKey}`;
   }
 
-  async get(sessionId: string, providerKey: string): Promise<string[]> {
+  async get(sessionId: string, integrationKey: string): Promise<string[]> {
     try {
-      const raw = await this.client.get(this.cacheKey(sessionId, providerKey));
+      const raw = await this.client.get(this.cacheKey(sessionId, integrationKey));
       if (!raw) return [];
       const parsed: unknown = JSON.parse(raw);
       return Array.isArray(parsed) ? (parsed as string[]) : [];
@@ -136,13 +141,13 @@ export class RedisCookieJarStore implements CookieJarStore {
 
   async set(
     sessionId: string,
-    providerKey: string,
+    integrationKey: string,
     cookies: string[],
     ttlSeconds: number,
   ): Promise<void> {
     try {
       await this.client.set(
-        this.cacheKey(sessionId, providerKey),
+        this.cacheKey(sessionId, integrationKey),
         JSON.stringify(cookies),
         "EX",
         ttlSeconds,

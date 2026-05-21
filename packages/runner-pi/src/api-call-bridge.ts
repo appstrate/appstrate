@@ -16,7 +16,7 @@ import { Type } from "@mariozechner/pi-ai";
 import type { ExtensionAPI, ExtensionFactory } from "@mariozechner/pi-coding-agent";
 import type { Bundle } from "@appstrate/afps-runtime/bundle";
 import {
-  providerCallRequestJsonSchema,
+  apiCallRequestJsonSchema,
   readIntegrationRefs,
   readApiCallIntegrationMeta,
   apiCallToolName,
@@ -28,7 +28,7 @@ import {
 
 /**
  * Event emitter for credentialled-call telemetry. Receives
- * `provider.called` / `provider.completed` / `provider.failed` events
+ * `api_call.called` / `api_call.completed` / `api_call.failed` events
  * (named for historical continuity with the legacy provider surface).
  */
 export type ProviderEventEmitter = (event: { type: string; [k: string]: unknown }) => void;
@@ -37,7 +37,7 @@ export type ProviderEventEmitter = (event: { type: string; [k: string]: unknown 
 // the LLM-facing schema documents the discriminated body union. Same
 // rationale as the legacy provider bridge.
 const SCHEMA_PROPERTIES =
-  (providerCallRequestJsonSchema as { properties?: Record<string, unknown> }).properties ?? {};
+  (apiCallRequestJsonSchema as { properties?: Record<string, unknown> }).properties ?? {};
 const BODY_SCHEMA = SCHEMA_PROPERTIES.body ?? {};
 const RESPONSE_MODE_SCHEMA = SCHEMA_PROPERTIES.responseMode ?? {};
 
@@ -120,7 +120,7 @@ function makeApiCallExtension(
         const args = (params ?? {}) as Record<string, unknown>;
         const startedAt = Date.now();
         opts.emitProvider({
-          type: "provider.called",
+          type: "api_call.called",
           runId: opts.runId,
           providerId: integrationId,
           toolCallId,
@@ -138,7 +138,7 @@ function makeApiCallExtension(
         try {
           const result = await tool.execute(args, ctx);
           opts.emitProvider({
-            type: "provider.completed",
+            type: "api_call.completed",
             runId: opts.runId,
             providerId: integrationId,
             toolCallId,
@@ -156,7 +156,7 @@ function makeApiCallExtension(
           return { content, details: undefined, isError: result.isError };
         } catch (err) {
           opts.emitProvider({
-            type: "provider.failed",
+            type: "api_call.failed",
             runId: opts.runId,
             providerId: integrationId,
             toolCallId,

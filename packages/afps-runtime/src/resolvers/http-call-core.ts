@@ -2,12 +2,12 @@
 // Copyright 2026 Appstrate
 
 /**
- * Reusable credential-injecting HTTP-call core. {@link makeProviderTool}
+ * Reusable credential-injecting HTTP-call core. {@link makeApiCallTool}
  * builds the `Tool` an integration's `{ns}__api_call` surface exposes to
  * the LLM (method, target URL, optional headers/body, responseMode). The
  * core is credential-source-agnostic: the caller closes over whatever
- * credential / transport state it needs and hands a {@link ProviderCallFn}
- * to {@link makeProviderTool}. The local + remote integration resolvers in
+ * credential / transport state it needs and hands a {@link ApiCallFn}
+ * to {@link makeApiCallTool}. The local + remote integration resolvers in
  * `integration-api-call.ts` reuse this module verbatim.
  *
  * Body streaming, redirect/cookie/SSRF hardening, `authorizedUris`
@@ -224,7 +224,7 @@ const responseModeSchema = z
   .optional();
 
 /** Zod schema for `provider_call` arguments — validated at runtime in execute(). */
-export const providerCallRequestSchema = z.object({
+export const apiCallRequestSchema = z.object({
   method: z
     .enum(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"])
     .describe("HTTP method for the upstream request"),
@@ -251,7 +251,7 @@ export const providerCallRequestSchema = z.object({
 
 /**
  * JSON schema for `provider_call` arguments — derived once from
- * `providerCallRequestSchema`. Exported so non-Zod consumers (notably
+ * `apiCallRequestSchema`. Exported so non-Zod consumers (notably
  * `@appstrate/runner-pi`'s container-mode dispatcher, which composes its
  * own parameters object around a `providerId` enum) can paste in the
  * canonical discriminated body / responseMode shapes without re-deriving
@@ -261,12 +261,12 @@ export const providerCallRequestSchema = z.object({
  * runs, and the literal `{"fromFile":"x"}` is forwarded upstream as the
  * request body.
  */
-export const providerCallRequestJsonSchema: JSONSchema = z.toJSONSchema(providerCallRequestSchema, {
+export const apiCallRequestJsonSchema: JSONSchema = z.toJSONSchema(apiCallRequestSchema, {
   target: "draft-7",
 }) as JSONSchema;
 
 /**
- * Flat view over the subset of fields {@link makeProviderTool} consumes
+ * Flat view over the subset of fields {@link makeApiCallTool} consumes
  * for URL-allowlist enforcement. Callers project their credential source
  * (integration manifest auth, local creds file, …) onto this shape.
  *
@@ -285,7 +285,7 @@ export const providerCallRequestJsonSchema: JSONSchema = z.toJSONSchema(provider
  * Consequence: the tool schema surfaced to the LLM is identical across
  * auth modes and carries no hint of how the credential is transported.
  */
-export interface ProviderMeta {
+export interface ApiCallMeta {
   /** Scoped package name (e.g. `@appstrate/gmail`). */
   name: string;
   /**
@@ -304,12 +304,12 @@ export interface ProviderMeta {
 
 /**
  * Public type for provider_call arguments. Structurally compatible with
- * `z.infer<typeof providerCallRequestSchema>` plus a `Uint8Array` variant
+ * `z.infer<typeof apiCallRequestSchema>` plus a `Uint8Array` variant
  * on `body` (for programmatic callers who already have bytes in memory —
  * this variant cannot be expressed in JSON Schema and is not surfaced to
  * the LLM).
  */
-export type ProviderCallRequest = Omit<z.infer<typeof providerCallRequestSchema>, "body"> & {
+export type ApiCallRequest = Omit<z.infer<typeof apiCallRequestSchema>, "body"> & {
   /**
    * Request body. Either raw bytes / string (forwarded verbatim), a
    * file reference that the transport resolves before dispatch, or a
@@ -335,7 +335,7 @@ export type ProviderCallRequest = Omit<z.infer<typeof providerCallRequestSchema>
  * truncated payload so the LLM can report partial data faithfully. The
  * `file` variant is never truncated — bytes are always streamed in full.
  */
-export type ProviderCallResponseBody =
+export type ApiCallResponseBody =
   | {
       kind: "text";
       text: string;
@@ -372,10 +372,10 @@ export type ProviderCallResponseBody =
       sha256: string;
     };
 
-export interface ProviderCallResponse {
+export interface ApiCallResponse {
   status: number;
   headers: Record<string, string>;
-  body: ProviderCallResponseBody;
+  body: ApiCallResponseBody;
 }
 
 /**
@@ -384,7 +384,7 @@ export interface ProviderCallResponse {
  * to materialize file-backed bodies safely (workspace, toolCallId for
  * deterministic auto-spill paths, abort signal).
  */
-export interface ProviderCallContext {
+export interface ApiCallContext {
   workspace: string;
   toolCallId: string;
   signal: AbortSignal;
@@ -393,21 +393,18 @@ export interface ProviderCallContext {
 /**
  * Transport callback. Resolver implementations close over whatever
  * credential / transport state they need and hand this callback to
- * {@link makeProviderTool}. The tool wrapper passes the ambient
- * {@link ProviderCallContext} alongside the request so the resolver can
+ * {@link makeApiCallTool}. The tool wrapper passes the ambient
+ * {@link ApiCallContext} alongside the request so the resolver can
  * resolve workspace-relative paths and auto-spill large responses.
  */
-export type ProviderCallFn = (
-  req: ProviderCallRequest,
-  ctx: ProviderCallContext,
-) => Promise<ProviderCallResponse>;
+export type ApiCallFn = (req: ApiCallRequest, ctx: ApiCallContext) => Promise<ApiCallResponse>;
 
 /**
  * Apply transport control headers to an outgoing credentialled call.
  *
  * Used by {@link RemoteAppstrateIntegrationResolver} for the CLI's HTTP
  * path to the platform's `/api/credential-proxy/proxy` route.
- * Container runs reach the sidecar's `executeProviderCall` over MCP
+ * Container runs reach the sidecar's `executeApiCall` over MCP
  * (`{ns}__api_call`) and bypass this header layer entirely.
  *
  * Rules applied (mirrors the platform server contract):
@@ -426,7 +423,7 @@ export type ProviderCallFn = (
  * consumed the stream. All other variants can be re-passed to
  * `resolveBodyForFetch` to produce fresh bytes/stream.
  */
-export function isReproducibleBody(body: ProviderCallRequest["body"]): boolean {
+export function isReproducibleBody(body: ApiCallRequest["body"]): boolean {
   if (body == null || typeof body === "string") return true;
   if (body instanceof Uint8Array) return true; // caller still holds the reference
   if (
@@ -475,13 +472,13 @@ export function applyTransportHeaders(
   return headers;
 }
 
-export interface MakeProviderToolOptions {
+export interface MakeApiCallToolOptions {
   /** Tool name override. Defaults to `<sluggedProviderName>_call`. */
   toolName?: string;
   /** Description override. */
   description?: string;
   /** Stable per-call event shape emitted through ctx.emit. */
-  emitProviderEvent?: boolean;
+  emitApiCallEvent?: boolean;
 }
 
 /**
@@ -492,12 +489,12 @@ export interface MakeProviderToolOptions {
  * passes `toolName` to set the surfaced name (integrations use
  * `{ns}__api_call`); the default falls back to `<slug>_call`.
  */
-export function makeProviderTool(
-  meta: ProviderMeta,
-  call: ProviderCallFn,
-  opts: MakeProviderToolOptions = {},
+export function makeApiCallTool(
+  meta: ApiCallMeta,
+  call: ApiCallFn,
+  opts: MakeApiCallToolOptions = {},
 ): Tool {
-  const toolName = opts.toolName ?? providerToolName(meta.name);
+  const toolName = opts.toolName ?? defaultApiCallToolName(meta.name);
   const description =
     opts.description ??
     `Call the ${meta.name} provider. Supply method, target URL, optional headers/body, and responseMode. ` +
@@ -505,21 +502,21 @@ export function makeProviderTool(
       `inline bytes are decoded as text and bloat the LLM context.`;
 
   // Generate the JSON schema from the Zod definition — single source of
-  // truth, computed once at module load via providerCallRequestJsonSchema.
-  const parameters = providerCallRequestJsonSchema;
+  // truth, computed once at module load via apiCallRequestJsonSchema.
+  const parameters = apiCallRequestJsonSchema;
 
-  const emit = opts.emitProviderEvent ?? true;
+  const emit = opts.emitApiCallEvent ?? true;
 
   return {
     name: toolName,
     description,
     parameters,
     async execute(args, ctx: ToolContext): Promise<ToolResult> {
-      // Validate args with Zod before casting to ProviderCallRequest.
+      // Validate args with Zod before casting to ApiCallRequest.
       // Note: Uint8Array bodies are valid at the TypeScript level but
       // cannot arrive from the LLM (JSON has no binary type) — the Zod
       // schema covers every variant the LLM can produce.
-      const parsed = providerCallRequestSchema.safeParse(args);
+      const parsed = apiCallRequestSchema.safeParse(args);
       if (!parsed.success) {
         throw new ResolverError(
           "RESOLVER_BODY_INVALID",
@@ -528,23 +525,23 @@ export function makeProviderTool(
             .join(", ")}`,
         );
       }
-      const req: ProviderCallRequest = parsed.data;
+      const req: ApiCallRequest = parsed.data;
       enforceAuthorizedUris(meta, req.target);
 
-      const callCtx: ProviderCallContext = {
+      const callCtx: ApiCallContext = {
         workspace: ctx.workspace,
         toolCallId: ctx.toolCallId ?? `tc_${Math.random().toString(36).slice(2, 10)}`,
         signal: ctx.signal,
       };
 
       const started = Date.now();
-      let response: ProviderCallResponse;
+      let response: ApiCallResponse;
       try {
         response = await call(req, callCtx);
       } catch (err) {
         if (emit) {
           ctx.emit({
-            type: "provider.called",
+            type: "api_call.called",
             timestamp: Date.now(),
             runId: ctx.runId,
             toolCallId: ctx.toolCallId,
@@ -561,7 +558,7 @@ export function makeProviderTool(
 
       if (emit) {
         ctx.emit({
-          type: "provider.called",
+          type: "api_call.called",
           timestamp: Date.now(),
           runId: ctx.runId,
           toolCallId: ctx.toolCallId,
@@ -596,7 +593,7 @@ export function makeProviderTool(
  * so scoped package ids like `@appstrate/gmail` become safe tool
  * identifiers.
  *
- * Internal: used by {@link makeProviderTool} to derive a default tool
+ * Internal: used by {@link makeApiCallTool} to derive a default tool
  * name when the caller does not pass an explicit `toolName`. The
  * integration resolvers always pass `{ns}__api_call`, so this fallback
  * mostly serves tests.
@@ -606,10 +603,10 @@ function slugifyProviderId(providerId: string): string {
 }
 
 /**
- * The default tool name {@link makeProviderTool} registers for a given
+ * The default tool name {@link makeApiCallTool} registers for a given
  * provider id. Internal: only consumed inside this file.
  */
-function providerToolName(providerId: string): string {
+function defaultApiCallToolName(providerId: string): string {
   return `${slugifyProviderId(providerId)}_call`;
 }
 
@@ -883,7 +880,7 @@ export type ResolvedRequestBody =
 
 /**
  * Materialise a request body into a `BodyInit`-compatible value.
- * Handles the three shapes accepted by {@link ProviderCallRequest.body}:
+ * Handles the three shapes accepted by {@link ApiCallRequest.body}:
  * strings (optionally transformed — e.g. placeholder substitution by
  * the local resolver), raw bytes (pass-through), and file references
  * (only resolved when `allowFromFile` is true; sidecar-based transports
@@ -912,7 +909,7 @@ export type ResolvedRequestBody =
  * {@link resolveSafeFile} — the same rules as for `{ fromFile }` bodies.
  */
 async function buildMultipartBytes(
-  parts: NonNullable<Extract<ProviderCallRequest["body"], { multipart: unknown }>["multipart"]>,
+  parts: NonNullable<Extract<ApiCallRequest["body"], { multipart: unknown }>["multipart"]>,
   workspace: string,
 ): Promise<{ bytes: Uint8Array<ArrayBuffer>; contentType: string }> {
   const path = await import("node:path");
@@ -1033,7 +1030,7 @@ function decodeBase64Body(
 }
 
 export async function resolveBodyStream(
-  body: ProviderCallRequest["body"],
+  body: ApiCallRequest["body"],
   opts: ResolveBodyStreamOptions = {},
 ): Promise<string | Uint8Array<ArrayBuffer> | undefined> {
   if (body === undefined || body === null) return undefined;
@@ -1106,7 +1103,7 @@ export async function resolveBodyStream(
  * pipeline.
  */
 export async function resolveBodyForFetch(
-  body: ProviderCallRequest["body"],
+  body: ApiCallRequest["body"],
   opts: ResolveBodyStreamOptions = {},
 ): Promise<ResolvedRequestBody> {
   if (body === undefined || body === null) {
@@ -1454,7 +1451,7 @@ export interface SerializeFetchResponseContext {
    */
   streaming?: boolean;
   /**
-   * Optional abort signal forwarded from the caller's {@link ProviderCallContext}.
+   * Optional abort signal forwarded from the caller's {@link ApiCallContext}.
    * When the signal fires mid-stream, `writeStreamToFile` cancels the
    * stream reader and removes any partial file written so far.
    */
@@ -1463,7 +1460,7 @@ export interface SerializeFetchResponseContext {
 
 /**
  * Serialise a `fetch` response into the spec-shaped
- * {@link ProviderCallResponse} every resolver returns to the LLM.
+ * {@link ApiCallResponse} every resolver returns to the LLM.
  *
  * Read once via `arrayBuffer()` (NEVER `text()`) so binary bytes are
  * preserved end-to-end — the regression fixed by issues #149 / #151 in
@@ -1477,7 +1474,7 @@ export interface SerializeFetchResponseContext {
 export async function serializeFetchResponse(
   res: Response,
   ctx: SerializeFetchResponseContext,
-): Promise<ProviderCallResponse> {
+): Promise<ApiCallResponse> {
   const headers: Record<string, string> = {};
   res.headers.forEach((value, key) => {
     headers[key] = value;
@@ -1633,7 +1630,7 @@ export async function serializeFetchResponse(
   };
 }
 
-function enforceAuthorizedUris(meta: ProviderMeta, target: string): void {
+function enforceAuthorizedUris(meta: ApiCallMeta, target: string): void {
   if (meta.allowAllUris) return;
   const patterns = meta.authorizedUris ?? [];
   if (patterns.length === 0) {

@@ -15,7 +15,7 @@
  * surface) via {@link resolveIntegrationProxyCredentials} — the provider
  * tables were removed when the `provider` package type was retired.
  *
- * The in-container sidecar uses its own `executeProviderCall` helper
+ * The in-container sidecar uses its own `executeApiCall` helper
  * (`runtime-pi/sidecar/credential-proxy.ts`) — same algorithm, same
  * shared primitives in `@appstrate/connect/proxy-primitives`, but
  * tailored to the per-run-token authorisation model.
@@ -56,8 +56,13 @@ const OUTBOUND_TIMEOUT_MS = 30_000;
  * narrow contract here so the core stays free of infra imports.
  */
 export interface CookieJarAdapter {
-  get(sessionId: string, providerKey: string): Promise<string[]>;
-  set(sessionId: string, providerKey: string, cookies: string[], ttlSeconds: number): Promise<void>;
+  get(sessionId: string, integrationKey: string): Promise<string[]>;
+  set(
+    sessionId: string,
+    integrationKey: string,
+    cookies: string[],
+    ttlSeconds: number,
+  ): Promise<void>;
 }
 
 export interface ProxyCallInput {
@@ -112,7 +117,7 @@ export interface ProxyCallInput {
   cookieJar?: CookieJarAdapter;
   /**
    * Jar lookup key (usually `sessionId`). Combined with `sessionKey`
-   * below to scope cookies per-provider within one session.
+   * below to scope cookies per-integration within one session.
    */
   jarSessionId?: string;
   /** Per-integration scope key for the jar. Defaults to `integrationId`. */

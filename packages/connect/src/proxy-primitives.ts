@@ -4,7 +4,7 @@
  * Shared primitives used by the credential-proxy server route
  * (`apps/api/src/routes/credential-proxy.ts`) and the in-container
  * sidecar (`runtime-pi/sidecar/app.ts`). Both code paths implement the
- * same wire protocol (X-Provider/X-Target/Set-Cookie passthrough) and
+ * same wire protocol (X-Integration/X-Target/Set-Cookie passthrough) and
  * share the AFPS 1.3 spec-compliant URL allowlist matcher so drift is
  * impossible by construction.
  */
@@ -35,7 +35,7 @@ export function findUnresolvedPlaceholders(input: string): string[] {
 /**
  * AFPS 1.3 spec-compliant URL allowlist matcher. Re-exported from
  * `@appstrate/afps-runtime/resolvers` so the credential-proxy route,
- * the sidecar, and the in-bundle `provider-tool` all enforce the exact
+ * the sidecar, and the in-bundle `http-call-core` all enforce the exact
  * same glob semantics by construction.
  */
 export { matchesAuthorizedUriSpec } from "@appstrate/afps-runtime/resolvers";
@@ -197,7 +197,7 @@ export const HOP_BY_HOP_HEADERS = new Set<string>([
 /**
  * Strip host, content-length, and RFC 7230 hop-by-hop headers. `extraSkip`
  * provides a hook for entrypoint-specific control headers (e.g.
- * `x-provider`, `x-target`) that must also be kept out of the upstream
+ * `x-integration`, `x-target`) that must also be kept out of the upstream
  * request.
  *
  * Preserves the original header casing from the caller.

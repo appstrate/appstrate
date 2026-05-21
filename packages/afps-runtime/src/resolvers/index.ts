@@ -48,30 +48,30 @@ export {
   MAX_REQUEST_BODY_SIZE,
   MAX_STREAMED_BODY_SIZE,
   STREAMING_THRESHOLD,
-  makeProviderTool,
+  makeApiCallTool,
   matchesAuthorizedUriSpec,
   isReproducibleBody,
-  providerCallRequestJsonSchema,
+  apiCallRequestJsonSchema,
   resolveBodyForFetch,
   resolveBodyStream,
   resolveSafeFile,
   resolveSafePath,
   serializeFetchResponse,
-  type MakeProviderToolOptions,
-  type ProviderCallContext,
-  type ProviderCallFn,
-  type ProviderCallRequest,
-  type ProviderCallResponse,
-  type ProviderCallResponseBody,
-  type ProviderMeta,
+  type MakeApiCallToolOptions,
+  type ApiCallContext,
+  type ApiCallFn,
+  type ApiCallRequest,
+  type ApiCallResponse,
+  type ApiCallResponseBody,
+  type ApiCallMeta,
   type ResolveBodyStreamOptions,
   type ResolvedRequestBody,
   type SerializeFetchResponseContext,
-} from "./provider-tool.ts";
+} from "./http-call-core.ts";
 
 // Integration `api_call` surface (provider→integration unification) — the
 // portable equivalent of the platform's `{ns}__api_call` MCP tool. Reuses
-// the same HTTP core (`makeProviderTool`) as the provider resolvers.
+// the same HTTP core (`makeApiCallTool`) as the provider resolvers.
 export {
   LocalIntegrationResolver,
   RemoteAppstrateIntegrationResolver,

@@ -4,7 +4,7 @@
  * Shared credential-proxy core.
  *
  * The single code path for all credential-injecting outbound traffic
- * inside the sidecar. {@link executeProviderCall} owns the full
+ * inside the sidecar. {@link executeApiCall} owns the full
  * sequence:
  *
  *   1. Fetch credentials from the platform (per-run Bearer token).
@@ -47,7 +47,7 @@ import { logger } from "./logger.ts";
 const MAX_REDIRECTS = 10;
 
 /**
- * Per-hop redirect refusal. Caught by {@link executeProviderCall} and
+ * Per-hop redirect refusal. Caught by {@link executeApiCall} and
  * surfaced as 403 (vs the 502 reserved for network faults). The host
  * is exposed for logs only — a redirect target may itself encode
  * capabilities (`?token=…`) we don't want in the agent's error.
@@ -209,7 +209,7 @@ async function fetchFollowingRedirectsCapturingCookies(
     const nextUrl = stripUserInfoAndFragment(raw) ?? raw;
 
     // Per-hop SSRF + allowlist validation. The initial-URL checks in
-    // executeProviderCall step 4 only see the operator-supplied target
+    // executeApiCall step 4 only see the operator-supplied target
     // — a redirect chain could pivot to internal targets or off-
     // allowlist hosts without these guards.
     if (isBlockedUrl(nextUrl)) {
@@ -293,7 +293,7 @@ export type ProviderRequestBody =
       fieldTemplates?: string[];
     };
 
-export interface ProviderCallArgs {
+export interface ApiCallArgs {
   providerId: string;
   targetUrl: string;
   method: string;
@@ -311,7 +311,7 @@ export interface ProviderCallArgs {
  * NOT been read yet — the caller decides whether to buffer (HTTP
  * handler with truncation) or pass through (MCP `responseToToolResult`).
  */
-export interface ProviderCallSuccess {
+export interface ApiCallSuccess {
   ok: true;
   response: Response;
   /**
@@ -333,15 +333,15 @@ export interface ProviderCallSuccess {
   authRefreshed: boolean;
 }
 
-export interface ProviderCallFailure {
+export interface ApiCallFailure {
   ok: false;
   status: number;
   error: string;
 }
 
-export type ProviderCallResult = ProviderCallSuccess | ProviderCallFailure;
+export type ApiCallResult = ApiCallSuccess | ApiCallFailure;
 
-export interface ProviderCallDeps {
+export interface ApiCallDeps {
   config: SidecarConfig;
   cookieJar: Map<string, string[]>;
   fetchFn: typeof fetch;
@@ -364,10 +364,7 @@ export interface ProviderCallDeps {
  * (body unread) on success, or a structured `{status, error}` failure
  * before any outbound bytes were sent.
  */
-export async function executeProviderCall(
-  args: ProviderCallArgs,
-  deps: ProviderCallDeps,
-): Promise<ProviderCallResult> {
+export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Promise<ApiCallResult> {
   const { config, cookieJar, fetchFn, fetchCredentials, refreshCredentials, reportedAuthFailures } =
     deps;
   const { providerId, targetUrl, method, callerHeaders, body, substituteBody } = args;
@@ -375,7 +372,7 @@ export async function executeProviderCall(
   // 1. Validate providerId format (defence in depth — callers should
   //    have already done this, but cheap to repeat).
   if (!PROVIDER_ID_RE.test(providerId)) {
-    return { ok: false, status: 400, error: "Invalid X-Provider format" };
+    return { ok: false, status: 400, error: "Invalid X-Integration format" };
   }
 
   // 2. Fetch credentials.
@@ -613,7 +610,7 @@ export async function executeProviderCall(
   return { ok: true, response: upstream, finalUrl: upstreamFinalUrl, authRefreshed };
 }
 
-function wrapFetchError(err: unknown, label: string, url: string): ProviderCallFailure {
+function wrapFetchError(err: unknown, label: string, url: string): ApiCallFailure {
   const code = err instanceof Error && "code" in err ? (err as { code: string }).code : undefined;
   let domain: string | undefined;
   try {
@@ -637,7 +634,7 @@ function wrapFetchError(err: unknown, label: string, url: string): ProviderCallF
  * out because a redirect target may itself encode capabilities
  * (`?token=…`) we don't want surfaced to the agent.
  */
-function wrapRequestError(err: unknown, resolvedUrl: string): ProviderCallFailure {
+function wrapRequestError(err: unknown, resolvedUrl: string): ApiCallFailure {
   if (err instanceof RedirectBlockedError) {
     return {
       ok: false,

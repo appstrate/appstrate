@@ -19,7 +19,7 @@ import { mkdtempSync, writeFileSync, symlinkSync, rmSync, realpathSync } from "n
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { resolveSafeFile, resolveSafePath } from "../../src/resolvers/provider-tool.ts";
+import { resolveSafeFile, resolveSafePath } from "../../src/resolvers/http-call-core.ts";
 import { ResolverError } from "../../src/errors.ts";
 
 // Real `/tmp` may not equal `tmpdir()` on macOS (`/var/folders/...`),

@@ -33,7 +33,7 @@ export class RedisEventBuffer implements EventBuffer {
     // The member must be unique per sequence — sorted-set semantics. ZADD
     // with an existing member updates the score rather than inserting a
     // new entry, so two events whose `JSON.stringify(event)` happens to
-    // collapse to the same string (10 parallel `provider.called` events
+    // collapse to the same string (10 parallel `api_call.called` events
     // with the same `toolCallId`/`durationMs`/`status` after JSON
     // omits `undefined` fields) would silently overwrite each other and
     // strand the earlier sequences. The runner's monotonic sequence is

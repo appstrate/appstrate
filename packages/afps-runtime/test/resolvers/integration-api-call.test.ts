@@ -322,7 +322,7 @@ describe("LocalIntegrationResolver", () => {
 });
 
 describe("RemoteAppstrateIntegrationResolver", () => {
-  it("POSTs to /api/credential-proxy/proxy with X-Provider = integration id", async () => {
+  it("POSTs to /api/credential-proxy/proxy with X-Integration = integration id", async () => {
     const calls: { url: string; init: RequestInit }[] = [];
     const root = makePackage("@acme/agent", "1.0.0", "agent", {});
     const integ = makePackage("@acme/api", "1.0.0", "integration", {
@@ -349,7 +349,7 @@ describe("RemoteAppstrateIntegrationResolver", () => {
     expect(h.Authorization).toBe("Bearer ask_test");
     expect(h["X-Application-Id"]).toBe("app_1");
     expect(h["X-Org-Id"]).toBe("org_1");
-    expect(h["X-Provider"]).toBe("@acme/api");
+    expect(h["X-Integration"]).toBe("@acme/api");
     expect(h["X-Target"]).toBe("https://api.acme.com/v1/me");
   });
 

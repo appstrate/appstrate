@@ -11,7 +11,7 @@
  *
  * Key invariants:
  *
- * 1. `provider_call` calls {@link executeProviderCall} directly via
+ * 1. `provider_call` calls {@link executeApiCall} directly via
  *    `proxyDeps`. There is no longer a `/proxy` HTTP envelope — the
  *    same credential-isolation invariants (cred fetch, URL allowlist,
  *    server-side header injection, 401-retry, cookie jar, persistent-
@@ -88,7 +88,7 @@ function decodeStrictBase64(s: string): Uint8Array | "invalid" {
   }
 }
 import type { BlobStore } from "./blob-store.ts";
-import { executeProviderCall, type ProviderCallDeps } from "./credential-proxy.ts";
+import { executeApiCall, type ApiCallDeps } from "./credential-proxy.ts";
 import {
   UPSTREAM_META_KEY,
   buildPreflightUpstreamMeta,
@@ -109,7 +109,7 @@ const PROVIDER_CALL_PREFLIGHT_META: Record<string, unknown> = {
 
 /**
  * JSON Schema `pattern` mirroring `PROVIDER_ID_RE` from `helpers.ts` —
- * the source of truth shared with `executeProviderCall`. We strip the
+ * the source of truth shared with `executeApiCall`. We strip the
  * leading/trailing slashes and the regex flags so JSON Schema
  * validators (AJV / the MCP SDK / inspectors) see a portable
  * ECMA-compatible string. Anchors are preserved.
@@ -174,13 +174,13 @@ function validateMcpHostHeader(req: Request): Response | undefined {
  * the MCP layer deliberately does not expose),
  * `X-Substitute-Body: 1` to inject `{{credential}}` placeholders into
  * an attacker-controlled payload, or `X-Max-Response-Size` to bypass
- * the response truncation budget. The `X-Provider` and `X-Target`
+ * the response truncation budget. The `X-Integration` and `X-Target`
  * routing headers are also stripped so the LLM can't redirect the
  * request post-validation. Header names are matched case-insensitively
  * (HTTP header semantics).
  */
 const PROVIDER_CALL_FORBIDDEN_HEADERS = new Set<string>([
-  "x-provider",
+  "x-integration",
   "x-target",
   "x-substitute-body",
   "x-stream-response",
@@ -454,7 +454,7 @@ function validateMultipartParts(parts: unknown): MultipartValidationOk | Multipa
 /**
  * Build the `provider_call`, `run_history`, and `recall_memory` MCP
  * tool definitions. All three tools are implemented in-process —
- * `provider_call` calls {@link executeProviderCall} directly via
+ * `provider_call` calls {@link executeApiCall} directly via
  * {@link MountMcpOptions.proxyDeps}; `run_history` and `recall_memory`
  * call `proxyDeps.fetchFn` against the platform upstream. None of
  * these tools round-trip through a Hono HTTP envelope.
@@ -489,7 +489,7 @@ function buildSidecarTools(options: MountMcpOptions): {
         description:
           "Provider identifier as declared in `dependencies.providers[].id` (e.g. `@appstrate/gmail` or `gmail`).",
         // The pattern source is `PROVIDER_ID_RE` in `helpers.ts` —
-        // shared with `executeProviderCall` so the same shape gates
+        // shared with `executeApiCall` so the same shape gates
         // the MCP descriptor and the credential-proxy core.
         pattern: PROVIDER_ID_PATTERN,
       },
@@ -509,7 +509,7 @@ function buildSidecarTools(options: MountMcpOptions): {
         type: "object",
         description:
           "Additional headers to forward. Hop-by-hop headers and sidecar-control " +
-          "headers (X-Provider, X-Target, X-Substitute-Body, …) are filtered " +
+          "headers (X-Integration, X-Target, X-Substitute-Body, …) are filtered " +
           "server-side.",
         additionalProperties: { type: "string" },
       },
@@ -753,7 +753,7 @@ function buildSidecarTools(options: MountMcpOptions): {
    */
   async function credentialProxyInner(
     rawArgs: unknown,
-    ctx: { proxyDeps: ProviderCallDeps; providerId: string; label: string },
+    ctx: { proxyDeps: ApiCallDeps; providerId: string; label: string },
   ): Promise<CallToolResult> {
     {
       const args = rawArgs as {
@@ -919,7 +919,7 @@ function buildSidecarTools(options: MountMcpOptions): {
         ) as ArrayBuffer;
       }
 
-      const result = await executeProviderCall(
+      const result = await executeApiCall(
         {
           providerId: ctx.providerId,
           targetUrl: args.target,
@@ -1182,7 +1182,7 @@ interface ResponseToToolResultOptions {
    * URL the response was eventually served from after any redirect
    * follow. Forwarded to {@link buildUpstreamMeta} which sanitises it
    * before serialisation. Omitted when no redirect happened (the
-   * sidecar passes `result.finalUrl` from {@link executeProviderCall}
+   * sidecar passes `result.finalUrl` from {@link executeApiCall}
    * regardless — equals the resolved target URL when no chain).
    */
   upstreamFinalUrl?: string;
@@ -1569,7 +1569,7 @@ async function readBodyBounded(res: Response, maxBytes: number): Promise<string>
  * One integration's `api_call` wiring (provider→integration unification).
  * The credential adapters are built by the sidecar boot from the
  * integration's live credentials source; `mountMcp` threads them into a
- * per-integration `ProviderCallDeps` so the generic tool reuses the
+ * per-integration `ApiCallDeps` so the generic tool reuses the
  * shared credential-proxy core.
  */
 export interface ApiCallIntegrationConfig {
@@ -1578,9 +1578,9 @@ export interface ApiCallIntegrationConfig {
   /** Integration package id (used as the proxy `providerId` + audit source). */
   packageId: string;
   /** Resolve the integration's credentials into the proxy payload. */
-  fetchCredentials: ProviderCallDeps["fetchCredentials"];
+  fetchCredentials: ApiCallDeps["fetchCredentials"];
   /** Force-refresh on a mid-run 401 and re-resolve. */
-  refreshCredentials: NonNullable<ProviderCallDeps["refreshCredentials"]>;
+  refreshCredentials: NonNullable<ApiCallDeps["refreshCredentials"]>;
   /**
    * Resumable-upload protocols this integration's `apiCall` declared
    * (`manifest.apiCall.uploadProtocols`). When non-empty the sidecar
@@ -1603,7 +1603,7 @@ export interface ApiCallIntegrationConfig {
  * spawned/remote integration tools.
  */
 export interface ApiCallToolDeps {
-  proxyDeps: ProviderCallDeps;
+  proxyDeps: ApiCallDeps;
   blobStore?: BlobStore;
   tokenBudget?: TokenBudget;
   providerCallLimit?: LimitFunction;
@@ -1642,12 +1642,12 @@ export interface MountMcpOptions {
   blobStore?: BlobStore;
   /**
    * Credential-proxy core deps. `provider_call` calls
-   * {@link executeProviderCall} directly with structured args; `run_history`
+   * {@link executeApiCall} directly with structured args; `run_history`
    * and `recall_memory` use `proxyDeps.fetchFn` + `proxyDeps.config` to
    * reach the platform upstream. Required: there is no longer a legacy
    * HTTP-route fallback.
    */
-  proxyDeps: ProviderCallDeps;
+  proxyDeps: ApiCallDeps;
   /**
    * Run-scoped token budget. When present, every tool output is run
    * through the budget tracker before being delivered to the agent —

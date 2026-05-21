@@ -39,7 +39,7 @@ const proxyParameters = [
     schema: { type: "string" },
   },
   {
-    name: "X-Provider",
+    name: "X-Integration",
     in: "header",
     required: true,
     description: "Scoped integration package name (e.g. `@afps/gmail`).",

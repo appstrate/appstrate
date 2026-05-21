@@ -143,7 +143,7 @@ describe("LocalEventBuffer", () => {
 describe("RedisEventBuffer", () => {
   // Regression: the runner can emit multiple events whose
   // `JSON.stringify(event)` collapses to the same string — e.g. 10 parallel
-  // `provider.called` events that complete in the same millisecond with
+  // `api_call.called` events that complete in the same millisecond with
   // identical providerId/method/target/status/durationMs and a
   // `toolCallId: undefined` field that JSON drops. In a Redis sorted set,
   // ZADD with an existing member updates the score instead of inserting a
@@ -158,7 +158,7 @@ describe("RedisEventBuffer", () => {
     const buf = new RedisEventBuffer();
     try {
       const identical: RunEvent = {
-        type: "provider.called",
+        type: "api_call.called",
         runId,
         timestamp: 1700000000000,
         providerId: "@appstrate/gmail",

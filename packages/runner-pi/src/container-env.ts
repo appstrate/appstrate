@@ -170,7 +170,7 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
   }
 
   // Forward operator-tunable sidecar caps so the agent container's
-  // runtime-side mirror (afps-runtime/.../provider-tool.ts) agrees with
+  // runtime-side mirror (afps-runtime/.../http-call-core.ts) agrees with
   // the sidecar on what counts as "too large" — otherwise large uploads
   // would fail with a 413 from the sidecar instead of a typed
   // RESOLVER_BODY_TOO_LARGE caught client-side. Only the request-body

@@ -8,7 +8,7 @@
  *
  *   agent → POST /mcp (JSON-RPC) → mountMcp → tools/call →
  *     provider_call / run_history / recall_memory →
- *       executeProviderCall (or platform fetchFn) →
+ *       executeApiCall (or platform fetchFn) →
  *         responseToToolResult — the function under test, where the
  *         token-budget tracker is consulted.
  *

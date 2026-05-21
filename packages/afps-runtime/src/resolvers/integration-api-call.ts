@@ -12,7 +12,7 @@
  * the portable equivalent that the standalone `appstrate run` CLI uses to
  * inject credentials locally — no sidecar, no container.
  *
- * The reusable HTTP core lives in {@link makeProviderTool} / {@link ProviderCallFn}
+ * The reusable HTTP core lives in {@link makeApiCallTool} / {@link ApiCallFn}
  * (body streaming, redirect handling, `authorizedUris` matching, response
  * serialisation). This module is credential-source-specific:
  *
@@ -21,7 +21,7 @@
  *     air-gapped dev — no refresh, no rotation).
  *   - {@link RemoteAppstrateIntegrationResolver} forwards every call through
  *     a pinned Appstrate instance's `/api/credential-proxy/proxy` route, with
- *     the integration id as the `X-Provider` scope marker. Credentials never
+ *     the integration id as the `X-Integration` scope marker. Credentials never
  *     leave the platform.
  *
  * Tool surface: one AFPS `Tool` per apiCall integration, named
@@ -31,15 +31,15 @@
 
 import type { Bundle, Tool } from "./types.ts";
 import {
-  makeProviderTool,
+  makeApiCallTool,
   resolveBodyForFetch,
   serializeFetchResponse,
   applyTransportHeaders,
   isReproducibleBody,
   matchesAuthorizedUriSpec,
-  type ProviderCallFn,
-  type ProviderMeta,
-} from "./provider-tool.ts";
+  type ApiCallFn,
+  type ApiCallMeta,
+} from "./http-call-core.ts";
 import { resolvePackageRef } from "./bundle-adapter.ts";
 
 // ─────────────────────────────────────────────
@@ -176,8 +176,8 @@ function projectApiCallMeta(name: string, parsed: unknown): ApiCallIntegrationMe
   };
 }
 
-/** Build the {@link ProviderMeta} the HTTP core uses for `authorizedUris` enforcement. */
-function toProviderMeta(meta: ApiCallIntegrationMeta): ProviderMeta {
+/** Build the {@link ApiCallMeta} the HTTP core uses for `authorizedUris` enforcement. */
+function toProviderMeta(meta: ApiCallIntegrationMeta): ApiCallMeta {
   return {
     name: meta.name,
     authorizedUris: meta.authorizedUris,
@@ -277,7 +277,7 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
         );
       }
       tools.push(
-        makeProviderTool(toProviderMeta(meta), this.buildCall(meta, entry), {
+        makeApiCallTool(toProviderMeta(meta), this.buildCall(meta, entry), {
           toolName: apiCallToolName(meta),
           description:
             `Make an authenticated request through the "${meta.name}" integration's ` +
@@ -303,7 +303,7 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
   private buildCall(
     meta: ApiCallIntegrationMeta,
     entry: LocalIntegrationCredentialsFile["integrations"][string],
-  ): ProviderCallFn {
+  ): ApiCallFn {
     return async (req, ctx) => {
       const fields = entry.fields;
       const target = substituteVars(req.target, fields);
@@ -499,7 +499,7 @@ export interface RemoteAppstrateIntegrationResolverOptions {
 /**
  * BYOI integration resolver — forwards every `api_call` through
  * `POST /api/credential-proxy/proxy` on a remote Appstrate instance, with
- * the integration id as the `X-Provider` scope marker. The platform owns
+ * the integration id as the `X-Integration` scope marker. The platform owns
  * credential injection server-side; the local agent never sees credentials.
  *
  * The credential-proxy route is provider/integration-agnostic — it gates on
@@ -543,9 +543,9 @@ export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallRes
       if (!meta) continue;
       // The platform enforces `authorizedUris` server-side — allow all
       // locally so the tool dispatches and lets the proxy gate.
-      const remoteMeta: ProviderMeta = { name: meta.name, allowAllUris: true };
+      const remoteMeta: ApiCallMeta = { name: meta.name, allowAllUris: true };
       tools.push(
-        makeProviderTool(remoteMeta, this.buildCall(meta), {
+        makeApiCallTool(remoteMeta, this.buildCall(meta), {
           toolName: apiCallToolName(meta),
           description:
             `Make an authenticated request through the "${meta.name}" integration's ` +
@@ -557,7 +557,7 @@ export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallRes
     return tools;
   }
 
-  private buildCall(meta: ApiCallIntegrationMeta): ProviderCallFn {
+  private buildCall(meta: ApiCallIntegrationMeta): ApiCallFn {
     return async (req, ctx) => {
       const resolved = await resolveBodyForFetch(req.body, {
         allowFromFile: true,
@@ -571,7 +571,7 @@ export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallRes
         "X-Application-Id": this.applicationId,
         ...(this.orgId ? { "X-Org-Id": this.orgId } : {}),
         "X-Session-Id": this.sessionId,
-        "X-Provider": meta.name,
+        "X-Integration": meta.name,
         "X-Target": req.target,
         ...(this.endUserId ? { "Appstrate-User": this.endUserId } : {}),
         ...(profileForCall ? { "X-Connection-Profile-Id": profileForCall } : {}),

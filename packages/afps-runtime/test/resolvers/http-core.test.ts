@@ -3,7 +3,7 @@
 
 /**
  * Tests for the reusable credential-injecting HTTP-call core
- * (`provider-tool.ts`): `makeProviderTool` (the Tool factory every
+ * (`http-call-core.ts`): `makeApiCallTool` (the Tool factory every
  * integration `api_call` resolver builds on) and `matchesAuthorizedUriSpec`
  * (the URL allowlist matcher). The credential-source-specific local/remote
  * integration resolvers are covered in `integration-api-call.test.ts`.
@@ -11,9 +11,9 @@
 
 import { describe, it, expect } from "bun:test";
 import {
-  makeProviderTool,
+  makeApiCallTool,
   matchesAuthorizedUriSpec,
-  type ProviderMeta,
+  type ApiCallMeta,
   type RunEvent,
   type ToolContext,
 } from "../../src/resolvers/index.ts";
@@ -34,10 +34,10 @@ function makeCtx(): { ctx: ToolContext; events: RunEvent[] } {
   };
 }
 
-describe("makeProviderTool", () => {
+describe("makeApiCallTool", () => {
   it("produces a {name}_call tool with JSON-schema parameters", () => {
-    const meta: ProviderMeta = { name: "@afps/gmail", allowAllUris: true };
-    const tool = makeProviderTool(meta, async () => ({
+    const meta: ApiCallMeta = { name: "@afps/gmail", allowAllUris: true };
+    const tool = makeApiCallTool(meta, async () => ({
       status: 200,
       headers: {},
       body: { kind: "text", text: "" },
@@ -50,8 +50,8 @@ describe("makeProviderTool", () => {
   });
 
   it("honours a toolName override (the {ns}__api_call shape integrations use)", () => {
-    const meta: ProviderMeta = { name: "@afps/gmail", allowAllUris: true };
-    const tool = makeProviderTool(
+    const meta: ApiCallMeta = { name: "@afps/gmail", allowAllUris: true };
+    const tool = makeApiCallTool(
       meta,
       async () => ({ status: 200, headers: {}, body: { kind: "text", text: "" } }),
       { toolName: "afps_gmail__api_call" },
@@ -60,11 +60,11 @@ describe("makeProviderTool", () => {
   });
 
   it("enforces authorizedUris when allowAllUris is not set", async () => {
-    const meta: ProviderMeta = {
+    const meta: ApiCallMeta = {
       name: "@acme/scoped",
       authorizedUris: ["https://api.acme.com/**"],
     };
-    const tool = makeProviderTool(meta, async () => ({
+    const tool = makeApiCallTool(meta, async () => ({
       status: 200,
       headers: {},
       body: { kind: "text", text: "" },
@@ -75,9 +75,9 @@ describe("makeProviderTool", () => {
     ).rejects.toThrow(/not in authorizedUris/);
   });
 
-  it("emits provider.called with status + duration on success", async () => {
-    const meta: ProviderMeta = { name: "@acme/ok", allowAllUris: true };
-    const tool = makeProviderTool(meta, async () => ({
+  it("emits api_call.called with status + duration on success", async () => {
+    const meta: ApiCallMeta = { name: "@acme/ok", allowAllUris: true };
+    const tool = makeApiCallTool(meta, async () => ({
       status: 201,
       headers: {},
       body: { kind: "text", text: "created" },
@@ -85,14 +85,14 @@ describe("makeProviderTool", () => {
     const { ctx, events } = makeCtx();
     await tool.execute({ method: "POST", target: "https://api.acme.com/x" }, ctx);
     expect(events).toHaveLength(1);
-    expect(events[0]!.type).toBe("provider.called");
+    expect(events[0]!.type).toBe("api_call.called");
     expect(events[0]!.status).toBe(201);
     expect(events[0]!.providerId).toBe("@acme/ok");
   });
 
   it("marks tool results as isError on 4xx/5xx", async () => {
-    const meta: ProviderMeta = { name: "@acme/err", allowAllUris: true };
-    const tool = makeProviderTool(meta, async () => ({
+    const meta: ApiCallMeta = { name: "@acme/err", allowAllUris: true };
+    const tool = makeApiCallTool(meta, async () => ({
       status: 404,
       headers: {},
       body: { kind: "text", text: "nope" },

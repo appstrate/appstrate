@@ -24,7 +24,7 @@
  *     or `user:<id>`) — cookie jars can never be shared between a bearer
  *     JWT and an API key, nor between two API keys of the same org.
  *   - Audit log on every call (requestId, authMethod, apiKeyId, userId,
- *     endUserId, providerId, target, status)
+ *     endUserId, integrationId, target, status)
  *   - URL allowlist enforced via the provider manifest
  *     (`authorizedUris` / `allowAllUris`)
  *   - Request / response size caps
@@ -108,7 +108,7 @@ export function createCredentialProxyRouter() {
         );
       }
 
-      const providerId = c.req.header("X-Provider");
+      const integrationId = c.req.header("X-Integration");
       const target = c.req.header("X-Target");
       const sessionId = c.req.header("X-Session-Id");
       const substituteBody = c.req.header("X-Substitute-Body") === "true";
@@ -125,7 +125,7 @@ export function createCredentialProxyRouter() {
       const explicitProfileId =
         explicitProfileHeader && explicitProfileHeader.length > 0 ? explicitProfileHeader : null;
 
-      if (!providerId) throw invalidRequest("Missing X-Provider header");
+      if (!integrationId) throw invalidRequest("Missing X-Integration header");
       if (!target) throw invalidRequest("Missing X-Target header");
       if (!sessionId) throw invalidRequest("Missing X-Session-Id header");
       if (!isValidSessionId(sessionId)) {
@@ -190,7 +190,7 @@ export function createCredentialProxyRouter() {
       const streamLogCtx = {
         requestId: c.get("requestId"),
         orgId,
-        providerId,
+        integrationId,
         target,
       };
 
@@ -254,7 +254,7 @@ export function createCredentialProxyRouter() {
           orgId,
           actor,
           ...(explicitProfileId ? { connectionId: explicitProfileId } : {}),
-          integrationId: providerId,
+          integrationId,
           method,
           target,
           headers: fwdHeaders,
@@ -263,7 +263,7 @@ export function createCredentialProxyRouter() {
           cookieJar: jar,
           jarSessionId: sessionId,
           cookieJarTtlSeconds: limits.session_ttl_seconds,
-          sessionKey: providerId,
+          sessionKey: integrationId,
           // When the client wants a streamed response, skip the platform
           // response-size cap — the capping transform stream in this
           // route enforces MAX_STREAMED_BODY_SIZE instead.
@@ -279,7 +279,7 @@ export function createCredentialProxyRouter() {
           userId,
           endUserId: endUser?.id,
           applicationId,
-          providerId,
+          integrationId,
           method,
           target,
           status: result.status,
@@ -297,7 +297,7 @@ export function createCredentialProxyRouter() {
           userId: apiKeyId ? null : userId,
           runId,
           applicationId,
-          providerId,
+          providerId: integrationId,
           targetHost: safeTargetHost(target),
           httpStatus: result.status,
           durationMs,
@@ -364,7 +364,7 @@ export function createCredentialProxyRouter() {
             apiKeyId,
             userId,
             applicationId,
-            providerId,
+            integrationId,
             target,
           });
           throw forbidden(err.message);
@@ -380,7 +380,7 @@ export function createCredentialProxyRouter() {
           apiKeyId,
           userId,
           applicationId,
-          providerId,
+          integrationId,
           error: getErrorMessage(err),
         });
         throw internalError();
@@ -392,7 +392,7 @@ export function createCredentialProxyRouter() {
 }
 
 const PROXY_CONTROL_HEADERS = new Set([
-  "x-provider",
+  "x-integration",
   "x-target",
   "x-session-id",
   "x-substitute-body",
@@ -442,7 +442,7 @@ const HOP_BY_HOP = new Set([
 interface StreamCapLogCtx {
   requestId: string;
   orgId: string;
-  providerId: string;
+  integrationId: string;
   target: string;
   direction: "upload" | "download";
 }
@@ -480,7 +480,7 @@ function capStreamingBody(
         logger.warn("credential-proxy: streaming body exceeded size cap", {
           requestId: ctx.requestId,
           orgId: ctx.orgId,
-          providerId: ctx.providerId,
+          integrationId: ctx.integrationId,
           target: ctx.target,
           direction: ctx.direction,
           bytesReceived: received,
@@ -509,7 +509,7 @@ function capStreamingBody(
       logger.warn("credential-proxy: streaming pipe aborted", {
         requestId: ctx.requestId,
         orgId: ctx.orgId,
-        providerId: ctx.providerId,
+        integrationId: ctx.integrationId,
         target: ctx.target,
         direction: ctx.direction,
         bytesReceived: received,

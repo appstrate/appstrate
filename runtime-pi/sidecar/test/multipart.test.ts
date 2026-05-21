@@ -7,7 +7,7 @@
  * `mcp.ts`, builds a standard `FormData` (so Bun's `fetch()` controls
  * the `Content-Type: multipart/form-data; boundary=…` header), strips
  * any caller-supplied `Content-Type: multipart/...` header, and lets
- * `executeProviderCall` regenerate the body per attempt for the
+ * `executeApiCall` regenerate the body per attempt for the
  * 401-retry path. These tests pin the wire-format guarantees:
  *
  *   - Upstream sees `multipart/form-data` with a well-formed boundary.

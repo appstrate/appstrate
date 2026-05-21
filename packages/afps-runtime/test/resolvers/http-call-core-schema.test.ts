@@ -5,21 +5,21 @@
  * Unit tests for the Zod-first provider_call argument schema (Task 1).
  *
  * Verifies:
- *  - Valid argument shapes parse correctly via providerCallRequestSchema
+ *  - Valid argument shapes parse correctly via apiCallRequestSchema
  *  - Invalid shapes surface ResolverError with a helpful message when
- *    execute() is called (end-to-end path through makeProviderTool)
+ *    execute() is called (end-to-end path through makeApiCallTool)
  *  - The generated JSON schema has the expected structural shape
  */
 
 import { describe, it, expect } from "bun:test";
 import { z } from "zod";
 import {
-  providerCallRequestSchema,
-  makeProviderTool,
+  apiCallRequestSchema,
+  makeApiCallTool,
   ABSOLUTE_MAX_RESPONSE_SIZE,
-} from "../../src/resolvers/provider-tool.ts";
+} from "../../src/resolvers/http-call-core.ts";
 import { ResolverError } from "../../src/errors.ts";
-import type { ProviderMeta, ProviderCallResponse } from "../../src/resolvers/provider-tool.ts";
+import type { ApiCallMeta, ApiCallResponse } from "../../src/resolvers/http-call-core.ts";
 import type { ToolContext } from "../../src/resolvers/types.ts";
 import type { RunEvent } from "../../src/resolvers/index.ts";
 
@@ -35,10 +35,10 @@ function makeCtx(workspace = "/tmp/ws"): ToolContext {
   };
 }
 
-const allowAllMeta: ProviderMeta = { name: "@acme/p", allowAllUris: true };
+const allowAllMeta: ApiCallMeta = { name: "@acme/p", allowAllUris: true };
 
 /** A no-op call fn that returns 200 JSON. */
-function noopCall(): Promise<ProviderCallResponse> {
+function noopCall(): Promise<ApiCallResponse> {
   return Promise.resolve({
     status: 200,
     headers: { "content-type": "application/json" },
@@ -47,14 +47,14 @@ function noopCall(): Promise<ProviderCallResponse> {
 }
 
 function makeTool() {
-  return makeProviderTool(allowAllMeta, noopCall, { emitProviderEvent: false });
+  return makeApiCallTool(allowAllMeta, noopCall, { emitApiCallEvent: false });
 }
 
 // ─── Schema parse tests ───────────────────────────────────────────────────────
 
-describe("providerCallRequestSchema — valid inputs", () => {
+describe("apiCallRequestSchema — valid inputs", () => {
   it("parses a minimal request (method + target only)", () => {
-    const result = providerCallRequestSchema.safeParse({
+    const result = apiCallRequestSchema.safeParse({
       method: "GET",
       target: "https://api.example.com/x",
     });
@@ -65,7 +65,7 @@ describe("providerCallRequestSchema — valid inputs", () => {
   });
 
   it("parses a string body", () => {
-    const result = providerCallRequestSchema.safeParse({
+    const result = apiCallRequestSchema.safeParse({
       method: "POST",
       target: "https://api.example.com/x",
       body: '{"key":"value"}',
@@ -76,7 +76,7 @@ describe("providerCallRequestSchema — valid inputs", () => {
   });
 
   it("parses a { fromFile } body", () => {
-    const result = providerCallRequestSchema.safeParse({
+    const result = apiCallRequestSchema.safeParse({
       method: "POST",
       target: "https://api.example.com/upload",
       body: { fromFile: "uploads/file.pdf" },
@@ -87,7 +87,7 @@ describe("providerCallRequestSchema — valid inputs", () => {
   });
 
   it("parses a { fromBytes } body with encoding", () => {
-    const result = providerCallRequestSchema.safeParse({
+    const result = apiCallRequestSchema.safeParse({
       method: "POST",
       target: "https://api.example.com/upload",
       body: { fromBytes: "aGVsbG8=", encoding: "base64" },
@@ -99,7 +99,7 @@ describe("providerCallRequestSchema — valid inputs", () => {
   });
 
   it("parses a multipart body with text parts", () => {
-    const result = providerCallRequestSchema.safeParse({
+    const result = apiCallRequestSchema.safeParse({
       method: "POST",
       target: "https://api.example.com/form",
       body: { multipart: [{ name: "field1", value: "hello" }] },
@@ -114,7 +114,7 @@ describe("providerCallRequestSchema — valid inputs", () => {
     // Google Drive multipart resumable upload requires the JSON metadata
     // part to carry `Content-Type: application/json` — without this knob
     // callers had to base64-encode the JSON via `fromBytes`.
-    const result = providerCallRequestSchema.safeParse({
+    const result = apiCallRequestSchema.safeParse({
       method: "POST",
       target: "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
       body: {
@@ -141,7 +141,7 @@ describe("providerCallRequestSchema — valid inputs", () => {
   });
 
   it("parses a multipart body mixing text + file + bytes parts", () => {
-    const result = providerCallRequestSchema.safeParse({
+    const result = apiCallRequestSchema.safeParse({
       method: "POST",
       target: "https://api.example.com/form",
       body: {
@@ -161,7 +161,7 @@ describe("providerCallRequestSchema — valid inputs", () => {
   });
 
   it("parses null body", () => {
-    const result = providerCallRequestSchema.safeParse({
+    const result = apiCallRequestSchema.safeParse({
       method: "DELETE",
       target: "https://api.example.com/x",
       body: null,
@@ -172,7 +172,7 @@ describe("providerCallRequestSchema — valid inputs", () => {
   });
 
   it("parses a request with no body (undefined)", () => {
-    const result = providerCallRequestSchema.safeParse({
+    const result = apiCallRequestSchema.safeParse({
       method: "GET",
       target: "https://api.example.com/x",
     });
@@ -182,7 +182,7 @@ describe("providerCallRequestSchema — valid inputs", () => {
   });
 
   it("parses responseMode with toFile and maxInlineBytes", () => {
-    const result = providerCallRequestSchema.safeParse({
+    const result = apiCallRequestSchema.safeParse({
       method: "GET",
       target: "https://api.example.com/x",
       responseMode: { toFile: "downloads/out.bin", maxInlineBytes: 512 * 1024 },
@@ -195,7 +195,7 @@ describe("providerCallRequestSchema — valid inputs", () => {
 
   it("parses all HTTP methods", () => {
     for (const method of ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"] as const) {
-      const result = providerCallRequestSchema.safeParse({
+      const result = apiCallRequestSchema.safeParse({
         method,
         target: "https://api.example.com/x",
       });
@@ -210,7 +210,7 @@ describe("providerCallRequestSchema — valid inputs", () => {
   // no opt-in flag and forwards `{{email}}` / `{{password}}` placeholders
   // verbatim to upstream.
   it("preserves substituteBody=true through safeParse", () => {
-    const result = providerCallRequestSchema.safeParse({
+    const result = apiCallRequestSchema.safeParse({
       method: "POST",
       target: "https://api.example.com/login",
       body: '{"login":"{{email}}","password":"{{password}}"}',
@@ -222,7 +222,7 @@ describe("providerCallRequestSchema — valid inputs", () => {
   });
 
   it("preserves substituteBody=false through safeParse", () => {
-    const result = providerCallRequestSchema.safeParse({
+    const result = apiCallRequestSchema.safeParse({
       method: "POST",
       target: "https://api.example.com/x",
       body: "literal",
@@ -234,7 +234,7 @@ describe("providerCallRequestSchema — valid inputs", () => {
   });
 
   it("treats missing substituteBody as undefined (default off)", () => {
-    const result = providerCallRequestSchema.safeParse({
+    const result = apiCallRequestSchema.safeParse({
       method: "POST",
       target: "https://api.example.com/x",
       body: "no opt-in",
@@ -245,7 +245,7 @@ describe("providerCallRequestSchema — valid inputs", () => {
   });
 
   it("rejects substituteBody as a non-boolean", () => {
-    const result = providerCallRequestSchema.safeParse({
+    const result = apiCallRequestSchema.safeParse({
       method: "POST",
       target: "https://api.example.com/x",
       substituteBody: "yes",
@@ -256,9 +256,9 @@ describe("providerCallRequestSchema — valid inputs", () => {
   });
 });
 
-describe("providerCallRequestSchema — invalid inputs", () => {
+describe("apiCallRequestSchema — invalid inputs", () => {
   it("rejects unknown method", () => {
-    const result = providerCallRequestSchema.safeParse({
+    const result = apiCallRequestSchema.safeParse({
       method: "FOO",
       target: "https://api.example.com/x",
     });
@@ -268,7 +268,7 @@ describe("providerCallRequestSchema — invalid inputs", () => {
   });
 
   it("rejects body.fromFile as non-string", () => {
-    const result = providerCallRequestSchema.safeParse({
+    const result = apiCallRequestSchema.safeParse({
       method: "POST",
       target: "https://api.example.com/x",
       body: { fromFile: 123 },
@@ -277,7 +277,7 @@ describe("providerCallRequestSchema — invalid inputs", () => {
   });
 
   it("rejects body with extra properties on fromFile shape", () => {
-    const result = providerCallRequestSchema.safeParse({
+    const result = apiCallRequestSchema.safeParse({
       method: "POST",
       target: "https://api.example.com/x",
       body: { fromFile: "uploads/f.pdf", extraKey: "surprise" },
@@ -290,7 +290,7 @@ describe("providerCallRequestSchema — invalid inputs", () => {
   });
 
   it("rejects multipart array with 0 items", () => {
-    const result = providerCallRequestSchema.safeParse({
+    const result = apiCallRequestSchema.safeParse({
       method: "POST",
       target: "https://api.example.com/x",
       body: { multipart: [] },
@@ -302,7 +302,7 @@ describe("providerCallRequestSchema — invalid inputs", () => {
   });
 
   it("rejects multipart part missing both value/fromFile/fromBytes", () => {
-    const result = providerCallRequestSchema.safeParse({
+    const result = apiCallRequestSchema.safeParse({
       method: "POST",
       target: "https://api.example.com/x",
       body: { multipart: [{ name: "broken" }] },
@@ -311,7 +311,7 @@ describe("providerCallRequestSchema — invalid inputs", () => {
   });
 
   it("rejects maxInlineBytes above ABSOLUTE_MAX_RESPONSE_SIZE", () => {
-    const result = providerCallRequestSchema.safeParse({
+    const result = apiCallRequestSchema.safeParse({
       method: "GET",
       target: "https://api.example.com/x",
       responseMode: { maxInlineBytes: ABSOLUTE_MAX_RESPONSE_SIZE + 1 },
@@ -330,10 +330,10 @@ describe("providerCallRequestSchema — invalid inputs", () => {
 // The schema rejects them at parse time so the transport layer never has
 // to think about it.
 
-describe("providerCallRequestSchema — multipart header-injection guard", () => {
+describe("apiCallRequestSchema — multipart header-injection guard", () => {
   const baseRequest = (
     part: Record<string, unknown>,
-  ): Parameters<typeof providerCallRequestSchema.safeParse>[0] => ({
+  ): Parameters<typeof apiCallRequestSchema.safeParse>[0] => ({
     method: "POST",
     target: "https://api.example.com/x",
     body: { multipart: [part] },
@@ -346,7 +346,7 @@ describe("providerCallRequestSchema — multipart header-injection guard", () =>
     ["NUL", "\0"],
   ] as const) {
     it(`rejects ${label} in text part contentType`, () => {
-      const result = providerCallRequestSchema.safeParse(
+      const result = apiCallRequestSchema.safeParse(
         baseRequest({
           name: "metadata",
           value: "{}",
@@ -357,21 +357,21 @@ describe("providerCallRequestSchema — multipart header-injection guard", () =>
     });
 
     it(`rejects ${label} in text part name`, () => {
-      const result = providerCallRequestSchema.safeParse(
+      const result = apiCallRequestSchema.safeParse(
         baseRequest({ name: `field${char}X-Injected`, value: "v" }),
       );
       expect(result.success).toBe(false);
     });
 
     it(`rejects ${label} in file part filename`, () => {
-      const result = providerCallRequestSchema.safeParse(
+      const result = apiCallRequestSchema.safeParse(
         baseRequest({ name: "f", fromFile: "x.bin", filename: `a${char}b.bin` }),
       );
       expect(result.success).toBe(false);
     });
 
     it(`rejects ${label} in file part contentType`, () => {
-      const result = providerCallRequestSchema.safeParse(
+      const result = apiCallRequestSchema.safeParse(
         baseRequest({
           name: "f",
           fromFile: "x.bin",
@@ -382,7 +382,7 @@ describe("providerCallRequestSchema — multipart header-injection guard", () =>
     });
 
     it(`rejects ${label} in bytes part filename`, () => {
-      const result = providerCallRequestSchema.safeParse(
+      const result = apiCallRequestSchema.safeParse(
         baseRequest({
           name: "b",
           fromBytes: "aGVsbG8=",
@@ -397,13 +397,13 @@ describe("providerCallRequestSchema — multipart header-injection guard", () =>
 
 // ─── Multipart part edge cases ────────────────────────────────────────────────
 
-describe("providerCallRequestSchema — multipart part edge cases", () => {
+describe("apiCallRequestSchema — multipart part edge cases", () => {
   it("accepts empty-string contentType (treated as plain absent value at runtime)", () => {
     // Empty string is structurally valid (no CR/LF/NUL) — the runtime path
     // treats falsy `contentType` as "use the default". Documenting the
     // boundary so a future tightening to `.min(1)` is an explicit decision,
     // not a silent regression.
-    const result = providerCallRequestSchema.safeParse({
+    const result = apiCallRequestSchema.safeParse({
       method: "POST",
       target: "https://api.example.com/x",
       body: { multipart: [{ name: "f", value: "v", contentType: "" }] },
@@ -412,7 +412,7 @@ describe("providerCallRequestSchema — multipart part edge cases", () => {
   });
 
   it("accepts Unicode (emoji, CJK) in text part value", () => {
-    const result = providerCallRequestSchema.safeParse({
+    const result = apiCallRequestSchema.safeParse({
       method: "POST",
       target: "https://api.example.com/x",
       body: {
@@ -430,7 +430,7 @@ describe("providerCallRequestSchema — multipart part edge cases", () => {
       "application/json;charset=UTF-8",
       "text/plain; charset=ISO-8859-1",
     ]) {
-      const result = providerCallRequestSchema.safeParse({
+      const result = apiCallRequestSchema.safeParse({
         method: "POST",
         target: "https://api.example.com/x",
         body: { multipart: [{ name: "metadata", value: "{}", contentType: ct }] },
@@ -441,7 +441,7 @@ describe("providerCallRequestSchema — multipart part edge cases", () => {
 
   it("accepts a very long contentType (4 KB) — no built-in length limit", () => {
     const longCt = "application/json; charset=UTF-8; " + "x=".repeat(2000);
-    const result = providerCallRequestSchema.safeParse({
+    const result = apiCallRequestSchema.safeParse({
       method: "POST",
       target: "https://api.example.com/x",
       body: { multipart: [{ name: "metadata", value: "{}", contentType: longCt }] },
@@ -450,7 +450,7 @@ describe("providerCallRequestSchema — multipart part edge cases", () => {
   });
 
   it("rejects unknown keys on a text part (.strict() schema)", () => {
-    const result = providerCallRequestSchema.safeParse({
+    const result = apiCallRequestSchema.safeParse({
       method: "POST",
       target: "https://api.example.com/x",
       body: { multipart: [{ name: "f", value: "v", typo: "extra" }] },
@@ -459,7 +459,7 @@ describe("providerCallRequestSchema — multipart part edge cases", () => {
   });
 
   it("rejects unknown keys on a file part (.strict() schema)", () => {
-    const result = providerCallRequestSchema.safeParse({
+    const result = apiCallRequestSchema.safeParse({
       method: "POST",
       target: "https://api.example.com/x",
       body: { multipart: [{ name: "f", fromFile: "x.pdf", encoding: "base64" }] },
@@ -471,7 +471,7 @@ describe("providerCallRequestSchema — multipart part edge cases", () => {
 
 // ─── execute() integration — ResolverError on invalid args ───────────────────
 
-describe("makeProviderTool execute() — validation errors surface as ResolverError", () => {
+describe("makeApiCallTool execute() — validation errors surface as ResolverError", () => {
   it("throws ResolverError RESOLVER_BODY_INVALID when method is invalid", async () => {
     const tool = makeTool();
     try {
@@ -528,7 +528,7 @@ describe("makeProviderTool execute() — validation errors surface as ResolverEr
 // ─── Generated JSON schema structural checks ─────────────────────────────────
 
 describe("generated JSON schema structure", () => {
-  const schema = z.toJSONSchema(providerCallRequestSchema, { target: "draft-7" }) as Record<
+  const schema = z.toJSONSchema(apiCallRequestSchema, { target: "draft-7" }) as Record<
     string,
     unknown
   >;

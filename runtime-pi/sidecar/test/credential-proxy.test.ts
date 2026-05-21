@@ -9,10 +9,10 @@
  */
 
 import { describe, it, expect, mock } from "bun:test";
-import { executeProviderCall, type ProviderCallDeps } from "../credential-proxy.ts";
+import { executeApiCall, type ApiCallDeps } from "../credential-proxy.ts";
 import type { CredentialsResponse } from "../helpers.ts";
 
-function makeDeps(overrides: Partial<ProviderCallDeps> = {}): ProviderCallDeps {
+function makeDeps(overrides: Partial<ApiCallDeps> = {}): ApiCallDeps {
   return {
     config: { runToken: "rt", platformApiUrl: "http://platform" },
     cookieJar: new Map(),
@@ -38,10 +38,10 @@ function makeDeps(overrides: Partial<ProviderCallDeps> = {}): ProviderCallDeps {
   };
 }
 
-describe("executeProviderCall — structured failures", () => {
+describe("executeApiCall — structured failures", () => {
   it("rejects malformed providerId without touching credentials", async () => {
     const fetchCredentials = mock(async () => ({}) as never);
-    const result = await executeProviderCall(
+    const result = await executeApiCall(
       {
         providerId: "../traversal",
         targetUrl: "https://api.example.com/x",
@@ -54,13 +54,13 @@ describe("executeProviderCall — structured failures", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.status).toBe(400);
-      expect(result.error).toMatch(/X-Provider/);
+      expect(result.error).toMatch(/X-Integration/);
     }
     expect(fetchCredentials).not.toHaveBeenCalled();
   });
 
   it("returns 400 on unresolved URL placeholders", async () => {
-    const result = await executeProviderCall(
+    const result = await executeApiCall(
       {
         providerId: "gmail",
         targetUrl: "https://api.example.com/{{missing}}",
@@ -75,7 +75,7 @@ describe("executeProviderCall — structured failures", () => {
   });
 
   it("returns 403 when the URL is not in authorizedUris", async () => {
-    const result = await executeProviderCall(
+    const result = await executeApiCall(
       {
         providerId: "gmail",
         targetUrl: "https://other.example.com/x",
@@ -93,7 +93,7 @@ describe("executeProviderCall — structured failures", () => {
   });
 });
 
-describe("executeProviderCall — happy path", () => {
+describe("executeApiCall — happy path", () => {
   it("forwards credentials, captures cookies, and returns the upstream response", async () => {
     const fetchFn = mock(
       async () =>
@@ -106,7 +106,7 @@ describe("executeProviderCall — happy path", () => {
         }),
     );
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
-    const result = await executeProviderCall(
+    const result = await executeApiCall(
       {
         providerId: "gmail",
         targetUrl: "https://api.example.com/messages",
@@ -132,7 +132,7 @@ describe("executeProviderCall — happy path", () => {
   });
 });
 
-describe("executeProviderCall — 401 retry path", () => {
+describe("executeApiCall — 401 retry path", () => {
   it("refreshes credentials and replays the buffered request once", async () => {
     let callCount = 0;
     const fetchFn = mock(async () => {
@@ -162,7 +162,7 @@ describe("executeProviderCall — 401 retry path", () => {
       fetchFn: fetchFn as unknown as typeof fetch,
       refreshCredentials,
     });
-    const result = await executeProviderCall(
+    const result = await executeApiCall(
       {
         providerId: "gmail",
         targetUrl: "https://api.example.com/x",
@@ -206,7 +206,7 @@ describe("executeProviderCall — 401 retry path", () => {
         c.close();
       },
     });
-    const result = await executeProviderCall(
+    const result = await executeApiCall(
       {
         providerId: "gmail",
         targetUrl: "https://api.example.com/upload",
@@ -226,7 +226,7 @@ describe("executeProviderCall — 401 retry path", () => {
   });
 });
 
-describe("executeProviderCall — multi-hop redirect cookie capture (#473)", () => {
+describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
   /**
    * Bug repro: in multi-step OAuth/CAS flows the session cookie is
    * often dropped on an intermediate 302. With Bun's native
@@ -258,7 +258,7 @@ describe("executeProviderCall — multi-hop redirect cookie capture (#473)", () 
       });
     });
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
-    const result = await executeProviderCall(
+    const result = await executeApiCall(
       {
         providerId: "kijiji",
         targetUrl: "https://api.example.com/login",
@@ -300,7 +300,7 @@ describe("executeProviderCall — multi-hop redirect cookie capture (#473)", () 
       return new Response("ok", { status: 200 });
     });
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
-    await executeProviderCall(
+    await executeApiCall(
       {
         providerId: "demo",
         targetUrl: "https://api.example.com/a",
@@ -337,7 +337,7 @@ describe("executeProviderCall — multi-hop redirect cookie capture (#473)", () 
       return new Response("done", { status: 200 });
     });
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
-    const result = await executeProviderCall(
+    const result = await executeApiCall(
       {
         providerId: "demo",
         targetUrl: "https://api.example.com/post",
@@ -372,7 +372,7 @@ describe("executeProviderCall — multi-hop redirect cookie capture (#473)", () 
       return new Response("done", { status: 200 });
     });
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
-    const result = await executeProviderCall(
+    const result = await executeApiCall(
       {
         providerId: "demo",
         targetUrl: "https://api.example.com/post",
@@ -404,7 +404,7 @@ describe("executeProviderCall — multi-hop redirect cookie capture (#473)", () 
         }),
     );
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
-    const result = await executeProviderCall(
+    const result = await executeApiCall(
       {
         providerId: "demo",
         targetUrl: "https://api.example.com/loop",
@@ -453,7 +453,7 @@ describe("executeProviderCall — multi-hop redirect cookie capture (#473)", () 
       fetchFn: fetchFn as unknown as typeof fetch,
       fetchCredentials,
     });
-    await executeProviderCall(
+    await executeApiCall(
       {
         providerId: "demo",
         targetUrl: "https://api.example.com/start",
@@ -486,7 +486,7 @@ describe("executeProviderCall — multi-hop redirect cookie capture (#473)", () 
         c.close();
       },
     });
-    const result = await executeProviderCall(
+    const result = await executeApiCall(
       {
         providerId: "demo",
         targetUrl: "https://api.example.com/upload",
@@ -523,7 +523,7 @@ describe("executeProviderCall — multi-hop redirect cookie capture (#473)", () 
       return new Response("ok", { status: 200 });
     });
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
-    await executeProviderCall(
+    await executeApiCall(
       {
         providerId: "demo",
         targetUrl: "https://api.example.com/a",
@@ -566,7 +566,7 @@ describe("executeProviderCall — multi-hop redirect cookie capture (#473)", () 
       return new Response("ok", { status: 200 });
     });
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
-    const result = await executeProviderCall(
+    const result = await executeApiCall(
       {
         providerId: "demo",
         targetUrl: "https://api.example.com/v1/login",
@@ -601,7 +601,7 @@ describe("executeProviderCall — multi-hop redirect cookie capture (#473)", () 
       return new Response("ok", { status: 200 });
     });
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
-    const result = await executeProviderCall(
+    const result = await executeApiCall(
       {
         providerId: "demo",
         targetUrl: "https://api.example.com/start",
@@ -635,7 +635,7 @@ describe("executeProviderCall — multi-hop redirect cookie capture (#473)", () 
       return new Response("ok", { status: 200 });
     });
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
-    const result = await executeProviderCall(
+    const result = await executeApiCall(
       {
         providerId: "demo",
         targetUrl: "https://api.example.com/old",
@@ -670,7 +670,7 @@ describe("executeProviderCall — multi-hop redirect cookie capture (#473)", () 
       return new Response(null, { status: 200 });
     });
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
-    const result = await executeProviderCall(
+    const result = await executeApiCall(
       {
         providerId: "demo",
         targetUrl: "https://api.example.com/check",
@@ -700,7 +700,7 @@ describe("executeProviderCall — multi-hop redirect cookie capture (#473)", () 
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
     const form = new FormData();
     form.set("field", "value");
-    const result = await executeProviderCall(
+    const result = await executeApiCall(
       {
         providerId: "demo",
         targetUrl: "https://api.example.com/upload",
@@ -717,7 +717,7 @@ describe("executeProviderCall — multi-hop redirect cookie capture (#473)", () 
   });
 });
 
-describe("executeProviderCall — per-hop redirect hardening (#475)", () => {
+describe("executeApiCall — per-hop redirect hardening (#475)", () => {
   /**
    * The initial-URL allowlist check only sees the operator-supplied
    * target. A compromised or misconfigured upstream that 302s into
@@ -757,7 +757,7 @@ describe("executeProviderCall — per-hop redirect hardening (#475)", () => {
         fetchFn: fetchFn as unknown as typeof fetch,
         fetchCredentials,
       });
-      const result = await executeProviderCall(
+      const result = await executeApiCall(
         {
           providerId: "demo",
           targetUrl: "https://api.example.com/start",
@@ -789,7 +789,7 @@ describe("executeProviderCall — per-hop redirect hardening (#475)", () => {
       return new Response("ok", { status: 200 });
     });
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
-    const result = await executeProviderCall(
+    const result = await executeApiCall(
       {
         providerId: "demo",
         targetUrl: "https://api.example.com/start",
@@ -847,7 +847,7 @@ describe("executeProviderCall — per-hop redirect hardening (#475)", () => {
       fetchFn: fetchFn as unknown as typeof fetch,
       fetchCredentials,
     });
-    const result = await executeProviderCall(
+    const result = await executeApiCall(
       {
         providerId: "dropbox",
         targetUrl: "https://api.dropboxapi.com/2/files/get_metadata",
@@ -897,7 +897,7 @@ describe("executeProviderCall — per-hop redirect hardening (#475)", () => {
       fetchFn: fetchFn as unknown as typeof fetch,
       fetchCredentials,
     });
-    const result = await executeProviderCall(
+    const result = await executeApiCall(
       {
         providerId: "webhooks",
         targetUrl: "https://hook.example.com/trigger",
@@ -929,7 +929,7 @@ describe("executeProviderCall — per-hop redirect hardening (#475)", () => {
       return new Response("ok", { status: 200 });
     });
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
-    const result = await executeProviderCall(
+    const result = await executeApiCall(
       {
         providerId: "demo",
         targetUrl: "https://api.example.com/start",
@@ -963,7 +963,7 @@ describe("executeProviderCall — per-hop redirect hardening (#475)", () => {
       return new Response("ok", { status: 200 });
     });
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
-    await executeProviderCall(
+    await executeApiCall(
       {
         providerId: "demo",
         targetUrl: "https://api.example.com/start",
@@ -978,7 +978,7 @@ describe("executeProviderCall — per-hop redirect hardening (#475)", () => {
   });
 });
 
-describe("executeProviderCall — finalUrl exposure (#471)", () => {
+describe("executeApiCall — finalUrl exposure (#471)", () => {
   /**
    * Agents driving redirect-chain flows (OAuth Authorization Code,
    * CAS `?ticket=…`, magic-link redemption) need to read the URL the
@@ -988,7 +988,7 @@ describe("executeProviderCall — finalUrl exposure (#471)", () => {
    */
   it("returns the resolved target URL when no redirect happens", async () => {
     const deps = makeDeps();
-    const result = await executeProviderCall(
+    const result = await executeApiCall(
       {
         providerId: "gmail",
         targetUrl: "https://api.example.com/messages",
@@ -1020,7 +1020,7 @@ describe("executeProviderCall — finalUrl exposure (#471)", () => {
       return new Response("ok", { status: 200 });
     });
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
-    const result = await executeProviderCall(
+    const result = await executeApiCall(
       {
         providerId: "demo",
         targetUrl: "https://api.example.com/authorize",
@@ -1053,7 +1053,7 @@ describe("executeProviderCall — finalUrl exposure (#471)", () => {
       return new Response("limbo", { status: 302 });
     });
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
-    const result = await executeProviderCall(
+    const result = await executeApiCall(
       {
         providerId: "demo",
         targetUrl: "https://api.example.com/a",
@@ -1086,7 +1086,7 @@ describe("executeProviderCall — finalUrl exposure (#471)", () => {
         c.close();
       },
     });
-    const result = await executeProviderCall(
+    const result = await executeApiCall(
       {
         providerId: "demo",
         targetUrl: "https://api.example.com/upload",
@@ -1133,7 +1133,7 @@ describe("executeProviderCall — finalUrl exposure (#471)", () => {
       fetchFn: fetchFn as unknown as typeof fetch,
       refreshCredentials,
     });
-    const result = await executeProviderCall(
+    const result = await executeApiCall(
       {
         providerId: "gmail",
         targetUrl: "https://api.example.com/x",

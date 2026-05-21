@@ -212,7 +212,7 @@ export const PROXY_INJECTED_FIELD = "__appstrate_credential_proxy_token__";
 
 /**
  * Synthesise the {@link ProxyCredentialsPayload} that `proxyCall` /
- * `executeProviderCall` consume, from an auth's decrypted `fields` and its
+ * `executeApiCall` consume, from an auth's decrypted `fields` and its
  * resolved {@link HttpDeliveryPlan}. Single source of truth shared by the
  * external-runner path (`apps/api` credential-proxy resolver) and the
  * in-container path (sidecar `api-call-credentials`), so the payload shape
