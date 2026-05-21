@@ -11,7 +11,8 @@
   "icon": "googledrive",
   "keywords": ["storage", "productivity"],
   "server": {
-    "type": "api_call"
+    "type": "api_call",
+    "uploadProtocols": ["google-resumable"]
   },
   "auths": {
     "primary": {
