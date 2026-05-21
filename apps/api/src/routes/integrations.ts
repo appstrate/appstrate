@@ -20,9 +20,8 @@
  * single owner-scoped entry point. The agent-surface "unlink" button is gone:
  * members switch agent picks via member pins, not by deleting the shared row.
  *
- * The OAuth2 callback re-uses the same popup-close HTML as the
- * provider-side `/api/connections/callback` so the same window handler
- * works on both surfaces.
+ * The OAuth2 callback renders a popup-close HTML page so the dashboard's
+ * connect-window handler can detect completion and refresh.
  */
 
 import { Hono } from "hono";
