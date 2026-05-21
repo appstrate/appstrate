@@ -139,7 +139,7 @@ async function buildTestApp(opts: {
     [
       {
         namespace: "test",
-        packageId: "@test/integ",
+        integrationId: "@test/integ",
         fetchCredentials: opts.deps.fetchCredentials,
         refreshCredentials: opts.deps.fetchCredentials,
       },
@@ -491,7 +491,7 @@ describe("token-aware spill — env-var configuration via createApp", () => {
         [
           {
             namespace: "test",
-            packageId: "@test/integ",
+            integrationId: "@test/integ",
             fetchCredentials: defaultFetchCredentials,
             refreshCredentials: defaultFetchCredentials,
           },

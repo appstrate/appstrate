@@ -249,7 +249,7 @@ describe("McpHost — namespace normalisation", () => {
   });
 
   // The generic `{ns}__api_call` tool (apiCall integrations) is named from
-  // `normaliseNamespace(packageId)` in integrations-boot — NOT routed through
+  // `normaliseNamespace(integrationId)` in integrations-boot — NOT routed through
   // McpHost.register — so the normaliser alone must yield an MCP-name-safe
   // prefix. A raw scoped package id (`@scope/name`) carries `@`/`/` which the
   // SDK's TOOL_NAME_PATTERN rejects → 500 on the agent's `/mcp` POST.

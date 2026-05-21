@@ -622,14 +622,14 @@ function buildSidecarTools(options: MountMcpOptions): {
         fetchCredentials: integ.fetchCredentials,
         refreshCredentials: integ.refreshCredentials,
       },
-      providerId: integ.packageId,
+      providerId: integ.integrationId,
       label: "api_call",
     };
     return {
       descriptor: {
         name: `${integ.namespace}__api_call`,
         description:
-          `Make an authenticated request through the "${integ.packageId}" integration's ` +
+          `Make an authenticated request through the "${integ.integrationId}" integration's ` +
           "credential-injecting proxy. The sidecar injects the integration's resolved " +
           "credential and forwards the request to the supplied target URL, which must match " +
           "the integration auth's `authorizedUris`. Binary upstream responses spill to MCP " +
@@ -670,7 +670,7 @@ function buildSidecarTools(options: MountMcpOptions): {
       descriptor: {
         name: `${integ.namespace}__api_upload`,
         description:
-          `Upload a workspace file (>5 MB friendly) to the "${integ.packageId}" integration's ` +
+          `Upload a workspace file (>5 MB friendly) to the "${integ.integrationId}" integration's ` +
           "API over a chunked resumable protocol. Bytes flow through the credential-injecting " +
           "proxy per chunk; the agent never holds credentials. Returns the upstream's final " +
           "response (file ID, ETag, …) plus a SHA-256 of the bytes uploaded for verification. " +
@@ -1572,7 +1572,7 @@ export interface ApiCallIntegrationConfig {
   /** McpHost-style namespace — the tool is named `{namespace}__api_call`. */
   namespace: string;
   /** Integration package id (used as the proxy `providerId` + audit source). */
-  packageId: string;
+  integrationId: string;
   /** Resolve the integration's credentials into the proxy payload. */
   fetchCredentials: ApiCallDeps["fetchCredentials"];
   /** Force-refresh on a mid-run 401 and re-resolve. */

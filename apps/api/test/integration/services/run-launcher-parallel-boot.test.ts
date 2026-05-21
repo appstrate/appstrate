@@ -151,7 +151,7 @@ function buildRunPlan(): AppstrateRunPlan {
     // shortcut does not bypass createSidecar in this parallel-boot test.
     integrations: [
       {
-        packageId: "@test/gmail-mcp",
+        integrationId: "@test/gmail-mcp",
         namespace: "gmail",
         manifest: { name: "@test/gmail-mcp", version: "1.0.0" },
         spawnEnv: {},

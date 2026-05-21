@@ -36,7 +36,7 @@ export type { IntegrationCredentialsWire };
 
 export interface CreateIntegrationCredentialsSourceOptions {
   /** Package id (e.g. `@vendor/integration`). */
-  packageId: string;
+  integrationId: string;
   /** Platform base URL (e.g. `http://appstrate-api:3000`). */
   platformApiUrl: string;
   /** Run token used as `Bearer` for both endpoints. */
@@ -92,7 +92,7 @@ export function createIntegrationCredentialsSource(
     const last = lastRefreshAt.get(authKey) ?? 0;
     if (now - last < minRefreshIntervalMs) {
       logger.info("integration credential refresh suppressed (cooldown)", {
-        packageId: options.packageId,
+        integrationId: options.integrationId,
         authKey,
         cooldownMs: minRefreshIntervalMs,
         elapsedMs: now - last,
@@ -111,7 +111,7 @@ export function createIntegrationCredentialsSource(
   };
 
   async function doRefresh(authKey: string): Promise<boolean> {
-    const url = `${options.platformApiUrl}/internal/integration-credentials/${options.packageId}/refresh`;
+    const url = `${options.platformApiUrl}/internal/integration-credentials/${options.integrationId}/refresh`;
     let res: Response;
     try {
       res = await fetchFn(url, {
@@ -120,7 +120,7 @@ export function createIntegrationCredentialsSource(
       });
     } catch (err) {
       logger.warn("integration credential refresh fetch failed", {
-        packageId: options.packageId,
+        integrationId: options.integrationId,
         authKey,
         error: err instanceof Error ? err.message : String(err),
       });
@@ -131,7 +131,7 @@ export function createIntegrationCredentialsSource(
       // on the platform. The integration's next call will return 401
       // again; we don't want to chase it forever.
       logger.warn("integration credential refresh revoked", {
-        packageId: options.packageId,
+        integrationId: options.integrationId,
         authKey,
       });
       // Mark cooldown so we don't retry for at least the full interval.
@@ -140,7 +140,7 @@ export function createIntegrationCredentialsSource(
     }
     if (!res.ok) {
       logger.warn("integration credential refresh non-OK status", {
-        packageId: options.packageId,
+        integrationId: options.integrationId,
         authKey,
         status: res.status,
       });
@@ -151,7 +151,7 @@ export function createIntegrationCredentialsSource(
       next = (await res.json()) as IntegrationCredentialsWire;
     } catch (err) {
       logger.warn("integration credential refresh malformed JSON", {
-        packageId: options.packageId,
+        integrationId: options.integrationId,
         authKey,
         error: err instanceof Error ? err.message : String(err),
       });
@@ -163,7 +163,7 @@ export function createIntegrationCredentialsSource(
     payload = next;
     lastRefreshAt.set(authKey, Date.now());
     logger.info("integration credentials refreshed", {
-      packageId: options.packageId,
+      integrationId: options.integrationId,
       authKey,
       authCount: payload.auths.length,
     });
@@ -185,11 +185,11 @@ export function createIntegrationCredentialsSource(
  * MITM listener entirely).
  */
 export async function fetchInitialIntegrationCredentials(
-  packageId: string,
+  integrationId: string,
   opts: { platformApiUrl: string; runToken: string; fetchFn?: typeof fetch },
 ): Promise<IntegrationCredentialsWire> {
   const fetchFn = opts.fetchFn ?? fetch;
-  const url = `${opts.platformApiUrl}/internal/integration-credentials/${packageId}`;
+  const url = `${opts.platformApiUrl}/internal/integration-credentials/${integrationId}`;
   const res = await fetchFn(url, {
     headers: { Authorization: `Bearer ${opts.runToken}` },
   });
@@ -202,7 +202,7 @@ export async function fetchInitialIntegrationCredentials(
       // ignore
     }
     throw new Error(
-      detail || `Failed to fetch integration credentials for ${packageId}: HTTP ${res.status}`,
+      detail || `Failed to fetch integration credentials for ${integrationId}: HTTP ${res.status}`,
     );
   }
   return (await res.json()) as IntegrationCredentialsWire;

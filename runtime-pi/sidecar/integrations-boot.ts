@@ -103,9 +103,9 @@ export interface BootIntegrationsResult {
    */
   tools: AppstrateToolDefinition[];
   /** Per-integration spawn outcome — useful for run-event observability. */
-  spawned: Array<{ packageId: string; namespace: string; toolCount: number }>;
+  spawned: Array<{ integrationId: string; namespace: string; toolCount: number }>;
   /** Per-integration failures — emitted as warnings but do not abort boot. */
-  failed: Array<{ packageId: string; error: string }>;
+  failed: Array<{ integrationId: string; error: string }>;
   /** Idempotent teardown — closes every upstream MCP client + runtime adapter. */
   shutdown: () => Promise<void>;
 }
@@ -134,7 +134,7 @@ export function readIntegrationSpecsFromEnv(env = process.env): IntegrationSpawn
     return (
       typeof s === "object" &&
       s !== null &&
-      typeof (s as IntegrationSpawnSpec).packageId === "string" &&
+      typeof (s as IntegrationSpawnSpec).integrationId === "string" &&
       typeof (s as IntegrationSpawnSpec).namespace === "string" &&
       typeof (s as IntegrationSpawnSpec).manifest === "object"
     );
@@ -147,8 +147,11 @@ export function readIntegrationSpecsFromEnv(env = process.env): IntegrationSpawn
  * credentials surface and verifies that the run's agent actually
  * declares this integration as a dependency.
  */
-async function fetchBundleBytes(packageId: string, opts: BundleFetchOptions): Promise<Uint8Array> {
-  const url = `${opts.platformApiUrl}/internal/integration-bundle/${packageId}`;
+async function fetchBundleBytes(
+  integrationId: string,
+  opts: BundleFetchOptions,
+): Promise<Uint8Array> {
+  const url = `${opts.platformApiUrl}/internal/integration-bundle/${integrationId}`;
   const f = opts.fetchFn ?? fetch;
   const res = await f(url, { headers: { Authorization: `Bearer ${opts.runToken}` } });
   if (!res.ok) {
@@ -160,7 +163,7 @@ async function fetchBundleBytes(packageId: string, opts: BundleFetchOptions): Pr
       // ignore
     }
     throw new Error(
-      detail || `Failed to fetch integration bundle for ${packageId}: HTTP ${res.status}`,
+      detail || `Failed to fetch integration bundle for ${integrationId}: HTTP ${res.status}`,
     );
   }
   const ab = await res.arrayBuffer();
@@ -219,10 +222,12 @@ async function connectRemoteHttpIntegration(
 ): Promise<{ client: AppstrateMcpClient; authKey: string }> {
   const serverUrl = spec.manifest.server?.url;
   if (!serverUrl) {
-    throw new Error(`integration ${spec.packageId} declares server.type="http" but no server.url`);
+    throw new Error(
+      `integration ${spec.integrationId} declares server.type="http" but no server.url`,
+    );
   }
 
-  const initial = await fetchInitialIntegrationCredentials(spec.packageId, bundleFetchOpts);
+  const initial = await fetchInitialIntegrationCredentials(spec.integrationId, bundleFetchOpts);
 
   // Pick the auth whose header we'll inject. OAuth2 wins (refresh-aware);
   // otherwise the first auth with a resolved plan. The credentials
@@ -238,13 +243,13 @@ async function connectRemoteHttpIntegration(
   const pickedAuth = oauthAuth ?? fallbackAuth;
   if (!pickedAuth) {
     throw new Error(
-      `integration ${spec.packageId} server.type="http" has no auth with a resolvable delivery.http plan`,
+      `integration ${spec.integrationId} server.type="http" has no auth with a resolvable delivery.http plan`,
     );
   }
   const authKey = pickedAuth.authKey;
 
   const source = createIntegrationCredentialsSource({
-    packageId: spec.packageId,
+    integrationId: spec.integrationId,
     platformApiUrl: bundleFetchOpts.platformApiUrl,
     runToken: bundleFetchOpts.runToken,
     initialPayload: initial,
@@ -410,12 +415,15 @@ export async function bootIntegrations(
       if (spec.apiCall) {
         if (!apiCallDeps) {
           logger.warn("integration declares api_call but sidecar has no proxy deps; skipping", {
-            packageId: spec.packageId,
+            integrationId: spec.integrationId,
           });
         } else {
-          const initial = await fetchInitialIntegrationCredentials(spec.packageId, bundleFetchOpts);
+          const initial = await fetchInitialIntegrationCredentials(
+            spec.integrationId,
+            bundleFetchOpts,
+          );
           const source = createIntegrationCredentialsSource({
-            packageId: spec.packageId,
+            integrationId: spec.integrationId,
             platformApiUrl: bundleFetchOpts.platformApiUrl,
             runToken: bundleFetchOpts.runToken,
             initialPayload: initial,
@@ -428,7 +436,7 @@ export async function bootIntegrations(
           });
           const integ: ApiCallIntegrationConfig = {
             namespace: spec.namespace, // McpHost.register normalises it
-            packageId: spec.packageId,
+            integrationId: spec.integrationId,
             fetchCredentials: credAdapter.fetchCredentials,
             refreshCredentials: credAdapter.refreshCredentials,
             // Resumable-upload protocols the manifest declared (plumbed via
@@ -440,7 +448,7 @@ export async function bootIntegrations(
           };
           const defs = createApiCallToolDefs(integ, apiCallDeps);
           const pair = await createInProcessPair(defs, {
-            serverInfo: { name: `appstrate-api-call-${spec.packageId}`, version: "1" },
+            serverInfo: { name: `appstrate-api-call-${spec.integrationId}`, version: "1" },
           });
           const wrapped = wrapClient(pair.client, { close: () => pair.close() });
           const sizeBefore = host.size();
@@ -453,7 +461,7 @@ export async function bootIntegrations(
           apiCallToolCount = host.size() - sizeBefore;
           clients.push(wrapped);
           logger.info("integration api_call registered (in-process)", {
-            packageId: spec.packageId,
+            integrationId: spec.integrationId,
             namespace: spec.namespace,
             authKey: spec.apiCall.authKey,
             toolCount: apiCallToolCount,
@@ -465,7 +473,7 @@ export async function bootIntegrations(
       // spawn; the in-process api_call server above is its entire surface.
       if (!spec.manifest.server) {
         spawned.push({
-          packageId: spec.packageId,
+          integrationId: spec.integrationId,
           namespace: spec.namespace,
           toolCount: apiCallToolCount,
         });
@@ -494,12 +502,12 @@ export async function bootIntegrations(
         const added = host.size() - sizeBefore;
         clients.push(client);
         spawned.push({
-          packageId: spec.packageId,
+          integrationId: spec.integrationId,
           namespace: spec.namespace,
           toolCount: added,
         });
         logger.info("integration registered (remote http)", {
-          packageId: spec.packageId,
+          integrationId: spec.integrationId,
           namespace: spec.namespace,
           serverUrl: server.url,
           authKey,
@@ -521,9 +529,12 @@ export async function bootIntegrations(
         runCaBundle !== null &&
         runCaCertHostPath !== null
       ) {
-        const initial = await fetchInitialIntegrationCredentials(spec.packageId, bundleFetchOpts);
+        const initial = await fetchInitialIntegrationCredentials(
+          spec.integrationId,
+          bundleFetchOpts,
+        );
         const source = createIntegrationCredentialsSource({
-          packageId: spec.packageId,
+          integrationId: spec.integrationId,
           platformApiUrl: bundleFetchOpts.platformApiUrl,
           runToken: bundleFetchOpts.runToken,
           initialPayload: initial,
@@ -553,7 +564,7 @@ export async function bootIntegrations(
                   }
                 : event;
             logger.info("integration mitm event", {
-              packageId: spec.packageId,
+              integrationId: spec.integrationId,
               ...safe,
             });
           },
@@ -567,13 +578,13 @@ export async function bootIntegrations(
           caCertHostPath: runCaCertHostPath,
         };
         logger.info("integration MITM listener ready", {
-          packageId: spec.packageId,
+          integrationId: spec.integrationId,
           localUrl: listener.proxyUrl(),
           runnerProxyUrl,
         });
       }
 
-      const bytes = await fetchBundleBytes(spec.packageId, bundleFetchOpts);
+      const bytes = await fetchBundleBytes(spec.integrationId, bundleFetchOpts);
       const root = await extractBundle(bytes, spec.namespace);
 
       const spawnedIntegration = await adapter.spawn({
@@ -582,7 +593,7 @@ export async function bootIntegrations(
         bundleRoot: root,
         mitm: mitmCtx,
         onStderrLine: (line) => {
-          logger.info("integration stderr", { packageId: spec.packageId, line });
+          logger.info("integration stderr", { integrationId: spec.integrationId, line });
         },
       });
 
@@ -612,12 +623,12 @@ export async function bootIntegrations(
       const added = host.size() - sizeBefore;
       clients.push(wrapped);
       spawned.push({
-        packageId: spec.packageId,
+        integrationId: spec.integrationId,
         namespace: spec.namespace,
         toolCount: added,
       });
       logger.info("integration registered", {
-        packageId: spec.packageId,
+        integrationId: spec.integrationId,
         namespace: spec.namespace,
         adapter: adapter.id,
         ...(spawnedIntegration.diagnosticId
@@ -627,9 +638,9 @@ export async function bootIntegrations(
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      failed.push({ packageId: spec.packageId, error: msg });
+      failed.push({ integrationId: spec.integrationId, error: msg });
       logger.warn("integration spawn failed", {
-        packageId: spec.packageId,
+        integrationId: spec.integrationId,
         error: msg,
       });
     }

@@ -114,8 +114,8 @@ export interface HttpDeliveryAuthSpec {
 }
 
 export interface IntegrationSpawnSpec {
-  /** Package id (e.g. `@appstrate/gmail-mcp`). */
-  packageId: string;
+  /** Integration package id (e.g. `@appstrate/gmail-mcp`). */
+  integrationId: string;
   /** McpHost namespace — tool names are prefixed with `{namespace}__`. */
   namespace: string;
   /** Validated `type: integration` manifest (server, transport, auths). */

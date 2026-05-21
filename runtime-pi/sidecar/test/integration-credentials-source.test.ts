@@ -53,7 +53,7 @@ describe("createIntegrationCredentialsSource", () => {
     const initial = makePayload("tok-1");
     const fetchFn = (async () => new Response("", { status: 500 })) as unknown as typeof fetch;
     const source = createIntegrationCredentialsSource({
-      packageId: "@test/integ",
+      integrationId: "@test/integ",
       platformApiUrl: "http://api",
       runToken: "run-tok",
       initialPayload: initial,
@@ -79,7 +79,7 @@ describe("createIntegrationCredentialsSource", () => {
     }) as unknown as typeof fetch;
 
     const source = createIntegrationCredentialsSource({
-      packageId: "@test/integ",
+      integrationId: "@test/integ",
       platformApiUrl: "http://api",
       runToken: "run-tok",
       initialPayload: initial,
@@ -106,7 +106,7 @@ describe("createIntegrationCredentialsSource", () => {
     }) as unknown as typeof fetch;
 
     const source = createIntegrationCredentialsSource({
-      packageId: "@test/integ",
+      integrationId: "@test/integ",
       platformApiUrl: "http://api",
       runToken: "run-tok",
       initialPayload: initial,
@@ -126,7 +126,7 @@ describe("createIntegrationCredentialsSource", () => {
       throw new TypeError("ConnectionRefused");
     }) as unknown as typeof fetch;
     const source = createIntegrationCredentialsSource({
-      packageId: "@test/integ",
+      integrationId: "@test/integ",
       platformApiUrl: "http://api",
       runToken: "run-tok",
       initialPayload: initial,
@@ -142,7 +142,7 @@ describe("createIntegrationCredentialsSource", () => {
     const fetchFn = (async () =>
       new Response("upstream broke", { status: 502 })) as unknown as typeof fetch;
     const source = createIntegrationCredentialsSource({
-      packageId: "@test/integ",
+      integrationId: "@test/integ",
       platformApiUrl: "http://api",
       runToken: "run-tok",
       initialPayload: initial,
@@ -164,7 +164,7 @@ describe("createIntegrationCredentialsSource", () => {
     }) as unknown as typeof fetch;
 
     const source = createIntegrationCredentialsSource({
-      packageId: "@test/integ",
+      integrationId: "@test/integ",
       platformApiUrl: "http://api",
       runToken: "run-tok",
       initialPayload: initial,
@@ -192,7 +192,7 @@ describe("createIntegrationCredentialsSource", () => {
     }) as unknown as typeof fetch;
 
     const source = createIntegrationCredentialsSource({
-      packageId: "@test/integ",
+      integrationId: "@test/integ",
       platformApiUrl: "http://api",
       runToken: "run-tok",
       initialPayload: initial,

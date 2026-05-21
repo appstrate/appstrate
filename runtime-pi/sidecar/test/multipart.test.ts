@@ -69,7 +69,7 @@ async function makeMultipartApp(overrides?: Partial<AppDeps>) {
     [
       {
         namespace: "test",
-        packageId: "@appstrate/test",
+        integrationId: "@appstrate/test",
         fetchCredentials: async () => integrationCreds(),
         refreshCredentials: async () => integrationCreds(),
       },

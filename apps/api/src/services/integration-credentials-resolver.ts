@@ -73,7 +73,7 @@ export interface ResolveLiveCredentialsOptions {
  *     keeps a flapping upstream from hammering this endpoint.
  */
 export async function resolveLiveIntegrationCredentials(
-  packageId: string,
+  integrationId: string,
   context: {
     runId: string;
     orgId: string;
@@ -82,7 +82,7 @@ export async function resolveLiveIntegrationCredentials(
     actor: Actor | null;
     /**
      * Snapshot from `runs.resolved_connections`. When present, the
-     * `[packageId].connectionId` entry pins which row the MITM listener
+     * `[integrationId].connectionId` entry pins which row the MITM listener
      * decrypts — so the cascade's pick (admin pin / run override /
      * schedule override / member pin / auto fallback) survives past
      * kickoff into the live credential surface. One connection per
@@ -96,11 +96,11 @@ export async function resolveLiveIntegrationCredentials(
   if (!context.actor) {
     // Scheduled runs without an actor cannot connect to user-scoped
     // integrations; refuse early.
-    throw notFound(`Integration '${packageId}' has no actor-scoped connection for this run`);
+    throw notFound(`Integration '${integrationId}' has no actor-scoped connection for this run`);
   }
 
-  const manifest = await loadIntegrationManifest(packageId);
-  await assertIntegrationActive(packageId, context.applicationId);
+  const manifest = await loadIntegrationManifest(integrationId);
+  await assertIntegrationActive(integrationId, context.applicationId);
 
   const auths = manifest.auths ?? {};
   if (Object.keys(auths).length === 0) {
@@ -117,13 +117,13 @@ export async function resolveLiveIntegrationCredentials(
   // at kickoff. The snapshot pins which row to load; without a snapshot
   // (legacy/manual paths) fall back to the actor's accessible connections
   // (first-found across declared auths — matches the spawn resolver).
-  const snapshotEntry = context.resolvedConnections?.[packageId] ?? null;
+  const snapshotEntry = context.resolvedConnections?.[integrationId] ?? null;
   const connection = snapshotEntry
     ? await loadAccessibleConnectionById(snapshotEntry.connectionId, {
         applicationId: context.applicationId,
         actor: context.actor,
       })
-    : await pickAnyAccessibleConnection(packageId, Object.keys(auths), {
+    : await pickAnyAccessibleConnection(integrationId, Object.keys(auths), {
         applicationId: context.applicationId,
         actor: context.actor,
       });
@@ -139,7 +139,7 @@ export async function resolveLiveIntegrationCredentials(
 
   let fields = decryptIntegrationConnectionFields(
     connection.credentialsEncrypted,
-    packageId,
+    integrationId,
     authKey,
   );
   if (!fields) return out;
@@ -155,7 +155,7 @@ export async function resolveLiveIntegrationCredentials(
 
   if (needsRefresh) {
     const refreshContext = await buildIntegrationOAuthRefreshContext(
-      packageId,
+      integrationId,
       authKey,
       authDef,
       context.applicationId,
@@ -164,7 +164,7 @@ export async function resolveLiveIntegrationCredentials(
       try {
         const refreshed = await forceRefreshIntegrationConnection(
           connection.id,
-          packageId,
+          integrationId,
           authKey,
           connection.credentialsEncrypted,
           refreshContext,
@@ -183,7 +183,7 @@ export async function resolveLiveIntegrationCredentials(
           const granted = refreshed.scopesGranted;
           const { required } = await computeRequiredScopes({
             scope: { orgId: context.orgId, applicationId: context.applicationId },
-            integrationPackageId: packageId,
+            integrationPackageId: integrationId,
             authKey,
           });
           const missing = required.filter((s) => !granted.includes(s));
@@ -194,7 +194,7 @@ export async function resolveLiveIntegrationCredentials(
               .where(eq(integrationConnections.id, connection.id));
             logger.warn("Integration scope shrink dropped below required floor", {
               runId: context.runId,
-              packageId,
+              integrationId,
               authKey,
               granted,
               required,
@@ -203,7 +203,7 @@ export async function resolveLiveIntegrationCredentials(
           } else {
             logger.info("Integration scope shrink absorbed (still covers required)", {
               runId: context.runId,
-              packageId,
+              integrationId,
               authKey,
               granted,
               required,
@@ -217,12 +217,12 @@ export async function resolveLiveIntegrationCredentials(
           // needsReconnection flag has already been set by the helper.
           logger.warn("Integration token refresh revoked", {
             runId: context.runId,
-            packageId,
+            integrationId,
             authKey,
             status: err.status,
           });
           throw forbidden(
-            `Integration '${packageId}' auth '${authKey}' needs re-connection (refresh token revoked)`,
+            `Integration '${integrationId}' auth '${authKey}' needs re-connection (refresh token revoked)`,
           );
         }
         // Transient failure (network, upstream 5xx, parse error). The
@@ -231,12 +231,12 @@ export async function resolveLiveIntegrationCredentials(
         // poisoning the connection row.
         logger.warn("Integration token refresh transient error", {
           runId: context.runId,
-          packageId,
+          integrationId,
           authKey,
           error: err instanceof Error ? err.message : String(err),
         });
         throw badGateway(
-          `Integration '${packageId}' auth '${authKey}' token refresh failed upstream (transient)`,
+          `Integration '${integrationId}' auth '${authKey}' token refresh failed upstream (transient)`,
         );
       }
     }
@@ -270,16 +270,18 @@ export async function resolveLiveIntegrationCredentials(
 // Helpers
 // ─────────────────────────────────────────────
 
-async function loadIntegrationManifest(packageId: string): Promise<IntegrationManifest> {
-  const res = await fetchIntegrationManifest(packageId);
+async function loadIntegrationManifest(integrationId: string): Promise<IntegrationManifest> {
+  const res = await fetchIntegrationManifest(integrationId);
   if (res.ok) return res.manifest;
   switch (res.failure.kind) {
     case "not_found":
-      throw notFound(`Integration '${packageId}' not found`);
+      throw notFound(`Integration '${integrationId}' not found`);
     case "not_integration":
-      throw notFound(`Package '${packageId}' is not an integration`);
+      throw notFound(`Package '${integrationId}' is not an integration`);
     case "invalid_manifest":
-      logger.warn("integration manifest fails validation in credentials resolver", { packageId });
+      logger.warn("integration manifest fails validation in credentials resolver", {
+        integrationId,
+      });
       throw internalError();
   }
 }

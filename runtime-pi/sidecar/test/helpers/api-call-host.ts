@@ -25,7 +25,7 @@ export async function buildApiCallHost(
   for (const integ of integs) {
     const defs = createApiCallToolDefs(integ, deps);
     const pair = await createInProcessPair(defs, {
-      serverInfo: { name: `test-api-call-${integ.packageId}`, version: "1" },
+      serverInfo: { name: `test-api-call-${integ.integrationId}`, version: "1" },
     });
     await host.register({
       namespace: integ.namespace,

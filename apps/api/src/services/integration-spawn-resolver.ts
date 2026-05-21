@@ -69,7 +69,7 @@ export interface ResolveIntegrationsInput {
   /**
    * Snapshot of the cascade frozen at run kickoff
    * (`runs.resolved_connections`). When set, the spawn loader looks up
-   * `snapshot[packageId].connectionId` to pick the one connection
+   * `snapshot[integrationId].connectionId` to pick the one connection
    * (admin pin / run override / schedule override / member pin / auto
    * fallback). When omitted, falls back to live actor-based lookup
    * (auto-pick when the actor has exactly one accessible connection).
@@ -103,7 +103,7 @@ export async function resolveIntegrationSpawns(
       if (spec) out.push(spec);
     } catch (err) {
       logger.warn("integration resolve failed; skipping", {
-        packageId: entry.id,
+        integrationId: entry.id,
         applicationId,
         error: err instanceof Error ? err.message : String(err),
       });
@@ -113,7 +113,7 @@ export async function resolveIntegrationSpawns(
 }
 
 async function resolveOne(
-  packageId: string,
+  integrationId: string,
   applicationId: string,
   actor: Actor,
   agentToolSelection: readonly string[] | undefined,
@@ -125,28 +125,31 @@ async function resolveOne(
   // run's org. The runtime never resolves against a yanked version —
   // we always use the package's draft manifest, which the publish path
   // keeps pinned to the live "latest" snapshot.
-  const res = await fetchIntegrationManifest(packageId);
+  const res = await fetchIntegrationManifest(integrationId);
   if (!res.ok) {
     switch (res.failure.kind) {
       case "not_found":
-        logger.info("integration not found", { packageId });
+        logger.info("integration not found", { integrationId });
         return null;
       case "not_integration":
         logger.warn("dependency declared as integration but package is different type", {
-          packageId,
+          integrationId,
           type: res.failure.actualType,
         });
         return null;
       case "invalid_manifest":
-        logger.warn("integration manifest fails validation", { packageId });
+        logger.warn("integration manifest fails validation", { integrationId });
         return null;
     }
   }
   const manifest = res.manifest;
 
   // (b) Installed in the application
-  if (!(await isIntegrationActive(packageId, applicationId))) {
-    logger.info("integration not installed in application; skipping", { packageId, applicationId });
+  if (!(await isIntegrationActive(integrationId, applicationId))) {
+    logger.info("integration not installed in application; skipping", {
+      integrationId,
+      applicationId,
+    });
     return null;
   }
 
@@ -179,7 +182,7 @@ async function resolveOne(
   // runtime through `/internal/integration-credentials`, and a `custom`
   // auth (no server-side injection) legitimately resolves no delivery.
   const deliveries = await resolveDeliveries(
-    packageId,
+    integrationId,
     applicationId,
     actor,
     manifest,
@@ -195,7 +198,7 @@ async function resolveOne(
   // Namespace = the manifest name's slug portion, normalised by the
   // MCP host. We pass the package id; McpHost.normaliseNamespace does
   // the slug + length cap.
-  const namespace = packageId;
+  const namespace = integrationId;
 
   // Phase 4 — narrow the MITM URL envelope to the union of urlPatterns
   // declared on the agent-selected tools (skipped for remote HTTP MCP).
@@ -205,7 +208,7 @@ async function resolveOne(
     : computeToolUrlEnvelope(manifest, agentToolSelection);
 
   return {
-    packageId,
+    integrationId,
     namespace,
     manifest: {
       name: manifest.name,
@@ -336,7 +339,7 @@ interface ResolvedDeliveries {
  * the actor's accessible connections on this integration.
  */
 async function resolveDeliveries(
-  packageId: string,
+  integrationId: string,
   applicationId: string,
   actor: Actor,
   manifest: IntegrationManifest,
@@ -352,11 +355,14 @@ async function resolveDeliveries(
   // Load the one connection chosen by the cascade.
   const row = resolvedConnection
     ? await loadAccessibleConnectionById(resolvedConnection.connectionId, { applicationId, actor })
-    : await pickAnyAccessibleConnection(packageId, Object.keys(auths), { applicationId, actor });
+    : await pickAnyAccessibleConnection(integrationId, Object.keys(auths), {
+        applicationId,
+        actor,
+      });
 
   if (!row) {
     logger.info("no resolved connection for integration; skipping delivery entries", {
-      packageId,
+      integrationId,
       actorType: actor.type,
       hadSnapshot: resolvedConnection !== null,
     });
@@ -369,7 +375,7 @@ async function resolveDeliveries(
     // (renamed/removed since the connection was created). Skip — the
     // operator should clean up the orphan.
     logger.warn("resolved connection points at unknown authKey; skipping", {
-      packageId,
+      integrationId,
       authKey: row.authKey,
       connectionId: row.id,
     });
@@ -381,7 +387,7 @@ async function resolveDeliveries(
     fields = decryptCredentialsToStringMap(row.credentialsEncrypted);
   } catch (err) {
     logger.warn("decrypt failed for integration connection", {
-      packageId,
+      integrationId,
       authKey: row.authKey,
       error: err instanceof Error ? err.message : String(err),
     });
@@ -399,7 +405,7 @@ async function resolveDeliveries(
       const value = readCredentialField(fields, conf.from);
       if (value === undefined || value.length === 0) {
         logger.info("delivery.env source field missing on credentials", {
-          packageId,
+          integrationId,
           authKey: row.authKey,
           envKey,
           from: conf.from,
@@ -417,7 +423,7 @@ async function resolveDeliveries(
     const plan = resolveHttpDelivery(auth.type, fields, httpDecl);
     if (!plan) {
       logger.info("delivery.http produced no plan (auth missing required fields)", {
-        packageId,
+        integrationId,
         authKey: row.authKey,
         authType: auth.type,
       });

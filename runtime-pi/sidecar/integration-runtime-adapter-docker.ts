@@ -190,7 +190,7 @@ export function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapt
         "--label",
         "appstrate.adapter=integration",
         "--label",
-        `appstrate.integration=${spec.packageId}`,
+        `appstrate.integration=${spec.integrationId}`,
       ];
 
       const networkFlags: string[] = runNetwork ? ["--network", runNetwork] : [];
