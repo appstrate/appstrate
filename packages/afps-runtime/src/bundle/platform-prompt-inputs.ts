@@ -6,18 +6,15 @@
  *
  * The bundle is self-describing — its root package holds the prompt
  * template + input/config/output schemas, and every non-root package
- * declares its own `type` (tool / skill / provider) in its manifest.
- * That is enough to compute every section of the platform preamble
- * that does not require live platform state (DB, sidecar, credentials).
+ * declares its own `type` (tool / skill) in its manifest. That is
+ * enough to compute every section of the platform preamble that does
+ * not require live platform state (DB, sidecar, credentials).
  *
  * Callers pass an {@link ExecutionContext} for state/memories/history
  * and an {@link overrides} bag for platform-specific fields:
  *
  *   - `platformName`: display name in `## System`
  *   - `uploads`: only the platform can enumerate these (DB-backed)
- *   - `providers`: pre-enriched list — merged over the bundle-derived
- *     providers by `id`, letting the platform add `authorizedUris`
- *     resolved via `@appstrate/connect` without re-deriving everything
  *   - any other field to override the bundle-derived value verbatim
  *
  * This helper NEVER imports anything outside `@appstrate/afps-runtime`.
@@ -29,7 +26,6 @@ import type { Bundle, BundlePackage } from "./types.ts";
 import type { ExecutionContext } from "../types/execution-context.ts";
 import type {
   PlatformPromptOptions,
-  PlatformPromptProvider,
   PlatformPromptSchema,
   PlatformPromptTool,
 } from "./platform-prompt.ts";
@@ -124,47 +120,16 @@ function toolFromPackage(pkg: BundlePackage): PlatformPromptTool {
 }
 
 /**
- * Derive provider meta from a provider package's manifest. Reads
- * `authorizedUris` / `allowAllUris` from `manifest.definition` per AFPS
- * spec §7.5 / §8.6; surfaces `docsUrl` and `authMode` when declared.
- * Per-provider documentation (PROVIDER.md) is surfaced through the
- * synthesised provider-skill mechanism, not through this struct.
- */
-function providerFromPackage(pkg: BundlePackage): PlatformPromptProvider {
-  const manifest = pkg.manifest as Record<string, unknown>;
-  const parsed = parsePackageIdentity(pkg.identity);
-  const id = parsed ? parsed.packageId : pkg.identity;
-
-  const def = isPlainObject(manifest["definition"]) ? manifest["definition"] : {};
-
-  const out: PlatformPromptProvider = { id };
-  if (typeof manifest["name"] === "string") out.displayName = manifest["name"] as string;
-  if (typeof def["authMode"] === "string") out.authMode = def["authMode"] as string;
-  if (typeof def["docsUrl"] === "string") out.docsUrl = def["docsUrl"] as string;
-  if (Array.isArray(def["authorizedUris"])) {
-    out.authorizedUris = (def["authorizedUris"] as unknown[]).filter(
-      (u): u is string => typeof u === "string",
-    );
-  }
-  if (typeof def["allowAllUris"] === "boolean") {
-    out.allowAllUris = def["allowAllUris"] as boolean;
-  }
-  return out;
-}
-
-/**
  * Walk all non-root packages once and classify by `manifest.type`.
  * Single pass — keeps the traversal cost predictable on large bundles.
  */
 function walkDependencies(bundle: Bundle): {
   tools: PlatformPromptTool[];
   skills: PlatformPromptTool[];
-  providers: PlatformPromptProvider[];
   toolDocs: Array<{ id: string; content: string }>;
 } {
   const tools: PlatformPromptTool[] = [];
   const skills: PlatformPromptTool[] = [];
-  const providers: PlatformPromptProvider[] = [];
   const toolDocs: Array<{ id: string; content: string }> = [];
   const decoder = new TextDecoder();
 
@@ -180,49 +145,13 @@ function walkDependencies(bundle: Bundle): {
       }
     } else if (type === "skill") {
       skills.push(toolFromPackage(pkg));
-    } else if (type === "provider") {
-      providers.push(providerFromPackage(pkg));
     }
   }
 
-  return { tools, skills, providers, toolDocs };
+  return { tools, skills, toolDocs };
 }
 
-/**
- * Merge override providers over bundle-derived providers by `id`.
- * Override fields win on conflict; bundle fields fill gaps. Order is
- * preserved from the bundle walk (deterministic) with overrides-only
- * entries appended at the end.
- */
-function mergeProviders(
-  fromBundle: ReadonlyArray<PlatformPromptProvider>,
-  fromOverride: ReadonlyArray<PlatformPromptProvider> | undefined,
-): ReadonlyArray<PlatformPromptProvider> {
-  if (!fromOverride || fromOverride.length === 0) return fromBundle;
-  const overrideById = new Map(fromOverride.map((p) => [p.id, p]));
-  const merged: PlatformPromptProvider[] = fromBundle.map((p) => {
-    const o = overrideById.get(p.id);
-    return o ? { ...p, ...o } : p;
-  });
-  const seen = new Set(fromBundle.map((p) => p.id));
-  for (const o of fromOverride) {
-    if (!seen.has(o.id)) merged.push(o);
-  }
-  return merged;
-}
-
-export interface BuildPlatformPromptInputsOverrides extends Partial<
-  Omit<PlatformPromptOptions, "context">
-> {
-  /**
-   * When `true`, the `providers` override REPLACES bundle-derived
-   * providers instead of merging by id. Platforms that compute a
-   * connection-filtered list (e.g. "only providers with credentials
-   * wired") should set this; the default merge-by-id semantic is
-   * geared at enrichment (e.g. add `authorizedUris` to bundle meta).
-   */
-  providersReplace?: boolean;
-}
+export type BuildPlatformPromptInputsOverrides = Partial<Omit<PlatformPromptOptions, "context">>;
 
 /**
  * Derive a fully-populated {@link PlatformPromptOptions} from a bundle
@@ -232,9 +161,7 @@ export interface BuildPlatformPromptInputsOverrides extends Partial<
  *
  * Behaviour:
  *   - Bundle-derived fields are overridden **verbatim** when present in
- *     `overrides`, except `providers` which is merged by id (see
- *     {@link mergeProviders}) so the platform can enrich URIs without
- *     re-deriving displayName / authMode / docs.
+ *     `overrides`.
  *   - `context` is always the caller's; the bundle never overrides it.
  *   - Absent overrides leave bundle-derived defaults in place.
  */
@@ -246,7 +173,7 @@ export function buildPlatformPromptInputs(
   const root = bundle.packages.get(bundle.root);
   const rootManifest = root?.manifest as Record<string, unknown> | undefined;
 
-  const { tools, skills, providers, toolDocs } = walkDependencies(bundle);
+  const { tools, skills, toolDocs } = walkDependencies(bundle);
 
   const inputSchema = asPromptSchema(readSchemaSection(rootManifest, "input"));
   const configSchema = asPromptSchema(readSchemaSection(rootManifest, "config"));
@@ -264,29 +191,19 @@ export function buildPlatformPromptInputs(
     availableTools: tools,
     availableSkills: skills,
     toolDocs,
-    providers,
     ...(inputSchema ? { inputSchema } : {}),
     ...(configSchema ? { configSchema } : {}),
     ...(outputSchema ? { outputSchema } : {}),
   };
 
-  // Apply overrides. `providers` is merged by id by default;
-  // `providersReplace: true` swaps to full replacement. Everything
-  // else is replaced verbatim. Undefined override values are ignored
-  // so callers can opt into "use derived" by simply omitting the key.
+  // Apply overrides verbatim. Undefined override values are ignored so
+  // callers can opt into "use derived" by simply omitting the key.
   const merged: PlatformPromptOptions = { ...derived };
-  const { providersReplace, ...standard } = overrides;
-  for (const [key, value] of Object.entries(standard) as Array<
+  for (const [key, value] of Object.entries(overrides) as Array<
     [keyof PlatformPromptOptions, unknown]
   >) {
     if (value === undefined) continue;
-    if (key === "providers") {
-      merged.providers = providersReplace
-        ? (value as ReadonlyArray<PlatformPromptProvider>)
-        : mergeProviders(derived.providers ?? [], value as ReadonlyArray<PlatformPromptProvider>);
-    } else {
-      (merged as unknown as Record<string, unknown>)[key] = value;
-    }
+    (merged as unknown as Record<string, unknown>)[key] = value;
   }
 
   return merged;

@@ -147,16 +147,16 @@ function buildRunPlan(): AppstrateRunPlan {
       label: "Test Model",
       isSystemModel: false,
     },
-    tokens: {},
-    // Declare at least one provider so the launcher's sidecar-skip
+    // Declare at least one integration so the launcher's sidecar-skip
     // shortcut does not bypass createSidecar in this parallel-boot test.
-    providers: [
+    integrations: [
       {
-        id: "gmail",
-        name: "gmail",
-        displayName: "Gmail",
-        authMode: "oauth2",
-      } as AppstrateRunPlan["providers"][number],
+        packageId: "@test/gmail-mcp",
+        namespace: "gmail",
+        manifest: { name: "@test/gmail-mcp", version: "1.0.0" },
+        spawnEnv: {},
+        toolAllowlist: [],
+      },
     ],
     timeout: 60,
   };

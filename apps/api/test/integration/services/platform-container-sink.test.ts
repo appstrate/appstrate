@@ -188,8 +188,6 @@ function buildRunPlan(): AppstrateRunPlan {
       label: "Test Model",
       isSystemModel: false,
     },
-    tokens: {},
-    providers: [],
     timeout: 60,
   };
 }

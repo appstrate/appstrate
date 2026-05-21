@@ -79,7 +79,6 @@ export {
   renderPrompt,
   buildPromptView,
   type PromptView,
-  type PromptViewProvider,
   type PromptViewUpload,
   type RenderPromptOptions,
 } from "./bundle/index.ts";
@@ -88,7 +87,6 @@ export {
 export {
   renderPlatformPrompt,
   type PlatformPromptOptions,
-  type PlatformPromptProvider,
   type PlatformPromptTool,
   type PlatformPromptSchema,
 } from "./bundle/index.ts";

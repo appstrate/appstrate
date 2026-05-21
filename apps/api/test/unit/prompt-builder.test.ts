@@ -5,7 +5,6 @@ import { buildPlatformSystemPrompt } from "../../src/services/run-launcher/promp
 import type {
   AppstrateRunPlan,
   FileReference,
-  ProviderSummary,
   ToolMeta,
 } from "../../src/services/run-launcher/types.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
@@ -83,14 +82,12 @@ interface PromptContext {
   rawPrompt: string;
   schemaVersion?: string;
   runId?: string;
-  tokens: Record<string, string>;
   config: Record<string, unknown>;
   previousCheckpoint: Record<string, unknown> | null;
   runToken?: string;
   input: Record<string, unknown>;
   files?: FileReference[];
   schemas: TestSchemas;
-  providers: ProviderSummary[];
   memories?: Array<{ id: number; content: string; createdAt: string | null }>;
   llmModel: string;
   llmConfig: AppstrateRunPlan["llmConfig"];
@@ -132,8 +129,6 @@ function splitLegacy(ctx: PromptContext): {
     ...(ctx.runToken !== undefined ? { runToken: ctx.runToken } : {}),
     proxyUrl: ctx.proxyUrl,
     timeout: ctx.timeout ?? 0,
-    tokens: ctx.tokens,
-    providers: ctx.providers,
     files: ctx.files,
   };
   return { context, plan };
@@ -147,12 +142,10 @@ function buildEnrichedPrompt(ctx: PromptContext): string {
 function baseContext(overrides?: Partial<PromptContext>): PromptContext {
   return {
     rawPrompt: "Do the task.",
-    tokens: {},
     config: {},
     previousCheckpoint: null,
     input: {},
     schemas: {},
-    providers: [],
     llmModel: "test-model",
     llmConfig: {
       providerId: "anthropic",
@@ -465,204 +458,17 @@ describe("buildEnrichedPrompt — run history is tool-wired, never in the prompt
   });
 });
 
-// ─── Connected providers ────────────────────────────────────
+// ─── No provider prompt dimension ───────────────────────────
 
-describe("buildEnrichedPrompt — provider documentation", () => {
-  it("cross-references the synthesised provider skill instead of inlining PROVIDER.md paths", () => {
-    const ctx = baseContext({
-      tokens: { "@test/gmail": "tok" },
-      providers: [
-        {
-          id: "@test/gmail",
-          displayName: "Gmail",
-          authMode: "oauth2",
-          credentialHeaderName: "Authorization",
-          credentialHeaderPrefix: "Bearer ",
-          authorizedUris: ["https://gmail.googleapis.com/*"],
-        },
-      ],
-    });
-
-    const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).not.toContain(".pi/providers/");
-    expect(prompt).not.toContain("PROVIDER.md");
-    expect(prompt).toContain("provider-<scope>-<name>");
-    expect(prompt).toContain("<available_skills>");
-  });
-
-  it("does not inline docsUrl in the providers list", () => {
-    const ctx = baseContext({
-      tokens: { "@test/stripe": "tok" },
-      providers: [
-        {
-          id: "@test/stripe",
-          displayName: "Stripe",
-          authMode: "api_key",
-          credentialHeaderName: "Authorization",
-          credentialHeaderPrefix: "Bearer ",
-          docsUrl: "https://stripe.com/docs/api",
-          authorizedUris: ["https://api.stripe.com/*"],
-        },
-      ],
-    });
-
-    const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).not.toContain("Documentation: https://stripe.com/docs/api");
-    expect(prompt).not.toContain("PROVIDER.md");
-  });
-
-  it("shows nothing when no doc and no docsUrl", () => {
-    const ctx = baseContext({
-      tokens: { "@test/custom": "tok" },
-      providers: [
-        {
-          id: "@test/custom",
-          displayName: "Custom",
-          authMode: "api_key",
-          credentialHeaderName: "X-Key",
-          credentialHeaderPrefix: "",
-          authorizedUris: ["https://api.custom.com/*"],
-        },
-      ],
-    });
-
-    const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).not.toContain("PROVIDER.md");
-    expect(prompt).not.toContain("Documentation:");
-  });
-
-  it("advertises the `provider_call` MCP tool with the bare providerId per connected provider (no curl / no $SIDECAR_URL)", () => {
-    const ctx = baseContext({
-      tokens: { "@test/gmail": "access_token_123" },
-      providers: [
-        {
-          id: "@test/gmail",
-          displayName: "Gmail",
-          authMode: "oauth2",
-          credentialHeaderName: "Authorization",
-          credentialHeaderPrefix: "Bearer ",
-          authorizedUris: ["https://gmail.googleapis.com/*"],
-        },
-      ],
-    });
-
-    const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("## Connected Providers");
-    // Single MCP tool — `provider_call` — replaces every per-provider alias.
-    expect(prompt).toContain("provider_call");
-    expect(prompt).toContain("Gmail");
-    expect(prompt).toContain("@test/gmail");
-    // Per-provider alias names are gone — every call goes through provider_call({ providerId, … }).
-    expect(prompt).not.toContain("test_gmail_call");
-    // No more legacy curl / sidecar boilerplate inside the provider section.
-    expect(prompt).not.toContain("## Authenticated Provider API");
-    expect(prompt).not.toContain("$SIDECAR_URL/proxy");
-    expect(prompt).not.toContain("X-Provider");
-    expect(prompt).not.toContain("X-Target");
-    expect(prompt).not.toContain("{{access_token}}");
-  });
-
-  it("omits provider section when no connected providers", () => {
-    const ctx = baseContext({
-      tokens: {},
-      providers: [
-        {
-          id: "@test/gmail",
-          displayName: "Gmail",
-          authMode: "oauth2",
-          authorizedUris: [],
-        },
-      ],
-    });
-
-    const prompt = buildEnrichedPrompt(ctx);
+describe("buildEnrichedPrompt — provider dimension fully removed", () => {
+  it("never emits a Connected Providers section or provider_call instructions", () => {
+    // Outbound API access is surfaced via integration MCP tools
+    // (`{ns}__api_call`), self-documented through MCP tools/list — never
+    // through the prompt. The provider prompt dimension is fully removed.
+    const prompt = buildEnrichedPrompt(baseContext());
     expect(prompt).not.toContain("## Connected Providers");
-    expect(prompt).not.toContain("## Authenticated Provider API");
-  });
-
-  it("shows authorized URLs", () => {
-    const ctx = baseContext({
-      tokens: { "@test/api": "tok" },
-      providers: [
-        {
-          id: "@test/api",
-          displayName: "My API",
-          authMode: "api_key",
-          credentialHeaderName: "X-Api-Key",
-          credentialHeaderPrefix: "",
-          authorizedUris: ["https://api.example.com/*", "https://api2.example.com/*"],
-        },
-      ],
-    });
-
-    const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("https://api.example.com/*");
-    expect(prompt).toContain("https://api2.example.com/*");
-  });
-
-  it("shows 'all public URLs' when allowAllUris is true", () => {
-    const ctx = baseContext({
-      tokens: { "@test/openapi": "tok" },
-      providers: [
-        {
-          id: "@test/openapi",
-          displayName: "Open API",
-          authMode: "api_key",
-          credentialHeaderName: "Authorization",
-          credentialHeaderPrefix: "Bearer ",
-          allowAllUris: true,
-        },
-      ],
-    });
-
-    const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("all public URLs");
-  });
-
-  it("does not leak credential placeholders — the provider tool injects them server-side", () => {
-    // Previously the prompt enumerated `{{access_token}}` / `{{api_key}}`
-    // so the agent could substitute them in a curl header. With the
-    // `provider_call` MCP tool, credential injection is entirely server-side
-    // and placeholders MUST not appear in the prompt.
-    const ctx = baseContext({
-      tokens: { "@test/stripe": "tok", "@test/custom": "tok" },
-      providers: [
-        {
-          id: "@test/stripe",
-          displayName: "Stripe",
-          authMode: "api_key",
-          credentialHeaderName: "Authorization",
-          credentialHeaderPrefix: "Bearer ",
-          authorizedUris: ["https://api.stripe.com/*"],
-        },
-        {
-          id: "@test/custom",
-          displayName: "Custom Service",
-          authMode: "custom",
-          credentialSchema: {
-            properties: {
-              api_key: { description: "API Key" },
-              secret: { description: "Secret Token" },
-            },
-          },
-          authorizedUris: ["https://custom.api.com/*"],
-        },
-      ],
-    });
-
-    const prompt = buildEnrichedPrompt(ctx);
-    // The single canonical MCP tool name appears…
-    expect(prompt).toContain("provider_call");
-    // …per-provider alias names do NOT…
-    expect(prompt).not.toContain("test_stripe_call");
-    expect(prompt).not.toContain("test_custom_call");
-    // …and credential placeholders / header hints do NOT either.
-    expect(prompt).not.toContain("{{api_key}}");
-    expect(prompt).not.toContain("{{secret}}");
-    expect(prompt).not.toContain("Authorization: Bearer");
-    expect(prompt).not.toContain("Auth:");
-    expect(prompt).not.toContain("Credentials:");
-    expect(prompt).not.toContain("Other credential vars");
+    expect(prompt).not.toContain("provider_call");
+    expect(prompt).not.toContain("$SIDECAR_URL");
   });
 });
 

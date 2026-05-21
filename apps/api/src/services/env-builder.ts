@@ -195,8 +195,6 @@ export async function buildRunContext(params: {
     runToken: signRunToken(runId),
     proxyUrl,
     timeout: (agent.manifest.timeout as number | undefined) ?? 300,
-    tokens: {},
-    providers: [],
     files,
     ...(integrationSpawns.length > 0 ? { integrations: integrationSpawns } : {}),
   };

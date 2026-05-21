@@ -8,15 +8,15 @@
  * This is NOT an AFPS contract — callers choose whether to prepend it.
  * External runners happy with the raw template alone (`renderPrompt`)
  * can skip this helper. The sections it builds (System / Environment /
- * Tools / Skills / Connected Providers / User Input / Documents /
- * Configuration / Checkpoint / Memory / Run History) represent one
- * reasonable convention for an AFPS-style agent; platforms and CLIs
- * may compose it as-is or override specific option fields.
+ * Tools / Skills / User Input / Documents / Configuration / Checkpoint /
+ * Memory / Run History) represent one reasonable convention for an
+ * AFPS-style agent; platforms and CLIs may compose it as-is or override
+ * specific option fields.
  */
 
 import type { ExecutionContext } from "../types/execution-context.ts";
 import { renderTemplate } from "../template/mustache.ts";
-import type { PromptView, PromptViewProvider, PromptViewUpload } from "./prompt-renderer.ts";
+import type { PromptView, PromptViewUpload } from "./prompt-renderer.ts";
 
 const TEMPLATE_RENDER_MIN_VERSION = [1, 1] as const;
 
@@ -59,8 +59,6 @@ export interface PlatformPromptTool {
   description?: string;
 }
 
-export type PlatformPromptProvider = PromptViewProvider;
-
 export interface PlatformPromptSchema {
   properties?: Record<string, unknown>;
   required?: readonly string[];
@@ -85,14 +83,6 @@ export interface PlatformPromptOptions {
   availableSkills?: ReadonlyArray<PlatformPromptTool>;
   /** Raw TOOL.md contents appended after the tool list. */
   toolDocs?: ReadonlyArray<{ id: string; content: string }>;
-
-  /**
-   * Providers to surface in the `## Connected Providers` section.
-   * Caller-filtered — pass only those for which credentials are wired.
-   * The LLM-facing tool surface is the canonical `provider_call`;
-   * each entry contributes one `providerId` to that tool's enum.
-   */
-  providers?: ReadonlyArray<PlatformPromptProvider>;
 
   /** Input schema — drives the `## User Input` section. */
   inputSchema?: PlatformPromptSchema;
@@ -122,7 +112,6 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
   const input = (context.input as Record<string, unknown>) ?? {};
   const config = context.config ?? {};
   const platformName = opts.platformName ?? "Appstrate";
-  const connectedProviders = opts.providers ?? [];
 
   // ─── Section model (#368) ─────────────────────────────────────────
   // The platform prompt owns SECTIONS — headers, intro prose, and data
@@ -149,9 +138,7 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
   );
   sections.push(
     "- **Network access**: Outbound HTTP/HTTPS is available. " +
-      "Use `curl`, `fetch`, or any HTTP client to call public APIs and websites directly. " +
-      "Authenticated requests to connected providers go through the `provider_call` MCP tool " +
-      "listed under **Connected Providers** — credentials are injected server-side.",
+      "Use `curl`, `fetch`, or any HTTP client to call public APIs and websites directly.",
   );
   if (opts.timeoutSeconds) {
     sections.push(
@@ -200,52 +187,6 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
     for (const skill of opts.availableSkills) {
       const desc = skill.description ? `: ${skill.description}` : "";
       sections.push(`- **${skill.name || skill.id}**${desc}`);
-    }
-    sections.push("");
-  }
-
-  // --- Connected providers ---
-  if (connectedProviders.length > 0) {
-    sections.push("## Connected Providers\n");
-    sections.push(
-      "To call any connected provider, use the `provider_call` MCP tool with " +
-        "`{ providerId, method, target, headers?, body?, responseMode? }`. " +
-        "Pass the `providerId` from the list below; `target` must be an absolute URL " +
-        "matching one of the provider's authorized URLs. " +
-        "Non-2xx upstream responses are returned with `isError: true` — read the body to " +
-        "diagnose rather than retrying blindly. Proxy timeout is 30 s. " +
-        "For other public APIs (no auth), call them directly with `curl` / `fetch`.\n",
-    );
-
-    sections.push(
-      'Binary content: pass `body: { fromFile: "documents/<name>" }` to upload a workspace file as the request body, or `body: { fromBytes: "<base64>", encoding: "base64" }` to upload inline binary bytes computed in memory (up to 5 MB; standard base64 RFC 4648 §4 only — alphabet `+/`; URL-safe base64 with `-_` is not accepted). ' +
-        'Use `responseMode: { toFile: "documents/<name>.<ext>" }` to stream the upstream response into the workspace. ' +
-        'Without `toFile`, responses that would blow the LLM context (large text payloads or binary blobs over 64 KB) auto-spill to a workspace file under `responses/<toolCallId>` (no extension — the authoritative content type is on `body.mimeType`). The result is `body.kind === "file"` with the workspace-relative `path`; read the spilled file with the standard `read` tool when you need the content. Smaller binaries are returned base64-encoded under `body.data` with `body.kind === "inline"`. ' +
-        "Inspect `body.kind` on the returned JSON to dispatch.\n",
-    );
-
-    sections.push(
-      "Multipart uploads (e.g. Drive file upload, Gmail send with attachment): pass `body: { multipart: [...] }` to compose a multipart/form-data body mixing text fields and workspace files. " +
-        'Each part is one of: `{ name, value }` (text field), `{ name, fromFile, filename?, contentType? }` (workspace file), or `{ name, fromBytes, encoding: "base64", filename?, contentType? }` (inline bytes). ' +
-        'Example — Drive resumable upload metadata + file: `{ multipart: [{ name: "metadata", value: JSON.stringify({name:"report.pdf"}), contentType: "application/json" }, { name: "file", fromFile: "documents/report.pdf", contentType: "application/pdf" }] }`. ' +
-        'Example — Gmail send with inline attachment: `{ multipart: [{ name: "message", value: rawMimeString }, { name: "attachment", fromFile: "documents/invoice.pdf", filename: "invoice.pdf", contentType: "application/pdf" }] }`. ' +
-        "Total size across all parts is capped at 5 MB; use a single `{ fromFile }` body for larger uploads.\n",
-    );
-
-    sections.push("Available providers:");
-    sections.push(
-      "Each provider has a corresponding skill (`provider-<scope>-<name>`) — read it before calling `provider_call` for the first time. Skills are listed under `<available_skills>` with full descriptions and file paths.\n",
-    );
-    for (const provider of connectedProviders) {
-      const displayName = provider.displayName ?? provider.id;
-
-      sections.push(`- **${displayName}** (\`${provider.id}\`)`);
-
-      if (provider.allowAllUris) {
-        sections.push(`  Authorized URLs: all public URLs`);
-      } else if (provider.authorizedUris && provider.authorizedUris.length > 0) {
-        sections.push(`  Authorized URLs: ${provider.authorizedUris.join(", ")}`);
-      }
     }
     sections.push("");
   }

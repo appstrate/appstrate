@@ -70,7 +70,7 @@ describe("buildPlatformPromptInputs", () => {
     });
   });
 
-  it("classifies dependencies by manifest.type (tool / skill / provider)", () => {
+  it("classifies dependencies by manifest.type (tool / skill)", () => {
     const root = pkg("@acme/agent@1.0.0", { type: "agent" }, { "prompt.md": "" });
     const tool = pkg(
       "@acme/t1@1.0.0",
@@ -78,30 +78,12 @@ describe("buildPlatformPromptInputs", () => {
       { "TOOL.md": "# tool-one docs" },
     );
     const skill = pkg("@acme/s1@1.0.0", { type: "skill", name: "skill-one" });
-    const provider = pkg("@acme/p1@1.0.0", {
-      type: "provider",
-      name: "Gmail",
-      definition: {
-        authMode: "oauth2",
-        authorizedUris: ["https://gmail.googleapis.com/**"],
-        docsUrl: "https://developers.google.com/gmail/api",
-      },
-    });
-    const inputs = buildPlatformPromptInputs(bundleOf(root, tool, skill, provider), ctx());
+    const inputs = buildPlatformPromptInputs(bundleOf(root, tool, skill), ctx());
     expect(inputs.availableTools).toEqual([
       { id: "@acme/t1", name: "tool-one", description: "First" },
     ]);
     expect(inputs.availableSkills).toEqual([{ id: "@acme/s1", name: "skill-one" }]);
     expect(inputs.toolDocs).toEqual([{ id: "@acme/t1", content: "# tool-one docs" }]);
-    expect(inputs.providers).toEqual([
-      {
-        id: "@acme/p1",
-        displayName: "Gmail",
-        authMode: "oauth2",
-        docsUrl: "https://developers.google.com/gmail/api",
-        authorizedUris: ["https://gmail.googleapis.com/**"],
-      },
-    ]);
   });
 
   it("prefers manifest.tool.name over manifest.name as the LLM-facing tool identifier", () => {
@@ -147,55 +129,6 @@ describe("buildPlatformPromptInputs", () => {
     expect(inputs.timeoutSeconds).toBe(300);
   });
 
-  it("merges provider overrides by id (override fields win, bundle fields fill gaps)", () => {
-    const root = pkg("@acme/agent@1.0.0", { type: "agent" }, { "prompt.md": "" });
-    const provider = pkg("@acme/p1@1.0.0", {
-      type: "provider",
-      name: "Gmail",
-      definition: { authMode: "oauth2", authorizedUris: ["https://old.example.com/**"] },
-    });
-    const inputs = buildPlatformPromptInputs(bundleOf(root, provider), ctx(), {
-      providers: [
-        {
-          id: "@acme/p1",
-          authorizedUris: ["https://gmail.googleapis.com/**", "https://oauth2.googleapis.com/**"],
-        },
-      ],
-    });
-    expect(inputs.providers).toEqual([
-      {
-        id: "@acme/p1",
-        displayName: "Gmail",
-        authMode: "oauth2",
-        authorizedUris: ["https://gmail.googleapis.com/**", "https://oauth2.googleapis.com/**"],
-      },
-    ]);
-  });
-
-  it("providersReplace: true swaps bundle-derived providers for the override list", () => {
-    const root = pkg("@acme/agent@1.0.0", { type: "agent" }, { "prompt.md": "" });
-    const gmail = pkg("@acme/gmail@1.0.0", { type: "provider", name: "Gmail" });
-    const slack = pkg("@acme/slack@1.0.0", { type: "provider", name: "Slack" });
-    const inputs = buildPlatformPromptInputs(bundleOf(root, gmail, slack), ctx(), {
-      providers: [
-        { id: "@acme/gmail", displayName: "Gmail", authorizedUris: ["https://g.example/**"] },
-      ],
-      providersReplace: true,
-    });
-    expect(inputs.providers).toEqual([
-      { id: "@acme/gmail", displayName: "Gmail", authorizedUris: ["https://g.example/**"] },
-    ]);
-  });
-
-  it("appends override-only providers after bundle-derived ones", () => {
-    const root = pkg("@acme/agent@1.0.0", { type: "agent" }, { "prompt.md": "" });
-    const provider = pkg("@acme/p1@1.0.0", { type: "provider", name: "Gmail" });
-    const inputs = buildPlatformPromptInputs(bundleOf(root, provider), ctx(), {
-      providers: [{ id: "@acme/extra", displayName: "Extra", allowAllUris: true }],
-    });
-    expect(inputs.providers?.map((p) => p.id)).toEqual(["@acme/p1", "@acme/extra"]);
-  });
-
   it("produces options that renderPlatformPrompt accepts end-to-end", () => {
     const root = pkg(
       "@acme/agent@1.0.0",
@@ -224,7 +157,6 @@ describe("buildPlatformPromptInputs", () => {
     const inputs = buildPlatformPromptInputs(bundleOf(root), ctx());
     expect(inputs.availableTools).toEqual([]);
     expect(inputs.availableSkills).toEqual([]);
-    expect(inputs.providers).toEqual([]);
     expect(inputs.toolDocs).toEqual([]);
     expect(inputs.inputSchema).toBeUndefined();
     expect(inputs.outputSchema).toBeUndefined();

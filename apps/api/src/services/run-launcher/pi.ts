@@ -111,16 +111,13 @@ export async function runPlatformContainer(
       ? deriveOauthPlaceholder(llmApiKey, llmConfig.providerId)
       : deriveKeyPlaceholder(llmApiKey);
 
-    // Skip the sidecar entirely when the run declares no providers AND
-    // no integrations AND uses a static API key. The sidecar's sole
-    // purposes are credential injection (provider_call), integration MCP
-    // multiplexing (Phase 1.4), and LLM passthrough for OAuth; an
-    // API-key model with neither providers nor integrations needs none
-    // of them. Saves a subprocess spawn + MCP handshake + forward-proxy
-    // bind on every run.
+    // Skip the sidecar entirely when the run declares no integrations AND
+    // uses a static API key. The sidecar's sole purposes are integration
+    // MCP multiplexing (Phase 1.4) and LLM passthrough for OAuth; an
+    // API-key model with no integrations needs neither. Saves a
+    // subprocess spawn + MCP handshake + forward-proxy bind on every run.
     const hasIntegrations = (plan.integrations?.length ?? 0) > 0;
-    const skipSidecar =
-      plan.providers.length === 0 && !hasIntegrations && !!llmConfig.apiKey && !isOauthCredential;
+    const skipSidecar = !hasIntegrations && !!llmConfig.apiKey && !isOauthCredential;
 
     let sidecarLlm: LlmProxyConfig | undefined;
     if (isOauthCredential) {
@@ -202,7 +199,6 @@ export async function runPlatformContainer(
         : llmApiKey
           ? "http://sidecar:8080/llm"
           : undefined,
-      connectedProviders: plan.providers.filter((s) => plan.tokens[s.id]).map((s) => s.id),
       outputSchema: hasOutputSchema ? plan.outputSchema : undefined,
       forwardProxyUrl: skipSidecar ? undefined : "http://sidecar:8081",
       sink: {

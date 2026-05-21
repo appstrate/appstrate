@@ -65,88 +65,13 @@ describe("renderPlatformPrompt", () => {
     expect(out).toContain("Be careful");
   });
 
-  it("emits the Connected Providers section pointing to the provider_call MCP tool", () => {
-    const out = renderPlatformPrompt({
-      template: "T",
-      context: ctx(),
-      providers: [
-        {
-          id: "@appstrate/gmail",
-          displayName: "Gmail",
-          authMode: "oauth2",
-          authorizedUris: ["https://gmail.googleapis.com/**"],
-        },
-      ],
-    });
-    expect(out).toContain("## Connected Providers");
-    expect(out).toContain("provider_call");
-    expect(out).toContain("**Gmail** (`@appstrate/gmail`)");
-    expect(out).toContain("Authorized URLs: https://gmail.googleapis.com/**");
-    expect(out).toContain("provider-<scope>-<name>");
-    expect(out).toContain("<available_skills>");
-    expect(out).not.toContain(".pi/providers/");
-    // Per-provider alias names are gone — every call goes through provider_call({ providerId, … }).
-    expect(out).not.toContain("appstrate_gmail_call");
-  });
-
-  it("documents binary upload/download contract when providers are connected", () => {
-    const out = renderPlatformPrompt({
-      template: "T",
-      context: ctx(),
-      providers: [
-        {
-          id: "@appstrate/gmail",
-          displayName: "Gmail",
-          authMode: "oauth2",
-          authorizedUris: ["https://gmail.googleapis.com/**"],
-        },
-      ],
-    });
-    // Binary contract guidance must appear so the LLM picks fromFile / toFile
-    // over base64-stuffing large payloads into tool args.
-    expect(out).toContain("fromFile");
-    expect(out).toContain("toFile");
-    expect(out).toContain("body.kind");
-  });
-
-  it("omits the binary upload/download contract when no providers are connected", () => {
+  it("never emits a Connected Providers section or provider_call instructions", () => {
+    // Outbound API access is surfaced via integration MCP tools
+    // (`{ns}__api_call`), self-documented through MCP tools/list — never
+    // through the prompt. The provider prompt dimension is fully removed.
     const out = renderPlatformPrompt({ template: "T", context: ctx() });
-    expect(out).not.toContain("fromFile");
-    expect(out).not.toContain("toFile");
     expect(out).not.toContain("## Connected Providers");
-  });
-
-  it("shows 'all public URLs' when allowAllUris is true", () => {
-    const out = renderPlatformPrompt({
-      template: "T",
-      context: ctx(),
-      providers: [
-        {
-          id: "@x/open",
-          displayName: "Open",
-          authMode: "api_key",
-          allowAllUris: true,
-        },
-      ],
-    });
-    expect(out).toContain("Authorized URLs: all public URLs");
-  });
-
-  it("does not surface docsUrl in the providers list (carried by the provider skill instead)", () => {
-    const out = renderPlatformPrompt({
-      template: "T",
-      context: ctx(),
-      providers: [
-        {
-          id: "@x/linked",
-          displayName: "Linked",
-          authMode: "oauth2",
-          docsUrl: "https://docs.linked.example/api",
-        },
-      ],
-    });
-    expect(out).not.toContain("Documentation: https://docs.linked.example/api");
-    expect(out).not.toContain(".pi/providers/");
+    expect(out).not.toContain("provider_call");
   });
 
   it("renders the User Input section with schema type/required info", () => {
@@ -419,7 +344,6 @@ describe("renderPlatformPrompt", () => {
       expect(out).toContain(recallDoc);
     });
   });
-
 
   it("never emits sidecar-knowledge sections — run history is surfaced via a typed tool", () => {
     // Before the run_history tool migration, a `## Run History` section
