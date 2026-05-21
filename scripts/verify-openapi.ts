@@ -80,7 +80,6 @@ const expectedEndpoints = [
   "GET /api/agents/{scope}/{name}/model",
   "PUT /api/agents/{scope}/{name}/model",
   "GET /api/agents/{scope}/{name}/bundle",
-  "GET /api/agents/{scope}/{name}/readiness",
 
   // Runs
   "POST /api/agents/{scope}/{name}/run",
@@ -103,15 +102,6 @@ const expectedEndpoints = [
   "POST /api/agents/{scope}/{name}/schedules",
   "PUT /api/schedules/{id}",
   "DELETE /api/schedules/{id}",
-
-  // Connections
-  "GET /api/connections",
-  "GET /api/connections/integrations",
-  "POST /api/connections/connect/{scope}/{name}",
-  "POST /api/connections/connect/{scope}/{name}/api-key",
-  "POST /api/connections/connect/{scope}/{name}/credentials",
-  "GET /api/connections/callback",
-  "DELETE /api/connections/{scope}/{name}",
 
   // Integrations (INTEGRATIONS_PROPOSAL Phase 1.3 — marketplace UI)
   "GET /api/integrations",
@@ -138,16 +128,6 @@ const expectedEndpoints = [
   "PUT /api/integrations/{packageId}/default",
   "DELETE /api/integrations/{packageId}/default",
 
-  // Providers
-  "GET /api/providers",
-  "POST /api/providers",
-  "PUT /api/providers/{scope}/{name}",
-  "DELETE /api/providers/{scope}/{name}",
-
-  // Provider Credentials
-  "PUT /api/providers/credentials/{scope}/{name}",
-  "DELETE /api/providers/credentials/{scope}/{name}",
-
   // Connection Profiles (org-scoped user profiles)
   "GET /api/connection-profiles",
   "POST /api/connection-profiles",
@@ -157,21 +137,10 @@ const expectedEndpoints = [
   // App Profiles (app-scoped)
   "GET /api/app-profiles",
   "POST /api/app-profiles",
-  "GET /api/app-profiles/connections",
-  "DELETE /api/app-profiles/connections",
   "GET /api/app-profiles/my-bindings",
   "PUT /api/app-profiles/{id}",
   "DELETE /api/app-profiles/{id}",
   "GET /api/app-profiles/{id}/agents",
-  "GET /api/app-profiles/{id}/bindings",
-  "POST /api/app-profiles/{id}/bind",
-  "DELETE /api/app-profiles/{id}/bind/{providerScope}/{providerName}",
-  "GET /api/app-profiles/{id}/connections",
-
-  // Agent Provider Profiles
-  "GET /api/agents/{scope}/{name}/provider-profiles",
-  "PUT /api/agents/{scope}/{name}/provider-profiles",
-  "DELETE /api/agents/{scope}/{name}/provider-profiles",
 
   // Agent App Profile
   "PUT /api/agents/{scope}/{name}/app-profile",

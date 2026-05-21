@@ -57,42 +57,6 @@ const providerAvailableScopesProperty = {
 } as const;
 
 /**
- * Properties shared by ProviderConfigInput AND ProviderConfigUpdate.
- * Excludes `id` (Input-only, required) and `displayName` (different shape per schema).
- */
-const providerInputSharedProperties = {
-  version: { type: "string" },
-  description: { type: "string" },
-  author: { type: "string" },
-  authMode: providerAuthModeEnum,
-  clientId: { type: "string" },
-  clientSecret: { type: "string" },
-  authorizationUrl: { type: "string" },
-  tokenUrl: { type: "string" },
-  refreshUrl: { type: "string" },
-  requestTokenUrl: { type: "string", description: "OAuth1 request token endpoint" },
-  accessTokenUrl: { type: "string", description: "OAuth1 access token endpoint" },
-  defaultScopes: { type: "array", items: { type: "string" } },
-  scopeSeparator: { type: "string" },
-  pkceEnabled: { type: "boolean" },
-  tokenAuthMethod: { type: "string", enum: ["client_secret_post", "client_secret_basic"] },
-  tokenContentType: providerTokenContentTypeProperty,
-  authorizationParams: { type: "object" },
-  tokenParams: { type: "object" },
-  credentialSchema: { type: "object", description: "JSON Schema for custom credential fields" },
-  credentialFieldName: { type: "string" },
-  credentialHeaderName: { type: "string" },
-  credentialHeaderPrefix: { type: "string" },
-  credentialTransform: providerCredentialTransformProperty,
-  availableScopes: providerAvailableScopesProperty,
-  iconUrl: { type: "string" },
-  categories: { type: "array", items: { type: "string" } },
-  docsUrl: { type: "string" },
-  authorizedUris: { type: "array", items: { type: "string" } },
-  allowAllUris: { type: "boolean" },
-} as const;
-
-/**
  * All OpenAPI schema definitions (components/schemas).
  */
 export const schemas = {
@@ -644,32 +608,6 @@ export const schemas = {
       },
     },
   },
-  AvailableProvider: {
-    type: "object",
-    required: ["uniqueKey", "provider", "status", "authMode"],
-    properties: {
-      uniqueKey: { type: "string" },
-      provider: { type: "string" },
-      displayName: { type: "string" },
-      logo: { type: "string" },
-      status: { type: "string", enum: ["connected", "not_connected", "needs_reconnection"] },
-      authMode: { type: "string" },
-      connectionId: { type: "string" },
-      connectedAt: { type: "string" },
-      scopesGranted: { type: "array", items: { type: "string" } },
-    },
-  },
-  ConnectionStatus: {
-    type: "object",
-    required: ["provider", "status"],
-    properties: {
-      provider: { type: "string" },
-      status: { type: "string", enum: ["connected", "not_connected", "needs_reconnection"] },
-      connectionId: { type: "string" },
-      connectedAt: { type: "string" },
-      scopesGranted: { type: "array", items: { type: "string" } },
-    },
-  },
   ProviderConfig: {
     type: "object",
     required: ["id", "displayName", "authMode"],
@@ -715,23 +653,6 @@ export const schemas = {
       categories: { type: "array", items: { type: "string" } },
       docsUrl: { type: "string" },
       usedByAgents: { type: "integer" },
-    },
-  },
-  ProviderConfigInput: {
-    type: "object",
-    required: ["id", "displayName", "authMode"],
-    properties: {
-      id: { type: "string", minLength: 1 },
-      displayName: { type: "string", minLength: 1 },
-      ...providerInputSharedProperties,
-    },
-  },
-  ProviderConfigUpdate: {
-    type: "object",
-    required: ["displayName", "authMode"],
-    properties: {
-      displayName: { type: "string", minLength: 1 },
-      ...providerInputSharedProperties,
     },
   },
   ApiKeyInfo: {
