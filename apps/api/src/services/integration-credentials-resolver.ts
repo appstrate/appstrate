@@ -19,13 +19,11 @@
  * `MitmCredentialSource.current()` and `.deliveryPlans()`.
  */
 
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
+import { integrationConnections } from "@appstrate/db/schema";
 import {
   RefreshError,
-  decryptCredentials,
-  decryptCredentialsToStringMap,
   resolveHttpDelivery,
   type HttpDeliveryPlan,
   type ResolvedAuthCredentials,
@@ -39,7 +37,8 @@ import { notFound, forbidden, internalError, badGateway } from "../lib/errors.ts
 import type { Actor } from "../lib/actor.ts";
 import {
   forceRefreshIntegrationConnection,
-  type IntegrationRefreshContext,
+  buildIntegrationOAuthRefreshContext,
+  decryptIntegrationConnectionFields,
 } from "./integration-token-refresh.ts";
 import {
   assertIntegrationInstalled,
@@ -138,7 +137,11 @@ export async function resolveLiveIntegrationCredentials(
   // maps to a declared auth (manifest renamed since the connection was created).
   if (!authDef) return out;
 
-  let fields = decryptToStringMap(connection.credentialsEncrypted, packageId, authKey);
+  let fields = decryptIntegrationConnectionFields(
+    connection.credentialsEncrypted,
+    packageId,
+    authKey,
+  );
   if (!fields) return out;
 
   let expiresAtEpochMs: number | null = connection.expiresAt
@@ -151,7 +154,7 @@ export async function resolveLiveIntegrationCredentials(
     (options.forceRefresh === true || isWithinLeadWindow(connection.expiresAt));
 
   if (needsRefresh) {
-    const refreshContext = await buildOAuthRefreshContext(
+    const refreshContext = await buildIntegrationOAuthRefreshContext(
       packageId,
       authKey,
       authDef,
@@ -281,100 +284,7 @@ async function loadIntegrationManifest(packageId: string): Promise<IntegrationMa
   }
 }
 
-function decryptToStringMap(
-  ciphertext: string,
-  packageId: string,
-  authKey: string,
-): Record<string, string> | null {
-  try {
-    return decryptCredentialsToStringMap(ciphertext);
-  } catch (err) {
-    logger.warn("decrypt failed in live credentials resolver", {
-      packageId,
-      authKey,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return null;
-  }
-}
-
 function isWithinLeadWindow(expiresAt: Date | null): boolean {
   if (!expiresAt) return false;
   return expiresAt.getTime() - Date.now() < OAUTH_REFRESH_LEAD_MS;
-}
-
-async function buildOAuthRefreshContext(
-  packageId: string,
-  authKey: string,
-  authDef: NonNullable<IntegrationManifest["auths"]>[string],
-  applicationId: string,
-): Promise<IntegrationRefreshContext | null> {
-  if (authDef.type !== "oauth2") return null;
-  if (!authDef.tokenUrl) {
-    // Discovery-only flows (`discovery: "auto"` or `discovery: {…}`) need
-    // a one-shot RFC 9728 resolution before they can refresh. Not wired
-    // in this first cut — the agent will see the stale token until the
-    // next spawn-time resolution.
-    logger.info("Integration auth refresh skipped — discovery-only flow", {
-      packageId,
-      authKey,
-    });
-    return null;
-  }
-  const [client] = await db
-    .select({
-      clientId: integrationOauthClients.clientId,
-      clientSecretEncrypted: integrationOauthClients.clientSecretEncrypted,
-    })
-    .from(integrationOauthClients)
-    .where(
-      and(
-        eq(integrationOauthClients.applicationId, applicationId),
-        eq(integrationOauthClients.integrationPackageId, packageId),
-        eq(integrationOauthClients.authKey, authKey),
-      ),
-    )
-    .limit(1);
-  if (!client) {
-    // The application admin never registered an OAuth client for this
-    // auth — the integration connection must have been provisioned via
-    // dynamic client registration (DCR) or a system-wide client. Cannot
-    // refresh without those credentials; skip.
-    logger.info("Integration auth refresh skipped — no per-app OAuth client", {
-      packageId,
-      authKey,
-    });
-    return null;
-  }
-  let clientSecret: string;
-  try {
-    const decrypted = decryptCredentials<{ client_secret?: string }>(client.clientSecretEncrypted);
-    clientSecret = decrypted.client_secret ?? "";
-  } catch (err) {
-    logger.warn("Integration auth client_secret decrypt failed", {
-      packageId,
-      authKey,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return null;
-  }
-  // `tokenAuthMethod: "none"` (public clients) needs `client_id` in the
-  // body with NO `client_secret`. The shared refresh helper doesn't yet
-  // model that case — skip the refresh for now (the cached token rides
-  // until next spawn) rather than send a malformed request the upstream
-  // server would reject.
-  if (authDef.tokenAuthMethod === "none") {
-    logger.info("Integration auth refresh skipped — public client (tokenAuthMethod=none)", {
-      packageId,
-      authKey,
-    });
-    return null;
-  }
-  return {
-    tokenUrl: authDef.tokenUrl,
-    clientId: client.clientId,
-    clientSecret,
-    ...(authDef.tokenAuthMethod ? { tokenAuthMethod: authDef.tokenAuthMethod } : {}),
-    ...(authDef.scopeSeparator ? { scopeSeparator: authDef.scopeSeparator } : {}),
-  };
 }

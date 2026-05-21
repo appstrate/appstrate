@@ -15,21 +15,26 @@
  * consume).
  */
 
-import { eq } from "drizzle-orm";
-import { integrationConnections } from "@appstrate/db/schema";
+import { and, eq } from "drizzle-orm";
+import { integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
 import { db } from "@appstrate/db/client";
 import {
   RefreshError,
   performRefreshTokenExchange,
   encryptCredentials,
+  decryptCredentials,
   decryptCredentialsToStringMap,
 } from "@appstrate/connect";
 import type {
   RefreshContext as IntegrationRefreshContext,
   RefreshExchangeResult,
 } from "@appstrate/connect";
+import type { IntegrationManifest } from "@appstrate/core/integration";
+import { logger } from "../lib/logger.ts";
 
 export type { IntegrationRefreshContext };
+
+type IntegrationAuthDef = NonNullable<IntegrationManifest["auths"]>[string];
 
 export interface IntegrationRefreshResult {
   /** Decrypted credentials (snake_case + camelCase aliases). */
@@ -194,4 +199,104 @@ async function doRefresh(
     .where(eq(integrationConnections.id, connectionId));
 
   return { fields: newCreds, expiresAt, scopesGranted: responseScopes, shrinkDetected };
+}
+
+/**
+ * Decrypt an integration connection's credential blob into a flat string
+ * map, returning `null` (with a warning) on failure rather than throwing.
+ * Shared by the MITM credentials resolver and the credential-proxy resolver.
+ */
+export function decryptIntegrationConnectionFields(
+  ciphertext: string,
+  packageIdForLog: string,
+  authKeyForLog: string,
+): Record<string, string> | null {
+  try {
+    return decryptCredentialsToStringMap(ciphertext);
+  } catch (err) {
+    logger.warn("integration credential decrypt failed", {
+      packageId: packageIdForLog,
+      authKey: authKeyForLog,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
+
+/**
+ * Build the OAuth2 {@link IntegrationRefreshContext} for an integration
+ * auth from its per-application `integration_oauth_clients` row. Returns
+ * `null` (the auth is not refreshable) for: non-oauth2 auths, discovery-only
+ * flows without a `tokenUrl`, missing per-app OAuth client, undecryptable
+ * client secret, and public clients (`tokenAuthMethod: "none"`, not modelled
+ * by the shared refresh helper). Single source of truth shared by both
+ * integration credential resolvers.
+ */
+export async function buildIntegrationOAuthRefreshContext(
+  packageId: string,
+  authKey: string,
+  authDef: IntegrationAuthDef,
+  applicationId: string,
+): Promise<IntegrationRefreshContext | null> {
+  if (authDef.type !== "oauth2") return null;
+  if (!authDef.tokenUrl) {
+    // Discovery-only flows (`discovery: "auto"` or `discovery: {…}`) need
+    // a one-shot RFC 9728 resolution before they can refresh. Not wired in
+    // this first cut — the agent sees the stale token until the next spawn.
+    logger.info("Integration auth refresh skipped — discovery-only flow", { packageId, authKey });
+    return null;
+  }
+  const [client] = await db
+    .select({
+      clientId: integrationOauthClients.clientId,
+      clientSecretEncrypted: integrationOauthClients.clientSecretEncrypted,
+    })
+    .from(integrationOauthClients)
+    .where(
+      and(
+        eq(integrationOauthClients.applicationId, applicationId),
+        eq(integrationOauthClients.integrationPackageId, packageId),
+        eq(integrationOauthClients.authKey, authKey),
+      ),
+    )
+    .limit(1);
+  if (!client) {
+    // The application admin never registered an OAuth client for this auth —
+    // the connection was provisioned via DCR or a system-wide client. Cannot
+    // refresh without those credentials; skip.
+    logger.info("Integration auth refresh skipped — no per-app OAuth client", {
+      packageId,
+      authKey,
+    });
+    return null;
+  }
+  let clientSecret: string;
+  try {
+    const decrypted = decryptCredentials<{ client_secret?: string }>(client.clientSecretEncrypted);
+    clientSecret = decrypted.client_secret ?? "";
+  } catch (err) {
+    logger.warn("Integration auth client_secret decrypt failed", {
+      packageId,
+      authKey,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+  // `tokenAuthMethod: "none"` (public clients) needs `client_id` in the body
+  // with NO `client_secret`. The shared refresh helper doesn't model that —
+  // skip rather than send a malformed request the upstream would reject.
+  if (authDef.tokenAuthMethod === "none") {
+    logger.info("Integration auth refresh skipped — public client (tokenAuthMethod=none)", {
+      packageId,
+      authKey,
+    });
+    return null;
+  }
+  return {
+    tokenUrl: authDef.tokenUrl,
+    clientId: client.clientId,
+    clientSecret,
+    ...(authDef.tokenAuthMethod ? { tokenAuthMethod: authDef.tokenAuthMethod } : {}),
+    ...(authDef.scopeSeparator ? { scopeSeparator: authDef.scopeSeparator } : {}),
+  };
 }

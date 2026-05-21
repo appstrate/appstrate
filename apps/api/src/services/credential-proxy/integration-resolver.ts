@@ -26,7 +26,6 @@
 
 import {
   RefreshError,
-  decryptCredentialsToStringMap,
   resolveHttpDelivery,
   buildProxyCredentialsPayload,
   type ProxyCredentialsPayload,
@@ -42,12 +41,9 @@ import {
 import { fetchIntegrationManifest } from "../integration-service.ts";
 import {
   forceRefreshIntegrationConnection,
-  type IntegrationRefreshContext,
+  buildIntegrationOAuthRefreshContext,
+  decryptIntegrationConnectionFields,
 } from "../integration-token-refresh.ts";
-import { and, eq } from "drizzle-orm";
-import { db } from "@appstrate/db/client";
-import { integrationOauthClients } from "@appstrate/db/schema";
-import { decryptCredentials } from "@appstrate/connect";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 
 /** Errors mapped by the route to 404 (credential not found). */
@@ -136,7 +132,7 @@ export async function forceRefreshIntegrationProxyCredentials(
   const authDef = auths[connection.authKey];
   if (!authDef || authDef.type !== "oauth2") return null;
 
-  const refreshContext = await buildOAuthRefreshContext(
+  const refreshContext = await buildIntegrationOAuthRefreshContext(
     input.integrationId,
     connection.authKey,
     authDef,
@@ -223,7 +219,7 @@ function buildPayload(
   manifest: IntegrationManifest,
   connection: ResolvedConnectionRow,
 ): ProxyCredentialsPayload {
-  const fields = decryptToStringMap(
+  const fields = decryptIntegrationConnectionFields(
     connection.credentialsEncrypted,
     integrationId,
     connection.authKey,
@@ -265,66 +261,4 @@ function buildPayloadFromFields(
     authorizedUris: authDef.authorizedUris,
     allowAllUris: authDef.allowAllUris === true,
   });
-}
-
-function decryptToStringMap(
-  ciphertext: string,
-  integrationId: string,
-  authKey: string,
-): Record<string, string> | null {
-  try {
-    return decryptCredentialsToStringMap(ciphertext);
-  } catch (err) {
-    logger.warn("credential-proxy: integration credential decrypt failed", {
-      integrationId,
-      authKey,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return null;
-  }
-}
-
-async function buildOAuthRefreshContext(
-  integrationId: string,
-  authKey: string,
-  authDef: NonNullable<IntegrationManifest["auths"]>[string],
-  applicationId: string,
-): Promise<IntegrationRefreshContext | null> {
-  if (authDef.type !== "oauth2") return null;
-  if (!authDef.tokenUrl) return null;
-
-  const [client] = await db
-    .select({
-      clientId: integrationOauthClients.clientId,
-      clientSecretEncrypted: integrationOauthClients.clientSecretEncrypted,
-    })
-    .from(integrationOauthClients)
-    .where(
-      and(
-        eq(integrationOauthClients.applicationId, applicationId),
-        eq(integrationOauthClients.integrationPackageId, integrationId),
-        eq(integrationOauthClients.authKey, authKey),
-      ),
-    )
-    .limit(1);
-  if (!client) return null;
-
-  let clientSecret: string;
-  try {
-    const decrypted = decryptCredentials<{ client_secret?: string }>(client.clientSecretEncrypted);
-    clientSecret = decrypted.client_secret ?? "";
-  } catch {
-    return null;
-  }
-  // Public clients (`tokenAuthMethod: "none"`) are not modelled by the
-  // shared refresh helper — skip rather than send a malformed request.
-  if (authDef.tokenAuthMethod === "none") return null;
-
-  return {
-    tokenUrl: authDef.tokenUrl,
-    clientId: client.clientId,
-    clientSecret,
-    ...(authDef.tokenAuthMethod ? { tokenAuthMethod: authDef.tokenAuthMethod } : {}),
-    ...(authDef.scopeSeparator ? { scopeSeparator: authDef.scopeSeparator } : {}),
-  };
 }
