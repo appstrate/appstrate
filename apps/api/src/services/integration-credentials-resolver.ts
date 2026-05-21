@@ -29,6 +29,7 @@ import {
   resolveHttpDelivery,
   type HttpDeliveryPlan,
   type ResolvedAuthCredentials,
+  type IntegrationCredentialsWire,
 } from "@appstrate/connect";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { OAUTH_REFRESH_LEAD_MS } from "@appstrate/core/sidecar-types";
@@ -48,12 +49,10 @@ import {
 import { computeRequiredScopes } from "./integration-scope-resolver.ts";
 import { fetchIntegrationManifest } from "./integration-service.ts";
 
-export interface LiveIntegrationCredentialsResult {
-  /** Auth payloads in the shape the MITM planner expects. */
+/** Mutable builder for the wire payload (returned widened to the readonly wire type). */
+interface MutableCredentialsWire {
   auths: ResolvedAuthCredentials[];
-  /** Per-auth HTTP delivery plans. */
   deliveryPlans: Record<string, HttpDeliveryPlan>;
-  /** Per-auth `expires_at` mirrored for the sidecar's proactive scheduler. */
   expiresAtEpochMs: Record<string, number | null>;
 }
 
@@ -94,7 +93,7 @@ export async function resolveLiveIntegrationCredentials(
     resolvedConnections?: Record<string, { connectionId: string; source: string }> | null;
   },
   options: ResolveLiveCredentialsOptions = {},
-): Promise<LiveIntegrationCredentialsResult> {
+): Promise<IntegrationCredentialsWire> {
   if (!context.actor) {
     // Scheduled runs without an actor cannot connect to user-scoped
     // integrations; refuse early.
@@ -109,7 +108,7 @@ export async function resolveLiveIntegrationCredentials(
     return { auths: [], deliveryPlans: {}, expiresAtEpochMs: {} };
   }
 
-  const out: LiveIntegrationCredentialsResult = {
+  const out: MutableCredentialsWire = {
     auths: [],
     deliveryPlans: {},
     expiresAtEpochMs: {},

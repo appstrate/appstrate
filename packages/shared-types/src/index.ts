@@ -24,6 +24,7 @@ export type {
   IntegrationPin,
   IntegrationRequiredScopes,
   IntegrationSummary,
+  ScopeBreakdownEntry,
 } from "./integrations.ts";
 
 export type { UserProfile, RunLog } from "@appstrate/db/schema";

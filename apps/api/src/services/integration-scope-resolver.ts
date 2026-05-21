@@ -42,23 +42,14 @@ import { applicationPackages, integrationConnections, packages } from "@appstrat
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { scopesContributedByTools } from "@appstrate/core/integration";
 
+import type { ScopeBreakdownEntry } from "@appstrate/shared-types";
+
 import type { Actor } from "../lib/actor.ts";
 import { actorFilter } from "../lib/actor.ts";
 import type { AppScope } from "../lib/scope.ts";
 import { getIntegration } from "./integration-service.ts";
 
-/**
- * Per-agent breakdown of scope contributions — useful for the debug
- * endpoint and the UI "which agent asked for this permission" surface.
- */
-export interface ScopeBreakdownEntry {
-  /** Fully-scoped agent package id (`@scope/name`). */
-  agentId: string;
-  /** Scopes inferred from the agent's declared (or implicit) `tools[]`. */
-  viaTools: string[];
-  /** Scopes the agent declared explicitly via `scopes[]`. */
-  viaExplicit: string[];
-}
+export type { ScopeBreakdownEntry };
 
 export interface ComputeRequiredScopesResult {
   /** Union over all agents — the set to add to the IdP authorize request. */

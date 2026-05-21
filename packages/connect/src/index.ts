@@ -59,6 +59,7 @@ export type {
   ResolvedAuthCredentials,
   IntegrationCredentialsPayload,
   HttpDeliveryPlan,
+  IntegrationCredentialsWire,
 } from "./integration-credentials.ts";
 
 // CA cert planner for the HTTPS credential proxy (§5.4.1).

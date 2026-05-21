@@ -135,6 +135,19 @@ export interface HttpDeliveryPlan {
   allowServerOverride: boolean;
 }
 
+/**
+ * Wire payload returned by both `/internal/integration-credentials/{scope}/{name}`
+ * endpoints (GET read-current + POST refresh). Single source of truth shared by
+ * the platform resolver (producer) and the sidecar `MitmCredentialSource`
+ * (consumer) — the `auths[]` entries feed the MITM planner; `deliveryPlans` and
+ * `expiresAtEpochMs` are sibling maps the sidecar needs but the planner doesn't.
+ */
+export interface IntegrationCredentialsWire {
+  auths: ReadonlyArray<ResolvedAuthCredentials>;
+  deliveryPlans: Readonly<Record<string, HttpDeliveryPlan>>;
+  expiresAtEpochMs: Readonly<Record<string, number | null>>;
+}
+
 const AUTH_TYPE_HTTP_DEFAULTS: Readonly<
   Record<string, { headerName: string; headerPrefix: string; valueFrom: string }>
 > = {

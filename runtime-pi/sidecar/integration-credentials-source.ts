@@ -22,24 +22,17 @@
  */
 
 import type {
-  HttpDeliveryPlan,
   IntegrationCredentialsPayload,
-  ResolvedAuthCredentials,
+  IntegrationCredentialsWire,
 } from "@appstrate/connect/integration-credentials";
 import type { MitmCredentialSource } from "./integration-mitm-listener.ts";
 import { logger } from "./logger.ts";
 
-/**
- * Wire-level payload returned by both endpoints. The `auths[]` shape is
- * exactly the `IntegrationCredentialsPayload` the MITM planner consumes
- * — `deliveryPlans` and `expiresAtEpochMs` are sibling maps the sidecar
- * needs but the planner doesn't.
- */
-export interface IntegrationCredentialsWire {
-  auths: ReadonlyArray<ResolvedAuthCredentials>;
-  deliveryPlans: Readonly<Record<string, HttpDeliveryPlan>>;
-  expiresAtEpochMs: Readonly<Record<string, number | null>>;
-}
+// Wire-level payload returned by both `/internal/integration-credentials`
+// endpoints — canonical definition lives in `@appstrate/connect` (single
+// source of truth shared with the platform-side resolver). Re-exported here
+// for the sidecar's consumers + tests.
+export type { IntegrationCredentialsWire };
 
 export interface CreateIntegrationCredentialsSourceOptions {
   /** Package id (e.g. `@vendor/integration`). */

@@ -108,17 +108,27 @@ export interface IntegrationOAuthClient {
  *  - `breakdown` — per-agent decomposition for the audit / "why is this
  *    permission required?" surface.
  */
+/**
+ * Per-agent breakdown of scope contributions — the audit / "which agent
+ * asked for this permission" surface. Shared wire element: the backend
+ * resolver builds it, the frontend renders it.
+ */
+export interface ScopeBreakdownEntry {
+  /** Fully-scoped agent package id (`@scope/name`). */
+  agentId: string;
+  /** Scopes inferred from the agent's declared (or implicit) `tools[]`. */
+  viaTools: string[];
+  /** Scopes the agent declared explicitly via `scopes[]`. */
+  viaExplicit: string[];
+}
+
 export interface IntegrationRequiredScopes {
   defaults: string[];
   required: string[];
   granted: string[];
   union: string[];
   missingFromGranted: string[];
-  breakdown: Array<{
-    agentId: string;
-    viaTools: string[];
-    viaExplicit: string[];
-  }>;
+  breakdown: ScopeBreakdownEntry[];
 }
 
 /**
