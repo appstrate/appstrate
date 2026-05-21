@@ -82,7 +82,7 @@ export const msResumableAdapter: UploadAdapter = {
     const body = JSON.stringify(
       Object.keys(ctx.metadata ?? {}).length > 0 ? ctx.metadata : { item: {} },
     );
-    const res = await ctx.providerCall({
+    const res = await ctx.apiCall({
       providerId: ctx.providerId,
       target: ctx.target,
       method: "POST",
@@ -132,7 +132,7 @@ export const msResumableAdapter: UploadAdapter = {
   ): Promise<SessionState> {
     const s = state as MsSessionState;
     ctx.hashUpdate(chunk.bytes);
-    const res = await ctx.providerCall({
+    const res = await ctx.apiCall({
       providerId: ctx.providerId,
       target: s.uploadUrl,
       method: "PUT",
@@ -182,7 +182,7 @@ export const msResumableAdapter: UploadAdapter = {
     const s = state as MsSessionState;
     if (!s.uploadUrl) return;
     try {
-      await ctx.providerCall({
+      await ctx.apiCall({
         providerId: ctx.providerId,
         target: s.uploadUrl,
         method: "DELETE",

@@ -289,7 +289,7 @@ await loadExtensionsFromDir("/runtime/extensions", "runtime");
 // --- 2c. Phase C: wire sidecar-backed tools via MCP ---
 // Every sidecar-backed capability is surfaced as a typed Pi tool whose
 // implementation forwards to the sidecar's MCP `tools/call` endpoint:
-//   - `provider_call({ providerId, … })` — credential-injecting proxy.
+//   - `{ns}__api_call({ method, target, … })` — credential-injecting proxy.
 //   - `run_history` — recent past-run metadata.
 //   - `recall_memory({ q?, limit? })` — archive memory store.
 // The agent LLM never sees the sidecar URL; the contract ("agent never
@@ -358,15 +358,14 @@ if (sidecarUrl) {
     });
     extensionFactories.push(...factories);
 
-    // Wire the tool-side runtime context (4th `execute` arg). The legacy
-    // credentialed `provider_call` surface was retired with the AFPS
-    // provider package type — integrations now expose their own
-    // namespaced tools (including the generic `{ns}__api_call`) directly
-    // to the LLM. `readResource` stays: it resolves any MCP
+    // Wire the tool-side runtime context (4th `execute` arg). The AFPS
+    // provider package type was retired — integrations now expose their
+    // own namespaced tools (including the generic `{ns}__api_call`)
+    // directly to the LLM. `readResource` stays: it resolves any MCP
     // `resource_link` an integration tool may return for spilled blobs.
     const mcp = mcpClient;
     appstrateRuntimeCtx = {
-      providerCall: async (providerId) => {
+      apiCall: async (providerId) => {
         throw new Error(
           `Tool tried to call provider '${providerId}', but the AFPS provider surface has been removed. ` +
             `Use an integration tool ({ns}__api_call) instead.`,
@@ -396,7 +395,7 @@ if (sidecarUrl) {
   // empty), but a misconfigured bundle still gets a clear error rather
   // than a null-deref.
   appstrateRuntimeCtx = {
-    providerCall: async (providerId) => {
+    apiCall: async (providerId) => {
       throw new Error(
         `Tool tried to call provider '${providerId}' but this run was launched without a sidecar — ` +
           `the bundle declared no providers in dependencies.providers[].`,

@@ -6,7 +6,7 @@
  *
  * The agent (MCP client) declares which file:// and s3:// URIs it
  * considers in-bounds via `roots/list`. When a tool argument carries
- * a URI reference (e.g. `provider_call` with
+ * a URI reference (e.g. `api_call` with
  * `body: { type: "resource", uri: "..." }`), the sidecar must validate
  * the URI is within a declared root before dereferencing it.
  *
@@ -17,7 +17,7 @@
  * caller never sees an attacker-shaped URI.
  *
  * Why a separate module: the same validation runs in two places —
- * `provider_call` argument validation (via the MCP server handler) and
+ * `api_call` argument validation (via the MCP server handler) and
  * any future direct-read primitive (e.g. an `appstrate://run-input`
  * scheme). Centralising avoids drift.
  */

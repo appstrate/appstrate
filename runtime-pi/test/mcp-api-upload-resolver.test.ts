@@ -6,7 +6,7 @@
  *
  * Test shape mirrors `mcp-provider-resolver.test.ts`: an in-process
  * MCP pair where the server-side handler stands in for the sidecar's
- * `provider_call` implementation. Each test wires a per-protocol
+ * `api_call` implementation. Each test wires a per-protocol
  * mock upstream simulator into that handler so we can verify
  * end-to-end: file → chunked dispatch → upstream confirms → result.
  *
@@ -62,7 +62,7 @@ function writeSyntheticFile(name: string, size: number) {
 }
 
 /**
- * Build an in-process MCP pair whose `provider_call` handler is
+ * Build an in-process MCP pair whose `api_call` handler is
  * driven by a per-test simulator. The simulator receives the same
  * args shape the sidecar would and returns the CallToolResult shape
  * (including `_meta`) that the resolver's wrapper expects.
@@ -309,7 +309,7 @@ describe("McpApiUploadResolver — google-resumable", () => {
     //      original test).
     //   2. The adapter's `abort()` cleanup DELETE actually reaches the
     //      simulator. This catches the "abort signal aliasing" bug
-    //      where the cleanup providerCall would inherit the user's
+    //      where the cleanup apiCall would inherit the user's
     //      already-aborted signal and short-circuit before the DELETE
     //      went on the wire — leaving the upstream session orphaned.
     const stub = new GoogleStubServer();
@@ -959,9 +959,9 @@ describe("McpApiUploadResolver — cross-cutting", () => {
     // stat without writing real bytes to disk, so the test runs in
     // milliseconds while exercising the real `totalBytes >
     // MAX_STREAMED_BODY_SIZE` branch in the resolver.
-    let providerCallCount = 0;
+    let apiCallCount = 0;
     const { pair, mcp } = await makePair(async () => {
-      providerCallCount += 1;
+      apiCallCount += 1;
       return { status: 200, headers: {}, body: "" };
     });
     try {
@@ -988,8 +988,8 @@ describe("McpApiUploadResolver — cross-cutting", () => {
       if (result.ok) throw new Error("expected failure");
       expect(result.status).toBe(0);
       expect(result.error).toMatch(/exceeds streaming ceiling|MAX_STREAMED_BODY_SIZE/);
-      // The resolver must reject before issuing any provider_call.
-      expect(providerCallCount).toBe(0);
+      // The resolver must reject before issuing any api_call.
+      expect(apiCallCount).toBe(0);
     } finally {
       await pair.close();
     }
@@ -1179,7 +1179,7 @@ describe("McpApiUploadResolver — cancellation parity", () => {
   it("cleanup uses a fresh signal — abort succeeds even after user signal aborted", async () => {
     // Direct regression test for the abort-signal aliasing bug. We
     // verify that the resolver's `fireAbort` builds a cleanup
-    // providerCall on a fresh signal, NOT the user's aborted one.
+    // apiCall on a fresh signal, NOT the user's aborted one.
     //
     // The simulator records every `signalAborted` value observed at
     // the time each request is dispatched. When the cleanup DELETE

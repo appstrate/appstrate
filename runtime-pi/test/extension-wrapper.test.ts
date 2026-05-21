@@ -13,8 +13,8 @@ const emitSpy = (obj: Record<string, unknown>) => {
 // Shared no-op ctx for tests that don't exercise the 4th arg. Throws on use
 // so that any unexpected access surfaces immediately.
 const stubCtx = {
-  providerCall: async () => {
-    throw new Error("stubCtx.providerCall used in a test that did not wire ctx");
+  apiCall: async () => {
+    throw new Error("stubCtx.apiCall used in a test that did not wire ctx");
   },
   readResource: async () => {
     throw new Error("stubCtx.readResource used in a test that did not wire ctx");
@@ -164,7 +164,7 @@ describe("wrapExtensionFactory", () => {
     );
 
     const liveCtx = {
-      providerCall: async (_pid: string, _args: unknown) => ({
+      apiCall: async (_pid: string, _args: unknown) => ({
         content: [{ type: "text", text: "from sidecar" }],
       }),
     };
@@ -180,7 +180,7 @@ describe("wrapExtensionFactory", () => {
 
     await pi.registeredTools[0].execute("call-1", {}, null);
     expect(receivedCtx).toBe(liveCtx);
-    expect(typeof receivedCtx.providerCall).toBe("function");
+    expect(typeof receivedCtx.apiCall).toBe("function");
   });
 
   it("re-evaluates the provider on each execute (late binding)", async () => {
@@ -188,12 +188,12 @@ describe("wrapExtensionFactory", () => {
     // client is wired; the ctx ref is swapped at Phase C. The wrapper must
     // read the provider at execute time, not at factory invocation time.
     const stubCtx = {
-      providerCall: async () => {
+      apiCall: async () => {
         throw new Error("not ready");
       },
     };
     const wiredCtx = {
-      providerCall: async () => ({ content: [{ type: "text", text: "wired" }] }),
+      apiCall: async () => ({ content: [{ type: "text", text: "wired" }] }),
     };
     let liveCtx: any = stubCtx;
 
@@ -218,11 +218,11 @@ describe("wrapExtensionFactory", () => {
     expect(receivedCtx).toBe(wiredCtx);
   });
 
-  it("forwards providerCall return value untouched to the tool", async () => {
-    let providerCallResult: any = undefined;
+  it("forwards apiCall return value untouched to the tool", async () => {
+    let apiCallResult: any = undefined;
     const factory = makeFactory(
       async (_id: string, _params: unknown, _signal: unknown, ctx: any) => {
-        providerCallResult = await ctx.providerCall("@scope/test", {
+        apiCallResult = await ctx.apiCall("@scope/test", {
           target: "https://example.com",
         });
         return { content: [{ type: "text", text: "ok" }] };
@@ -236,7 +236,7 @@ describe("wrapExtensionFactory", () => {
     };
 
     const liveCtx = {
-      providerCall: async (_pid: string, _args: unknown) => stubbedResponse,
+      apiCall: async (_pid: string, _args: unknown) => stubbedResponse,
     };
 
     const wrapped = wrapExtensionFactory(
@@ -249,6 +249,6 @@ describe("wrapExtensionFactory", () => {
     wrapped(pi as any);
 
     await pi.registeredTools[0].execute("call-1", {}, null);
-    expect(providerCallResult).toEqual(stubbedResponse);
+    expect(apiCallResult).toEqual(stubbedResponse);
   });
 });

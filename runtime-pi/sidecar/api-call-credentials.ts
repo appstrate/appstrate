@@ -4,8 +4,7 @@
  * Bridge between an integration's live credentials source and the
  * `ProxyCredentialsPayload` shape `executeApiCall` consumes.
  *
- * The generic `api_call` tool (provider→integration unification) reuses
- * the exact credential-proxy core that used to back `provider_call`. That
+ * The generic `api_call` tool runs the credential-proxy core. That
  * core fetches a {@link ProxyCredentialsPayload} per call; here we
  * synthesise one from the integration's resolved `delivery.http` plan:
  *
@@ -38,7 +37,7 @@ export interface ApiCallCredentialAdapter {
  * Build the `fetch` / `refresh` credential adapters for one integration's
  * `api_call` tool. `providerId` is ignored (the integration is fixed by
  * closure) — the parameter exists only to satisfy the `ApiCallDeps`
- * signature shared with `provider_call`.
+ * signature used by `api_call`.
  */
 export function createApiCallCredentialAdapter(opts: {
   source: IntegrationCredentialsSource;

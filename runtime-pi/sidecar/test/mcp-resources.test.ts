@@ -3,7 +3,7 @@
 /**
  * Tests for the sidecar's `/mcp` resource surface:
  *   - `resources/list` + `resources/read` backed by the run-scoped blob cache.
- *   - `provider_call` spilling oversized / binary upstream responses to
+ *   - `api_call` spilling oversized / binary upstream responses to
  *     `resource_link` blocks.
  *
  * The tests reuse the same `rpc()` JSON-RPC helper pattern as
@@ -111,7 +111,7 @@ async function rpc(
   };
 }
 
-describe("POST /mcp — provider_call resource spillover", () => {
+describe("POST /mcp — api_call resource spillover", () => {
   it("returns a resource_link block for binary upstream responses", async () => {
     const fetchFn = mock(
       async () =>
@@ -293,7 +293,7 @@ describe("POST /mcp — resources/list + resources/read", () => {
     expect(result.resources).toEqual([]);
   });
 
-  it("reads a resource that was previously spilled by provider_call", async () => {
+  it("reads a resource that was previously spilled by api_call", async () => {
     const pdfBytes = new Uint8Array([0xde, 0xad, 0xbe, 0xef, 0x00, 0xff]);
     const fetchFn = mock(
       async () =>
@@ -304,7 +304,7 @@ describe("POST /mcp — resources/list + resources/read", () => {
     );
     const app = await makeResourcesApp({ fetchFn: fetchFn as unknown as typeof fetch });
 
-    // 1. Call provider_call to spill bytes into the blob cache.
+    // 1. Call api_call to spill bytes into the blob cache.
     const callRes = await rpc(app, {
       method: "tools/call",
       params: {

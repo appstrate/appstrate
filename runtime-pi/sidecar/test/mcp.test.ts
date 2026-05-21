@@ -165,7 +165,7 @@ describe("POST /mcp — initialize", () => {
 });
 
 describe("POST /mcp — tools/list", () => {
-  it("advertises run_history and recall_memory (no provider_call)", async () => {
+  it("advertises run_history and recall_memory (no api_call)", async () => {
     const app = createApp(makeDeps());
     const res = await rpc(app, { method: "tools/list" });
     expect(res.status).toBe(200);

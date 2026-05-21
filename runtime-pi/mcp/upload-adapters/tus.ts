@@ -68,7 +68,7 @@ export const tusAdapter: UploadAdapter = {
     const meta = encodeTusMetadata(ctx.metadata);
     if (meta) headers["Upload-Metadata"] = meta;
 
-    const res = await ctx.providerCall({
+    const res = await ctx.apiCall({
       providerId: ctx.providerId,
       target: ctx.target,
       method: "POST",
@@ -113,7 +113,7 @@ export const tusAdapter: UploadAdapter = {
       );
     }
     ctx.hashUpdate(chunk.bytes);
-    const res = await ctx.providerCall({
+    const res = await ctx.apiCall({
       providerId: ctx.providerId,
       target: s.sessionUrl,
       method: "PATCH",
@@ -179,7 +179,7 @@ export const tusAdapter: UploadAdapter = {
     const s = state as TusSessionState;
     if (!s.sessionUrl) return;
     try {
-      await ctx.providerCall({
+      await ctx.apiCall({
         providerId: ctx.providerId,
         target: s.sessionUrl,
         method: "DELETE",

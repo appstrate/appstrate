@@ -84,14 +84,14 @@ describe("DIRECT_TOOL_PROMPT (D5.1)", () => {
 });
 
 describe("buildMcpDirectFactories — runtime-injected tools", () => {
-  it("registers run_history + recall_memory and no provider_call", async () => {
+  it("registers run_history + recall_memory and no api_call", async () => {
     const { mcp, pair } = await makeMockServer();
     try {
       const factories = await buildMcpDirectFactories({ mcp, runId: "run-1", emit: () => {} });
       const captured: CapturedTool[] = [];
       const api = makeMockExtensionApi(captured);
       for (const f of factories) f(api);
-      expect(captured.find((c) => c.name === "provider_call")).toBeUndefined();
+      expect(captured.find((c) => c.name === "api_call")).toBeUndefined();
       expect(captured.map((c) => c.name).sort()).toEqual(["recall_memory", "run_history"]);
     } finally {
       await pair.close();

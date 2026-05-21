@@ -15,11 +15,9 @@
  * credential-isolation invariant unchanged — every byte still transits
  * the sidecar's authenticated proxy.
  *
- * This is the integration-era port of the retired provider-era
- * `provider_upload`: same adapter logic, swapped from dispatching
- * `provider_call` (which carried a `providerId` arg) to dispatching the
- * per-integration `{ns}__api_call` tool (the integration is implied by
- * the tool name, so no `providerId` arg is sent). `req.providerId`
+ * The chunked-upload resolver dispatches each chunk through the
+ * per-integration `{ns}__api_call` tool. The integration is implied by
+ * the tool name, so no separate `providerId` arg is sent — `req.providerId`
  * carries the `{ns}__api_call` tool name the wrapper dispatches to.
  *
  * Lifecycle
@@ -55,8 +53,8 @@ import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
 import {
   ADAPTERS,
   type AdapterContext,
-  type AdapterProviderCallRequest,
-  type AdapterProviderResponse,
+  type AdapterApiCallRequest,
+  type AdapterApiCallResponse,
   type ChunkInfo,
   type UploadAdapter,
   type UploadProtocol,
@@ -84,9 +82,8 @@ const ABORT_CLEANUP_TIMEOUT_MS = 5_000;
 export interface ProviderUploadRequest {
   /**
    * The `{ns}__api_call` MCP tool name to dispatch each chunk through.
-   * (Provider-era this was a `provider_call` `providerId` argument; in
-   * the integration era the integration is implied by the tool name, so
-   * this string IS the tool name and no `providerId` arg is sent.)
+   * The integration is implied by the tool name, so this string IS the
+   * tool name and no separate `providerId` arg is sent.
    */
   providerId: string;
   target: string;
@@ -158,7 +155,7 @@ export class McpApiUploadResolver {
     }
 
     // Resolve the workspace-relative path with the same safety the
-    // provider_call resolver applies — symlinks refused, escapes
+    // api_call resolver applies — symlinks refused, escapes
     // refused. Throws on violation (caught and structured below).
     let absPath: string;
     let totalBytes: number;
@@ -223,7 +220,7 @@ export class McpApiUploadResolver {
     // and the digest reflects exactly those bytes. On a mid-flight
     // failure, `bytesAcked` reports what upstream confirmed receiving,
     // not what we attempted to send (which would be one chunk too high
-    // — the failing chunk hashed before its provider_call rejected).
+    // — the failing chunk hashed before its api_call rejected).
     let bytesAcked = 0;
 
     const adapterCtx: AdapterContext = {
@@ -232,7 +229,7 @@ export class McpApiUploadResolver {
       totalBytes,
       metadata: req.metadata ?? {},
       partSizeBytes,
-      providerCall: this.makeProviderCall(ctx.signal),
+      apiCall: this.makeApiCall(ctx.signal),
       signal: ctx.signal,
       hashUpdate: (bytes) => {
         hasher.update(bytes);
@@ -322,7 +319,7 @@ export class McpApiUploadResolver {
    * Fire `adapter.abort` against a fresh, time-bounded signal so the
    * cleanup DELETE actually has a chance to reach upstream.
    *
-   * Why a separate signal: `adapterCtx.providerCall` was built with
+   * Why a separate signal: `adapterCtx.apiCall` was built with
    * the user's `ctx.signal`. By the time we get here that signal is
    * usually aborted (cancellation path) — reusing it would make
    * `mcp.callTool` throw before issuing the cleanup request, leaving
@@ -339,7 +336,7 @@ export class McpApiUploadResolver {
     const cleanupSignal = AbortSignal.timeout(ABORT_CLEANUP_TIMEOUT_MS);
     const cleanupCtx: AdapterContext = {
       ...ctx,
-      providerCall: this.makeProviderCall(cleanupSignal),
+      apiCall: this.makeApiCall(cleanupSignal),
       signal: cleanupSignal,
     };
     void adapter.abort(state, cleanupCtx).catch(() => {});
@@ -361,12 +358,12 @@ export class McpApiUploadResolver {
    * `adapter.abort` runs on a fresh, time-bounded signal so it doesn't
    * inherit the user's already-aborted cancellation signal.
    */
-  private makeProviderCall(signal: AbortSignal) {
-    return async (req: AdapterProviderCallRequest): Promise<AdapterProviderResponse> => {
+  private makeApiCall(signal: AbortSignal) {
+    return async (req: AdapterApiCallRequest): Promise<AdapterApiCallResponse> => {
       // `req.providerId` is the per-integration `{ns}__api_call` tool
-      // name. Unlike the retired `provider_call`, that tool does NOT
-      // accept a `providerId` argument (the integration is fixed by the
-      // tool name), so we dispatch to the named tool and omit it.
+      // name. That tool does NOT accept a `providerId` argument (the
+      // integration is fixed by the tool name), so we dispatch to the
+      // named tool and omit it.
       const toolName = req.providerId;
       const args: Record<string, unknown> = {
         target: req.target,

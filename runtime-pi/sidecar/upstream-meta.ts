@@ -2,7 +2,7 @@
 // Copyright 2026 Appstrate
 
 /**
- * Sidecar-side serializer for `provider_call` upstream-response
+ * Sidecar-side serializer for `api_call` upstream-response
  * metadata. The wire format (key + allowlist + `UpstreamMeta` type)
  * lives in `@appstrate/mcp-transport/upstream-meta` so the sidecar
  * and the runtime-pi parser share a single source of truth.

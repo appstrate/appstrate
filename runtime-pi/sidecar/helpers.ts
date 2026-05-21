@@ -27,7 +27,7 @@ export const MAX_SUBSTITUTE_BODY_SIZE = 5 * 1024 * 1024; // 5MB
 export const LLM_PROXY_TIMEOUT_MS = 1_800_000; // 30 minutes (patched from 300_000 — was killing legitimate long-running agentic runs at exactly 5 min)
 
 /**
- * Default cap on simultaneous `provider_call` MCP invocations per run.
+ * Default cap on simultaneous `api_call` MCP invocations per run.
  * Three matches the typical browsing concurrency a single LLM turn can
  * usefully exploit while leaving headroom under most providers' per-IP
  * rate limits. Operators can override via
@@ -94,7 +94,7 @@ export function readPositiveByteEnv(
 }
 
 /**
- * Hard upper bound on `provider_call` request bodies after base64 decode
+ * Hard upper bound on `api_call` request bodies after base64 decode
  * (binary path) or string materialization (text path). Configurable via
  * `SIDECAR_MAX_REQUEST_BODY_BYTES`. Default 10 MB.
  *

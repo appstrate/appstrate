@@ -4,7 +4,7 @@
 /**
  * Run-scoped blob cache backing the sidecar's MCP `resources/*` surface.
  *
- * One writer populates this store: the `provider_call` tool when an
+ * One writer populates this store: the `api_call` tool when an
  * upstream response is too large to inline.
  *
  * One reader: the MCP `resources/read` handler (validated against the

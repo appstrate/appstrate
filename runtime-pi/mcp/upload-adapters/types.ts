@@ -23,8 +23,8 @@ type AfpsUploadProtocol = IntegrationUploadProtocol;
  *
  * Adapters never touch the wire directly. They orchestrate state
  * (session URLs, ETag accumulation, offset tracking) and call
- * back into `ctx.providerCall(...)` which dispatches a single MCP
- * `provider_call` for each chunk. The credential isolation
+ * back into `ctx.apiCall(...)` which dispatches a single MCP
+ * `{ns}__api_call` for each chunk. The credential isolation
  * invariant is therefore preserved: every byte still flows through
  * the sidecar's authenticated proxy.
  *
@@ -56,7 +56,7 @@ type AfpsUploadProtocol = IntegrationUploadProtocol;
 export type UploadProtocol = AfpsUploadProtocol;
 
 /**
- * Outcome of a single `providerCall` issued by an adapter.
+ * Outcome of a single `apiCall` issued by an adapter.
  *
  * Mirrors the sidecar's `_meta.appstrate/upstream` payload after
  * resolver-side parsing — adapters consume `status` and `headers`
@@ -65,7 +65,7 @@ export type UploadProtocol = AfpsUploadProtocol;
  * `UploadId` in XML; Microsoft's `createUploadSession` returns the
  * resumable URL in JSON).
  */
-export interface AdapterProviderResponse {
+export interface AdapterApiCallResponse {
   status: number;
   headers: Record<string, string>;
   /** Response body as a string. UTF-8 decoded for non-binary upstreams. */
@@ -73,8 +73,8 @@ export interface AdapterProviderResponse {
 }
 
 /**
- * Abstract `provider_call` dispatcher exposed to adapters. Wraps
- * `mcp.callTool({ name: "provider_call", arguments: ... })` and
+ * Abstract `api_call` dispatcher exposed to adapters. Wraps
+ * `mcp.callTool({ name: "{ns}__api_call", arguments: ... })` and
  * surfaces the upstream meta in a single object.
  *
  * `bytes` carries the chunk to upload — the wrapper base64-encodes
@@ -82,12 +82,10 @@ export interface AdapterProviderResponse {
  * to (for adapters that follow `Location:` between calls, this may
  * differ from the original `target` the agent passed).
  */
-export type AdapterProviderCall = (
-  req: AdapterProviderCallRequest,
-) => Promise<AdapterProviderResponse>;
+export type AdapterApiCall = (req: AdapterApiCallRequest) => Promise<AdapterApiCallResponse>;
 
-export interface AdapterProviderCallRequest {
-  /** `provider_call.providerId` — pinned for the whole upload. */
+export interface AdapterApiCallRequest {
+  /** The `{ns}__api_call` tool name — pinned for the whole upload. */
   providerId: string;
   target: string;
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD";
@@ -114,10 +112,10 @@ export interface AdapterContext {
   /** Suggested chunk size; the adapter may clamp to its own protocol-
    *  level minimum/alignment requirements. */
   partSizeBytes: number;
-  /** Wraps `mcp.callTool({ name: "provider_call", … })`. */
-  providerCall: AdapterProviderCall;
+  /** Wraps `mcp.callTool({ name: "{ns}__api_call", … })`. */
+  apiCall: AdapterApiCall;
   /** Abort signal — adapters check between chunks AND propagate to
-   *  the underlying providerCall. */
+   *  the underlying apiCall. */
   signal: AbortSignal;
   /** Update the running SHA-256 with the chunk bytes about to be sent.
    *  Adapters call this exactly once per uploaded chunk so the digest
@@ -231,7 +229,7 @@ export interface UploadAdapter {
   /**
    * Initiate the upload session. Returns adapter-private state.
    *
-   * Implementations issue ONE `providerCall` typically — a metadata
+   * Implementations issue ONE `apiCall` typically — a metadata
    * POST. May issue zero (tus, where session creation is implicit on
    * first PATCH) or several (rare). Must respect `ctx.signal`.
    */

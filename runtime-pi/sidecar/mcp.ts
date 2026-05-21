@@ -6,12 +6,12 @@
  * surface after the migration.
  *
  * The sidecar's only first-party HTTP endpoint is `/health`; everything
- * the agent talks to (`provider_call`, `run_history`, `recall_memory`) is
+ * the agent talks to (`{ns}__api_call`, `run_history`, `recall_memory`) is
  * dispatched here as MCP tools.
  *
  * Key invariants:
  *
- * 1. `provider_call` calls {@link executeApiCall} directly via
+ * 1. `{ns}__api_call` calls {@link executeApiCall} directly via
  *    `proxyDeps`. There is no longer a `/proxy` HTTP envelope — the
  *    same credential-isolation invariants (cred fetch, URL allowlist,
  *    server-side header injection, 401-retry, cookie jar, persistent-
@@ -97,7 +97,7 @@ import {
 } from "./upstream-meta.ts";
 
 /**
- * `_meta` payload attached to every `provider_call` pre-flight error
+ * `_meta` payload attached to every `api_call` pre-flight error
  * (no upstream contact). Surfacing `status: 0` lets the runtime
  * distinguish "no upstream contact" from "upstream returned 5xx" via
  * the status code rather than the absence of `_meta` — the runtime
@@ -166,7 +166,7 @@ function validateMcpHostHeader(req: Request): Response | undefined {
 }
 
 /**
- * Headers an LLM caller may NOT inject via `provider_call.args.headers`.
+ * Headers an LLM caller may NOT inject via `api_call.args.headers`.
  *
  * The MCP descriptor advertises that routing / sidecar-control headers
  * are filtered server-side. Without this filter, an LLM could supply
@@ -196,7 +196,7 @@ const PROVIDER_CALL_FORBIDDEN_HEADERS = new Set<string>([
  * (used to surface the violation to the agent — silent stripping would
  * mask buggy MCP clients).
  */
-function sanitiseProviderCallHeaders(raw: Record<string, string> | undefined): {
+function sanitiseApiCallHeaders(raw: Record<string, string> | undefined): {
   headers: Record<string, string>;
   dropped: string[];
 } {
@@ -282,7 +282,7 @@ const MAX_MULTIPART_FILENAME_LENGTH = 1024;
 const MAX_MULTIPART_CONTENT_TYPE_LENGTH = 256;
 
 /**
- * Runtime shape of a single `provider_call.body.multipart[]` entry.
+ * Runtime shape of a single `api_call.body.multipart[]` entry.
  * Mirrors the JSON Schema on the tool descriptor — kept as an explicit
  * TS type so the handler can narrow without `as` casts. Two variants:
  *
@@ -337,7 +337,7 @@ function multipartError(
 }
 
 /**
- * Validate + decode every entry in `provider_call.body.multipart[]`.
+ * Validate + decode every entry in `api_call.body.multipart[]`.
  * Returns either the fully-decoded parts ready for `FormData` assembly,
  * or a structured `CallToolResult` describing the first failure (mirrors
  * the `{ fromBytes }` error shapes — invalid base64, oversize payload).
@@ -350,14 +350,14 @@ function multipartError(
  */
 function validateMultipartParts(parts: unknown): MultipartValidationOk | MultipartValidationErr {
   if (!Array.isArray(parts)) {
-    return multipartError("provider_call: body.multipart must be an array of parts.");
+    return multipartError("api_call: body.multipart must be an array of parts.");
   }
   if (parts.length === 0) {
-    return multipartError("provider_call: body.multipart must contain at least one part.");
+    return multipartError("api_call: body.multipart must contain at least one part.");
   }
   if (parts.length > MAX_MULTIPART_PARTS) {
     return multipartError(
-      `provider_call: body.multipart has ${parts.length} parts, which exceeds the per-request limit of ${MAX_MULTIPART_PARTS}.`,
+      `api_call: body.multipart has ${parts.length} parts, which exceeds the per-request limit of ${MAX_MULTIPART_PARTS}.`,
     );
   }
 
@@ -368,20 +368,20 @@ function validateMultipartParts(parts: unknown): MultipartValidationOk | Multipa
   for (let i = 0; i < parts.length; i++) {
     const part = parts[i] as MultipartPartArg | undefined;
     if (!part || typeof part !== "object") {
-      return multipartError(`provider_call: body.multipart[${i}] must be an object.`);
+      return multipartError(`api_call: body.multipart[${i}] must be an object.`);
     }
     if (typeof (part as { name?: unknown }).name !== "string" || part.name.length === 0) {
-      return multipartError(`provider_call: body.multipart[${i}].name must be a non-empty string.`);
+      return multipartError(`api_call: body.multipart[${i}].name must be a non-empty string.`);
     }
     if (part.name.length > MAX_MULTIPART_NAME_LENGTH) {
       return multipartError(
-        `provider_call: body.multipart[${i}].name length ${part.name.length} exceeds the per-part limit of ${MAX_MULTIPART_NAME_LENGTH}.`,
+        `api_call: body.multipart[${i}].name length ${part.name.length} exceeds the per-part limit of ${MAX_MULTIPART_NAME_LENGTH}.`,
       );
     }
     if ("value" in part) {
       if (typeof part.value !== "string") {
         return multipartError(
-          `provider_call: body.multipart[${i}].value must be a string. Use the file-part shape ({ name, filename, bytes, encoding }) for binary data.`,
+          `api_call: body.multipart[${i}].value must be a string. Use the file-part shape ({ name, filename, bytes, encoding }) for binary data.`,
         );
       }
       fields.push({ name: part.name, value: part.value });
@@ -390,17 +390,15 @@ function validateMultipartParts(parts: unknown): MultipartValidationOk | Multipa
     // File part: { name, filename, bytes, encoding, contentType? }
     if (part.encoding !== "base64") {
       return multipartError(
-        `provider_call: body.multipart[${i}].encoding must be "base64" (only standard base64 file parts are supported).`,
+        `api_call: body.multipart[${i}].encoding must be "base64" (only standard base64 file parts are supported).`,
       );
     }
     if (typeof part.filename !== "string" || part.filename.length === 0) {
-      return multipartError(
-        `provider_call: body.multipart[${i}].filename must be a non-empty string.`,
-      );
+      return multipartError(`api_call: body.multipart[${i}].filename must be a non-empty string.`);
     }
     if (part.filename.length > MAX_MULTIPART_FILENAME_LENGTH) {
       return multipartError(
-        `provider_call: body.multipart[${i}].filename length ${part.filename.length} exceeds the per-part limit of ${MAX_MULTIPART_FILENAME_LENGTH}.`,
+        `api_call: body.multipart[${i}].filename length ${part.filename.length} exceeds the per-part limit of ${MAX_MULTIPART_FILENAME_LENGTH}.`,
       );
     }
     if (
@@ -409,19 +407,19 @@ function validateMultipartParts(parts: unknown): MultipartValidationOk | Multipa
         part.contentType.length > MAX_MULTIPART_CONTENT_TYPE_LENGTH)
     ) {
       return multipartError(
-        `provider_call: body.multipart[${i}].contentType must be a string of at most ${MAX_MULTIPART_CONTENT_TYPE_LENGTH} characters.`,
+        `api_call: body.multipart[${i}].contentType must be a string of at most ${MAX_MULTIPART_CONTENT_TYPE_LENGTH} characters.`,
       );
     }
     const decoded = decodeStrictBase64(part.bytes);
     if (decoded === "invalid") {
       return multipartError(
-        `provider_call: body.multipart[${i}].bytes is not standard base64 (RFC 4648 §4, alphabet \`+/\`, no whitespace).`,
+        `api_call: body.multipart[${i}].bytes is not standard base64 (RFC 4648 §4, alphabet \`+/\`, no whitespace).`,
       );
     }
     decodedBytes += decoded.byteLength;
     if (decodedBytes > MAX_REQUEST_BODY_SIZE) {
       return multipartError(
-        `provider_call: body.multipart sum of decoded file bytes is ${decodedBytes} bytes ` +
+        `api_call: body.multipart sum of decoded file bytes is ${decodedBytes} bytes ` +
           `(at index ${i}), which exceeds the per-request limit of ${MAX_REQUEST_BODY_SIZE} ` +
           `bytes. Operators can raise the cap with SIDECAR_MAX_REQUEST_BODY_BYTES (and ` +
           `SIDECAR_MAX_MCP_ENVELOPE_BYTES, since base64 inflation must still fit the ` +
@@ -452,14 +450,14 @@ function validateMultipartParts(parts: unknown): MultipartValidationOk | Multipa
 }
 
 /**
- * Build the `provider_call`, `run_history`, and `recall_memory` MCP
+ * Build the `{ns}__api_call`, `run_history`, and `recall_memory` MCP
  * tool definitions. All three tools are implemented in-process —
- * `provider_call` calls {@link executeApiCall} directly via
+ * `{ns}__api_call` calls {@link executeApiCall} directly via
  * {@link MountMcpOptions.proxyDeps}; `run_history` and `recall_memory`
  * call `proxyDeps.fetchFn` against the platform upstream. None of
  * these tools round-trip through a Hono HTTP envelope.
  *
- * When a `provider_call` upstream response is binary, exceeds the
+ * When an `api_call` upstream response is binary, exceeds the
  * per-call token cap, or would push the run-level cumulative budget
  * past its ceiling (see {@link TokenBudget}), the bytes are stored in
  * the supplied {@link BlobStore} and the tool returns a `resource_link`
@@ -472,13 +470,13 @@ function buildSidecarTools(options: MountMcpOptions): {
   makeApiCallTool: (integ: ApiCallIntegrationConfig) => AppstrateToolDefinition;
   makeApiUploadTool: (integ: ApiCallIntegrationConfig) => AppstrateToolDefinition | null;
 } {
-  const { blobStore, proxyDeps, tokenBudget, providerCallLimit } = options;
+  const { blobStore, proxyDeps, tokenBudget, apiCallLimit } = options;
   const { config, fetchFn } = proxyDeps;
   // Shared input schema for the credential-injecting proxy. The AFPS
-  // provider package type (and its served `provider_call` tool) is
-  // retired — the only tool built from this schema now is the generic
-  // `{ns}__api_call` per-integration tool, which clones this minus the
-  // `providerId` argument (the integration is implied by the tool name).
+  // provider package type is retired — the only tool built from this
+  // schema is the generic `{ns}__api_call` per-integration tool, which
+  // omits the `providerId` argument (the integration is implied by the
+  // tool name).
   const CREDENTIAL_PROXY_INPUT_SCHEMA = {
     type: "object",
     additionalProperties: false,
@@ -602,14 +600,12 @@ function buildSidecarTools(options: MountMcpOptions): {
     },
   } as const;
 
-  // provider→integration unification — build one generic `{ns}__api_call`
-  // tool for an integration that opted into `apiCall`. Reuses the exact
-  // credential-proxy core as `provider_call` (body parsing,
+  // Build one generic `{ns}__api_call` tool for an integration that opted
+  // into `apiCall`. Runs the credential-proxy core (body parsing,
   // redirect/cookie/SSRF hardening, 401 refresh, blob spillover) via
   // {@link credentialProxyInner}, with a fixed providerId (the integration
-  // package id) and integration-backed credentials. The descriptor is
-  // cloned from `provider_call` minus the `providerId` argument (the
-  // integration is implied by the tool name).
+  // package id) and integration-backed credentials. The descriptor omits a
+  // `providerId` argument (the integration is implied by the tool name).
   //
   // Built lazily (per `/mcp` request) by `mountMcp` because the set of
   // integrations is only known after the background bootstrap finishes.
@@ -645,8 +641,8 @@ function buildSidecarTools(options: MountMcpOptions): {
         },
       },
       handler: async (rawArgs) =>
-        providerCallLimit
-          ? await providerCallLimit(() => credentialProxyInner(rawArgs, ctx))
+        apiCallLimit
+          ? await apiCallLimit(() => credentialProxyInner(rawArgs, ctx))
           : await credentialProxyInner(rawArgs, ctx),
     };
   };
@@ -746,7 +742,7 @@ function buildSidecarTools(options: MountMcpOptions): {
   };
 
   /**
-   * Inner handler for `provider_call` — extracted so the
+   * Inner handler for `api_call` — extracted so the
    * concurrency-limiting wrapper above can stay shallow and the
    * pre-flight validation / upstream HTTP body can keep its existing
    * control flow without nested closures.
@@ -789,7 +785,7 @@ function buildSidecarTools(options: MountMcpOptions): {
         };
       }
 
-      const { headers: callerHeaders, dropped } = sanitiseProviderCallHeaders(args.headers);
+      const { headers: callerHeaders, dropped } = sanitiseApiCallHeaders(args.headers);
       if (dropped.length > 0) {
         return {
           content: [
@@ -897,7 +893,7 @@ function buildSidecarTools(options: MountMcpOptions): {
                   `Operators can raise the cap with SIDECAR_MAX_REQUEST_BODY_BYTES (and ` +
                   `SIDECAR_MAX_MCP_ENVELOPE_BYTES, since base64 inflation must still fit ` +
                   `the JSON-RPC envelope). Files larger than the cap must be split across ` +
-                  `multiple provider_call invocations.`,
+                  `multiple api_call invocations.`,
               },
             ],
             structuredContent: {
@@ -964,7 +960,7 @@ function buildSidecarTools(options: MountMcpOptions): {
         // can surface real HTTP status / response headers (Location,
         // ETag, Upload-Offset, …) to chunked-upload protocols, plus
         // the post-redirect terminal URL for OAuth/CAS/magic-link
-        // callback extraction. Always on for `provider_call` — the
+        // callback extraction. Always on for `api_call` — the
         // runtime parser requires it.
         attachUpstreamMeta: true,
         upstreamFinalUrl: result.finalUrl,
@@ -1173,9 +1169,9 @@ interface ResponseToToolResultOptions {
    * `./upstream-meta.ts`; finalUrl is sanitised (userinfo + fragment
    * stripped) before serialisation.
    *
-   * Defaults to false on the legacy `provider_call` path so an
-   * existing agent connection sees no wire-format change. The new
-   * `provider_upload` Pi tool always passes `true`.
+   * Defaults to false on the `api_call` path so an existing agent
+   * connection sees no wire-format change. The `provider_upload` Pi
+   * tool always passes `true`.
    */
   attachUpstreamMeta?: boolean;
   /**
@@ -1322,7 +1318,7 @@ async function responseToToolResult(
           {
             type: "text",
             text:
-              `provider_call: non-text response of type '${ct || "unknown"}' is not supported on ` +
+              `api_call: non-text response of type '${ct || "unknown"}' is not supported on ` +
               `this path without a configured blob store. Binary upstream responses are linked as ` +
               `MCP resources — verify the sidecar was started with a runId.`,
           },
@@ -1344,7 +1340,7 @@ async function responseToToolResult(
           {
             type: "text",
             text:
-              `provider_call: response exceeds ${binaryReadCap} bytes (${binaryReadCap >= 1024 * 1024 ? `${Math.round(binaryReadCap / 1024 / 1024)} MB` : `${Math.round(binaryReadCap / 1024)} KB`}) — refused without truncation ` +
+              `api_call: response exceeds ${binaryReadCap} bytes (${binaryReadCap >= 1024 * 1024 ? `${Math.round(binaryReadCap / 1024 / 1024)} MB` : `${Math.round(binaryReadCap / 1024)} KB`}) — refused without truncation ` +
               `(truncating an opaque binary blob is unsafe).`,
           },
         ],
@@ -1362,7 +1358,7 @@ async function responseToToolResult(
         content: [
           {
             type: "text",
-            text: `provider_call: blob store rejected upstream response — ${getErrorMessage(err)}`,
+            text: `api_call: blob store rejected upstream response — ${getErrorMessage(err)}`,
           },
         ],
         isError: true,
@@ -1606,7 +1602,7 @@ export interface ApiCallToolDeps {
   proxyDeps: ApiCallDeps;
   blobStore?: BlobStore;
   tokenBudget?: TokenBudget;
-  providerCallLimit?: LimitFunction;
+  apiCallLimit?: LimitFunction;
 }
 
 /**
@@ -1638,10 +1634,10 @@ export const API_CALL_TOOL_NAME = "api_call";
 export const API_UPLOAD_TOOL_NAME = "api_upload";
 
 export interface MountMcpOptions {
-  /** Run-scoped blob store for `provider_call` resource spillover. */
+  /** Run-scoped blob store for `api_call` resource spillover. */
   blobStore?: BlobStore;
   /**
-   * Credential-proxy core deps. `provider_call` calls
+   * Credential-proxy core deps. `api_call` calls
    * {@link executeApiCall} directly with structured args; `run_history`
    * and `recall_memory` use `proxyDeps.fetchFn` + `proxyDeps.config` to
    * reach the platform upstream. Required: there is no longer a legacy
@@ -1661,7 +1657,7 @@ export interface MountMcpOptions {
    */
   tokenBudget?: TokenBudget;
   /**
-   * Run-scoped fan-out limiter for `provider_call`. Caps the number of
+   * Run-scoped fan-out limiter for `api_call`. Caps the number of
    * concurrent upstream HTTP hops a single run can issue at once.
    * Without a cap, an agent that fetches N items in parallel (8 Gmail
    * messages, 20 ClickUp tasks, …) can feed the next LLM turn an
@@ -1671,10 +1667,10 @@ export interface MountMcpOptions {
    * Optional only so tests / embedders can omit it; production wires a
    * `pLimit` instance unconditionally via `createApp` (see `app.ts`).
    */
-  providerCallLimit?: LimitFunction;
+  apiCallLimit?: LimitFunction;
   /**
    * Lazy provider for additional MCP tool definitions to merge alongside
-   * the first-party sidecar tools (provider_call, run_history, recall_memory).
+   * the first-party sidecar tools (run_history, recall_memory).
    * Called on EVERY `/mcp` request so the sidecar's HTTP surface comes up
    * before integration MCP servers finish their initial handshake. The
    * integration runtime (Phase 1.4) wires `McpHost.buildTools` here:

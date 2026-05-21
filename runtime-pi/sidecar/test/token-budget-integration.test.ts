@@ -7,7 +7,7 @@
  * These tests exercise the full path:
  *
  *   agent → POST /mcp (JSON-RPC) → mountMcp → tools/call →
- *     provider_call / run_history / recall_memory →
+ *     api_call / run_history / recall_memory →
  *       executeApiCall (or platform fetchFn) →
  *         responseToToolResult — the function under test, where the
  *         token-budget tracker is consulted.
@@ -21,7 +21,7 @@
  *   - `_meta` payload carries the budget accounting so the agent
  *     runtime can react to structured truncation events.
  *   - `run_history` and `recall_memory` honour the same gate as
- *     `provider_call`.
+ *     `api_call`.
  *   - Without a token budget configured, the legacy byte threshold
  *     remains in force (no regression for embedders that don't wire
  *     the budget).

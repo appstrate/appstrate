@@ -300,7 +300,7 @@ function stringifyError(err: unknown): string {
  *                          upstream response back to the agent without
  *                          buffering. The agent never sees the key.
  *   - `ALL  /mcp`        — JSON-RPC entrypoint mounted by `mountMcp`.
- *                          Exposes `provider_call`, `run_history`, and
+ *                          Exposes `{ns}__api_call`, `run_history`, and
  *                          `recall_memory` as MCP tools backed by the
  *                          credential-proxy core in `credential-proxy.ts`.
  */
@@ -314,7 +314,7 @@ function stringifyError(err: unknown): string {
 export interface SidecarRuntimeDeps {
   blobStore: BlobStore;
   tokenBudget: TokenBudget;
-  providerCallLimit: LimitFunction;
+  apiCallLimit: LimitFunction;
   proxyDeps: ApiCallDeps;
 }
 
@@ -351,7 +351,7 @@ export function buildSidecarRuntimeDeps(deps: AppDeps): SidecarRuntimeDeps {
     contextWindowTokens: tokenBudget.contextWindowTokens,
     reserveTokens: tokenBudget.reserveTokens,
   });
-  const providerCallLimit: LimitFunction = pLimit(
+  const apiCallLimit: LimitFunction = pLimit(
     readPositiveIntEnv("SIDECAR_PROVIDER_CALL_CONCURRENCY", DEFAULT_PROVIDER_CALL_CONCURRENCY),
   );
   const proxyDeps: ApiCallDeps = {
@@ -362,7 +362,7 @@ export function buildSidecarRuntimeDeps(deps: AppDeps): SidecarRuntimeDeps {
     ...(deps.refreshCredentials ? { refreshCredentials: deps.refreshCredentials } : {}),
     reportedAuthFailures: new Set<string>(),
   };
-  return { blobStore, tokenBudget, providerCallLimit, proxyDeps };
+  return { blobStore, tokenBudget, apiCallLimit, proxyDeps };
 }
 
 export function createApp(deps: AppDeps): Hono {
@@ -614,12 +614,12 @@ export function createApp(deps: AppDeps): Hono {
   // `bootIntegrations` (when `server.ts` pre-builds them) so the
   // in-process api_call server and the outer resource provider use the
   // same blob store.
-  const { blobStore, tokenBudget, providerCallLimit, proxyDeps } =
+  const { blobStore, tokenBudget, apiCallLimit, proxyDeps } =
     deps.runtimeDeps ?? buildSidecarRuntimeDeps(deps);
   mountMcp(app, {
     blobStore,
     tokenBudget,
-    providerCallLimit,
+    apiCallLimit,
     proxyDeps,
     ...(deps.additionalMcpToolsProvider
       ? { additionalToolsProvider: deps.additionalMcpToolsProvider }

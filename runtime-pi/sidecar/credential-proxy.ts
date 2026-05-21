@@ -16,7 +16,7 @@
  *   6. Retry once on 401 with a refreshed token.
  *   7. Log persistent auth failures locally (once per provider per run).
  *
- * The MCP `provider_call` tool handler in `runtime-pi/sidecar/mcp.ts`
+ * The MCP `api_call` tool handler in `runtime-pi/sidecar/mcp.ts`
  * takes typed JSON-RPC arguments and calls this helper directly, then
  * hands the resulting upstream `Response` to `responseToToolResult` for
  * blob spillover / truncation.

@@ -3,7 +3,7 @@
 /**
  * Tests for the shared credential-proxy core.
  *
- * The MCP `provider_call` tool delegates here. This file pins the
+ * The MCP `api_call` tool delegates here. This file pins the
  * structured args/result surface so MCP-only regressions (e.g. dropping
  * a result branch) are caught without needing a Hono context.
  */

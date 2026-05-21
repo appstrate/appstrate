@@ -62,7 +62,7 @@ export const s3MultipartAdapter: UploadAdapter = {
       throw new Error(
         `s3-multipart: partSizeBytes ${partSizeBytes} below S3 minimum ${MIN_PART_SIZE} (5 MiB) ` +
           `for multi-part uploads. Use ≥5 MiB, or send the whole file in one shot via ` +
-          `provider_call with body: { fromFile: "..." } when it fits under MAX_REQUEST_BODY_SIZE.`,
+          `api_call with body: { fromFile: "..." } when it fits under MAX_REQUEST_BODY_SIZE.`,
       );
     }
     return partSizeBytes;
@@ -78,7 +78,7 @@ export const s3MultipartAdapter: UploadAdapter = {
     for (const [k, v] of Object.entries(ctx.metadata ?? {})) {
       if (typeof v === "string") headers[k] = v;
     }
-    const res = await ctx.providerCall({
+    const res = await ctx.apiCall({
       providerId: ctx.providerId,
       target: url,
       method: "POST",
@@ -126,7 +126,7 @@ export const s3MultipartAdapter: UploadAdapter = {
       ctx.target,
       `partNumber=${partNumber}&uploadId=${encodeURIComponent(s.uploadId)}`,
     );
-    const res = await ctx.providerCall({
+    const res = await ctx.apiCall({
       providerId: ctx.providerId,
       target: url,
       method: "PUT",
@@ -164,7 +164,7 @@ export const s3MultipartAdapter: UploadAdapter = {
     const s = state as S3SessionState;
     const url = appendQuery(ctx.target, `uploadId=${encodeURIComponent(s.uploadId)}`);
     const xml = buildCompleteMultipartUploadXml(s.parts);
-    const res = await ctx.providerCall({
+    const res = await ctx.apiCall({
       providerId: ctx.providerId,
       target: url,
       method: "POST",
@@ -192,7 +192,7 @@ export const s3MultipartAdapter: UploadAdapter = {
     if (!s.uploadId) return;
     const url = appendQuery(ctx.target, `uploadId=${encodeURIComponent(s.uploadId)}`);
     try {
-      await ctx.providerCall({
+      await ctx.apiCall({
         providerId: ctx.providerId,
         target: url,
         method: "DELETE",
