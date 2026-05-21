@@ -46,22 +46,6 @@ description: A test skill
 ---
 # Skill content`;
 
-function validProviderManifest() {
-  return JSON.stringify({
-    name: "@test/my-provider",
-    version: "1.0.0",
-    type: "provider",
-    definition: {
-      authMode: "oauth2",
-      oauth2: {
-        authorizationUrl: "https://example.com/authorize",
-        tokenUrl: "https://example.com/token",
-        defaultScopes: ["read"],
-      },
-    },
-  });
-}
-
 function validIntegrationManifest() {
   return JSON.stringify({
     manifestVersion: "1.1",
@@ -100,28 +84,6 @@ describe("parsePackageZip", () => {
     const result = parsePackageZip(zip);
     expect(result.type).toBe("skill");
     expect(result.content).toContain("my-skill");
-  });
-
-  it("valid provider ZIP (manifest-only)", () => {
-    const zip = makeZip({
-      "manifest.json": validProviderManifest(),
-    });
-    const result = parsePackageZip(zip);
-    expect(result.type).toBe("provider");
-    expect(result.content).toContain("oauth2");
-    expect(result.manifest.name).toBe("@test/my-provider");
-  });
-
-  it("valid provider ZIP with PROVIDER.md", () => {
-    const providerDoc = "# My Provider API\n\nBase URL: https://api.example.com\n";
-    const zip = makeZip({
-      "manifest.json": validProviderManifest(),
-      "PROVIDER.md": providerDoc,
-    });
-    const result = parsePackageZip(zip);
-    expect(result.type).toBe("provider");
-    expect(result.content).toBe(providerDoc);
-    expect(result.manifest.name).toBe("@test/my-provider");
   });
 
   it("valid integration ZIP (manifest-only)", () => {
@@ -436,25 +398,6 @@ describe("wrapper folder stripping (parsePackageZip)", () => {
     const result = parsePackageZip(zip);
     expect(result.type).toBe("skill");
     expect(result.content).toContain("my-skill");
-  });
-
-  it("wrapped provider ZIP with PROVIDER.md", () => {
-    const providerDoc = "# My Provider\n\nBase URL: https://api.example.com\n";
-    const zip = makeZip({
-      "my-provider/manifest.json": validProviderManifest(),
-      "my-provider/PROVIDER.md": providerDoc,
-    });
-    const result = parsePackageZip(zip);
-    expect(result.type).toBe("provider");
-    expect(result.content).toBe(providerDoc);
-  });
-
-  it("wrapped provider ZIP (manifest-only)", () => {
-    const zip = makeZip({
-      "my-provider/manifest.json": validProviderManifest(),
-    });
-    const result = parsePackageZip(zip);
-    expect(result.type).toBe("provider");
   });
 
   it("mixed top-level entries (root + folder) — no stripping", () => {

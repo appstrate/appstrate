@@ -11,6 +11,5 @@
 
 import agentSchema from "../schema/agent.schema.json";
 import skillSchema from "../schema/skill.schema.json";
-import providerSchema from "../schema/provider.schema.json";
 
-export { agentSchema, skillSchema, providerSchema };
+export { agentSchema, skillSchema };

@@ -21,7 +21,6 @@ import { applications, endUsers } from "./applications.ts";
 import { apiKeys, organizations, modelProviderCredentials } from "./organizations.ts";
 import { packages } from "./packages.ts";
 import { connectionProfiles } from "./connections.ts";
-import type { RunProviderSnapshot } from "./types.ts";
 
 export const runs = pgTable(
   "runs",
@@ -98,8 +97,6 @@ export const runs = pgTable(
     modelSource: text("model_source"),
     cost: doublePrecision("cost"),
     runNumber: integer("run_number"),
-    providerProfileIds: jsonb("provider_profile_ids").$type<Record<string, string>>(),
-    providerStatuses: jsonb("provider_statuses").$type<RunProviderSnapshot[]>(),
     // Per-run integration connection overrides — the caller's explicit
     // choice at run kickoff (e.g. "for this run, use my Gmail-Boulot
     // not my Gmail-Perso"). Shape: { "@scope/integration": "<connection_id>" }.

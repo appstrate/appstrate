@@ -218,6 +218,13 @@
       "when": 1789862400000,
       "tag": "0030_integration_org_defaults",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1789948800000,
+      "tag": "0031_drop_provider_tables",
+      "breakpoints": true
     }
   ]
 }

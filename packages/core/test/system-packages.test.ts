@@ -19,21 +19,6 @@ function makeZip(entries: Record<string, string>): Uint8Array {
   return zipArtifact(encoded);
 }
 
-function providerManifest(name: string, version = "1.0.0") {
-  return JSON.stringify({
-    name,
-    version,
-    type: "provider",
-    definition: {
-      authMode: "oauth2",
-      oauth2: {
-        authorizationUrl: "https://example.com/authorize",
-        tokenUrl: "https://example.com/token",
-      },
-    },
-  });
-}
-
 function agentManifest(name: string, version = "1.0.0") {
   return JSON.stringify({
     name,
@@ -50,6 +35,20 @@ function skillManifest(name: string, version = "1.0.0") {
     name,
     version,
     type: "skill",
+  });
+}
+
+function integrationManifest(name: string, version = "1.0.0") {
+  return JSON.stringify({
+    manifestVersion: "1.1",
+    type: "integration",
+    name,
+    version,
+    displayName: "Test Integration",
+    server: {
+      type: "node",
+      entryPoint: "./server/index.js",
+    },
   });
 }
 
@@ -74,8 +73,8 @@ afterEach(async () => {
 // ─────────────────────────────────────────────
 
 describe("loadSystemPackages", () => {
-  it("loads provider ZIPs", async () => {
-    const zip = makeZip({ "manifest.json": providerManifest("@test/gmail") });
+  it("loads integration ZIPs", async () => {
+    const zip = makeZip({ "manifest.json": integrationManifest("@test/gmail") });
     await writeFile(join(testDir, "gmail-1.0.0.afps"), zip);
 
     const result = await loadSystemPackages(testDir);
@@ -86,7 +85,7 @@ describe("loadSystemPackages", () => {
     expect(entry.packageId).toBe("@test/gmail");
     expect(entry.scope).toBe("@test");
     expect(entry.name).toBe("gmail");
-    expect(entry.type).toBe("provider");
+    expect(entry.type).toBe("integration");
     expect(entry.version).toBe("1.0.0");
   });
 
@@ -115,8 +114,8 @@ describe("loadSystemPackages", () => {
   });
 
   it("loads multiple ZIPs", async () => {
-    const zip1 = makeZip({ "manifest.json": providerManifest("@test/gmail") });
-    const zip2 = makeZip({ "manifest.json": providerManifest("@test/slack") });
+    const zip1 = makeZip({ "manifest.json": integrationManifest("@test/gmail") });
+    const zip2 = makeZip({ "manifest.json": integrationManifest("@test/slack") });
     await writeFile(join(testDir, "gmail-1.0.0.afps"), zip1);
     await writeFile(join(testDir, "slack-1.0.0.afps"), zip2);
 
@@ -126,7 +125,7 @@ describe("loadSystemPackages", () => {
   });
 
   it("skips non-zip files", async () => {
-    const zip = makeZip({ "manifest.json": providerManifest("@test/gmail") });
+    const zip = makeZip({ "manifest.json": integrationManifest("@test/gmail") });
     await writeFile(join(testDir, "gmail-1.0.0.afps"), zip);
     await writeFile(join(testDir, "readme.txt"), "not a zip");
     await writeFile(join(testDir, ".DS_Store"), "");
@@ -147,7 +146,7 @@ describe("loadSystemPackages", () => {
 
   it("reports ZIPs with missing manifest name as warnings", async () => {
     const zip = makeZip({
-      "manifest.json": JSON.stringify({ version: "1.0.0", type: "provider" }),
+      "manifest.json": JSON.stringify({ version: "1.0.0", type: "integration" }),
     });
     await writeFile(join(testDir, "noname.afps"), zip);
 
@@ -173,7 +172,7 @@ describe("loadSystemPackages", () => {
   });
 
   it("preserves zipBuffer for each entry", async () => {
-    const zip = makeZip({ "manifest.json": providerManifest("@test/gmail") });
+    const zip = makeZip({ "manifest.json": integrationManifest("@test/gmail") });
     await writeFile(join(testDir, "gmail-1.0.0.afps"), zip);
 
     const result = await loadSystemPackages(testDir);
@@ -182,7 +181,7 @@ describe("loadSystemPackages", () => {
   });
 
   it("mixes valid and invalid ZIPs", async () => {
-    const valid = makeZip({ "manifest.json": providerManifest("@test/gmail") });
+    const valid = makeZip({ "manifest.json": integrationManifest("@test/gmail") });
     await writeFile(join(testDir, "gmail.afps"), valid);
     await writeFile(join(testDir, "bad.afps"), "corrupted");
 

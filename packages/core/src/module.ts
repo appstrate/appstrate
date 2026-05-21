@@ -21,8 +21,6 @@ import type {
   InlinePreflightResult,
   InlineRunBody,
   PlatformApplication,
-  PlatformConnectionProviderGroup,
-  PlatformListResponse,
   PlatformModel,
   PlatformPackage,
   PubSub,
@@ -1101,18 +1099,13 @@ export interface PlatformServices {
     search(args: {
       query: string;
       orgId: string;
-      kind: "agent" | "skill" | "provider";
+      kind: "agent" | "skill";
       limit?: number;
     }): Promise<PlatformPackage[]>;
   };
   /** Application helpers. */
   applications: {
     getDefault(orgId: string): Promise<PlatformApplication | null>;
-  };
-  /** Connection manager helpers. */
-  connections: {
-    /** Returns the Stripe-canonical list envelope `{ object: "list", data, hasMore }`. */
-    listAllForActor(actor: Actor): Promise<PlatformListResponse<PlatformConnectionProviderGroup>>;
   };
   /**
    * Run lifecycle operations (append log, update, abort).

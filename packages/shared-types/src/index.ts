@@ -27,11 +27,7 @@ export type {
 } from "./integrations.ts";
 
 export type { UserProfile, RunLog, ConnectionProfile } from "@appstrate/db/schema";
-import type {
-  PackageType,
-  ProviderSetupGuide,
-  ResolvedProviderDefinition,
-} from "@appstrate/core/validation";
+import type { PackageType } from "@appstrate/core/validation";
 export type { PackageType };
 
 export type { Run } from "@appstrate/db/schema";
@@ -146,18 +142,10 @@ export type { TerminalRunStatus } from "@appstrate/db/schema";
 import type { Schedule } from "@appstrate/db/schema";
 export type { Schedule };
 
-export interface ScheduleReadiness {
-  status: "ready" | "degraded" | "not_ready";
-  totalProviders: number;
-  connectedProviders: number;
-  missingProviders: string[];
-}
-
 export type EnrichedSchedule = Schedule & {
   profileName: string | null;
   profileType: "user" | "app" | null;
   profileOwnerName: string | null;
-  readiness: ScheduleReadiness;
 };
 
 // --- Organization Types ---
@@ -203,64 +191,13 @@ export interface OrgInvitation {
   createdAt: string;
 }
 
-import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
-
-// --- Connection Types ---
-
-/** Connection record as returned by the API (no encrypted credentials). */
-export interface ConnectionInfo {
-  id: string;
-  connectionProfileId: string;
-  providerId: string;
-  orgId: string;
-  scopesGranted?: string[];
-  needsReconnection: boolean;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export type { ConnectionStatusValue } from "@appstrate/db/schema";
-import type { ConnectionStatusValue } from "@appstrate/db/schema";
-
-// --- Org Profile Binding Types ---
-
-export interface EnrichedBinding {
-  providerId: string;
-  sourceProfileId: string;
-  sourceProfileName: string;
-  boundByUserName: string | null;
-  connected: boolean;
-}
-
-// --- User Connection Types ---
-
-export interface UserConnectionEntry {
-  connectionId: string;
-  scopesGranted: string[];
-  connectedAt: string;
-  profile: { id: string; name: string; isDefault: boolean };
-  application: { id: string; name: string };
-}
-
-export interface UserConnectionOrgGroup {
-  orgId: string;
-  orgName: string;
-  connections: UserConnectionEntry[];
-}
-
-export interface UserConnectionProviderGroup {
-  providerId: string;
-  displayName: string;
-  logo: string;
-  totalConnections: number;
-  orgs: UserConnectionOrgGroup[];
-}
+import type { SchemaWrapper } from "@appstrate/core/form";
 
 // --- Unified Me Connections (R1 refactor) ----------------
 // User-scope view that merges provider connections and integration
 // connections under a single shape. Backs `GET /api/me/connections`.
 
-export type MeConnectionKind = "provider" | "integration";
+export type MeConnectionKind = "integration";
 
 export interface MeConnectionEntry {
   /** Stable connection id (uuid). */
@@ -303,31 +240,6 @@ export interface MeConnectionSourceGroup {
   connections: MeConnectionEntry[];
 }
 
-export type { ProviderProfileSource } from "@appstrate/db/schema";
-import type { ProviderProfileSource } from "@appstrate/db/schema";
-
-export interface ProviderStatus {
-  id: string;
-  name?: string;
-  provider: string;
-  description: string;
-  status: ConnectionStatusValue;
-  authMode?: string;
-  connectUrl?: string;
-  scopesRequired?: string[];
-  scopesGranted?: string[];
-  scopesSufficient?: boolean;
-  scopesMissing?: string[];
-  /** How the connection profile was resolved — "app_binding" if via app profile delegation, "user_profile" if via personal profile. */
-  source: ProviderProfileSource | null;
-  /** Name of the connection profile used for this provider. */
-  profileName: string | null;
-  /** Name of the user who owns the connection profile. */
-  profileOwnerName: string | null;
-}
-
-export type { RunProviderSnapshot } from "@appstrate/db/schema";
-
 /**
  * Fields shared by every package row when listed (agent or skill/tool/provider).
  * Concrete list shapes (`AgentListItem`, `OrgPackageItem`) extend this with
@@ -348,7 +260,6 @@ export interface AgentListItem extends BasePackageListItem {
   author: string;
   keywords: string[];
   dependencies: {
-    providers: string[];
     skills: Record<string, string>;
     tools: Record<string, string>;
   };
@@ -364,7 +275,6 @@ export interface AgentDetail {
   description: string;
   source: "system" | "local";
   dependencies: {
-    providers: ProviderStatus[];
     skills: { id: string; version: string; name?: string; description?: string }[];
     tools: { id: string; version: string; name?: string; description?: string }[];
     /**
@@ -390,11 +300,7 @@ export interface AgentDetail {
   version: string | null;
   manifest?: Record<string, unknown>; // Raw manifest from DB (user agents only)
 
-  populatedProviders?: Record<string, ProviderConfig>;
   callbackUrl?: string;
-  /** App profile ID configured for this agent. Used for per-provider app bindings. */
-  agentAppProfileId: string | null;
-  agentAppProfileName: string | null;
   versionCount?: number;
   hasUnarchivedChanges?: boolean;
   forkedFrom: string | null;
@@ -703,42 +609,6 @@ export interface ApiKeyInfo {
   createdAt: string;
 }
 
-// --- Available Provider Types ---
-
-export interface AvailableProvider {
-  uniqueKey: string;
-  provider: string;
-  displayName: string;
-  logo?: string;
-  status: ConnectionStatusValue;
-  authMode?: string;
-  connectionId?: string;
-  connectedAt?: string;
-  scopesGranted?: string[];
-}
-
-// --- Provider Config Types ---
-
-/** Provider config returned by the API — extends core's resolved definition with UI state. */
-export interface ProviderConfig extends Omit<
-  ResolvedProviderDefinition,
-  "authorizationParams" | "tokenParams"
-> {
-  version?: string;
-  description?: string;
-  author?: string;
-  source: "built-in" | "custom";
-  hasCredentials: boolean;
-  enabled: boolean;
-  adminCredentialSchema?: JSONSchemaObject;
-  setupGuide?: ProviderSetupGuide;
-  tokenAuthMethod?: "client_secret_post" | "client_secret_basic";
-  authorizationParams?: Record<string, string>;
-  tokenParams?: Record<string, string>;
-  credentialSchema?: Record<string, unknown>;
-  usedByAgents?: number;
-}
-
 // --- Application Types ---
 
 export interface ApplicationInfo {
@@ -779,35 +649,6 @@ export interface ResolvedRunConfig {
   proxyId: string | null;
   /** Pinned semver label (`1.2.3`), or null when the app uses the floating dist-tag. */
   versionPin: string | null;
-  /** Provider ids declared as dependencies on the package's manifest. */
-  requiredProviders: string[];
-}
-
-// --- Readiness Types (agent preflight) ---
-
-/**
- * Provider readiness reasons — single source of truth shared between the
- * API service that computes them, the CLI that consumes them, and the
- * OpenAPI enum on `GET /api/agents/{scope}/{name}/readiness`.
- */
-export const READINESS_REASONS = [
-  "no_connection",
-  "needs_reconnection",
-  "scope_insufficient",
-  "provider_not_enabled",
-] as const;
-export type ReadinessReason = (typeof READINESS_REASONS)[number];
-
-export interface ReadinessProviderEntry {
-  providerId: string;
-  connectionProfileId: string | null;
-  reason: ReadinessReason;
-  message: string;
-}
-
-export interface ReadinessReport {
-  ready: boolean;
-  missing: ReadinessProviderEntry[];
 }
 
 // --- End-User Types ---

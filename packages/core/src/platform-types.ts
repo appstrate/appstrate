@@ -160,20 +160,6 @@ export interface PlatformListResponse<T> {
   readonly total?: number;
 }
 
-/** A user's connections grouped by provider, then by org — shape returned by `connections.listAllForActor`. */
-export interface PlatformConnectionProviderGroup {
-  readonly providerId: string;
-  readonly displayName: string;
-  readonly logo: string;
-  readonly totalConnections: number;
-  readonly orgs: ReadonlyArray<{
-    readonly orgId: string;
-    readonly orgName: string;
-    /** Connection entries — cast to `UserConnectionEntry` (from shared-types) at the call site. */
-    readonly connections: ReadonlyArray<unknown>;
-  }>;
-}
-
 // ---------------------------------------------------------------------------
 // Workload / orchestrator value types
 // ---------------------------------------------------------------------------

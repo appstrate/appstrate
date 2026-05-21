@@ -6,14 +6,8 @@ import { SLUG_PATTERN } from "./naming.ts";
 import {
   agentManifestSchema as afpsAgentManifestSchema,
   skillManifestSchema as afpsSkillManifestSchema,
-  providerManifestSchema as afpsProviderManifestSchema,
-  authModeEnum as afpsAuthModeEnum,
-  setupGuide as afpsSetupGuide,
   oauthTokenAuthMethodEnum as afpsOAuthTokenAuthMethodEnum,
   oauthTokenContentTypeEnum as afpsOAuthTokenContentTypeEnum,
-  credentialTransform as afpsCredentialTransform,
-  credentialTransformEncodingEnum as afpsCredentialTransformEncodingEnum,
-  uploadProtocolEnum as afpsUploadProtocolEnum,
 } from "@afps-spec/schema";
 import { integrationManifestSchema, type IntegrationManifest } from "./integration.ts";
 import { SELECTABLE_RUNTIME_TOOLS } from "./runtime-tools-catalog.ts";
@@ -28,7 +22,7 @@ export { integrationManifestSchema, type IntegrationManifest };
 export const scopedNameRegex = new RegExp(`^@${SLUG_PATTERN}\\/${SLUG_PATTERN}$`);
 
 /** Zod enum for supported AFPS package types (Phase 1.0 adds `integration`). */
-export const packageTypeEnum = z.enum(["agent", "skill", "provider", "integration"]);
+export const packageTypeEnum = z.enum(["agent", "skill", "integration"]);
 /** Union type of supported package types. */
 export type PackageType = z.infer<typeof packageTypeEnum>;
 /** Array of all valid package type strings. */
@@ -38,7 +32,6 @@ export const PACKAGE_TYPES = packageTypeEnum.options;
 export const AFPS_SCHEMA_URLS: Record<PackageType, string> = {
   agent: "https://afps.appstrate.dev/packages/schema/v1/agent.schema.json",
   skill: "https://afps.appstrate.dev/packages/schema/v1/skill.schema.json",
-  provider: "https://afps.appstrate.dev/packages/schema/v1/provider.schema.json",
   integration: "https://afps.dev/schema/v1/integration.schema.json",
 };
 
@@ -55,11 +48,6 @@ export const manifestSchema = z.looseObject({
   dependencies: z
     .looseObject({
       skills: z.record(z.string(), z.string()).optional(),
-      providers: z.record(z.string(), z.string()).optional(),
-      // Phase 1.0 — proposal §4.2.3. Additive: legacy `providers`
-      // remains valid; the manifest may reference both sets while
-      // legacy types are still being migrated.
-      //
       // Niveau 2 — value accepts either the legacy bare semver range or
       // an object selecting tools/scopes for the niveau 2 scope model.
       // The base shape mirrors the AgentManifest narrowing so any caller
@@ -103,15 +91,13 @@ export const agentManifestSchema = afpsAgentManifestSchema.extend({
   keywords: z.array(z.string()).optional(),
   license: z.string().optional(),
   repository: z.string().optional(),
-  // Phase 1.0 — additive sibling of `dependencies.providers`. Keys must
-  // be scoped package names; values are bare semver ranges (npm-style).
-  // Per-integration tool/scope selection lives in the top-level
-  // `integrations` field below, so `dependencies` stays a pure
+  // Keys must be scoped package names; values are bare semver ranges
+  // (npm-style). Per-integration tool/scope selection lives in the
+  // top-level `integrations` field below, so `dependencies` stays a pure
   // version-resolution surface.
   dependencies: z
     .looseObject({
       skills: z.record(z.string().regex(scopedNameRegex), z.string()).optional(),
-      providers: z.record(z.string().regex(scopedNameRegex), z.string()).optional(),
       integrations: z.record(z.string().regex(scopedNameRegex), z.string()).optional(),
     })
     .optional(),
@@ -163,319 +149,20 @@ export const skillManifestSchema = afpsSkillManifestSchema.extend({
 /** Inferred type from the skill manifest schema. */
 export type SkillManifest = z.infer<typeof skillManifestSchema>;
 
-// ─────────────────────────────────────────────
-// Provider manifest schema — extends AFPS (superRefine inherited)
-// ─────────────────────────────────────────────
-
-/**
- * Provider auth-mode Zod enum, re-exported from `@afps-spec/schema` so
- * appstrate route validators can reference the canonical AFPS values
- * without redeclaring the literal array. AFPS v1: `oauth2 | oauth1 |
- * api_key | basic | custom`.
- */
-export const authModeEnum = afpsAuthModeEnum;
-
-/** Closed list of valid auth-mode strings — derived from {@link authModeEnum}. */
-export const AUTH_MODES = authModeEnum.options;
-
-/** Auth mode union type derived from the AFPS Zod enum. */
-export type AuthMode = z.infer<typeof authModeEnum>;
-
-/**
- * Provider upload-protocol Zod enum, re-exported from `@afps-spec/schema`
- * so the runtime can advertise the `provider_upload` tool only for protocols
- * declared in the canonical AFPS enum. AFPS v1 (§7.7): `google-resumable |
- * s3-multipart | tus | ms-resumable`.
- */
-export const uploadProtocolEnum = afpsUploadProtocolEnum;
-
-/** Closed list of valid upload-protocol strings — derived from {@link uploadProtocolEnum}. */
-export const UPLOAD_PROTOCOLS = uploadProtocolEnum.options;
-
-/** Upload protocol union type derived from the AFPS Zod enum. */
-export type UploadProtocol = z.infer<typeof uploadProtocolEnum>;
-
-const _setupGuideSchema = afpsSetupGuide;
-
-/** Provider setup guide type derived from the Zod schema. */
-export type ProviderSetupGuide = NonNullable<z.infer<typeof _setupGuideSchema>>;
-
-/** Available scope entry for OAuth provider configuration. */
+/** Available scope entry for OAuth configuration. */
 export interface AvailableScope {
   value: string;
   label: string;
 }
 
 /**
- * Zod schema for provider manifests — extends AFPS with relaxed optional metadata.
- * Uses `.safeExtend()` because AFPS provider schema has `.superRefine()` (Zod 4 restriction).
- */
-export const providerManifestSchema = afpsProviderManifestSchema.safeExtend({
-  keywords: z.array(z.string()).optional(),
-  license: z.string().optional(),
-  repository: z.string().optional(),
-});
-
-/** Inferred type from the provider manifest schema. */
-export type ProviderManifest = z.infer<typeof providerManifestSchema>;
-
-/**
- * Canonical credential key pattern — shared by the provider schema editor,
- * the AFPS validation and the Zod route schemas.
- *
- * Matches the `\w+` regex used by the sidecar substitution engine
- * (`runtime-pi/sidecar/helpers.ts`) and by `buildSidecarCredentials` /
- * `evaluateCredentialTransform` in `@appstrate/connect`. Keys produced by
- * the UI must round-trip through those engines without escaping.
- */
-export const CREDENTIAL_KEY_RE = /^[a-z][a-z0-9_]*$/;
-
-/**
- * Structured error emitted by {@link validateProviderCredentialKeys}. The
- * `field` discriminator lets callers (e.g. Zod refinements) route the issue
- * to the right input path instead of a generic `credentials` bucket.
- */
-export interface CredentialKeyError {
-  /** Which conceptual field failed. */
-  field: "schemaKey" | "fieldName";
-  /** Offending schema property key — only set when `field === "schemaKey"`. */
-  key?: string;
-  /** Human-readable message suitable for direct display. */
-  message: string;
-}
-
-/**
- * Validate credential-related fields on a provider manifest definition.
- * Pure function — returns structured errors (empty array = valid).
- *
- * Rules (api_key / basic / custom only — OAuth modes don't declare credentials):
- *  - `definition.credentials.schema.properties` keys match {@link CREDENTIAL_KEY_RE}
- *  - `definition.credentials.fieldName` (when present) matches the pattern
- *  - `fieldName` references an existing property in the schema
- *
- * Called from:
- *  - {@link validateManifest} (ZIP import + package update)
- *  - `routes/providers.ts` Zod schemas (POST / PUT)
- */
-export function validateProviderCredentialKeys(
-  manifest: Record<string, unknown>,
-): CredentialKeyError[] {
-  const errors: CredentialKeyError[] = [];
-  const def = (manifest.definition ?? {}) as Record<string, unknown>;
-  const authMode = def.authMode as string | undefined;
-
-  if (authMode !== "api_key" && authMode !== "basic" && authMode !== "custom") {
-    return errors;
-  }
-
-  const credentials = def.credentials as Record<string, unknown> | undefined;
-  const schema = credentials?.schema as Record<string, unknown> | undefined;
-  const properties = (schema?.properties ?? {}) as Record<string, unknown>;
-  const propertyKeys = Object.keys(properties);
-
-  for (const key of propertyKeys) {
-    if (!CREDENTIAL_KEY_RE.test(key)) {
-      errors.push({
-        field: "schemaKey",
-        key,
-        message: `key "${key}" must match ${CREDENTIAL_KEY_RE} (lowercase letters, digits and underscores; must start with a letter)`,
-      });
-    }
-  }
-
-  const fieldName = credentials?.fieldName as string | undefined;
-  if (fieldName !== undefined) {
-    if (!CREDENTIAL_KEY_RE.test(fieldName)) {
-      errors.push({
-        field: "fieldName",
-        message: `"${fieldName}" must match ${CREDENTIAL_KEY_RE}`,
-      });
-    } else if (propertyKeys.length > 0 && !propertyKeys.includes(fieldName)) {
-      errors.push({
-        field: "fieldName",
-        message: `"${fieldName}" is not declared in definition.credentials.schema.properties`,
-      });
-    }
-  }
-
-  return errors;
-}
-
-/**
- * Format a {@link CredentialKeyError} into the dotted `path: message` shape
- * used by {@link validateManifest}'s flat string error list.
- */
-export function formatCredentialKeyError(error: CredentialKeyError): string {
-  const path =
-    error.field === "schemaKey"
-      ? "definition.credentials.schema.properties"
-      : "definition.credentials.fieldName";
-  return `${path}: ${error.message}`;
-}
-
-/**
- * OAuth2 token-endpoint auth method, `tokenContentType` and
- * `credentialTransform` are part of AFPS v1 (§7.2 and §7.4). Types are
- * derived from the canonical Zod enums so appstrate cannot drift.
+ * OAuth2 token-endpoint auth method and `tokenContentType` are part of
+ * AFPS v1 (§7.2). Types are derived from the canonical Zod enums so
+ * appstrate cannot drift. Consumed by `@appstrate/connect` token refresh /
+ * exchange for OAuth model providers + integrations.
  */
 export type OAuthTokenAuthMethod = z.infer<typeof afpsOAuthTokenAuthMethodEnum>;
 export type OAuthTokenContentType = z.infer<typeof afpsOAuthTokenContentTypeEnum>;
-
-/**
- * Whitelisted post-substitution transforms for `credentialTransform.encoding`.
- * AFPS v1 defines a single value (`base64`); extend by updating the spec.
- * Derived from the canonical AFPS enum so appstrate cannot drift.
- */
-export type CredentialTransformEncoding = z.infer<typeof afpsCredentialTransformEncodingEnum>;
-
-/**
- * Template-based pre-encoding for api_key providers. See AFPS v1 §7.4.
- *
- * The `template` string is rendered with the same `{{var}}` substitution
- * engine used for URLs and headers (keys resolved against the user-provided
- * credential fields), then passed through `encoding` to produce the final
- * value injected under `credentials.fieldName`.
- *
- * Derived from the canonical AFPS schema; the AFPS schema is declared as
- * `looseObject`, so extra keys are tolerated on the wire but appstrate only
- * reads `template` and `encoding`.
- */
-export type CredentialTransform = Pick<
-  z.infer<typeof afpsCredentialTransform>,
-  "template" | "encoding"
->;
-
-/** Resolved provider definition built from a raw manifest JSONB object. */
-export interface ResolvedProviderDefinition {
-  id: string;
-  displayName: string;
-  authMode: AuthMode | undefined;
-  authorizationUrl?: string;
-  tokenUrl?: string;
-  refreshUrl?: string;
-  defaultScopes: string[];
-  scopeSeparator: string;
-  pkceEnabled: boolean;
-  tokenAuthMethod?: OAuthTokenAuthMethod;
-  tokenContentType?: OAuthTokenContentType;
-  authorizationParams: Record<string, string>;
-  tokenParams: Record<string, string>;
-  credentialSchema?: Record<string, unknown>;
-  credentialFieldName?: string;
-  credentialHeaderName?: string;
-  credentialHeaderPrefix?: string;
-  credentialTransform?: CredentialTransform;
-  authorizedUris?: string[];
-  allowAllUris: boolean;
-  availableScopes?: AvailableScope[];
-  requestTokenUrl?: string;
-  accessTokenUrl?: string;
-  iconUrl?: string;
-  categories: string[];
-  docsUrl?: string;
-}
-
-/**
- * Build a fully resolved provider definition from a raw manifest JSONB object.
- * Reads from nested manifest structure (oauth2/oauth1/credentials sub-objects)
- * and produces a flat resolved type for runtime convenience.
- * Pure function — no DB, no side effects.
- * Used by both the provider API routes and the connect package.
- */
-export function buildProviderDefinitionFromManifest(
-  id: string,
-  manifest: Record<string, unknown>,
-): ResolvedProviderDefinition {
-  const rawDef = (manifest.definition ?? {}) as Record<string, unknown>;
-  const authMode = rawDef.authMode as AuthMode | undefined;
-
-  // Read from nested sub-objects (may be undefined if not applicable for this auth mode)
-  const oauth2 = rawDef.oauth2 as Record<string, unknown> | undefined;
-  const oauth1 = rawDef.oauth1 as Record<string, unknown> | undefined;
-  const credentials = rawDef.credentials as Record<string, unknown> | undefined;
-
-  return {
-    id,
-    displayName: (manifest.displayName as string) ?? id,
-    authMode,
-    // OAuth2 fields (from definition.oauth2)
-    authorizationUrl: oauth2?.authorizationUrl as string | undefined,
-    tokenUrl: oauth2?.tokenUrl as string | undefined,
-    refreshUrl: oauth2?.refreshUrl as string | undefined,
-    defaultScopes: (oauth2?.defaultScopes as string[]) ?? [],
-    scopeSeparator: (oauth2?.scopeSeparator as string) ?? " ",
-    pkceEnabled: (oauth2?.pkceEnabled as boolean) ?? true,
-    tokenAuthMethod: oauth2?.tokenAuthMethod as OAuthTokenAuthMethod | undefined,
-    tokenContentType: oauth2?.tokenContentType as OAuthTokenContentType | undefined,
-    authorizationParams: (oauth2?.authorizationParams as Record<string, string>) ?? {},
-    tokenParams: (oauth2?.tokenParams as Record<string, string>) ?? {},
-    // OAuth1 fields (from definition.oauth1)
-    requestTokenUrl: oauth1?.requestTokenUrl as string | undefined,
-    accessTokenUrl: oauth1?.accessTokenUrl as string | undefined,
-    // OAuth1 also uses authorizationUrl and authorizationParams (for user redirect)
-    ...(authMode === "oauth1"
-      ? {
-          authorizationUrl: oauth1?.authorizationUrl as string | undefined,
-          authorizationParams: (oauth1?.authorizationParams as Record<string, string>) ?? {},
-        }
-      : {}),
-    // Credential fields (from definition.credentials)
-    credentialSchema: credentials?.schema as Record<string, unknown> | undefined,
-    credentialFieldName: credentials?.fieldName as string | undefined,
-    // Transport fields (from definition level — cross-cutting, implementation-specific)
-    credentialHeaderName: rawDef.credentialHeaderName as string | undefined,
-    credentialHeaderPrefix: rawDef.credentialHeaderPrefix as string | undefined,
-    credentialTransform: rawDef.credentialTransform as CredentialTransform | undefined,
-    // Transversal fields
-    authorizedUris: (rawDef.authorizedUris as string[])?.length
-      ? (rawDef.authorizedUris as string[])
-      : undefined,
-    allowAllUris: (rawDef.allowAllUris as boolean) ?? false,
-    availableScopes: (rawDef.availableScopes as AvailableScope[])?.length
-      ? (rawDef.availableScopes as AvailableScope[])
-      : undefined,
-    // Presentation fields
-    iconUrl: manifest.iconUrl as string | undefined,
-    categories: (manifest.categories as string[]) ?? [],
-    docsUrl: manifest.docsUrl as string | undefined,
-  };
-}
-
-/** JSON Schema object type used for admin credential schemas. */
-export interface AdminCredentialSchema {
-  type: "object";
-  properties: Record<string, { type: string; description: string }>;
-  required?: string[];
-}
-
-/**
- * Generate default admin credential schema per auth mode.
- * Returns null for auth modes that don't need admin credentials (api_key, basic, custom).
- */
-export function getDefaultAdminCredentialSchema(authMode: string): AdminCredentialSchema | null {
-  switch (authMode) {
-    case "oauth2":
-      return {
-        type: "object",
-        properties: {
-          clientId: { type: "string", description: "Client ID" },
-          clientSecret: { type: "string", description: "Client Secret" },
-        },
-        required: ["clientId", "clientSecret"],
-      };
-    case "oauth1":
-      return {
-        type: "object",
-        properties: {
-          consumerKey: { type: "string", description: "Consumer Key" },
-          consumerSecret: { type: "string", description: "Consumer Secret" },
-        },
-        required: ["consumerKey", "consumerSecret"],
-      };
-    default:
-      return null;
-  }
-}
 
 // ─────────────────────────────────────────────
 // Unified validateManifest — dispatches by type
@@ -486,7 +173,7 @@ export type ValidateManifestResult =
   | {
       valid: true;
       errors: [];
-      manifest: Manifest | AgentManifest | SkillManifest | ProviderManifest | IntegrationManifest;
+      manifest: Manifest | AgentManifest | SkillManifest | IntegrationManifest;
     }
   | { valid: false; errors: string[]; manifest?: undefined };
 
@@ -495,7 +182,6 @@ function parseWithSchema(
     | typeof manifestSchema
     | typeof agentManifestSchema
     | typeof skillManifestSchema
-    | typeof providerManifestSchema
     | typeof integrationManifestSchema,
   raw: unknown,
 ): ValidateManifestResult {
@@ -503,13 +189,6 @@ function parseWithSchema(
   if (!result.success) {
     const errors = result.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`);
     return { valid: false, errors };
-  }
-
-  if (schema === providerManifestSchema) {
-    const credentialErrors = validateProviderCredentialKeys(result.data as Record<string, unknown>);
-    if (credentialErrors.length > 0) {
-      return { valid: false, errors: credentialErrors.map(formatCredentialKeyError) };
-    }
   }
 
   return { valid: true, errors: [], manifest: result.data };
@@ -529,11 +208,9 @@ export function validateManifest(raw: unknown): ValidateManifestResult {
         ? agentManifestSchema
         : type === "skill"
           ? skillManifestSchema
-          : type === "provider"
-            ? providerManifestSchema
-            : type === "integration"
-              ? integrationManifestSchema
-              : manifestSchema;
+          : type === "integration"
+            ? integrationManifestSchema
+            : manifestSchema;
     return parseWithSchema(schema, raw);
   }
   // No `type` field — run the base schema so every missing-field error is

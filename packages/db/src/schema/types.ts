@@ -10,14 +10,7 @@ import type {
   applicationPackages,
 } from "./packages.ts";
 import type { runs, runLogs, schedules } from "./runs.ts";
-import type {
-  connectionProfiles,
-  appProfileProviderBindings,
-  userProviderConnections,
-  applicationProviderCredentials,
-  userAgentProviderProfiles,
-  userApplicationProfiles,
-} from "./connections.ts";
+import type { connectionProfiles, userApplicationProfiles } from "./connections.ts";
 import type { applications, endUsers } from "./applications.ts";
 import type { user, session, account, verification } from "./auth.ts";
 import type {
@@ -48,17 +41,11 @@ export type RunLog = InferSelectModel<typeof runLogs>;
 
 export type ConnectionProfile = InferSelectModel<typeof connectionProfiles>;
 
-export type AppProfileProviderBinding = InferSelectModel<typeof appProfileProviderBindings>;
-
 export type Application = InferSelectModel<typeof applications>;
 
 export type EndUser = InferSelectModel<typeof endUsers>;
 
 export type ApplicationPackage = InferSelectModel<typeof applicationPackages>;
-
-export type UserProviderConnection = InferSelectModel<typeof userProviderConnections>;
-
-export type ApplicationProviderCredential = InferSelectModel<typeof applicationProviderCredentials>;
 
 export type Organization = InferSelectModel<typeof organizations>;
 
@@ -82,22 +69,4 @@ export type Account = InferSelectModel<typeof account>;
 
 export type Verification = InferSelectModel<typeof verification>;
 
-export type UserAgentProviderProfile = InferSelectModel<typeof userAgentProviderProfiles>;
-
 export type UserApplicationProfile = InferSelectModel<typeof userApplicationProfiles>;
-
-// --- Provider snapshot types (used by runs.providerStatuses JSONB column) ---
-
-export type ConnectionStatusValue = "connected" | "not_connected" | "needs_reconnection";
-
-export type ProviderProfileSource = "app_binding" | "user_profile";
-
-/** Snapshot of a provider's connection state at run time (stored in `runs.providerStatuses`). */
-export interface RunProviderSnapshot {
-  id: string;
-  status: ConnectionStatusValue;
-  source: ProviderProfileSource | null;
-  profileName: string | null;
-  profileOwnerName: string | null;
-  scopesSufficient?: boolean;
-}

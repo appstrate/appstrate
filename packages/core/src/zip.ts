@@ -8,7 +8,6 @@ import {
   type Manifest,
   type AgentManifest,
   type PackageType,
-  type ProviderManifest,
   type IntegrationManifest,
 } from "./validation.ts";
 
@@ -143,7 +142,7 @@ export function stripWrapperPrefix(
 /** Result of parsing an AFPS package ZIP file. */
 export interface ParsedPackageZip {
   /** The validated manifest from manifest.json. */
-  manifest: Manifest | AgentManifest | ProviderManifest | IntegrationManifest;
+  manifest: Manifest | AgentManifest | IntegrationManifest;
   /** The primary content (prompt.md for agents, SKILL.md for skills, source for tools, etc.). */
   content: string;
   /** All files in the ZIP archive (path to content). */
@@ -268,12 +267,6 @@ export function parsePackageZip(zipBuffer: Uint8Array, maxSize?: number): Parsed
         );
       }
       content = skillMd;
-      break;
-    }
-    case "provider": {
-      // Provider packages require manifest.json; PROVIDER.md is an optional companion file
-      const providerRaw = files["PROVIDER.md"];
-      content = providerRaw ? new TextDecoder().decode(providerRaw) : manifestText;
       break;
     }
     case "integration": {
