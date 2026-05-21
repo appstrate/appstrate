@@ -985,6 +985,12 @@ export function expandScopesGranted(
  * with {@link expandScopesGranted} (so a parent grant covers its implied
  * children) — the single source of truth for the insufficient-scopes diff
  * used by both the connection resolver and the agent-page picker.
+ *
+ * Scopes are an OAuth2 concept: api_key / basic / custom / oauth1 auths
+ * grant access wholesale and carry no scope catalog, so an agent's declared
+ * scopes can never be "missing" from such a connection. Diffing against one
+ * would spuriously report every declared scope as missing (its `granted`
+ * set is always empty) — so a non-oauth2 auth short-circuits to no gap.
  */
 export function missingScopesForConnection(input: {
   manifest: IntegrationManifest;
@@ -993,6 +999,7 @@ export function missingScopesForConnection(input: {
   agentTools: readonly string[] | undefined;
   agentScopes: readonly string[] | undefined;
 }): string[] {
+  if (input.manifest.auths?.[input.authKey]?.type !== "oauth2") return [];
   const required = requiredScopesForAgent(input);
   if (required.length === 0) return [];
   const expanded = new Set(expandScopesGranted(input.granted, input.manifest, input.authKey));

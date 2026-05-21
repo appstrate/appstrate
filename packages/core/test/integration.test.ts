@@ -10,6 +10,7 @@
 import { describe, expect, it } from "bun:test";
 import {
   expandScopesGranted,
+  missingScopesForConnection,
   integrationManifestSchema,
   integrationServerTypeEnum,
   caTrustEnvEnum,
@@ -712,6 +713,88 @@ describe("expandScopesGranted", () => {
   it("returns granted verbatim for an unknown auth key", () => {
     const m = manifestWithImplies();
     expect(expandScopesGranted(["whatever"], m, "ghost-auth")).toEqual(["whatever"]);
+  });
+});
+
+describe("missingScopesForConnection", () => {
+  // One integration, two auths: an oauth2 auth that carries a scope catalog
+  // and an api_key auth that does not. Scopes only apply to the oauth2 side.
+  function dualAuthManifest(): IntegrationManifest {
+    return integrationManifestSchema.parse({
+      manifestVersion: "1.1",
+      type: "integration",
+      name: "@official/github",
+      version: "1.0.0",
+      displayName: "GitHub",
+      server: { type: "node", entryPoint: "./server/index.js" },
+      auths: {
+        oauth: {
+          type: "oauth2",
+          authorizationUrl: "https://github.com/login/oauth/authorize",
+          tokenUrl: "https://github.com/login/oauth/access_token",
+          authorizedUris: ["https://api.github.com/*"],
+          delivery: { http: { valueFrom: "accessToken" } },
+          availableScopes: [
+            { value: "read:org", label: "Read orgs" },
+            { value: "write:org", label: "Write orgs", implies: ["read:org"] },
+          ],
+        },
+        token: {
+          type: "api_key",
+          authorizedUris: ["https://api.github.com/*"],
+          credentials: {
+            schema: {
+              type: "object",
+              properties: { api_key: { type: "string" } },
+              required: ["api_key"],
+            },
+          },
+          delivery: { env: { GITHUB_TOKEN: { from: "api_key", sensitive: true } } },
+        },
+      },
+    });
+  }
+
+  it("reports scopes the oauth2 connection's grant lacks", () => {
+    const m = dualAuthManifest();
+    expect(
+      missingScopesForConnection({
+        manifest: m,
+        authKey: "oauth",
+        granted: ["read:org"],
+        agentTools: undefined,
+        agentScopes: ["read:org", "write:org"],
+      }),
+    ).toEqual(["write:org"]);
+  });
+
+  it("returns [] for an oauth2 connection that already covers the required scopes", () => {
+    const m = dualAuthManifest();
+    // `write:org` implies `read:org`, so a grant of write:org covers both.
+    expect(
+      missingScopesForConnection({
+        manifest: m,
+        authKey: "oauth",
+        granted: ["write:org"],
+        agentTools: undefined,
+        agentScopes: ["read:org", "write:org"],
+      }),
+    ).toEqual([]);
+  });
+
+  it("returns [] for a non-oauth2 (api_key) connection even when the agent declares scopes", () => {
+    const m = dualAuthManifest();
+    // api_key auths grant access wholesale — scopes are an OAuth2 concept and
+    // never apply, so the agent's declared scopes are never "missing" here.
+    expect(
+      missingScopesForConnection({
+        manifest: m,
+        authKey: "token",
+        granted: [],
+        agentTools: undefined,
+        agentScopes: ["read:org", "write:org"],
+      }),
+    ).toEqual([]);
   });
 });
 
