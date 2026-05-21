@@ -446,7 +446,7 @@ const authSchema = z
     //
     // `implies` declares the scope hierarchy of the upstream IdP — e.g.
     // GitHub's `repo` implies `public_repo`, `admin:org` implies
-    // `read:org`. Used by {@link expandGrantedScopes} to take the
+    // `read:org`. Used by {@link expandScopesGranted} to take the
     // transitive closure of a grant before computing "missing" scopes,
     // so a connection that was granted `repo` doesn't appear to be
     // missing `public_repo`. Entries listed in `implies` must be values
@@ -954,7 +954,7 @@ export function scopesContributedByTools(input: {
  * grant doesn't appear to be missing its narrower children when computing
  * insufficient-scopes diffs.
  */
-export function expandGrantedScopes(
+export function expandScopesGranted(
   granted: readonly string[],
   manifest: IntegrationManifest,
   authKey: string,

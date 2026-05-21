@@ -35,7 +35,7 @@ import {
 } from "@appstrate/core/dependencies";
 import {
   requiredScopesForAgent,
-  expandGrantedScopes,
+  expandScopesGranted,
   type IntegrationManifest,
   type ConnectionOverrides,
   type ConnectionResolutionError,
@@ -333,7 +333,7 @@ function checkHealth(
     agentScopes: args.agentScopes,
   });
   if (required.length > 0) {
-    const granted = new Set(expandGrantedScopes(conn.scopesGranted, args.manifest, conn.authKey));
+    const granted = new Set(expandScopesGranted(conn.scopesGranted, args.manifest, conn.authKey));
     const missing = required.filter((s) => !granted.has(s));
     if (missing.length > 0) {
       const ownedByActor =

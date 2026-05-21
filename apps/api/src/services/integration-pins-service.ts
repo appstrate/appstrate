@@ -38,7 +38,7 @@ import type {
 } from "@appstrate/shared-types";
 import {
   requiredScopesForAgent,
-  expandGrantedScopes,
+  expandScopesGranted,
   type IntegrationManifest,
 } from "@appstrate/core/integration";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
@@ -611,7 +611,7 @@ function missingScopesForConnection(
 ): string[] {
   const required = requiredScopesForAgent({ manifest, authKey, agentTools, agentScopes });
   if (required.length === 0) return [];
-  const expanded = new Set(expandGrantedScopes(granted, manifest, authKey));
+  const expanded = new Set(expandScopesGranted(granted, manifest, authKey));
   return required.filter((s) => !expanded.has(s));
 }
 

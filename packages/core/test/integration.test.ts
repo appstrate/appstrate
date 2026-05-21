@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from "bun:test";
 import {
-  expandGrantedScopes,
+  expandScopesGranted,
   integrationManifestSchema,
   integrationServerTypeEnum,
   caTrustEnvEnum,
@@ -641,7 +641,7 @@ describe("integrationManifestSchema — availableScopes catalog", () => {
   });
 });
 
-describe("expandGrantedScopes", () => {
+describe("expandScopesGranted", () => {
   function manifestWithImplies(): IntegrationManifest {
     return integrationManifestSchema.parse({
       manifestVersion: "1.1",
@@ -687,17 +687,17 @@ describe("expandGrantedScopes", () => {
         },
       },
     });
-    expect(expandGrantedScopes(["x", "y", "x"], m, "oauth").sort()).toEqual(["x", "y"]);
+    expect(expandScopesGranted(["x", "y", "x"], m, "oauth").sort()).toEqual(["x", "y"]);
   });
 
   it("expands one-hop implications", () => {
     const m = manifestWithImplies();
-    expect(expandGrantedScopes(["repo"], m, "oauth").sort()).toEqual(["public_repo", "repo"]);
+    expect(expandScopesGranted(["repo"], m, "oauth").sort()).toEqual(["public_repo", "repo"]);
   });
 
   it("expands transitively (admin:org → write:org → read:org)", () => {
     const m = manifestWithImplies();
-    expect(expandGrantedScopes(["admin:org"], m, "oauth").sort()).toEqual([
+    expect(expandScopesGranted(["admin:org"], m, "oauth").sort()).toEqual([
       "admin:org",
       "read:org",
       "write:org",
@@ -706,12 +706,12 @@ describe("expandGrantedScopes", () => {
 
   it("returns granted unchanged when no implies declared", () => {
     const m = manifestWithImplies();
-    expect(expandGrantedScopes(["read:org"], m, "oauth").sort()).toEqual(["read:org"]);
+    expect(expandScopesGranted(["read:org"], m, "oauth").sort()).toEqual(["read:org"]);
   });
 
   it("returns granted verbatim for an unknown auth key", () => {
     const m = manifestWithImplies();
-    expect(expandGrantedScopes(["whatever"], m, "ghost-auth")).toEqual(["whatever"]);
+    expect(expandScopesGranted(["whatever"], m, "ghost-auth")).toEqual(["whatever"]);
   });
 });
 

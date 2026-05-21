@@ -26,7 +26,7 @@
  *     allowed" default that mirrors Phase 3's runtime allowlist
  *     semantics).
  *
- * `getCurrentGrantedScopes` reads the high-water-mark across every row in
+ * `getCurrentScopesGranted` reads the high-water-mark across every row in
  * `integration_connections` matching `(app, integration, authKey, actor)`
  * — typically one row per Google/etc. account the actor connected. We
  * union across accounts so the re-consent prompt requests the strict
@@ -141,7 +141,7 @@ export async function computeRequiredScopes(
  * to keep the re-consent prompt strict-superset of what's already
  * granted (incremental consent semantics).
  */
-export async function getCurrentGrantedScopes(input: {
+export async function getCurrentScopesGranted(input: {
   scope: AppScope;
   integrationPackageId: string;
   authKey: string;

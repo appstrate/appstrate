@@ -782,7 +782,7 @@ export async function getIntegrationAuthStatuses(
  * Surfaces the manifest's `auth` declaration verbatim — used by the
  * OAuth initiate handler to read endpoints + audience + scopes without
  * a second DB round-trip. Returns the full manifest too so callers that
- * need the wider catalog (e.g. `expandGrantedScopes`) don't re-fetch.
+ * need the wider catalog (e.g. `expandScopesGranted`) don't re-fetch.
  */
 export async function readIntegrationAuth(
   scope: AppScope,

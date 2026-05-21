@@ -13,7 +13,7 @@ import { useOAuthPopup } from "../../hooks/use-oauth-popup";
  * inline connect button on agent surfaces (`AgentIntegrationsBlock`,
  * `MissingConnectionsModal`) can pass the agent's per-tool scope
  * inference into the kickoff. The backend resolver still unions the
- * caller scopes with `getCurrentGrantedScopes(actor)` for incremental
+ * caller scopes with `getCurrentScopesGranted(actor)` for incremental
  * consent, so re-running with fewer scopes never shrinks the grant.
  */
 export function useIntegrationOAuthPopup() {

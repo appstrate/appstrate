@@ -6,7 +6,7 @@
  *
  *   - `computeRequiredScopes` walks installed agents, infers scopes from
  *     tool selections + explicit agent scopes, unions everything.
- *   - `getCurrentGrantedScopes` reads the high-water-mark across the
+ *   - `getCurrentScopesGranted` reads the high-water-mark across the
  *     actor's existing connections (drives incremental consent).
  */
 
@@ -18,7 +18,7 @@ import { installPackage } from "../../../src/services/application-packages.ts";
 import { integrationConnections } from "@appstrate/db/schema";
 import {
   computeRequiredScopes,
-  getCurrentGrantedScopes,
+  getCurrentScopesGranted,
 } from "../../../src/services/integration-scope-resolver.ts";
 
 const INTEGRATION_ID = "@official/gmail";
@@ -265,9 +265,9 @@ describe("integration-scope-resolver", () => {
     });
   });
 
-  describe("getCurrentGrantedScopes", () => {
+  describe("getCurrentScopesGranted", () => {
     it("returns empty when the actor has no connection", async () => {
-      const granted = await getCurrentGrantedScopes({
+      const granted = await getCurrentScopesGranted({
         scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
         integrationPackageId: INTEGRATION_ID,
         authKey: "primary",
@@ -297,7 +297,7 @@ describe("integration-scope-resolver", () => {
           scopesGranted: ["read", "send"],
         },
       ]);
-      const granted = await getCurrentGrantedScopes({
+      const granted = await getCurrentScopesGranted({
         scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
         integrationPackageId: INTEGRATION_ID,
         authKey: "primary",
@@ -327,7 +327,7 @@ describe("integration-scope-resolver", () => {
           scopesGranted: ["admin"],
         },
       ]);
-      const granted = await getCurrentGrantedScopes({
+      const granted = await getCurrentScopesGranted({
         scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
         integrationPackageId: INTEGRATION_ID,
         authKey: "primary",

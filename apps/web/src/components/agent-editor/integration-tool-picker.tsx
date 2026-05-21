@@ -24,7 +24,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import {
-  expandGrantedScopes,
+  expandScopesGranted,
   getApiCallConfig,
   API_CALL_TOOL_NAME,
 } from "@appstrate/core/integration";
@@ -124,14 +124,14 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
   const hasInferredScopes = inferredScopes.size > 0;
 
   // Transitively expand the inferred set through the manifest's `implies`
-  // hierarchy (mirrors `expandGrantedScopes` used server-side for missing-
+  // hierarchy (mirrors `expandScopesGranted` used server-side for missing-
   // scope diffs). Without this, `repo` would be flagged as inferred but
   // its implied children (`repo:status`, `repo_deployment`) would render
   // as toggleable — even though the OAuth grant already covers them.
   const inferredExpanded = new Set<string>(inferredScopes.keys());
   const directInferred = [...inferredScopes.keys()];
   for (const authKey of Object.keys(detail.manifest.auths ?? {})) {
-    for (const s of expandGrantedScopes(directInferred, detail.manifest, authKey)) {
+    for (const s of expandScopesGranted(directInferred, detail.manifest, authKey)) {
       inferredExpanded.add(s);
     }
   }

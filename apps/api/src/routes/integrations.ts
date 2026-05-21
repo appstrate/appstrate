@@ -56,7 +56,7 @@ import { getAppScope } from "../lib/scope.ts";
 import { recordAuditFromContext } from "./../services/audit.ts";
 import { installPackage, uninstallPackage } from "../services/application-packages.ts";
 import { listIntegrations, getIntegration } from "../services/integration-service.ts";
-import { expandGrantedScopes } from "@appstrate/core/integration";
+import { expandScopesGranted } from "@appstrate/core/integration";
 import {
   assertIsIntegration,
   connectIntegrationWithFields,
@@ -72,7 +72,7 @@ import {
 } from "../services/integration-connections.ts";
 import {
   computeRequiredScopes,
-  getCurrentGrantedScopes,
+  getCurrentScopesGranted,
 } from "../services/integration-scope-resolver.ts";
 import { isUserConnectionCreationBlocked } from "../services/integration-connection-resolver.ts";
 import {
@@ -448,7 +448,7 @@ export function createIntegrationsRouter() {
       const { manifest, auth } = await readIntegrationAuth(scope, packageId, authKey);
       const [computed, granted] = await Promise.all([
         computeRequiredScopes({ scope, integrationPackageId: packageId, authKey }),
-        getCurrentGrantedScopes({
+        getCurrentScopesGranted({
           scope,
           integrationPackageId: packageId,
           authKey,
@@ -457,7 +457,7 @@ export function createIntegrationsRouter() {
       ]);
       const defaults = auth.scopes ?? [];
       const union = [...new Set([...defaults, ...computed.required, ...granted])];
-      const effective = new Set(expandGrantedScopes(granted, manifest, authKey));
+      const effective = new Set(expandScopesGranted(granted, manifest, authKey));
       const missingFromGranted = union.filter((s) => !effective.has(s));
       return c.json({
         defaults,
@@ -578,7 +578,7 @@ export function createIntegrationsRouter() {
       //   - caller-supplied (`body.scopes`)
       //   - inferred from agents installed in this app (`computeRequiredScopes`)
       //   - currently granted across the actor's existing connections
-      //     (`getCurrentGrantedScopes`) → incremental consent
+      //     (`getCurrentScopesGranted`) → incremental consent
       // Granted is unioned so re-consent never silently shrinks the set
       // the user already authorized.
       const [computed, granted] = await Promise.all([
@@ -587,7 +587,7 @@ export function createIntegrationsRouter() {
           integrationPackageId: packageId,
           authKey,
         }),
-        getCurrentGrantedScopes({
+        getCurrentScopesGranted({
           scope,
           integrationPackageId: packageId,
           authKey,
