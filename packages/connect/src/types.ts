@@ -1,37 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { AuthMode, ResolvedProviderDefinition } from "@appstrate/core/validation";
-
-export type { AuthMode };
-
 /** Actor identity — dashboard user or end-user (headless). Re-exported from `@appstrate/core/platform-types` to keep one canonical definition. */
 export type { Actor } from "@appstrate/core/platform-types";
-
-/** Provider definition used by the connect package. */
-export type ProviderDefinition = ResolvedProviderDefinition;
-
-export interface ConnectionRecord {
-  id: string;
-  connectionProfileId: string;
-  providerId: string;
-  orgId: string;
-  providerCredentialId: string;
-  credentialsEncrypted: string;
-  scopesGranted: string[];
-  needsReconnection: boolean;
-  expiresAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface DecryptedCredentials {
-  access_token?: string;
-  refresh_token?: string;
-  api_key?: string;
-  username?: string;
-  password?: string;
-  [key: string]: string | undefined;
-}
 
 export interface OAuthStateRecord {
   state: string;

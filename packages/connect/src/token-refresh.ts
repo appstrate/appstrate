@@ -1,10 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { eq } from "drizzle-orm";
-import { userProviderConnections } from "@appstrate/db/schema";
-import type { Db } from "@appstrate/db/client";
-import type { DecryptedCredentials } from "./types.ts";
-import { encryptCredentials, decryptCredentials } from "./encryption.ts";
 import type { OAuthTokenAuthMethod, OAuthTokenContentType } from "@appstrate/core/validation";
 import {
   parseTokenResponse,
@@ -14,9 +9,6 @@ import {
   type ParsedTokenResponse,
 } from "./token-utils.ts";
 import { extractErrorMessage } from "./utils.ts";
-
-/** In-memory concurrency lock: one refresh at a time per connection. */
-const inflightRefreshes = new Map<string, Promise<DecryptedCredentials>>();
 
 export interface RefreshContext {
   tokenUrl: string;
@@ -54,43 +46,6 @@ export class RefreshError extends Error {
   ) {
     super(message);
     this.name = "RefreshError";
-  }
-}
-
-/**
- * Force a token refresh regardless of expiry.
- * Returns refreshed credentials, or current credentials if no refresh token / not OAuth2.
- * Throws if the refresh request itself fails (invalid_grant, network error).
- * Clears `needsReconnection` on success — a successful refresh proves the connection is healthy.
- */
-export async function forceRefresh(
-  db: Db,
-  connectionId: string,
-  providerId: string,
-  credentialsEncrypted: string,
-  refreshContext?: RefreshContext,
-): Promise<DecryptedCredentials> {
-  if (!refreshContext) {
-    return decryptCredentials<DecryptedCredentials>(credentialsEncrypted);
-  }
-
-  // Deduplicate concurrent refreshes for the same connection
-  const inflight = inflightRefreshes.get(connectionId);
-  if (inflight) return inflight;
-
-  const refreshPromise = doRefresh(
-    db,
-    connectionId,
-    providerId,
-    credentialsEncrypted,
-    refreshContext,
-  );
-  inflightRefreshes.set(connectionId, refreshPromise);
-
-  try {
-    return await refreshPromise;
-  } finally {
-    inflightRefreshes.delete(connectionId);
   }
 }
 
@@ -174,42 +129,4 @@ export async function performRefreshTokenExchange(
     refreshToken,
   );
   return { parsed, raw };
-}
-
-async function doRefresh(
-  db: Db,
-  connectionId: string,
-  providerId: string,
-  credentialsEncrypted: string,
-  ctx: RefreshContext,
-): Promise<DecryptedCredentials> {
-  const creds = decryptCredentials<DecryptedCredentials>(credentialsEncrypted);
-
-  if (!creds.refresh_token) {
-    return creds;
-  }
-
-  const { parsed } = await performRefreshTokenExchange(ctx, creds.refresh_token, {
-    label: `Token refresh for '${providerId}'`,
-    accessTokenFallback: creds.access_token,
-  });
-
-  const newCreds: DecryptedCredentials = {
-    access_token: parsed.accessToken,
-    refresh_token: parsed.refreshToken,
-  };
-  const newExpiresAt = parsed.expiresAt;
-
-  const newEncrypted = encryptCredentials(newCreds);
-  await db
-    .update(userProviderConnections)
-    .set({
-      credentialsEncrypted: newEncrypted,
-      expiresAt: newExpiresAt ? new Date(newExpiresAt) : null,
-      needsReconnection: false,
-      updatedAt: new Date(),
-    })
-    .where(eq(userProviderConnections.id, connectionId));
-
-  return newCreds;
 }
