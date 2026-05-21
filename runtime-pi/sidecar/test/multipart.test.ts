@@ -21,7 +21,8 @@
  */
 
 import { describe, it, expect, mock } from "bun:test";
-import { createApp, type AppDeps } from "../app.ts";
+import { createApp, buildSidecarRuntimeDeps, type AppDeps } from "../app.ts";
+import { buildApiCallHost } from "./helpers/api-call-host.ts";
 import { MAX_REQUEST_BODY_SIZE } from "../helpers.ts";
 import type { CredentialsResponse } from "../helpers.ts";
 
@@ -43,14 +44,6 @@ function makeMultipartDeps(overrides?: Partial<AppDeps>): AppDeps {
   return {
     config: { platformApiUrl: "http://mock:3000", runToken: "tok", proxyUrl: "" },
     fetchCredentials: mock(async (): Promise<CredentialsResponse> => integrationCreds()),
-    apiCallIntegrationsProvider: () => [
-      {
-        namespace: "test",
-        packageId: "@appstrate/test",
-        fetchCredentials: async () => integrationCreds(),
-        refreshCredentials: async () => integrationCreds(),
-      },
-    ],
     cookieJar: new Map(),
     fetchFn: mock(
       async () =>
@@ -62,6 +55,32 @@ function makeMultipartDeps(overrides?: Partial<AppDeps>): AppDeps {
     isReady: () => true,
     ...overrides,
   };
+}
+
+/**
+ * Build the `/mcp` app with the `test__api_call` tool hosted on an McpHost
+ * (production path), sharing the run-scoped deps so the upstream fetch mock
+ * is the one the tool uses.
+ */
+async function makeMultipartApp(overrides?: Partial<AppDeps>) {
+  const appDeps = makeMultipartDeps(overrides);
+  const runtimeDeps = buildSidecarRuntimeDeps(appDeps);
+  const host = await buildApiCallHost(
+    [
+      {
+        namespace: "test",
+        packageId: "@appstrate/test",
+        fetchCredentials: async () => integrationCreds(),
+        refreshCredentials: async () => integrationCreds(),
+      },
+    ],
+    runtimeDeps,
+  );
+  return createApp({
+    ...appDeps,
+    runtimeDeps,
+    additionalMcpToolsProvider: () => host.buildTools(),
+  });
 }
 
 async function rpc(
@@ -119,7 +138,7 @@ describe("POST /mcp — api_call multipart/form-data", () => {
         headers: { "Content-Type": "application/json" },
       });
     });
-    const app = createApp(makeMultipartDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
+    const app = await makeMultipartApp({ fetchFn: fetchFn as unknown as typeof fetch });
 
     // A non-UTF-8 payload — the canary for "body was JSON-stringified
     // instead of multipart-encoded".
@@ -183,7 +202,7 @@ describe("POST /mcp — api_call multipart/form-data", () => {
       }
       return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
     });
-    const app = createApp(makeMultipartDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
+    const app = await makeMultipartApp({ fetchFn: fetchFn as unknown as typeof fetch });
 
     // The literal `{{access_token}}` placeholder inside the binary
     // payload must NOT be substituted — that would corrupt the file
@@ -237,7 +256,7 @@ describe("POST /mcp — api_call multipart/form-data", () => {
       }
       return new Response("{}", { status: 200 });
     });
-    const app = createApp(makeMultipartDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
+    const app = await makeMultipartApp({ fetchFn: fetchFn as unknown as typeof fetch });
 
     await rpc(app, {
       method: "tools/call",
@@ -270,7 +289,7 @@ describe("POST /mcp — api_call multipart/form-data", () => {
       capturedContentType = req.headers.get("content-type");
       return new Response("{}", { status: 200 });
     });
-    const app = createApp(makeMultipartDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
+    const app = await makeMultipartApp({ fetchFn: fetchFn as unknown as typeof fetch });
 
     await rpc(app, {
       method: "tools/call",
@@ -312,7 +331,7 @@ describe("POST /mcp — api_call multipart/form-data", () => {
       capturedContentType = rawHeaders?.["Content-Type"] ?? rawHeaders?.["content-type"] ?? null;
       return new Response("{}", { status: 200 });
     });
-    const app = createApp(makeMultipartDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
+    const app = await makeMultipartApp({ fetchFn: fetchFn as unknown as typeof fetch });
 
     await rpc(app, {
       method: "tools/call",
@@ -337,7 +356,7 @@ describe("POST /mcp — api_call multipart/form-data", () => {
     // preflight error rather than silently shipping the literal
     // `{{access_tokn}}` to the upstream third party.
     const fetchFn = mock(async () => new Response("{}", { status: 200 }));
-    const app = createApp(makeMultipartDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
+    const app = await makeMultipartApp({ fetchFn: fetchFn as unknown as typeof fetch });
 
     const res = await rpc(app, {
       method: "tools/call",
@@ -365,7 +384,7 @@ describe("POST /mcp — api_call multipart/form-data", () => {
     // descriptor's inputSchema, so a caller can pass `multipart: "x"`.
     // The handler must reject it with a structured error instead of
     // iterating a string char-by-char.
-    const app = createApp(makeMultipartDeps());
+    const app = await makeMultipartApp();
     const res = await rpc(app, {
       method: "tools/call",
       params: {
@@ -387,7 +406,7 @@ describe("POST /mcp — api_call multipart/form-data", () => {
     // that fit every other check (envelope cap, decoded-bytes cap) but
     // allocate 100k Blobs + FormData entries.
     const tooMany = Array.from({ length: 257 }, (_, i) => ({ name: `f${i}`, value: "v" }));
-    const app = createApp(makeMultipartDeps());
+    const app = await makeMultipartApp();
     const res = await rpc(app, {
       method: "tools/call",
       params: {
@@ -405,7 +424,7 @@ describe("POST /mcp — api_call multipart/form-data", () => {
   });
 
   it("rejects a part with an oversize filename", async () => {
-    const app = createApp(makeMultipartDeps());
+    const app = await makeMultipartApp();
     const huge = "x".repeat(1025);
     const res = await rpc(app, {
       method: "tools/call",
@@ -438,7 +457,7 @@ describe("POST /mcp — api_call multipart/form-data", () => {
     // the per-part max.
     const half = Buffer.alloc(Math.ceil(MAX_REQUEST_BODY_SIZE / 2) + 1024, 0x41);
     const b64 = half.toString("base64");
-    const app = createApp(makeMultipartDeps());
+    const app = await makeMultipartApp();
     const res = await rpc(app, {
       method: "tools/call",
       params: {
@@ -471,7 +490,7 @@ describe("POST /mcp — api_call multipart/form-data", () => {
   });
 
   it("rejects a file part with invalid base64", async () => {
-    const app = createApp(makeMultipartDeps());
+    const app = await makeMultipartApp();
     const res = await rpc(app, {
       method: "tools/call",
       params: {
@@ -493,7 +512,7 @@ describe("POST /mcp — api_call multipart/form-data", () => {
   });
 
   it("advertises the multipart shape in tools/list", async () => {
-    const app = createApp(makeMultipartDeps());
+    const app = await makeMultipartApp();
     const res = await rpc(app, { method: "tools/list" });
     const result = res.json.result as {
       tools: Array<{
@@ -510,7 +529,7 @@ describe("POST /mcp — api_call multipart/form-data", () => {
     // Lightweight smoke-test: tool call returns 200 + non-error result,
     // confirming the descriptor + handler are wired end-to-end through
     // the SDK's stateless transport.
-    const app = createApp(makeMultipartDeps());
+    const app = await makeMultipartApp();
     const res = await rpc(app, {
       method: "tools/call",
       params: {

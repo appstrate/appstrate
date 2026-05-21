@@ -2,7 +2,8 @@
 
 import { Hono, type Context } from "hono";
 import pLimit, { type LimitFunction } from "p-limit";
-import { mountMcp, type ApiCallIntegrationConfig } from "./mcp.ts";
+import { mountMcp } from "./mcp.ts";
+import type { ProviderCallDeps } from "./credential-proxy.ts";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import { BlobStore } from "./blob-store.ts";
 import {
@@ -72,12 +73,15 @@ export interface AppDeps {
    */
   additionalMcpToolsProvider?: () => AppstrateToolDefinition[];
   /**
-   * Lazy provider for the integrations exposing the generic `api_call`
-   * tool (provider→integration unification). Same laziness rationale as
-   * {@link additionalMcpToolsProvider}: the set is only known after the
-   * background bootstrap finishes.
+   * Pre-built run-scoped runtime deps (blob store, token budget,
+   * concurrency limiter, credential-proxy base deps). Production wires
+   * these in `server.ts` and shares the SAME instances with
+   * `bootIntegrations` so the in-process `api_call` MCP server and the
+   * outer `/mcp` server's resource provider read the same blob store
+   * (resource_link spillover resolves across the McpHost boundary).
+   * Omitted by tests → `createApp` builds its own.
    */
-  apiCallIntegrationsProvider?: () => ApiCallIntegrationConfig[];
+  runtimeDeps?: SidecarRuntimeDeps;
   /**
    * Promise that resolves once `bootIntegrations` has finished its
    * initial pass. `tools/list` awaits this briefly (with a hard
@@ -300,11 +304,71 @@ function stringifyError(err: unknown): string {
  *                          `recall_memory` as MCP tools backed by the
  *                          credential-proxy core in `credential-proxy.ts`.
  */
+/**
+ * Run-scoped runtime singletons shared between the HTTP `/mcp` surface
+ * (`createApp` → `mountMcp`) and the integration boot pipeline
+ * (`bootIntegrations`). Building them once and threading the SAME
+ * instances is what lets the in-process `api_call` MCP server and the
+ * outer server agree on one blob store / token budget / concurrency cap.
+ */
+export interface SidecarRuntimeDeps {
+  blobStore: BlobStore;
+  tokenBudget: TokenBudget;
+  providerCallLimit: LimitFunction;
+  proxyDeps: ProviderCallDeps;
+}
+
+/**
+ * Build the run-scoped runtime deps from {@link AppDeps}. Pure
+ * construction (no I/O beyond reading env vars + one info log). Called
+ * once in `server.ts` (shared with boot) and as a fallback inside
+ * `createApp` for tests that don't pre-build them.
+ */
+export function buildSidecarRuntimeDeps(deps: AppDeps): SidecarRuntimeDeps {
+  const fetchFn = deps.fetchFn ?? fetch;
+  const blobStore = new BlobStore(deps.runId ?? "unknown");
+  const inlineCapTokens = readPositiveTokenEnv(
+    "SIDECAR_INLINE_TOOL_OUTPUT_TOKENS",
+    DEFAULT_INLINE_OUTPUT_TOKENS,
+  );
+  const runBudgetTokens = readPositiveTokenEnv(
+    "SIDECAR_RUN_TOOL_OUTPUT_BUDGET_TOKENS",
+    DEFAULT_RUN_OUTPUT_BUDGET_TOKENS,
+  );
+  const tokenBudget = new TokenBudget({
+    inlineCapTokens,
+    runBudgetTokens,
+    ...(deps.config.modelContextWindow !== undefined
+      ? { contextWindowTokens: deps.config.modelContextWindow }
+      : {}),
+    ...(deps.config.modelMaxTokens !== undefined && deps.config.modelContextWindow !== undefined
+      ? { reserveTokens: deps.config.modelMaxTokens }
+      : {}),
+  });
+  logger.info("token-budget configured", {
+    inlineCapTokens: tokenBudget.inlineCapTokens,
+    runBudgetTokens: tokenBudget.runBudgetTokens,
+    contextWindowTokens: tokenBudget.contextWindowTokens,
+    reserveTokens: tokenBudget.reserveTokens,
+  });
+  const providerCallLimit: LimitFunction = pLimit(
+    readPositiveIntEnv("SIDECAR_PROVIDER_CALL_CONCURRENCY", DEFAULT_PROVIDER_CALL_CONCURRENCY),
+  );
+  const proxyDeps: ProviderCallDeps = {
+    config: deps.config,
+    cookieJar: deps.cookieJar,
+    fetchFn,
+    fetchCredentials: deps.fetchCredentials,
+    ...(deps.refreshCredentials ? { refreshCredentials: deps.refreshCredentials } : {}),
+    reportedAuthFailures: new Set<string>(),
+  };
+  return { blobStore, tokenBudget, providerCallLimit, proxyDeps };
+}
+
 export function createApp(deps: AppDeps): Hono {
-  const { config, fetchCredentials, cookieJar } = deps;
+  const { config } = deps;
   const fetchFn = deps.fetchFn ?? fetch;
   const isReady = deps.isReady ?? (() => true);
-  const reportedAuthFailures = new Set<string>();
 
   const app = new Hono();
 
@@ -543,67 +607,22 @@ export function createApp(deps: AppDeps): Hono {
     });
   }
 
-  // MCP exposure — the agent-facing surface for `provider_call`,
-  // `run_history`, and `recall_memory`. `mountMcp` forwards
-  // `provider_call` directly to `executeProviderCall` via the shared
-  // `proxyDeps` (no header round-trip).
-  const blobStore = new BlobStore(deps.runId ?? "unknown");
-  // Token-aware budgeting (issue #390): every tool output is gated by
-  // a per-call inline cap and a cumulative run-level ceiling. Both
-  // are configurable via env vars; defaults stay conservative for
-  // OSS / dev (200 K-token context window equivalent).
-  const inlineCapTokens = readPositiveTokenEnv(
-    "SIDECAR_INLINE_TOOL_OUTPUT_TOKENS",
-    DEFAULT_INLINE_OUTPUT_TOKENS,
-  );
-  const runBudgetTokens = readPositiveTokenEnv(
-    "SIDECAR_RUN_TOOL_OUTPUT_BUDGET_TOKENS",
-    DEFAULT_RUN_OUTPUT_BUDGET_TOKENS,
-  );
-  // Context-window guard (#464): when the launcher forwards both the
-  // resolved model's window + reserve, the budget refuses to inline a
-  // `provider_call` output that would push past `contextWindow - reserve`.
-  // The constructor rejects a lone `reserveTokens`; the launcher never
-  // emits `maxTokens` without `contextWindow` (same resolved-model row).
-  const tokenBudget = new TokenBudget({
-    inlineCapTokens,
-    runBudgetTokens,
-    ...(config.modelContextWindow !== undefined
-      ? { contextWindowTokens: config.modelContextWindow }
-      : {}),
-    ...(config.modelMaxTokens !== undefined && config.modelContextWindow !== undefined
-      ? { reserveTokens: config.modelMaxTokens }
-      : {}),
-  });
-  logger.info("token-budget configured", {
-    inlineCapTokens: tokenBudget.inlineCapTokens,
-    runBudgetTokens: tokenBudget.runBudgetTokens,
-    contextWindowTokens: tokenBudget.contextWindowTokens,
-    reserveTokens: tokenBudget.reserveTokens,
-  });
-  // Fan-out cap on `provider_call`. Defaults to
-  // {@link DEFAULT_PROVIDER_CALL_CONCURRENCY}; operators raise it for
-  // bandwidth-bound workloads via `SIDECAR_PROVIDER_CALL_CONCURRENCY`.
-  const providerCallLimit: LimitFunction = pLimit(
-    readPositiveIntEnv("SIDECAR_PROVIDER_CALL_CONCURRENCY", DEFAULT_PROVIDER_CALL_CONCURRENCY),
-  );
+  // MCP exposure — the agent-facing surface for the first-party tools
+  // (`run_history`, `recall_memory`) plus every integration tool the
+  // McpHost aggregates (spawned/remote MCP servers AND the in-process
+  // `api_call` server). Run-scoped deps are built once and shared with
+  // `bootIntegrations` (when `server.ts` pre-builds them) so the
+  // in-process api_call server and the outer resource provider use the
+  // same blob store.
+  const { blobStore, tokenBudget, providerCallLimit, proxyDeps } =
+    deps.runtimeDeps ?? buildSidecarRuntimeDeps(deps);
   mountMcp(app, {
     blobStore,
     tokenBudget,
     providerCallLimit,
-    proxyDeps: {
-      config,
-      cookieJar,
-      fetchFn,
-      fetchCredentials,
-      ...(deps.refreshCredentials ? { refreshCredentials: deps.refreshCredentials } : {}),
-      reportedAuthFailures,
-    },
+    proxyDeps,
     ...(deps.additionalMcpToolsProvider
       ? { additionalToolsProvider: deps.additionalMcpToolsProvider }
-      : {}),
-    ...(deps.apiCallIntegrationsProvider
-      ? { apiCallIntegrationsProvider: deps.apiCallIntegrationsProvider }
       : {}),
     ...(deps.integrationBootPromise ? { integrationBootPromise: deps.integrationBootPromise } : {}),
   });

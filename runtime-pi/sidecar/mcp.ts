@@ -1594,17 +1594,52 @@ export interface ApiCallIntegrationConfig {
   uploadProtocols?: readonly string[];
 }
 
+/**
+ * Credential-proxy core deps needed to build one integration's `api_call`
+ * (+ optional `api_upload`) tool definitions outside of `mountMcp`. The
+ * sidecar boot (`integrations-boot.ts`) builds these once per run and
+ * passes them in so the api_call tools can be hosted as a trusted
+ * in-process MCP server registered on the McpHost — same pipeline as
+ * spawned/remote integration tools.
+ */
+export interface ApiCallToolDeps {
+  proxyDeps: ProviderCallDeps;
+  blobStore?: BlobStore;
+  tokenBudget?: TokenBudget;
+  providerCallLimit?: LimitFunction;
+}
+
+/**
+ * Build the `api_call` (+ optional `api_upload`) {@link AppstrateToolDefinition}s
+ * for one integration, named UNPREFIXED (`api_call` / `api_upload`). The
+ * caller registers them on the McpHost, which applies the `{ns}__` prefix
+ * (matching the legacy `{ns}__api_call` name) + tool-name validation. The
+ * handlers reuse the exact credential-proxy core (`credentialProxyInner`)
+ * via {@link buildSidecarTools}, with the integration's credential adapters
+ * injected per-call.
+ */
+export function createApiCallToolDefs(
+  integ: ApiCallIntegrationConfig,
+  deps: ApiCallToolDeps,
+): AppstrateToolDefinition[] {
+  const { makeApiCallTool, makeApiUploadTool } = buildSidecarTools(deps);
+  const out: AppstrateToolDefinition[] = [];
+  const call = makeApiCallTool(integ);
+  out.push({ ...call, descriptor: { ...call.descriptor, name: API_CALL_TOOL_NAME } });
+  const upload = makeApiUploadTool(integ);
+  if (upload) {
+    out.push({ ...upload, descriptor: { ...upload.descriptor, name: API_UPLOAD_TOOL_NAME } });
+  }
+  return out;
+}
+
+/** Unprefixed tool names for the generic credential-injecting tools. */
+export const API_CALL_TOOL_NAME = "api_call";
+export const API_UPLOAD_TOOL_NAME = "api_upload";
+
 export interface MountMcpOptions {
   /** Run-scoped blob store for `provider_call` resource spillover. */
   blobStore?: BlobStore;
-  /**
-   * Lazy provider for integrations exposing the generic `api_call` tool.
-   * Called on every `/mcp` request (like {@link additionalToolsProvider})
-   * so integrations that finish their background bootstrap after the
-   * HTTP listener comes up still surface their `{namespace}__api_call`
-   * tool on the next `tools/list`.
-   */
-  apiCallIntegrationsProvider?: () => ApiCallIntegrationConfig[];
   /**
    * Credential-proxy core deps. `provider_call` calls
    * {@link executeProviderCall} directly with structured args; `run_history`
@@ -1676,7 +1711,7 @@ export interface MountMcpOptions {
 const INTEGRATION_BOOT_WAIT_MS = 30_000;
 
 export function mountMcp(app: Hono, options: MountMcpOptions): void {
-  const { firstParty, makeApiCallTool, makeApiUploadTool } = buildSidecarTools(options);
+  const { firstParty } = buildSidecarTools(options);
   const firstPartyNames = new Set(firstParty.map((t) => t.descriptor.name));
   const resources = options.blobStore ? buildBlobResourceProvider(options.blobStore) : undefined;
   // Cache the await so only the first `/mcp` request pays the wait —
@@ -1775,28 +1810,39 @@ export function mountMcp(app: Hono, options: MountMcpOptions): void {
     if (bootReady) await bootReady;
     // Resolve tools per-request so integrations that finish booting AFTER
     // the sidecar's HTTP listener is up still surface on the next call.
-    // provider→integration unification — build the generic `api_call`
-    // tools lazily from the (post-bootstrap) integration set, alongside
-    // the spawned-integration MCP tools.
-    const apiCallIntegrations = options.apiCallIntegrationsProvider?.() ?? [];
-    const apiCallExtras = apiCallIntegrations.map(makeApiCallTool);
-    // Advertise a `{ns}__api_upload` tool alongside `{ns}__api_call` for
-    // every integration that declared `apiCall.uploadProtocols`. Gated +
-    // null-filtered inside makeApiUploadTool.
-    const apiUploadExtras = apiCallIntegrations
-      .map(makeApiUploadTool)
-      .filter((t): t is AppstrateToolDefinition => t !== null);
-    const dynamicExtras = [
-      ...(options.additionalToolsProvider?.() ?? []),
-      ...apiCallExtras,
-      ...apiUploadExtras,
-    ].filter((t) => !firstPartyNames.has(t.descriptor.name));
-    const tools = [...firstParty, ...dynamicExtras];
-    const server = createMcpServer(
-      tools,
-      { name: "appstrate-sidecar", version: "1" },
-      resources ? { resources } : {},
+    // provider→integration unification — the generic `api_call` (+ optional
+    // `api_upload`) tools are now registered on the McpHost as trusted
+    // in-process MCP servers at boot (see integrations-boot.ts), so they
+    // arrive here through `additionalToolsProvider` (= host.buildTools)
+    // exactly like any spawned/remote integration tool. One pipeline.
+    const dynamicExtras = (options.additionalToolsProvider?.() ?? []).filter(
+      (t) => !firstPartyNames.has(t.descriptor.name),
     );
+    const tools = [...firstParty, ...dynamicExtras];
+    // `createMcpServer` validates every descriptor (tool-name pattern, schema
+    // shape). A single malformed dynamic tool would otherwise throw here —
+    // outside the try/finally below — and 500 the entire `/mcp` POST, taking
+    // down even the first-party tools. Degrade gracefully: log the offending
+    // descriptor, drop the dynamic extras, and serve first-party only so the
+    // agent can still connect.
+    let server: ReturnType<typeof createMcpServer>;
+    try {
+      server = createMcpServer(
+        tools,
+        { name: "appstrate-sidecar", version: "1" },
+        resources ? { resources } : {},
+      );
+    } catch (err) {
+      logger.error("MCP server build failed; serving first-party tools only", {
+        error: err instanceof Error ? err.message : String(err),
+        dynamicToolNames: dynamicExtras.map((t) => t.descriptor.name),
+      });
+      server = createMcpServer(
+        firstParty,
+        { name: "appstrate-sidecar", version: "1" },
+        resources ? { resources } : {},
+      );
+    }
     // Stateless mode: passing `sessionIdGenerator: undefined` explicitly
     // disables session tracking. Combined with per-request construction,
     // there is no state to leak between agent invocations, no map to

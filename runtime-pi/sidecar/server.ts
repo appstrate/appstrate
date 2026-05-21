@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { createApp, SIDECAR_IDLE_TIMEOUT_SECONDS } from "./app.ts";
+import { createApp, buildSidecarRuntimeDeps, SIDECAR_IDLE_TIMEOUT_SECONDS } from "./app.ts";
 import { createForwardProxy } from "./forward-proxy.ts";
 import type { CredentialsResponse, LlmProxyConfig } from "./helpers.ts";
 import { logger } from "./logger.ts";
 import { OAuthTokenCache } from "./oauth-token-cache.ts";
 import { bootIntegrations, readIntegrationSpecsFromEnv } from "./integrations-boot.ts";
-import type { ApiCallIntegrationConfig } from "./mcp.ts";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 
 function readLlmConfigFromEnv(): LlmProxyConfig | undefined {
@@ -97,23 +96,36 @@ const oauthTokenCache = new OAuthTokenCache({
 // take several seconds for a fresh node_modules tree). The agent's
 // first `tools/list` call then briefly awaits this promise via the
 // lazy tools provider below.
+// Run-scoped runtime deps built ONCE and shared between the integration
+// boot pipeline (in-process `api_call` MCP server) and the HTTP `/mcp`
+// surface (`createApp`), so both read the same blob store — resource_link
+// spillover from api_call resolves via the outer server's resources/read.
+const runtimeDeps = buildSidecarRuntimeDeps({
+  config,
+  cookieJar,
+  fetchCredentials,
+  refreshCredentials,
+  ...(process.env.RUN_ID ? { runId: process.env.RUN_ID } : {}),
+});
+
 let integrationTools: AppstrateToolDefinition[] = [];
-let apiCallIntegrations: ApiCallIntegrationConfig[] = [];
 const specs = readIntegrationSpecsFromEnv();
 const integrationBootPromise =
   specs && specs.length > 0
-    ? bootIntegrations(specs, {
-        platformApiUrl: config.platformApiUrl,
-        runToken: config.runToken,
-      })
+    ? bootIntegrations(
+        specs,
+        {
+          platformApiUrl: config.platformApiUrl,
+          runToken: config.runToken,
+        },
+        runtimeDeps,
+      )
         .then((result) => {
           integrationTools = result.tools;
-          apiCallIntegrations = result.apiCallIntegrations;
           logger.info("Integrations bootstrapped", {
             spawned: result.spawned,
             failed: result.failed,
             toolCount: result.tools.length,
-            apiCallTools: result.apiCallIntegrations.length,
           });
         })
         .catch((err) => {
@@ -128,10 +140,10 @@ const app = createApp({
   fetchCredentials,
   refreshCredentials,
   cookieJar,
+  runtimeDeps,
   isReady: () => proxy.readySync,
   oauthTokenCache,
   additionalMcpToolsProvider: () => integrationTools,
-  apiCallIntegrationsProvider: () => apiCallIntegrations,
   integrationBootPromise,
 });
 

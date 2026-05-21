@@ -37,6 +37,7 @@ import { unzipSync } from "fflate";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import {
+  createInProcessPair,
   createMcpHttpClient,
   wrapClient,
   type AppstrateMcpClient,
@@ -58,7 +59,11 @@ import {
   fetchInitialIntegrationCredentials,
 } from "./integration-credentials-source.ts";
 import { createApiCallCredentialAdapter } from "./api-call-credentials.ts";
-import type { ApiCallIntegrationConfig } from "./mcp.ts";
+import {
+  createApiCallToolDefs,
+  type ApiCallIntegrationConfig,
+  type ApiCallToolDeps,
+} from "./mcp.ts";
 import {
   selectIntegrationRuntimeAdapter,
   type IntegrationRuntimeAdapter,
@@ -90,15 +95,13 @@ export interface BundleFetchOptions {
 
 export interface BootIntegrationsResult {
   host: McpHost;
-  /** Tools registered on `host`, ready to merge into the sidecar's MCP surface. */
-  tools: AppstrateToolDefinition[];
   /**
-   * Per-integration `api_call` wiring (provider→integration unification).
-   * One entry per spec that declared `apiCall` and whose agent selected
-   * the `api_call` tool. `mountMcp` turns each into a
-   * `{namespace}__api_call` tool. Empty when no integration opted in.
+   * Tools registered on `host`, ready to merge into the sidecar's MCP
+   * surface. Includes spawned/remote integration tools AND the generic
+   * `api_call` (+ optional `api_upload`) tools, which are now registered
+   * as trusted in-process MCP servers on the same host — one pipeline.
    */
-  apiCallIntegrations: ApiCallIntegrationConfig[];
+  tools: AppstrateToolDefinition[];
   /** Per-integration spawn outcome — useful for run-event observability. */
   spawned: Array<{ packageId: string; namespace: string; toolCount: number }>;
   /** Per-integration failures — emitted as warnings but do not abort boot. */
@@ -290,6 +293,13 @@ async function connectRemoteHttpIntegration(
 export async function bootIntegrations(
   specs: IntegrationSpawnSpec[],
   bundleFetchOpts: BundleFetchOptions,
+  /**
+   * Credential-proxy core deps for the generic `api_call` tool. Built once
+   * per run by `server.ts` and shared with `createApp` (same blob store).
+   * When omitted (tests / api_call-less runs) the in-process api_call
+   * server is skipped — a spec that declares `apiCall` is logged + dropped.
+   */
+  apiCallDeps?: ApiCallToolDeps,
 ): Promise<BootIntegrationsResult> {
   const host = new McpHost({
     onLog: (event) =>
@@ -303,7 +313,6 @@ export async function bootIntegrations(
   const failed: BootIntegrationsResult["failed"] = [];
   const clients: AppstrateMcpClient[] = [];
   const mitmListeners: MitmListenerHandle[] = [];
-  const apiCallIntegrations: ApiCallIntegrationConfig[] = [];
 
   // The sidecar receives RUN_TOKEN but not always RUN_ID directly — we
   // need a stable identifier for labelling integration containers
@@ -390,49 +399,75 @@ export async function bootIntegrations(
     try {
       // ─── provider→integration unification — generic api_call tool ───
       // Independent of how (or whether) the integration spawns a server:
-      // build the credential adapter from a dedicated credentials source
-      // so `mountMcp` can register `{namespace}__api_call`. A pure-proxy
-      // integration (apiCall, no server) does ONLY this and skips spawn.
+      // build the credential adapter from a dedicated credentials source,
+      // then host the generic `api_call` (+ optional `api_upload`) tools as
+      // a TRUSTED in-process MCP server registered on the same McpHost as
+      // every spawned/remote integration. One pipeline → McpHost owns the
+      // namespacing (`{ns}__api_call`) + name validation. A pure-proxy
+      // integration (server.type api_call, no spec.manifest.server) does
+      // ONLY this and skips spawn.
+      let apiCallToolCount = 0;
       if (spec.apiCall) {
-        const initial = await fetchInitialIntegrationCredentials(spec.packageId, bundleFetchOpts);
-        const source = createIntegrationCredentialsSource({
-          packageId: spec.packageId,
-          platformApiUrl: bundleFetchOpts.platformApiUrl,
-          runToken: bundleFetchOpts.runToken,
-          initialPayload: initial,
-        });
-        const credAdapter = createApiCallCredentialAdapter({
-          source,
-          authKey: spec.apiCall.authKey,
-          authorizedUris: spec.apiCall.authorizedUris,
-          ...(spec.apiCall.allowAllUris ? { allowAllUris: true } : {}),
-        });
-        apiCallIntegrations.push({
-          namespace: spec.namespace,
-          packageId: spec.packageId,
-          fetchCredentials: credAdapter.fetchCredentials,
-          refreshCredentials: credAdapter.refreshCredentials,
-          // Resumable-upload protocols the manifest declared (plumbed via
-          // the spawn resolver). When non-empty the sidecar also advertises
-          // `{ns}__api_upload`; the agent-side resolver drives it.
-          ...(spec.apiCall.uploadProtocols && spec.apiCall.uploadProtocols.length > 0
-            ? { uploadProtocols: spec.apiCall.uploadProtocols }
-            : {}),
-        });
-        logger.info("integration api_call registered", {
-          packageId: spec.packageId,
-          namespace: spec.namespace,
-          authKey: spec.apiCall.authKey,
-        });
+        if (!apiCallDeps) {
+          logger.warn("integration declares api_call but sidecar has no proxy deps; skipping", {
+            packageId: spec.packageId,
+          });
+        } else {
+          const initial = await fetchInitialIntegrationCredentials(spec.packageId, bundleFetchOpts);
+          const source = createIntegrationCredentialsSource({
+            packageId: spec.packageId,
+            platformApiUrl: bundleFetchOpts.platformApiUrl,
+            runToken: bundleFetchOpts.runToken,
+            initialPayload: initial,
+          });
+          const credAdapter = createApiCallCredentialAdapter({
+            source,
+            authKey: spec.apiCall.authKey,
+            authorizedUris: spec.apiCall.authorizedUris,
+            ...(spec.apiCall.allowAllUris ? { allowAllUris: true } : {}),
+          });
+          const integ: ApiCallIntegrationConfig = {
+            namespace: spec.namespace, // McpHost.register normalises it
+            packageId: spec.packageId,
+            fetchCredentials: credAdapter.fetchCredentials,
+            refreshCredentials: credAdapter.refreshCredentials,
+            // Resumable-upload protocols the manifest declared (plumbed via
+            // the spawn resolver). When non-empty the factory also emits an
+            // `api_upload` tool; the agent-side resolver drives it.
+            ...(spec.apiCall.uploadProtocols && spec.apiCall.uploadProtocols.length > 0
+              ? { uploadProtocols: spec.apiCall.uploadProtocols }
+              : {}),
+          };
+          const defs = createApiCallToolDefs(integ, apiCallDeps);
+          const pair = await createInProcessPair(defs, {
+            serverInfo: { name: `appstrate-api-call-${spec.packageId}`, version: "1" },
+          });
+          const wrapped = wrapClient(pair.client, { close: () => pair.close() });
+          const sizeBefore = host.size();
+          await host.register({
+            namespace: spec.namespace,
+            client: wrapped,
+            trusted: true,
+            allowedTools: defs.map((d) => d.descriptor.name),
+          });
+          apiCallToolCount = host.size() - sizeBefore;
+          clients.push(wrapped);
+          logger.info("integration api_call registered (in-process)", {
+            packageId: spec.packageId,
+            namespace: spec.namespace,
+            authKey: spec.apiCall.authKey,
+            toolCount: apiCallToolCount,
+          });
+        }
       }
 
-      // Serverless integration (apiCall-only, no MCP server) — nothing to
-      // spawn; the api_call tool above is its entire surface.
+      // Serverless integration (api_call-only, no MCP server) — nothing to
+      // spawn; the in-process api_call server above is its entire surface.
       if (!spec.manifest.server) {
         spawned.push({
           packageId: spec.packageId,
           namespace: spec.namespace,
-          toolCount: spec.apiCall ? 1 : 0,
+          toolCount: apiCallToolCount,
         });
         continue;
       }
@@ -604,7 +639,6 @@ export async function bootIntegrations(
   return {
     host,
     tools,
-    apiCallIntegrations,
     spawned,
     failed,
     shutdown: async () => {

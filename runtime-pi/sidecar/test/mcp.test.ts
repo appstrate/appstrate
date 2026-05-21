@@ -13,7 +13,8 @@
 import { describe, it, expect, mock } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { createApp, type AppDeps } from "../app.ts";
+import { createApp, buildSidecarRuntimeDeps, type AppDeps } from "../app.ts";
+import { buildApiCallHost } from "./helpers/api-call-host.ts";
 import { MAX_MCP_ENVELOPE_SIZE } from "../helpers.ts";
 import type { CredentialsResponse } from "../helpers.ts";
 
@@ -501,9 +502,11 @@ describe("POST /mcp — api_call (provider→integration unification)", () => {
     credentialFieldName: "__appstrate_api_call_token__",
   });
 
-  function makeApiCallDeps(overrides?: Partial<AppDeps>): AppDeps {
-    return makeDeps({
-      apiCallIntegrationsProvider: () => [
+  async function makeApiCallApp(overrides?: Partial<AppDeps>) {
+    const appDeps = makeDeps(overrides);
+    const runtimeDeps = buildSidecarRuntimeDeps(appDeps);
+    const host = await buildApiCallHost(
+      [
         {
           namespace: "gmail",
           packageId: "@official/gmail",
@@ -511,12 +514,17 @@ describe("POST /mcp — api_call (provider→integration unification)", () => {
           refreshCredentials: async () => integrationCreds("integ-tok-2"),
         },
       ],
-      ...overrides,
+      runtimeDeps,
+    );
+    return createApp({
+      ...appDeps,
+      runtimeDeps,
+      additionalMcpToolsProvider: () => host.buildTools(),
     });
   }
 
   it("advertises {namespace}__api_call in tools/list", async () => {
-    const app = createApp(makeApiCallDeps());
+    const app = await makeApiCallApp();
     const res = await rpc(app, { method: "tools/list" });
     const result = res.json.result as {
       tools: Array<{
@@ -540,7 +548,7 @@ describe("POST /mcp — api_call (provider→integration unification)", () => {
           headers: { "Content-Type": "application/json" },
         }),
     );
-    const app = createApp(makeApiCallDeps({ fetchFn }));
+    const app = await makeApiCallApp({ fetchFn });
     const res = await rpc(app, {
       method: "tools/call",
       params: {
@@ -558,7 +566,7 @@ describe("POST /mcp — api_call (provider→integration unification)", () => {
   });
 
   it("enforces the integration authorizedUris allowlist", async () => {
-    const app = createApp(makeApiCallDeps());
+    const app = await makeApiCallApp();
     const res = await rpc(app, {
       method: "tools/call",
       params: {

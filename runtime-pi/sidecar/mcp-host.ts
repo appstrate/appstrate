@@ -53,6 +53,17 @@ export interface McpHostUpstream {
    * behaviour. Empty `[]` is a valid explicit "register nothing".
    */
   allowedTools?: readonly string[];
+  /**
+   * Trusted first-party upstream (e.g. the sidecar's own in-process
+   * `api_call` server). Skips the tool-poisoning sanitiser
+   * (`sanitiseToolDescriptor`) — which is designed for UNTRUSTED
+   * third-party MCP servers and caps every `description` to 512 bytes /
+   * the whole schema to 8 KB. Our first-party tools ship deliberately
+   * rich, audited documentation (the `api_call` body / multipart docs the
+   * agent needs to format requests) that must survive intact. Namespacing
+   * + tool-name validation still apply.
+   */
+  trusted?: boolean;
 }
 
 export interface McpHostOptions {
@@ -164,8 +175,10 @@ export class McpHost {
       // before any third-party descriptor reaches
       // the agent's LLM. A descriptor that exceeds the schema-size cap
       // after sanitisation is dropped entirely; the host emits a log
-      // event so operators can audit the rejection.
-      const sanitised = sanitiseToolDescriptor(tool);
+      // event so operators can audit the rejection. Trusted first-party
+      // upstreams (our own in-process api_call server) bypass the
+      // sanitiser so their rich audited docs survive intact.
+      const sanitised = upstream.trusted ? tool : sanitiseToolDescriptor(tool);
       if (!sanitised) {
         this.options.onLog?.({
           source: `host:${normalisedNs}`,
@@ -282,7 +295,7 @@ export class McpHost {
  * the V3 tool-name regex. Returns `""` when the input is empty or
  * contains nothing usable.
  */
-function normaliseNamespace(raw: string): string {
+export function normaliseNamespace(raw: string): string {
   if (typeof raw !== "string") return "";
   const out = raw
     .replace(/^@/, "")

@@ -11,7 +11,8 @@
  */
 
 import { describe, it, expect, mock } from "bun:test";
-import { createApp, type AppDeps } from "../app.ts";
+import { createApp, buildSidecarRuntimeDeps, type AppDeps } from "../app.ts";
+import { buildApiCallHost } from "./helpers/api-call-host.ts";
 import { type CredentialsResponse } from "../helpers.ts";
 
 function makeDeps(overrides: Partial<AppDeps> = {}): AppDeps {
@@ -41,9 +42,21 @@ function makeDeps(overrides: Partial<AppDeps> = {}): AppDeps {
         }),
     ) as unknown as typeof fetch,
     runId: "run-test",
-    // The credential-proxy spillover path is exercised through the
-    // generic `{ns}__api_call` integration tool (provider_call retired).
-    apiCallIntegrationsProvider: () => [
+    ...overrides,
+  };
+}
+
+/**
+ * Build the `/mcp` app with `test__api_call` hosted on an McpHost and the
+ * SAME run-scoped blob store wired into the outer server's resource
+ * provider — so a `resource_link` spilled by the in-process api_call tool
+ * resolves via `resources/read` across the McpHost boundary.
+ */
+async function makeResourcesApp(overrides: Partial<AppDeps> = {}) {
+  const appDeps = makeDeps(overrides);
+  const runtimeDeps = buildSidecarRuntimeDeps(appDeps);
+  const host = await buildApiCallHost(
+    [
       {
         namespace: "test",
         packageId: "@test/integ",
@@ -51,8 +64,13 @@ function makeDeps(overrides: Partial<AppDeps> = {}): AppDeps {
         refreshCredentials: integResCreds,
       },
     ],
-    ...overrides,
-  };
+    runtimeDeps,
+  );
+  return createApp({
+    ...appDeps,
+    runtimeDeps,
+    additionalMcpToolsProvider: () => host.buildTools(),
+  });
 }
 
 const integResCreds = async (): Promise<CredentialsResponse> => ({
@@ -102,7 +120,7 @@ describe("POST /mcp — provider_call resource spillover", () => {
           headers: { "Content-Type": "application/pdf" },
         }),
     );
-    const app = createApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
+    const app = await makeResourcesApp({ fetchFn: fetchFn as unknown as typeof fetch });
     const res = await rpc(app, {
       method: "tools/call",
       params: {
@@ -135,7 +153,7 @@ describe("POST /mcp — provider_call resource spillover", () => {
           headers: { "Content-Type": "application/json" },
         }),
     );
-    const app = createApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
+    const app = await makeResourcesApp({ fetchFn: fetchFn as unknown as typeof fetch });
     const res = await rpc(app, {
       method: "tools/call",
       params: {
@@ -167,7 +185,7 @@ describe("POST /mcp — provider_call resource spillover", () => {
           headers: { "Content-Type": "application/json" },
         }),
     );
-    const app = createApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
+    const app = await makeResourcesApp({ fetchFn: fetchFn as unknown as typeof fetch });
     const callRes = await rpc(app, {
       method: "tools/call",
       params: {
@@ -211,7 +229,7 @@ describe("POST /mcp — provider_call resource spillover", () => {
           headers: { "Content-Type": "application/pdf" },
         }),
     );
-    const app = createApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
+    const app = await makeResourcesApp({ fetchFn: fetchFn as unknown as typeof fetch });
     const callRes = await rpc(app, {
       method: "tools/call",
       params: {
@@ -251,7 +269,7 @@ describe("POST /mcp — provider_call resource spillover", () => {
           headers: { "Content-Type": "application/json" },
         }),
     );
-    const app = createApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
+    const app = await makeResourcesApp({ fetchFn: fetchFn as unknown as typeof fetch });
     const res = await rpc(app, {
       method: "tools/call",
       params: {
@@ -284,7 +302,7 @@ describe("POST /mcp — resources/list + resources/read", () => {
           headers: { "Content-Type": "application/pdf" },
         }),
     );
-    const app = createApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
+    const app = await makeResourcesApp({ fetchFn: fetchFn as unknown as typeof fetch });
 
     // 1. Call provider_call to spill bytes into the blob cache.
     const callRes = await rpc(app, {
@@ -327,7 +345,7 @@ describe("POST /mcp — resources/list + resources/read", () => {
           headers: { "Content-Type": "application/json" },
         }),
     );
-    const app = createApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
+    const app = await makeResourcesApp({ fetchFn: fetchFn as unknown as typeof fetch });
     const callRes = await rpc(app, {
       method: "tools/call",
       params: {

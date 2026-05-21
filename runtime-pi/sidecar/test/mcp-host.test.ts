@@ -20,7 +20,7 @@ import {
   wrapClient,
   type AppstrateToolDefinition,
 } from "@appstrate/mcp-transport";
-import { McpHost } from "../mcp-host.ts";
+import { McpHost, normaliseNamespace } from "../mcp-host.ts";
 
 function fsTool(): AppstrateToolDefinition[] {
   return [
@@ -248,6 +248,20 @@ describe("McpHost — namespace normalisation", () => {
     }
   });
 
+  // The generic `{ns}__api_call` tool (apiCall integrations) is named from
+  // `normaliseNamespace(packageId)` in integrations-boot — NOT routed through
+  // McpHost.register — so the normaliser alone must yield an MCP-name-safe
+  // prefix. A raw scoped package id (`@scope/name`) carries `@`/`/` which the
+  // SDK's TOOL_NAME_PATTERN rejects → 500 on the agent's `/mcp` POST.
+  it("yields an MCP-name-safe prefix for scoped package ids", () => {
+    const TOOL_NAME_PATTERN = /^[A-Za-z0-9_.-]{1,128}$/;
+    for (const id of ["@appstrate/google-drive", "@appstrate/github", "gmail"]) {
+      const ns = normaliseNamespace(id);
+      expect(ns.length).toBeGreaterThan(0);
+      expect(TOOL_NAME_PATTERN.test(`${ns}__api_call`)).toBe(true);
+    }
+  });
+
   it("caps namespace at 20 chars", async () => {
     const fs = await makeUpstream(fsTool());
     try {
@@ -300,6 +314,58 @@ describe("McpHost — dispose", () => {
 // ─────────────────────────────────────────────
 // Niveau 2 Phase 3 — allowedTools filter
 // ─────────────────────────────────────────────
+
+describe("McpHost — trusted (first-party) bypass of the poisoning sanitiser", () => {
+  // The generic `api_call` tool ships a deliberately rich `body` description
+  // (multipart / base64 docs the agent needs). A third-party schema that
+  // serialises past MAX_SCHEMA_SERIALISED_BYTES (8 KB) is DROPPED by
+  // sanitiseToolDescriptor; a trusted first-party one must survive intact.
+  function fatSchemaTool(): AppstrateToolDefinition[] {
+    return [
+      {
+        descriptor: {
+          name: "api_call",
+          description: "x".repeat(4000), // > MAX_TOOL_DESCRIPTION_BYTES (2048)
+          inputSchema: {
+            type: "object",
+            properties: {
+              note: { type: "string", description: "y".repeat(6000) }, // > 512 param cap
+            },
+          },
+        },
+        handler: async () => ({ content: [{ type: "text", text: "ok" }] }),
+      },
+    ];
+  }
+
+  const noteDescOf = (tool: AppstrateToolDefinition): string =>
+    (tool.descriptor.inputSchema as { properties: { note: { description: string } } }).properties
+      .note.description;
+
+  it("truncates an untrusted tool's rich docs but keeps the trusted one verbatim", async () => {
+    const untrusted = await makeUpstream(fatSchemaTool());
+    const trusted = await makeUpstream(fatSchemaTool());
+    try {
+      const host = new McpHost();
+      await host.register({ namespace: "third", client: untrusted.client });
+      await host.register({ namespace: "gmail", client: trusted.client, trusted: true });
+      const built = host.buildTools();
+
+      // Untrusted: param description capped at 512 bytes + tool description capped.
+      const untrustedTool = built.find((t) => t.descriptor.name === "third__api_call")!;
+      expect(noteDescOf(untrustedTool).length).toBeLessThanOrEqual(512);
+      expect(untrustedTool.descriptor.description!.length).toBeLessThanOrEqual(2048);
+
+      // Trusted: rich docs survive untouched.
+      const trustedTool = built.find((t) => t.descriptor.name === "gmail__api_call")!;
+      expect(noteDescOf(trustedTool).length).toBe(6000);
+      expect(trustedTool.descriptor.description!.length).toBe(4000);
+    } finally {
+      await untrusted.pair.close();
+      await trusted.pair.close();
+    }
+  });
+});
 
 describe("McpHost — allowedTools filter", () => {
   it("registers only the tools in the allowlist (originalName-based)", async () => {

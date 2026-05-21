@@ -29,8 +29,9 @@
 
 import { describe, it, expect, mock } from "bun:test";
 import { Hono } from "hono";
-import { createApp, type AppDeps } from "../app.ts";
+import { createApp, buildSidecarRuntimeDeps, type AppDeps } from "../app.ts";
 import { mountMcp } from "../mcp.ts";
+import { buildApiCallHost } from "./helpers/api-call-host.ts";
 import { BlobStore } from "../blob-store.ts";
 import { TokenBudget, estimateTokens } from "../token-budget.ts";
 import type { CredentialsResponse } from "../helpers.ts";
@@ -51,16 +52,6 @@ function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
     cookieJar: new Map(),
     fetchFn: mock(async () => new Response("{}", { status: 200 })),
     isReady: () => true,
-    // The credential-proxy core is exercised through the generic
-    // `{ns}__api_call` integration tool (provider_call is retired).
-    apiCallIntegrationsProvider: () => [
-      {
-        namespace: "test",
-        packageId: "@test/integ",
-        fetchCredentials: defaultFetchCredentials,
-        refreshCredentials: defaultFetchCredentials,
-      },
-    ],
     ...overrides,
   };
 }
@@ -126,20 +117,26 @@ interface CallToolResult {
  * `createApp` so tests can drive the budget independently of env vars
  * (which createApp reads at boot).
  */
-function buildTestApp(opts: {
+async function buildTestApp(opts: {
   deps: AppDeps;
   tokenBudget?: TokenBudget;
   blobStore?: BlobStore;
-}): Hono {
+}): Promise<Hono> {
   const app = new Hono();
   const blobStore = opts.blobStore ?? new BlobStore("run-test");
-  // The credential-proxy core (token-budget / blob spillover) is now
-  // exercised through the generic `{ns}__api_call` integration tool —
-  // `provider_call` was retired with the AFPS provider package type.
-  mountMcp(app, {
-    blobStore,
-    ...(opts.tokenBudget ? { tokenBudget: opts.tokenBudget } : {}),
-    apiCallIntegrationsProvider: () => [
+  const proxyDeps = {
+    config: opts.deps.config,
+    cookieJar: opts.deps.cookieJar,
+    fetchFn: opts.deps.fetchFn ?? fetch,
+    fetchCredentials: opts.deps.fetchCredentials,
+    reportedAuthFailures: new Set<string>(),
+  };
+  // The credential-proxy core (token-budget / blob spillover) is exercised
+  // through the generic `{ns}__api_call` tool, now hosted as a trusted
+  // in-process MCP server on an McpHost. The SAME blobStore + tokenBudget
+  // flow into both the api_call tool (via the host) and the outer server.
+  const host = await buildApiCallHost(
+    [
       {
         namespace: "test",
         packageId: "@test/integ",
@@ -147,13 +144,13 @@ function buildTestApp(opts: {
         refreshCredentials: opts.deps.fetchCredentials,
       },
     ],
-    proxyDeps: {
-      config: opts.deps.config,
-      cookieJar: opts.deps.cookieJar,
-      fetchFn: opts.deps.fetchFn ?? fetch,
-      fetchCredentials: opts.deps.fetchCredentials,
-      reportedAuthFailures: new Set<string>(),
-    },
+    { proxyDeps, blobStore, ...(opts.tokenBudget ? { tokenBudget: opts.tokenBudget } : {}) },
+  );
+  mountMcp(app, {
+    blobStore,
+    ...(opts.tokenBudget ? { tokenBudget: opts.tokenBudget } : {}),
+    additionalToolsProvider: () => host.buildTools(),
+    proxyDeps,
   });
   return app;
 }
@@ -174,7 +171,7 @@ describe("token-aware spill — dense JSON (issue #390 primary)", () => {
         }),
     );
     const tokenBudget = new TokenBudget({ inlineCapTokens: 4_000, runBudgetTokens: 100_000 });
-    const app = buildTestApp({ deps: makeDeps({ fetchFn }), tokenBudget });
+    const app = await buildTestApp({ deps: makeDeps({ fetchFn }), tokenBudget });
 
     const res = await rpc(app, {
       method: "tools/call",
@@ -208,7 +205,7 @@ describe("token-aware spill — dense JSON (issue #390 primary)", () => {
         }),
     );
     const tokenBudget = new TokenBudget({ inlineCapTokens: 4_000, runBudgetTokens: 100_000 });
-    const app = buildTestApp({ deps: makeDeps({ fetchFn }), tokenBudget });
+    const app = await buildTestApp({ deps: makeDeps({ fetchFn }), tokenBudget });
 
     const res = await rpc(app, {
       method: "tools/call",
@@ -253,7 +250,7 @@ describe("token-aware spill — cumulative pressure (issue #390 secondary)", () 
     // Inline cap allows each call individually; run budget tight
     // enough to exhaust within 50 calls.
     const tokenBudget = new TokenBudget({ inlineCapTokens: 4_000, runBudgetTokens: 20_000 });
-    const app = buildTestApp({ deps: makeDeps({ fetchFn }), tokenBudget });
+    const app = await buildTestApp({ deps: makeDeps({ fetchFn }), tokenBudget });
 
     let inlineCount = 0;
     let spillCount = 0;
@@ -301,7 +298,7 @@ describe("token-aware spill — `_meta` accounting", () => {
         }),
     );
     const tokenBudget = new TokenBudget({ inlineCapTokens: 4_000, runBudgetTokens: 100_000 });
-    const app = buildTestApp({ deps: makeDeps({ fetchFn }), tokenBudget });
+    const app = await buildTestApp({ deps: makeDeps({ fetchFn }), tokenBudget });
 
     const res = await rpc(app, {
       method: "tools/call",
@@ -334,7 +331,7 @@ describe("token-aware spill — `_meta` accounting", () => {
         }),
     );
     const tokenBudget = new TokenBudget({ inlineCapTokens: 4_000, runBudgetTokens: 100_000 });
-    const app = buildTestApp({ deps: makeDeps({ fetchFn }), tokenBudget });
+    const app = await buildTestApp({ deps: makeDeps({ fetchFn }), tokenBudget });
 
     const consumed: number[] = [];
     for (let i = 0; i < 3; i++) {
@@ -372,7 +369,7 @@ describe("token-aware spill — applied to all platform tools", () => {
         }),
     );
     const tokenBudget = new TokenBudget({ inlineCapTokens: 4_000, runBudgetTokens: 100_000 });
-    const app = buildTestApp({ deps: makeDeps({ fetchFn }), tokenBudget });
+    const app = await buildTestApp({ deps: makeDeps({ fetchFn }), tokenBudget });
 
     const res = await rpc(app, {
       method: "tools/call",
@@ -395,7 +392,7 @@ describe("token-aware spill — applied to all platform tools", () => {
         }),
     );
     const tokenBudget = new TokenBudget({ inlineCapTokens: 4_000, runBudgetTokens: 100_000 });
-    const app = buildTestApp({ deps: makeDeps({ fetchFn }), tokenBudget });
+    const app = await buildTestApp({ deps: makeDeps({ fetchFn }), tokenBudget });
 
     const res = await rpc(app, {
       method: "tools/call",
@@ -421,7 +418,7 @@ describe("token-aware spill — backwards compatibility", () => {
         }),
     );
     // Build app with NO tokenBudget passed — exercise the legacy path.
-    const app = buildTestApp({ deps: makeDeps({ fetchFn }) });
+    const app = await buildTestApp({ deps: makeDeps({ fetchFn }) });
 
     const res = await rpc(app, {
       method: "tools/call",
@@ -447,7 +444,7 @@ describe("token-aware spill — backwards compatibility", () => {
           headers: { "Content-Type": "application/json" },
         }),
     );
-    const app = buildTestApp({ deps: makeDeps({ fetchFn }) });
+    const app = await buildTestApp({ deps: makeDeps({ fetchFn }) });
     const res = await rpc(app, {
       method: "tools/call",
       params: {
@@ -486,7 +483,26 @@ describe("token-aware spill — env-var configuration via createApp", () => {
             headers: { "Content-Type": "application/json" },
           }),
       );
-      const app = createApp(makeDeps({ fetchFn }));
+      // Build runtimeDeps explicitly so the env-var-driven TokenBudget is
+      // shared with the in-process api_call host (mirrors server.ts).
+      const appDeps = makeDeps({ fetchFn });
+      const runtimeDeps = buildSidecarRuntimeDeps(appDeps);
+      const host = await buildApiCallHost(
+        [
+          {
+            namespace: "test",
+            packageId: "@test/integ",
+            fetchCredentials: defaultFetchCredentials,
+            refreshCredentials: defaultFetchCredentials,
+          },
+        ],
+        runtimeDeps,
+      );
+      const app = createApp({
+        ...appDeps,
+        runtimeDeps,
+        additionalMcpToolsProvider: () => host.buildTools(),
+      });
       const res = await rpc(app, {
         method: "tools/call",
         params: {
@@ -539,7 +555,7 @@ describe("token-aware spill — fallback when blob store is full", () => {
         }),
     );
     const tokenBudget = new TokenBudget({ inlineCapTokens: 4_000, runBudgetTokens: 100_000 });
-    const app = buildTestApp({ deps: makeDeps({ fetchFn }), tokenBudget, blobStore });
+    const app = await buildTestApp({ deps: makeDeps({ fetchFn }), tokenBudget, blobStore });
 
     const res = await rpc(app, {
       method: "tools/call",
