@@ -59,3 +59,8 @@ export {
   type BuildRuntimeToolFactoriesOptions,
   type RuntimeToolEventEmitter,
 } from "./runtime-tools/mcp-forward.ts";
+
+export {
+  spillResourcesToWorkspace,
+  type ResourceSpillOptions,
+} from "./runtime-tools/resource-spill.ts";

@@ -32,6 +32,7 @@ import {
   buildRuntimeToolFactories,
   callToolResultToPi,
   RUNTIME_INJECTED_TOOLS,
+  spillResourcesToWorkspace,
 } from "@appstrate/runner-pi";
 import { buildApiUploadToolFactory, isApiUploadToolName } from "./api-upload-extension.ts";
 
@@ -170,7 +171,19 @@ function buildIntegrationToolFactories(
             isError: result.isError === true,
             timestamp: Date.now(),
           });
-          return callToolResultToPi(result);
+          // Materialise any embedded MCP resources (e.g. GitHub MCP's
+          // `get_file_contents`, attachments) to workspace files before the
+          // adapter flattens them. Keeps file bytes out of the LLM context —
+          // the agent gets a `fromFile`-ready pointer instead of re-emitting
+          // the whole file into a `write` call, and binary `blob` resources
+          // survive (the inline renderer would drop them).
+          const spilled = await spillResourcesToWorkspace(result, {
+            workspace: opts.workspace,
+            toolCallId,
+            emit: opts.emit,
+            runId: opts.runId,
+          });
+          return callToolResultToPi(spilled);
         },
       });
     });
