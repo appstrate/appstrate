@@ -128,23 +128,6 @@ const expectedEndpoints = [
   "PUT /api/integrations/{packageId}/default",
   "DELETE /api/integrations/{packageId}/default",
 
-  // Connection Profiles (org-scoped user profiles)
-  "GET /api/connection-profiles",
-  "POST /api/connection-profiles",
-  "PUT /api/connection-profiles/{id}",
-  "DELETE /api/connection-profiles/{id}",
-
-  // App Profiles (app-scoped)
-  "GET /api/app-profiles",
-  "POST /api/app-profiles",
-  "GET /api/app-profiles/my-bindings",
-  "PUT /api/app-profiles/{id}",
-  "DELETE /api/app-profiles/{id}",
-  "GET /api/app-profiles/{id}/agents",
-
-  // Agent App Profile
-  "PUT /api/agents/{scope}/{name}/app-profile",
-
   // Agent Proxy
   "GET /api/agents/{scope}/{name}/proxy",
   "PUT /api/agents/{scope}/{name}/proxy",
@@ -257,9 +240,6 @@ const expectedEndpoints = [
   "GET /api/me/models",
   "GET /api/me/connections",
   "DELETE /api/me/connections/{connectionId}",
-  "GET /api/me/application-profile",
-  "PUT /api/me/application-profile",
-  "DELETE /api/me/application-profile",
   "GET /api/me/integration-pins",
   "PUT /api/me/integration-pins",
   "DELETE /api/me/integration-pins",

@@ -511,7 +511,6 @@ export const runsPaths = {
                 startedAt: "2026-01-15T10:30:00Z",
                 completedAt: "2026-01-15T10:31:12Z",
                 duration: 72000,
-                connectionProfileId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                 scheduleId: "sched_cm1abc456def789",
                 versionLabel: "1.2.0",
                 versionDirty: false,

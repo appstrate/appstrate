@@ -1414,80 +1414,6 @@
         }
       }
     },
-    "/api/agents/{scope}/{name}/app-profile": {
-      "put": {
-        "operationId": "setAgentAppProfile",
-        "tags": ["Agents"],
-        "summary": "Set app profile for an agent",
-        "description": "Set or clear the application-level connection profile for this agent. Pass a profile ID to set, or null to clear.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          },
-          {
-            "$ref": "#/components/parameters/PackageScope"
-          },
-          {
-            "$ref": "#/components/parameters/PackageName"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": ["appProfileId"],
-                "properties": {
-                  "appProfileId": {
-                    "type": ["string", "null"],
-                    "format": "uuid",
-                    "description": "App profile ID or null to clear"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "App profile updated",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      }
-    },
     "/api/agents/{scope}/{name}/bundle": {
       "get": {
         "operationId": "exportAgentBundle",
@@ -2362,7 +2288,6 @@
                   "startedAt": "2026-01-15T10:30:00Z",
                   "completedAt": "2026-01-15T10:31:12Z",
                   "duration": 72000,
-                  "connectionProfileId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                   "scheduleId": "sched_cm1abc456def789",
                   "versionLabel": "1.2.0",
                   "versionDirty": false,
@@ -3375,15 +3300,10 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["connectionProfileId", "cronExpression"],
+                "required": ["cronExpression"],
                 "properties": {
                   "name": {
                     "type": "string"
-                  },
-                  "connectionProfileId": {
-                    "type": "string",
-                    "format": "uuid",
-                    "description": "Connection profile to use for provider credentials (user or app profile)"
                   },
                   "cronExpression": {
                     "type": "string",
@@ -3447,7 +3367,8 @@
                 "example": {
                   "id": "sched_cm1abc456def789",
                   "packageId": "@acme/email-sorter",
-                  "connectionProfileId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                  "userId": "usr_r3t5w8y1z6",
+                  "endUserId": null,
                   "orgId": "org_r3t5w8y1z6",
                   "name": "Weekday morning sort",
                   "enabled": true,
@@ -3461,14 +3382,8 @@
                   "nextRunAt": "2026-01-16T09:00:00Z",
                   "createdAt": "2026-01-15T10:30:00Z",
                   "updatedAt": "2026-01-15T10:30:00Z",
-                  "profileName": "Pierre's profile",
-                  "profileType": "user",
-                  "readiness": {
-                    "status": "ready",
-                    "totalProviders": 1,
-                    "connectedProviders": 1,
-                    "missingProviders": []
-                  }
+                  "actorName": "Pierre",
+                  "actorType": "user"
                 }
               }
             }
@@ -3530,7 +3445,8 @@
                 "example": {
                   "id": "sched_cm1abc456def789",
                   "packageId": "@acme/email-sorter",
-                  "connectionProfileId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                  "userId": "usr_r3t5w8y1z6",
+                  "endUserId": null,
                   "orgId": "org_r3t5w8y1z6",
                   "name": "Weekday morning sort",
                   "enabled": true,
@@ -3544,14 +3460,8 @@
                   "nextRunAt": "2026-01-16T09:00:00Z",
                   "createdAt": "2026-01-14T14:00:00Z",
                   "updatedAt": "2026-01-15T09:00:05Z",
-                  "profileName": "Pierre's profile",
-                  "profileType": "user",
-                  "readiness": {
-                    "status": "ready",
-                    "totalProviders": 1,
-                    "connectedProviders": 1,
-                    "missingProviders": []
-                  }
+                  "actorName": "Pierre",
+                  "actorType": "user"
                 }
               }
             }
@@ -3592,10 +3502,6 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "connectionProfileId": {
-                    "type": "string",
-                    "format": "uuid"
-                  },
                   "name": {
                     "type": "string"
                   },
@@ -8163,705 +8069,6 @@
         }
       }
     },
-    "/api/connection-profiles": {
-      "get": {
-        "operationId": "listConnectionProfiles",
-        "tags": ["Connection Profiles"],
-        "summary": "List connection profiles",
-        "description": "List all connection profiles for the authenticated user, including a connection count per profile.",
-        "responses": {
-          "200": {
-            "description": "Profile list",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["object", "data", "hasMore"],
-                  "properties": {
-                    "object": {
-                      "type": "string",
-                      "enum": ["list"]
-                    },
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string",
-                            "format": "uuid"
-                          },
-                          "name": {
-                            "type": "string"
-                          },
-                          "isDefault": {
-                            "type": "boolean"
-                          },
-                          "connectionCount": {
-                            "type": "integer"
-                          },
-                          "createdAt": {
-                            "type": "string",
-                            "format": "date-time"
-                          },
-                          "updatedAt": {
-                            "type": "string",
-                            "format": "date-time"
-                          }
-                        }
-                      }
-                    },
-                    "hasMore": {
-                      "type": "boolean"
-                    }
-                  }
-                },
-                "example": {
-                  "object": "list",
-                  "hasMore": false,
-                  "data": [
-                    {
-                      "id": "550e8400-e29b-41d4-a716-446655440010",
-                      "name": "Default",
-                      "isDefault": true,
-                      "connectionCount": 3,
-                      "createdAt": "2026-01-10T08:00:00Z",
-                      "updatedAt": "2026-01-10T08:00:00Z"
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
-        }
-      },
-      "post": {
-        "operationId": "createConnectionProfile",
-        "tags": ["Connection Profiles"],
-        "summary": "Create a connection profile",
-        "description": "Create a new named connection profile for the authenticated user.",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": ["name"],
-                "properties": {
-                  "name": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 100
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Profile created",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "profile": {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "string",
-                          "format": "uuid"
-                        },
-                        "name": {
-                          "type": "string"
-                        },
-                        "isDefault": {
-                          "type": "boolean"
-                        },
-                        "createdAt": {
-                          "type": "string",
-                          "format": "date-time"
-                        }
-                      }
-                    }
-                  }
-                },
-                "example": {
-                  "profile": {
-                    "id": "550e8400-e29b-41d4-a716-446655440011",
-                    "name": "Work Profile",
-                    "isDefault": false,
-                    "createdAt": "2026-01-15T10:30:00Z"
-                  }
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
-        }
-      }
-    },
-    "/api/connection-profiles/{id}": {
-      "put": {
-        "operationId": "renameConnectionProfile",
-        "tags": ["Connection Profiles"],
-        "summary": "Rename a connection profile",
-        "description": "Update the name of a connection profile owned by the authenticated user.",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": ["name"],
-                "properties": {
-                  "name": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 100
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Profile renamed",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      },
-      "delete": {
-        "operationId": "deleteConnectionProfile",
-        "tags": ["Connection Profiles"],
-        "summary": "Delete a connection profile",
-        "description": "Delete a non-default connection profile. Fails if the profile is the user's default or is bound to an agent provider binding.",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Profile deleted",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Cannot delete (default or bound)"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      }
-    },
-    "/api/app-profiles/my-bindings": {
-      "get": {
-        "operationId": "listMyAppBindings",
-        "tags": ["App Profiles"],
-        "summary": "List app profiles using my bindings",
-        "description": "List all application-level connection profiles where the authenticated user has bound provider connections.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "App profiles with user's connections",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["object", "data", "hasMore"],
-                  "properties": {
-                    "object": {
-                      "type": "string",
-                      "enum": ["list"]
-                    },
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "profile": {
-                            "type": "object",
-                            "properties": {
-                              "id": {
-                                "type": "string",
-                                "format": "uuid"
-                              },
-                              "name": {
-                                "type": "string"
-                              },
-                              "applicationId": {
-                                "type": "string"
-                              }
-                            }
-                          },
-                          "providerIds": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          }
-                        }
-                      }
-                    },
-                    "hasMore": {
-                      "type": "boolean"
-                    }
-                  }
-                },
-                "example": {
-                  "object": "list",
-                  "hasMore": false,
-                  "data": [
-                    {
-                      "profile": {
-                        "id": "550e8400-e29b-41d4-a716-446655440030",
-                        "name": "Shared Production",
-                        "applicationId": "app_cm4jkl013"
-                      },
-                      "providerIds": ["@appstrate/gmail", "@appstrate/clickup"]
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
-        }
-      }
-    },
-    "/api/app-profiles": {
-      "get": {
-        "operationId": "listAppConnectionProfiles",
-        "tags": ["App Profiles"],
-        "summary": "List app connection profiles",
-        "description": "List all application-level shared connection profiles with connection counts.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "App profile list",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["object", "data", "hasMore"],
-                  "properties": {
-                    "object": {
-                      "type": "string",
-                      "enum": ["list"]
-                    },
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string",
-                            "format": "uuid"
-                          },
-                          "name": {
-                            "type": "string"
-                          },
-                          "applicationId": {
-                            "type": "string"
-                          },
-                          "connectionCount": {
-                            "type": "integer"
-                          },
-                          "createdAt": {
-                            "type": "string",
-                            "format": "date-time"
-                          },
-                          "updatedAt": {
-                            "type": "string",
-                            "format": "date-time"
-                          }
-                        }
-                      }
-                    },
-                    "hasMore": {
-                      "type": "boolean"
-                    }
-                  }
-                },
-                "example": {
-                  "object": "list",
-                  "hasMore": false,
-                  "data": [
-                    {
-                      "id": "550e8400-e29b-41d4-a716-446655440030",
-                      "name": "Shared Production",
-                      "applicationId": "app_cm4jkl013",
-                      "connectionCount": 2,
-                      "createdAt": "2026-01-10T08:00:00Z",
-                      "updatedAt": "2026-01-10T08:00:00Z"
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
-        }
-      },
-      "post": {
-        "operationId": "createAppConnectionProfile",
-        "tags": ["App Profiles"],
-        "summary": "Create an app connection profile",
-        "description": "Create a new application-level shared connection profile.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": ["name"],
-                "properties": {
-                  "name": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 100
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "App profile created",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          }
-        }
-      }
-    },
-    "/api/app-profiles/{id}": {
-      "put": {
-        "operationId": "renameAppConnectionProfile",
-        "tags": ["App Profiles"],
-        "summary": "Rename an app connection profile",
-        "description": "Update the name of an application-level connection profile.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          },
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": ["name"],
-                "properties": {
-                  "name": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 100
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Profile renamed",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      },
-      "delete": {
-        "operationId": "deleteAppConnectionProfile",
-        "tags": ["App Profiles"],
-        "summary": "Delete an app connection profile",
-        "description": "Delete an application-level connection profile.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          },
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Profile deleted",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      }
-    },
-    "/api/app-profiles/{id}/agents": {
-      "get": {
-        "operationId": "listAppProfileAgents",
-        "tags": ["App Profiles"],
-        "summary": "List agents using an app profile",
-        "description": "List all agents that are configured to use a specific application-level connection profile.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          },
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Agent list",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["object", "data", "hasMore"],
-                  "properties": {
-                    "object": {
-                      "type": "string",
-                      "enum": ["list"]
-                    },
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string"
-                          },
-                          "displayName": {
-                            "type": "string"
-                          }
-                        }
-                      }
-                    },
-                    "hasMore": {
-                      "type": "boolean"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      }
-    },
     "/api/api-keys/available-scopes": {
       "get": {
         "operationId": "listAvailableScopes",
@@ -10217,140 +9424,6 @@
                 }
               }
             }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
-        }
-      }
-    },
-    "/api/me/application-profile": {
-      "get": {
-        "operationId": "getMyApplicationProfile",
-        "tags": ["Profile"],
-        "summary": "Get the caller's pinned default profile for the active app",
-        "description": "Returns the connection profile id the caller has pinned as their personal default for the active application, or `null` if no sticky is set. The credential proxy's `resolveProfileId` cascade consults this between the explicit per-run override (`X-Connection-Profile-Id`) and the application default. Member-only — end-user callers always receive `{ connectionProfileId: null }`.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Sticky profile id (or null)",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["connectionProfileId"],
-                  "properties": {
-                    "connectionProfileId": {
-                      "oneOf": [
-                        {
-                          "type": "string",
-                          "format": "uuid"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
-        }
-      },
-      "put": {
-        "operationId": "setMyApplicationProfile",
-        "tags": ["Profile"],
-        "summary": "Pin a default connection profile for the active app",
-        "description": "Sets the caller's per-(member, application) sticky default. The profile must be either a profile the caller owns or an app profile of the active application; anything else is rejected. Idempotent — repeated calls update the same row.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": ["connectionProfileId"],
-                "properties": {
-                  "connectionProfileId": {
-                    "type": "string",
-                    "format": "uuid"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Sticky profile pinned",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["connectionProfileId"],
-                  "properties": {
-                    "connectionProfileId": {
-                      "type": "string",
-                      "format": "uuid"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Profile is not owned by the caller and not an app profile of this app"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      },
-      "delete": {
-        "operationId": "clearMyApplicationProfile",
-        "tags": ["Profile"],
-        "summary": "Clear the caller's pinned default profile for the active app",
-        "description": "Removes the per-(member, application) sticky default; the cascade falls back to the application default. Idempotent — succeeds even when no row exists.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Sticky cleared"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -16104,9 +15177,6 @@
                   "proxyId": {
                     "type": ["string", "null"]
                   },
-                  "appProfileId": {
-                    "type": ["string", "null"]
-                  },
                   "versionId": {
                     "type": ["integer", "null"]
                   },
@@ -18532,10 +17602,6 @@
             "type": ["string", "null"],
             "description": "Proxy override for this app"
           },
-          "appProfileId": {
-            "type": ["string", "null"],
-            "description": "App profile override"
-          },
           "versionId": {
             "type": ["integer", "null"],
             "description": "Pinned version (null = latest)"
@@ -19016,15 +18082,6 @@
             "type": "integer",
             "description": "Number of published versions (0 for built-in agents)"
           },
-          "agentAppProfileId": {
-            "type": ["string", "null"],
-            "format": "uuid",
-            "description": "Admin-configured app connection profile ID (null if none)"
-          },
-          "agentAppProfileName": {
-            "type": ["string", "null"],
-            "description": "Display name of the admin-configured app connection profile"
-          },
           "forkedFrom": {
             "type": ["string", "null"],
             "description": "Source package ID if forked"
@@ -19148,9 +18205,6 @@
           "duration": {
             "type": "integer",
             "description": "Duration in milliseconds"
-          },
-          "connectionProfileId": {
-            "type": "string"
           },
           "scheduleId": {
             "type": "string"
@@ -19294,15 +18348,7 @@
       },
       "Schedule": {
         "type": "object",
-        "required": [
-          "id",
-          "packageId",
-          "connectionProfileId",
-          "orgId",
-          "cronExpression",
-          "createdAt",
-          "updatedAt"
-        ],
+        "required": ["id", "packageId", "orgId", "cronExpression", "createdAt", "updatedAt"],
         "properties": {
           "id": {
             "type": "string"
@@ -19310,9 +18356,13 @@
           "packageId": {
             "type": "string"
           },
-          "connectionProfileId": {
-            "type": "string",
-            "format": "uuid"
+          "userId": {
+            "type": ["string", "null"],
+            "description": "Member actor the schedule runs as"
+          },
+          "endUserId": {
+            "type": ["string", "null"],
+            "description": "End-user actor the schedule runs as"
           },
           "orgId": {
             "type": "string"
@@ -19344,6 +18394,9 @@
           "versionOverride": {
             "type": ["string", "null"]
           },
+          "connectionOverrides": {
+            "type": ["object", "null"]
+          },
           "lastRunAt": {
             "type": ["string", "null"],
             "format": "date-time"
@@ -19360,33 +18413,13 @@
             "type": "string",
             "format": "date-time"
           },
-          "profileName": {
-            "type": ["string", "null"]
-          },
-          "profileType": {
+          "actorName": {
             "type": ["string", "null"],
-            "enum": ["user", "app", null]
+            "description": "Display name of the schedule actor"
           },
-          "readiness": {
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": ["ready", "degraded", "not_ready"]
-              },
-              "totalProviders": {
-                "type": "integer"
-              },
-              "connectedProviders": {
-                "type": "integer"
-              },
-              "missingProviders": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              }
-            }
+          "actorType": {
+            "type": ["string", "null"],
+            "enum": ["user", "end_user", null]
           }
         }
       },
