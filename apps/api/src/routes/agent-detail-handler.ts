@@ -12,7 +12,6 @@ import {
 } from "../services/package-versions.ts";
 import { getLastRun, getRunningRunsForPackage } from "../services/state/runs.ts";
 import { getPackageConfig } from "../services/application-packages.ts";
-import { getAgentAppProfile } from "../services/connection-profiles.ts";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { parseScopedName } from "@appstrate/core/naming";
 import { mergeWithDefaults, asJSONSchemaObject } from "@appstrate/core/form";
@@ -38,13 +37,7 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
 
   const m = agent.manifest;
 
-  // Load app profile + package config in parallel
-  const [agentAppProfile, packageConfig] = await Promise.all([
-    getAgentAppProfile(scope, agent.id),
-    getPackageConfig(applicationId, agent.id),
-  ]);
-  const agentAppProfileId = agentAppProfile?.id ?? null;
-  const agentAppProfileName = agentAppProfile?.name ?? null;
+  const packageConfig = await getPackageConfig(applicationId, agent.id);
 
   const [lastRun, runningCount] = await Promise.all([
     getLastRun(scope, agent.id, null),
@@ -102,8 +95,6 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
       : null,
     versionCount,
     hasUnarchivedChanges,
-    agentAppProfileId,
-    agentAppProfileName,
     forkedFrom: rawItem?.forkedFrom ?? null,
     ...(agent.source !== "system" && rawItem
       ? {

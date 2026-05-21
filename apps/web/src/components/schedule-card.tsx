@@ -40,9 +40,8 @@ export function ScheduleCard({ schedule, agentName }: ScheduleCardProps) {
         )}
         {runningRuns > 0 && <Badge status="running" />}
         <ProfileLabel
-          profileType={schedule.profileType}
-          profileName={schedule.profileName}
-          profileOwnerName={schedule.profileOwnerName}
+          actorType={schedule.actorType}
+          actorName={schedule.actorName}
           className="text-muted-foreground ml-auto text-xs"
         />
       </div>

@@ -15,9 +15,8 @@ import { isValidCron } from "../lib/cron.ts";
 import { validateInput } from "../services/schema.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
-import { forbidden, invalidRequest, notFound, parseBody, validationFailed } from "../lib/errors.ts";
+import { invalidRequest, notFound, parseBody, validationFailed } from "../lib/errors.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
-import { getAccessibleProfile } from "../services/connection-profiles.ts";
 import { getActor } from "../lib/actor.ts";
 import { getAppScope } from "../lib/scope.ts";
 import { asJSONSchemaObject, schemaHasFileFields } from "@appstrate/core/form";
@@ -33,7 +32,6 @@ const connectionOverridesSchema = z.record(z.string(), z.string());
 
 export const createScheduleSchema = z.object({
   name: z.string().optional(),
-  connectionProfileId: z.uuid(),
   cronExpression: z.string().min(1, "cronExpression is required"),
   timezone: z.string().default("UTC"),
   input: scheduleInputSchema.default({}),
@@ -49,7 +47,6 @@ export const createScheduleSchema = z.object({
 });
 
 export const updateScheduleSchema = z.object({
-  connectionProfileId: z.uuid().optional(),
   name: z.string().optional(),
   cronExpression: z.string().optional(),
   timezone: z.string().optional(),
@@ -94,15 +91,6 @@ export function createSchedulesRouter() {
       const body = await c.req.json();
       const data = parseBody(createScheduleSchema, body);
 
-      // Validate ownership — user can only schedule with their own profiles
-      const profile = await getAccessibleProfile(data.connectionProfileId, actor, {
-        orgId: c.get("orgId"),
-        applicationId: c.get("applicationId")!,
-      });
-      if (!profile) {
-        throw forbidden("Cannot use a profile you do not own");
-      }
-
       // Block scheduling for agents with file inputs
       const inputSchema = agent.manifest.input?.schema;
       if (schemaHasFileFields(inputSchema ? asJSONSchemaObject(inputSchema) : undefined)) {
@@ -130,7 +118,7 @@ export function createSchedulesRouter() {
       }
 
       const scope = getAppScope(c);
-      const schedule = await createSchedule(scope, agent.id, data.connectionProfileId, {
+      const schedule = await createSchedule(scope, agent.id, actor, {
         ...data,
         configOverride: data.configOverride ?? null,
         modelIdOverride: data.modelIdOverride ?? null,
@@ -173,18 +161,6 @@ export function createSchedulesRouter() {
 
     const body = await c.req.json();
     const data = parseBody(updateScheduleSchema, body);
-
-    // Validate ownership — only check when the profile is actually changing
-    if (data.connectionProfileId && data.connectionProfileId !== existing.connectionProfileId) {
-      const actor = getActor(c);
-      const profile = await getAccessibleProfile(data.connectionProfileId, actor, {
-        orgId: c.get("orgId"),
-        applicationId: c.get("applicationId")!,
-      });
-      if (!profile) {
-        throw forbidden("Cannot use a profile you do not own");
-      }
-    }
 
     // Validate cron expression if provided
     if (data.cronExpression && !isValidCron(data.cronExpression)) {

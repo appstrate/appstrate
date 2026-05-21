@@ -10,7 +10,6 @@ import type {
   applicationPackages,
 } from "./packages.ts";
 import type { runs, runLogs, schedules } from "./runs.ts";
-import type { connectionProfiles, userApplicationProfiles } from "./connections.ts";
 import type { applications, endUsers } from "./applications.ts";
 import type { user, session, account, verification } from "./auth.ts";
 import type {
@@ -39,8 +38,6 @@ export type Run = InferSelectModel<typeof runs>;
 
 export type RunLog = InferSelectModel<typeof runLogs>;
 
-export type ConnectionProfile = InferSelectModel<typeof connectionProfiles>;
-
 export type Application = InferSelectModel<typeof applications>;
 
 export type EndUser = InferSelectModel<typeof endUsers>;
@@ -68,5 +65,3 @@ export type Session = InferSelectModel<typeof session>;
 export type Account = InferSelectModel<typeof account>;
 
 export type Verification = InferSelectModel<typeof verification>;
-
-export type UserApplicationProfile = InferSelectModel<typeof userApplicationProfiles>;

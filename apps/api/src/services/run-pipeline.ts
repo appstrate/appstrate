@@ -10,8 +10,6 @@ import { buildRunContext, ModelNotConfiguredError } from "./env-builder.ts";
 import { createRun } from "./state/runs.ts";
 import { getPackageConfig } from "./application-packages.ts";
 import { executeAgentInBackground } from "../routes/runs.ts";
-import { resolveProviderProfiles } from "./connection-profiles.ts";
-import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { validateAgentReadiness, translateResolutionError } from "./agent-readiness.ts";
 import { resolveConnectionsForRun } from "./integration-connection-resolver.ts";
 import type { ConnectionOverrides, ResolvedConnectionMap } from "@appstrate/core/integration";
@@ -21,7 +19,7 @@ import { encrypt } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
 import { getOrchestrator } from "./orchestrator/index.ts";
 import { ApiError } from "../lib/errors.ts";
-import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
+import type { LoadedPackage } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
 import type { UploadedFile, FileReference } from "./run-launcher/types.ts";
 import { runPreflightGates } from "./run-preflight-gates.ts";
@@ -57,7 +55,6 @@ export function extractRunAgentDenorm(pkg: LoadedPackage): {
 export interface RunPipelineParams {
   runId: string;
   agent: LoadedPackage;
-  providerProfiles: ProviderProfileMap;
   orgId: string;
   actor: Actor | null;
   input?: Record<string, unknown> | null;
@@ -76,8 +73,6 @@ export interface RunPipelineParams {
   overrideVersionLabel?: string;
   /** Schedule ID — set only for scheduled runs. */
   scheduleId?: string;
-  /** Connection profile ID used to create the run. */
-  connectionProfileId?: string;
   /** Application ID — required for all runs. */
   applicationId: string;
   /** Uploaded files to inject into the container. */
@@ -119,14 +114,13 @@ export interface RunPipelineSuccess {
 // ---------------------------------------------------------------------------
 
 export interface PreflightResult {
-  providerProfiles: ProviderProfileMap;
   config: Record<string, unknown>;
   modelId: string | null;
   proxyId: string | null;
 }
 
 /**
- * Resolve provider profiles, package config, and validate agent readiness.
+ * Resolve package config and validate agent readiness.
  * Shared by the POST /run route and the scheduler's triggerScheduledRun.
  */
 export async function resolveRunPreflight(params: {
@@ -134,32 +128,10 @@ export async function resolveRunPreflight(params: {
   applicationId: string;
   orgId: string;
   actor: Actor | null;
-  defaultUserProfileId: string | null;
-  userProviderOverrides?: Record<string, string>;
-  appProfileId: string | null;
 }): Promise<PreflightResult> {
-  const {
-    agent,
-    applicationId,
-    orgId,
-    actor,
-    defaultUserProfileId,
-    userProviderOverrides,
-    appProfileId,
-  } = params;
+  const { agent, applicationId, orgId, actor } = params;
 
-  const manifestProviders = resolveManifestProviders(agent.manifest);
-
-  const [providerProfiles, packageConfig] = await Promise.all([
-    resolveProviderProfiles(
-      manifestProviders,
-      defaultUserProfileId,
-      userProviderOverrides,
-      appProfileId,
-      applicationId,
-    ),
-    getPackageConfig(applicationId, agent.id),
-  ]);
+  const packageConfig = await getPackageConfig(applicationId, agent.id);
 
   await validateAgentReadiness({
     agent,
@@ -170,7 +142,6 @@ export async function resolveRunPreflight(params: {
   });
 
   return {
-    providerProfiles,
     config: packageConfig.config,
     modelId: packageConfig.modelId,
     proxyId: packageConfig.proxyId,
@@ -192,7 +163,6 @@ export async function resolveRunPreflight(params: {
 export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<RunPipelineSuccess> {
   const {
     runId,
-    providerProfiles,
     orgId,
     actor,
     input,
@@ -202,20 +172,17 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     proxyId,
     overrideVersionLabel,
     scheduleId,
-    connectionProfileId,
     applicationId,
     uploadedFiles,
     apiKeyId,
   } = params;
   // --- Step 0: Shared preflight gates (rate, concurrency, timeout cap,
-  //     beforeRun hook, provider status snapshot). Shared with the remote
-  //     origin in run-creation.ts so drift across the two paths is
-  //     impossible — one change surface.
+  //     beforeRun hook). Shared with the remote origin in run-creation.ts so
+  //     drift across the two paths is impossible — one change surface.
   const gates = await runPreflightGates({
     orgId,
     applicationId: params.applicationId,
     agent: params.agent,
-    providerProfiles,
   });
   if (!gates.ok) {
     throw new ApiError({
@@ -284,7 +251,6 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     } = await buildRunContext({
       runId,
       agent,
-      providerProfiles,
       orgId,
       applicationId,
       actor,
@@ -338,7 +304,6 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
       actor,
       input: input ?? null,
       scheduleId,
-      connectionProfileId,
       versionLabel: versionLabel ?? undefined,
       versionDirty,
       proxyLabel: proxyLabel ?? undefined,

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { usePermissions } from "../hooks/use-permissions";
@@ -10,9 +9,7 @@ import {
   useDeleteSchedule,
   useScheduleFormDeps,
 } from "../hooks/use-schedules";
-import { useConnectionProfiles, useAppProfiles } from "../hooks/use-connection-profiles";
 import { ScheduleForm } from "../components/schedule-form";
-import type { ForeignProfile } from "../components/combined-profile-select";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState } from "../components/page-states";
 
@@ -26,24 +23,6 @@ export function ScheduleEditPage() {
   const deps = useScheduleFormDeps(schedule?.packageId);
   const updateSchedule = useUpdateSchedule();
   const deleteSchedule = useDeleteSchedule();
-
-  const { data: userProfiles } = useConnectionProfiles();
-  const { data: appProfiles } = useAppProfiles();
-
-  // Build foreign profile when the schedule's profile belongs to another user
-  const foreignProfile = useMemo<ForeignProfile | undefined>(() => {
-    if (!schedule) return undefined;
-    const connectionProfileId = schedule.connectionProfileId;
-    const inUser = userProfiles?.some((p) => p.id === connectionProfileId) ?? false;
-    const inApp = appProfiles?.some((p) => p.id === connectionProfileId) ?? false;
-    if (inUser || inApp) return undefined;
-    if (schedule.profileType !== "user" || !schedule.profileName) return undefined;
-    return {
-      id: connectionProfileId,
-      name: schedule.profileName,
-      ownerName: schedule.profileOwnerName ?? "",
-    };
-  }, [schedule, userProfiles, appProfiles]);
 
   if (!isMember) return null;
   if (isLoading) return <LoadingState />;
@@ -68,7 +47,6 @@ export function ScheduleEditPage() {
         key={schedule.id}
         mode="edit"
         defaultValues={{
-          connectionProfileId: schedule.connectionProfileId,
           name: schedule.name ?? "",
           cronExpression: schedule.cronExpression,
           timezone: schedule.timezone ?? "UTC",
@@ -105,7 +83,6 @@ export function ScheduleEditPage() {
           });
         }}
         onCancel={() => navigate(-1)}
-        foreignProfile={foreignProfile}
       />
     </div>
   );

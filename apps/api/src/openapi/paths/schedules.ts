@@ -79,15 +79,9 @@ export const schedulesPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["connectionProfileId", "cronExpression"],
+              required: ["cronExpression"],
               properties: {
                 name: { type: "string" },
-                connectionProfileId: {
-                  type: "string",
-                  format: "uuid",
-                  description:
-                    "Connection profile to use for provider credentials (user or app profile)",
-                },
                 cronExpression: {
                   type: "string",
                   minLength: 1,
@@ -142,7 +136,8 @@ export const schedulesPaths = {
               example: {
                 id: "sched_cm1abc456def789",
                 packageId: "@acme/email-sorter",
-                connectionProfileId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                userId: "usr_r3t5w8y1z6",
+                endUserId: null,
                 orgId: "org_r3t5w8y1z6",
                 name: "Weekday morning sort",
                 enabled: true,
@@ -153,14 +148,8 @@ export const schedulesPaths = {
                 nextRunAt: "2026-01-16T09:00:00Z",
                 createdAt: "2026-01-15T10:30:00Z",
                 updatedAt: "2026-01-15T10:30:00Z",
-                profileName: "Pierre's profile",
-                profileType: "user",
-                readiness: {
-                  status: "ready",
-                  totalProviders: 1,
-                  connectedProviders: 1,
-                  missingProviders: [],
-                },
+                actorName: "Pierre",
+                actorType: "user",
               },
             },
           },
@@ -202,7 +191,8 @@ export const schedulesPaths = {
               example: {
                 id: "sched_cm1abc456def789",
                 packageId: "@acme/email-sorter",
-                connectionProfileId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                userId: "usr_r3t5w8y1z6",
+                endUserId: null,
                 orgId: "org_r3t5w8y1z6",
                 name: "Weekday morning sort",
                 enabled: true,
@@ -213,14 +203,8 @@ export const schedulesPaths = {
                 nextRunAt: "2026-01-16T09:00:00Z",
                 createdAt: "2026-01-14T14:00:00Z",
                 updatedAt: "2026-01-15T09:00:05Z",
-                profileName: "Pierre's profile",
-                profileType: "user",
-                readiness: {
-                  status: "ready",
-                  totalProviders: 1,
-                  connectedProviders: 1,
-                  missingProviders: [],
-                },
+                actorName: "Pierre",
+                actorType: "user",
               },
             },
           },
@@ -246,7 +230,6 @@ export const schedulesPaths = {
             schema: {
               type: "object",
               properties: {
-                connectionProfileId: { type: "string", format: "uuid" },
                 name: { type: "string" },
                 cronExpression: { type: "string" },
                 timezone: { type: "string" },

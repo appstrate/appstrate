@@ -17,7 +17,7 @@
  * Centralising the checks here guarantees a single change surface.
  */
 
-import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
+import type { LoadedPackage } from "../types/index.ts";
 import { getPlatformRunLimits } from "./run-limits.ts";
 import { checkOrgRunRateLimit } from "./org-run-rate-limit.ts";
 import { getRunningRunCountForOrg } from "./state/runs.ts";
@@ -29,7 +29,6 @@ export interface PreflightGatesInput {
   orgId: string;
   applicationId: string;
   agent: LoadedPackage;
-  providerProfiles: ProviderProfileMap;
 }
 
 export interface PreflightGatesOk {

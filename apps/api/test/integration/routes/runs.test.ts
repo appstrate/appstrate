@@ -15,7 +15,6 @@ import {
   seedEndUser,
   seedApiKey,
   seedSchedule,
-  seedConnectionProfile,
 } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
 
@@ -839,14 +838,11 @@ describe("Runs API", () => {
 
     it("GET /api/runs/:id returns scheduleName for scheduled runs", async () => {
       await seedAgent({ id: "@runorg/sched-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
-      const profile = await seedConnectionProfile({
-        userId: ctx.user.id,
-      });
       const schedule = await seedSchedule({
         packageId: "@runorg/sched-agent",
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        connectionProfileId: profile.id,
+        userId: ctx.user.id,
         name: "Daily Sync",
       });
       const run = await seedRun({

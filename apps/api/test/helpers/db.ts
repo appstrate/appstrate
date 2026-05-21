@@ -44,7 +44,6 @@ const CORE_TABLES = [
   "package_versions",
   "api_keys",
   "end_users",
-  "connection_profiles",
   // Core tables
   "packages",
   "applications",

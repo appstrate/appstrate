@@ -75,7 +75,6 @@ async function verifyRunToken(c: Context): Promise<{
     orgId: string;
     applicationId: string;
     status: string;
-    connectionProfileId: string | null;
     modelCredentialId: string | null;
     runOrigin: "platform" | "remote";
     /**
@@ -110,7 +109,6 @@ async function verifyRunToken(c: Context): Promise<{
       orgId: runs.orgId,
       applicationId: runs.applicationId,
       status: runs.status,
-      connectionProfileId: runs.connectionProfileId,
       modelCredentialId: runs.modelCredentialId,
       runOrigin: runs.runOrigin,
       resolvedConnections: runs.resolvedConnections,
@@ -137,7 +135,6 @@ async function verifyRunToken(c: Context): Promise<{
       orgId: run.orgId,
       applicationId: run.applicationId,
       status: run.status,
-      connectionProfileId: run.connectionProfileId,
       modelCredentialId: run.modelCredentialId ?? null,
       runOrigin: run.runOrigin,
       resolvedConnections: run.resolvedConnections ?? null,

@@ -156,17 +156,16 @@ function ScheduleParams({
     <>
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="border-border bg-muted/30 rounded-lg border p-4">
-          <p className="text-muted-foreground mb-1 text-xs">{t("schedule.paramProfile")}</p>
+          <p className="text-muted-foreground mb-1 text-xs">{t("schedule.paramActor")}</p>
           <p className="inline-flex items-center gap-1.5 text-sm font-medium">
             <ProfileLabel
-              profileType={schedule.profileType}
-              profileName={schedule.profileName}
-              profileOwnerName={schedule.profileOwnerName}
+              actorType={schedule.actorType}
+              actorName={schedule.actorName}
               iconSize="size-3.5"
             />
-            {schedule.profileType && (
+            {schedule.actorType && (
               <UIBadge variant="outline" className="px-1 py-0 text-[10px]">
-                {schedule.profileType}
+                {schedule.actorType}
               </UIBadge>
             )}
           </p>

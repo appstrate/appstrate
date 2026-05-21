@@ -25,8 +25,6 @@ import { createModelProviderCredentialsRouter } from "./routes/model-provider-cr
 import { createModelProvidersOAuthRouter } from "./routes/model-providers-oauth.ts";
 import { createInternalRouter } from "./routes/internal.ts";
 import { createApplicationsRouter } from "./routes/applications.ts";
-import { createConnectionProfilesRouter } from "./routes/connection-profiles.ts";
-import { createAppProfilesRouter } from "./routes/app-profiles.ts";
 import { createNotificationsRouter } from "./routes/notifications.ts";
 import { createPackagesRouter } from "./routes/packages.ts";
 import { createRealtimeRouter } from "./routes/realtime.ts";
@@ -184,7 +182,6 @@ const CORE_APP_SCOPED_PREFIXES = [
   "/api/notifications",
   "/api/packages",
   "/api/integrations",
-  "/api/app-profiles",
   "/api/uploads",
 ];
 let _appScopedPrefixes: string[] | null = null;
@@ -282,8 +279,6 @@ app.route("/api/model-provider-credentials", createModelProviderCredentialsRoute
 app.route("/api/model-providers-oauth", createModelProvidersOAuthRouter());
 app.route("/api/applications", createApplicationsRouter());
 app.route("/api/library", createLibraryRouter());
-app.route("/api/connection-profiles", createConnectionProfilesRouter());
-app.route("/api/app-profiles", createAppProfilesRouter());
 app.route("/api", profileRouter);
 app.route("/api/realtime", createRealtimeRouter());
 app.route("/api/integrations", createIntegrationsRouter());

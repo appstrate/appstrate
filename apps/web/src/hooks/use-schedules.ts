@@ -66,7 +66,6 @@ export function useCreateSchedule(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (data: {
-      connectionProfileId: string;
       name?: string;
       cronExpression: string;
       timezone?: string;
@@ -95,7 +94,6 @@ export function useUpdateSchedule() {
       ...data
     }: {
       id: string;
-      connectionProfileId?: string;
       name?: string;
       cronExpression?: string;
       timezone?: string;

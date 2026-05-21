@@ -119,15 +119,6 @@ const OWNER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "connections:read",
   "connections:connect",
   "connections:disconnect",
-  // Profiles
-  "profiles:read",
-  "profiles:write",
-  "profiles:delete",
-  // Org profiles
-  "app-profiles:read",
-  "app-profiles:write",
-  "app-profiles:delete",
-  "app-profiles:bind",
   // Infrastructure
   "models:read",
   "models:write",
@@ -194,13 +185,6 @@ const MEMBER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "integrations:read",
   "integrations:connect",
   "integrations:disconnect",
-  // Profiles (personal)
-  "profiles:read",
-  "profiles:write",
-  "profiles:delete",
-  // Org profiles (read + bind own connections)
-  "app-profiles:read",
-  "app-profiles:bind",
   // Infrastructure (read only, except model-provider-credentials which is admin-only)
   "models:read",
   "proxies:read",
@@ -222,8 +206,6 @@ const VIEWER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "schedules:read",
   "persistence:read",
   "connections:read",
-  "profiles:read",
-  "app-profiles:read",
   "models:read",
   "proxies:read",
   "applications:read",

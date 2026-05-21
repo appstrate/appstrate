@@ -4,12 +4,11 @@
  * End-Users API — CRUD operations for end-users managed via API.
  *
  * End-users belong to an application and represent external users of the platform.
- * Each end-user gets a default connection profile on creation.
  */
 
 import { eq, and, desc, lt, gt } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { endUsers, applications, connectionProfiles } from "@appstrate/db/schema";
+import { endUsers, applications } from "@appstrate/db/schema";
 import type { EndUserInfo, EndUserListResponse } from "@appstrate/shared-types";
 import { logger } from "../lib/logger.ts";
 import { notFound, ApiError } from "../lib/errors.ts";
@@ -97,13 +96,6 @@ export async function createEndUser(
       updatedAt: now,
     })
     .returning();
-
-  // Create default connection profile for the end-user
-  await db.insert(connectionProfiles).values({
-    endUserId,
-    name: "Default",
-    isDefault: true,
-  });
 
   logger.info("End-user created via API", {
     endUserId,
@@ -263,7 +255,7 @@ export async function deleteEndUser(scope: AppScope, endUserId: string): Promise
   // Verify end-user exists and belongs to app
   await getEndUser(scope, endUserId);
 
-  // Delete end-user — cascades handle profiles, connections, runs
+  // Delete end-user — cascades handle connections, runs
   await db
     .delete(endUsers)
     .where(

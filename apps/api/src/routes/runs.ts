@@ -14,7 +14,6 @@ import {
   listRunLogs,
 } from "../services/state/runs.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { resolveActorProfileContext, getAgentAppProfile } from "../services/connection-profiles.ts";
 import type { AppstrateRunPlan, UploadedFile } from "../services/run-launcher/types.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import { runPlatformContainer } from "../services/run-launcher/pi.ts";
@@ -221,7 +220,6 @@ export function createRunsRouter() {
       const agent = c.get("package");
       const orgId = c.get("orgId");
       const actor = getActor(c);
-      const packageId = agent.id;
       // Version override from query param (e.g. ?version=1.2.0 or ?version=latest)
       const versionOverride = c.req.query("version");
 
@@ -242,22 +240,15 @@ export function createRunsRouter() {
         };
       }
 
-      // Resolve app profile, actor profile context, and input in parallel
-      const [agentAppProfile, { defaultUserProfileId, userProviderOverrides }, inputResult] =
-        await Promise.all([
-          getAgentAppProfile({ orgId, applicationId: c.get("applicationId")! }, packageId),
-          resolveActorProfileContext(actor, packageId, null, c.get("applicationId")!),
-          parseRequestInput(
-            c,
-            effectiveAgent.manifest.input?.schema
-              ? asJSONSchemaObject(effectiveAgent.manifest.input.schema)
-              : undefined,
-          ),
-        ]);
+      const inputResult = await parseRequestInput(
+        c,
+        effectiveAgent.manifest.input?.schema
+          ? asJSONSchemaObject(effectiveAgent.manifest.input.schema)
+          : undefined,
+      );
 
-      // Shared preflight: resolve providers, config, validate readiness
+      // Shared preflight: resolve config, validate readiness
       const {
-        providerProfiles,
         config,
         modelId: preflightModelId,
         proxyId: preflightProxyId,
@@ -266,9 +257,6 @@ export function createRunsRouter() {
         applicationId: c.get("applicationId"),
         orgId,
         actor,
-        defaultUserProfileId,
-        userProviderOverrides,
-        appProfileId: agentAppProfile?.id ?? null,
       });
 
       const {
@@ -303,7 +291,6 @@ export function createRunsRouter() {
       await prepareAndExecuteRun({
         runId,
         agent: effectiveAgent,
-        providerProfiles,
         orgId,
         actor,
         input: parsedInput,
@@ -313,7 +300,6 @@ export function createRunsRouter() {
         modelId: modelIdOverride ?? preflightModelId,
         proxyId: proxyIdOverride ?? preflightProxyId,
         overrideVersionLabel,
-        connectionProfileId: defaultUserProfileId ?? undefined,
         applicationId: c.get("applicationId"),
         uploadedFiles,
         apiKeyId: c.get("apiKeyId") ?? undefined,

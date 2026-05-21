@@ -18,7 +18,6 @@ import { getLatestVersionInfo } from "./package-versions.ts";
 import { resolveProxy } from "./org-proxies.ts";
 import { resolveModel } from "./org-models.ts";
 import { extractManifestSchemas } from "../lib/manifest-utils.ts";
-import type { ProviderProfileMap } from "../types/index.ts";
 import { resolveIntegrationSpawns } from "./integration-spawn-resolver.ts";
 import type { ResolvedConnectionMap } from "@appstrate/core/integration";
 
@@ -47,7 +46,6 @@ function toEpochMs(value: Date | string | null | undefined): number {
 export async function buildRunContext(params: {
   runId: string;
   agent: LoadedPackage;
-  providerProfiles: ProviderProfileMap;
   orgId: string;
   applicationId: string;
   actor: Actor | null;

@@ -38,8 +38,6 @@ describe("resolvePermissions", () => {
     expect(perms.has("connections:disconnect")).toBe(true);
     // Can cancel runs
     expect(perms.has("runs:cancel")).toBe(true);
-    // Can bind org profiles
-    expect(perms.has("app-profiles:bind")).toBe(true);
     // Can write end-users
     expect(perms.has("end-users:write")).toBe(true);
     // Module-owned permissions still part of the core taxonomy
@@ -166,13 +164,6 @@ describe("API_KEY_ALLOWED_SCOPES", () => {
       "api-keys:read",
       "api-keys:create",
       "api-keys:revoke",
-      "profiles:read",
-      "profiles:write",
-      "profiles:delete",
-      "app-profiles:read",
-      "app-profiles:write",
-      "app-profiles:delete",
-      "app-profiles:bind",
       "model-provider-credentials:read",
       "model-provider-credentials:write",
       "model-provider-credentials:delete",

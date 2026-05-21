@@ -53,8 +53,6 @@ import { createModelProvidersOAuthRouter } from "../../src/routes/model-provider
 import { createModelProviderCredentialsRouter } from "../../src/routes/model-provider-credentials.ts";
 import { createInternalRouter } from "../../src/routes/internal.ts";
 import { createApplicationsRouter } from "../../src/routes/applications.ts";
-import { createConnectionProfilesRouter } from "../../src/routes/connection-profiles.ts";
-import { createAppProfilesRouter } from "../../src/routes/app-profiles.ts";
 import { createNotificationsRouter } from "../../src/routes/notifications.ts";
 import { createPackagesRouter } from "../../src/routes/packages.ts";
 import { createRealtimeRouter } from "../../src/routes/realtime.ts";
@@ -183,7 +181,6 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
     "/api/notifications",
     "/api/packages",
     "/api/integrations",
-    "/api/app-profiles",
     ...extraModules.flatMap((m) => m.appScopedPaths ?? []),
   ];
 
@@ -243,8 +240,6 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.route("/api/model-provider-credentials", createModelProviderCredentialsRouter());
   app.route("/api/model-providers-oauth", createModelProvidersOAuthRouter());
   app.route("/api/applications", createApplicationsRouter());
-  app.route("/api/connection-profiles", createConnectionProfilesRouter());
-  app.route("/api/app-profiles", createAppProfilesRouter());
   app.route("/api", profileRouter);
   app.route("/api/realtime", createRealtimeRouter());
   app.route("/api/integrations", createIntegrationsRouter());

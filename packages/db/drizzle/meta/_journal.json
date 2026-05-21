@@ -225,6 +225,13 @@
       "when": 1789948800000,
       "tag": "0031_drop_provider_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1790035200000,
+      "tag": "0032_drop_connection_profiles",
+      "breakpoints": true
     }
   ]
 }

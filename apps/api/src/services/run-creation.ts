@@ -27,7 +27,7 @@
 import { encrypt } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
 import { mintSinkCredentials, type SinkCredentials } from "../lib/mint-sink-credentials.ts";
-import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
+import type { LoadedPackage } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
 import type { FileReference, UploadedFile } from "./run-launcher/types.ts";
 import { prepareAndExecuteRun, extractRunAgentDenorm } from "./run-pipeline.ts";
@@ -67,7 +67,6 @@ export interface CreateRunInput {
   applicationId: string;
   actor: Actor | null;
   agent: LoadedPackage;
-  providerProfiles: ProviderProfileMap;
   input?: Record<string, unknown> | null;
   files?: FileReference[];
   config: Record<string, unknown>;
@@ -75,7 +74,6 @@ export interface CreateRunInput {
   proxyId?: string | null;
   apiKeyId?: string;
   scheduleId?: string;
-  connectionProfileId?: string;
   overrideVersionLabel?: string;
   uploadedFiles?: UploadedFile[];
   /**
@@ -127,7 +125,6 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
       const result = await prepareAndExecuteRun({
         runId: input.runId,
         agent: input.agent,
-        providerProfiles: input.providerProfiles,
         orgId: input.orgId,
         actor: input.actor,
         input: input.input ?? null,
@@ -138,7 +135,6 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
         applicationId: input.applicationId,
         apiKeyId: input.apiKeyId,
         scheduleId: input.scheduleId,
-        connectionProfileId: input.connectionProfileId,
         overrideVersionLabel: input.overrideVersionLabel,
         uploadedFiles: input.uploadedFiles,
         connectionOverrides: input.connectionOverrides ?? null,
@@ -171,11 +167,9 @@ async function createRemoteRun(input: CreateRunInput): Promise<CreateRunResult> 
     orgId,
     applicationId,
     actor,
-    providerProfiles,
     input: runInput,
     config,
     apiKeyId,
-    connectionProfileId,
     contextSnapshot,
     overrideVersionLabel,
   } = input;
@@ -201,14 +195,12 @@ async function createRemoteRun(input: CreateRunInput): Promise<CreateRunResult> 
     };
   }
 
-  // --- Shared preflight: rate, concurrency, timeout cap, beforeRun hook,
-  //     provider status snapshot. Single source of truth across platform /
-  //     remote / scheduled origins.
+  // --- Shared preflight: rate, concurrency, timeout cap, beforeRun hook.
+  //     Single source of truth across platform / remote / scheduled origins.
   const gates = await runPreflightGates({
     orgId,
     applicationId,
     agent: input.agent,
-    providerProfiles,
   });
   if (!gates.ok) return { ok: false, error: gates.error };
   const { agent } = gates;
@@ -266,7 +258,6 @@ async function createRemoteRun(input: CreateRunInput): Promise<CreateRunResult> 
       packageId: agent.id,
       actor,
       input: runInput ?? null,
-      connectionProfileId,
       apiKeyId,
       agentScope: agentDenorm.scope,
       agentName: agentDenorm.name,

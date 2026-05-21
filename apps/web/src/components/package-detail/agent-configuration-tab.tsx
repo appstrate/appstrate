@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react";
-import { Trans, useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -19,7 +18,6 @@ import { findProviderByApiShapeAndBaseUrl } from "@/lib/provider-registry-helper
 import { useProvidersRegistry } from "../../hooks/use-model-provider-credentials";
 import { useModels, useAgentModel, useSetAgentModel } from "../../hooks/use-models";
 import { useProxies, useAgentProxy, useSetAgentProxy } from "../../hooks/use-proxies";
-import { useAppProfiles, useSetAgentAppProfile } from "../../hooks/use-connection-profiles";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useSaveConfig } from "../../hooks/use-mutations";
 import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
@@ -159,73 +157,6 @@ function ProxySection({ packageId }: { packageId: string }) {
   );
 }
 
-// ─── Org Profile Section ───────────────────────────────────────────
-
-function AppProfileSection({ packageId }: { packageId: string }) {
-  const { t } = useTranslation(["agents", "settings"]);
-  const { data: appProfiles } = useAppProfiles();
-  const setAgentAppProfile = useSetAgentAppProfile(packageId);
-  const isEmpty = !appProfiles || appProfiles.length === 0;
-  const currentAppProfileId: string | null | undefined = undefined;
-
-  return (
-    <div className="border-border bg-card space-y-3 rounded-lg border p-4">
-      <h3 className="text-sm font-medium">{t("detail.configSectionAppProfile")}</h3>
-      <p className="text-muted-foreground text-xs">
-        <Trans
-          i18nKey="agents:detail.configAppProfileHint"
-          components={{
-            pref: (
-              <Link
-                to="/preferences/profiles"
-                className="text-primary underline-offset-2 hover:underline"
-              />
-            ),
-          }}
-        />
-      </p>
-      {isEmpty ? (
-        <p className="text-muted-foreground text-xs">
-          <Trans
-            i18nKey="agents:detail.configAppProfileEmpty"
-            components={{
-              admin: (
-                <Link
-                  to="/org-settings/app/profiles"
-                  className="text-primary underline-offset-2 hover:underline"
-                />
-              ),
-            }}
-          />
-        </p>
-      ) : (
-        <Select
-          value={currentAppProfileId ?? "__none__"}
-          onValueChange={(v) => setAgentAppProfile.mutate(v === "__none__" ? null : v)}
-          disabled={setAgentAppProfile.isPending}
-        >
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__none__">{t("detail.configAppProfileNone")}</SelectItem>
-            {appProfiles.map((p) => (
-              <SelectItem key={p.id} value={p.id}>
-                {p.name}
-                {p.bindingCount > 0 && (
-                  <span className="text-muted-foreground ml-1">
-                    ({t("detail.configAppProfileBinding", { count: p.bindingCount })})
-                  </span>
-                )}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      )}
-    </div>
-  );
-}
-
 // ─── Main Tab ───────────────────────────────────────────────────────
 
 export function AgentConfigurationTab({
@@ -251,7 +182,6 @@ export function AgentConfigurationTab({
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <ModelSection packageId={packageId} />
         <ProxySection packageId={packageId} />
-        <AppProfileSection packageId={packageId} />
       </div>
       {hasConfigSchema && schema && (
         <ConfigSection packageId={packageId} schema={schema} isHistorical={isHistorical} />

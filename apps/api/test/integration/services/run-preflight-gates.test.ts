@@ -48,7 +48,6 @@ describe("runPreflightGates", () => {
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       agent,
-      providerProfiles: {},
     });
     expect(res.ok).toBe(true);
     if (res.ok) expect(res.agent.manifest.timeout).toBe(60);
@@ -61,7 +60,6 @@ describe("runPreflightGates", () => {
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       agent,
-      providerProfiles: {},
     });
     expect(res.ok).toBe(true);
     if (res.ok) {

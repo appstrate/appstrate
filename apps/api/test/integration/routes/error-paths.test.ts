@@ -34,7 +34,6 @@ describe("401 — unauthenticated requests", () => {
     { method: "GET", path: "/api/proxies" },
     { method: "POST", path: "/api/proxies" },
     { method: "GET", path: "/api/model-provider-credentials" },
-    { method: "GET", path: "/api/connection-profiles" },
     { method: "GET", path: "/api/notifications" },
     { method: "GET", path: "/api/packages" },
   ];

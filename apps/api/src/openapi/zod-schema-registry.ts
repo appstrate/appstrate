@@ -46,12 +46,6 @@ import { updateSkillsSchema } from "../routes/user-agents.ts";
 // --- Welcome schemas (routes/welcome.ts) ---
 import { welcomeSetupSchema } from "../routes/welcome.ts";
 
-// --- App Profile schemas (routes/app-profiles.ts) ---
-import { profileNameSchema as appProfileNameSchema } from "../routes/app-profiles.ts";
-
-// --- Connection Profile schemas (routes/connection-profiles.ts) ---
-import { profileNameSchema as connectionProfileNameSchema } from "../routes/connection-profiles.ts";
-
 // --- Proxy schemas (routes/proxies.ts) ---
 import {
   createProxySchema,
@@ -60,7 +54,7 @@ import {
 } from "../routes/proxies.ts";
 
 // --- Agent schemas (routes/agents.ts) ---
-import { proxyIdSchema, modelIdSchema, appProfileIdSchema } from "../routes/agents.ts";
+import { proxyIdSchema, modelIdSchema } from "../routes/agents.ts";
 
 // --- Model Provider Credential schemas (routes/model-provider-credentials.ts) ---
 import {
@@ -217,34 +211,6 @@ const coreSchemas: ZodSchemaEntry[] = [
     description: "Welcome setup",
   },
 
-  // ─── App Profiles ───────────────────────────────────────────────────────
-  {
-    method: "POST",
-    path: "/api/app-profiles",
-    jsonSchema: toJsonSchema(appProfileNameSchema),
-    description: "Create app profile",
-  },
-  {
-    method: "PUT",
-    path: "/api/app-profiles/{id}",
-    jsonSchema: toJsonSchema(appProfileNameSchema),
-    description: "Rename app profile",
-  },
-
-  // ─── Connection Profiles ────────────────────────────────────────────────
-  {
-    method: "POST",
-    path: "/api/connection-profiles",
-    jsonSchema: toJsonSchema(connectionProfileNameSchema),
-    description: "Create connection profile",
-  },
-  {
-    method: "PUT",
-    path: "/api/connection-profiles/{id}",
-    jsonSchema: toJsonSchema(connectionProfileNameSchema),
-    description: "Rename connection profile",
-  },
-
   // ─── Proxies ────────────────────────────────────────────────────────────
   {
     method: "POST",
@@ -265,7 +231,7 @@ const coreSchemas: ZodSchemaEntry[] = [
     description: "Set default proxy",
   },
 
-  // ─── Agent config (proxy/model/app-profile) ─────────────────────────────
+  // ─── Agent config (proxy/model) ─────────────────────────────────────────
   {
     method: "PUT",
     path: "/api/agents/{scope}/{name}/proxy",
@@ -277,12 +243,6 @@ const coreSchemas: ZodSchemaEntry[] = [
     path: "/api/agents/{scope}/{name}/model",
     jsonSchema: toJsonSchema(modelIdSchema),
     description: "Set agent model",
-  },
-  {
-    method: "PUT",
-    path: "/api/agents/{scope}/{name}/app-profile",
-    jsonSchema: toJsonSchema(appProfileIdSchema),
-    description: "Set agent app profile",
   },
 
   // ─── Model Provider Credentials ────────────────────────────────────────

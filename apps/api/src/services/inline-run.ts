@@ -142,14 +142,13 @@ export async function triggerInlineRun(params: {
 }): Promise<{ runId: string; packageId: string }> {
   const { orgId, applicationId, actor, body, apiKeyId, traceparent } = params;
 
-  // ----- 1. Preflight — shape + providers + readiness (no side effects). -----
+  // ----- 1. Preflight — shape + readiness (no side effects). -----
   const preflight = await runInlinePreflight({ orgId, applicationId, actor, body });
   const {
     manifest,
     prompt,
     effectiveConfig,
     effectiveInput,
-    providerProfiles,
     modelIdOverride,
     proxyIdOverride,
     resolvedDeps,
@@ -166,7 +165,6 @@ export async function triggerInlineRun(params: {
     await prepareAndExecuteRun({
       runId,
       agent: shadowAgent,
-      providerProfiles,
       orgId,
       actor,
       input: effectiveInput,

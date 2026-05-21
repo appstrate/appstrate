@@ -29,8 +29,6 @@ import { modelsPaths } from "./paths/models.ts";
 import { modelProviderCredentialsPaths } from "./paths/model-provider-credentials.ts";
 import { modelProvidersOAuthPaths } from "./paths/model-providers-oauth.ts";
 import { proxiesPaths } from "./paths/proxies.ts";
-import { connectionProfilesPaths } from "./paths/connection-profiles.ts";
-import { appProfilesPaths } from "./paths/app-profiles.ts";
 import { apiKeysPaths } from "./paths/api-keys.ts";
 import { organizationsPaths } from "./paths/organizations.ts";
 import { profilePaths } from "./paths/profile.ts";
@@ -60,8 +58,6 @@ const corePaths = {
   ...modelProviderCredentialsPaths,
   ...modelProvidersOAuthPaths,
   ...proxiesPaths,
-  ...connectionProfilesPaths,
-  ...appProfilesPaths,
   ...apiKeysPaths,
   ...organizationsPaths,
   ...profilePaths,

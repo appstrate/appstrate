@@ -2,9 +2,9 @@
 
 import { createQueue } from "../infra/queue/index.ts";
 import type { JobQueue, QueueJob } from "../infra/queue/index.ts";
-import { eq, asc, inArray } from "drizzle-orm";
+import { eq, asc, inArray, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { schedules, connectionProfiles as connectionProfilesTable } from "@appstrate/db/schema";
+import { schedules, endUsers } from "@appstrate/db/schema";
 import { batchLoadUserNames } from "../lib/user-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import type { Schedule, EnrichedSchedule } from "@appstrate/shared-types";
@@ -18,13 +18,6 @@ import {
 import { getErrorMessage } from "@appstrate/core/errors";
 import { asRecordOrNull } from "@appstrate/core/safe-json";
 import { getPackage, packageExists } from "./package-catalog.ts";
-import type { ConnectionProfile } from "@appstrate/db/schema";
-import {
-  getProfileByIdUnsafe,
-  resolveScheduleProfileArgs,
-  getAgentAppProfile,
-} from "./connection-profiles.ts";
-import type { ProviderProfileMap } from "../types/index.ts";
 import { ApiError, internalError } from "../lib/errors.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
 import { validateInput } from "./schema.ts";
@@ -41,7 +34,9 @@ import type { AppScope } from "../lib/scope.ts";
 interface ScheduleJobData {
   scheduleId: string;
   packageId: string;
-  connectionProfileId: string;
+  /** Actor the scheduled run executes as — at most one set. */
+  userId: string | null;
+  endUserId: string | null;
   orgId: string;
   applicationId: string;
   input?: Record<string, unknown>;
@@ -95,7 +90,8 @@ async function upsertScheduleJob(schedule: Schedule, orgId: string): Promise<voi
   const jobData: ScheduleJobData = {
     scheduleId: schedule.id,
     packageId: schedule.packageId,
-    connectionProfileId: schedule.connectionProfileId,
+    userId: schedule.userId,
+    endUserId: schedule.endUserId,
     orgId,
     applicationId: schedule.applicationId,
     input: schedule.input ?? undefined,
@@ -125,7 +121,8 @@ async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> 
   const {
     scheduleId,
     packageId,
-    connectionProfileId,
+    userId,
+    endUserId,
     orgId,
     applicationId,
     input,
@@ -139,7 +136,7 @@ async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> 
   await triggerScheduledRun(
     scheduleId,
     packageId,
-    connectionProfileId,
+    actorFromIds(userId, endUserId),
     orgId,
     applicationId,
     input,
@@ -213,7 +210,7 @@ export async function shutdownScheduleWorker(): Promise<void> {
 async function triggerScheduledRun(
   scheduleId: string,
   packageId: string,
-  connectionProfileId: string,
+  actor: Actor | null,
   orgId: string,
   applicationId: string,
   input: Record<string, unknown> | undefined,
@@ -230,7 +227,7 @@ async function triggerScheduledRun(
   let agentDenorm: { scope: string | null; name: string | null } | null = null;
 
   /** Create a failed run record + emit onRunStatusChange so modules (webhooks, …) can notify. */
-  async function failSchedule(error: string, actor: Actor | null = null): Promise<void> {
+  async function failSchedule(error: string): Promise<void> {
     const runId = `run_${crypto.randomUUID()}`;
     try {
       await createFailedRun(
@@ -240,7 +237,6 @@ async function triggerScheduledRun(
         actor,
         error,
         scheduleId,
-        connectionProfileId,
         agentDenorm ?? undefined,
       );
       void emitEvent("onRunStatusChange", {
@@ -269,29 +265,7 @@ async function triggerScheduledRun(
     }
     agentDenorm = extractRunAgentDenorm(agent);
 
-    // Resolve actor from connection profile (null for app profiles)
-    const profile = await getProfileByIdUnsafe(connectionProfileId);
-    if (!profile) {
-      logger.warn("Connection profile not found, skipping schedule", {
-        scheduleId,
-        connectionProfileId,
-      });
-      await failSchedule("Connection profile not found");
-      return;
-    }
-
-    const actor: Actor | null = actorFromIds(profile.userId, profile.endUserId);
-
-    // Load the agent's admin-configured app profile (validates it still exists)
-    const agentAppProfile = await getAgentAppProfile({ orgId, applicationId }, packageId);
-    const { defaultUserProfileId, appProfileId } = resolveScheduleProfileArgs(
-      profile,
-      connectionProfileId,
-      agentAppProfile?.id ?? null,
-    );
-
-    // Shared preflight: resolve providers, config, validate readiness
-    let providerProfiles: ProviderProfileMap;
+    // Shared preflight: resolve config, validate readiness
     let config: Record<string, unknown>;
     let preflightModelId: string | null;
     let preflightProxyId: string | null;
@@ -301,11 +275,8 @@ async function triggerScheduledRun(
         applicationId,
         orgId,
         actor,
-        defaultUserProfileId,
-        appProfileId,
       });
 
-      providerProfiles = preflight.providerProfiles;
       config = preflight.config;
       preflightModelId = preflight.modelId;
       preflightProxyId = preflight.proxyId;
@@ -317,7 +288,7 @@ async function triggerScheduledRun(
           code: err.code,
           detail: err.message,
         });
-        await failSchedule(err.message, actor);
+        await failSchedule(err.message);
         return;
       }
       logger.error("Unexpected error during schedule preflight", {
@@ -325,7 +296,7 @@ async function triggerScheduledRun(
         packageId,
         error: getErrorMessage(err),
       });
-      await failSchedule(`Preflight error: ${getErrorMessage(err)}`, actor);
+      await failSchedule(`Preflight error: ${getErrorMessage(err)}`);
       return;
     }
 
@@ -341,7 +312,6 @@ async function triggerScheduledRun(
         });
         await failSchedule(
           `Input validation failed: ${inputValidation.errors?.map((e) => e.message).join(", ")}`,
-          actor,
         );
         return;
       }
@@ -365,7 +335,7 @@ async function triggerScheduledRun(
           code: err.code,
           detail: err.message,
         });
-        await failSchedule(err.message, actor);
+        await failSchedule(err.message);
         return;
       }
       throw err;
@@ -378,7 +348,6 @@ async function triggerScheduledRun(
       await prepareAndExecuteRun({
         runId,
         agent,
-        providerProfiles,
         orgId,
         actor,
         input,
@@ -388,7 +357,6 @@ async function triggerScheduledRun(
         proxyId: finalProxyId,
         overrideVersionLabel: overrides.versionOverride,
         scheduleId,
-        connectionProfileId,
         applicationId,
         scheduleConnectionOverrides: overrides.connectionOverrides ?? null,
       });
@@ -401,7 +369,7 @@ async function triggerScheduledRun(
           code: err.code,
           detail: err.message,
         });
-        await failSchedule(err.message, actor);
+        await failSchedule(err.message);
         return;
       }
       throw err;
@@ -411,7 +379,6 @@ async function triggerScheduledRun(
       runId,
       packageId,
       scheduleId,
-      connectionProfileId,
       orgId,
     });
   } catch (err) {
@@ -473,48 +440,49 @@ export async function getSchedule(id: string, scope?: AppScope): Promise<Enriche
 }
 
 /**
- * Enrich schedules with profile info.
- * Batches lookups by unique connectionProfileId for efficiency.
+ * Enrich schedules with the display name of the actor (member or end-user)
+ * each schedule runs as. Batches name lookups per actor kind.
  */
 async function enrichSchedules(schedules: Schedule[], _orgId: string): Promise<EnrichedSchedule[]> {
   if (schedules.length === 0) return [];
 
-  // Batch load unique profiles in one query
-  const profileIds = [...new Set(schedules.map((s) => s.connectionProfileId))];
-  const profileRows = await db
-    .select()
-    .from(connectionProfilesTable)
-    .where(inArray(connectionProfilesTable.id, profileIds));
-  const profileMap = new Map<string, ConnectionProfile | null>(
-    profileIds.map((id) => [id, profileRows.find((r) => r.id === id) ?? null]),
-  );
+  const userIds = [...new Set(schedules.map((s) => s.userId).filter((id): id is string => !!id))];
+  const endUserIds = [
+    ...new Set(schedules.map((s) => s.endUserId).filter((id): id is string => !!id)),
+  ];
 
-  // Batch load user names for user-owned profiles
-  const userIds = [...new Set(profileRows.filter((p) => p.userId).map((p) => p.userId!))];
-  const userNameMap = await batchLoadUserNames(userIds);
+  const [userNameMap, endUserRows] = await Promise.all([
+    batchLoadUserNames(userIds),
+    endUserIds.length > 0
+      ? db
+          .select({
+            id: endUsers.id,
+            name: sql<string | null>`coalesce(${endUsers.name}, ${endUsers.externalId})`,
+          })
+          .from(endUsers)
+          .where(inArray(endUsers.id, endUserIds))
+      : Promise.resolve([] as { id: string; name: string | null }[]),
+  ]);
+  const endUserNameMap = new Map(endUserRows.map((r) => [r.id, r.name]));
 
   return schedules.map((schedule) => {
-    const profile = profileMap.get(schedule.connectionProfileId);
-
-    let profileName: string | null = null;
-    let profileType: "user" | "app" | null = null;
-    let profileOwnerName: string | null = null;
-    if (profile) {
-      profileName = profile.name;
-      profileType = profile.applicationId ? "app" : "user";
-      if (profile.userId) {
-        profileOwnerName = userNameMap.get(profile.userId) ?? null;
-      }
+    let actorName: string | null = null;
+    let actorType: "user" | "end_user" | null = null;
+    if (schedule.userId) {
+      actorType = "user";
+      actorName = userNameMap.get(schedule.userId) ?? null;
+    } else if (schedule.endUserId) {
+      actorType = "end_user";
+      actorName = endUserNameMap.get(schedule.endUserId) ?? null;
     }
-
-    return { ...schedule, profileName, profileType, profileOwnerName };
+    return { ...schedule, actorName, actorType };
   });
 }
 
 export async function createSchedule(
   scope: AppScope,
   packageId: string,
-  connectionProfileId: string,
+  actor: Actor | null,
   data: {
     name?: string;
     cronExpression: string;
@@ -538,7 +506,8 @@ export async function createSchedule(
     .values({
       id,
       packageId,
-      connectionProfileId,
+      userId: actor?.type === "user" ? actor.id : null,
+      endUserId: actor?.type === "end_user" ? actor.id : null,
       orgId: scope.orgId,
       applicationId: scope.applicationId,
       name: data.name ?? null,
@@ -569,7 +538,6 @@ export async function updateSchedule(
   scope: AppScope,
   id: string,
   data: {
-    connectionProfileId?: string;
     name?: string;
     cronExpression?: string;
     timezone?: string;
@@ -599,8 +567,6 @@ export async function updateSchedule(
     nextRunAt: nextRun ?? null,
     updatedAt: new Date(),
   };
-  if (data.connectionProfileId !== undefined)
-    payload.connectionProfileId = data.connectionProfileId;
   if (data.name !== undefined) payload.name = data.name;
   if (data.input !== undefined) payload.input = data.input;
   // Explicit `null` clears the override; `undefined` leaves it untouched.

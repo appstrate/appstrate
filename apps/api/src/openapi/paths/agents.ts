@@ -573,56 +573,6 @@ export const agentsPaths = {
       },
     },
   },
-  "/api/agents/{scope}/{name}/app-profile": {
-    put: {
-      operationId: "setAgentAppProfile",
-      tags: ["Agents"],
-      summary: "Set app profile for an agent",
-      description:
-        "Set or clear the application-level connection profile for this agent. Pass a profile ID to set, or null to clear.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-      ],
-      requestBody: {
-        required: true,
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              required: ["appProfileId"],
-              properties: {
-                appProfileId: {
-                  type: ["string", "null"],
-                  format: "uuid",
-                  description: "App profile ID or null to clear",
-                },
-              },
-            },
-          },
-        },
-      },
-      responses: {
-        "200": {
-          description: "App profile updated",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: { type: "object", properties: { success: { type: "boolean" } } },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-  },
   "/api/agents/{scope}/{name}/bundle": {
     get: {
       operationId: "exportAgentBundle",

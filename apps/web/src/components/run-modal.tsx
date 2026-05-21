@@ -1,6 +1,5 @@
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
 import type RjsfForm from "@rjsf/core";
 import { Modal } from "./modal";
 import { Button } from "@/components/ui/button";
@@ -9,11 +8,6 @@ import { SchemaForm } from "@appstrate/ui/schema-form";
 import type { SchemaWrapper, JSONSchemaObject } from "@appstrate/core/form";
 import { useSchemaFormLabels } from "../hooks/use-schema-form-labels";
 import { uploadClient } from "../api";
-import {
-  useAppProfiles,
-  useConnectionProfiles,
-  useMyApplicationProfile,
-} from "../hooks/use-connection-profiles";
 import type { AgentDetail } from "@appstrate/shared-types";
 
 interface RunModalProps {
@@ -82,19 +76,6 @@ function RunModalForm({
   const inputFormRef = useRef<RjsfForm>(null);
   const labels = useSchemaFormLabels();
 
-  // Resolve the member's pinned default profile for the active app — only
-  // shown when set, as a confirmation that a personal preference is in
-  // effect. Absence falls through to the application default silently;
-  // we don't surface that branch to keep the modal focused.
-  const { data: sticky } = useMyApplicationProfile();
-  const { data: userProfiles } = useConnectionProfiles();
-  const { data: appProfiles } = useAppProfiles();
-  const stickyProfile = sticky?.connectionProfileId
-    ? (userProfiles?.find((p) => p.id === sticky.connectionProfileId) ??
-      appProfiles?.find((p) => p.id === sticky.connectionProfileId) ??
-      null)
-    : null;
-
   const handleSubmit = () => {
     if (hasInputFields && inputFormRef.current) {
       inputFormRef.current.submit();
@@ -117,19 +98,6 @@ function RunModalForm({
             onSubmit={(e) => onSubmit(e.formData as Record<string, unknown>)}
           />
         </div>
-      )}
-
-      {stickyProfile && (
-        <p className="text-muted-foreground text-xs">
-          {t("run.modal.profileBadge")}{" "}
-          <span className="text-foreground font-medium">{stickyProfile.name}</span>{" "}
-          <Link
-            to="/preferences/profiles"
-            className="text-primary underline-offset-2 hover:underline"
-          >
-            ({t("run.modal.profileChange")})
-          </Link>
-        </p>
       )}
 
       <div className="flex justify-end gap-2 pt-1">

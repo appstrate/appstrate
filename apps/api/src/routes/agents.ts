@@ -43,7 +43,6 @@ import { rateLimit } from "../middleware/rate-limit.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 export const proxyIdSchema = z.object({ proxyId: z.string().nullable() });
 export const modelIdSchema = z.object({ modelId: z.string().nullable() });
-export const appProfileIdSchema = z.object({ appProfileId: z.uuid().nullable() });
 
 /**
  * Parse the `actorType` / `actorId` query-param pair shared by the
@@ -200,30 +199,6 @@ export function createAgentsRouter() {
         resourceType: "agent",
         resourceId: agent.id,
         after: { modelId: data.modelId },
-      });
-
-      return c.json({ success: true });
-    },
-  );
-
-  // PUT /api/agents/:scope/:name/app-profile — set app profile for this agent (admin-only)
-  router.put(
-    "/:scope{@[^/]+}/:name/app-profile",
-    requireAgent(),
-    requirePermission("agents", "configure"),
-    async (c) => {
-      const agent = c.get("package");
-      const scope = getAppScope(c);
-      const body = await c.req.json();
-      const data = parseBody(appProfileIdSchema, body);
-
-      await updateInstalledPackage(scope, agent.id, { appProfileId: data.appProfileId });
-
-      await recordAuditFromContext(c, {
-        action: "agent.app_profile_updated",
-        resourceType: "agent",
-        resourceId: agent.id,
-        after: { appProfileId: data.appProfileId },
       });
 
       return c.json({ success: true });

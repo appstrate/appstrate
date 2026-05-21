@@ -14,7 +14,8 @@ import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 process.on("unhandledRejection", () => {});
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
-import { seedPackage, seedConnectionProfile } from "../../helpers/seed.ts";
+import { seedPackage } from "../../helpers/seed.ts";
+import type { Actor } from "../../../src/lib/actor.ts";
 import { flushRedis, closeRedis } from "../../helpers/redis.ts";
 import {
   createSchedule,
@@ -31,7 +32,7 @@ describe("scheduler service", () => {
   let orgSlug: string;
   let defaultAppId: string;
   let packageId: string;
-  let connectionProfileId: string;
+  let actor: Actor;
 
   beforeEach(async () => {
     await truncateAll();
@@ -43,8 +44,7 @@ describe("scheduler service", () => {
     orgSlug = org.slug;
     defaultAppId = applicationId;
 
-    const profile = await seedConnectionProfile({ userId, name: "Default" });
-    connectionProfileId = profile.id;
+    actor = { type: "user", id: userId };
 
     // Seed an agent package that schedules will reference
     const pkg = await seedPackage({
@@ -71,7 +71,7 @@ describe("scheduler service", () => {
       const schedule = await createSchedule(
         { orgId: orgId, applicationId: defaultAppId },
         packageId,
-        connectionProfileId,
+        actor,
         {
           name: "Every hour",
           cronExpression: "0 * * * *",
@@ -82,7 +82,7 @@ describe("scheduler service", () => {
       expect(schedule.id).toMatch(/^sched_/);
       expect(schedule.packageId).toBe(packageId);
       expect(schedule.orgId).toBe(orgId);
-      expect(schedule.connectionProfileId).toBe(connectionProfileId);
+      expect(schedule.userId).toBe(userId);
       expect(schedule.cronExpression).toBe("0 * * * *");
       expect(schedule.timezone).toBe("UTC");
       expect(schedule.enabled).toBe(true);
@@ -97,7 +97,7 @@ describe("scheduler service", () => {
       const schedule = await createSchedule(
         { orgId: orgId, applicationId: defaultAppId },
         packageId,
-        connectionProfileId,
+        actor,
         {
           cronExpression: "*/5 * * * *",
           input: inputData,
@@ -111,7 +111,7 @@ describe("scheduler service", () => {
       const schedule = await createSchedule(
         { orgId: orgId, applicationId: defaultAppId },
         packageId,
-        connectionProfileId,
+        actor,
         {
           cronExpression: "0 9 * * *",
         },
@@ -124,7 +124,7 @@ describe("scheduler service", () => {
       const schedule = await createSchedule(
         { orgId: orgId, applicationId: defaultAppId },
         packageId,
-        connectionProfileId,
+        actor,
         {
           cronExpression: "0 * * * *",
           timezone: "UTC",
@@ -139,7 +139,7 @@ describe("scheduler service", () => {
       const schedule = await createSchedule(
         { orgId: orgId, applicationId: defaultAppId },
         packageId,
-        connectionProfileId,
+        actor,
         {
           cronExpression: "0 9 * * *",
           configOverride: { providers: { gmail: { scopes: ["read"] } } },
@@ -161,7 +161,7 @@ describe("scheduler service", () => {
       const schedule = await createSchedule(
         { orgId: orgId, applicationId: defaultAppId },
         packageId,
-        connectionProfileId,
+        actor,
         {
           cronExpression: "0 9 * * *",
         },
@@ -178,24 +178,14 @@ describe("scheduler service", () => {
 
   describe("listSchedules", () => {
     it("returns schedules for the org", async () => {
-      await createSchedule(
-        { orgId: orgId, applicationId: defaultAppId },
-        packageId,
-        connectionProfileId,
-        {
-          name: "Schedule A",
-          cronExpression: "0 * * * *",
-        },
-      );
-      await createSchedule(
-        { orgId: orgId, applicationId: defaultAppId },
-        packageId,
-        connectionProfileId,
-        {
-          name: "Schedule B",
-          cronExpression: "*/30 * * * *",
-        },
-      );
+      await createSchedule({ orgId: orgId, applicationId: defaultAppId }, packageId, actor, {
+        name: "Schedule A",
+        cronExpression: "0 * * * *",
+      });
+      await createSchedule({ orgId: orgId, applicationId: defaultAppId }, packageId, actor, {
+        name: "Schedule B",
+        cronExpression: "*/30 * * * *",
+      });
 
       const schedules = await listSchedules({ orgId: orgId, applicationId: defaultAppId });
 
@@ -206,15 +196,10 @@ describe("scheduler service", () => {
     });
 
     it("does not return schedules from other orgs", async () => {
-      await createSchedule(
-        { orgId: orgId, applicationId: defaultAppId },
-        packageId,
-        connectionProfileId,
-        {
-          name: "My Schedule",
-          cronExpression: "0 * * * *",
-        },
-      );
+      await createSchedule({ orgId: orgId, applicationId: defaultAppId }, packageId, actor, {
+        name: "My Schedule",
+        cronExpression: "0 * * * *",
+      });
 
       const otherUser = await createTestUser({ email: "other@test.com" });
       const { org: otherOrg, defaultAppId: otherDefaultAppId } = await createTestOrg(otherUser.id, {
@@ -230,11 +215,10 @@ describe("scheduler service", () => {
           description: "Other",
         },
       });
-      const otherProfile = await seedConnectionProfile({ userId: otherUser.id, name: "Default" });
       await createSchedule(
         { orgId: otherOrg.id, applicationId: otherDefaultAppId },
         otherPkg.id,
-        otherProfile.id,
+        { type: "user", id: otherUser.id },
         {
           name: "Other Schedule",
           cronExpression: "0 * * * *",
@@ -275,24 +259,14 @@ describe("scheduler service", () => {
         },
       });
 
-      await createSchedule(
-        { orgId: orgId, applicationId: defaultAppId },
-        packageId,
-        connectionProfileId,
-        {
-          name: "Agent 1 Schedule",
-          cronExpression: "0 * * * *",
-        },
-      );
-      await createSchedule(
-        { orgId: orgId, applicationId: defaultAppId },
-        pkg2.id,
-        connectionProfileId,
-        {
-          name: "Agent 2 Schedule",
-          cronExpression: "*/15 * * * *",
-        },
-      );
+      await createSchedule({ orgId: orgId, applicationId: defaultAppId }, packageId, actor, {
+        name: "Agent 1 Schedule",
+        cronExpression: "0 * * * *",
+      });
+      await createSchedule({ orgId: orgId, applicationId: defaultAppId }, pkg2.id, actor, {
+        name: "Agent 2 Schedule",
+        cronExpression: "*/15 * * * *",
+      });
 
       const schedules = await listPackageSchedules(
         { orgId: orgId, applicationId: defaultAppId },
@@ -326,7 +300,7 @@ describe("scheduler service", () => {
       const created = await createSchedule(
         { orgId: orgId, applicationId: defaultAppId },
         packageId,
-        connectionProfileId,
+        actor,
         {
           name: "Hourly Run",
           cronExpression: "0 * * * *",
@@ -357,7 +331,7 @@ describe("scheduler service", () => {
       const created = await createSchedule(
         { orgId: orgId, applicationId: defaultAppId },
         packageId,
-        connectionProfileId,
+        actor,
         {
           cronExpression: "0 * * * *",
         },
@@ -381,7 +355,7 @@ describe("scheduler service", () => {
       const created = await createSchedule(
         { orgId: orgId, applicationId: defaultAppId },
         packageId,
-        connectionProfileId,
+        actor,
         {
           name: "Original Name",
           cronExpression: "0 * * * *",
@@ -404,7 +378,7 @@ describe("scheduler service", () => {
       const created = await createSchedule(
         { orgId: orgId, applicationId: defaultAppId },
         packageId,
-        connectionProfileId,
+        actor,
         {
           cronExpression: "0 9 * * *",
           configOverride: { foo: "bar" },
@@ -446,7 +420,7 @@ describe("scheduler service", () => {
       const created = await createSchedule(
         { orgId: orgId, applicationId: defaultAppId },
         packageId,
-        connectionProfileId,
+        actor,
         {
           cronExpression: "0 * * * *",
         },
@@ -472,7 +446,7 @@ describe("scheduler service", () => {
       const created = await createSchedule(
         { orgId: orgId, applicationId: defaultAppId },
         packageId,
-        connectionProfileId,
+        actor,
         {
           cronExpression: "0 * * * *",
         },
@@ -498,7 +472,7 @@ describe("scheduler service", () => {
       const created = await createSchedule(
         { orgId: orgId, applicationId: defaultAppId },
         packageId,
-        connectionProfileId,
+        actor,
         {
           cronExpression: "0 * * * *",
           input: { key: "original" },
@@ -536,7 +510,7 @@ describe("scheduler service", () => {
       const created = await createSchedule(
         { orgId: orgId, applicationId: defaultAppId },
         packageId,
-        connectionProfileId,
+        actor,
         {
           cronExpression: "0 * * * *",
         },
@@ -564,7 +538,7 @@ describe("scheduler service", () => {
       const schedule1 = await createSchedule(
         { orgId: orgId, applicationId: defaultAppId },
         packageId,
-        connectionProfileId,
+        actor,
         {
           name: "Keep This",
           cronExpression: "0 * * * *",
@@ -573,7 +547,7 @@ describe("scheduler service", () => {
       const schedule2 = await createSchedule(
         { orgId: orgId, applicationId: defaultAppId },
         packageId,
-        connectionProfileId,
+        actor,
         {
           name: "Delete This",
           cronExpression: "*/30 * * * *",

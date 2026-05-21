@@ -163,7 +163,6 @@ interface CreateRunParams {
   actor: Actor | null;
   input: Record<string, unknown> | null;
   scheduleId?: string;
-  connectionProfileId?: string;
   versionLabel?: string;
   versionDirty?: boolean;
   proxyLabel?: string;
@@ -245,7 +244,6 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
     status: "pending",
     input,
     startedAt: new Date(),
-    connectionProfileId: params.connectionProfileId,
     scheduleId: params.scheduleId,
     versionLabel: params.versionLabel,
     versionDirty: params.versionDirty ?? false,
@@ -288,7 +286,6 @@ export async function createFailedRun(
   actor: Actor | null,
   error: string,
   scheduleId?: string,
-  connectionProfileId?: string,
   agentDenorm?: { scope?: string | null; name?: string | null },
 ): Promise<void> {
   const runNumber = await nextRunNumber(scope, packageId);
@@ -308,7 +305,6 @@ export async function createFailedRun(
     completedAt: now,
     duration: 0,
     notifiedAt: now,
-    connectionProfileId,
     scheduleId,
     runNumber,
     agentScope: agentDenorm?.scope ?? null,

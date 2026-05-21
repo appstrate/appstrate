@@ -538,37 +538,6 @@ describe("OpenAPI response validation", () => {
     });
   });
 
-  // ── Connection Profiles list (auth + app-scoped) ───────────
-
-  describe("GET /api/connection-profiles -> 200", () => {
-    it("response body conforms to OpenAPI schema", async () => {
-      const schema = getResponseSchema("/api/connection-profiles", "GET", "200");
-      expect(schema).not.toBeNull();
-
-      const res = await app.request("/api/connection-profiles", {
-        headers: authHeaders(ctx),
-      });
-      expect(res.status).toBe(200);
-
-      const body = await res.json();
-      const result = validateResponse(body, schema);
-
-      if (!result.valid) {
-        console.error("GET /api/connection-profiles 200 validation errors:", result.errors);
-      }
-      if (result.extraFields.length > 0) {
-        console.warn(
-          "GET /api/connection-profiles 200 extra fields not in spec:",
-          result.extraFields,
-        );
-      }
-
-      expect(result.valid).toBe(true);
-      expect(body).toHaveProperty("data");
-      expect((body as any).data).toBeArray();
-    });
-  });
-
   // ── Runs 404 error response ────────────────────────────────
 
   describe("GET /api/runs/{id} -> 404 (not found)", () => {

@@ -45,7 +45,6 @@ import {
   AgentMemoryTab,
   AgentApiTab,
 } from "../components/package-detail/agent-tabs";
-import { AgentModals } from "../components/package-detail/agent-modals";
 import { AgentConfigurationTab } from "../components/package-detail/agent-configuration-tab";
 import { RunAgentButton } from "../components/run-agent-button";
 import { PackageCard } from "../components/package-card";
@@ -576,9 +575,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         defaultName={name ?? ""}
         type={type}
       />
-
-      {/* Agent modals */}
-      {type === "agent" && <AgentModals packageId={packageId} />}
 
       <ConfirmModal
         open={!!confirmAction}

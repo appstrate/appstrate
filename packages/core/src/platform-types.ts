@@ -318,7 +318,6 @@ export interface InlineRunBody {
   prompt?: unknown;
   input?: Record<string, unknown>;
   config?: Record<string, unknown>;
-  providerProfiles?: Record<string, string>;
   modelId?: string | null;
   proxyId?: string | null;
 }
@@ -340,18 +339,16 @@ export interface InlinePreflightInput {
 }
 
 /**
- * Public DTO returned by `inline.preflight`. Manifest and provider-profile
- * payloads are `unknown` — modules cast at the call site if they need the
- * richer apps/api shape. Adding optional fields here is non-breaking; adding
- * required fields would break consumers and requires a major bump.
+ * Public DTO returned by `inline.preflight`. The manifest payload is
+ * `unknown` — modules cast at the call site if they need the richer apps/api
+ * shape. Adding optional fields here is non-breaking; adding required fields
+ * would break consumers and requires a major bump.
  */
 export interface InlinePreflightResult {
   manifest: unknown;
   prompt: string;
   effectiveConfig: Record<string, unknown>;
   effectiveInput: Record<string, unknown> | null;
-  providerProfiles: unknown;
-  providerProfilesOverride: Record<string, string> | undefined;
   modelIdOverride: string | null;
   proxyIdOverride: string | null;
   resolvedDeps: { skills: unknown };

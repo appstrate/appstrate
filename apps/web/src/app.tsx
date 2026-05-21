@@ -35,7 +35,6 @@ import { OrgSettingsBillingPage } from "./pages/org-settings/billing";
 import { OrgSettingsCliSessionsPage } from "./pages/org-settings/cli-sessions";
 import { OrgSettingsApplicationsPage } from "./pages/org-settings/applications";
 import { OrgSettingsAppGeneralPage } from "./pages/org-settings/app/general";
-import { OrgSettingsAppProfilesPage } from "./pages/org-settings/app/profiles";
 import { OrgSettingsAppAuthPage } from "./pages/org-settings/app/auth";
 import { OrgSettingsAppOauthPage } from "./pages/org-settings/app/oauth";
 import { ApiKeysPage } from "./pages/api-keys-page";
@@ -43,7 +42,6 @@ import { EndUsersPage } from "./pages/end-users-page";
 import { SkillsPage } from "./pages/skills-page";
 import { IntegrationsPage } from "./pages/integrations-page";
 import { IntegrationDetailPage } from "./pages/integration-detail";
-import { AppProfileDetailPage } from "./pages/app-profile-detail";
 import { ScheduleDetailPage } from "./pages/schedule-detail";
 import { ScheduleCreatePage } from "./pages/schedule-create";
 import { ScheduleEditPage } from "./pages/schedule-edit";
@@ -52,7 +50,6 @@ import { PreferencesGeneralPage } from "./pages/preferences/general";
 import { PreferencesAppearancePage } from "./pages/preferences/appearance";
 import { PreferencesSecurityPage } from "./pages/preferences/security";
 import { PreferencesConnectorsPage } from "./pages/preferences/connectors";
-import { PreferencesProfilesPage } from "./pages/preferences/profiles";
 import { PreferencesDevicesPage } from "./pages/preferences/devices";
 import { LibraryPage } from "./pages/library-page";
 import { LoginPage } from "./pages/login";
@@ -381,11 +378,6 @@ export function App() {
             <Route path="/skills" element={<SkillsPage />} />
             <Route path="/integrations" element={<IntegrationsPage />} />
             <Route path="/integrations/:scope/:name" element={<IntegrationDetailPage />} />
-            <Route
-              path="/app-profiles"
-              element={<Navigate to="/org-settings/app/profiles" replace />}
-            />
-            <Route path="/app-profiles/:id" element={<AppProfileDetailPage />} />
             <Route path="/skills/new" element={<PackageEditorPage type="skill" />} />
             <Route path="/skills/:scope/:name/edit" element={<PackageEditorPage type="skill" />} />
             <Route
@@ -408,7 +400,6 @@ export function App() {
               <Route path="security" element={<PreferencesSecurityPage />} />
               <Route path="devices" element={<PreferencesDevicesPage />} />
               <Route path="connectors" element={<PreferencesConnectorsPage />} />
-              <Route path="profiles" element={<PreferencesProfilesPage />} />
             </Route>
             {features.webhooks && (
               <>
@@ -447,7 +438,6 @@ export function App() {
               <Route path="cli-sessions" element={<OrgSettingsCliSessionsPage />} />
               <Route path="billing" element={<OrgSettingsBillingPage />} />
               <Route path="app/general" element={<OrgSettingsAppGeneralPage />} />
-              <Route path="app/profiles" element={<OrgSettingsAppProfilesPage />} />
               <Route path="app/api-keys" element={<ApiKeysPage />} />
               <Route path="app/auth" element={<OrgSettingsAppAuthPage />} />
               <Route path="app/oauth" element={<OrgSettingsAppOauthPage />} />

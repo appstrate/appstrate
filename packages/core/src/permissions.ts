@@ -71,8 +71,6 @@ export interface CoreResources {
   // actor scoping. Supersedes the dropped `memories` resource.
   persistence: "read" | "delete";
   connections: "read" | "connect" | "disconnect";
-  profiles: "read" | "write" | "delete";
-  "app-profiles": "read" | "write" | "delete" | "bind";
   models: "read" | "write" | "delete";
   "model-provider-credentials": "read" | "write" | "delete";
   proxies: "read" | "write" | "delete";
@@ -121,8 +119,6 @@ export const CORE_RESOURCE_NAMES: ReadonlySet<string> = new Set<string>([
   "schedules",
   "persistence",
   "connections",
-  "profiles",
-  "app-profiles",
   "models",
   "model-provider-credentials",
   "proxies",

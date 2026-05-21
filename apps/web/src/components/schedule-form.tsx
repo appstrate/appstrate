@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, useMemo, useState } from "react";
+import { useState } from "react";
 import { useWatch } from "react-hook-form";
 import { useAppForm } from "../hooks/use-app-form";
 import { useTranslation } from "react-i18next";
@@ -22,8 +22,6 @@ import { SchemaForm } from "@appstrate/ui/schema-form";
 import { useSchemaFormLabels } from "../hooks/use-schema-form-labels";
 import { uploadClient } from "../api";
 import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
-import { useConnectionProfiles, useAppProfiles } from "../hooks/use-connection-profiles";
-import { CombinedProfileSelect, type ForeignProfile } from "./combined-profile-select";
 import { RunOverridesPanel, type RunOverridesValue } from "./run-overrides-panel";
 
 function getCronPresets(t: (key: string) => string) {
@@ -47,7 +45,6 @@ const TIMEZONES = [
 ] as const;
 
 export interface ScheduleSaveData {
-  connectionProfileId: string;
   name?: string;
   cronExpression: string;
   timezone?: string;
@@ -73,7 +70,6 @@ export interface ScheduleSaveData {
 interface ScheduleFormProps {
   mode: "create" | "edit";
   defaultValues?: {
-    connectionProfileId?: string;
     name?: string;
     cronExpression?: string;
     timezone?: string;
@@ -110,13 +106,10 @@ interface ScheduleFormProps {
   onDelete?: () => void;
   isPending?: boolean;
   blockedMessage?: string;
-  /** Profile owned by another user — shown read-only in the selector */
-  foreignProfile?: ForeignProfile;
 }
 
 interface FormFields {
   name: string;
-  connectionProfileId: string;
   cronExpression: string;
   timezone: string;
   enabled: boolean;
@@ -141,18 +134,10 @@ export function ScheduleForm({
   onDelete,
   isPending,
   blockedMessage,
-  foreignProfile,
 }: ScheduleFormProps) {
   const { t } = useTranslation(["agents", "common"]);
   const cronPresets = getCronPresets(t);
   const isEdit = mode === "edit";
-
-  const { data: userProfiles } = useConnectionProfiles();
-  const { data: appProfiles } = useAppProfiles();
-  const allProfiles = useMemo(
-    () => [...(userProfiles ?? []), ...(appProfiles ?? [])],
-    [userProfiles, appProfiles],
-  );
 
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -200,24 +185,16 @@ export function ScheduleForm({
   } = useAppForm<FormFields>({
     defaultValues: {
       name: defaultValues?.name ?? "",
-      connectionProfileId: defaultValues?.connectionProfileId ?? allProfiles[0]?.id ?? "",
       cronExpression: defaultValues?.cronExpression ?? "0 9 * * *",
       timezone: defaultValues?.timezone ?? "UTC",
       enabled: defaultValues?.enabled ?? true,
     },
   });
 
-  const [connectionProfileId, cronExpression, timezone, enabled] = useWatch({
+  const [cronExpression, timezone, enabled] = useWatch({
     control,
-    name: ["connectionProfileId", "cronExpression", "timezone", "enabled"],
+    name: ["cronExpression", "timezone", "enabled"],
   });
-
-  // When profiles load after form init, set the default if still empty
-  useEffect(() => {
-    if (!connectionProfileId && allProfiles.length > 0) {
-      setValue("connectionProfileId", allProfiles[0]!.id);
-    }
-  }, [connectionProfileId, allProfiles, setValue]);
 
   const onFormSubmit = handleSubmit((data) => {
     const input = hasInputSchema ? inputValues : undefined;
@@ -245,7 +222,6 @@ export function ScheduleForm({
         };
 
     onSubmit({
-      connectionProfileId: data.connectionProfileId,
       name: data.name || undefined,
       cronExpression: data.cronExpression,
       timezone: data.timezone,
@@ -286,23 +262,6 @@ export function ScheduleForm({
               ))}
             </SelectContent>
           </Select>
-        </div>
-      )}
-
-      {/* Connection profile */}
-      {(allProfiles.length > 1 || foreignProfile) && (
-        <div className="space-y-3">
-          <Label htmlFor="sched-profile">{t("schedule.connectionProfile")}</Label>
-          <CombinedProfileSelect
-            value={connectionProfileId}
-            onChange={(v) => {
-              if (v != null) setValue("connectionProfileId", v);
-              else if (allProfiles.length > 0) setValue("connectionProfileId", allProfiles[0]!.id);
-            }}
-            triggerClassName="w-full"
-            id="sched-profile"
-            foreignProfile={foreignProfile}
-          />
         </div>
       )}
 
@@ -481,7 +440,7 @@ export function ScheduleForm({
         <Button type="button" variant="outline" onClick={onCancel}>
           {t("btn.cancel")}
         </Button>
-        <Button type="submit" disabled={isPending || allProfiles.length === 0}>
+        <Button type="submit" disabled={isPending}>
           {isEdit ? t("btn.save") : t("btn.create")}
         </Button>
       </div>

@@ -2,33 +2,31 @@
 
 import { User, Building2 } from "lucide-react";
 
-interface ProfileLabelProps {
-  profileType: "user" | "app" | null;
-  profileName: string | null;
-  profileOwnerName?: string | null;
+interface ActorLabelProps {
+  actorType: "user" | "end_user" | null;
+  actorName: string | null;
   iconSize?: string;
   className?: string;
 }
 
+/**
+ * Renders the actor (member or end-user) a schedule runs as. Replaces the
+ * former connection-profile label after the profiles feature was removed.
+ */
 export function ProfileLabel({
-  profileType,
-  profileName,
-  profileOwnerName,
+  actorType,
+  actorName,
   iconSize = "size-3",
   className,
-}: ProfileLabelProps) {
-  if (!profileName) return null;
+}: ActorLabelProps) {
+  if (!actorName) return null;
 
-  const Icon = profileType === "app" ? Building2 : User;
-  const label =
-    profileType === "user" && profileOwnerName
-      ? `${profileOwnerName} — ${profileName}`
-      : profileName;
+  const Icon = actorType === "end_user" ? Building2 : User;
 
   return (
     <span className={`inline-flex items-center gap-1 ${className ?? ""}`}>
       <Icon className={iconSize} />
-      {label}
+      {actorName}
     </span>
   );
 }

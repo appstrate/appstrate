@@ -52,7 +52,6 @@ export const updatePackageSchema = z.object({
   config: z.record(z.string(), z.unknown()).optional(),
   modelId: z.string().nullable().optional(),
   proxyId: z.string().nullable().optional(),
-  appProfileId: z.string().nullable().optional(),
   versionId: z.number().int().nullable().optional(),
   enabled: z.boolean().optional(),
 });

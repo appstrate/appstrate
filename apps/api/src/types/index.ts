@@ -4,9 +4,6 @@
 // All other shared types should be imported directly from "@appstrate/shared-types".
 export type { OrgRole } from "@appstrate/shared-types";
 
-/** How a provider connection profile was resolved for a run. */
-export type ProviderProfileSource = "app_binding" | "user_profile";
-
 // --- Agent Manifest Types ---
 // Re-exported from @appstrate/validation. The AgentManifest type is Zod-inferred
 // and covers all agent manifest fields (name, version, type, dependencies, input/output/config, timeout).
@@ -16,28 +13,6 @@ export type { AgentManifest };
 
 import type { ResourceEntry as ToolMeta } from "@appstrate/shared-types";
 export type { ToolMeta };
-
-export interface AgentProviderRequirement {
-  id: string;
-  description?: string;
-  scopes?: string[];
-}
-
-/**
- * Resolved profile entry for a provider — carries both the profile ID and how it was resolved.
- *
- * Resolution order (highest priority first):
- * 1. App profile binding (`source: "app_binding"`) — admin-configured via app_profile_provider_bindings
- * 2. Per-provider user override (`source: "user_profile"`) — user-selected via user_agent_provider_profiles
- * 3. Default user profile (`source: "user_profile"`) — actor's default connection profile
- */
-export interface ProviderProfileEntry {
-  connectionProfileId: string;
-  source: ProviderProfileSource;
-}
-
-/** Map of providerId → resolved profile entry. Built by resolveProviderProfiles(). */
-export type ProviderProfileMap = Record<string, ProviderProfileEntry>;
 
 // --- Loaded Package (manifest + prompt from DB) ---
 

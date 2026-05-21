@@ -23,7 +23,6 @@ import { db } from "@appstrate/db/client";
 import { user as userTable } from "@appstrate/db/schema";
 import { getAuth } from "@appstrate/db/auth";
 import { validateApiKey } from "../services/api-keys.ts";
-import { ensureDefaultProfile } from "../services/connection-profiles.ts";
 import { requireOrgContext } from "../middleware/org-context.ts";
 import { requirePlatformRealm } from "../middleware/realm-guard.ts";
 import { isEndUserInApp } from "../services/end-users.ts";
@@ -33,7 +32,6 @@ import { resolvePermissions, resolveApiKeyPermissions } from "./permissions.ts";
 import { getClientIp, propagateRequestClientIp } from "./client-ip.ts";
 import { logger } from "./logger.ts";
 import type { AppEnv } from "../types/index.ts";
-import { getErrorMessage } from "@appstrate/core/errors";
 
 export interface AuthPipelineOptions {
   /**
@@ -228,14 +226,6 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
       .where(eq(userTable.id, session.user.id))
       .limit(1);
     if (userRow) c.set("sessionRealm", userRow.realm);
-
-    // Ensure the user has a default connection profile (fire-and-forget)
-    ensureDefaultProfile({ type: "user", id: session.user.id }).catch((err) => {
-      logger.warn("Failed to ensure default profile", {
-        userId: session.user.id,
-        error: getErrorMessage(err),
-      });
-    });
 
     return next();
   });

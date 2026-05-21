@@ -12,7 +12,6 @@ import {
   LayoutGrid,
   Settings,
   Shield,
-  UserCircle,
   Users,
 } from "lucide-react";
 import { SettingsLayout, type SettingsSection } from "../../components/settings-layout";
@@ -95,11 +94,6 @@ export function OrgSettingsLayout() {
                 to: "/org-settings/app/general",
                 icon: Settings,
                 label: t("appSettings.tabGeneral"),
-              },
-              {
-                to: "/org-settings/app/profiles",
-                icon: UserCircle,
-                label: t("appSettings.tabProfiles"),
               },
               {
                 to: "/org-settings/app/api-keys",

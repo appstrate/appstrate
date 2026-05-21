@@ -29,11 +29,6 @@ import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { getOrgById, getUserOrganizations } from "../services/organizations.ts";
 import { listOrgModels } from "../services/org-models.ts";
-import {
-  getMemberApplicationProfileId,
-  setMemberApplicationProfileId,
-  clearMemberApplicationProfile,
-} from "../services/connection-profiles.ts";
 import { db } from "@appstrate/db/client";
 import { integrationConnections } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
@@ -147,55 +142,6 @@ router.get("/connections", async (c) => {
   const actor = getActor(c);
   const groups = await listMeConnections(actor);
   return c.json(listResponse(groups));
-});
-
-/**
- * `/api/me/application-profile` — per-(member, application) sticky default
- * connection profile. Lets a dashboard user pin which connection profile
- * their runs in this application use by default, sitting between the
- * explicit per-run override (`X-Connection-Profile-Id`) and the application
- * default in the credential proxy's `resolveProfileId` cascade.
- *
- * Member-only: end-users have their own auto-created default elsewhere on
- * `connection_profiles` itself, so these routes reject `endUser`-bound
- * callers. The application id comes from `requireAppContext()` (header
- * `X-Application-Id` for cookie sessions, embedded for API keys).
- */
-const setProfileSchema = z.object({ connectionProfileId: z.uuid() });
-
-router.get("/application-profile", requireAppContext(), async (c) => {
-  const user = c.get("user");
-  if (!user) throw unauthorized("Authentication required");
-  if (c.get("endUser")) {
-    return c.json({ connectionProfileId: null });
-  }
-  const applicationId = c.get("applicationId")!;
-  const connectionProfileId = await getMemberApplicationProfileId(user.id, applicationId);
-  return c.json({ connectionProfileId });
-});
-
-router.put("/application-profile", requireAppContext(), async (c) => {
-  const user = c.get("user");
-  if (!user) throw unauthorized("Authentication required");
-  if (c.get("endUser")) {
-    throw unauthorized("End-user cannot pin a member-level sticky profile");
-  }
-  const applicationId = c.get("applicationId")!;
-  const body = await c.req.json().catch(() => ({}));
-  const { connectionProfileId } = parseBody(setProfileSchema, body);
-  await setMemberApplicationProfileId(user.id, applicationId, connectionProfileId);
-  return c.json({ connectionProfileId });
-});
-
-router.delete("/application-profile", requireAppContext(), async (c) => {
-  const user = c.get("user");
-  if (!user) throw unauthorized("Authentication required");
-  if (c.get("endUser")) {
-    throw unauthorized("End-user cannot clear a member-level sticky profile");
-  }
-  const applicationId = c.get("applicationId")!;
-  await clearMemberApplicationProfile(user.id, applicationId);
-  return c.body(null, 204);
 });
 
 /**

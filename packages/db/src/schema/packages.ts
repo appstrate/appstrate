@@ -19,7 +19,6 @@ import { packageTypeEnum, packageSourceEnum } from "./enums.ts";
 import { user } from "./auth.ts";
 import { organizations } from "./organizations.ts";
 import { applications } from "./applications.ts";
-import { connectionProfiles } from "./connections.ts";
 
 export const applicationPackages = pgTable(
   "application_packages",
@@ -36,9 +35,6 @@ export const applicationPackages = pgTable(
     config: jsonb("config").notNull().default({}),
     modelId: text("model_id"),
     proxyId: text("proxy_id"),
-    appProfileId: uuid("app_profile_id").references(() => connectionProfiles.id, {
-      onDelete: "set null",
-    }),
     // Per-(application, integration) admin lock. Only meaningful for
     // integration packages — set true to refuse user/end-user attempts
     // to create their own connection on this integration in this app
@@ -57,7 +53,6 @@ export const applicationPackages = pgTable(
   (table) => [
     primaryKey({ columns: [table.applicationId, table.packageId] }),
     index("idx_application_packages_package_id").on(table.packageId),
-    index("idx_application_packages_app_profile_id").on(table.appProfileId),
     index("idx_application_packages_app_id").on(table.applicationId),
   ],
 );

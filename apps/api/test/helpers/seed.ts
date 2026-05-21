@@ -22,7 +22,6 @@ import {
   orgProxies,
   modelProviderCredentials,
   orgModels,
-  connectionProfiles,
   orgInvitations,
   packageVersions,
 } from "@appstrate/db/schema";
@@ -171,7 +170,6 @@ export async function seedEndUser(
 
 type ScheduleInsert = Partial<InferInsertModel<typeof schedules>> & {
   packageId: string;
-  connectionProfileId: string;
   orgId: string;
   applicationId: string;
 };
@@ -384,24 +382,6 @@ export async function seedOrgModel(
     })
     .returning();
   return model!;
-}
-
-// ─── Connection Profiles ──────────────────────────────────
-
-type ConnectionProfileInsert = Partial<InferInsertModel<typeof connectionProfiles>> &
-  ({ userId: string } | { applicationId: string });
-
-export async function seedConnectionProfile(
-  overrides: ConnectionProfileInsert,
-): Promise<InferSelectModel<typeof connectionProfiles>> {
-  const [profile] = await db
-    .insert(connectionProfiles)
-    .values({
-      name: "Test Profile",
-      ...overrides,
-    })
-    .returning();
-  return profile!;
 }
 
 // ─── Invitations ──────────────────────────────────────────

@@ -26,7 +26,7 @@ export type {
   IntegrationSummary,
 } from "./integrations.ts";
 
-export type { UserProfile, RunLog, ConnectionProfile } from "@appstrate/db/schema";
+export type { UserProfile, RunLog } from "@appstrate/db/schema";
 import type { PackageType } from "@appstrate/core/validation";
 export type { PackageType };
 
@@ -143,9 +143,10 @@ import type { Schedule } from "@appstrate/db/schema";
 export type { Schedule };
 
 export type EnrichedSchedule = Schedule & {
-  profileName: string | null;
-  profileType: "user" | "app" | null;
-  profileOwnerName: string | null;
+  /** Display name of the actor (member or end-user) the schedule runs as. */
+  actorName: string | null;
+  /** Which actor kind owns the schedule run. Null for org/system-owned schedules. */
+  actorType: "user" | "end_user" | null;
 };
 
 // --- Organization Types ---
@@ -626,7 +627,6 @@ export interface InstalledPackage {
   config: Record<string, unknown>;
   modelId: string | null;
   proxyId: string | null;
-  appProfileId: string | null;
   versionId: number | null;
   enabled: boolean;
   installedAt: string;

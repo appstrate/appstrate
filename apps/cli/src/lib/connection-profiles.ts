@@ -23,19 +23,22 @@
  */
 
 import { apiFetch, apiList } from "./api.ts";
-import type { ConnectionProfile as DbConnectionProfile } from "@appstrate/shared-types";
 
 /**
- * Connection profile as returned by `GET /api/connection-profiles` —
- * the DB row enriched with the API-side `connectionCount` aggregate.
- * Mirrors the dashboard's `ProfileWithConnections` shape so both
- * clients reason about the same payload.
- *
- * The DB row models `createdAt`/`updatedAt` as `Date`, but JSON
- * serialization replaces them with ISO 8601 strings on the wire — we
- * narrow the type to reflect what the CLI actually receives.
+ * Connection profile wire shape as previously returned by
+ * `GET /api/connection-profiles`. The connection-profile feature was
+ * removed server-side; this local type is retained only so the legacy
+ * CLI helpers below still type-check. The endpoints they call no longer
+ * exist — the surrounding `connections profile` commands are slated for
+ * removal in a follow-up.
  */
-export interface ConnectionProfile extends Omit<DbConnectionProfile, "createdAt" | "updatedAt"> {
+export interface ConnectionProfile {
+  id: string;
+  userId: string | null;
+  endUserId: string | null;
+  applicationId: string | null;
+  name: string;
+  isDefault: boolean;
   connectionCount: number;
   createdAt: string;
   updatedAt: string;
