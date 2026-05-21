@@ -32,8 +32,8 @@ appstrate org current
 
 # 3b. Confirm which application is pinned (X-Application-Id sent on every call).
 #     App-scoped routes (agents, runs, schedules, webhooks, api-keys,
-#     notifications, packages, providers, connections, end-users,
-#     app-profiles) require this. `login` cascades into the default app
+#     notifications, packages, integrations, end-users) require this.
+#     `login` cascades into the default app
 #     automatically, so this usually already prints a value.
 appstrate app current
 

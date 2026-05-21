@@ -143,16 +143,16 @@ appstrate login --profile prod --instance https://app.my.io
 
 **Flags**
 
-| Flag              | Values         | Description                                                                                                                                   |
-| ----------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--instance`      | URL            | Instance base URL. Skips the interactive prompt.                                                                                              |
-| `-p`, `--profile` | name           | Profile name to store credentials under (default: `default`).                                                                                 |
-| `--org`           | `<id-or-slug>` | After the token exchange, pin this organization on the profile non-interactively. Fails if the reference does not match any org.              |
-| `--create-org`    | `<name>`       | Create a new organization with this name and pin it. A default application + hello-world agent are provisioned server-side. Skips the prompt. |
-| `--no-org`        | —              | Skip the post-login org-pinning step entirely. Subsequent calls must carry `-H 'X-Org-Id: …'`, or pin later via `appstrate org switch`.       |
-| `--app`           | `<id>`         | After the org pin, pin this application on the profile non-interactively. Fails if the reference does not match any app.                      |
-| `--create-app`    | `<name>`       | Create a new application with this name after login and pin it. Skips the cascade's default-app pick.                                         |
-| `--no-app`        | —              | Skip the post-login app-pinning step entirely. Subsequent calls must carry `-H 'X-Application-Id: …'`, or pin later via `appstrate app switch`.       |
+| Flag              | Values         | Description                                                                                                                                     |
+| ----------------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--instance`      | URL            | Instance base URL. Skips the interactive prompt.                                                                                                |
+| `-p`, `--profile` | name           | Profile name to store credentials under (default: `default`).                                                                                   |
+| `--org`           | `<id-or-slug>` | After the token exchange, pin this organization on the profile non-interactively. Fails if the reference does not match any org.                |
+| `--create-org`    | `<name>`       | Create a new organization with this name and pin it. A default application + hello-world agent are provisioned server-side. Skips the prompt.   |
+| `--no-org`        | —              | Skip the post-login org-pinning step entirely. Subsequent calls must carry `-H 'X-Org-Id: …'`, or pin later via `appstrate org switch`.         |
+| `--app`           | `<id>`         | After the org pin, pin this application on the profile non-interactively. Fails if the reference does not match any app.                        |
+| `--create-app`    | `<name>`       | Create a new application with this name after login and pin it. Skips the cascade's default-app pick.                                           |
+| `--no-app`        | —              | Skip the post-login app-pinning step entirely. Subsequent calls must carry `-H 'X-Application-Id: …'`, or pin later via `appstrate app switch`. |
 
 **Org pinning after login** (issue #209): on success, the CLI calls `GET /api/orgs` and branches:
 
@@ -346,7 +346,7 @@ All four subcommands respect the global `--profile <name>` flag and talk to `GET
 
 ### `appstrate app`
 
-Manage the application pinned on the active profile. `login` auto-pins the default application in the pinned org (see above); `app switch` / `app create` let you change the pin without re-running the device flow. The pinned app id is sent as `X-Application-Id` on every `appstrate api` call — required for app-scoped routes (agents, runs, schedules, webhooks, api-keys, notifications, packages, providers, connections, end-users, app-profiles).
+Manage the application pinned on the active profile. `login` auto-pins the default application in the pinned org (see above); `app switch` / `app create` let you change the pin without re-running the device flow. The pinned app id is sent as `X-Application-Id` on every `appstrate api` call — required for app-scoped routes (agents, runs, schedules, webhooks, api-keys, notifications, packages, integrations, end-users).
 
 ```sh
 appstrate app list            # enumerate apps in the pinned org; pinned row is marked *, default row tagged [default]
