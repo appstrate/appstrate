@@ -53,8 +53,6 @@ export interface ModeResolutionOpts {
   sinkTtl?: number;
   noPreflight?: boolean;
   preflightTimeout?: number;
-  connectionProfile?: string;
-  providerProfile?: string[];
 }
 
 export class ExecutionModeError extends Error {
@@ -180,19 +178,6 @@ export function validateOptsForMode(mode: ExecutionMode, opts: ModeResolutionOpt
     offenders.push({
       flag: "--preflight-timeout",
       reason: "the server runs its own preflight before launching the container",
-    });
-  }
-  if (opts.connectionProfile !== undefined) {
-    offenders.push({
-      flag: "--connection-profile",
-      reason:
-        "remote runs use the application's pinned profiles — change them via the dashboard or `appstrate connections profile switch`",
-    });
-  }
-  if (opts.providerProfile !== undefined && opts.providerProfile.length > 0) {
-    offenders.push({
-      flag: "--provider-profile",
-      reason: "per-provider overrides are not yet accepted by the run trigger endpoint",
     });
   }
 

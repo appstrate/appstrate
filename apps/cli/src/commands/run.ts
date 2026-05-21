@@ -82,11 +82,6 @@ import {
   RunConfigFetchError,
   type InheritedRunConfig,
 } from "./run/inherit-config.ts";
-import {
-  parseProviderProfileOverrides,
-  resolveConnectionProfileSelection,
-  ConnectionProfileResolutionError,
-} from "./run/connection-profiles.ts";
 import { preflightCheck, PreflightAbortError } from "./run/preflight.ts";
 import {
   resolveExecutionMode,
@@ -143,20 +138,6 @@ export interface RunCommandOptions {
    * must not drift the run.
    */
   noInherit?: boolean;
-  /**
-   * Connection profile id or name. Used as `X-Connection-Profile-Id`
-   * on every credential-proxy call. Falls back to the sticky default
-   * pinned via `appstrate connections profile switch`, then to the
-   * platform's implicit-default chain.
-   */
-  connectionProfile?: string;
-  /**
-   * Per-provider profile overrides — `["@scope/provider=uuid", ...]`.
-   * Each entry is split on `=`; the resolver applies the override only
-   * for that provider's calls, falling back to the default profile for
-   * everything else. Mirrors the dashboard's per-agent override surface.
-   */
-  providerProfile?: string[];
   /** Skip the readiness preflight entirely (CI mode). */
   noPreflight?: boolean;
   /** Override the preflight polling timeout. Default 5 minutes. */
@@ -230,26 +211,6 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   // bearer token — they share the same auth surface.
   const resolverInputs = await buildResolverInputs(mode, opts);
 
-  // ─── 1b. Connection profile + per-provider overrides ─────────────
-  // Apply the explicit `--connection-profile` flag (or the sticky
-  // default pinned by `appstrate connections profile switch`) and
-  // any `--provider-profile <p>=<ref>` overrides. Names need an API
-  // round-trip; UUIDs pass through verbatim. No-op when not in remote
-  // mode — local/none resolvers don't speak to the credential proxy.
-  const connectionSelection = await resolveConnectionProfileForRun(resolverInputs, opts);
-  const resolverInputsWithProfiles =
-    resolverInputs && "bearerToken" in resolverInputs && connectionSelection
-      ? {
-          ...resolverInputs,
-          ...(connectionSelection.connectionProfileId
-            ? { connectionProfileId: connectionSelection.connectionProfileId }
-            : {}),
-          ...(Object.keys(connectionSelection.providerProfileOverrides).length > 0
-            ? { providerProfileOverrides: connectionSelection.providerProfileOverrides }
-            : {}),
-        }
-      : resolverInputs;
-
   // ─── 1a. Inherited run-config ────────────────────────────────────
   // When the user runs an agent by id with a remote provider context,
   // pull the per-app run-config so flags + env vars cascade over the
@@ -317,13 +278,6 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
       orgId: resolverInputs.orgId,
       scope: target.scope,
       name: target.name,
-      ...(connectionSelection?.connectionProfileId
-        ? { connectionProfileId: connectionSelection.connectionProfileId }
-        : {}),
-      ...(connectionSelection?.providerProfileOverrides &&
-      Object.keys(connectionSelection.providerProfileOverrides).length > 0
-        ? { perProviderOverrides: connectionSelection.providerProfileOverrides }
-        : {}),
       json: opts.json === true,
       skip: false,
       ...(opts.preflightTimeout ? { timeoutSeconds: opts.preflightTimeout } : {}),
@@ -339,9 +293,9 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   // surface) get credential-injected HTTP calls; the resolver yields one
   // `{ns}__api_call` tool per integration.
   const effectiveResolverInputs =
-    resolverInputsWithProfiles && reportSession
-      ? appendResolverHeaders(resolverInputsWithProfiles, reportSession.proxyHeaders)
-      : resolverInputsWithProfiles;
+    resolverInputs && reportSession
+      ? appendResolverHeaders(resolverInputs, reportSession.proxyHeaders)
+      : resolverInputs;
   const integrationResolver = buildIntegrationResolver(mode, effectiveResolverInputs);
 
   // ─── 5. Parse input ────────────────────────────────────────────────
@@ -1128,44 +1082,6 @@ function resolverInputsInstance(inputs: RemoteResolverInputs | LocalResolverInpu
 }
 
 /**
- * Resolve `--connection-profile` + `--provider-profile` flags into the
- * concrete ids the resolver forwards as `X-Connection-Profile-Id`. The
- * sticky default (`Profile.connectionProfileId`) acts as the fallback
- * when the user did not pass `--connection-profile`. No-op when the
- * provider mode has no remote handle (`local`, `none`).
- */
-async function resolveConnectionProfileForRun(
-  resolverInputs: RemoteResolverInputs | LocalResolverInputs | null,
-  opts: RunCommandOptions,
-): Promise<{
-  connectionProfileId: string | undefined;
-  providerProfileOverrides: Record<string, string>;
-} | null> {
-  if (!resolverInputs || !("bearerToken" in resolverInputs)) return null;
-
-  const perProvider = parseProviderProfileOverrides(opts.providerProfile);
-  // No flags + no sticky → nothing to do, no need to load profiles.
-  const resolved = await resolveActiveProfile(opts.profile).catch(() => null);
-  const pinnedId = resolved?.profile?.connectionProfileId;
-  if (!opts.connectionProfile && !pinnedId && perProvider.length === 0) {
-    return { connectionProfileId: undefined, providerProfileOverrides: {} };
-  }
-
-  if (!resolved) {
-    throw new ConnectionProfileResolutionError(
-      "--connection-profile / --provider-profile require an active CLI profile",
-      "Run `appstrate login`, or pass --profile.",
-    );
-  }
-  return resolveConnectionProfileSelection({
-    profileName: resolved.profileName,
-    flagRef: opts.connectionProfile,
-    pinnedId,
-    perProvider,
-  });
-}
-
-/**
  * Pull the resolved run-config from the pinned instance when running an
  * agent by id with a remote provider context. Returns a zeroed
  * inheritance record when the call cannot or should not be made — the
@@ -1295,7 +1211,6 @@ export {
   PackageSpecError,
   BundleFetchError,
   RunConfigFetchError,
-  ConnectionProfileResolutionError,
   PreflightAbortError,
   ExecutionModeError,
   RemoteRunError,

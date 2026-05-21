@@ -4,8 +4,7 @@
  * Preflight readiness check + browser handoff for `appstrate run`.
  *
  * Flow before the run is triggered:
- *   1. GET /api/agents/{scope}/{name}/readiness with the resolved
- *      connectionProfileId + per-provider overrides.
+ *   1. GET /api/agents/{scope}/{name}/readiness.
  *   2. If `ready` → continue silently.
  *   3. Else, in a TTY without `--json` / `--no-preflight`:
  *      - Print missing providers + reasons.
@@ -37,7 +36,6 @@ import { getErrorMessage } from "@appstrate/core/errors";
  */
 export interface ReadinessProviderEntry {
   providerId: string;
-  connectionProfileId: string | null;
   reason: string;
   message: string;
 }
@@ -72,8 +70,6 @@ export interface PreflightInputs {
   orgId?: string;
   scope: string;
   name: string;
-  connectionProfileId?: string;
-  perProviderOverrides?: Record<string, string>;
   /** Fail fast in CI mode — never prompt, never poll. */
   json: boolean;
   /** When true, skip preflight entirely. */
@@ -225,21 +221,10 @@ export function nextBackoffMs(
 // ---------------------------------------------------------------------------
 
 function buildReadinessUrl(instance: string, inputs: PreflightInputs): string {
-  const params = new URLSearchParams();
-  if (inputs.connectionProfileId) {
-    params.set("connectionProfileId", inputs.connectionProfileId);
-  }
-  for (const [providerId, connectionProfileId] of Object.entries(
-    inputs.perProviderOverrides ?? {},
-  )) {
-    params.set(`providerProfile.${providerId}`, connectionProfileId);
-  }
-  const qs = params.toString();
   // See bundle-fetch.ts:buildBundleUrl — `@` in scope must NOT be percent-encoded
   // or the Hono route `:scope{@[^/]+}` 404s on `%40scope`. scope/name are
   // already validated to a strict `[a-z0-9-]` charset.
-  const base = `${instance}/api/agents/${inputs.scope}/${inputs.name}/readiness`;
-  return qs ? `${base}?${qs}` : base;
+  return `${instance}/api/agents/${inputs.scope}/${inputs.name}/readiness`;
 }
 
 /**

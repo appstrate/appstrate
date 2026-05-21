@@ -76,7 +76,6 @@ describe("preflightCheck", () => {
     const missing = [
       {
         providerId: "@afps/gmail",
-        connectionProfileId: null,
         reason: "no_connection",
         message: "not connected",
       },
@@ -113,7 +112,6 @@ describe("preflightCheck", () => {
         missing: [
           {
             providerId: "@afps/gmail",
-            connectionProfileId: null,
             reason: "no_connection",
             message: "not connected",
           },
@@ -143,7 +141,6 @@ describe("preflightCheck", () => {
         missing: [
           {
             providerId: "@afps/gmail",
-            connectionProfileId: null,
             reason: "no_connection",
             message: "not connected",
           },
@@ -187,7 +184,6 @@ describe("preflightCheck", () => {
         missing: [
           {
             providerId: "@afps/gmail",
-            connectionProfileId: null,
             reason: "no_connection",
             message: "not connected",
           },
@@ -218,7 +214,6 @@ describe("preflightCheck", () => {
     const missing = [
       {
         providerId: "@afps/gmail",
-        connectionProfileId: null,
         reason: "no_connection",
         message: "not connected",
       },
@@ -247,20 +242,6 @@ describe("preflightCheck", () => {
     });
   });
 
-  it("includes connectionProfileId and per-provider overrides in the readiness URL", async () => {
-    const { fetchImpl, urls } = makeFetch([{ ready: true, missing: [] }]);
-    await preflightCheck({
-      ...BASE_INPUTS,
-      connectionProfileId: "prof_1",
-      perProviderOverrides: { "@afps/gmail": "prof_2" },
-      fetchImpl,
-      openBrowser: () => {},
-      confirmPrompt: async () => true,
-    });
-    expect(urls[0]).toContain("connectionProfileId=prof_1");
-    expect(urls[0]).toContain("providerProfile.%40afps%2Fgmail=prof_2");
-  });
-
   it("uses a literal `@` in the path — never percent-encoded", async () => {
     // The Hono server route `:scope{@[^/]+}` matches against the raw
     // (encoded) path; `%40scope` returns 404. Pin the contract so a
@@ -281,7 +262,6 @@ describe("preflightCheck", () => {
     const missing = [
       {
         providerId: "@afps/gmail",
-        connectionProfileId: null,
         reason: "no_connection",
         message: "not connected",
       },

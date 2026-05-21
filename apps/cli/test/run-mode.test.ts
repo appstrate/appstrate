@@ -107,8 +107,6 @@ describe("validateOptsForMode — local mode", () => {
         sinkTtl: 600,
         noPreflight: true,
         preflightTimeout: 60,
-        connectionProfile: "default",
-        providerProfile: ["@x/y=abc"],
       }),
     ).not.toThrow();
   });
@@ -134,8 +132,6 @@ describe("validateOptsForMode — remote mode", () => {
     ["sinkTtl", { sinkTtl: 600 }],
     ["noPreflight", { noPreflight: true }],
     ["preflightTimeout", { preflightTimeout: 60 }],
-    ["connectionProfile", { connectionProfile: "default" }],
-    ["providerProfile", { providerProfile: ["@x/y=abc"] }],
   ])("rejects %s in remote mode", (_label, opts) => {
     expect(() => validateOptsForMode("remote", opts)).toThrow(ExecutionModeError);
   });
@@ -143,10 +139,6 @@ describe("validateOptsForMode — remote mode", () => {
   it("rejects --providers=local|none in remote mode", () => {
     expect(() => validateOptsForMode("remote", { providers: "local" })).toThrow(ExecutionModeError);
     expect(() => validateOptsForMode("remote", { providers: "none" })).toThrow(ExecutionModeError);
-  });
-
-  it("ignores empty providerProfile arrays (commander default for unrepeated flag)", () => {
-    expect(() => validateOptsForMode("remote", { providerProfile: [] })).not.toThrow();
   });
 
   it("error message lists every offender so the user fixes them in one pass", () => {

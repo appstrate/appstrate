@@ -60,14 +60,6 @@ export interface RemoteResolverInputs {
    * {@link RemoteAppstrateIntegrationResolver}.
    */
   extraHeaders?: Record<string, string>;
-  /**
-   * Default connection profile id sent on every credential-proxy call
-   * as `X-Connection-Profile-Id`. Per-provider overrides
-   * ({@link providerProfileOverrides}) take precedence on a per-call basis.
-   */
-  connectionProfileId?: string;
-  /** Per-provider profile id overrides (`@scope/provider` → uuid). */
-  providerProfileOverrides?: Record<string, string>;
 }
 
 export interface LocalResolverInputs {
@@ -132,10 +124,6 @@ export function buildIntegrationResolver(
         ...(remote.orgId ? { orgId: remote.orgId } : {}),
         endUserId: remote.endUserId,
         extraHeaders: remote.extraHeaders,
-        ...(remote.connectionProfileId ? { connectionProfileId: remote.connectionProfileId } : {}),
-        ...(remote.providerProfileOverrides
-          ? { integrationProfileOverrides: remote.providerProfileOverrides }
-          : {}),
       });
     }
   }
