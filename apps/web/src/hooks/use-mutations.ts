@@ -4,11 +4,9 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import i18n from "../i18n";
-import { api, apiFetch, ApiError, buildQs, uploadFormData } from "../api";
+import { api, ApiError, buildQs, uploadFormData } from "../api";
 import { PACKAGE_CONFIG, type PackageType } from "./use-packages";
 import { packageDetailPath } from "../lib/package-paths";
-import { invalidateConnectionRelated } from "./invalidation";
-import { useOAuthPopup } from "./use-oauth-popup";
 
 export function onMutationError(err: Error) {
   // Skip the generic toast for missing_integration_connection (412) —
@@ -72,93 +70,6 @@ export function useRunAgent(packageId: string) {
   });
 }
 
-export function useConnect() {
-  const qc = useQueryClient();
-  const openOAuthPopup = useOAuthPopup("oauth");
-  return useMutation({
-    mutationFn: async (
-      params: string | { provider: string; scopes?: string[]; connectionProfileId?: string },
-    ) => {
-      const provider = typeof params === "string" ? params : params.provider;
-      const scopes = typeof params === "string" ? undefined : params.scopes;
-      const connectionProfileId =
-        typeof params === "string" ? undefined : params.connectionProfileId;
-
-      const body: Record<string, unknown> = {};
-      if (scopes) body.scopes = scopes;
-      if (connectionProfileId) body.connectionProfileId = connectionProfileId;
-
-      try {
-        await openOAuthPopup(() =>
-          apiFetch<{ authUrl: string }>(`/api/connections/connect/${provider}`, {
-            method: "POST",
-            body: JSON.stringify(body),
-          }),
-        );
-      } catch (err) {
-        if (err instanceof Error && err.message === "popup_blocked") {
-          throw new Error(i18n.t("error.popupBlocked"));
-        }
-        if (err instanceof Error && err.message === "oauth_timeout") {
-          throw new Error(i18n.t("error.oauthTimeout"));
-        }
-        throw err;
-      }
-    },
-    onSuccess: () => {
-      invalidateConnectionRelated(qc);
-      toast.success(i18n.t("settings:providers.connectSuccess"));
-    },
-    onError: onMutationError,
-  });
-}
-
-export function useConnectApiKey() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({
-      provider,
-      apiKey,
-      connectionProfileId,
-    }: {
-      provider: string;
-      apiKey: string;
-      connectionProfileId?: string;
-    }) => {
-      return apiFetch(`/api/connections/connect/${provider}/api-key`, {
-        method: "POST",
-        body: JSON.stringify({ apiKey, ...(connectionProfileId ? { connectionProfileId } : {}) }),
-      });
-    },
-    onSuccess: () => {
-      invalidateConnectionRelated(qc);
-      toast.success(i18n.t("settings:providers.connectSuccess"));
-    },
-    onError: onMutationError,
-  });
-}
-
-export function useDisconnect() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (
-      params: string | { provider: string; connectionProfileId?: string; connectionId?: string },
-    ) => {
-      const provider = typeof params === "string" ? params : params.provider;
-      const connectionProfileId =
-        typeof params === "string" ? undefined : params.connectionProfileId;
-      const connectionId = typeof params === "string" ? undefined : params.connectionId;
-      const qs = buildQs({
-        connectionId,
-        ...(!connectionId ? { connectionProfileId } : {}),
-      });
-      return apiFetch(`/api/connections/${provider}${qs}`, { method: "DELETE" });
-    },
-    onSuccess: () => invalidateConnectionRelated(qc),
-    onError: onMutationError,
-  });
-}
-
 export function useImportPackage() {
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -218,34 +129,6 @@ export function useCancelRun() {
       qc.invalidateQueries({ queryKey: ["run"] });
       qc.invalidateQueries({ queryKey: ["runs"] });
       qc.invalidateQueries({ queryKey: ["paginated-runs"] });
-    },
-    onError: onMutationError,
-  });
-}
-
-export function useConnectCredentials() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({
-      provider,
-      credentials,
-      connectionProfileId,
-    }: {
-      provider: string;
-      credentials: Record<string, string>;
-      connectionProfileId?: string;
-    }) => {
-      return apiFetch(`/api/connections/connect/${provider}/credentials`, {
-        method: "POST",
-        body: JSON.stringify({
-          credentials,
-          ...(connectionProfileId ? { connectionProfileId } : {}),
-        }),
-      });
-    },
-    onSuccess: () => {
-      invalidateConnectionRelated(qc);
-      toast.success(i18n.t("settings:providers.connectSuccess"));
     },
     onError: onMutationError,
   });

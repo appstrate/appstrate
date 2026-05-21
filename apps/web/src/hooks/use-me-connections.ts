@@ -14,9 +14,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import i18n from "../i18n";
-import { api, apiFetch, apiList } from "../api";
+import { api, apiList } from "../api";
 import type { MeConnectionSourceGroup } from "@appstrate/shared-types";
-import { invalidateConnectionRelated } from "./invalidation";
 import { onMutationError } from "./use-mutations";
 
 /**
@@ -41,32 +40,6 @@ function scopedHeaders({ orgId, applicationId }: OrgAppHeaders) {
     "X-Org-Id": orgId,
     "X-Application-Id": applicationId,
   };
-}
-
-/**
- * Disconnect a provider connection from the user-scope page. Uses the
- * entry's own org/app headers so the call works regardless of the SPA's
- * currently-active org.
- */
-export function useDisconnectProviderConnection() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      providerId,
-      connectionId,
-      orgId,
-      applicationId,
-    }: OrgAppHeaders & { providerId: string; connectionId: string }) =>
-      apiFetch(`/api/connections/${providerId}?connectionId=${connectionId}`, {
-        method: "DELETE",
-        headers: scopedHeaders({ orgId, applicationId }),
-      }),
-    onSuccess: () => {
-      invalidateConnectionRelated(qc);
-      qc.invalidateQueries({ queryKey: ["me-connections"] });
-    },
-    onError: onMutationError,
-  });
 }
 
 /**

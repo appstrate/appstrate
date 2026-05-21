@@ -81,8 +81,6 @@ export interface InitiateIntegrationOAuthInput {
   orgId: string;
   applicationId: string;
   actor: Actor;
-  /** Connection profile id (mirrors legacy OAuth flow for consistency). */
-  connectionProfileId: string;
   /**
    * When true, append `prompt=select_account` to the authorize URL so the
    * IdP shows the account picker instead of silently reusing the currently
@@ -130,7 +128,6 @@ export async function initiateIntegrationOAuth(
     userId: input.actor.type === "user" ? input.actor.id : null,
     endUserId: input.actor.type === "end_user" ? input.actor.id : null,
     applicationId: input.applicationId,
-    connectionProfileId: input.connectionProfileId,
     providerId: integrationProviderIdSentinel(input.packageId, input.authKey),
     codeVerifier,
     scopesRequested: uniqueScopes,
@@ -180,7 +177,6 @@ export interface IntegrationOAuthCallbackResult {
   orgId: string;
   applicationId: string;
   actor: Actor;
-  connectionProfileId: string;
   accessToken: string;
   refreshToken?: string;
   expiresAt: string | null;
@@ -262,7 +258,6 @@ export async function handleIntegrationOAuthCallback(
     orgId: stateRow.orgId,
     applicationId: stateRow.applicationId,
     actor,
-    connectionProfileId: stateRow.connectionProfileId,
     accessToken: parsed.accessToken,
     refreshToken: parsed.refreshToken,
     expiresAt: parsed.expiresAt,

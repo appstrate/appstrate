@@ -9,7 +9,6 @@ export interface OAuthStateRecord {
   userId: string | null;
   endUserId?: string | null;
   applicationId: string;
-  connectionProfileId: string;
   providerId: string;
   codeVerifier: string;
   scopesRequested: string[];

@@ -617,11 +617,6 @@ export function createIntegrationsRouter() {
         orgId: scope.orgId,
         applicationId: scope.applicationId,
         actor,
-        // Integration connections aren't keyed by connection_profiles
-        // (that model is provider-side only) — we still carry an ID
-        // through for the state record shape. Use a fixed sentinel so
-        // the field is non-empty.
-        connectionProfileId: "integration",
         forceAccountSelect: body.forceAccountSelect ?? false,
         ...(body.connectionId ? { connectionId: body.connectionId } : {}),
       });

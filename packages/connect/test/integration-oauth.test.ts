@@ -55,7 +55,6 @@ describe("initiateIntegrationOAuth", () => {
       orgId: "org_1",
       applicationId: "app_1",
       actor: { type: "user", id: "u_1" },
-      connectionProfileId: "prof_1",
     });
     const url = new URL(result.authUrl);
     expect(url.origin).toBe("https://accounts.google.com");
@@ -81,7 +80,6 @@ describe("initiateIntegrationOAuth", () => {
       orgId: "o",
       applicationId: "a",
       actor: { type: "user", id: "u" },
-      connectionProfileId: "p",
     });
     const stored = await store.get(state);
     expect(stored).not.toBeNull();
@@ -103,7 +101,6 @@ describe("initiateIntegrationOAuth", () => {
       orgId: "o",
       applicationId: "a",
       actor: { type: "user", id: "u" },
-      connectionProfileId: "p",
     });
     expect(new URL(result.authUrl).searchParams.get("resource")).toBe("https://api.example.com");
   });
@@ -120,7 +117,6 @@ describe("initiateIntegrationOAuth", () => {
       orgId: "o",
       applicationId: "a",
       actor: { type: "user", id: "u" },
-      connectionProfileId: "p",
     });
     expect(result.authUrl).toContain("prompt=consent&client_id=");
     const url = new URL(result.authUrl);
@@ -140,7 +136,6 @@ describe("initiateIntegrationOAuth", () => {
       orgId: "o",
       applicationId: "a",
       actor: { type: "end_user", id: "eu_1" },
-      connectionProfileId: "p",
     });
     const stored = await store.get(state);
     expect(stored?.userId).toBeNull();
@@ -168,7 +163,6 @@ describe("handleIntegrationOAuthCallback", () => {
       orgId: "org_1",
       applicationId: "app_1",
       actor: { type: "user", id: "u_1" },
-      connectionProfileId: "prof_1",
       ...overrides,
     });
   }
@@ -343,7 +337,6 @@ describe("handleIntegrationOAuthCallback", () => {
       orgId: "o",
       userId: "u",
       applicationId: "a",
-      connectionProfileId: "p",
       providerId: "@official/gmail",
       codeVerifier: "v",
       scopesRequested: [],
