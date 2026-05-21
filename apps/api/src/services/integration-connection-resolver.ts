@@ -23,10 +23,6 @@
  * The exported `resolveConnections()` is pure — no DB access — so it can
  * be unit-tested with mock arrays. The `resolveConnectionsForRun()`
  * orchestrator below does the DB fanout and feeds the pure function.
- *
- * Provider-side (legacy `connectionProfiles` cascade) is untouched —
- * `resolveProviderProfiles` in `connection-profiles.ts` still runs for
- * those. The two models will converge when the provider sunset lands.
  */
 
 import { and, eq, or, inArray, isNull } from "drizzle-orm";

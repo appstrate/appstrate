@@ -17,9 +17,9 @@
  *  - Agent declares only `version` (bare semver-range string) →
  *    nothing to validate.
  *  - Integration not (yet) installed / not visible to the org →
- *    validation is skipped silently. The existing dependency check at
- *    run-time (`validateAgentDependencies`) is the authority on
- *    "integration must be installed", not us.
+ *    validation is skipped silently. The run-readiness check
+ *    (`agent-readiness.ts`) is the authority on "integration must be
+ *    installed", not us.
  *  - Integration declares no `tools` block or no `availableScopes`
  *    catalog → the corresponding subset check is skipped (matches the
  *    Phase 0 schema semantics).

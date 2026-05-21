@@ -4,11 +4,10 @@
  * /api/credential-proxy/proxy — public authenticated credential proxy.
  *
  * Used by external runners (CLI, GitHub Action, third-party agents) to
- * reach an application's providers without copying raw credentials out
- * of Appstrate. The CLI's `RemoteAppstrateProviderResolver` (spec.md
- * §8.3) is the canonical consumer; in-container runs reach the same
- * `executeProviderCall` helper via the sidecar's MCP `provider_call`
- * tool instead.
+ * reach an application's integrations without copying raw credentials out
+ * of Appstrate. The CLI's `RemoteAppstrateIntegrationResolver` is the
+ * canonical consumer; in-container runs reach the same credential-proxy
+ * core via the sidecar's MCP `{ns}__api_call` tools instead.
  *
  * Security: this is the single most sensitive endpoint in the public
  * API surface. Controls:
