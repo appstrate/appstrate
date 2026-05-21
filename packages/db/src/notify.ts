@@ -103,7 +103,7 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
           WHEN octet_length(NEW.data::text) <= 6000 THEN NEW.data
           ELSE '"[payload too large]"'::jsonb
         END,
-        'created_at', NEW.created_at
+        'created_at', to_char(NEW.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
       )::text);
       RETURN NEW;
     END;
