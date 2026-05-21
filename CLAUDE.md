@@ -453,7 +453,7 @@ Reference integration: `@appstrate/gmail-mcp@2.0.0` (in `scripts/system-packages
 
 ### AFPS Integrations — connection model & single-auth invariant
 
-The connect lifecycle for integrations is **agent-driven** (not integration-driven), because OAuth scopes are inferred per-agent from `tools[]` selection. The integration detail page (`/integrations/:scope/:name`) is **admin-leaning**: install/uninstall, OAuth client (`integration_oauth_clients`) registration, read-only auth declarations + connection list, and a passive `RequiredScopesPanel` diff for audit. It does NOT surface user-facing connect/disconnect.
+The connect lifecycle for integrations is **agent-driven** (not integration-driven), because OAuth scopes are inferred per-agent from `tools[]` selection. The integration detail page (`/integrations/:scope/:name`) is **admin-leaning**: activate/deactivate (non-destructive — installs/removes the `application_packages` row while FK'd connections survive), OAuth client (`integration_oauth_clients`) registration, read-only auth declarations + connection list, and a passive `RequiredScopesPanel` diff for audit. It does NOT surface user-facing connect/disconnect.
 
 User-facing connect/upgrade lives on agent surfaces (`AgentConnectionsSection` + `MissingConnectionsModal` on the run-kickoff 412). Both render `<InlineConnectButton>` from `components/integration-connect/` which picks OAuth popup vs api_key/basic/custom fields modal based on `auth.type` and forwards the agent's per-tool scope inference (`requiredScopes`) to the OAuth kickoff so consent asks for the minimum required.
 

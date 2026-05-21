@@ -68,7 +68,7 @@ type ConnectionRow = InferSelectModel<typeof integrationConnections>;
 /**
  * Toggle the per-(application, integration) lock. Refuses if the
  * application_packages row doesn't exist (integration not installed in
- * this app). Use after `assertIntegrationInstalled` to surface the
+ * this app). Use after `assertIntegrationActive` to surface the
  * standard 404 instead.
  */
 export async function setBlockUserConnections(

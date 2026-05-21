@@ -33,7 +33,7 @@ import {
 import type { Actor } from "../../lib/actor.ts";
 import { logger } from "../../lib/logger.ts";
 import {
-  assertIntegrationInstalled,
+  assertIntegrationActive,
   loadActorConnection,
   pickAnyAccessibleConnection,
   type ResolvedConnectionRow,
@@ -91,7 +91,7 @@ export async function resolveIntegrationProxyCredentials(
   input: ResolveIntegrationProxyInput,
 ): Promise<ResolvedIntegrationProxyCredentials> {
   const manifest = await loadManifest(input.integrationId);
-  await assertIntegrationInstalled(input.integrationId, input.applicationId);
+  await assertIntegrationActive(input.integrationId, input.applicationId);
 
   const auths = manifest.auths ?? {};
   const declaredAuthKeys = Object.keys(auths);

@@ -48,7 +48,7 @@ import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import { logger } from "../lib/logger.ts";
 import type { Actor } from "../lib/actor.ts";
 import {
-  isIntegrationInstalled,
+  isIntegrationActive,
   loadAccessibleConnectionById,
   pickAnyAccessibleConnection,
 } from "./integration-connections.ts";
@@ -145,7 +145,7 @@ async function resolveOne(
   const manifest = res.manifest;
 
   // (b) Installed in the application
-  if (!(await isIntegrationInstalled(packageId, applicationId))) {
+  if (!(await isIntegrationActive(packageId, applicationId))) {
     logger.info("integration not installed in application; skipping", { packageId, applicationId });
     return null;
   }

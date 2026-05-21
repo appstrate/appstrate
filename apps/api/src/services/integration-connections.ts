@@ -285,11 +285,12 @@ export async function pickAnyAccessibleConnection(
 }
 
 /**
- * `true` when the integration is recorded in `application_packages` for the
- * given app. Use {@link assertIntegrationInstalled} when the caller needs a
+ * `true` when the integration is active in the app — i.e. recorded in
+ * `application_packages` (activation installs the row, deactivation removes
+ * it). Use {@link assertIntegrationActive} when the caller needs a
  * structured 404 instead of a boolean.
  */
-export async function isIntegrationInstalled(
+export async function isIntegrationActive(
   packageId: string,
   applicationId: string,
 ): Promise<boolean> {
@@ -306,12 +307,12 @@ export async function isIntegrationInstalled(
   return row !== undefined;
 }
 
-/** Throw `notFound` unless the integration is installed in the application. */
-export async function assertIntegrationInstalled(
+/** Throw `notFound` unless the integration is active in the application. */
+export async function assertIntegrationActive(
   packageId: string,
   applicationId: string,
 ): Promise<void> {
-  if (!(await isIntegrationInstalled(packageId, applicationId))) {
+  if (!(await isIntegrationActive(packageId, applicationId))) {
     throw notFound(`Integration '${packageId}' is not installed in this application`);
   }
 }

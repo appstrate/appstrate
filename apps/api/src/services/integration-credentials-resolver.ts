@@ -41,7 +41,7 @@ import {
   decryptIntegrationConnectionFields,
 } from "./integration-token-refresh.ts";
 import {
-  assertIntegrationInstalled,
+  assertIntegrationActive,
   loadAccessibleConnectionById,
   pickAnyAccessibleConnection,
 } from "./integration-connections.ts";
@@ -100,7 +100,7 @@ export async function resolveLiveIntegrationCredentials(
   }
 
   const manifest = await loadIntegrationManifest(packageId);
-  await assertIntegrationInstalled(packageId, context.applicationId);
+  await assertIntegrationActive(packageId, context.applicationId);
 
   const auths = manifest.auths ?? {};
   if (Object.keys(auths).length === 0) {
