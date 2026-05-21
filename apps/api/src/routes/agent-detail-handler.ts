@@ -2,9 +2,6 @@
 
 import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
-import { eq, and, inArray } from "drizzle-orm";
-import { db } from "@appstrate/db/client";
-import { packages, applicationProviderCredentials } from "@appstrate/db/schema";
 import { getPackageWithAccess } from "../services/package-catalog.ts";
 import { getOrgItem } from "../services/package-items/crud.ts";
 import { CONFIG_BY_TYPE } from "../services/package-items/config.ts";
@@ -15,28 +12,17 @@ import {
 } from "../services/package-versions.ts";
 import { getLastRun, getRunningRunsForPackage } from "../services/state/runs.ts";
 import { getPackageConfig } from "../services/application-packages.ts";
-import {
-  resolveProviderProfiles,
-  resolveActorProfileContext,
-  getAgentAppProfile,
-} from "../services/connection-profiles.ts";
-import { resolveProviderStatuses } from "../services/connection-manager/status.ts";
-import { resolveManifestProviders } from "../lib/manifest-utils.ts";
+import { getAgentAppProfile } from "../services/connection-profiles.ts";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
-import { packageToProviderConfig } from "../lib/provider-config.ts";
-import { getOAuthCallbackUrl } from "../services/connection-manager/oauth.ts";
 import { parseScopedName } from "@appstrate/core/naming";
 import { mergeWithDefaults, asJSONSchemaObject } from "@appstrate/core/form";
 import { getItemId } from "./packages.ts";
 import { notFound } from "../lib/errors.ts";
-import { getActor } from "../lib/actor.ts";
-import { orgOrSystemFilter } from "../lib/package-helpers.ts";
 import { getAppScope } from "../lib/scope.ts";
 
 export async function agentDetailHandler(c: Context<AppEnv>) {
   const scope = getAppScope(c);
   const { orgId, applicationId } = scope;
-  const actor = getActor(c);
   const itemId = getItemId(c);
 
   const [agent, rawItem, versionCount, latestVersionDate] = await Promise.all([
@@ -52,78 +38,13 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
 
   const m = agent.manifest;
 
-  // Load app profile, actor profile context, and package config in parallel
-  const [agentAppProfile, { defaultUserProfileId, userProviderOverrides }, packageConfig] =
-    await Promise.all([
-      getAgentAppProfile(scope, agent.id),
-      resolveActorProfileContext(actor, agent.id, null, applicationId),
-      getPackageConfig(applicationId, agent.id),
-    ]);
+  // Load app profile + package config in parallel
+  const [agentAppProfile, packageConfig] = await Promise.all([
+    getAgentAppProfile(scope, agent.id),
+    getPackageConfig(applicationId, agent.id),
+  ]);
   const agentAppProfileId = agentAppProfile?.id ?? null;
   const agentAppProfileName = agentAppProfile?.name ?? null;
-
-  // Build providerProfiles map: app bindings → per-provider overrides → default
-  const manifestProviders = resolveManifestProviders(m);
-  const providerProfiles = await resolveProviderProfiles(
-    manifestProviders,
-    defaultUserProfileId,
-    userProviderOverrides,
-    agentAppProfileId,
-    applicationId,
-  );
-
-  const providerStatuses = await resolveProviderStatuses(
-    scope,
-    manifestProviders,
-    providerProfiles,
-  );
-
-  // Build populatedProviders: ProviderConfig keyed by provider ID
-  const providerIds = [...new Set(manifestProviders.map((p) => p.id))];
-  let populatedProviders: Record<string, unknown> = {};
-  if (providerIds.length > 0) {
-    const [providerPkgs, providerCreds] = await Promise.all([
-      db
-        .select({
-          id: packages.id,
-          draftManifest: packages.draftManifest,
-          source: packages.source,
-        })
-        .from(packages)
-        .where(
-          and(
-            orgOrSystemFilter(orgId),
-            eq(packages.type, "provider"),
-            inArray(packages.id, providerIds),
-          ),
-        ),
-      applicationId
-        ? db
-            .select({
-              providerId: applicationProviderCredentials.providerId,
-              credentialsEncrypted: applicationProviderCredentials.credentialsEncrypted,
-              enabled: applicationProviderCredentials.enabled,
-            })
-            .from(applicationProviderCredentials)
-            .where(
-              and(
-                eq(applicationProviderCredentials.applicationId, applicationId),
-                inArray(applicationProviderCredentials.providerId, providerIds),
-              ),
-            )
-        : Promise.resolve([]),
-    ]);
-    const credMap = new Map(providerCreds.map((r) => [r.providerId, r]));
-    populatedProviders = Object.fromEntries(
-      providerPkgs.map((pkg) => [
-        pkg.id,
-        packageToProviderConfig(
-          { id: pkg.id, manifest: pkg.draftManifest, source: pkg.source },
-          credMap.get(pkg.id) ?? null,
-        ),
-      ]),
-    );
-  }
 
   const [lastRun, runningCount] = await Promise.all([
     getLastRun(scope, agent.id, null),
@@ -151,7 +72,6 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
     scope: parsed?.scope ?? null,
     version: m.version ?? null,
     dependencies: {
-      providers: providerStatuses,
       skills: agent.skills.map((s) => ({
         id: s.id,
         ...(s.version ? { version: s.version } : {}),
@@ -180,8 +100,6 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
           duration: lastRun.duration,
         }
       : null,
-    populatedProviders,
-    callbackUrl: getOAuthCallbackUrl(),
     versionCount,
     hasUnarchivedChanges,
     agentAppProfileId,

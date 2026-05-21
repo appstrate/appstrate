@@ -7,8 +7,7 @@ import type { AppEnv } from "../types/index.ts";
 import { parsePackageZip, PackageZipError, zipArtifact } from "@appstrate/core/zip";
 import { buildDownloadHeaders } from "@appstrate/core/integrity";
 import { eq, and, inArray } from "drizzle-orm";
-import { packages, profiles, applicationProviderCredentials } from "@appstrate/db/schema";
-import { encryptCredentials } from "@appstrate/connect";
+import { packages, profiles } from "@appstrate/db/schema";
 import { db } from "@appstrate/db/client";
 import { listResponse } from "../lib/list-response.ts";
 import { postInstallPackage } from "../services/post-install-package.ts";
@@ -354,26 +353,6 @@ const ROUTE_CONFIGS: Record<PackageType, PackageRouteConfig> = {
     requireContent: true,
     requireMutableForVersionOps: true,
     getHandler: agentDetailHandler,
-  },
-  provider: {
-    cfg: CONFIG_BY_TYPE.provider,
-    path: "providers",
-    parseOpts: { requiredFile: null, contentFileExt: null },
-    storageFileName: () => "PROVIDER.md",
-    jsonBodyCreate: true,
-    afterCreate: async ({ packageId, applicationId }) => {
-      if (applicationId) {
-        await db
-          .insert(applicationProviderCredentials)
-          .values({
-            applicationId,
-            providerId: packageId,
-            credentialsEncrypted: encryptCredentials({}),
-            enabled: true,
-          })
-          .onConflictDoNothing();
-      }
-    },
   },
   // Phase 1.0 — no CRUD routes yet; integrations land via the bundle
   // import pipeline (`POST /api/packages/import-bundle`). This entry
@@ -1225,13 +1204,6 @@ export function createPackagesRouter() {
     }
 
     return c.json(result, 201);
-  });
-
-  // --- Provider versions (standalone — providers use their own CRUD in routes/providers.ts) ---
-  router.get("/providers/:scope{@[^/]+}/:name/versions", async (c) => {
-    const packageId = getItemId(c);
-    const versions = await listPackageVersions(packageId);
-    return c.json({ versions });
   });
 
   // --- Package import/download/publish routes ---

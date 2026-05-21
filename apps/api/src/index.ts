@@ -18,7 +18,6 @@ import { createRunsRemoteRouter } from "./routes/runs-remote.ts";
 import { createRunsEventsRouter } from "./routes/runs-events.ts";
 import { createSchedulesRouter } from "./routes/schedules.ts";
 import { createUserAgentsRouter } from "./routes/user-agents.ts";
-import { createProvidersRouter } from "./routes/providers.ts";
 import { createApiKeysRouter } from "./routes/api-keys.ts";
 import { createProxiesRouter } from "./routes/proxies.ts";
 import { createModelsRouter } from "./routes/models.ts";
@@ -34,7 +33,6 @@ import { createRealtimeRouter } from "./routes/realtime.ts";
 import { createEndUsersRouter } from "./routes/end-users.ts";
 import { createUploadsRouter, createUploadContentRouter } from "./routes/uploads.ts";
 import healthRouter from "./routes/health.ts";
-import { createConnectionsRouter } from "./routes/connections.ts";
 import { createIntegrationsRouter } from "./routes/integrations.ts";
 import { createCredentialProxyRouter } from "./routes/credential-proxy.ts";
 import { createLlmProxyRouter } from "./routes/llm-proxy.ts";
@@ -185,8 +183,6 @@ const CORE_APP_SCOPED_PREFIXES = [
   "/api/api-keys",
   "/api/notifications",
   "/api/packages",
-  "/api/providers",
-  "/api/connections",
   "/api/integrations",
   "/api/app-profiles",
   "/api/uploads",
@@ -279,7 +275,6 @@ app.route("/api/end-users", createEndUsersRouter());
 // Public path (no auth middleware — authenticated via HMAC token), rate-limited.
 app.route("/api/uploads/_content", createUploadContentRouter());
 app.route("/api/uploads", createUploadsRouter());
-app.route("/api/providers", createProvidersRouter());
 app.route("/api/api-keys", createApiKeysRouter());
 app.route("/api/proxies", createProxiesRouter());
 app.route("/api/models", createModelsRouter());
@@ -291,7 +286,6 @@ app.route("/api/connection-profiles", createConnectionProfilesRouter());
 app.route("/api/app-profiles", createAppProfilesRouter());
 app.route("/api", profileRouter);
 app.route("/api/realtime", createRealtimeRouter());
-app.route("/api/connections", createConnectionsRouter());
 app.route("/api/integrations", createIntegrationsRouter());
 app.route("/api/credential-proxy", createCredentialProxyRouter());
 app.route("/api/llm-proxy", createLlmProxyRouter());

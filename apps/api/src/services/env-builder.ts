@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { AppstrateRunPlan, FileReference, ProviderSummary } from "./run-launcher/types.ts";
+import type { AppstrateRunPlan, FileReference } from "./run-launcher/types.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
-import type { LoadedPackage, AgentProviderRequirement } from "../types/index.ts";
-import { getProvider } from "@appstrate/connect";
-import { db } from "@appstrate/db/client";
+import type { LoadedPackage } from "../types/index.ts";
 import { signRunToken } from "../lib/run-token.ts";
-import { buildProviderTokens } from "./token-resolver.ts";
 import {
   CHECKPOINT_KEY,
   getCheckpoint,
@@ -20,7 +17,7 @@ import { buildAgentPackage } from "./package-storage.ts";
 import { getLatestVersionInfo } from "./package-versions.ts";
 import { resolveProxy } from "./org-proxies.ts";
 import { resolveModel } from "./org-models.ts";
-import { resolveManifestProviders, extractManifestSchemas } from "../lib/manifest-utils.ts";
+import { extractManifestSchemas } from "../lib/manifest-utils.ts";
 import type { ProviderProfileMap } from "../types/index.ts";
 import { resolveIntegrationSpawns } from "./integration-spawn-resolver.ts";
 import type { ResolvedConnectionMap } from "@appstrate/core/integration";
@@ -84,8 +81,7 @@ export async function buildRunContext(params: {
   modelLabel: string | null;
   modelSource: string | null;
 }> {
-  const { runId, agent, providerProfiles, orgId, applicationId, actor, input, files } = params;
-  const manifestProviders = resolveManifestProviders(agent.manifest);
+  const { runId, agent, orgId, applicationId, actor, input, files } = params;
 
   // Skip getPackageConfig when all values are already provided by the caller (from preflight)
   const skipConfigFetch =
@@ -94,19 +90,15 @@ export async function buildRunContext(params: {
   // Step 1: load all independent data in parallel
   const persistenceScope = scopeFromActor(actor);
   const [
-    tokens,
     configFull,
     previousCheckpoint,
-    providerDefs,
     agentPackageResult,
     latestVersion,
     memories,
     pinnedSlotRows,
   ] = await Promise.all([
-    buildProviderTokens(manifestProviders, providerProfiles, orgId, applicationId),
     skipConfigFetch ? null : getPackageConfig(applicationId, agent.id),
     getCheckpoint(agent.id, applicationId, persistenceScope),
-    resolveProviderDefs(orgId, manifestProviders),
     buildAgentPackage(agent, orgId),
     params.overrideVersionLabel
       ? null
@@ -205,8 +197,8 @@ export async function buildRunContext(params: {
     runToken: signRunToken(runId),
     proxyUrl,
     timeout: (agent.manifest.timeout as number | undefined) ?? 300,
-    tokens,
-    providers: providerDefs,
+    tokens: {},
+    providers: [],
     files,
     ...(integrationSpawns.length > 0 ? { integrations: integrationSpawns } : {}),
   };
@@ -221,29 +213,4 @@ export async function buildRunContext(params: {
     modelLabel,
     modelSource,
   };
-}
-
-/** Resolve unique provider definitions for prompt context. */
-async function resolveProviderDefs(
-  orgId: string,
-  providers: AgentProviderRequirement[],
-): Promise<ProviderSummary[]> {
-  const uniqueProviders = [...new Set(providers.map((s) => s.id))];
-  const defs = await Promise.all(uniqueProviders.map((p) => getProvider(db, orgId, p)));
-  return defs
-    .filter((def): def is NonNullable<typeof def> => def != null)
-    .filter((def) => def.authMode != null)
-    .map((def) => ({
-      id: def.id,
-      displayName: def.displayName,
-      authMode: def.authMode!,
-      credentialSchema: def.credentialSchema,
-      credentialFieldName: def.credentialFieldName,
-      credentialHeaderName: def.credentialHeaderName,
-      credentialHeaderPrefix: def.credentialHeaderPrefix,
-      authorizedUris: def.authorizedUris,
-      allowAllUris: def.allowAllUris,
-      docsUrl: def.docsUrl,
-      categories: def.categories,
-    }));
 }

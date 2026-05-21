@@ -3,8 +3,9 @@
 // Only re-export types actually imported through this path (backend-only consumers).
 // All other shared types should be imported directly from "@appstrate/shared-types".
 export type { OrgRole } from "@appstrate/shared-types";
-import type { ProviderProfileSource } from "@appstrate/shared-types";
-export type { ProviderProfileSource };
+
+/** How a provider connection profile was resolved for a run. */
+export type ProviderProfileSource = "app_binding" | "user_profile";
 
 // --- Agent Manifest Types ---
 // Re-exported from @appstrate/validation. The AgentManifest type is Zod-inferred

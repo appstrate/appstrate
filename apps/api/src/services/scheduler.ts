@@ -7,7 +7,7 @@ import { db } from "@appstrate/db/client";
 import { schedules, connectionProfiles as connectionProfilesTable } from "@appstrate/db/schema";
 import { batchLoadUserNames } from "../lib/user-helpers.ts";
 import { logger } from "../lib/logger.ts";
-import type { Schedule, EnrichedSchedule, ScheduleReadiness } from "@appstrate/shared-types";
+import type { Schedule, EnrichedSchedule } from "@appstrate/shared-types";
 import { createFailedRun } from "./state/runs.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 import {
@@ -21,13 +21,10 @@ import { getPackage, packageExists } from "./package-catalog.ts";
 import type { ConnectionProfile } from "@appstrate/db/schema";
 import {
   getProfileByIdUnsafe,
-  resolveProviderProfiles,
   resolveScheduleProfileArgs,
   getAgentAppProfile,
 } from "./connection-profiles.ts";
-import { resolveProviderStatuses } from "./connection-manager/status.ts";
-import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
-import { resolveManifestProviders } from "../lib/manifest-utils.ts";
+import type { ProviderProfileMap } from "../types/index.ts";
 import { ApiError, internalError } from "../lib/errors.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
 import { validateInput } from "./schema.ts";
@@ -475,67 +472,11 @@ export async function getSchedule(id: string, scope?: AppScope): Promise<Enriche
   return enriched ?? null;
 }
 
-/** Compute readiness status for a single schedule based on its profile and agent. */
-async function computeScheduleReadiness(
-  schedule: Schedule,
-  profile: ConnectionProfile | null,
-  agent: LoadedPackage | null,
-  orgId: string,
-): Promise<ScheduleReadiness> {
-  if (!agent) {
-    return { status: "not_ready", totalProviders: 0, connectedProviders: 0, missingProviders: [] };
-  }
-
-  const providers = resolveManifestProviders(agent.manifest);
-
-  if (!profile) {
-    return {
-      status: "not_ready",
-      totalProviders: providers.length,
-      connectedProviders: 0,
-      missingProviders: providers.map((p) => p.id),
-    };
-  }
-
-  if (providers.length === 0) {
-    return { status: "ready", totalProviders: 0, connectedProviders: 0, missingProviders: [] };
-  }
-
-  const { defaultUserProfileId, appProfileId } = resolveScheduleProfileArgs(
-    profile,
-    schedule.connectionProfileId,
-  );
-  const providerProfiles = await resolveProviderProfiles(
-    providers,
-    defaultUserProfileId,
-    undefined,
-    appProfileId,
-    schedule.applicationId,
-  );
-
-  // Reuse the shared provider status resolution (batch-fetches connections)
-  const statuses = await resolveProviderStatuses(
-    { orgId, applicationId: schedule.applicationId },
-    providers,
-    providerProfiles,
-  );
-
-  const missing = statuses.filter((s) => s.status !== "connected").map((s) => s.id);
-  const connected = statuses.filter((s) => s.status === "connected").length;
-
-  return {
-    status: missing.length === 0 ? "ready" : connected > 0 ? "degraded" : "not_ready",
-    totalProviders: providers.length,
-    connectedProviders: connected,
-    missingProviders: missing,
-  };
-}
-
 /**
- * Enrich schedules with profile info and readiness status.
- * Batches lookups by unique connectionProfileId and packageId for efficiency.
+ * Enrich schedules with profile info.
+ * Batches lookups by unique connectionProfileId for efficiency.
  */
-async function enrichSchedules(schedules: Schedule[], orgId: string): Promise<EnrichedSchedule[]> {
+async function enrichSchedules(schedules: Schedule[], _orgId: string): Promise<EnrichedSchedule[]> {
   if (schedules.length === 0) return [];
 
   // Batch load unique profiles in one query
@@ -552,36 +493,22 @@ async function enrichSchedules(schedules: Schedule[], orgId: string): Promise<En
   const userIds = [...new Set(profileRows.filter((p) => p.userId).map((p) => p.userId!))];
   const userNameMap = await batchLoadUserNames(userIds);
 
-  // Batch load unique agents
-  const packageIds = [...new Set(schedules.map((s) => s.packageId))];
-  const agents = await Promise.all(packageIds.map((id) => getPackage(id, orgId)));
-  const agentMap = new Map(packageIds.map((id, i) => [id, agents[i] ?? null]));
+  return schedules.map((schedule) => {
+    const profile = profileMap.get(schedule.connectionProfileId);
 
-  return Promise.all(
-    schedules.map(async (schedule) => {
-      const profile = profileMap.get(schedule.connectionProfileId);
-      const agent = agentMap.get(schedule.packageId);
-
-      let profileName: string | null = null;
-      let profileType: "user" | "app" | null = null;
-      let profileOwnerName: string | null = null;
-      if (profile) {
-        profileName = profile.name;
-        profileType = profile.applicationId ? "app" : "user";
-        if (profile.userId) {
-          profileOwnerName = userNameMap.get(profile.userId) ?? null;
-        }
+    let profileName: string | null = null;
+    let profileType: "user" | "app" | null = null;
+    let profileOwnerName: string | null = null;
+    if (profile) {
+      profileName = profile.name;
+      profileType = profile.applicationId ? "app" : "user";
+      if (profile.userId) {
+        profileOwnerName = userNameMap.get(profile.userId) ?? null;
       }
+    }
 
-      const readiness = await computeScheduleReadiness(
-        schedule,
-        profile ?? null,
-        agent ?? null,
-        orgId,
-      );
-      return { ...schedule, profileName, profileType, profileOwnerName, readiness };
-    }),
-  );
+    return { ...schedule, profileName, profileType, profileOwnerName };
+  });
 }
 
 export async function createSchedule(

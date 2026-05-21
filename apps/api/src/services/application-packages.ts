@@ -11,7 +11,6 @@ import { applicationPackages, packages, applications, packageVersions } from "@a
 import { notFound, conflict } from "../lib/errors.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import { asRecord } from "@appstrate/core/safe-json";
-import { parseDraftManifest, extractDepsFromManifest } from "../lib/manifest-utils.ts";
 import type { PackageType } from "@appstrate/core/validation";
 import type { ResolvedRunConfig } from "@appstrate/shared-types";
 import type { AppScope } from "../lib/scope.ts";
@@ -319,15 +318,11 @@ export async function getResolvedRunConfig(
     versionPin = versionRow?.version ?? null;
   }
 
-  const manifest = parseDraftManifest(row.draftManifest);
-  const { providerIds } = extractDepsFromManifest(manifest);
-
   return {
     config: asRecord(row.config),
     modelId: row.modelId ?? null,
     proxyId: row.proxyId ?? null,
     versionPin,
-    requiredProviders: providerIds,
   };
 }
 

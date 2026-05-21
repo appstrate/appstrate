@@ -30,7 +30,6 @@ import {
   activeRunStatusValues,
   type RunStatus,
 } from "@appstrate/db/schema";
-import type { RunProviderSnapshot } from "@appstrate/shared-types";
 import { logger } from "../../lib/logger.ts";
 import { listResponse, type ListResponse } from "../../lib/list-response.ts";
 import { scopedWhere } from "../../lib/db-helpers.ts";
@@ -170,8 +169,6 @@ interface CreateRunParams {
   proxyLabel?: string;
   modelLabel?: string;
   modelSource?: string;
-  providerProfileIds?: Record<string, string>;
-  providerStatuses?: RunProviderSnapshot[];
   apiKeyId?: string;
   /** Snapshot of the agent's @scope (e.g. "@acme") at run creation. */
   agentScope?: string | null;
@@ -256,8 +253,6 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
     modelLabel: params.modelLabel,
     modelSource: params.modelSource,
     applicationId: scope.applicationId,
-    providerProfileIds: params.providerProfileIds,
-    providerStatuses: params.providerStatuses,
     apiKeyId: params.apiKeyId,
     runNumber,
     agentScope: params.agentScope ?? null,

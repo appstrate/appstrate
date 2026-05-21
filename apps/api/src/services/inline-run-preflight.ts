@@ -217,7 +217,6 @@ export async function runInlinePreflight(params: {
     if (mode === "fail-fast") {
       await validateAgentReadiness({
         agent: probeAgent,
-        providerProfiles,
         orgId,
         config: effectiveConfig,
         applicationId,
@@ -227,7 +226,6 @@ export async function runInlinePreflight(params: {
       push(
         await collectAgentReadinessErrors({
           agent: probeAgent,
-          providerProfiles,
           orgId,
           config: effectiveConfig,
           applicationId,

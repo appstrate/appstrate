@@ -24,9 +24,7 @@ import { agentsPaths } from "./paths/agents.ts";
 import { runsPaths } from "./paths/runs.ts";
 import { realtimePaths } from "./paths/realtime.ts";
 import { schedulesPaths } from "./paths/schedules.ts";
-import { connectionsPaths } from "./paths/connections.ts";
 import { integrationsPaths } from "./paths/integrations.ts";
-import { providersPaths } from "./paths/providers.ts";
 import { modelsPaths } from "./paths/models.ts";
 import { modelProviderCredentialsPaths } from "./paths/model-provider-credentials.ts";
 import { modelProvidersOAuthPaths } from "./paths/model-providers-oauth.ts";
@@ -57,9 +55,7 @@ const corePaths = {
   ...runsPaths,
   ...realtimePaths,
   ...schedulesPaths,
-  ...connectionsPaths,
   ...integrationsPaths,
-  ...providersPaths,
   ...modelsPaths,
   ...modelProviderCredentialsPaths,
   ...modelProvidersOAuthPaths,

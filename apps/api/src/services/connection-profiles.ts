@@ -4,20 +4,16 @@
  * Connection Profiles — manages actor and app connection profiles and profile resolution.
  */
 
-import { eq, and, count, inArray, sql } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   connectionProfiles,
-  userAgentProviderProfiles,
   userApplicationProfiles,
-  userProviderConnections,
-  appProfileProviderBindings,
   organizationMembers,
   applicationPackages,
 } from "@appstrate/db/schema";
 import type { ConnectionProfile } from "@appstrate/db/schema";
 import { type Actor, actorInsert, actorFilter } from "../lib/actor.ts";
-import { getAppProfileBindings } from "./state/app-profile-bindings.ts";
 import { getPackageConfig } from "./application-packages.ts";
 import type { AgentProviderRequirement, ProviderProfileMap } from "../types/index.ts";
 import { notFound, invalidRequest } from "../lib/errors.ts";
@@ -73,26 +69,11 @@ export async function listProfiles(
   actor: Actor,
 ): Promise<(ConnectionProfile & { connectionCount: number })[]> {
   const rows = await db
-    .select({
-      id: connectionProfiles.id,
-      userId: connectionProfiles.userId,
-      endUserId: connectionProfiles.endUserId,
-      applicationId: connectionProfiles.applicationId,
-      name: connectionProfiles.name,
-      isDefault: connectionProfiles.isDefault,
-      createdAt: connectionProfiles.createdAt,
-      updatedAt: connectionProfiles.updatedAt,
-      connectionCount: count(userProviderConnections.id),
-    })
+    .select()
     .from(connectionProfiles)
-    .leftJoin(
-      userProviderConnections,
-      eq(userProviderConnections.connectionProfileId, connectionProfiles.id),
-    )
-    .where(actorFilter(actor, PROFILE_ACTOR_COLUMNS))
-    .groupBy(connectionProfiles.id);
+    .where(actorFilter(actor, PROFILE_ACTOR_COLUMNS));
 
-  return rows;
+  return rows.map((p) => ({ ...p, connectionCount: 0 }));
 }
 
 /**
@@ -211,36 +192,12 @@ export async function deleteProfile(connectionProfileId: string, actor: Actor): 
 export async function listAppProfiles(
   scope: AppScope,
 ): Promise<(ConnectionProfile & { bindingCount: number; boundProviderIds: string[] })[]> {
-  // Fetch profiles
   const profileRows = await db
     .select()
     .from(connectionProfiles)
     .where(eq(connectionProfiles.applicationId, scope.applicationId));
 
-  if (profileRows.length === 0) return [];
-
-  // Fetch all bindings for these profiles in a single query
-  const profileIds = profileRows.map((p) => p.id);
-  const bindingRows = await db
-    .select({
-      appProfileId: appProfileProviderBindings.appProfileId,
-      providerId: appProfileProviderBindings.providerId,
-    })
-    .from(appProfileProviderBindings)
-    .where(inArray(appProfileProviderBindings.appProfileId, profileIds));
-
-  // Group bindings by profile
-  const bindingsByProfile = new Map<string, string[]>();
-  for (const row of bindingRows) {
-    const list = bindingsByProfile.get(row.appProfileId) ?? [];
-    list.push(row.providerId);
-    bindingsByProfile.set(row.appProfileId, list);
-  }
-
-  return profileRows.map((p) => {
-    const providerIds = bindingsByProfile.get(p.id) ?? [];
-    return { ...p, bindingCount: providerIds.length, boundProviderIds: providerIds };
-  });
+  return profileRows.map((p) => ({ ...p, bindingCount: 0, boundProviderIds: [] }));
 }
 
 export async function createAppProfile(scope: AppScope, name: string): Promise<ConnectionProfile> {
@@ -340,131 +297,11 @@ export async function deleteAppProfile(
  * Used to show users which app profiles depend on their credentials.
  */
 export async function listAppProfilesWithUserBindings(
-  scope: AppScope,
-  userId: string,
+  _scope: AppScope,
+  _userId: string,
 ): Promise<{ profile: ConnectionProfile; providerIds: string[] }[]> {
-  const rows = await db
-    .select({
-      appProfileId: appProfileProviderBindings.appProfileId,
-      providerId: appProfileProviderBindings.providerId,
-      profileName: connectionProfiles.name,
-      profileCreatedAt: connectionProfiles.createdAt,
-      profileUpdatedAt: connectionProfiles.updatedAt,
-    })
-    .from(appProfileProviderBindings)
-    .innerJoin(
-      connectionProfiles,
-      eq(connectionProfiles.id, appProfileProviderBindings.appProfileId),
-    )
-    .where(
-      and(
-        eq(appProfileProviderBindings.boundByUserId, userId),
-        eq(connectionProfiles.applicationId, scope.applicationId),
-      ),
-    );
-
-  const grouped = new Map<
-    string,
-    { profileName: string; createdAt: Date; updatedAt: Date; providerIds: string[] }
-  >();
-  for (const row of rows) {
-    const entry = grouped.get(row.appProfileId) ?? {
-      profileName: row.profileName,
-      createdAt: row.profileCreatedAt,
-      updatedAt: row.profileUpdatedAt,
-      providerIds: [],
-    };
-    entry.providerIds.push(row.providerId);
-    grouped.set(row.appProfileId, entry);
-  }
-
-  return Array.from(grouped.entries()).map(([connectionProfileId, data]) => ({
-    profile: {
-      id: connectionProfileId,
-      userId: null,
-      endUserId: null,
-      applicationId: scope.applicationId,
-      name: data.profileName,
-      isDefault: false,
-      createdAt: data.createdAt,
-      updatedAt: data.updatedAt,
-    },
-    providerIds: data.providerIds,
-  }));
-}
-
-// ─── Per-Provider Profile Overrides ──────────────────────────
-
-/** Get all per-provider profile overrides for an actor+agent combination. */
-export async function getUserAgentProviderOverrides(
-  actor: Actor,
-  packageId: string,
-): Promise<Record<string, string>> {
-  const rows = await db
-    .select({
-      providerId: userAgentProviderProfiles.providerId,
-      connectionProfileId: userAgentProviderProfiles.connectionProfileId,
-    })
-    .from(userAgentProviderProfiles)
-    .where(
-      and(
-        actorFilter(actor, {
-          userId: userAgentProviderProfiles.userId,
-          endUserId: userAgentProviderProfiles.endUserId,
-        }),
-        eq(userAgentProviderProfiles.packageId, packageId),
-      ),
-    );
-
-  const map: Record<string, string> = {};
-  for (const row of rows) {
-    map[row.providerId] = row.connectionProfileId;
-  }
-  return map;
-}
-
-/** Set a per-provider profile override (atomic upsert via raw SQL). */
-export async function setUserAgentProviderOverride(
-  actor: Actor,
-  packageId: string,
-  providerId: string,
-  connectionProfileId: string,
-): Promise<void> {
-  const actorValues = actorInsert(actor);
-  const userId = actorValues.userId ?? null;
-  const endUserId = actorValues.endUserId ?? null;
-
-  if (!userId && !endUserId) {
-    throw new Error("setUserAgentProviderOverride: exactly one of userId or endUserId must be set");
-  }
-
-  // Atomic upsert — partial unique indexes (idx_ufpp_member / idx_ufpp_end_user)
-  // cannot be targeted by Drizzle's onConflictDoUpdate, so we use raw SQL.
-  await db.execute(sql`
-    INSERT INTO user_agent_provider_profiles (user_id, end_user_id, package_id, provider_id, profile_id, updated_at)
-    VALUES (${userId}, ${endUserId}, ${packageId}, ${providerId}, ${connectionProfileId}, NOW())
-    ON CONFLICT (${userId !== null ? sql`user_id` : sql`end_user_id`}, package_id, provider_id)
-      WHERE ${userId !== null ? sql`user_id IS NOT NULL` : sql`end_user_id IS NOT NULL`}
-    DO UPDATE SET profile_id = EXCLUDED.profile_id, updated_at = NOW()
-  `);
-}
-
-/** Remove a per-provider profile override (revert to default). */
-export async function removeUserAgentProviderOverride(
-  actor: Actor,
-  packageId: string,
-  providerId: string,
-): Promise<void> {
-  await db.delete(userAgentProviderProfiles).where(
-    and(
-      actorFilter(actor, {
-        userId: userAgentProviderProfiles.userId,
-        endUserId: userAgentProviderProfiles.endUserId,
-      }),
-      eq(userAgentProviderProfiles.packageId, packageId),
-      eq(userAgentProviderProfiles.providerId, providerId),
-    ),
-  );
+  // Provider bindings were removed with the provider package type.
+  return [];
 }
 
 /** Get the default profile ID for an actor. */
@@ -487,7 +324,7 @@ export async function getDefaultProfileId(actor: Actor): Promise<string> {
  */
 export async function resolveActorProfileContext(
   actor: Actor | null,
-  packageId: string,
+  _packageId: string,
   fallbackProfileId: string | null = null,
   applicationId?: string,
 ): Promise<{ defaultUserProfileId: string | null; userProviderOverrides: Record<string, string> }> {
@@ -501,12 +338,8 @@ export async function resolveActorProfileContext(
     actor.type === "user" && applicationId
       ? getMemberApplicationProfileId(actor.id, applicationId)
       : Promise.resolve(null);
-  const [sticky, fallback, userProviderOverrides] = await Promise.all([
-    stickyPromise,
-    getDefaultProfileId(actor),
-    getUserAgentProviderOverrides(actor, packageId),
-  ]);
-  return { defaultUserProfileId: sticky ?? fallback, userProviderOverrides };
+  const [sticky, fallback] = await Promise.all([stickyPromise, getDefaultProfileId(actor)]);
+  return { defaultUserProfileId: sticky ?? fallback, userProviderOverrides: {} };
 }
 
 /**
@@ -632,57 +465,25 @@ export function resolveScheduleProfileArgs(
 
 // ─── Provider Profile Resolution ────────────────────────────
 
-/** Dependencies for resolveProviderProfiles — injectable for testing. */
-export interface ResolveProviderProfilesDeps {
-  getAppProfileBindings: (
-    appProfileId: string,
-    applicationId: string,
-  ) => Promise<Record<string, string>>;
-}
-
-const defaultResolveProviderProfilesDeps: ResolveProviderProfilesDeps = {
-  getAppProfileBindings,
-};
-
 /**
- * Resolve profile IDs for each provider in a package.
- *
- * Three-layer resolution (highest priority first):
- * 1. appProfileId binding → source: "app_binding"
- * 2. Per-provider user override → source: "user_profile"
- * 3. Default user profile → source: "user_profile"
- *
- * For schedules: pass the schedule's connectionProfileId as defaultUserProfileId
- * with appProfileId if the schedule uses an app profile. No per-provider overrides.
+ * Resolve profile IDs for each provider in a package. The provider package
+ * type was removed, so `providers` is always empty and the map is empty —
+ * retained as a no-op stub for the run-pipeline callers that still pass a
+ * (now-empty) provider list through their resolution step.
  */
 export async function resolveProviderProfiles(
   providers: AgentProviderRequirement[],
   defaultUserProfileId: string | null,
   userProviderOverrides?: Record<string, string>,
-  appProfileId?: string | null,
-  applicationId?: string,
-  deps: ResolveProviderProfilesDeps = defaultResolveProviderProfilesDeps,
+  _appProfileId?: string | null,
+  _applicationId?: string,
 ): Promise<ProviderProfileMap> {
   const map: ProviderProfileMap = {};
-
-  // Load app bindings if an app profile is provided
-  let bindings: Record<string, string> = {};
-  if (appProfileId && applicationId) {
-    bindings = await deps.getAppProfileBindings(appProfileId, applicationId);
-  }
-
   for (const svc of providers) {
-    const appBinding = appProfileId ? bindings[svc.id] : undefined;
-    if (appBinding) {
-      map[svc.id] = { connectionProfileId: appBinding, source: "app_binding" };
-    } else {
-      const fallbackId = userProviderOverrides?.[svc.id] ?? defaultUserProfileId;
-      if (fallbackId) {
-        map[svc.id] = { connectionProfileId: fallbackId, source: "user_profile" };
-      }
-      // If no fallback (app-only mode), provider simply not in map — dependency validation will catch it
+    const fallbackId = userProviderOverrides?.[svc.id] ?? defaultUserProfileId;
+    if (fallbackId) {
+      map[svc.id] = { connectionProfileId: fallbackId, source: "user_profile" };
     }
   }
-
   return map;
 }

@@ -47,10 +47,7 @@ import { updateSkillsSchema } from "../routes/user-agents.ts";
 import { welcomeSetupSchema } from "../routes/welcome.ts";
 
 // --- App Profile schemas (routes/app-profiles.ts) ---
-import {
-  profileNameSchema as appProfileNameSchema,
-  bindAppProfileSchema,
-} from "../routes/app-profiles.ts";
+import { profileNameSchema as appProfileNameSchema } from "../routes/app-profiles.ts";
 
 // --- Connection Profile schemas (routes/connection-profiles.ts) ---
 import { profileNameSchema as connectionProfileNameSchema } from "../routes/connection-profiles.ts";
@@ -62,21 +59,8 @@ import {
   setDefaultSchema as proxiesSetDefaultSchema,
 } from "../routes/proxies.ts";
 
-// --- Provider schemas (routes/providers.ts) ---
-import {
-  createProviderSchema,
-  updateProviderSchema,
-  configureCredentialsSchema,
-} from "../routes/providers.ts";
-
 // --- Agent schemas (routes/agents.ts) ---
-import {
-  proxyIdSchema,
-  modelIdSchema,
-  appProfileIdSchema,
-  setProviderProfileSchema,
-  removeProviderProfileSchema,
-} from "../routes/agents.ts";
+import { proxyIdSchema, modelIdSchema, appProfileIdSchema } from "../routes/agents.ts";
 
 // --- Model Provider Credential schemas (routes/model-provider-credentials.ts) ---
 import {
@@ -88,13 +72,6 @@ import {
 // --- Profile schemas (routes/profile.ts) ---
 import { profileUpdateSchema, batchLookupSchema } from "../routes/profile.ts";
 
-// --- Connection schemas (routes/connections.ts) ---
-import {
-  connectOAuthSchema,
-  connectApiKeySchema,
-  connectCredentialsSchema,
-} from "../routes/connections.ts";
-
 // --- Package schemas (routes/packages.ts) ---
 import { githubImportSchema, forkSchema } from "../routes/packages.ts";
 
@@ -104,7 +81,6 @@ import {
   updateApplicationSchema,
   installPackageSchema,
   updatePackageSchema,
-  appProviderCredentialsSchema,
 } from "../routes/applications.ts";
 
 // ---------------------------------------------------------------------------
@@ -289,20 +265,6 @@ const coreSchemas: ZodSchemaEntry[] = [
     description: "Set default proxy",
   },
 
-  // ─── Providers ──────────────────────────────────────────────────────────
-  {
-    method: "POST",
-    path: "/api/providers",
-    jsonSchema: toJsonSchema(createProviderSchema),
-    description: "Create provider",
-  },
-  {
-    method: "PUT",
-    path: "/api/providers/{scope}/{name}",
-    jsonSchema: toJsonSchema(updateProviderSchema),
-    description: "Update provider",
-  },
-
   // ─── Agent config (proxy/model/app-profile) ─────────────────────────────
   {
     method: "PUT",
@@ -385,48 +347,6 @@ const coreSchemas: ZodSchemaEntry[] = [
     description: "Update installed package config",
   },
 
-  // ─── Application Provider Credentials ──────────────────────────────────
-  {
-    method: "PUT",
-    path: "/api/applications/{applicationId}/providers/{scope}/{name}/credentials",
-    jsonSchema: toJsonSchema(appProviderCredentialsSchema),
-    description: "Set app-level provider credentials",
-  },
-
-  // ─── Connections ────────────────────────────────────────────────────────
-  {
-    method: "POST",
-    path: "/api/connections/connect/{scope}/{name}",
-    jsonSchema: toJsonSchema(connectOAuthSchema),
-    description: "Initiate OAuth connection",
-  },
-  {
-    method: "POST",
-    path: "/api/connections/connect/{scope}/{name}/api-key",
-    jsonSchema: toJsonSchema(connectApiKeySchema),
-    description: "Create API key connection",
-  },
-  {
-    method: "POST",
-    path: "/api/connections/connect/{scope}/{name}/credentials",
-    jsonSchema: toJsonSchema(connectCredentialsSchema),
-    description: "Save generic credentials connection",
-  },
-
-  // ─── Agent Provider Profiles ────────────────────────────────────────────
-  {
-    method: "PUT",
-    path: "/api/agents/{scope}/{name}/provider-profiles",
-    jsonSchema: toJsonSchema(setProviderProfileSchema),
-    description: "Set agent provider profile override",
-  },
-  {
-    method: "DELETE",
-    path: "/api/agents/{scope}/{name}/provider-profiles",
-    jsonSchema: toJsonSchema(removeProviderProfileSchema),
-    description: "Remove agent provider profile override",
-  },
-
   // ─── Package Import & Fork ──────────────────────────────────────────────
   {
     method: "POST",
@@ -439,22 +359,6 @@ const coreSchemas: ZodSchemaEntry[] = [
     path: "/api/packages/{scope}/{name}/fork",
     jsonSchema: toJsonSchema(forkSchema),
     description: "Fork an agent",
-  },
-
-  // ─── Provider Credentials ──────────────────────────────────────────────
-  {
-    method: "PUT",
-    path: "/api/providers/credentials/{scope}/{name}",
-    jsonSchema: toJsonSchema(configureCredentialsSchema),
-    description: "Configure provider credentials",
-  },
-
-  // ─── App Profile Binding ───────────────────────────────────────────────
-  {
-    method: "POST",
-    path: "/api/app-profiles/{id}/bind",
-    jsonSchema: toJsonSchema(bindAppProfileSchema),
-    description: "Bind provider to app profile",
   },
 ];
 

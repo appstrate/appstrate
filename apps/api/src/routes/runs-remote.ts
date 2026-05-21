@@ -240,7 +240,6 @@ export function createRunsRemoteRouter() {
         // Readiness gate — same checks the inline preflight ends with.
         await validateAgentReadiness({
           agent: agentForRun,
-          providerProfiles,
           orgId,
           config: effectiveConfig,
           applicationId,

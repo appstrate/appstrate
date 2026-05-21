@@ -8,14 +8,13 @@ import type { PackageType } from "@appstrate/core/validation";
 
 export interface PackageTypeConfig {
   type: PackageType;
-  storageFolder: "agents" | "skills" | "providers" | "integrations";
+  storageFolder: "agents" | "skills" | "integrations";
   label: string;
 }
 
 export const CONFIG_BY_TYPE: Record<PackageType, PackageTypeConfig> = {
   agent: { type: "agent", storageFolder: "agents", label: "Agents" },
   skill: { type: "skill", storageFolder: "skills", label: "Skills" },
-  provider: { type: "provider", storageFolder: "providers", label: "Providers" },
   // Phase 1.0 — INTEGRATIONS_PROPOSAL §4.1.
   integration: { type: "integration", storageFolder: "integrations", label: "Integrations" },
 };

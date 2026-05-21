@@ -163,7 +163,6 @@ export async function resolveRunPreflight(params: {
 
   await validateAgentReadiness({
     agent,
-    providerProfiles,
     orgId,
     config: packageConfig.config,
     applicationId,
@@ -226,7 +225,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
       detail: gates.error.message,
     });
   }
-  const { agent, providerStatusSnapshots } = gates;
+  const { agent } = gates;
 
   // --- Step 0.5: Connection resolution snapshot (#199) ---
   //
@@ -310,11 +309,6 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     throw err;
   }
 
-  // --- Step 2: Extract profile ID map ---
-  const profileIdMap = Object.fromEntries(
-    Object.entries(providerProfiles).map(([k, v]) => [k, v.connectionProfileId]),
-  );
-
   // --- Step 5: Mint sink credentials ---
   // Every run — platform and remote — uses the same signed-event
   // protocol. The container reads `APPSTRATE_SINK_URL` +
@@ -350,8 +344,6 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
       proxyLabel: proxyLabel ?? undefined,
       modelLabel: modelLabel ?? undefined,
       modelSource: modelSource ?? undefined,
-      providerProfileIds: profileIdMap,
-      providerStatuses: providerStatusSnapshots,
       apiKeyId,
       agentScope: agentDenorm.scope,
       agentName: agentDenorm.name,

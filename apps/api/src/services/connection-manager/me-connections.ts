@@ -3,10 +3,9 @@
 /**
  * Unified user-scope connection aggregator backing `GET /api/me/connections`.
  *
- * Returns both provider connections and integration connections in a single
- * shape, grouped by their "source" (the package they connect to). Crosses
- * orgs and applications — the connection list belongs to the user, not to
- * any single org context.
+ * Returns integration connections in a single shape, grouped by their
+ * "source" (the package they connect to). Crosses orgs and applications —
+ * the connection list belongs to the user, not to any single org context.
  */
 
 import { db } from "@appstrate/db/client";
@@ -24,7 +23,6 @@ import type { MeConnectionEntry, MeConnectionSourceGroup } from "@appstrate/shar
 import { asRecord } from "@appstrate/core/safe-json";
 import { toISORequired } from "../../lib/date-helpers.ts";
 import { getPackageDisplayName } from "../../lib/package-helpers.ts";
-import { listAllActorConnections } from "./providers.ts";
 
 /**
  * Fetch every integration_connections row owned by the actor, joined with
@@ -196,63 +194,11 @@ async function listAllActorIntegrationConnections(
 }
 
 /**
- * Convert the legacy `UserConnectionProviderGroup[]` shape into the unified
- * `MeConnectionSourceGroup[]` shape. Provider connections don't carry
- * `needsReconnection` / `expiresAt` / `label` at this listing layer — we
- * surface what's available.
- */
-async function listAllActorProviderConnectionsUnified(
-  actor: Actor,
-): Promise<MeConnectionSourceGroup[]> {
-  const legacy = await listAllActorConnections(actor);
-  const groups: MeConnectionSourceGroup[] = [];
-  for (const pg of legacy.data) {
-    const connections: MeConnectionEntry[] = [];
-    for (const og of pg.orgs) {
-      for (const conn of og.connections) {
-        connections.push({
-          connectionId: conn.connectionId,
-          kind: "provider",
-          label: null,
-          scopesGranted: conn.scopesGranted ?? [],
-          connectedAt: conn.connectedAt,
-          needsReconnection: false,
-          expiresAt: null,
-          identity: conn.profile.name,
-          profile: conn.profile,
-          authKey: null,
-          sharedWithOrg: false,
-          reusedByAgents: null,
-          org: { id: og.orgId, name: og.orgName },
-          application: conn.application,
-        });
-      }
-    }
-    if (connections.length === 0) continue;
-    groups.push({
-      kind: "provider",
-      sourceId: pg.providerId,
-      displayName: pg.displayName,
-      logo: pg.logo,
-      totalConnections: connections.length,
-      connections,
-    });
-  }
-  return groups;
-}
-
-/**
- * Unified user-scope listing. Provider groups first, then integration groups,
- * sorted alphabetically by display name within each kind.
+ * Unified user-scope listing of integration connection groups, sorted
+ * alphabetically by display name.
  */
 export async function listMeConnections(actor: Actor): Promise<MeConnectionSourceGroup[]> {
-  const [providers, integrations] = await Promise.all([
-    listAllActorProviderConnectionsUnified(actor),
-    listAllActorIntegrationConnections(actor),
-  ]);
-  const sortByName = (a: MeConnectionSourceGroup, b: MeConnectionSourceGroup) =>
-    a.displayName.localeCompare(b.displayName);
-  providers.sort(sortByName);
-  integrations.sort(sortByName);
-  return [...providers, ...integrations];
+  const integrations = await listAllActorIntegrationConnections(actor);
+  integrations.sort((a, b) => a.displayName.localeCompare(b.displayName));
+  return integrations;
 }

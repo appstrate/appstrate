@@ -185,7 +185,6 @@ async function createRemoteRun(input: CreateRunInput): Promise<CreateRunResult> 
   try {
     await validateAgentReadiness({
       agent: input.agent,
-      providerProfiles,
       orgId,
       config,
       applicationId,
@@ -212,7 +211,7 @@ async function createRemoteRun(input: CreateRunInput): Promise<CreateRunResult> 
     providerProfiles,
   });
   if (!gates.ok) return { ok: false, error: gates.error };
-  const { agent, providerStatusSnapshots } = gates;
+  const { agent } = gates;
 
   // --- Snapshot the connection cascade (#199, remote-path mirror of
   //     run-pipeline). Any resolver error is hard 412: readiness already
@@ -259,9 +258,6 @@ async function createRemoteRun(input: CreateRunInput): Promise<CreateRunResult> 
   //     for runs inserts — covers runNumber allocation, app-scoping, and
   //     sink bookkeeping consistently across both origins).
   const agentDenorm = extractRunAgentDenorm(agent);
-  const profileIdMap = Object.fromEntries(
-    Object.entries(providerProfiles).map(([k, v]) => [k, v.connectionProfileId]),
-  );
 
   await createRunRow(
     { orgId, applicationId },
@@ -272,8 +268,6 @@ async function createRemoteRun(input: CreateRunInput): Promise<CreateRunResult> 
       input: runInput ?? null,
       connectionProfileId,
       apiKeyId,
-      providerProfileIds: profileIdMap,
-      providerStatuses: providerStatusSnapshots,
       agentScope: agentDenorm.scope,
       agentName: agentDenorm.name,
       config,

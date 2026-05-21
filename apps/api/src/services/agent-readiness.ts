@@ -5,29 +5,19 @@
  * before a run. Called from all run paths (manual, scheduled).
  */
 
-import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
-import { collectDependencyErrors } from "./dependency-validation.ts";
+import type { LoadedPackage } from "../types/index.ts";
 import { resolveConnectionsForRun } from "./integration-connection-resolver.ts";
 import type { ConnectionResolutionError } from "@appstrate/core/integration";
 import { validateConfig } from "./schema.ts";
-import { resolveManifestProviders, extractManifestSchemas } from "../lib/manifest-utils.ts";
+import { extractManifestSchemas } from "../lib/manifest-utils.ts";
 import { isPromptEmpty, findMissingDependencies } from "@appstrate/core/validation";
 import { deepMergeConfig } from "@appstrate/core/schema-validation";
 import { ApiError, type ValidationFieldError } from "../lib/errors.ts";
-import { resolveProviderProfiles } from "./connection-profiles.ts";
 import type { Actor } from "../lib/actor.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
-import type {
-  ReadinessProviderEntry,
-  ReadinessReason,
-  ReadinessReport,
-} from "@appstrate/shared-types";
-
-export type { ReadinessProviderEntry, ReadinessReason, ReadinessReport };
 
 export interface AgentReadinessParams {
   agent: LoadedPackage;
-  providerProfiles: ProviderProfileMap;
   orgId: string;
   config?: Record<string, unknown>;
   applicationId: string;
@@ -59,7 +49,7 @@ export interface AgentReadinessParams {
 export async function collectAgentReadinessErrors(
   params: AgentReadinessParams,
 ): Promise<ValidationFieldError[]> {
-  const { agent, providerProfiles, orgId, config, applicationId, actor, skip } = params;
+  const { agent, orgId, config, applicationId, actor, skip } = params;
   const { manifest } = agent;
   const errors: ValidationFieldError[] = [];
 
@@ -84,11 +74,6 @@ export async function collectAgentReadinessErrors(
       message: `Required skill '${skillId}' is not installed`,
     });
   }
-
-  const manifestProviders = resolveManifestProviders(manifest);
-  errors.push(
-    ...(await collectDependencyErrors(manifestProviders, providerProfiles, orgId, applicationId)),
-  );
 
   if (actor) {
     // New flat-connections + pins model (replaces the per-actor-only
@@ -276,79 +261,4 @@ export function mergeAndValidateConfigOverride(
   const merged = deepMergeConfig(persisted, override);
   validateMergedConfigOrThrow(agent, merged);
   return merged;
-}
-
-// ---------------------------------------------------------------------------
-// Readiness preflight — read-only contract for the CLI (and dashboard) to
-// inspect provider readiness before a run, without committing to one.
-// Reuses resolveProviderProfiles + collectDependencyErrors so the answer
-// stays in lockstep with what the run pipeline would actually do.
-// ---------------------------------------------------------------------------
-
-export interface ReadinessQuery {
-  agent: LoadedPackage;
-  applicationId: string;
-  orgId: string;
-  /** Default user profile id (X-Connection-Profile-Id equivalent). */
-  defaultUserProfileId: string | null;
-  /** Per-provider profile overrides, mirrors `--provider-profile` on the CLI. */
-  perProviderOverrides?: Record<string, string>;
-  /** Optional app profile id (used when the request is in app-profile mode). */
-  appProfileId?: string | null;
-}
-
-/**
- * Compute the set of unsatisfied providers for an agent under the given
- * profile context. Single source of truth for both the CLI's preflight
- * call and any future dashboard inspector that wants to surface "which
- * connections do I still need?" without triggering a run.
- */
-export async function resolveAgentReadiness(query: ReadinessQuery): Promise<ReadinessReport> {
-  const { agent, applicationId, orgId, defaultUserProfileId, perProviderOverrides, appProfileId } =
-    query;
-  const manifestProviders = resolveManifestProviders(agent.manifest);
-  const providerProfiles = await resolveProviderProfiles(
-    manifestProviders,
-    defaultUserProfileId,
-    perProviderOverrides,
-    appProfileId ?? null,
-    applicationId,
-  );
-  const errors = await collectDependencyErrors(
-    manifestProviders,
-    providerProfiles,
-    orgId,
-    applicationId,
-  );
-
-  const seen = new Set<string>();
-  const missing: ReadinessProviderEntry[] = [];
-  for (const err of errors) {
-    const providerId = err.field.startsWith("providers.")
-      ? err.field.slice("providers.".length)
-      : err.field;
-    if (seen.has(providerId)) continue;
-    seen.add(providerId);
-    missing.push({
-      providerId,
-      connectionProfileId: providerProfiles[providerId]?.connectionProfileId ?? null,
-      reason: mapReason(err.code),
-      message: err.message,
-    });
-  }
-  return { ready: missing.length === 0, missing };
-}
-
-function mapReason(code: string): ReadinessReason {
-  switch (code) {
-    case "needs_reconnection":
-      return "needs_reconnection";
-    case "scope_insufficient":
-      return "scope_insufficient";
-    case "provider_not_enabled":
-    case "provider_not_configured":
-      return "provider_not_enabled";
-    default:
-      return "no_connection";
-  }
 }
