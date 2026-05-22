@@ -145,6 +145,60 @@ describe("runTwoStep — declarative chain", () => {
     expect(res.outputs.person_id).toBe("P-7");
   });
 
+  it("fails closed when a declared output extracts an empty value", async () => {
+    // Upstream answers 200 but with no Set-Cookie — the cookie extractor yields
+    // "" rather than throwing, so without the empty-guard the engine would
+    // silently persist `JSESSIONID=""`. Assert it fails closed instead.
+    const { impl } = fakeFetch([{ status: 200, body: "ok" }]);
+    const config: TwoStepConfig = {
+      steps: [
+        {
+          request: { method: "POST", url: "https://idp.example.com/login", body: "u=x" },
+          extract: { JSESSIONID: { from: "cookie", name: "JSESSIONID" } },
+          output: ["JSESSIONID"],
+        },
+      ],
+    };
+    const err = await runTwoStep(config, {
+      inputs: {},
+      authorizedUris: ALLOW,
+      allowAllUris: false,
+      fetchImpl: impl,
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(TwoStepError);
+    expect((err as TwoStepError).reason).toBe("extract_failed");
+  });
+
+  it("fails closed when a declared bind extracts an empty value", async () => {
+    // First step binds a token that the response doesn't carry → "" → must throw
+    // before the second step runs with a corrupted `{{token}}`.
+    const { impl } = fakeFetch([{ status: 200, body: JSON.stringify({}) }]);
+    const config: TwoStepConfig = {
+      steps: [
+        {
+          request: { method: "POST", url: "https://idp.example.com/token", body: "g=pw" },
+          extract: { token: { from: "json", path: "$.access_token" } },
+          bind: ["token"],
+        },
+        {
+          request: {
+            method: "GET",
+            url: "https://idp.example.com/me",
+            headers: { Authorization: "Bearer {{token}}" },
+          },
+        },
+      ],
+    };
+    const err = await runTwoStep(config, {
+      inputs: {},
+      authorizedUris: ALLOW,
+      allowAllUris: false,
+      fetchImpl: impl,
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(TwoStepError);
+    expect((err as TwoStepError).reason).toBe("extract_failed");
+  });
+
   it("captures a Set-Cookie value", async () => {
     const { impl } = fakeFetch([
       { status: 200, body: "ok", headers: { "set-cookie": "JSESSIONID=abc123; Path=/; HttpOnly" } },

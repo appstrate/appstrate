@@ -18,6 +18,8 @@
  *     worst-case input length);
  *   - `{{...}}` resolves ONLY `inputs` + this flow's `bind` — never another
  *     connection's material; unresolved placeholders fail closed.
+ *   - a declared `bind`/`output` whose extractor produced an empty string fails
+ *     closed too — never persist/forward a silently-empty required value.
  *
  * Pure: no DB / Redis / sidecar. `fetchImpl` + `now` are injectable for tests.
  */
@@ -356,6 +358,17 @@ export async function runTwoStep(
           "invalid_config",
         );
       }
+      // Fail closed on a present-but-empty extraction: a declared `bind` is a
+      // required intermediate value, and an empty string means the upstream
+      // response didn't carry it (missing JSON path, absent cookie/header, …).
+      // Feeding "" into a later step would silently corrupt the chain.
+      if (extracted[name] === "") {
+        throw new TwoStepError(
+          `step ${i}: bind '${name}' extracted an empty value`,
+          i,
+          "extract_failed",
+        );
+      }
       bind[name] = extracted[name]!;
     }
     for (const name of step.output ?? []) {
@@ -364,6 +377,16 @@ export async function runTwoStep(
           `step ${i}: output '${name}' has no matching extractor`,
           i,
           "invalid_config",
+        );
+      }
+      // Fail closed on a present-but-empty extraction: a declared `output` is a
+      // required injectable. Persisting "" would yield a silently-broken
+      // connection (e.g. `Authorization: Bearer ` or `Cookie: JSESSIONID=`).
+      if (extracted[name] === "") {
+        throw new TwoStepError(
+          `step ${i}: output '${name}' extracted an empty value`,
+          i,
+          "extract_failed",
         );
       }
       outputs[name] = extracted[name]!;
