@@ -63,8 +63,6 @@ export interface CoreResources {
   members: "read" | "invite" | "remove" | "change-role";
   agents: "read" | "write" | "configure" | "delete" | "run";
   skills: "read" | "write" | "delete";
-  tools: "read" | "write" | "delete";
-  providers: "read" | "write" | "delete";
   runs: "read" | "cancel" | "delete";
   schedules: "read" | "write" | "delete";
   // Unified `package_persistence` (checkpoints + memories) with first-class
@@ -112,8 +110,6 @@ export const CORE_RESOURCE_NAMES: ReadonlySet<string> = new Set<string>([
   "members",
   "agents",
   "skills",
-  "tools",
-  "providers",
   "runs",
   "schedules",
   "persistence",

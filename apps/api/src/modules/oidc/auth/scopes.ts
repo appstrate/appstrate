@@ -48,10 +48,8 @@ export const OIDC_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permission>(
   "integrations:connect",
   "integrations:disconnect",
   // Read-only catalog access — safe to surface to embedding apps so they can
-  // render skill/tool/provider/model metadata alongside their own UI.
+  // render skill/model metadata alongside their own UI.
   "skills:read",
-  "tools:read",
-  "providers:read",
   "models:read",
 ]);
 

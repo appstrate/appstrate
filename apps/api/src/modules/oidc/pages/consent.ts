@@ -31,8 +31,6 @@ const SCOPE_DESCRIPTIONS_FR: Record<string, string> = {
   "integrations:connect": "Ajouter des connexions en votre nom",
   "integrations:disconnect": "Retirer vos connexions",
   "skills:read": "Lister les skills disponibles",
-  "tools:read": "Lister les tools disponibles",
-  "providers:read": "Lister les providers disponibles",
   "models:read": "Lister les modèles LLM disponibles",
 };
 

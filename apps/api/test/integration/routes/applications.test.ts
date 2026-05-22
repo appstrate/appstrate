@@ -139,7 +139,7 @@ describe("Applications API", () => {
           "applications:read",
           "applications:write",
           "applications:delete",
-          "providers:write",
+          "integrations:read",
         ],
       });
       return {

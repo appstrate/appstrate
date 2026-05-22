@@ -96,14 +96,6 @@ const OWNER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "skills:read",
   "skills:write",
   "skills:delete",
-  // Tools
-  "tools:read",
-  "tools:write",
-  "tools:delete",
-  // Providers
-  "providers:read",
-  "providers:write",
-  "providers:delete",
   // Runs
   "runs:read",
   "runs:cancel",
@@ -160,10 +152,8 @@ const MEMBER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   // Agents (read + run, no write/configure/delete)
   "agents:read",
   "agents:run",
-  // Skills, Tools, Providers (read only)
+  // Skills (read only)
   "skills:read",
-  "tools:read",
-  "providers:read",
   // Runs (read + cancel own)
   "runs:read",
   "runs:cancel",
@@ -193,8 +183,6 @@ const VIEWER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "members:read",
   "agents:read",
   "skills:read",
-  "tools:read",
-  "providers:read",
   "runs:read",
   "schedules:read",
   "persistence:read",
@@ -236,14 +224,6 @@ export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permissio
   "skills:read",
   "skills:write",
   "skills:delete",
-  // Tools
-  "tools:read",
-  "tools:write",
-  "tools:delete",
-  // Providers
-  "providers:read",
-  "providers:write",
-  "providers:delete",
   // Runs
   "runs:read",
   "runs:cancel",
