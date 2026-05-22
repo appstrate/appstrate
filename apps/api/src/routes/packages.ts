@@ -1109,10 +1109,10 @@ function makeDeleteVersionHandler(rcfg: PackageRouteConfig) {
 export function createPackagesRouter() {
   const router = new Hono<AppEnv>();
 
-  // --- Package CRUD routes (skills, tools, agents, providers) ---
+  // --- Package CRUD routes (skills, agents, integrations) ---
   for (const rcfg of Object.values(ROUTE_CONFIGS)) {
     const { path } = rcfg;
-    // Permission resource matches the route path (e.g. "skills", "tools", "agents", "providers")
+    // Permission resource matches the route path (e.g. "skills", "agents", "integrations")
     const resource = path as import("../lib/permissions.ts").Resource;
     const writeGuard = requirePermission(resource, "write");
     const deleteGuard = requirePermission(resource, "delete");

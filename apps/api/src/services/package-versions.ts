@@ -566,13 +566,7 @@ export async function createVersionFromDraft(params: {
 
   // Build ZIP depending on package type
   let zipBuffer: Buffer;
-  if (pkg.type === "provider") {
-    // Providers store everything in manifest — ZIP contains only manifest.json
-    const entries: Record<string, Uint8Array> = {
-      "manifest.json": new TextEncoder().encode(JSON.stringify(finalManifest, null, 2)),
-    };
-    zipBuffer = Buffer.from(zipArtifact(entries, 6));
-  } else if (pkg.type === "agent") {
+  if (pkg.type === "agent") {
     const storedFiles = await downloadPackageFiles("agents", orgId, packageId);
     if (storedFiles) {
       const entries: Record<string, Uint8Array> = { ...storedFiles };
@@ -584,8 +578,11 @@ export async function createVersionFromDraft(params: {
       zipBuffer = buildMinimalZip(finalManifest, content);
     }
   } else {
-    // pkg.type === "skill" — bundle the stored files + rewritten manifest.
-    const files = await downloadPackageFiles("skills", orgId, packageId);
+    // pkg.type === "skill" | "integration" — both bundle their stored files
+    // (skill content / integration entrypoint+bundle) plus the rewritten
+    // manifest, from their respective storage folder.
+    const folder = pkg.type === "integration" ? "integrations" : "skills";
+    const files = await downloadPackageFiles(folder, orgId, packageId);
     if (!files) {
       throw new Error(
         `Cannot create version for ${packageId}: package files not found in storage. Re-upload the package before creating a version.`,

@@ -24,18 +24,12 @@ import type {
 const PACKAGE_CONFIG = {
   agent: { path: "agents" },
   skill: { path: "skills" },
-  provider: { path: "providers" },
-  // Phase 1.0 — read-only surface (proposal §4.1). UI for browse +
-  // connect lands in Phase 1.3; this stub keeps the package-type
-  // factory exhaustive so adding the enum value didn't fan out
-  // into "missing key" errors across the dashboard.
   integration: { path: "integrations" },
 } as const;
 
 type PackageDetailMap = {
   agent: AgentDetail;
   skill: OrgPackageItemDetail;
-  provider: OrgPackageItemDetail;
   integration: OrgPackageItemDetail;
 };
 

@@ -4,22 +4,21 @@
  * Integration test: `buildAgentPackage` emits the canonical multi-package
  * `.afps-bundle` format (Phase 3 of the bundle-format roadmap).
  *
- * Seeds an agent with skill + provider draft deps, drops each dep's file
- * set into the `library-packages` bucket, and asserts:
+ * Seeds an agent with a skill draft dep, drops the dep's file set into the
+ * `library-packages` bucket, and asserts:
  *   - the produced ZIP is a valid multi-package bundle
  *     (`readBundleFromBuffer` accepts it)
  *   - the bundle's root is the seeded agent, with `manifest.json` +
  *     `prompt.md` at the root package
- *   - each declared dep is resolved and embedded under
+ *   - the declared skill dep is resolved and embedded under
  *     `packages/@scope/name/version/…`
- *   - when projected back through `bundleToLoadedBundle` (what the
- *     container does), the flat layout matches what the runtime
- *     resolvers expect: `skills/<scoped-id>/`, `providers/<scoped-id>/`.
+ *   - the flat layout matches what the runtime resolvers expect:
+ *     `skills/<scoped-id>/`.
  *
- * NOTE: the `tool` AFPS package type was removed — the former system tools
- * are now built-in runtime tools baked into the runner, so they are no
- * longer resolved as bundle dependencies. `DraftPackageCatalog` only
- * resolves skill + provider draft folders.
+ * NOTE: skills are the only bundle dependency the platform resolves.
+ * The `tool`/`provider` AFPS package types were removed, and integrations
+ * are spawned as separate MCP servers at runtime (never embedded in the
+ * agent bundle) — so `DraftPackageCatalog` only resolves the skill folder.
  *
  * This is the round-trip guarantee that lets the host switch to
  * multi-package without breaking the container resolvers.
@@ -52,19 +51,13 @@ describe("buildAgentPackage — multi-package bundle output", () => {
     ORG_ID = ctx.org.id;
   });
 
-  it("emits a valid Bundle with root + skill + provider deps", async () => {
-    // ─── 1. Seed the dep packages and their draft files ──────────────
+  it("emits a valid Bundle with root + skill dep", async () => {
+    // ─── 1. Seed the dep package and its draft files ─────────────────
     const skillManifest = {
       name: "@bundlehost/md-skill",
       version: "1.0.0",
       type: "skill",
       description: "Markdown skill",
-    };
-    const providerManifest = {
-      name: "@bundlehost/svc-provider",
-      version: "0.5.0",
-      type: "provider",
-      description: "Svc provider",
     };
 
     await seedPackage({
@@ -78,18 +71,7 @@ describe("buildAgentPackage — multi-package bundle output", () => {
       "SKILL.md": enc("---\nname: md\n---\nUse markdown."),
     });
 
-    await seedPackage({
-      id: "@bundlehost/svc-provider",
-      type: "provider",
-      orgId: ORG_ID,
-      draftManifest: providerManifest,
-    });
-    await uploadPackageFiles("providers", ORG_ID, "@bundlehost/svc-provider", {
-      "manifest.json": enc(JSON.stringify(providerManifest, null, 2)),
-      "PROVIDER.md": enc("Provider doc"),
-    });
-
-    // ─── 2. Seed the root agent with all three deps ──────────────────
+    // ─── 2. Seed the root agent with the skill dep ───────────────────
     const agentManifest = {
       name: "@bundlehost/root-agent",
       version: "3.0.0",
@@ -97,7 +79,6 @@ describe("buildAgentPackage — multi-package bundle output", () => {
       description: "Root agent",
       dependencies: {
         skills: { "@bundlehost/md-skill": "^1" },
-        providers: { "@bundlehost/svc-provider": "^0.5" },
       },
     };
     await seedPackage({
@@ -124,21 +105,17 @@ describe("buildAgentPackage — multi-package bundle output", () => {
     // ─── 4. Read it back as a Bundle ─────────────────────────────────
     const bundle = readBundleFromBuffer(new Uint8Array(result.zip));
     expect(bundle.root).toBe("@bundlehost/root-agent@3.0.0");
-    expect(bundle.packages.size).toBe(3); // agent + skill + provider
+    expect(bundle.packages.size).toBe(2); // agent + skill
 
     const rootPkg = bundle.packages.get(bundle.root)!;
     expect(dec(rootPkg.files.get("prompt.md"))).toBe("You are the agent.");
     expect(dec(rootPkg.files.get("manifest.json"))).toContain('"name": "@bundlehost/root-agent"');
 
     expect(bundle.packages.has("@bundlehost/md-skill@1.0.0")).toBe(true);
-    expect(bundle.packages.has("@bundlehost/svc-provider@0.5.0")).toBe(true);
 
     // ─── 5. Assert dep package contents match the uploaded files ────
     const skillPkg = bundle.packages.get("@bundlehost/md-skill@1.0.0")!;
     expect(dec(skillPkg.files.get("SKILL.md"))).toContain("markdown");
-
-    const providerPkg = bundle.packages.get("@bundlehost/svc-provider@0.5.0")!;
-    expect(dec(providerPkg.files.get("PROVIDER.md"))).toBe("Provider doc");
   });
 
   it("produces a deterministic bundle — two builds yield byte-identical ZIPs", async () => {

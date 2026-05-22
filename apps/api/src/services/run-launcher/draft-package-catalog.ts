@@ -7,7 +7,7 @@
  * bucket) rather than against published versions.
  *
  * This is the catalog used on the run hot path by `buildAgentPackage`,
- * where runs must see the latest tool/skill/provider edits without a
+ * where runs must see the latest skill/integration edits without a
  * republish step. The counterpart {@link DbPackageCatalog} resolves
  * against published versions (signed, version-range-pinned) and is
  * used by the import/export endpoints, where reproducibility matters
@@ -21,8 +21,10 @@
  *   - `fetch(identity)` returns a `BundlePackage` whose `integrity` is
  *     left empty; `buildBundleFromCatalog` recomputes it from the
  *     RECORD entries (same policy as `DbPackageCatalog`).
- *   - Skills and providers are returned as-is (their contract is
- *     file-based, not source-based).
+ *   - Skills are returned as-is (their contract is file-based, not
+ *     source-based). Integrations are NOT bundle dependencies — they are
+ *     spawned as separate MCP servers at runtime — so they never flow
+ *     through this catalog.
  *   - System packages (`orgId IS NULL`) are visible cross-org — same
  *     rule as every other platform resolver.
  */
@@ -47,7 +49,7 @@ export interface DraftPackageCatalogOptions {
   orgId: string;
 }
 
-type DraftStorageFolder = "skills" | "providers";
+type DraftStorageFolder = "skills";
 
 export class DraftPackageCatalog implements PackageCatalog {
   private readonly rowCache = new Map<
@@ -112,8 +114,8 @@ export class DraftPackageCatalog implements PackageCatalog {
     const fileMap = new Map<string, Uint8Array>();
     for (const [p, bytes] of Object.entries(files)) fileMap.set(p, bytes);
 
-    // For skills/providers, ensure `manifest.json` is materialised since
-    // some upload paths only store content files.
+    // For skills, ensure `manifest.json` is materialised since some upload
+    // paths only store content files.
     if (!fileMap.has("manifest.json")) {
       fileMap.set("manifest.json", new TextEncoder().encode(JSON.stringify(manifest, null, 2)));
     }
@@ -154,6 +156,5 @@ export class DraftPackageCatalog implements PackageCatalog {
 
 function typeToFolder(type: unknown): DraftStorageFolder | null {
   if (type === "skill") return "skills";
-  if (type === "provider") return "providers";
   return null;
 }
