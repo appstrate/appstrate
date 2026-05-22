@@ -4,11 +4,20 @@ import { describe, it, expect } from "bun:test";
 import { resolveStrategy } from "../../../src/services/connect/registry.ts";
 import { OAuth2Strategy } from "../../../src/services/connect/oauth2-strategy.ts";
 import { FieldsStrategy } from "../../../src/services/connect/fields-strategy.ts";
+import { TwoStepStrategy } from "../../../src/services/connect/twostep-strategy.ts";
+import {
+  OrchestratedStrategy,
+  type ConnectToolExecutor,
+} from "../../../src/services/connect/orchestrated-strategy.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 
 type AuthDef = NonNullable<IntegrationManifest["auths"]>[string];
 
 const auth = (type: AuthDef["type"]): AuthDef => ({ type }) as AuthDef;
+
+const fakeExecutor: ConnectToolExecutor = {
+  run: async () => ({ outputs: { JSESSIONID: "x" }, expiresAt: null }),
+};
 
 describe("resolveStrategy", () => {
   it("maps oauth2 → OAuth2Strategy (with begin)", () => {
@@ -17,12 +26,28 @@ describe("resolveStrategy", () => {
     expect(typeof s.begin).toBe("function");
   });
 
-  it("maps api_key / basic / custom → FieldsStrategy (no begin)", () => {
+  it("maps api_key / basic / bare custom → FieldsStrategy (no begin)", () => {
     for (const t of ["api_key", "basic", "custom"] as const) {
       const s = resolveStrategy(auth(t));
       expect(s).toBeInstanceOf(FieldsStrategy);
       expect(s.begin).toBeUndefined();
     }
+  });
+
+  it("maps custom + connect.steps → TwoStepStrategy", () => {
+    const a = { type: "custom", connect: { steps: [{}] } } as unknown as AuthDef;
+    expect(resolveStrategy(a)).toBeInstanceOf(TwoStepStrategy);
+  });
+
+  it("maps custom + connect.tool → OrchestratedStrategy when an executor is supplied", () => {
+    const a = { type: "custom", connect: { tool: "login" } } as unknown as AuthDef;
+    const s = resolveStrategy(a, { connectToolExecutor: fakeExecutor });
+    expect(s).toBeInstanceOf(OrchestratedStrategy);
+  });
+
+  it("throws for custom + connect.tool with no executor (no silent half-acquisition)", () => {
+    const a = { type: "custom", connect: { tool: "login" } } as unknown as AuthDef;
+    expect(() => resolveStrategy(a)).toThrow(/connect-run substrate/);
   });
 
   it("throws for an auth type without a connect strategy (oauth1)", () => {
