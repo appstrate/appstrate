@@ -436,14 +436,13 @@ export function PreferencesConnectorsPage() {
         description={(() => {
           if (!confirmState) return "";
           const base = t("connectors.deleteConfirm", {
-            provider: confirmState.displayName,
-            profile: confirmState.identity ?? "",
+            name: confirmState.displayName,
+            account: confirmState.identity ?? "",
           });
-          // Impact list — only relevant for integrations (provider connections
-          // don't carry a reusedByAgents count). Surfaces the blast radius so
-          // the user can intentionally choose between deleting (here) vs
-          // changing the agent-side pick (on the agent page).
-          if (confirmState.kind === "integration" && confirmState.reusedByAgents > 0) {
+          // Impact list surfaces the blast radius so the user can
+          // intentionally choose between deleting (here) vs changing the
+          // agent-side pick (on the agent page).
+          if (confirmState.reusedByAgents > 0) {
             return `${base}\n\n${t("connectors.deleteConfirmImpact", {
               count: confirmState.reusedByAgents,
             })}`;
