@@ -431,7 +431,7 @@ export const applicationsPaths = {
       tags: ["Application Packages"],
       summary: "Get the resolved per-app run configuration",
       description:
-        "Returns the configuration applied when this application runs the given package: agent config, model override, proxy override, pinned version label, and the list of providers required by the package's manifest. Used by the CLI to reproduce a UI run without stitching together three separate calls; the UI uses the same source for its run-from-app flow.",
+        "Returns the configuration applied when this application runs the given package: agent config, model override, proxy override, and pinned version label. Used by the CLI to reproduce a UI run without stitching together three separate calls; the UI uses the same source for its run-from-app flow.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "applicationId", in: "path", required: true, schema: { type: "string" } },
@@ -446,16 +446,12 @@ export const applicationsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["config", "modelId", "proxyId", "versionPin", "requiredProviders"],
+                required: ["config", "modelId", "proxyId", "versionPin"],
                 properties: {
                   config: { type: "object" },
                   modelId: { type: ["string", "null"] },
                   proxyId: { type: ["string", "null"] },
                   versionPin: { type: ["string", "null"] },
-                  requiredProviders: {
-                    type: "array",
-                    items: { type: "string" },
-                  },
                 },
               },
               example: {
@@ -463,128 +459,9 @@ export const applicationsPaths = {
                 modelId: "claude-sonnet-4-6",
                 proxyId: null,
                 versionPin: "1.2.3",
-                requiredProviders: ["@afps/gmail", "@afps/clickup"],
               },
             },
           },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-  },
-  "/api/applications/{applicationId}/providers": {
-    get: {
-      operationId: "listAppProviderOverrides",
-      tags: ["Application Providers"],
-      summary: "List app-level provider overrides",
-      description:
-        "List all application-level provider credential overrides and enablement status.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { name: "applicationId", in: "path", required: true, schema: { type: "string" } },
-      ],
-      responses: {
-        "200": {
-          description: "Provider overrides list",
-          headers: { "Request-Id": { $ref: "#/components/headers/RequestId" } },
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  object: { type: "string", enum: ["list"] },
-                  data: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: {
-                        providerId: { type: "string" },
-                        hasAppCredentials: { type: "boolean" },
-                        appEnabled: { type: "boolean" },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-  },
-  "/api/applications/{applicationId}/providers/{scope}/{name}/credentials": {
-    put: {
-      operationId: "setAppProviderCredentials",
-      tags: ["Application Providers"],
-      summary: "Set app-level provider credentials",
-      description:
-        "Set or update application-level provider admin credentials (e.g. OAuth clientId/clientSecret). These override org-level credentials for this application. The provider must be enabled at org level.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { name: "applicationId", in: "path", required: true, schema: { type: "string" } },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-      ],
-      requestBody: {
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              properties: {
-                credentials: {
-                  type: "object",
-                  additionalProperties: { type: "string" },
-                  description:
-                    "Admin credentials (e.g. clientId, clientSecret for OAuth providers)",
-                },
-                enabled: {
-                  type: "boolean",
-                  description:
-                    "Whether the provider is enabled for this application. Can only restrict (disable), not override an org-level disable.",
-                },
-              },
-            },
-          },
-        },
-      },
-      responses: {
-        "200": {
-          description: "Credentials configured",
-          headers: { "Request-Id": { $ref: "#/components/headers/RequestId" } },
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: { configured: { type: "boolean" } },
-              },
-            },
-          },
-        },
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-    delete: {
-      operationId: "deleteAppProviderCredentials",
-      tags: ["Application Providers"],
-      summary: "Remove app-level provider credentials",
-      description:
-        "Remove the application-level override for a provider, reverting to org-level credentials.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { name: "applicationId", in: "path", required: true, schema: { type: "string" } },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-      ],
-      responses: {
-        "204": {
-          description: "Override removed",
-          headers: { "Request-Id": { $ref: "#/components/headers/RequestId" } },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "404": { $ref: "#/components/responses/NotFound" },

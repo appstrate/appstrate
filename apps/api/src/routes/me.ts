@@ -133,8 +133,8 @@ router.get("/models", requirePermission("models", "read"), async (c) => {
 /**
  * GET /api/me/connections — unified user-scope connection list.
  *
- * Returns every connection the caller owns (provider + integration) across
- * all orgs/apps they're a member of. Source-grouped (one group per package).
+ * Returns every integration connection the caller owns across all orgs/apps
+ * they're a member of. Source-grouped (one group per package).
  * Skips org context entirely: the connection list belongs to the user, not
  * to any org/application.
  */

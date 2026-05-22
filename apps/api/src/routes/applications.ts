@@ -264,8 +264,8 @@ export function createApplicationsRouter() {
 
   // GET /api/applications/:applicationId/packages/:scope/:name/run-config —
   // single source of truth for the per-app config, model/proxy override,
-  // version pin, and required-provider list. Consumed by the CLI to
-  // reproduce a UI run without hand-stitching three separate calls.
+  // and version pin. Consumed by the CLI to reproduce a UI run without
+  // hand-stitching three separate calls.
   router.get(
     "/:applicationId/packages/:scope{@[^/]+}/:name/run-config",
     requirePermission("agents", "read"),

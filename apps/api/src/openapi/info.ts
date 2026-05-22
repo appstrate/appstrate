@@ -52,12 +52,7 @@ export const openApiInfo = {
     { name: "Meta", description: "API documentation and specification" },
     { name: "Applications", description: "Application management for headless API" },
     { name: "Application Packages", description: "Manage packages installed in an application" },
-    {
-      name: "Application Providers",
-      description: "Manage provider credentials at the application level",
-    },
     { name: "End Users", description: "End-user management for headless API" },
-    { name: "Provider Keys", description: "Organization provider keys and credentials" },
     { name: "Uploads", description: "Direct-upload protocol for agent input files" },
     {
       name: "Credential Proxy",

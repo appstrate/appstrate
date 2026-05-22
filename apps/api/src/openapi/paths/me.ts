@@ -85,9 +85,9 @@ export const mePaths = {
       tags: ["Profile"],
       summary: "List the caller's connections across every org/app",
       description:
-        "Unified user-scope view that merges provider connections and integration " +
-        "connections under a single shape, grouped by source package. Crosses " +
-        "orgs/applications by design — does NOT require `X-Org-Id`.",
+        "Unified user-scope view of the caller's integration connections under a " +
+        "single shape, grouped by source package. Crosses orgs/applications by " +
+        "design — does NOT require `X-Org-Id`.",
       responses: {
         "200": {
           description: "Connection groups",

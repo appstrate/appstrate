@@ -90,7 +90,6 @@ export function createAgentsRouter() {
         author: manifest.author,
         keywords: manifest.keywords ?? [],
         dependencies: {
-          providers: (manifest.dependencies?.providers ?? {}) as Record<string, string>,
           skills: (manifest.dependencies?.skills ?? {}) as Record<string, string>,
         },
         runningRuns: runningCounts[row.id] ?? 0,
