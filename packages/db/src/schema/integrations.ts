@@ -93,12 +93,17 @@ export const integrationConnections = pgTable(
     // (even pointing at the same upstream account — it's their call to
     // keep duplicates or clean up). Reconnect / upgrade flows target a
     // specific row via its `id` (threaded through the OAuth state).
-    // Replaced with a covering lookup index so the resolver's per-actor
-    // queries stay fast.
+    // Covering lookup index so the resolver's per-actor queries stay fast.
+    // Column order is (integrationPackageId, applicationId, authKey): the hot
+    // reads filter (integrationPackageId, applicationId) — with or without
+    // authKey — so applicationId must precede authKey for both shapes to get
+    // a full prefix match. Its leftmost prefix (integrationPackageId) also
+    // serves package-only scans + the package FK cascade, so no separate
+    // single-column package index is needed.
     index("idx_integration_conn_lookup").on(
       table.integrationPackageId,
-      table.authKey,
       table.applicationId,
+      table.authKey,
     ),
     index("idx_integration_conn_user")
       .on(table.userId)
@@ -106,8 +111,9 @@ export const integrationConnections = pgTable(
     index("idx_integration_conn_end_user")
       .on(table.endUserId)
       .where(sql`${table.endUserId} IS NOT NULL`),
+    // applicationId-only scans (FK cascade on app delete) — not covered by
+    // the lookup index (which leads with integrationPackageId).
     index("idx_integration_conn_app").on(table.applicationId),
-    index("idx_integration_conn_package").on(table.integrationPackageId),
     // Hot path for the fallback resolution: when an actor has no pin
     // and no override, the resolver enumerates own + shared connections
     // for (app, integration, authKey). Partial index keeps the sharing

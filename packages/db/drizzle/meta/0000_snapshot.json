@@ -1,5 +1,5 @@
 {
-  "id": "760de19c-35a1-4511-9270-5d77be141437",
+  "id": "43864a1e-7c32-414e-9ce9-e9da4855cdd4",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -3592,21 +3592,6 @@
           "method": "btree",
           "with": {}
         },
-        "idx_runs_application_id": {
-          "name": "idx_runs_application_id",
-          "columns": [
-            {
-              "expression": "application_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "idx_runs_app_status_started": {
           "name": "idx_runs_app_status_started",
           "columns": [
@@ -4186,13 +4171,13 @@
               "nulls": "last"
             },
             {
-              "expression": "auth_key",
+              "expression": "application_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
             },
             {
-              "expression": "application_id",
+              "expression": "auth_key",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -4240,21 +4225,6 @@
           "columns": [
             {
               "expression": "application_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_integration_conn_package": {
-          "name": "idx_integration_conn_package",
-          "columns": [
-            {
-              "expression": "integration_package_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

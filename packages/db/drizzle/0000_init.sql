@@ -623,7 +623,6 @@ CREATE INDEX "idx_runs_package_id" ON "runs" USING btree ("package_id");--> stat
 CREATE INDEX "idx_runs_status" ON "runs" USING btree ("status");--> statement-breakpoint
 CREATE INDEX "idx_runs_user_id" ON "runs" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX "idx_runs_end_user_id" ON "runs" USING btree ("end_user_id");--> statement-breakpoint
-CREATE INDEX "idx_runs_application_id" ON "runs" USING btree ("application_id");--> statement-breakpoint
 CREATE INDEX "idx_runs_app_status_started" ON "runs" USING btree ("application_id","status","started_at");--> statement-breakpoint
 CREATE INDEX "idx_runs_org_id" ON "runs" USING btree ("org_id");--> statement-breakpoint
 CREATE INDEX "idx_runs_notification" ON "runs" USING btree ("user_id","org_id","notified_at","read_at");--> statement-breakpoint
@@ -634,11 +633,10 @@ CREATE INDEX "idx_schedules_user_id" ON "package_schedules" USING btree ("user_i
 CREATE INDEX "idx_schedules_end_user_id" ON "package_schedules" USING btree ("end_user_id");--> statement-breakpoint
 CREATE INDEX "idx_package_schedules_org_id" ON "package_schedules" USING btree ("org_id");--> statement-breakpoint
 CREATE INDEX "idx_package_schedules_app_id" ON "package_schedules" USING btree ("application_id");--> statement-breakpoint
-CREATE INDEX "idx_integration_conn_lookup" ON "integration_connections" USING btree ("integration_package_id","auth_key","application_id");--> statement-breakpoint
+CREATE INDEX "idx_integration_conn_lookup" ON "integration_connections" USING btree ("integration_package_id","application_id","auth_key");--> statement-breakpoint
 CREATE INDEX "idx_integration_conn_user" ON "integration_connections" USING btree ("user_id") WHERE "integration_connections"."user_id" IS NOT NULL;--> statement-breakpoint
 CREATE INDEX "idx_integration_conn_end_user" ON "integration_connections" USING btree ("end_user_id") WHERE "integration_connections"."end_user_id" IS NOT NULL;--> statement-breakpoint
 CREATE INDEX "idx_integration_conn_app" ON "integration_connections" USING btree ("application_id");--> statement-breakpoint
-CREATE INDEX "idx_integration_conn_package" ON "integration_connections" USING btree ("integration_package_id");--> statement-breakpoint
 CREATE INDEX "idx_integration_conn_shared" ON "integration_connections" USING btree ("application_id","integration_package_id","auth_key") WHERE "integration_connections"."shared_with_org" = true;--> statement-breakpoint
 CREATE UNIQUE INDEX "idx_integration_oauth_clients_unique" ON "integration_oauth_clients" USING btree ("application_id","integration_package_id","auth_key");--> statement-breakpoint
 CREATE INDEX "idx_integration_oauth_clients_app" ON "integration_oauth_clients" USING btree ("application_id");--> statement-breakpoint
