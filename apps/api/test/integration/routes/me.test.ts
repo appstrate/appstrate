@@ -21,9 +21,36 @@ import {
   orgOnlyHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedApiKey } from "../../helpers/seed.ts";
+import { seedApiKey, seedPackage } from "../../helpers/seed.ts";
+import { db } from "../../helpers/db.ts";
+import { integrationConnections } from "@appstrate/db/schema";
 
 const app = getTestApp();
+
+async function seedConnectionFor(opts: {
+  orgId: string;
+  applicationId: string;
+  integrationId: string;
+  userId: string;
+  label?: string;
+}): Promise<void> {
+  await seedPackage({
+    id: opts.integrationId,
+    orgId: opts.orgId,
+    type: "integration",
+    source: "local",
+  });
+  await db.insert(integrationConnections).values({
+    integrationPackageId: opts.integrationId,
+    authKey: "google",
+    accountId: `acct-${crypto.randomUUID().slice(0, 8)}`,
+    applicationId: opts.applicationId,
+    userId: opts.userId,
+    credentialsEncrypted: "x",
+    scopesGranted: ["openid", "email"],
+    label: opts.label ?? null,
+  });
+}
 
 describe("Me API (/api/me)", () => {
   beforeEach(async () => {
@@ -180,6 +207,91 @@ describe("Me API (/api/me)", () => {
       for (const m of body.data) {
         expect(m.apiKey).toBeUndefined();
       }
+    });
+  });
+
+  describe("GET /api/me/connections", () => {
+    type Group = {
+      kind: string;
+      sourceId: string;
+      totalConnections: number;
+      connections: Array<{ connectionId: string; kind: string; org: { id: string } }>;
+    };
+
+    it("returns the caller's integration connections grouped by source", async () => {
+      const ctx = await createTestContext({ orgSlug: "conn-org" });
+      await seedConnectionFor({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        integrationId: "@conn/gmail",
+        userId: ctx.user.id,
+      });
+
+      // Crosses orgs/apps by design — must succeed WITHOUT X-Org-Id.
+      const res = await app.request("/api/me/connections", {
+        headers: { Cookie: ctx.cookie },
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { object: "list"; data: Group[] };
+      expect(body.object).toBe("list");
+      const group = body.data.find((g) => g.sourceId === "@conn/gmail");
+      expect(group).toBeDefined();
+      expect(group?.kind).toBe("integration");
+      expect(group?.totalConnections).toBe(1);
+      expect(group?.connections[0]?.kind).toBe("integration");
+    });
+
+    it("aggregates connections across multiple orgs the caller belongs to", async () => {
+      const user = await createTestUser();
+      const { org: orgA, defaultAppId: appA } = await createTestOrg(user.id, { slug: "org-aa" });
+      const { org: orgB, defaultAppId: appB } = await createTestOrg(user.id, { slug: "org-bb" });
+      await seedConnectionFor({
+        orgId: orgA.id,
+        applicationId: appA,
+        integrationId: "@conn/a",
+        userId: user.id,
+      });
+      await seedConnectionFor({
+        orgId: orgB.id,
+        applicationId: appB,
+        integrationId: "@conn/b",
+        userId: user.id,
+      });
+
+      const res = await app.request("/api/me/connections", {
+        headers: { Cookie: user.cookie },
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: Group[] };
+      const sourceIds = body.data.map((g) => g.sourceId);
+      expect(sourceIds).toContain("@conn/a");
+      expect(sourceIds).toContain("@conn/b");
+    });
+
+    it("does not leak another user's connections", async () => {
+      const ctx = await createTestContext({ orgSlug: "owner-org" });
+      const other = await createTestUser();
+      await seedConnectionFor({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        integrationId: "@conn/secret",
+        userId: ctx.user.id,
+      });
+
+      const res = await app.request("/api/me/connections", {
+        headers: { Cookie: other.cookie },
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: Group[] };
+      expect(body.data.find((g) => g.sourceId === "@conn/secret")).toBeUndefined();
+    });
+
+    it("returns 401 without authentication", async () => {
+      const res = await app.request("/api/me/connections");
+      expect(res.status).toBe(401);
     });
   });
 });
