@@ -121,15 +121,6 @@ describe("handleImportBundle — integration packages", () => {
     expect(second.imported[0]!.status).toBe("reused");
   });
 
-  it("rejects an .afps whose integration manifest is invalid (D32 violation)", async () => {
-    // Binary server without httpClient.caTrustEnv → schema rejects.
-    const broken = validManifest({
-      server: { type: "binary", entryPoint: "./bin/foo" },
-    });
-    const afps = buildIntegrationAfps({ manifest: broken });
-    await expect(handleImportBundle(afps, scope, ctx.user.id)).rejects.toThrow();
-  });
-
   it("rejects an .afps with mismatched type/discriminator (docker without digest)", async () => {
     const broken = validManifest({
       server: {

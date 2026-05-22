@@ -46,14 +46,18 @@ interface SubprocessPlan {
 }
 
 function planSubprocess(spec: IntegrationSpawnSpec, bundleRoot: string): SubprocessPlan {
-  const t = spec.manifest.server.type;
+  const server = spec.manifest.server;
+  if (!server) {
+    throw new Error("integration-runtime-adapter-process: spec has no server to spawn");
+  }
+  const t = server.type;
   const cfg = HOST_INTERPRETER_BY_TYPE[t];
   if (!cfg) {
     throw new Error(
       `integration-runtime-adapter-process: server.type "${t}" has no host-interpreter mapping`,
     );
   }
-  const entry = spec.manifest.server.entryPoint;
+  const entry = server.entryPoint;
   if (!entry) {
     throw new Error(
       `integration-runtime-adapter-process: server.entryPoint required for server.type="${t}"`,

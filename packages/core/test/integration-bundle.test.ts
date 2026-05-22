@@ -445,7 +445,6 @@ describe("bundleIntegration — direct types (no sugar)", () => {
     const result = await bundleIntegration({
       manifest: authorManifest({
         server: { type: "http", url: "https://api.example.com/mcp" },
-        transport: { type: "streamable-http" },
       }),
     });
     expect(result.manifest.server!.type).toBe("http");

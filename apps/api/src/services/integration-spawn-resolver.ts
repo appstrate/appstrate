@@ -225,7 +225,6 @@ async function resolveOne(
             },
           }
         : {}),
-      ...(manifest.transport ? { transport: { type: manifest.transport.type } } : {}),
     },
     ...(exposeApiCall && apiCallCfg
       ? {

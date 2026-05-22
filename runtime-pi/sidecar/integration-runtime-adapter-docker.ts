@@ -86,7 +86,11 @@ async function dockerExec(args: string[]): Promise<string> {
 }
 
 function planContainer(spec: IntegrationSpawnSpec, bundleRoot: string): ContainerPlan {
-  const t = spec.manifest.server.type;
+  const server = spec.manifest.server;
+  if (!server) {
+    throw new Error("integration-runtime-adapter-docker: spec has no server to spawn");
+  }
+  const t = server.type;
   const image = RUNNER_IMAGE_BY_TYPE[t];
   if (!image) {
     throw new Error(
@@ -94,7 +98,7 @@ function planContainer(spec: IntegrationSpawnSpec, bundleRoot: string): Containe
         `Supported types: ${Object.keys(RUNNER_IMAGE_BY_TYPE).join(", ")}`,
     );
   }
-  const entry = spec.manifest.server.entryPoint;
+  const entry = server.entryPoint;
   if (!entry) {
     throw new Error(
       `integration-runtime-adapter-docker: server.entryPoint required for server.type="${t}"`,

@@ -875,10 +875,6 @@ function MetadataBlock({ manifest }: { manifest: IntegrationManifestView }) {
       t("integration.field.serverType"),
       <span className="font-mono">{manifest.server?.type ?? "api_call"}</span>,
     ],
-    [
-      t("integration.field.transport"),
-      <span className="font-mono">{manifest.transport?.type ?? "stdio"}</span>,
-    ],
     [t("integration.field.toolsDynamic"), manifest.server?.toolsDynamic ? "✓" : "—"],
     [
       t("integration.field.compatibility"),

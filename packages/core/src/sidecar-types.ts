@@ -118,7 +118,7 @@ export interface IntegrationSpawnSpec {
   integrationId: string;
   /** McpHost namespace — tool names are prefixed with `{namespace}__`. */
   namespace: string;
-  /** Validated `type: integration` manifest (server, transport, auths). */
+  /** Validated `type: integration` manifest (server, auths). */
   manifest: {
     name: string;
     version: string;
@@ -139,7 +139,6 @@ export interface IntegrationSpawnSpec {
        */
       url?: string;
     };
-    transport?: { type: string };
   };
   /**
    * Generic credential-injecting HTTP tool (provider→integration

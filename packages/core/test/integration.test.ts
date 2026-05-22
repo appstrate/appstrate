@@ -13,7 +13,6 @@ import {
   missingScopesForConnection,
   integrationManifestSchema,
   integrationServerTypeEnum,
-  caTrustEnvEnum,
   getAvailableScopes,
   getDeclaredToolNames,
   getToolRequiredScopes,
@@ -53,24 +52,6 @@ describe("integrationServerTypeEnum", () => {
   });
 });
 
-describe("caTrustEnvEnum", () => {
-  it("covers the documented runtime CA trust env vars", () => {
-    for (const t of [
-      "SSL_CERT_FILE",
-      "NODE_EXTRA_CA_CERTS",
-      "CURL_CA_BUNDLE",
-      "REQUESTS_CA_BUNDLE",
-      "NONE",
-    ]) {
-      expect(caTrustEnvEnum.parse(t)).toBe(t as never);
-    }
-  });
-
-  it("rejects values outside the closed enum", () => {
-    expect(() => caTrustEnvEnum.parse("CA_BUNDLE")).toThrow();
-  });
-});
-
 describe("integrationManifestSchema — happy paths", () => {
   it("accepts the minimal node manifest", () => {
     const parsed = integrationManifestSchema.parse(baseManifest());
@@ -104,31 +85,13 @@ describe("integrationManifestSchema — happy paths", () => {
   it("accepts a remote http manifest", () => {
     const m = baseManifest({
       server: { type: "http", url: "https://api.example.com/mcp/{tenantId}" },
-      transport: { type: "streamable-http" },
     });
     expect(() => integrationManifestSchema.parse(m)).not.toThrow();
   });
 
-  it("accepts a binary manifest when httpClient is declared", () => {
+  it("accepts a minimal binary manifest", () => {
     const m = baseManifest({
-      server: {
-        type: "binary",
-        entryPoint: "./bin/foo",
-        httpClient: { caTrustEnv: "SSL_CERT_FILE" },
-      },
-    });
-    expect(() => integrationManifestSchema.parse(m)).not.toThrow();
-  });
-
-  it("accepts a binary manifest with caTrustEnv: NONE (opt-in egress unobservable)", () => {
-    // The schema accepts NONE; the runtime install flow is responsible
-    // for surfacing the warning + requiring explicit user opt-in.
-    const m = baseManifest({
-      server: {
-        type: "binary",
-        entryPoint: "./bin/foo",
-        httpClient: { caTrustEnv: "NONE" },
-      },
+      server: { type: "binary", entryPoint: "./bin/foo" },
     });
     expect(() => integrationManifestSchema.parse(m)).not.toThrow();
   });
@@ -330,18 +293,6 @@ describe("integrationManifestSchema — server discrimination", () => {
     const r = integrationManifestSchema.safeParse(m);
     expect(r.success).toBe(false);
   });
-
-  it("rejects binary without httpClient.caTrustEnv (D32)", () => {
-    const m = baseManifest({
-      server: { type: "binary", entryPoint: "./bin/foo" },
-    });
-    const r = integrationManifestSchema.safeParse(m);
-    expect(r.success).toBe(false);
-    if (!r.success) {
-      const messages = r.error.issues.map((i) => i.message).join("|");
-      expect(messages).toMatch(/D32|caTrustEnv|httpClient/);
-    }
-  });
 });
 
 describe("integrationManifestSchema — auth discrimination", () => {
@@ -436,33 +387,6 @@ describe("integrationManifestSchema — auth discrimination", () => {
     });
     const r = integrationManifestSchema.safeParse(m);
     expect(r.success).toBe(false);
-  });
-});
-
-describe("integrationManifestSchema — serverAuth", () => {
-  it("rejects serverAuth on stdio transport", () => {
-    const m = baseManifest({
-      serverAuth: {
-        type: "oauth2-mcp",
-        resource: "https://mcp.vendor.com",
-        discovery: "auto",
-      },
-    });
-    const r = integrationManifestSchema.safeParse(m);
-    expect(r.success).toBe(false);
-  });
-
-  it("accepts serverAuth on streamable-http transport", () => {
-    const m = baseManifest({
-      server: { type: "http", url: "https://mcp.vendor.com" },
-      transport: { type: "streamable-http" },
-      serverAuth: {
-        type: "oauth2-mcp",
-        resource: "https://mcp.vendor.com",
-        discovery: "auto",
-      },
-    });
-    expect(() => integrationManifestSchema.parse(m)).not.toThrow();
   });
 });
 

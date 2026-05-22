@@ -73,26 +73,6 @@ export const integrationServerTypeEnum = z.enum([
 
 export type IntegrationServerType = z.infer<typeof integrationServerTypeEnum>;
 
-/**
- * CA-trust env var enum for `server.type: "binary"` (D32 §4.1.1).
- * `NONE` flags a binary with no env-based CA trust mechanism — the
- * installer refuses unless the user opts into "egress unobservable".
- */
-export const caTrustEnvEnum = z.enum([
-  "SSL_CERT_FILE",
-  "NODE_EXTRA_CA_CERTS",
-  "CURL_CA_BUNDLE",
-  "REQUESTS_CA_BUNDLE",
-  "NONE",
-]);
-
-export type CaTrustEnv = z.infer<typeof caTrustEnvEnum>;
-
-const httpClientSchema = z.object({
-  proxyEnv: z.string().min(1).optional(),
-  caTrustEnv: caTrustEnvEnum,
-});
-
 const ociPackageRefSchema = z.object({
   registryType: z.literal("oci"),
   identifier: z.string().min(1),
@@ -149,7 +129,6 @@ const serverVariableSchema = z.object({
 const serverSchema = z
   .object({
     type: integrationServerTypeEnum,
-    httpClient: httpClientSchema.optional(),
     entryPoint: z.string().min(1).optional(),
     package: packageRefSchema.optional(),
     url: z.string().optional(),
@@ -311,39 +290,14 @@ const serverSchema = z
         path: server.authKey !== undefined ? ["authKey"] : ["uploadProtocols"],
       });
     }
-
-    // D32: caTrustEnv is required for binaries.
-    if (server.type === "binary" && !server.httpClient) {
-      ctx.addIssue({
-        code: "custom",
-        message:
-          'server.httpClient.caTrustEnv is required when server.type is "binary" (D32). ' +
-          'Set caTrustEnv: "NONE" to declare egress is not observable (requires user opt-in at install).',
-        path: ["httpClient"],
-      });
-    }
   });
 
 // ─────────────────────────────────────────────
-// Transport (stdio | streamable-http | sse)
-// ─────────────────────────────────────────────
-
-const transportSchema = z.object({
-  type: z.enum(["stdio", "streamable-http", "sse"]),
-});
-
-// ─────────────────────────────────────────────
-// Server auth (Runtime → MCP server HTTP, distinct from upstream `auths`)
+// OAuth2 discovery (used by `auths.{key}.discovery`)
 // ─────────────────────────────────────────────
 
 const discoveryExplicitSchema = z.object({
   protectedResourceMetadataUrl: z.string().min(1),
-});
-
-const serverAuthSchema = z.object({
-  type: z.literal("oauth2-mcp"),
-  resource: z.string().min(1),
-  discovery: z.union([z.literal("auto"), discoveryExplicitSchema]),
 });
 
 // ─────────────────────────────────────────────
@@ -661,8 +615,6 @@ export const integrationManifestSchema = z
     // generic credential-injecting tool (api_call). Optional only so the root
     // superRefine can emit a friendly "must declare a server" error.
     server: serverSchema.optional(),
-    transport: transportSchema.optional(),
-    serverAuth: serverAuthSchema.optional(),
     auths: z
       .record(
         z.string().regex(/^[a-z][a-z0-9_]*$/, {
@@ -711,29 +663,6 @@ export const integrationManifestSchema = z
           code: "custom",
           message: "server.authKey is required when the integration declares multiple auths",
           path: ["server", "authKey"],
-        });
-      }
-    }
-
-    // `serverAuth` / `transport` describe how to reach an MCP server —
-    // meaningless without one.
-    if (m.serverAuth && !m.server) {
-      ctx.addIssue({
-        code: "custom",
-        message: "serverAuth is only valid when a server is declared",
-        path: ["serverAuth"],
-      });
-    }
-
-    // `serverAuth` only makes sense for remote transports.
-    if (m.serverAuth) {
-      const transportType = m.transport?.type ?? "stdio";
-      if (transportType === "stdio") {
-        ctx.addIssue({
-          code: "custom",
-          message:
-            'serverAuth is only valid when transport.type is "streamable-http" or "sse" (stdio servers do not have an HTTP transport to authenticate against)',
-          path: ["serverAuth"],
         });
       }
     }
