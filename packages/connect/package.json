@@ -6,6 +6,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./connect": "./src/connect/index.ts",
     "./proxy-primitives": "./src/proxy-primitives.ts",
     "./proxy-ca-planner": "./src/proxy-ca-planner.ts",
     "./integration-mitm-planner": "./src/integration-mitm-planner.ts",

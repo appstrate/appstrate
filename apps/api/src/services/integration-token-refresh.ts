@@ -20,7 +20,6 @@ import { db } from "@appstrate/db/client";
 import {
   RefreshError,
   performRefreshTokenExchange,
-  encryptCredentials,
   decryptCredentials,
   decryptCredentialsToStringMap,
 } from "@appstrate/connect";
@@ -30,6 +29,10 @@ import type {
 } from "@appstrate/connect";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { logger } from "../lib/logger.ts";
+import {
+  persistCredentialBundle,
+  markIntegrationConnectionNeedsReconnection,
+} from "./integration-connections.ts";
 
 export type { IntegrationRefreshContext };
 
@@ -144,10 +147,7 @@ async function doRefresh(
         connectionId,
       },
     );
-    await db
-      .update(integrationConnections)
-      .set({ needsReconnection: true, updatedAt: new Date() })
-      .where(eq(integrationConnections.id, connectionId));
+    await markIntegrationConnectionNeedsReconnection(connectionId);
     return { fields: current, expiresAt: null, scopesGranted: null, shrinkDetected: false };
   }
 
@@ -164,10 +164,7 @@ async function doRefresh(
     // temporary upstream issues. The wire mechanics + classification live
     // in the shared exchange; only the table write-back is integration-side.
     if (err instanceof RefreshError && err.kind === "revoked") {
-      await db
-        .update(integrationConnections)
-        .set({ needsReconnection: true, updatedAt: new Date() })
-        .where(eq(integrationConnections.id, connectionId));
+      await markIntegrationConnectionNeedsReconnection(connectionId);
     }
     throw err;
   }
@@ -207,18 +204,19 @@ async function doRefresh(
       ? prevScopes.some((s) => !responseScopes.includes(s))
       : false;
 
-  await db
-    .update(integrationConnections)
-    .set({
-      credentialsEncrypted: encryptCredentials(newCreds),
+  // Converged write — the single credential writer. `scopesGranted` is passed
+  // only when the IdP authoritatively echoed a `scope` field; otherwise it is
+  // omitted so persistCredentialBundle leaves the high-water-mark untouched.
+  // accountId/identityClaims are likewise omitted → never clobbered by refresh.
+  await persistCredentialBundle(
+    { kind: "update-by-id", connectionId },
+    {
+      credentials: newCreds,
       expiresAt,
       needsReconnection: false,
-      updatedAt: new Date(),
-      // Only overwrite scopesGranted when the IdP authoritatively echoed
-      // a `scope` field. Otherwise leave the high-water-mark untouched.
       ...(responseScopes !== null ? { scopesGranted: responseScopes } : {}),
-    })
-    .where(eq(integrationConnections.id, connectionId));
+    },
+  );
 
   return { fields: newCreds, expiresAt, scopesGranted: responseScopes, shrinkDetected };
 }
