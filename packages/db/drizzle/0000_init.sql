@@ -13,20 +13,20 @@ CREATE TABLE "account" (
 	"access_token" text,
 	"refresh_token" text,
 	"id_token" text,
-	"access_token_expires_at" timestamp,
-	"refresh_token_expires_at" timestamp,
+	"access_token_expires_at" timestamp with time zone,
+	"refresh_token_expires_at" timestamp with time zone,
 	"scope" text,
 	"password" text,
-	"created_at" timestamp DEFAULT now() NOT NULL,
-	"updated_at" timestamp DEFAULT now() NOT NULL
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "session" (
 	"id" text PRIMARY KEY NOT NULL,
-	"expires_at" timestamp NOT NULL,
+	"expires_at" timestamp with time zone NOT NULL,
 	"token" text NOT NULL,
-	"created_at" timestamp DEFAULT now() NOT NULL,
-	"updated_at" timestamp DEFAULT now() NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"ip_address" text,
 	"user_agent" text,
 	"user_id" text NOT NULL,
@@ -41,8 +41,8 @@ CREATE TABLE "user" (
 	"email_verified" boolean DEFAULT false NOT NULL,
 	"image" text,
 	"realm" text DEFAULT 'platform' NOT NULL,
-	"created_at" timestamp DEFAULT now() NOT NULL,
-	"updated_at" timestamp DEFAULT now() NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "user_email_unique" UNIQUE("email")
 );
 --> statement-breakpoint
@@ -50,9 +50,9 @@ CREATE TABLE "verification" (
 	"id" text PRIMARY KEY NOT NULL,
 	"identifier" text NOT NULL,
 	"value" text NOT NULL,
-	"expires_at" timestamp NOT NULL,
-	"created_at" timestamp DEFAULT now() NOT NULL,
-	"updated_at" timestamp DEFAULT now() NOT NULL
+	"expires_at" timestamp with time zone NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "api_keys" (
@@ -64,10 +64,10 @@ CREATE TABLE "api_keys" (
 	"key_prefix" text NOT NULL,
 	"scopes" text[] DEFAULT '{}'::text[] NOT NULL,
 	"created_by" text,
-	"expires_at" timestamp,
-	"last_used_at" timestamp,
-	"revoked_at" timestamp,
-	"created_at" timestamp DEFAULT now() NOT NULL
+	"expires_at" timestamp with time zone,
+	"last_used_at" timestamp with time zone,
+	"revoked_at" timestamp with time zone,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "model_provider_credentials" (
@@ -77,10 +77,10 @@ CREATE TABLE "model_provider_credentials" (
 	"provider_id" text NOT NULL,
 	"credentials_encrypted" text NOT NULL,
 	"base_url_override" text,
-	"expires_at" timestamp,
+	"expires_at" timestamp with time zone,
 	"created_by" text,
-	"created_at" timestamp DEFAULT now() NOT NULL,
-	"updated_at" timestamp DEFAULT now() NOT NULL
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "model_provider_pairings" (
@@ -89,11 +89,11 @@ CREATE TABLE "model_provider_pairings" (
 	"user_id" text NOT NULL,
 	"org_id" uuid NOT NULL,
 	"provider_id" text NOT NULL,
-	"expires_at" timestamp NOT NULL,
-	"consumed_at" timestamp,
+	"expires_at" timestamp with time zone NOT NULL,
+	"consumed_at" timestamp with time zone,
 	"consumed_from_ip" text,
 	"credential_id" uuid,
-	"created_at" timestamp DEFAULT now() NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "model_provider_pairings_token_hash_unique" UNIQUE("token_hash")
 );
 --> statement-breakpoint
@@ -106,9 +106,9 @@ CREATE TABLE "org_invitations" (
 	"status" "invitation_status" DEFAULT 'pending' NOT NULL,
 	"invited_by" text,
 	"accepted_by" text,
-	"expires_at" timestamp NOT NULL,
-	"accepted_at" timestamp,
-	"created_at" timestamp DEFAULT now() NOT NULL,
+	"expires_at" timestamp with time zone NOT NULL,
+	"accepted_at" timestamp with time zone,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "org_invitations_token_unique" UNIQUE("token")
 );
 --> statement-breakpoint
@@ -127,8 +127,8 @@ CREATE TABLE "org_models" (
 	"is_default" boolean DEFAULT false NOT NULL,
 	"source" text DEFAULT 'custom' NOT NULL,
 	"created_by" text,
-	"created_at" timestamp DEFAULT now() NOT NULL,
-	"updated_at" timestamp DEFAULT now() NOT NULL
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "org_proxies" (
@@ -140,15 +140,15 @@ CREATE TABLE "org_proxies" (
 	"is_default" boolean DEFAULT false NOT NULL,
 	"source" text DEFAULT 'custom' NOT NULL,
 	"created_by" text,
-	"created_at" timestamp DEFAULT now() NOT NULL,
-	"updated_at" timestamp DEFAULT now() NOT NULL
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "org_members" (
 	"org_id" uuid NOT NULL,
 	"user_id" text NOT NULL,
 	"role" "org_role" NOT NULL,
-	"joined_at" timestamp DEFAULT now() NOT NULL,
+	"joined_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "org_members_org_id_user_id_pk" PRIMARY KEY("org_id","user_id")
 );
 --> statement-breakpoint
@@ -158,8 +158,8 @@ CREATE TABLE "organizations" (
 	"slug" text NOT NULL,
 	"org_settings" jsonb DEFAULT '{}'::jsonb NOT NULL,
 	"created_by" text,
-	"created_at" timestamp DEFAULT now() NOT NULL,
-	"updated_at" timestamp DEFAULT now() NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "organizations_slug_unique" UNIQUE("slug")
 );
 --> statement-breakpoint
@@ -170,8 +170,8 @@ CREATE TABLE "applications" (
 	"is_default" boolean DEFAULT false NOT NULL,
 	"settings" jsonb DEFAULT '{}'::jsonb NOT NULL,
 	"created_by" text,
-	"created_at" timestamp DEFAULT now() NOT NULL,
-	"updated_at" timestamp DEFAULT now() NOT NULL
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "end_users" (
@@ -182,16 +182,16 @@ CREATE TABLE "end_users" (
 	"name" text,
 	"email" text,
 	"metadata" jsonb,
-	"created_at" timestamp DEFAULT now() NOT NULL,
-	"updated_at" timestamp DEFAULT now() NOT NULL
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "profiles" (
 	"id" text PRIMARY KEY NOT NULL,
 	"display_name" text,
 	"language" text NOT NULL,
-	"created_at" timestamp DEFAULT now() NOT NULL,
-	"updated_at" timestamp DEFAULT now() NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "language_check" CHECK ("profiles"."language" IN ('fr', 'en'))
 );
 --> statement-breakpoint
@@ -204,8 +204,8 @@ CREATE TABLE "application_packages" (
 	"proxy_id" text,
 	"block_user_connections" boolean DEFAULT false NOT NULL,
 	"enabled" boolean DEFAULT true NOT NULL,
-	"installed_at" timestamp DEFAULT now() NOT NULL,
-	"updated_at" timestamp DEFAULT now() NOT NULL,
+	"installed_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "application_packages_application_id_package_id_pk" PRIMARY KEY("application_id","package_id")
 );
 --> statement-breakpoint
@@ -213,7 +213,7 @@ CREATE TABLE "package_dist_tags" (
 	"package_id" text NOT NULL,
 	"tag" text NOT NULL,
 	"version_id" integer NOT NULL,
-	"updated_at" timestamp DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "package_dist_tags_package_id_tag_pk" PRIMARY KEY("package_id","tag")
 );
 --> statement-breakpoint
@@ -236,7 +236,7 @@ CREATE TABLE "package_versions" (
 	"yanked" boolean DEFAULT false NOT NULL,
 	"yanked_reason" text,
 	"created_by" text,
-	"created_at" timestamp DEFAULT now() NOT NULL
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "packages" (
@@ -249,8 +249,8 @@ CREATE TABLE "packages" (
 	"auto_installed" boolean DEFAULT false NOT NULL,
 	"ephemeral" boolean DEFAULT false NOT NULL,
 	"created_by" text,
-	"created_at" timestamp DEFAULT now() NOT NULL,
-	"updated_at" timestamp DEFAULT now() NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"lock_version" integer DEFAULT 1 NOT NULL,
 	"forked_from" text,
 	CONSTRAINT "packages_id_format" CHECK ("packages"."id" ~ '^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$')
@@ -269,7 +269,7 @@ CREATE TABLE "credential_proxy_usage" (
 	"duration_ms" integer,
 	"cost_usd" double precision DEFAULT 0 NOT NULL,
 	"request_id" text NOT NULL,
-	"created_at" timestamp DEFAULT now() NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "credential_proxy_usage_request_id_unique" UNIQUE("request_id"),
 	CONSTRAINT "credential_proxy_usage_principal_single" CHECK (api_key_id IS NULL OR user_id IS NULL)
 );
@@ -291,7 +291,7 @@ CREATE TABLE "llm_usage" (
 	"cost_usd" double precision DEFAULT 0 NOT NULL,
 	"duration_ms" integer,
 	"request_id" text,
-	"created_at" timestamp DEFAULT now() NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "llm_usage_principal_single" CHECK (api_key_id IS NULL OR user_id IS NULL),
 	CONSTRAINT "llm_usage_proxy_has_request_id" CHECK (source <> 'proxy' OR request_id IS NOT NULL),
 	CONSTRAINT "llm_usage_runner_has_run_id" CHECK (source <> 'runner' OR run_id IS NOT NULL)
@@ -308,8 +308,8 @@ CREATE TABLE "package_persistence" (
 	"actor_id" text,
 	"content" jsonb NOT NULL,
 	"run_id" text,
-	"created_at" timestamp DEFAULT now() NOT NULL,
-	"updated_at" timestamp DEFAULT now() NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "pkp_actor_type_valid" CHECK (actor_type IN ('user', 'end_user', 'shared')),
 	CONSTRAINT "pkp_actor_id_shape" CHECK ((actor_type = 'shared' AND actor_id IS NULL) OR (actor_type <> 'shared' AND actor_id IS NOT NULL))
 );
@@ -323,7 +323,7 @@ CREATE TABLE "run_logs" (
 	"event" text,
 	"message" text,
 	"data" jsonb,
-	"created_at" timestamp DEFAULT now() NOT NULL
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "runs" (
@@ -339,14 +339,14 @@ CREATE TABLE "runs" (
 	"checkpoint" jsonb,
 	"error" text,
 	"token_usage" jsonb,
-	"started_at" timestamp DEFAULT now() NOT NULL,
-	"completed_at" timestamp,
+	"started_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"completed_at" timestamp with time zone,
 	"duration" integer,
 	"schedule_id" text,
 	"version_label" text,
 	"version_dirty" boolean DEFAULT false NOT NULL,
-	"notified_at" timestamp,
-	"read_at" timestamp,
+	"notified_at" timestamp with time zone,
+	"read_at" timestamp with time zone,
 	"proxy_label" text,
 	"model_label" text,
 	"model_source" text,
@@ -362,10 +362,10 @@ CREATE TABLE "runs" (
 	"agent_name" text,
 	"run_origin" "run_origin" DEFAULT 'platform' NOT NULL,
 	"sink_secret_encrypted" text,
-	"sink_expires_at" timestamp,
-	"sink_closed_at" timestamp,
+	"sink_expires_at" timestamp with time zone,
+	"sink_closed_at" timestamp with time zone,
 	"last_event_sequence" integer DEFAULT 0 NOT NULL,
-	"last_heartbeat_at" timestamp DEFAULT now() NOT NULL,
+	"last_heartbeat_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"context_snapshot" jsonb,
 	"runner_name" text,
 	"runner_kind" text,
@@ -391,10 +391,10 @@ CREATE TABLE "package_schedules" (
 	"proxy_id_override" text,
 	"version_override" text,
 	"connection_overrides" jsonb,
-	"last_run_at" timestamp,
-	"next_run_at" timestamp,
-	"created_at" timestamp DEFAULT now() NOT NULL,
-	"updated_at" timestamp DEFAULT now() NOT NULL,
+	"last_run_at" timestamp with time zone,
+	"next_run_at" timestamp with time zone,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "package_schedules_at_most_one_actor" CHECK (NOT (user_id IS NOT NULL AND end_user_id IS NOT NULL))
 );
 --> statement-breakpoint
@@ -410,11 +410,11 @@ CREATE TABLE "integration_connections" (
 	"identity_claims" jsonb,
 	"scopes_granted" text[] DEFAULT '{}'::text[] NOT NULL,
 	"needs_reconnection" boolean DEFAULT false NOT NULL,
-	"expires_at" timestamp,
+	"expires_at" timestamp with time zone,
 	"label" text,
 	"shared_with_org" boolean DEFAULT false NOT NULL,
-	"created_at" timestamp DEFAULT now() NOT NULL,
-	"updated_at" timestamp DEFAULT now() NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "integration_conn_exactly_one_owner" CHECK ((user_id IS NOT NULL AND end_user_id IS NULL) OR (user_id IS NULL AND end_user_id IS NOT NULL))
 );
 --> statement-breakpoint
@@ -426,8 +426,8 @@ CREATE TABLE "integration_oauth_clients" (
 	"client_id" text NOT NULL,
 	"client_secret_encrypted" text NOT NULL,
 	"redirect_uri" text,
-	"created_at" timestamp DEFAULT now() NOT NULL,
-	"updated_at" timestamp DEFAULT now() NOT NULL
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "integration_pins" (
@@ -438,8 +438,8 @@ CREATE TABLE "integration_pins" (
 	"user_id" text,
 	"connection_id" uuid NOT NULL,
 	"created_by" text,
-	"created_at" timestamp DEFAULT now() NOT NULL,
-	"updated_at" timestamp DEFAULT now() NOT NULL
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "integration_org_defaults" (
@@ -449,8 +449,8 @@ CREATE TABLE "integration_org_defaults" (
 	"connection_id" uuid NOT NULL,
 	"enforce" boolean DEFAULT false NOT NULL,
 	"created_by" text,
-	"created_at" timestamp DEFAULT now() NOT NULL,
-	"updated_at" timestamp DEFAULT now() NOT NULL
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "uploads" (
@@ -462,9 +462,9 @@ CREATE TABLE "uploads" (
 	"name" text NOT NULL,
 	"mime" text NOT NULL,
 	"size" integer NOT NULL,
-	"expires_at" timestamp NOT NULL,
-	"consumed_at" timestamp,
-	"created_at" timestamp DEFAULT now() NOT NULL
+	"expires_at" timestamp with time zone NOT NULL,
+	"consumed_at" timestamp with time zone,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "audit_events" (
@@ -481,7 +481,7 @@ CREATE TABLE "audit_events" (
 	"ip" text,
 	"user_agent" text,
 	"request_id" text,
-	"created_at" timestamp DEFAULT now() NOT NULL
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 ALTER TABLE "account" ADD CONSTRAINT "account_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint

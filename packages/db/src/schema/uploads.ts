@@ -38,10 +38,10 @@ export const uploads = pgTable(
     /** Size in bytes (declared, then verified on consumption). */
     size: integer("size").notNull(),
     /** When the pre-signed URL expires and the row becomes eligible for GC. */
-    expiresAt: timestamp("expires_at").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     /** Set when a run has consumed the file. NULL = still orphan. */
-    consumedAt: timestamp("consumed_at"),
-    createdAt: timestamp("created_at").notNull().defaultNow(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     index("idx_uploads_app").on(table.applicationId),

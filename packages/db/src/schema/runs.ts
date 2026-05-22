@@ -78,16 +78,16 @@ export const runs = pgTable(
       cache_creation_input_tokens?: number;
       cache_read_input_tokens?: number;
     }>(),
-    startedAt: timestamp("started_at").defaultNow().notNull(),
-    completedAt: timestamp("completed_at"),
+    startedAt: timestamp("started_at", { withTimezone: true }).defaultNow().notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
     duration: integer("duration"),
     scheduleId: text("schedule_id").references(() => schedules.id, {
       onDelete: "set null",
     }),
     versionLabel: text("version_label"),
     versionDirty: boolean("version_dirty").default(false).notNull(),
-    notifiedAt: timestamp("notified_at"),
-    readAt: timestamp("read_at"),
+    notifiedAt: timestamp("notified_at", { withTimezone: true }),
+    readAt: timestamp("read_at", { withTimezone: true }),
     proxyLabel: text("proxy_label"),
     modelLabel: text("model_label"),
     modelSource: text("model_source"),
@@ -140,10 +140,10 @@ export const runs = pgTable(
     // verify HMAC signatures against.
     sinkSecretEncrypted: text("sink_secret_encrypted"),
     // Hard cap after which /events rejects. Also the "sink is active" signal.
-    sinkExpiresAt: timestamp("sink_expires_at"),
+    sinkExpiresAt: timestamp("sink_expires_at", { withTimezone: true }),
     // Set on finalize (terminal event, /finalize POST, explicit revocation).
     // Presence means the sink is closed; subsequent events reject with 410.
-    sinkClosedAt: timestamp("sink_closed_at"),
+    sinkClosedAt: timestamp("sink_closed_at", { withTimezone: true }),
     // Highest successfully persisted sequence number; drives the ordering
     // buffer fast-path (CAS update on sequence = last_event_sequence + 1).
     lastEventSequence: integer("last_event_sequence").notNull().default(0),
@@ -152,7 +152,7 @@ export const runs = pgTable(
     // slipped past the threshold and routes them through `finalizeRun` as
     // `failed` (same convergence point as natural termination and
     // container-exit synthesis — identical for platform + remote runners).
-    lastHeartbeatAt: timestamp("last_heartbeat_at").defaultNow().notNull(),
+    lastHeartbeatAt: timestamp("last_heartbeat_at", { withTimezone: true }).defaultNow().notNull(),
     // CLI-provided execution environment metadata (os, cli version, git sha,
     // ...). Capped at 16 KiB by the route Zod schema.
     contextSnapshot: jsonb("context_snapshot").$type<Record<string, unknown>>(),
@@ -236,7 +236,7 @@ export const runLogs = pgTable(
     event: text("event"),
     message: text("message"),
     data: jsonb("data").$type<Record<string, unknown>>(),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_run_logs_run_id").on(table.runId),
@@ -290,8 +290,8 @@ export const packagePersistence = pgTable(
     runId: text("run_id").references(() => runs.id, {
       onDelete: "set null",
     }),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     // Upsert target for named slots. The partial WHERE keeps archive rows
@@ -398,7 +398,7 @@ export const llmUsage = pgTable(
     // Proxy dedup key — one per upstream call minted by the proxy route.
     // Null on runner-source rows (they dedup on run_id instead).
     requestId: text("request_id"),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_llm_usage_org_id").on(table.orgId),
@@ -471,7 +471,7 @@ export const credentialProxyUsage = pgTable(
     durationMs: integer("duration_ms"),
     costUsd: doublePrecision("cost_usd").notNull().default(0),
     requestId: text("request_id").notNull().unique(),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_credential_proxy_usage_org_id").on(table.orgId),
@@ -521,10 +521,10 @@ export const schedules = pgTable(
     // creation/edit (mirrors `configOverride`). Same shape as
     // `runs.connectionOverrides`. Loses to admin pin at fire time.
     connectionOverrides: jsonb("connection_overrides").$type<Record<string, string>>(),
-    lastRunAt: timestamp("last_run_at"),
-    nextRunAt: timestamp("next_run_at"),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+    lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+    nextRunAt: timestamp("next_run_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_schedules_package_id").on(table.packageId),

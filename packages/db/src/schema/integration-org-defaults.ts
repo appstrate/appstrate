@@ -64,8 +64,8 @@ export const integrationOrgDefaults = pgTable(
     enforce: boolean("enforce").notNull().default(false),
     /** Admin who set the default. */
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     // One default per (application, integration).

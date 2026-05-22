@@ -27,8 +27,8 @@ export const applications = pgTable(
     createdBy: text("created_by").references(() => user.id, {
       onDelete: "set null",
     }),
-    createdAt: timestamp("created_at").notNull().defaultNow(),
-    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     index("idx_applications_org_id").on(table.orgId),
@@ -52,8 +52,8 @@ export const endUsers = pgTable(
     name: text("name"),
     email: text("email"),
     metadata: jsonb("metadata"),
-    createdAt: timestamp("created_at").notNull().defaultNow(),
-    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     uniqueIndex("idx_end_users_external_id")

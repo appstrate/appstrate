@@ -47,8 +47,8 @@ export const applicationPackages = pgTable(
     // already keys on those (when type=integration).
     blockUserConnections: boolean("block_user_connections").notNull().default(false),
     enabled: boolean("enabled").notNull().default(true),
-    installedAt: timestamp("installed_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+    installedAt: timestamp("installed_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     primaryKey({ columns: [table.applicationId, table.packageId] }),
@@ -74,8 +74,8 @@ export const packages = pgTable(
     // content after retention (see inline-compaction worker).
     ephemeral: boolean("ephemeral").notNull().default(false),
     createdBy: text("created_by").references(() => user.id),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
     lockVersion: integer("lock_version").notNull().default(1),
     forkedFrom: text("forked_from"),
   },
@@ -106,7 +106,7 @@ export const packageVersions = pgTable(
     yanked: boolean("yanked").notNull().default(false),
     yankedReason: text("yanked_reason"),
     createdBy: text("created_by").references(() => user.id),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     uniqueIndex("package_versions_pkg_version_unique").on(table.packageId, table.version),
@@ -124,7 +124,7 @@ export const packageDistTags = pgTable(
     versionId: integer("version_id")
       .notNull()
       .references(() => packageVersions.id, { onDelete: "cascade" }),
-    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [primaryKey({ columns: [table.packageId, table.tag] })],
 );

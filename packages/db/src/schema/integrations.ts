@@ -72,7 +72,7 @@ export const integrationConnections = pgTable(
       .notNull()
       .default(sql`'{}'::text[]`),
     needsReconnection: boolean("needs_reconnection").notNull().default(false),
-    expiresAt: timestamp("expires_at"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
     // User-facing display name ("Perso", "Boulot"). Distinct from
     // `accountId` (the upstream identifier — `sub` claim, email) which
     // is opaque and shared across users. Nullable so existing rows stay
@@ -84,8 +84,8 @@ export const integrationConnections = pgTable(
     // resolution (see integration-connection-resolver). Off by default
     // — sharing is explicit consent, never silent.
     sharedWithOrg: boolean("shared_with_org").notNull().default(false),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     // No uniqueness on (packageId, authKey, accountId, app, owner): an
@@ -163,8 +163,8 @@ export const integrationOauthClients = pgTable(
     clientSecretEncrypted: text("client_secret_encrypted").notNull(),
     /** Optional pre-registered redirect URI; falls back to the platform default at connect time. */
     redirectUri: text("redirect_uri"),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     uniqueIndex("idx_integration_oauth_clients_unique").on(

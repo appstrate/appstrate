@@ -12,8 +12,8 @@ export const profiles = pgTable(
       .references(() => user.id, { onDelete: "cascade" }),
     displayName: text("display_name"),
     language: text("language").notNull(),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [check("language_check", sql`${table.language} IN ('fr', 'en')`)],
 );

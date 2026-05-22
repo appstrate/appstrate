@@ -71,8 +71,8 @@ export const integrationPins = pgTable(
       .references(() => integrationConnections.id, { onDelete: "cascade" }),
     /** Who set the pin — admin id for admin pins, same as `user_id` for member pins. */
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     // One row per (application, agent, integration, scope). The
