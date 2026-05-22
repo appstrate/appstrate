@@ -1,5 +1,5 @@
 {
-  "id": "bd09482c-fb53-4e58-aa49-60630abd82ad",
+  "id": "04c74007-e604-44fb-8291-fade659c9154",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -788,6 +788,15 @@
           "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
+        },
+        "model_provider_pairings_credential_id_model_provider_credentials_id_fk": {
+          "name": "model_provider_pairings_credential_id_model_provider_credentials_id_fk",
+          "tableFrom": "model_provider_pairings",
+          "tableTo": "model_provider_credentials",
+          "columnsFrom": ["credential_id"],
+          "columnsTo": ["id"],
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1137,7 +1146,12 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "org_models_source_valid": {
+          "name": "org_models_source_valid",
+          "value": "source IN ('built-in', 'custom')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.org_proxies": {
@@ -1267,7 +1281,12 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "org_proxies_source_valid": {
+          "name": "org_proxies_source_valid",
+          "value": "source IN ('built-in', 'custom')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.org_members": {
@@ -3257,7 +3276,12 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "run_logs_level_valid": {
+          "name": "run_logs_level_valid",
+          "value": "level IN ('debug', 'info', 'warn', 'error')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.runs": {

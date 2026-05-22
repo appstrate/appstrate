@@ -128,7 +128,8 @@ CREATE TABLE "org_models" (
 	"source" text DEFAULT 'custom' NOT NULL,
 	"created_by" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "org_models_source_valid" CHECK (source IN ('built-in', 'custom'))
 );
 --> statement-breakpoint
 CREATE TABLE "org_proxies" (
@@ -141,7 +142,8 @@ CREATE TABLE "org_proxies" (
 	"source" text DEFAULT 'custom' NOT NULL,
 	"created_by" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "org_proxies_source_valid" CHECK (source IN ('built-in', 'custom'))
 );
 --> statement-breakpoint
 CREATE TABLE "org_members" (
@@ -323,7 +325,8 @@ CREATE TABLE "run_logs" (
 	"event" text,
 	"message" text,
 	"data" jsonb,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "run_logs_level_valid" CHECK (level IN ('debug', 'info', 'warn', 'error'))
 );
 --> statement-breakpoint
 CREATE TABLE "runs" (
@@ -493,6 +496,7 @@ ALTER TABLE "model_provider_credentials" ADD CONSTRAINT "model_provider_credenti
 ALTER TABLE "model_provider_credentials" ADD CONSTRAINT "model_provider_credentials_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "model_provider_pairings" ADD CONSTRAINT "model_provider_pairings_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "model_provider_pairings" ADD CONSTRAINT "model_provider_pairings_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "model_provider_pairings" ADD CONSTRAINT "model_provider_pairings_credential_id_model_provider_credentials_id_fk" FOREIGN KEY ("credential_id") REFERENCES "public"."model_provider_credentials"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "org_invitations" ADD CONSTRAINT "org_invitations_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "org_invitations" ADD CONSTRAINT "org_invitations_invited_by_user_id_fk" FOREIGN KEY ("invited_by") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "org_invitations" ADD CONSTRAINT "org_invitations_accepted_by_user_id_fk" FOREIGN KEY ("accepted_by") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint

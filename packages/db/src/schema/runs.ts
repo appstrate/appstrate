@@ -253,6 +253,9 @@ export const runLogs = pgTable(
     index("idx_run_logs_run_id").on(table.runId),
     index("idx_run_logs_lookup").on(table.runId, table.id),
     index("idx_run_logs_org_id").on(table.orgId),
+    // `level` has a fixed domain in the app (appendRunLog) but `type` is
+    // intentionally open-ended (progress/event kinds modules invent freely).
+    check("run_logs_level_valid", sql`level IN ('debug', 'info', 'warn', 'error')`),
   ],
 );
 

@@ -11,6 +11,7 @@ import {
   index,
   uniqueIndex,
   primaryKey,
+  check,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { orgRoleEnum, invitationStatusEnum } from "./enums.ts";
@@ -125,6 +126,7 @@ export const orgProxies = pgTable(
     uniqueIndex("idx_org_proxies_one_default")
       .on(table.orgId)
       .where(sql`${table.isDefault} = true`),
+    check("org_proxies_source_valid", sql`source IN ('built-in', 'custom')`),
   ],
 );
 
@@ -240,7 +242,9 @@ export const modelProviderPairings = pgTable(
      * to the dashboard via `GET /pairing/:id` so the UI can act on the new
      * credential without polling the credential list.
      */
-    credentialId: uuid("credential_id"),
+    credentialId: uuid("credential_id").references(() => modelProviderCredentials.id, {
+      onDelete: "set null",
+    }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
@@ -293,5 +297,6 @@ export const orgModels = pgTable(
     uniqueIndex("idx_org_models_one_default")
       .on(table.orgId)
       .where(sql`${table.isDefault} = true`),
+    check("org_models_source_valid", sql`source IN ('built-in', 'custom')`),
   ],
 );
