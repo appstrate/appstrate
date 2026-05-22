@@ -1,5 +1,5 @@
 {
-  "id": "4b3d58e6-fc25-4ee6-b828-e7c27c060c9c",
+  "id": "bd09482c-fb53-4e58-aa49-60630abd82ad",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -3588,6 +3588,43 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_runs_package_started": {
+          "name": "idx_runs_package_started",
+          "columns": [
+            {
+              "expression": "package_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "started_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_runs_schedule_id": {
+          "name": "idx_runs_schedule_id",
+          "columns": [
+            {
+              "expression": "schedule_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"runs\".\"schedule_id\" IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}

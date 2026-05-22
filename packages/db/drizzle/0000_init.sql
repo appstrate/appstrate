@@ -623,6 +623,8 @@ CREATE INDEX "idx_runs_package_id" ON "runs" USING btree ("package_id");--> stat
 CREATE INDEX "idx_runs_status" ON "runs" USING btree ("status");--> statement-breakpoint
 CREATE INDEX "idx_runs_user_id" ON "runs" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX "idx_runs_end_user_id" ON "runs" USING btree ("end_user_id");--> statement-breakpoint
+CREATE INDEX "idx_runs_package_started" ON "runs" USING btree ("package_id","started_at");--> statement-breakpoint
+CREATE INDEX "idx_runs_schedule_id" ON "runs" USING btree ("schedule_id") WHERE "runs"."schedule_id" IS NOT NULL;--> statement-breakpoint
 CREATE INDEX "idx_runs_app_status_started" ON "runs" USING btree ("application_id","status","started_at");--> statement-breakpoint
 CREATE INDEX "idx_runs_org_id" ON "runs" USING btree ("org_id");--> statement-breakpoint
 CREATE INDEX "idx_runs_notification" ON "runs" USING btree ("user_id","org_id","notified_at","read_at");--> statement-breakpoint

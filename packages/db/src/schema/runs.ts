@@ -195,6 +195,17 @@ export const runs = pgTable(
     index("idx_runs_status").on(table.status),
     index("idx_runs_user_id").on(table.userId),
     index("idx_runs_end_user_id").on(table.endUserId),
+    // Per-agent run history (the hottest list path): WHERE package_id = ?
+    // ORDER BY started_at DESC. Also serves getLastRun / getRecentRuns /
+    // getLastCheckpoint / nextRunNumber. A backward scan satisfies the DESC
+    // sort, so a plain composite suffices.
+    index("idx_runs_package_started").on(table.packageId, table.startedAt),
+    // schedule_id is LEFT JOINed on every enriched run list and the FK
+    // SET NULL on schedule delete scans runs by it — partial index keeps it
+    // tiny (most runs are ad-hoc, schedule_id NULL).
+    index("idx_runs_schedule_id")
+      .on(table.scheduleId)
+      .where(sql`${table.scheduleId} IS NOT NULL`),
     // Application-scoped lookups (incl. the FK cascade on app delete) are
     // served by the leftmost prefix of idx_runs_app_status_started — no
     // separate single-column applicationId index needed.
