@@ -819,40 +819,9 @@ function rowToSummary(
 // Non-OAuth connect flows
 // ─────────────────────────────────────────────
 
-/**
- * Connect an `api_key` / `basic` / `custom` auth. The `credentials`
- * payload shape is validated against the auth's declared
- * `credentials.schema` (best-effort — full AJV validation lives in the
- * route layer; this guard catches obviously empty payloads).
- */
-export async function connectIntegrationWithFields(
-  scope: AppScope,
-  packageId: string,
-  authKey: string,
-  credentials: Record<string, string>,
-  actor: Actor,
-): Promise<IntegrationConnectionSummary> {
-  const manifest = await loadManifestOrThrow(scope, packageId);
-  const auth = lookupAuth(manifest, authKey);
-  if (auth.type === "oauth2" || auth.type === "oauth1") {
-    throw invalidRequest(
-      `Auth '${authKey}' is type '${auth.type}' — use the OAuth flow, not the fields flow`,
-    );
-  }
-  if (!credentials || Object.keys(credentials).length === 0) {
-    throw invalidRequest("credentials payload cannot be empty", "credentials");
-  }
-
-  const { accountId, identityClaims } = extractIdentity(manifest, authKey, credentials);
-  return saveIntegrationConnection(scope, {
-    packageId,
-    authKey,
-    accountId,
-    credentials,
-    identityClaims,
-    actor,
-  });
-}
+// The api_key/basic/custom paste-the-bag connect flow now lives in
+// `services/connect/fields-strategy.ts` (FieldsStrategy) — selected via
+// `resolveStrategy` and reached through the connect/fields route adapter.
 
 // ─────────────────────────────────────────────
 // Aggregate views for the marketplace UI

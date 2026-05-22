@@ -5,3 +5,10 @@
 // orchestration layer (apps/api) and the sidecar executor.
 
 export type { CredentialBundle } from "./types.ts";
+export type {
+  ConnectContext,
+  BeginOptions,
+  BeginResult,
+  ConnectInput,
+  ConnectStrategy,
+} from "./strategy.ts";
