@@ -21,6 +21,7 @@ import type {
   CredentialBundle,
 } from "@appstrate/connect/connect";
 import type { IntegrationOAuthCallbackResult } from "@appstrate/connect";
+import type { AppScope } from "../../lib/scope.ts";
 import type { IntegrationConnectionSummary } from "../integration-connections.ts";
 import type {
   IntegrationRefreshContext,
@@ -44,6 +45,12 @@ export interface ReacquireInput {
   authKey: string;
   credentialsEncrypted: string;
   refreshContext: IntegrationRefreshContext;
+  /**
+   * App scope of the connection. Optional because the OAuth2 fast-path
+   * refresh is keyed by id alone; the OrchestratedStrategy re-bootstrap NEEDS
+   * it to re-read the manifest (`connect.tool` / `produces`) for the re-run.
+   */
+  scope?: AppScope;
 }
 
 /**

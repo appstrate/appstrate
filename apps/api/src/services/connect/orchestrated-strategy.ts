@@ -25,6 +25,7 @@
 
 import { invalidRequest } from "../../lib/errors.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
+import { RefreshError, decryptCredentialInputsToStringMap } from "@appstrate/connect";
 import type { AppScope } from "../../lib/scope.ts";
 import type { Actor } from "@appstrate/connect";
 import {
@@ -33,17 +34,20 @@ import {
   readIntegrationAuth,
   type IntegrationConnectionSummary,
 } from "../integration-connections.ts";
+import type { IntegrationRefreshResult } from "../integration-token-refresh.ts";
 import type {
   ConnectContext,
   ConnectCompleteInput,
   CredentialBundle,
   IntegrationConnectStrategy,
+  ReacquireInput,
 } from "./strategy.ts";
 
 /** One connect-tool login run, handed to the {@link ConnectToolExecutor}. */
 export interface ConnectToolExecution {
   scope: AppScope;
-  actor: Actor;
+  /** Acquiring actor on first connect; absent on a system re-bootstrap (reacquire). */
+  actor?: Actor;
   integrationPackageId: string;
   authKey: string;
   manifest: IntegrationManifest;
@@ -139,5 +143,68 @@ export class OrchestratedStrategy implements IntegrationConnectStrategy {
     });
     // insert / update-owned always return a summary (or throw).
     return summary!;
+  }
+
+  /**
+   * Re-bootstrap an expired session (spec §4.4.1 / Phase 5). Re-runs the
+   * connect-tool with the persisted login secret (`inputs`) and writes the
+   * fresh outputs back, preserving the secret. Mirrors the OAuth2 fast-path's
+   * {@link IntegrationRefreshResult} shape so the live resolvers consume it the
+   * same way. Throws a `revoked` {@link RefreshError} (→ caller flips
+   * `needsReconnection`) when there is no persisted secret to re-bootstrap from
+   * — i.e. the connection was made without `persistLoginSecret`.
+   */
+  async reacquire(input: ReacquireInput): Promise<IntegrationRefreshResult> {
+    if (!input.scope) {
+      throw new RefreshError("orchestrated reacquire requires the connection scope", "transient");
+    }
+    const { manifest, auth } = await readIntegrationAuth(
+      input.scope,
+      input.packageId,
+      input.authKey,
+    );
+    const tool = auth.connect?.tool;
+    if (!tool) {
+      throw new RefreshError(`Auth '${input.authKey}' has no connect.tool`, "transient");
+    }
+
+    const inputs = decryptCredentialInputsToStringMap(input.credentialsEncrypted);
+    if (Object.keys(inputs).length === 0) {
+      // No persisted login secret → cannot re-bootstrap. Surface as revoked so
+      // the resolver flips needsReconnection (same outcome as a paste-the-bag
+      // 401), rather than looping.
+      throw new RefreshError("no persisted login secret to re-bootstrap", "revoked");
+    }
+
+    const bundle = await this.executor.run({
+      scope: input.scope,
+      integrationPackageId: input.packageId,
+      authKey: input.authKey,
+      manifest,
+      toolName: tool,
+      produces: auth.connect?.produces,
+      inputs,
+      inputFields: Object.keys(inputs),
+      dependsOn: auth.connect?.dependsOn,
+    });
+
+    // Write the fresh session back, preserving the login secret. Keyed by id —
+    // the id came from an already-authorised resolution.
+    await persistCredentialBundle(
+      { kind: "update-by-id", connectionId: input.connectionId },
+      {
+        credentials: bundle.outputs,
+        inputs,
+        expiresAt: bundle.expiresAt ? new Date(bundle.expiresAt) : null,
+        needsReconnection: false,
+      },
+    );
+
+    return {
+      fields: bundle.outputs,
+      expiresAt: bundle.expiresAt ? new Date(bundle.expiresAt) : null,
+      scopesGranted: bundle.scopesGranted ?? null,
+      shrinkDetected: false,
+    };
   }
 }

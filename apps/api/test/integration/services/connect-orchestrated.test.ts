@@ -156,3 +156,107 @@ describe("OrchestratedStrategy.complete — persistLoginSecret gating (§4.6)", 
     expect(JSON.stringify(captured)).not.toContain("s3cr3t");
   });
 });
+
+describe("OrchestratedStrategy.reacquire — re-bootstrap from persisted secret (Phase 5)", () => {
+  let ctx: TestContext;
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "orga" });
+  });
+
+  function connectCtx(packageId: string): ConnectContext {
+    return {
+      scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      actor: { type: "user", id: ctx.user.id },
+      integrationPackageId: packageId,
+      authKey: "session",
+    } as ConnectContext;
+  }
+
+  it("re-runs the tool with the persisted secret and writes the fresh session back", async () => {
+    const pkg = await seedPackage({
+      id: "@orga/wajax-re",
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: orchestratedManifest("@orga/wajax-re", true),
+    });
+    // First connect captures sess-1 + persists the login secret.
+    let issued = "sess-1";
+    let lastInputs: Record<string, string> = {};
+    const executor: ConnectToolExecutor = {
+      run: async (exec) => {
+        lastInputs = exec.inputs;
+        return { outputs: { JSESSIONID: issued }, expiresAt: null };
+      },
+    };
+    const strategy = new OrchestratedStrategy(executor);
+    const summary = await strategy.complete(connectCtx(pkg.id), {
+      kind: "fields",
+      credentials: { identifiant: "user1", mot_de_passe: "s3cr3t" },
+    });
+
+    const [before] = await db
+      .select()
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, summary.id));
+
+    // Session expired mid-run → reacquire re-bootstraps with the stored secret.
+    issued = "sess-2";
+    const result = await strategy.reacquire({
+      connectionId: summary.id,
+      packageId: pkg.id,
+      authKey: "session",
+      credentialsEncrypted: before!.credentialsEncrypted,
+      refreshContext: {} as never,
+      scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+    });
+
+    // Tool was driven with the persisted secret (re-bootstrap, no re-prompt).
+    expect(lastInputs).toEqual({ identifiant: "user1", mot_de_passe: "s3cr3t" });
+    expect(result.fields).toEqual({ JSESSIONID: "sess-2" });
+
+    // Fresh outputs written back; the login secret survives for the next re-run.
+    const [after] = await db
+      .select()
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, summary.id));
+    expect(decryptCredentialsToStringMap(after!.credentialsEncrypted)).toEqual({
+      JSESSIONID: "sess-2",
+    });
+    expect(decryptCredentialInputsToStringMap(after!.credentialsEncrypted)).toEqual({
+      identifiant: "user1",
+      mot_de_passe: "s3cr3t",
+    });
+  });
+
+  it("throws revoked when there is no persisted secret to re-bootstrap", async () => {
+    const pkg = await seedPackage({
+      id: "@orga/wajax-nore",
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: orchestratedManifest("@orga/wajax-nore", false), // persistLoginSecret off
+    });
+    const strategy = new OrchestratedStrategy(fakeExecutor);
+    const summary = await strategy.complete(connectCtx(pkg.id), {
+      kind: "fields",
+      credentials: { identifiant: "user1", mot_de_passe: "s3cr3t" },
+    });
+    const [row] = await db
+      .select()
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, summary.id));
+
+    await expect(
+      strategy.reacquire({
+        connectionId: summary.id,
+        packageId: pkg.id,
+        authKey: "session",
+        credentialsEncrypted: row!.credentialsEncrypted,
+        refreshContext: {} as never,
+        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      }),
+    ).rejects.toMatchObject({ kind: "revoked" });
+  });
+});
