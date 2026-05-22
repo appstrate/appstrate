@@ -118,6 +118,33 @@ describe("runTwoStep — declarative chain", () => {
     expect(res.identityClaims.person_id).toBe("P-42");
   });
 
+  it("resolves a jwt extractor regardless of key order (JSONB reorder safety)", async () => {
+    const jwt = `${b64url({ alg: "none" })}.${b64url({ AUTH: [{ personId: "P-7" }] })}.`;
+    const { impl } = fakeFetch([{ status: 200, body: JSON.stringify({ access_token: jwt }) }]);
+    const config: TwoStepConfig = {
+      steps: [
+        {
+          request: { method: "POST", url: "https://idp.example.com/token", body: "grant=pw" },
+          // `person_id` (jwt) is declared BEFORE `access_token` it depends on —
+          // mimics a manifest reordered by JSONB persistence. The engine's
+          // two-pass extraction (non-jwt first) must still resolve it.
+          extract: {
+            person_id: { from: "jwt", token: "access_token", path: "$.AUTH[0].personId" },
+            access_token: { from: "json", path: "$.access_token" },
+          },
+          output: ["access_token", "person_id"],
+        },
+      ],
+    };
+    const res = await runTwoStep(config, {
+      inputs: {},
+      authorizedUris: ALLOW,
+      allowAllUris: false,
+      fetchImpl: impl,
+    });
+    expect(res.outputs.person_id).toBe("P-7");
+  });
+
   it("captures a Set-Cookie value", async () => {
     const { impl } = fakeFetch([
       { status: 200, body: "ok", headers: { "set-cookie": "JSESSIONID=abc123; Path=/; HttpOnly" } },

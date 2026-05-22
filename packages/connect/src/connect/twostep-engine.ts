@@ -330,10 +330,21 @@ export async function runTwoStep(
     );
     const bodyText = needsBody ? await readBoundedText(res, limits.maxResponseBytes, i) : "";
 
-    // Extract → jwt refs resolve against prior-flow state (bind+outputs) plus
-    // values already extracted earlier in THIS step (insertion order).
+    // Extract in two passes so a `jwt` extractor can reference any other
+    // same-step value regardless of key order. We can't rely on insertion
+    // order: the manifest is persisted as JSONB, which does NOT preserve key
+    // order, so the decrypted `extract` map comes back reordered. Pass 1 runs
+    // every self-contained extractor (json/regex/header/cookie); pass 2 runs
+    // `jwt`, whose `token` names another extracted value (or a prior bind).
     const extracted: Record<string, string> = {};
-    for (const [name, ex] of Object.entries(step.extract ?? {})) {
+    const entries = Object.entries(step.extract ?? {});
+    for (const [name, ex] of entries) {
+      if (ex.from === "jwt") continue;
+      const scope = { ...bind, ...outputs, ...extracted };
+      extracted[name] = applyExtractor(ex, bodyText, res.headers, scope, i, name);
+    }
+    for (const [name, ex] of entries) {
+      if (ex.from !== "jwt") continue;
       const scope = { ...bind, ...outputs, ...extracted };
       extracted[name] = applyExtractor(ex, bodyText, res.headers, scope, i, name);
     }

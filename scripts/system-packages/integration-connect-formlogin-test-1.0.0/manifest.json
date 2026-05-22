@@ -1,0 +1,58 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/connect-formlogin-test",
+  "version": "1.0.0",
+  "displayName": "Connect Form-Login Test",
+  "description": "Phase 3 reference — declarative form-login that captures a session cookie (`connect.steps` cookie extractor). A lespac/orgabusiness-shaped flow against https://formlogin.test.appstrate.dev: POST the credentials form, capture `JSESSIONID` + `AWSALB` from Set-Cookie, and inject them as a `Cookie` header. No untrusted code — the platform engine drives the chain and substitutes `{{username}}`/`{{password}}` at the boundary. Used by the connect E2E to confirm cookie-capture connects end-to-end against a fake upstream.",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "keywords": ["connect", "twostep", "cookie", "test"],
+  "server": {
+    "type": "api_call"
+  },
+  "auths": {
+    "session": {
+      "type": "custom",
+      "required": true,
+      "authorizedUris": ["https://formlogin.test.appstrate.dev/**"],
+      "credentials": {
+        "schema": {
+          "type": "object",
+          "required": ["username", "password"],
+          "properties": {
+            "username": { "type": "string", "description": "Account username (login)" },
+            "password": {
+              "type": "string",
+              "description": "Account password — never seen by any tool; the platform engine substitutes it into the login POST at the boundary."
+            }
+          }
+        }
+      },
+      "delivery": {
+        "http": {
+          "headerName": "Cookie",
+          "valueFrom": { "template": "JSESSIONID={{JSESSIONID}}; AWSALB={{AWSALB}}" }
+        }
+      },
+      "connect": {
+        "steps": [
+          {
+            "request": {
+              "method": "POST",
+              "url": "https://formlogin.test.appstrate.dev/j_security_check",
+              "contentType": "application/x-www-form-urlencoded",
+              "body": "j_username={{username}}&j_password={{password}}"
+            },
+            "extract": {
+              "JSESSIONID": { "from": "cookie", "name": "JSESSIONID" },
+              "AWSALB": { "from": "cookie", "name": "AWSALB" }
+            },
+            "output": ["JSESSIONID", "AWSALB"]
+          }
+        ]
+      }
+    }
+  }
+}
