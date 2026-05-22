@@ -176,8 +176,8 @@ export async function buildBundleForAgentExport(
 
 /**
  * Build a Bundle from the agent's DRAFT state (the `packages.draftManifest`
- * + `packages.draftContent` columns and on-the-fly draft tool/skill/provider
- * resolution via {@link DraftPackageCatalog}).
+ * + `packages.draftContent` columns and on-the-fly draft skill resolution
+ * via {@link DraftPackageCatalog}).
  *
  * This mirrors the dashboard "Run" semantic — running an agent that has
  * never been published, or that has uncommitted edits since its last

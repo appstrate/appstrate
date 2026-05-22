@@ -43,8 +43,8 @@ export interface AgentReadinessParams {
  * Collect every readiness error as structured field entries (non-throwing).
  *
  * Single source of truth for readiness checks — the throwing wrapper
- * `validateAgentReadiness` delegates to this. Order matches the historical
- * fail-fast sequence: prompt → skills → tools → provider deps → config.
+ * `validateAgentReadiness` delegates to this. Fail-fast sequence:
+ * prompt → skills → integration connections → config.
  */
 export async function collectAgentReadinessErrors(
   params: AgentReadinessParams,

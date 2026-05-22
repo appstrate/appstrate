@@ -7,9 +7,7 @@
  * Mutations (publish, install, connect) and runtime side (proxy, MCP
  * Router, OAuth flows) come in Phases 1.05, 1.1, 1.2a.
  *
- * Mirrors `provider-service.ts` for the read path so the package list
- * UI can surface integrations alongside providers without
- * special-casing.
+ * Read-side queries for the integration package list UI.
  */
 
 import { and, eq } from "drizzle-orm";

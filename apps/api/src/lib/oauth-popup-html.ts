@@ -2,10 +2,9 @@
 
 /**
  * Tiny HTML snippets returned by OAuth callback endpoints to close (or
- * surface an error in) the popup that initiated the flow. Used by both
- * the legacy provider flow (`routes/connections.ts`) and the integration
- * flow (`routes/integrations.ts`) — keep one source so a CSP/branding
- * change touches a single file.
+ * surface an error in) the popup that initiated the flow. Used by the
+ * integration OAuth flow (`routes/integrations.ts`) — keep one source so
+ * a CSP/branding change touches a single file.
  */
 
 import { escapeHtml } from "@appstrate/core/html";
