@@ -9,11 +9,11 @@ import {
 import type { DepEntry } from "../src/dependencies.ts";
 
 describe("extractDependencies", () => {
-  it("manifest with skills and providers", () => {
+  it("manifest with skills and integrations", () => {
     const manifest = {
       dependencies: {
         skills: { "@acme/skill-a": "^1.0.0", "@acme/skill-b": "~2.0.0" },
-        providers: { "@acme/svc-c": ">=1.0.0" },
+        integrations: { "@acme/svc-c": ">=1.0.0" },
       },
     };
     const deps = extractDependencies(manifest);
@@ -27,7 +27,7 @@ describe("extractDependencies", () => {
 
     const svcC = deps.find((d) => d.depName === "svc-c");
     expect(svcC).toBeDefined();
-    expect(svcC!.depType).toBe("provider");
+    expect(svcC!.depType).toBe("integration");
   });
 
   it("manifest without dependencies", () => {
@@ -51,10 +51,10 @@ describe("extractDependencies", () => {
     expect(deps[0]!.depName).toBe("cool-skill");
   });
 
-  it("manifest with providers", () => {
+  it("manifest with integrations", () => {
     const manifest = {
       dependencies: {
-        providers: { "@acme/slack": "^1.0.0", "@acme/github": "~2.0.0" },
+        integrations: { "@acme/slack": "^1.0.0", "@acme/github": "~2.0.0" },
       },
     };
     const deps = extractDependencies(manifest);
@@ -63,23 +63,21 @@ describe("extractDependencies", () => {
     const slack = deps.find((d) => d.depName === "slack");
     expect(slack).toBeDefined();
     expect(slack!.depScope).toBe("@acme");
-    expect(slack!.depType).toBe("provider");
+    expect(slack!.depType).toBe("integration");
     expect(slack!.versionRange).toBe("^1.0.0");
   });
 
-  it("manifest with skills, providers, and integrations", () => {
+  it("manifest with both skills and integrations", () => {
     const manifest = {
       dependencies: {
         skills: { "@acme/skill-a": "^1.0.0" },
         integrations: { "@acme/gmail-mcp": "^1.0.0" },
-        providers: { "@acme/slack": "^1.0.0" },
       },
     };
     const deps = extractDependencies(manifest);
-    expect(deps).toHaveLength(3);
+    expect(deps).toHaveLength(2);
     expect(deps.find((d) => d.depType === "skill")).toBeDefined();
     expect(deps.find((d) => d.depType === "integration")).toBeDefined();
-    expect(deps.find((d) => d.depType === "provider")).toBeDefined();
   });
 
   it("throws on invalid scoped package name", () => {
@@ -235,7 +233,7 @@ describe("detectCycle", () => {
   it("valid DAG — no cycle", async () => {
     const deps: DepEntry[] = [
       { depScope: "@acme", depName: "pkg-b", depType: "skill", versionRange: "^1.0.0" },
-      { depScope: "@acme", depName: "pkg-c", depType: "provider", versionRange: "^1.0.0" },
+      { depScope: "@acme", depName: "pkg-c", depType: "integration", versionRange: "^1.0.0" },
     ];
     const resolveDeps = async (_scope: string, name: string): Promise<DepEntry[]> => {
       if (name === "pkg-b") {

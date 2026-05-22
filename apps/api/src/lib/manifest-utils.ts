@@ -10,13 +10,19 @@ export function parseDraftManifest(value: unknown): Partial<Manifest> {
   return asRecord(value) as Partial<Manifest>;
 }
 
-/** Extract skill IDs from a manifest's dependencies section. */
-export function extractDepsFromManifest(manifest: Partial<Manifest>) {
+/**
+ * Extract skill IDs from a manifest's dependencies section.
+ *
+ * The platform's transitive dependency graph is skill-only: agents pull in
+ * skills, and skills can depend on other skills. Integrations are resolved
+ * through a separate path (`parseManifestIntegrations`), and the legacy
+ * `tool`/`provider` package types are gone — so this returns a bare list of
+ * skill package IDs rather than a typed multi-category bag.
+ */
+export function extractSkillIdsFromManifest(manifest: Partial<Manifest>): string[] {
   const dependencies = asRecord(manifest.dependencies);
   const skillsMap = asRecord(dependencies.skills) as Record<string, string>;
-  return {
-    skillIds: Object.keys(skillsMap).filter(Boolean),
-  };
+  return Object.keys(skillsMap).filter(Boolean);
 }
 
 /** Extract input/config/output JSON schemas from a manifest, with safe narrowing. */

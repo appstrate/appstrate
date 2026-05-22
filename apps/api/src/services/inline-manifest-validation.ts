@@ -16,7 +16,7 @@
 
 import { validateManifest } from "@appstrate/core/validation";
 import type { Manifest } from "@appstrate/core/validation";
-import { extractDepsFromManifest } from "./../lib/manifest-utils.ts";
+import { extractSkillIdsFromManifest } from "./../lib/manifest-utils.ts";
 import type { InlineRunLimits } from "./run-limits.ts";
 
 export interface InlineManifestValidationResult {
@@ -75,15 +75,14 @@ export function validateInlineManifest(
   const manifest = structural.valid ? (structural.manifest as Manifest) : undefined;
 
   // --- 5. Dependency count caps ---
-  // `extractDepsFromManifest` is defensive (it routes every read through
+  // `extractSkillIdsFromManifest` is defensive (it routes every read through
   // `asRecord`) so this call should never throw on malformed input. The
   // try/catch is belt-and-suspenders: if a future refactor relaxes the
   // helper's tolerance, a malformed `dependencies` payload still surfaces a
   // structured error instead of bubbling a TypeError to the request handler.
   let skillIds: string[] = [];
   try {
-    const deps = extractDepsFromManifest((manifest ?? input.manifest) as Partial<Manifest>);
-    skillIds = deps.skillIds;
+    skillIds = extractSkillIdsFromManifest((manifest ?? input.manifest) as Partial<Manifest>);
   } catch {
     errors.push("manifest.dependencies: malformed shape");
   }

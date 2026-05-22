@@ -24,17 +24,17 @@ export interface DepEntry {
   /** Package name without scope (e.g. "my-tool"). */
   depName: string;
   /** The dependency category. */
-  depType: "skill" | "provider" | "integration";
+  depType: "skill" | "integration";
   /** Semver version range (e.g. "^1.0.0"). */
   versionRange: string;
 }
 
 /**
  * Extract dependency entries from a manifest's `dependencies` field.
- * Parses scoped names from the skills, providers, and integrations
- * dependency maps. Every dependency value is a bare semver range string.
- * Per-integration tool/scope selection lives in the manifest's top-level
- * `integrations[id]` block — read via {@link parseManifestIntegrations}.
+ * Parses scoped names from the skills and integrations dependency maps.
+ * Every dependency value is a bare semver range string. Per-integration
+ * tool/scope selection lives in the manifest's top-level `integrations[id]`
+ * block — read via {@link parseManifestIntegrations}.
  * @param manifest - Raw manifest object containing an optional `dependencies` field
  * @returns Array of parsed dependency entries
  * @throws Error if any dependency has an invalid scoped package name
@@ -43,7 +43,6 @@ export function extractDependencies(manifest: Record<string, unknown>): DepEntry
   const dependencies = manifest.dependencies as
     | {
         skills?: Record<string, string>;
-        providers?: Record<string, string>;
         integrations?: Record<string, string>;
       }
     | undefined;
@@ -51,11 +50,10 @@ export function extractDependencies(manifest: Record<string, unknown>): DepEntry
   if (!dependencies) return [];
 
   const deps: DepEntry[] = [];
-  const { skills = {}, providers = {}, integrations = {} } = dependencies;
+  const { skills = {}, integrations = {} } = dependencies;
 
   const maps: [Record<string, string>, DepEntry["depType"]][] = [
     [skills, "skill"],
-    [providers, "provider"],
     [integrations, "integration"],
   ];
 

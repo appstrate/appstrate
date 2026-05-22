@@ -8,7 +8,7 @@ import { caretRange } from "@appstrate/core/semver";
 import type { AgentManifest, LoadedPackage } from "../types/index.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
-import { extractDepsFromManifest, parseDraftManifest } from "../lib/manifest-utils.ts";
+import { extractSkillIdsFromManifest, parseDraftManifest } from "../lib/manifest-utils.ts";
 import { hasPackageAccess } from "./application-packages.ts";
 
 interface DbPackageRow {
@@ -35,7 +35,7 @@ function mapDependencies(
       const m = parseDraftManifest(d.draftManifest);
       // Manifest's declared range is the source of truth. If the
       // manifest doesn't carry one for a dep that resolved (data
-      // inconsistency — extractDepsFromManifest reads the same
+      // inconsistency — extractSkillIdsFromManifest reads the same
       // section), fall back to caret-of-current so we never emit a
       // bare wildcard. `m.version` is "0.0.0" only for malformed
       // drafts, in which case the dep wouldn't load at runtime anyway.
@@ -76,11 +76,10 @@ async function resolveDepRefs(
   orgId: string,
 ): Promise<NonNullable<DbPackageRow["depRefs"]>> {
   const m = parseDraftManifest(manifest);
-  const { skillIds } = extractDepsFromManifest(m);
-  const allDepIds = [...skillIds];
-  if (allDepIds.length === 0) return [];
+  const skillIds = extractSkillIdsFromManifest(m);
+  if (skillIds.length === 0) return [];
 
-  const conditions = [inArray(packages.id, allDepIds), orgOrSystemFilter(orgId)];
+  const conditions = [inArray(packages.id, skillIds), orgOrSystemFilter(orgId)];
 
   const rows = await db
     .select({
