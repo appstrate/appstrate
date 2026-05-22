@@ -177,3 +177,78 @@ export function decryptCredentials<T = Record<string, string>>(encryptedStr: str
   const json = decrypt(encryptedStr);
   return JSON.parse(json) as T;
 }
+
+// ─────────────────────────────────────────────
+// Structured credential envelope (v2) — spec §4.6
+// ─────────────────────────────────────────────
+
+/**
+ * Decrypted shape of a credential blob, split into two non-overlapping
+ * planes (spec §4.6):
+ *
+ *   - `outputs` — the ONLY injectables. `delivery.{http,env,files}` may
+ *     reference these and nothing else.
+ *   - `inputs`  — bootstrap secrets (a login password) persisted solely to
+ *     re-bootstrap an expired session (`persistLoginSecret`). Readable ONLY
+ *     by the connect-runner during `complete`/`reacquire`; never by the
+ *     injection path nor the agent.
+ *
+ * Values are typed `unknown` here; callers project to strings at the
+ * boundary (`projectToStringMap`).
+ */
+export interface CredentialEnvelope {
+  outputs: Record<string, unknown>;
+  inputs: Record<string, unknown>;
+}
+
+/** Tag of the structured envelope. v1 (untagged flat map) reads back as all-outputs. */
+const STRUCTURED_ENVELOPE_VERSION = 2;
+
+/**
+ * Encrypt a structured `{ v:2, outputs, inputs }` credential envelope. The
+ * outer crypto envelope is unchanged (still `v1:<kid>:…` AES-256-GCM, spec
+ * §1.2 invariant 3) — `v` here versions the *plaintext* JSON shape, not the
+ * wire crypto. `inputs` is omitted when empty so a no-secret bundle stays a
+ * compact `{ v:2, outputs }`.
+ */
+export function encryptCredentialEnvelope(envelope: {
+  outputs: Record<string, unknown>;
+  inputs?: Record<string, unknown>;
+}): string {
+  const hasInputs = envelope.inputs && Object.keys(envelope.inputs).length > 0;
+  return encrypt(
+    JSON.stringify({
+      v: STRUCTURED_ENVELOPE_VERSION,
+      outputs: envelope.outputs,
+      ...(hasInputs ? { inputs: envelope.inputs } : {}),
+    }),
+  );
+}
+
+/**
+ * Decrypt a credential blob into its `{ outputs, inputs }` planes.
+ *
+ * Backward-compat (spec §4.6): a v1 flat `Record<string,string>` blob (no
+ * `v:2` tag) is read as `{ outputs: <whole blob>, inputs: {} }` — zero DDL,
+ * zero re-encryption needed. This makes every legacy injection read project
+ * the entire blob as injectables, exactly as before.
+ */
+export function decryptCredentialEnvelope(ciphertext: string): CredentialEnvelope {
+  const decoded = decryptCredentials<Record<string, unknown>>(ciphertext) ?? {};
+  if (
+    decoded &&
+    typeof decoded === "object" &&
+    decoded["v"] === STRUCTURED_ENVELOPE_VERSION &&
+    typeof decoded["outputs"] === "object" &&
+    decoded["outputs"] !== null
+  ) {
+    const inputs = decoded["inputs"];
+    return {
+      outputs: decoded["outputs"] as Record<string, unknown>,
+      inputs:
+        typeof inputs === "object" && inputs !== null ? (inputs as Record<string, unknown>) : {},
+    };
+  }
+  // v1 flat blob — the whole map is injectable, nothing is a bootstrap secret.
+  return { outputs: decoded, inputs: {} };
+}

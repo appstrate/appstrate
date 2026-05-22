@@ -1273,3 +1273,137 @@ describe("integrationManifestSchema — connect (TwoStep)", () => {
     expect(r.success).toBe(false);
   });
 });
+
+describe("integrationManifestSchema — connect.tool (Orchestrated) + delivery gating (§4.6)", () => {
+  function withAuth(auth: Record<string, unknown>): Record<string, unknown> {
+    return baseManifest({ auths: { session: auth } });
+  }
+  const orchestratedAuth = (
+    connect: Record<string, unknown>,
+    delivery: Record<string, unknown> = {
+      http: { headerName: "Cookie", valueFrom: "JSESSIONID" },
+    },
+  ): Record<string, unknown> => ({
+    type: "custom",
+    credentials: { schema: { type: "object" } },
+    authorizedUris: ["https://saas.example.com/**"],
+    delivery,
+    connect,
+  });
+
+  it("accepts a valid custom + connect.tool auth", () => {
+    const r = integrationManifestSchema.safeParse(
+      withAuth(
+        orchestratedAuth({
+          tool: "login",
+          runAt: "run-start",
+          reauthOn: [401],
+          persistLoginSecret: true,
+          produces: ["JSESSIONID", "AWSALB"],
+          dependsOn: ["@appstrate/gmail"],
+        }),
+      ),
+    );
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects declaring both steps and tool", () => {
+    const r = integrationManifestSchema.safeParse(
+      withAuth(
+        orchestratedAuth({
+          tool: "login",
+          runAt: "run-start",
+          produces: ["JSESSIONID"],
+          steps: [
+            {
+              request: { method: "POST", url: "https://saas.example.com/login" },
+              extract: { JSESSIONID: { from: "cookie", name: "JSESSIONID" } },
+              output: ["JSESSIONID"],
+            },
+          ],
+        }),
+      ),
+    );
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects connect.tool without runAt", () => {
+    const r = integrationManifestSchema.safeParse(
+      withAuth(orchestratedAuth({ tool: "login", produces: ["JSESSIONID"] })),
+    );
+    expect(r.success).toBe(false);
+  });
+
+  it("requires produces when persistLoginSecret is set", () => {
+    const r = integrationManifestSchema.safeParse(
+      withAuth(orchestratedAuth({ tool: "login", runAt: "run-start", persistLoginSecret: true })),
+    );
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects orchestrated-only fields on a steps connect", () => {
+    const r = integrationManifestSchema.safeParse(
+      withAuth(
+        orchestratedAuth(
+          {
+            runAt: "link",
+            steps: [
+              {
+                request: { method: "POST", url: "https://saas.example.com/login" },
+                extract: { JSESSIONID: { from: "cookie", name: "JSESSIONID" } },
+                output: ["JSESSIONID"],
+              },
+            ],
+          },
+          { http: { headerName: "Cookie", valueFrom: "JSESSIONID" } },
+        ),
+      ),
+    );
+    expect(r.success).toBe(false);
+  });
+
+  it("GATING: rejects delivery referencing a field that is not a declared output", () => {
+    // `mot_de_passe` is a bootstrap input (login secret), never an injectable.
+    const r = integrationManifestSchema.safeParse(
+      withAuth(
+        orchestratedAuth(
+          { tool: "login", runAt: "run-start", produces: ["JSESSIONID"] },
+          { http: { headerName: "Cookie", valueFrom: "mot_de_passe" } },
+        ),
+      ),
+    );
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      expect(JSON.stringify(r.error.issues)).toContain("not a declared connect output");
+    }
+  });
+
+  it("GATING: rejects a delivery template token that is not a declared output", () => {
+    const r = integrationManifestSchema.safeParse(
+      withAuth(
+        orchestratedAuth(
+          { tool: "login", runAt: "run-start", produces: ["JSESSIONID"] },
+          { http: { headerName: "Cookie", valueFrom: { template: "sid={{secret_pwd}}" } } },
+        ),
+      ),
+    );
+    expect(r.success).toBe(false);
+  });
+
+  it("GATING: accepts delivery referencing only declared outputs", () => {
+    const r = integrationManifestSchema.safeParse(
+      withAuth(
+        orchestratedAuth(
+          { tool: "login", runAt: "run-start", produces: ["JSESSIONID", "AWSALB"] },
+          {
+            http: {
+              headerName: "Cookie",
+              valueFrom: { template: "JSESSIONID={{JSESSIONID}}; AWSALB={{AWSALB}}" },
+            },
+          },
+        ),
+      ),
+    );
+    expect(r.success).toBe(true);
+  });
+});

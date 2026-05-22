@@ -3,7 +3,15 @@
 // Types
 export type { Actor, ScopeValidationResult, OAuthStateRecord, OAuthStateStore } from "./types.ts";
 // Encryption
-export { encrypt, decrypt, encryptCredentials, decryptCredentials } from "./encryption.ts";
+export {
+  encrypt,
+  decrypt,
+  encryptCredentials,
+  decryptCredentials,
+  encryptCredentialEnvelope,
+  decryptCredentialEnvelope,
+} from "./encryption.ts";
+export type { CredentialEnvelope } from "./encryption.ts";
 
 // Scopes
 export { validateScopes } from "./scopes.ts";
@@ -50,6 +58,7 @@ export type { ProxyCredentialsPayload } from "./proxy-primitives.ts";
 export {
   ALIAS_MAP,
   decryptCredentialsToStringMap,
+  decryptCredentialInputsToStringMap,
   readCredentialField,
   resolveHttpDelivery,
   buildProxyCredentialsPayload,

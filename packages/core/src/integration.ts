@@ -394,14 +394,66 @@ const connectLimitsSchema = z.object({
 });
 
 const connectSchema = z.object({
+  // ── TwoStep (declarative) — mutually exclusive with `tool` ──
   // Declarative multi-step login (TWO_STEP). Bounded: max 8 steps.
-  steps: z.array(connectStepSchema).min(1).max(8),
+  steps: z.array(connectStepSchema).min(1).max(8).optional(),
   limits: connectLimitsSchema.optional(),
   // Output name holding seconds-to-expiry → computes expires_at.
   expiresInOutput: z.string().optional(),
   // Output names to also record as identity claims.
   identityOutputs: z.array(z.string()).optional(),
+
+  // ── Orchestrated (code) — mutually exclusive with `steps` (spec §4.3) ──
+  // Name of the MCP tool, exposed by the integration's bundled server, that
+  // drives the login dance. Runs in the sidecar; the secret never reaches it
+  // (substitution is proxy-side). Selecting `tool` makes this an
+  // OrchestratedStrategy auth.
+  tool: z.string().min(1).optional(),
+  // When the FIRST acquisition happens: `link` (durable, at dashboard click —
+  // ephemeral connect-run) | `run-start` (at each agent run, in the run's
+  // sidecar). `reauthOn` is the orthogonal RE-acquisition trigger.
+  runAt: z.enum(["link", "run-start"]).optional(),
+  // HTTP status codes that trigger a re-acquisition (re-bootstrap) mid-run —
+  // typically `[401]`. The MITM signals; the sandbox re-runs the tool.
+  reauthOn: z.array(z.number().int().min(100).max(599)).max(8).optional(),
+  // Persist the bootstrap `inputs` (login secret) encrypted, NON-injectable,
+  // so the tool can re-bootstrap an expired session without re-prompting.
+  persistLoginSecret: z.boolean().optional(),
+  // Injectable outputs the tool is expected to produce. Authoritative set the
+  // `delivery.*` gating (spec §4.6) is validated against.
+  produces: z.array(z.string().min(1)).max(32).optional(),
+  // Other integrations the connect-tool may call during the dance (e.g.
+  // craigslist → Gmail magic-link). Bounded.
+  dependsOn: z.array(z.string().min(1)).max(8).optional(),
 });
+
+/** Extract `{{name}}` placeholder names from a delivery template. */
+function extractTemplateTokens(template: string): string[] {
+  const out: string[] = [];
+  const re = /\{\{\s*(\w+)\s*\}\}/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(template)) !== null) out.push(m[1]!);
+  return out;
+}
+
+/**
+ * Every credential field name a `delivery.{http,env,files}` block references.
+ * Used to enforce the §4.6 gating rule: a connect auth's delivery may only
+ * reference declared `outputs` — never a bootstrap `inputs` (login secret).
+ */
+function collectDeliveryRefs(delivery: {
+  http?: { valueFrom?: string | { template: string; encoding?: "base64" } };
+  env?: Record<string, { from: string }>;
+  files?: Record<string, { from: string }>;
+}): string[] {
+  const refs: string[] = [];
+  const vf = delivery.http?.valueFrom;
+  if (typeof vf === "string") refs.push(vf);
+  else if (vf && typeof vf === "object") refs.push(...extractTemplateTokens(vf.template));
+  for (const e of Object.values(delivery.env ?? {})) refs.push(e.from);
+  for (const e of Object.values(delivery.files ?? {})) refs.push(e.from);
+  return refs;
+}
 
 const authSchema = z
   .object({
@@ -526,63 +578,140 @@ const authSchema = z
         path: ["credentials"],
       });
     }
-    // `connect` (TwoStep) is only meaningful for `custom` auths — oauth2 has
-    // its own flow, api_key/basic are paste-the-bag.
+    // `connect` is only meaningful for `custom` auths — oauth2 has its own
+    // flow, api_key/basic are paste-the-bag. It is EITHER a declarative
+    // `steps` chain (TwoStep) OR a code-orchestrated `tool` (Orchestrated) —
+    // never both (spec §4.2/§4.3).
     if (auth.connect) {
+      const { connect } = auth;
       if (auth.type !== "custom") {
         ctx.addIssue({
           code: "custom",
-          message: `auth.connect (TwoStep) is only valid on type 'custom' (got '${auth.type}')`,
+          message: `auth.connect is only valid on type 'custom' (got '${auth.type}')`,
           path: ["connect"],
         });
       }
-      // Collect every name declared by any step's extractors; bind/output must
-      // reference a name extracted in the SAME step, and the final outputs set
-      // must cover expiresInOutput / identityOutputs.
-      const allOutputs = new Set<string>();
-      auth.connect.steps.forEach((step, i) => {
-        const extractKeys = new Set(Object.keys(step.extract ?? {}));
-        for (const name of step.bind ?? []) {
-          if (!extractKeys.has(name)) {
-            ctx.addIssue({
-              code: "custom",
-              message: `connect.steps[${i}].bind '${name}' has no matching extractor in the same step`,
-              path: ["connect", "steps", i, "bind"],
-            });
-          }
-        }
-        for (const name of step.output ?? []) {
-          if (!extractKeys.has(name)) {
-            ctx.addIssue({
-              code: "custom",
-              message: `connect.steps[${i}].output '${name}' has no matching extractor in the same step`,
-              path: ["connect", "steps", i, "output"],
-            });
-          }
-          allOutputs.add(name);
-        }
-      });
-      if (allOutputs.size === 0) {
+      const hasSteps = connect.steps !== undefined;
+      const hasTool = connect.tool !== undefined;
+      if (hasSteps === hasTool) {
         ctx.addIssue({
           code: "custom",
-          message: "auth.connect must declare at least one step `output` (the injectable result)",
+          message:
+            "auth.connect must declare exactly one of `steps` (TwoStep) or `tool` (Orchestrated)",
           path: ["connect"],
         });
       }
-      if (auth.connect.expiresInOutput && !allOutputs.has(auth.connect.expiresInOutput)) {
-        ctx.addIssue({
-          code: "custom",
-          message: `connect.expiresInOutput '${auth.connect.expiresInOutput}' is not a declared output`,
-          path: ["connect", "expiresInOutput"],
+
+      // The set of injectable outputs this auth declares — what `delivery.*`
+      // is allowed to reference (§4.6 gating). TwoStep: the union of step
+      // `output` names. Orchestrated: the `produces` list.
+      const declaredOutputs = new Set<string>();
+
+      if (hasSteps) {
+        // Collect every name declared by any step's extractors; bind/output
+        // must reference a name extracted in the SAME step, and the final
+        // outputs set must cover expiresInOutput / identityOutputs.
+        connect.steps!.forEach((step, i) => {
+          const extractKeys = new Set(Object.keys(step.extract ?? {}));
+          for (const name of step.bind ?? []) {
+            if (!extractKeys.has(name)) {
+              ctx.addIssue({
+                code: "custom",
+                message: `connect.steps[${i}].bind '${name}' has no matching extractor in the same step`,
+                path: ["connect", "steps", i, "bind"],
+              });
+            }
+          }
+          for (const name of step.output ?? []) {
+            if (!extractKeys.has(name)) {
+              ctx.addIssue({
+                code: "custom",
+                message: `connect.steps[${i}].output '${name}' has no matching extractor in the same step`,
+                path: ["connect", "steps", i, "output"],
+              });
+            }
+            declaredOutputs.add(name);
+          }
         });
-      }
-      for (const name of auth.connect.identityOutputs ?? []) {
-        if (!allOutputs.has(name)) {
+        if (declaredOutputs.size === 0) {
           ctx.addIssue({
             code: "custom",
-            message: `connect.identityOutputs '${name}' is not a declared output`,
-            path: ["connect", "identityOutputs"],
+            message: "auth.connect must declare at least one step `output` (the injectable result)",
+            path: ["connect"],
           });
+        }
+        if (connect.expiresInOutput && !declaredOutputs.has(connect.expiresInOutput)) {
+          ctx.addIssue({
+            code: "custom",
+            message: `connect.expiresInOutput '${connect.expiresInOutput}' is not a declared output`,
+            path: ["connect", "expiresInOutput"],
+          });
+        }
+        for (const name of connect.identityOutputs ?? []) {
+          if (!declaredOutputs.has(name)) {
+            ctx.addIssue({
+              code: "custom",
+              message: `connect.identityOutputs '${name}' is not a declared output`,
+              path: ["connect", "identityOutputs"],
+            });
+          }
+        }
+      }
+
+      if (hasTool) {
+        // Orchestrated fields that only make sense with `tool`.
+        if (connect.runAt === undefined) {
+          ctx.addIssue({
+            code: "custom",
+            message: "connect.tool requires `runAt` ('link' | 'run-start')",
+            path: ["connect", "runAt"],
+          });
+        }
+        // Persisting the login secret means an `inputs` plane will exist, so a
+        // `produces` list is REQUIRED — it's what makes the §4.6 delivery
+        // gating enforceable (otherwise an input could be referenced).
+        if (connect.persistLoginSecret && (connect.produces?.length ?? 0) === 0) {
+          ctx.addIssue({
+            code: "custom",
+            message:
+              "connect.persistLoginSecret requires a non-empty `produces` (so delivery.* gating can distinguish injectable outputs from the persisted login secret)",
+            path: ["connect", "produces"],
+          });
+        }
+        for (const name of connect.produces ?? []) declaredOutputs.add(name);
+      } else {
+        // `steps` mode: orchestrated-only fields are meaningless.
+        for (const field of [
+          "tool",
+          "runAt",
+          "reauthOn",
+          "persistLoginSecret",
+          "produces",
+          "dependsOn",
+        ] as const) {
+          if (connect[field] !== undefined) {
+            ctx.addIssue({
+              code: "custom",
+              message: `connect.${field} is only valid with connect.tool (Orchestrated), not connect.steps`,
+              path: ["connect", field],
+            });
+          }
+        }
+      }
+
+      // §4.6 gating: a connect auth's delivery may only reference declared
+      // `outputs`. A delivery pointing at a credentials-schema field that is
+      // NOT an output (i.e. a bootstrap login secret) is a manifest error —
+      // never a silent injection of the secret.
+      if (declaredOutputs.size > 0) {
+        for (const ref of collectDeliveryRefs(auth.delivery)) {
+          if (!declaredOutputs.has(ref)) {
+            ctx.addIssue({
+              code: "custom",
+              message: `delivery references '${ref}', which is not a declared connect output — delivery.* may only reference injectable outputs (spec §4.6)`,
+              path: ["delivery"],
+            });
+          }
         }
       }
     }

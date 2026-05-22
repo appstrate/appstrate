@@ -22,3 +22,9 @@ export type {
   TwoStepContext,
   TwoStepResult,
 } from "./twostep-engine.ts";
+export { validateConnectToolResult, ConnectToolContractError } from "./tool-contract.ts";
+export type {
+  ConnectToolContext,
+  ConnectToolResult,
+  ConnectToolErrorReason,
+} from "./tool-contract.ts";

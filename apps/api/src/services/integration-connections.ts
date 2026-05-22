@@ -36,7 +36,11 @@ import {
   applications,
   packages,
 } from "@appstrate/db/schema";
-import { encryptCredentials, decryptCredentials } from "@appstrate/connect";
+import {
+  encryptCredentials,
+  encryptCredentialEnvelope,
+  decryptCredentials,
+} from "@appstrate/connect";
 import { logger } from "../lib/logger.ts";
 import { notFound, conflict, invalidRequest } from "../lib/errors.ts";
 import type { AppScope } from "../lib/scope.ts";
@@ -565,9 +569,14 @@ export type PersistTarget =
   | { kind: "update-by-id"; connectionId: string };
 
 /**
- * Flat-credentials persist input (Phase 0). The strategies bridge a
- * {@link CredentialBundle}'s `outputs ∪ inputs` into this map until the v2
- * structured envelope lands (Phase 4).
+ * Persist input for the credential columns.
+ *
+ * `credentials` is the injectable **outputs** plane. `inputs` (spec §4.6) is
+ * the bootstrap-secret plane, persisted ONLY when an OrchestratedStrategy
+ * declares `persistLoginSecret` — when present (non-empty) the writer emits a
+ * structured v2 envelope `{ v:2, outputs, inputs }`; otherwise it stays a flat
+ * v1 blob, byte-identical to every pre-Phase-4 write. The injection path can
+ * never read `inputs` (it only ever projects `outputs`).
  *
  * UPDATE column semantics (preserving today's behaviour exactly):
  *   - `credentials`, `expiresAt`, `needsReconnection` are ALWAYS written.
@@ -578,6 +587,8 @@ export type PersistTarget =
  */
 export interface PersistCredentialInput {
   credentials: Record<string, unknown>;
+  /** Bootstrap secrets (login password) — persisted NON-injectable (v2). */
+  inputs?: Record<string, string>;
   expiresAt?: Date | null;
   needsReconnection?: boolean;
   accountId?: string;
@@ -605,7 +616,13 @@ export async function persistCredentialBundle(
   target: PersistTarget,
   input: PersistCredentialInput,
 ): Promise<IntegrationConnectionSummary | null> {
-  const ciphertext = encryptCredentials(input.credentials);
+  // v2 structured envelope only when a bootstrap secret is being persisted
+  // (`persistLoginSecret`); otherwise a flat v1 blob, byte-identical to every
+  // pre-Phase-4 write so existing connections/round-trips are unchanged.
+  const hasInputs = input.inputs && Object.keys(input.inputs).length > 0;
+  const ciphertext = hasInputs
+    ? encryptCredentialEnvelope({ outputs: input.credentials, inputs: input.inputs })
+    : encryptCredentials(input.credentials);
   const now = new Date();
 
   if (target.kind === "insert") {

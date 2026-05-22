@@ -8,6 +8,8 @@ import {
   decrypt,
   encryptCredentials,
   decryptCredentials,
+  encryptCredentialEnvelope,
+  decryptCredentialEnvelope,
   _resetKeyringForTesting,
 } from "../src/encryption.ts";
 
@@ -163,5 +165,40 @@ describe("encryption — credentials helpers", () => {
     const encrypted = encryptCredentials(creds);
     expect(encrypted.startsWith("v1:")).toBe(true);
     expect(decryptCredentials<typeof creds>(encrypted)).toEqual(creds);
+  });
+});
+
+describe("encryption — structured credential envelope (v2, spec §4.6)", () => {
+  it("round-trips outputs + inputs through the v2 envelope", () => {
+    const blob = encryptCredentialEnvelope({
+      outputs: { access_token: "TOK", JSESSIONID: "abc" },
+      inputs: { mot_de_passe: "s3cr3t" },
+    });
+    expect(blob.startsWith("v1:")).toBe(true); // crypto envelope unchanged
+    const env = decryptCredentialEnvelope(blob);
+    expect(env.outputs).toEqual({ access_token: "TOK", JSESSIONID: "abc" });
+    expect(env.inputs).toEqual({ mot_de_passe: "s3cr3t" });
+  });
+
+  it("omits an empty inputs plane on write", () => {
+    const blob = encryptCredentialEnvelope({ outputs: { api_key: "k" } });
+    // The plaintext carries no `inputs` key, and reads back as {}.
+    expect(JSON.parse(decrypt(blob))).toEqual({ v: 2, outputs: { api_key: "k" } });
+    expect(decryptCredentialEnvelope(blob).inputs).toEqual({});
+  });
+
+  it("reads a legacy v1 flat blob as all-outputs (backward-compat, no DDL)", () => {
+    const v1 = encryptCredentials({ access_token: "at_123", refresh_token: "rt_456" });
+    const env = decryptCredentialEnvelope(v1);
+    expect(env.outputs).toEqual({ access_token: "at_123", refresh_token: "rt_456" });
+    expect(env.inputs).toEqual({});
+  });
+
+  it("never leaks an input into the outputs plane", () => {
+    const blob = encryptCredentialEnvelope({
+      outputs: { access_token: "TOK" },
+      inputs: { password: "s3cr3t" },
+    });
+    expect(JSON.stringify(decryptCredentialEnvelope(blob).outputs)).not.toContain("s3cr3t");
   });
 });
