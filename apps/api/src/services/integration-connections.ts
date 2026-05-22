@@ -235,7 +235,7 @@ export async function loadActorConnection(
  * (admin pin / overrides / member pin / auto fallback) and return its
  * authKey for downstream delivery selection.
  */
-export async function loadAccessibleConnectionById(
+async function loadAccessibleConnectionById(
   connectionId: string,
   context: { applicationId: string; actor: Actor },
 ): Promise<ResolvedConnectionRow | null> {
@@ -265,7 +265,7 @@ export async function loadAccessibleConnectionById(
 
 /**
  * Fallback connection pick used when no resolver snapshot is available
- * (legacy/manual spawn + the live credentials path). Walks the declared
+ * (the live credentials path). Walks the declared
  * auth keys and returns the first accessible connection found — same
  * auto-pick semantics as the runtime resolver's single-candidate fallback.
  * Multi-candidate ambiguity is resolved by iteration order (declared-auth

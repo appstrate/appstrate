@@ -287,7 +287,7 @@ export async function deleteOrganization(orgId: string): Promise<void> {
     // no explicit delete needed.
     // applicationPackages cascade through applications → orgId
     await tx.delete(packages).where(eq(packages.orgId, orgId));
-    // userProviderConnections are now profile-scoped (user-owned), not org-scoped — no cleanup needed
+    // integration_connections cascade through applications → orgId — no explicit delete needed
     await tx.delete(orgInvitations).where(eq(orgInvitations.orgId, orgId));
     // org_members cascades from organizations (onDelete: "cascade")
 

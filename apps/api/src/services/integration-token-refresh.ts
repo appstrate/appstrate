@@ -3,11 +3,10 @@
 /**
  * Phase 1.5 — OAuth refresh for `integration_connections` rows.
  *
- * Mirrors the contract of `forceRefresh` in `@appstrate/connect/token-refresh`
- * (which writes back to `user_provider_connections`) but targets the
- * integration-side table. Same in-memory dedup, same RefreshError taxonomy
- * (`revoked` vs `transient`), same write-on-success + clear-needsReconnection
- * semantics.
+ * Reuses the OAuth2 refresh contract from `@appstrate/connect/token-refresh`
+ * (in-memory dedup, the `revoked` vs `transient` RefreshError taxonomy,
+ * write-on-success + clear-needsReconnection) but writes back to the
+ * `integration_connections` table.
  *
  * Lives in apps/api rather than packages/connect because `integration_connections`
  * is platform-internal (the connect package intentionally stays free of

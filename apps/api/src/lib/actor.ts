@@ -39,7 +39,7 @@ export function actorFromIds(userId: string | null, endUserId: string | null): A
 /**
  * Produces the WHERE clause to filter by actor. Pass the `{userId, endUserId}`
  * column pair from whichever table is being scoped (e.g. `runs.userId` /
- * `runs.endUserId`, or `connectionProfiles.userId` / `endUserId`).
+ * `runs.endUserId`, or `integrationConnections.userId` / `endUserId`).
  */
 export function actorFilter(actor: Actor, cols: { userId: Column; endUserId: Column }) {
   return actor.type === "end_user" ? eq(cols.endUserId, actor.id) : eq(cols.userId, actor.id);
