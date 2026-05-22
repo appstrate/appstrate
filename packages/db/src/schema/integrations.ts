@@ -3,8 +3,7 @@
 /**
  * AFPS integration storage tables (Phase 1.1 — credential layer).
  *
- * Separate from `userProviderConnections` (legacy provider model)
- * because the integration model is keyed differently:
+ * The integration credential model is keyed per-auth:
  *
  *   - One integration manifest can declare 1..N auths
  *     (`auths.{key}` — proposal §4.1.1), each independently connected
@@ -20,12 +19,12 @@
  *     surface in Appstrate is application-scoped — see CLAUDE.md
  *     "Multi-tenant" section), with the owner being either a
  *     dashboard user (`userId`) or a headless end-user
- *     (`endUserId`). The check constraint mirrors `connection_profiles`.
+ *     (`endUserId`), enforced by a check constraint.
  *
- * The runtime spawn flow (Phase 1.2a) will hit this table once per
- * declared auth at integration boot, decrypt with the same v1 envelope
- * as `userProviderConnections`, and feed
- * `resolveIntegrationCredentials` (packages/connect/integration-credentials.ts).
+ * The runtime spawn flow (Phase 1.2a) hits this table once per declared
+ * auth at integration boot, decrypts with the v1 credential envelope, and
+ * feeds `resolveIntegrationCredentials`
+ * (packages/connect/integration-credentials.ts).
  */
 
 import {
@@ -63,7 +62,7 @@ export const integrationConnections = pgTable(
     /** Owner: dashboard user XOR headless end-user (constraint below). */
     userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
     endUserId: text("end_user_id").references(() => endUsers.id, { onDelete: "cascade" }),
-    /** v1 envelope ciphertext (same primitive as `userProviderConnections`). */
+    /** v1 envelope ciphertext (AES-GCM, keyring-encrypted). */
     credentialsEncrypted: text("credentials_encrypted").notNull(),
     /** Identity claims extracted via `extractTokenIdentity` — `accountEmail`, …. */
     identityClaims: jsonb("identity_claims"),
