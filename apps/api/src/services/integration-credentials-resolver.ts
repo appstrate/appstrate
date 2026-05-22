@@ -33,10 +33,10 @@ import { logger } from "../lib/logger.ts";
 import { notFound, forbidden, internalError, badGateway } from "../lib/errors.ts";
 import type { Actor } from "../lib/actor.ts";
 import {
-  forceRefreshIntegrationConnection,
   buildIntegrationOAuthRefreshContext,
   decryptIntegrationConnectionFields,
 } from "./integration-token-refresh.ts";
+import { resolveStrategy } from "./connect/registry.ts";
 import {
   assertIntegrationActive,
   selectAccessibleConnection,
@@ -156,13 +156,15 @@ export async function resolveLiveIntegrationCredentials(
     );
     if (refreshContext) {
       try {
-        const refreshed = await forceRefreshIntegrationConnection(
-          connection.id,
-          integrationId,
+        // Single re-acquisition path — OAuth2Strategy.reacquire wraps the
+        // fast-path refresh_token POST. needsRefresh already gated type=oauth2.
+        const refreshed = await resolveStrategy(authDef).reacquire!({
+          connectionId: connection.id,
+          packageId: integrationId,
           authKey,
-          connection.credentialsEncrypted,
+          credentialsEncrypted: connection.credentialsEncrypted,
           refreshContext,
-        );
+        });
         fields = refreshed.fields;
         expiresAtEpochMs = refreshed.expiresAt ? refreshed.expiresAt.getTime() : null;
 

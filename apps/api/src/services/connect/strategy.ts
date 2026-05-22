@@ -22,8 +22,29 @@ import type {
 } from "@appstrate/connect/connect";
 import type { IntegrationOAuthCallbackResult } from "@appstrate/connect";
 import type { IntegrationConnectionSummary } from "../integration-connections.ts";
+import type {
+  IntegrationRefreshContext,
+  IntegrationRefreshResult,
+} from "../integration-token-refresh.ts";
 
 export type { ConnectContext, BeginOptions, BeginResult, CredentialBundle };
+export type { IntegrationRefreshResult };
+
+/**
+ * Inputs for {@link IntegrationConnectStrategy.reacquire}. The live credential
+ * resolvers (MITM + api_call proxy) hold the encrypted blob + the per-app
+ * OAuth refresh context, not a decrypted {@link CredentialBundle} — so the
+ * orchestration `reacquire` takes the resolver's shape and returns the rich
+ * {@link IntegrationRefreshResult} (fields + expiry + granted scopes + shrink
+ * flag) those hot paths consume.
+ */
+export interface ReacquireInput {
+  connectionId: string;
+  packageId: string;
+  authKey: string;
+  credentialsEncrypted: string;
+  refreshContext: IntegrationRefreshContext;
+}
 
 /**
  * Terminal acquisition input for the orchestration layer.
@@ -43,6 +64,10 @@ export interface IntegrationConnectStrategy {
   begin?(ctx: ConnectContext, opts: BeginOptions): Promise<BeginResult>;
   /** Terminal acquisition → persisted connection summary. */
   complete(ctx: ConnectContext, input: ConnectCompleteInput): Promise<IntegrationConnectionSummary>;
-  /** Re-acquisition (Phase 2). */
-  reacquire?(ctx: ConnectContext, current: CredentialBundle): Promise<CredentialBundle>;
+  /**
+   * Re-acquisition (Phase 2). Present on OAuth2Strategy (fast-path
+   * refresh_token POST); absent on FieldsStrategy — a 401 on a paste-the-bag
+   * connection cannot be auto-recovered and surfaces as needsReconnection.
+   */
+  reacquire?(input: ReacquireInput): Promise<IntegrationRefreshResult>;
 }
