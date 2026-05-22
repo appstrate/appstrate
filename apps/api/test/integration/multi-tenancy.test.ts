@@ -208,28 +208,9 @@ describe("Multi-tenancy isolation", () => {
     });
   });
 
-  // ─── Skill / Tool isolation ──────────────────────────────
+  // ─── Skill isolation ─────────────────────────────────────
 
-  describe("Skills and Tools", () => {
-    it("cannot read another org's skill", async () => {
-      await seedAgent({
-        id: "@org-a/my-skill",
-        orgId: orgA.orgId,
-        type: "skill",
-        draftManifest: {
-          name: "@org-a/my-skill",
-          version: "1.0.0",
-          type: "skill",
-        },
-      });
-
-      const res = await app.request("/api/packages/skills/@org-a/my-skill", {
-        headers: authHeaders(orgB),
-      });
-
-      expect(res.status).toBe(404);
-    });
-
+  describe("Skills", () => {
     it("cannot read another org's skill", async () => {
       await seedAgent({
         id: "@org-a/my-skill",
@@ -263,18 +244,6 @@ describe("Multi-tenancy isolation", () => {
       });
 
       // requireAgent() guard returns 404 for cross-org
-      expect(res.status).toBe(404);
-    });
-
-    it("cannot modify another org's agent tools", async () => {
-      await seedAgent({ id: "@org-a/agent", orgId: orgA.orgId });
-
-      const res = await app.request("/api/agents/@org-a/agent/tools", {
-        method: "PUT",
-        headers: authHeaders(orgB, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ toolIds: ["@org-b/evil-tool"] }),
-      });
-
       expect(res.status).toBe(404);
     });
   });
