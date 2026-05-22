@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * E2E for the declarative TwoStep connect path, exercised through the real
+ * E2E for the declarative Login connect path, exercised through the real
  * `POST /api/integrations/.../connect/fields` route against a local fake
  * upstream — using the SHIPPED system-package manifests
- * (`@appstrate/connect-twostep-test`, `@appstrate/connect-formlogin-test`),
+ * (`@appstrate/connect-bearer-test`, `@appstrate/connect-formlogin-test`),
  * with their `*.test.appstrate.dev` host rebased onto the test server so the
  * chain is hermetic. Proves the full pipeline: route → resolveStrategy →
- * TwoStepStrategy → runTwoStep (real HTTP) → persistCredentialBundle, with the
+ * LoginStrategy → runLogin (real HTTP) → persistCredentialBundle, with the
  * secret substituted at the boundary (never echoed back to the connection).
  */
 
@@ -37,7 +37,7 @@ const b64url = (o: unknown) => Buffer.from(JSON.stringify(o)).toString("base64ur
 /** Per-test override for the token endpoint; null → happy-path JWT response. */
 type TokenResponder = (() => Response) | null;
 
-describe("connect E2E — declarative TwoStep against the shipped system manifests", () => {
+describe("connect E2E — declarative Login against the shipped system manifests", () => {
   let ctx: TestContext;
   let server: ReturnType<typeof Bun.serve>;
   let base: string;
@@ -81,8 +81,8 @@ describe("connect E2E — declarative TwoStep against the shipped system manifes
 
   it("password grant: extracts access_token + JWT person_id, never persists the password", async () => {
     const manifest = loadRebased(
-      "integration-connect-twostep-test-1.0.0",
-      "twostep.test.appstrate.dev",
+      "integration-connect-bearer-test-1.0.0",
+      "bearer.test.appstrate.dev",
       base,
     );
     const pkg = await seedPackage({
@@ -150,11 +150,11 @@ describe("connect E2E — declarative TwoStep against the shipped system manifes
 
   // ── Edge cases ────────────────────────────────────────────────────────────
 
-  /** Seed the TwoStep package and POST credentials to its fields-connect route. */
-  async function connectTwoStep(credentials: Record<string, string>) {
+  /** Seed the Login package and POST credentials to its fields-connect route. */
+  async function connectLogin(credentials: Record<string, string>) {
     const manifest = loadRebased(
-      "integration-connect-twostep-test-1.0.0",
-      "twostep.test.appstrate.dev",
+      "integration-connect-bearer-test-1.0.0",
+      "bearer.test.appstrate.dev",
       base,
     );
     const pkg = await seedPackage({
@@ -182,7 +182,7 @@ describe("connect E2E — declarative TwoStep against the shipped system manifes
     // the engine must not surface that body, and no connection may be written.
     tokenResponder = () => new Response("invalid_grant for password s3cr3t", { status: 401 });
 
-    const { res } = await connectTwoStep({ email: "a@b.co", password: "s3cr3t" });
+    const { res } = await connectLogin({ email: "a@b.co", password: "s3cr3t" });
 
     expect(res.status).toBe(500);
     const text = await res.text();
@@ -196,14 +196,14 @@ describe("connect E2E — declarative TwoStep against the shipped system manifes
     // `password` is omitted. The route's Zod schema only checks non-empty, so the
     // value reaches the engine, which fails closed on the unresolved `{{password}}`
     // rather than sending it literally upstream. No connection is written.
-    const { res } = await connectTwoStep({ email: "a@b.co" });
+    const { res } = await connectLogin({ email: "a@b.co" });
 
     expect(res.status).toBe(500);
     expect(await connectionCount()).toBe(0);
   });
 
   it("empty credentials object: rejected by request validation (400), no upstream call", async () => {
-    const { res } = await connectTwoStep({});
+    const { res } = await connectLogin({});
 
     expect(res.status).toBe(400);
     expect(await connectionCount()).toBe(0);
@@ -214,7 +214,7 @@ describe("connect E2E — declarative TwoStep against the shipped system manifes
     // `extract_failed`, so the connect aborts before any persistence.
     tokenResponder = () => new Response("<html>maintenance</html>", { status: 200 });
 
-    const { res } = await connectTwoStep({ email: "a@b.co", password: "s3cr3t" });
+    const { res } = await connectLogin({ email: "a@b.co", password: "s3cr3t" });
 
     expect(res.status).toBe(500);
     expect(await connectionCount()).toBe(0);
@@ -251,7 +251,7 @@ describe("connect E2E — declarative TwoStep against the shipped system manifes
     // Multi-connection model (CLAUDE.md): saveIntegrationConnection has no
     // single-auth gate. Connecting the same auth twice on the same actor yields
     // an upsert-or-insert — assert the happy path stays connectable repeatedly.
-    const first = await connectTwoStep({ email: "a@b.co", password: "s3cr3t" });
+    const first = await connectLogin({ email: "a@b.co", password: "s3cr3t" });
     expect(first.res.status).toBe(200);
 
     const second = await app.request(

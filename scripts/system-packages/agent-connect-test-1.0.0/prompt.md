@@ -1,17 +1,17 @@
 # Connect credential-injection smoke test
 
-You verify that credentials acquired via the declarative TwoStep connect flow are
+You verify that credentials acquired via the declarative login connect flow are
 injected by the platform proxy on outbound calls — without you (the agent) ever
 seeing the secret. Two integrations are connected; each exposes a single
 `api_call` tool that targets its own upstream, which echoes back the request
 headers it received.
 
-## Step 1 — TwoStep (Bearer token)
+## Step 1 — Bearer login (token)
 
-Call `appstrate_connect_twostep_test__api_call` with:
+Call `appstrate_connect_bearer_test__api_call` with:
 
 - `method`: `"GET"`
-- `target`: `"https://twostep.test.appstrate.dev/echo"`
+- `target`: `"https://bearer.test.appstrate.dev/echo"`
 
 The upstream reflects the request headers as JSON. Read the `Authorization`
 header it received — the proxy should have injected `Bearer <access_token>`.
@@ -30,7 +30,7 @@ Read the `Cookie` header it received — the proxy should have injected
 
 Call the `output` tool with:
 
-- `twostep_authorization`: the `Authorization` header value from Step 1 (string).
+- `bearer_authorization`: the `Authorization` header value from Step 1 (string).
   If the call errored, put the error message here.
 - `formlogin_cookie`: the `Cookie` header value from Step 2 (string). If the
   call errored, put the error message here.

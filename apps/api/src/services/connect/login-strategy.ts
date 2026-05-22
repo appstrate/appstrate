@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * TwoStepStrategy — declarative multi-step acquisition (spec §4.2, §4.8).
+ * LoginStrategy — declarative single-request acquisition (spec §4.2, §4.8).
  *
- * Drives the pure `runTwoStep` engine with the user-submitted bootstrap
+ * Drives the pure `runLogin` engine with the user-submitted bootstrap
  * credentials as transient `inputs`, then persists the engine's `outputs`
  * (injectables) through the single credential writer. No `begin` (the user
  * submits the bootstrap bag like Fields), no `reacquire` yet — re-bootstrap
@@ -14,7 +14,7 @@
  * `{{placeholder}}`s; the trusted engine substitutes the transient inputs.
  */
 
-import { runTwoStep, type TwoStepConfig } from "@appstrate/connect/connect";
+import { runLogin, type LoginConfig } from "@appstrate/connect/connect";
 import { invalidRequest } from "../../lib/errors.ts";
 import {
   extractIdentity,
@@ -28,13 +28,13 @@ import type {
   IntegrationConnectStrategy,
 } from "./strategy.ts";
 
-export class TwoStepStrategy implements IntegrationConnectStrategy {
+export class LoginStrategy implements IntegrationConnectStrategy {
   async complete(
     ctx: ConnectContext,
     input: ConnectCompleteInput,
   ): Promise<IntegrationConnectionSummary> {
     if (input.kind !== "fields") {
-      throw new Error(`TwoStepStrategy.complete: unexpected input kind '${input.kind}'`);
+      throw new Error(`LoginStrategy.complete: unexpected input kind '${input.kind}'`);
     }
     const { manifest, auth } = await readIntegrationAuth(
       ctx.scope,
@@ -48,7 +48,7 @@ export class TwoStepStrategy implements IntegrationConnectStrategy {
       throw invalidRequest("credentials payload cannot be empty", "credentials");
     }
 
-    const { outputs, identityClaims, expiresAt } = await runTwoStep(auth.connect as TwoStepConfig, {
+    const { outputs, identityClaims, expiresAt } = await runLogin(auth.connect as LoginConfig, {
       inputs: input.credentials,
       authorizedUris: auth.authorizedUris ?? null,
       allowAllUris: auth.allowAllUris ?? false,

@@ -2,7 +2,7 @@
 
 /**
  * OrchestratedStrategy — code-driven login (spec §4.3). For the irreducible
- * cases the declarative TwoStep can't express: CSRF/HTML scraping, stateful
+ * cases the declarative Login can't express: CSRF/HTML scraping, stateful
  * cookie-jars, magic-links. The integration ships a `login` MCP tool; the
  * connect-runner executes it in a sandbox and returns a {@link CredentialBundle}.
  *

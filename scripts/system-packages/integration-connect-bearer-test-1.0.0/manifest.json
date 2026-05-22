@@ -2,13 +2,13 @@
   "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
   "manifestVersion": "1.1",
   "type": "integration",
-  "name": "@appstrate/connect-twostep-test",
+  "name": "@appstrate/connect-bearer-test",
   "version": "1.0.0",
-  "displayName": "Connect TwoStep Test",
-  "description": "Phase 3 reference — exercises the declarative TwoStep acquisition (`connect.steps`). A petitspas-shaped OAuth2 password grant against https://twostep.test.appstrate.dev: POST the credentials, extract `access_token` + `expires_in` from JSON, and pull `person_id` from the JWT's `AUTH[0].personId` claim. No untrusted code runs — the platform-side engine drives the chain and substitutes `{{email}}`/`{{password}}` at the boundary. Used by the connect E2E to confirm a manifest connects end-to-end against a fake upstream.",
+  "displayName": "Connect Bearer Test",
+  "description": "Phase 3 reference — exercises the declarative login (single Bearer-token request) (`connect.steps`). A petitspas-shaped OAuth2 password grant against https://bearer.test.appstrate.dev: POST the credentials, extract `access_token` + `expires_in` from JSON, and pull `person_id` from the JWT's `AUTH[0].personId` claim. No untrusted code runs — the platform-side engine drives the chain and substitutes `{{email}}`/`{{password}}` at the boundary. Used by the connect E2E to confirm a manifest connects end-to-end against a fake upstream.",
   "license": "Apache-2.0",
   "author": "Appstrate",
-  "keywords": ["connect", "twostep", "test"],
+  "keywords": ["connect", "bearer", "test"],
   "server": {
     "type": "api_call"
   },
@@ -16,7 +16,7 @@
     "session": {
       "type": "custom",
       "required": true,
-      "authorizedUris": ["https://twostep.test.appstrate.dev/**"],
+      "authorizedUris": ["https://bearer.test.appstrate.dev/**"],
       "credentials": {
         "schema": {
           "type": "object",
@@ -42,7 +42,7 @@
           {
             "request": {
               "method": "POST",
-              "url": "https://twostep.test.appstrate.dev/oauth/token",
+              "url": "https://bearer.test.appstrate.dev/oauth/token",
               "contentType": "application/x-www-form-urlencoded",
               "body": "grant_type=password&username={{email}}&password={{password}}"
             },

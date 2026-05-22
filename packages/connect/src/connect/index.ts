@@ -12,16 +12,16 @@ export type {
   ConnectInput,
   ConnectStrategy,
 } from "./strategy.ts";
-export { runTwoStep, TwoStepError, DEFAULT_TWOSTEP_LIMITS } from "./twostep-engine.ts";
+export { runLogin, LoginError, DEFAULT_LOGIN_LIMITS } from "./login-engine.ts";
 export type {
-  TwoStepConfig,
-  TwoStepStep,
-  TwoStepRequest,
-  TwoStepExtractor,
-  TwoStepLimits,
-  TwoStepContext,
-  TwoStepResult,
-} from "./twostep-engine.ts";
+  LoginConfig,
+  LoginStep,
+  LoginRequest,
+  LoginExtractor,
+  LoginLimits,
+  LoginContext,
+  LoginResult,
+} from "./login-engine.ts";
 export { validateConnectToolResult, ConnectToolContractError } from "./tool-contract.ts";
 export type {
   ConnectToolContext,

@@ -1173,7 +1173,7 @@ describe("requiredAuthKeysForAgent / requiredScopesForAgent — apiCall scope-on
   });
 });
 
-describe("integrationManifestSchema — connect (TwoStep)", () => {
+describe("integrationManifestSchema — connect (Login)", () => {
   function withAuth(auth: Record<string, unknown>): Record<string, unknown> {
     return baseManifest({ auths: { session: auth } });
   }
@@ -1189,7 +1189,6 @@ describe("integrationManifestSchema — connect (TwoStep)", () => {
           access_token: { from: "json", path: "$.access_token" },
           expires_in: { from: "json", path: "$.expires_in" },
         },
-        bind: ["access_token"],
         output: ["access_token", "expires_in"],
       },
     ],
@@ -1222,7 +1221,7 @@ describe("integrationManifestSchema — connect (TwoStep)", () => {
     expect(r.success).toBe(false);
   });
 
-  it("rejects bind/output referencing an undeclared extractor", () => {
+  it("rejects output referencing an undeclared extractor", () => {
     const r = integrationManifestSchema.safeParse(
       withAuth(
         customAuth({

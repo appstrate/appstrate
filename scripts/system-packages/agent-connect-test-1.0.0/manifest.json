@@ -5,26 +5,26 @@
   "name": "@appstrate/connect-test",
   "version": "1.0.0",
   "displayName": "Connect Test Agent — credential injection E2E",
-  "description": "End-to-end harness for the declarative TwoStep connect integrations. Once @appstrate/connect-twostep-test (Bearer token) and @appstrate/connect-formlogin-test (session cookies) are connected, this agent calls each integration's api_call tool against its upstream /echo and reports the auth credential the proxy injected — proving the captured connect outputs are delivered on outbound calls while the agent never sees the secret.",
+  "description": "End-to-end harness for the declarative login connect integrations. Once @appstrate/connect-bearer-test (Bearer token) and @appstrate/connect-formlogin-test (session cookies) are connected, this agent calls each integration's api_call tool against its upstream /echo and reports the auth credential the proxy injected — proving the captured connect outputs are delivered on outbound calls while the agent never sees the secret.",
   "timeout": 60,
   "dependencies": {
     "integrations": {
-      "@appstrate/connect-twostep-test": "^1.0.0",
+      "@appstrate/connect-bearer-test": "^1.0.0",
       "@appstrate/connect-formlogin-test": "^1.0.0"
     }
   },
   "integrations": {
-    "@appstrate/connect-twostep-test": { "tools": ["api_call"] },
+    "@appstrate/connect-bearer-test": { "tools": ["api_call"] },
     "@appstrate/connect-formlogin-test": { "tools": ["api_call"] }
   },
   "output": {
     "schema": {
       "type": "object",
-      "required": ["twostep_authorization", "formlogin_cookie", "secret_leaked"],
+      "required": ["bearer_authorization", "formlogin_cookie", "secret_leaked"],
       "properties": {
-        "twostep_authorization": {
+        "bearer_authorization": {
           "type": "string",
-          "description": "The Authorization header value the TwoStep upstream echoed back (the injected Bearer token), or an error message."
+          "description": "The Authorization header value the Bearer-login upstream echoed back (the injected Bearer token), or an error message."
         },
         "formlogin_cookie": {
           "type": "string",

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { runTwoStep, TwoStepError, type TwoStepConfig } from "../../src/connect/twostep-engine.ts";
+import { runLogin, LoginError, type LoginConfig } from "../../src/connect/login-engine.ts";
 
 const b64url = (obj: unknown): string => Buffer.from(JSON.stringify(obj)).toString("base64url");
 
@@ -21,13 +21,12 @@ function fakeFetch(
 
 const ALLOW = ["https://idp.example.com/**"];
 
-describe("runTwoStep — declarative chain", () => {
-  it("password grant: substitutes secrets, extracts token, reuses across steps", async () => {
+describe("runLogin — declarative login", () => {
+  it("password grant: substitutes secrets, extracts token + expiry", async () => {
     const { impl, calls } = fakeFetch([
       { status: 200, body: JSON.stringify({ access_token: "TOK-123", expires_in: 3600 }) },
-      { status: 200, body: JSON.stringify({ ok: true }) },
     ]);
-    const config: TwoStepConfig = {
+    const config: LoginConfig = {
       steps: [
         {
           request: {
@@ -40,21 +39,13 @@ describe("runTwoStep — declarative chain", () => {
             access_token: { from: "json", path: "$.access_token" },
             expires_in: { from: "json", path: "$.expires_in" },
           },
-          bind: ["access_token"],
           output: ["access_token", "expires_in"],
-        },
-        {
-          request: {
-            method: "GET",
-            url: "https://idp.example.com/me",
-            headers: { Authorization: "Bearer {{access_token}}" },
-          },
         },
       ],
       expiresInOutput: "expires_in",
     };
 
-    const res = await runTwoStep(config, {
+    const res = await runLogin(config, {
       inputs: { email: "a@b.co", password: "s3cr3t" },
       authorizedUris: ALLOW,
       allowAllUris: false,
@@ -65,15 +56,13 @@ describe("runTwoStep — declarative chain", () => {
     expect(res.outputs.access_token).toBe("TOK-123");
     // expiresAt computed from expires_in seconds.
     expect(res.expiresAt).toBe(new Date(1_000_000 + 3600 * 1000).toISOString());
-    // Step 1 received the substituted secret in the body…
+    // The login request received the substituted secret in the body.
     expect(calls[0]!.init.body).toBe("grant_type=password&username=a@b.co&password=s3cr3t");
-    // …and step 2 reused the extracted token via bind.
-    expect((calls[1]!.init.headers as Record<string, string>).Authorization).toBe("Bearer TOK-123");
   });
 
   it("non-leak: the bootstrap secret never lands in outputs", async () => {
     const { impl } = fakeFetch([{ status: 200, body: JSON.stringify({ access_token: "TOK" }) }]);
-    const config: TwoStepConfig = {
+    const config: LoginConfig = {
       steps: [
         {
           request: { method: "POST", url: "https://idp.example.com/token", body: "p={{password}}" },
@@ -82,7 +71,7 @@ describe("runTwoStep — declarative chain", () => {
         },
       ],
     };
-    const res = await runTwoStep(config, {
+    const res = await runLogin(config, {
       inputs: { password: "s3cr3t" },
       authorizedUris: ALLOW,
       allowAllUris: false,
@@ -95,7 +84,7 @@ describe("runTwoStep — declarative chain", () => {
   it("extracts a JWT claim (petitspas-like personId)", async () => {
     const jwt = `${b64url({ alg: "none" })}.${b64url({ AUTH: [{ personId: "P-42" }] })}.`;
     const { impl } = fakeFetch([{ status: 200, body: JSON.stringify({ access_token: jwt }) }]);
-    const config: TwoStepConfig = {
+    const config: LoginConfig = {
       steps: [
         {
           request: { method: "POST", url: "https://idp.example.com/token", body: "grant=pw" },
@@ -108,7 +97,7 @@ describe("runTwoStep — declarative chain", () => {
       ],
       identityOutputs: ["person_id"],
     };
-    const res = await runTwoStep(config, {
+    const res = await runLogin(config, {
       inputs: {},
       authorizedUris: ALLOW,
       allowAllUris: false,
@@ -121,7 +110,7 @@ describe("runTwoStep — declarative chain", () => {
   it("resolves a jwt extractor regardless of key order (JSONB reorder safety)", async () => {
     const jwt = `${b64url({ alg: "none" })}.${b64url({ AUTH: [{ personId: "P-7" }] })}.`;
     const { impl } = fakeFetch([{ status: 200, body: JSON.stringify({ access_token: jwt }) }]);
-    const config: TwoStepConfig = {
+    const config: LoginConfig = {
       steps: [
         {
           request: { method: "POST", url: "https://idp.example.com/token", body: "grant=pw" },
@@ -136,7 +125,7 @@ describe("runTwoStep — declarative chain", () => {
         },
       ],
     };
-    const res = await runTwoStep(config, {
+    const res = await runLogin(config, {
       inputs: {},
       authorizedUris: ALLOW,
       allowAllUris: false,
@@ -150,7 +139,7 @@ describe("runTwoStep — declarative chain", () => {
     // "" rather than throwing, so without the empty-guard the engine would
     // silently persist `JSESSIONID=""`. Assert it fails closed instead.
     const { impl } = fakeFetch([{ status: 200, body: "ok" }]);
-    const config: TwoStepConfig = {
+    const config: LoginConfig = {
       steps: [
         {
           request: { method: "POST", url: "https://idp.example.com/login", body: "u=x" },
@@ -159,51 +148,21 @@ describe("runTwoStep — declarative chain", () => {
         },
       ],
     };
-    const err = await runTwoStep(config, {
+    const err = await runLogin(config, {
       inputs: {},
       authorizedUris: ALLOW,
       allowAllUris: false,
       fetchImpl: impl,
     }).catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(TwoStepError);
-    expect((err as TwoStepError).reason).toBe("extract_failed");
-  });
-
-  it("fails closed when a declared bind extracts an empty value", async () => {
-    // First step binds a token that the response doesn't carry → "" → must throw
-    // before the second step runs with a corrupted `{{token}}`.
-    const { impl } = fakeFetch([{ status: 200, body: JSON.stringify({}) }]);
-    const config: TwoStepConfig = {
-      steps: [
-        {
-          request: { method: "POST", url: "https://idp.example.com/token", body: "g=pw" },
-          extract: { token: { from: "json", path: "$.access_token" } },
-          bind: ["token"],
-        },
-        {
-          request: {
-            method: "GET",
-            url: "https://idp.example.com/me",
-            headers: { Authorization: "Bearer {{token}}" },
-          },
-        },
-      ],
-    };
-    const err = await runTwoStep(config, {
-      inputs: {},
-      authorizedUris: ALLOW,
-      allowAllUris: false,
-      fetchImpl: impl,
-    }).catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(TwoStepError);
-    expect((err as TwoStepError).reason).toBe("extract_failed");
+    expect(err).toBeInstanceOf(LoginError);
+    expect((err as LoginError).reason).toBe("extract_failed");
   });
 
   it("captures a Set-Cookie value", async () => {
     const { impl } = fakeFetch([
       { status: 200, body: "ok", headers: { "set-cookie": "JSESSIONID=abc123; Path=/; HttpOnly" } },
     ]);
-    const config: TwoStepConfig = {
+    const config: LoginConfig = {
       steps: [
         {
           request: { method: "POST", url: "https://idp.example.com/login", body: "u=x" },
@@ -212,7 +171,7 @@ describe("runTwoStep — declarative chain", () => {
         },
       ],
     };
-    const res = await runTwoStep(config, {
+    const res = await runLogin(config, {
       inputs: {},
       authorizedUris: ALLOW,
       allowAllUris: false,
@@ -222,7 +181,7 @@ describe("runTwoStep — declarative chain", () => {
   });
 });
 
-describe("runTwoStep — security limits", () => {
+describe("runLogin — security limits", () => {
   const baseStep = {
     request: { method: "POST" as const, url: "https://idp.example.com/token", body: "x=1" },
     extract: { t: { from: "json" as const, path: "$.t" } },
@@ -231,11 +190,11 @@ describe("runTwoStep — security limits", () => {
 
   it("rejects a URL outside the authorizedUris allowlist", async () => {
     const { impl } = fakeFetch([{ status: 200, body: "{}" }]);
-    const config: TwoStepConfig = {
+    const config: LoginConfig = {
       steps: [{ ...baseStep, request: { ...baseStep.request, url: "https://evil.example.com/x" } }],
     };
     await expect(
-      runTwoStep(config, {
+      runLogin(config, {
         inputs: {},
         authorizedUris: ALLOW,
         allowAllUris: false,
@@ -246,11 +205,11 @@ describe("runTwoStep — security limits", () => {
 
   it("fails closed on an unresolved placeholder", async () => {
     const { impl } = fakeFetch([{ status: 200, body: "{}" }]);
-    const config: TwoStepConfig = {
+    const config: LoginConfig = {
       steps: [{ ...baseStep, request: { ...baseStep.request, body: "x={{missing}}" } }],
     };
     await expect(
-      runTwoStep(config, {
+      runLogin(config, {
         inputs: {},
         authorizedUris: ALLOW,
         allowAllUris: false,
@@ -261,23 +220,23 @@ describe("runTwoStep — security limits", () => {
 
   it("rejects a non-OK status without echoing the body", async () => {
     const { impl } = fakeFetch([{ status: 401, body: "secret-error-detail" }]);
-    const config: TwoStepConfig = { steps: [baseStep] };
-    const err = await runTwoStep(config, {
+    const config: LoginConfig = { steps: [baseStep] };
+    const err = await runLogin(config, {
       inputs: {},
       authorizedUris: ALLOW,
       allowAllUris: false,
       fetchImpl: impl,
     }).catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(TwoStepError);
-    expect((err as TwoStepError).reason).toBe("bad_status");
+    expect(err).toBeInstanceOf(LoginError);
+    expect((err as LoginError).reason).toBe("bad_status");
     expect((err as Error).message).not.toContain("secret-error-detail");
   });
 
   it("rejects an oversized response body", async () => {
     const { impl } = fakeFetch([{ status: 200, body: "x".repeat(2000) }]);
-    const config: TwoStepConfig = { steps: [baseStep], limits: { maxResponseBytes: 1000 } };
+    const config: LoginConfig = { steps: [baseStep], limits: { maxResponseBytes: 1000 } };
     await expect(
-      runTwoStep(config, {
+      runLogin(config, {
         inputs: {},
         authorizedUris: ALLOW,
         allowAllUris: false,

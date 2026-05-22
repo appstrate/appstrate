@@ -4,7 +4,7 @@ import { describe, it, expect } from "bun:test";
 import { resolveStrategy } from "../../../src/services/connect/registry.ts";
 import { OAuth2Strategy } from "../../../src/services/connect/oauth2-strategy.ts";
 import { FieldsStrategy } from "../../../src/services/connect/fields-strategy.ts";
-import { TwoStepStrategy } from "../../../src/services/connect/twostep-strategy.ts";
+import { LoginStrategy } from "../../../src/services/connect/login-strategy.ts";
 import {
   OrchestratedStrategy,
   type ConnectToolExecutor,
@@ -34,9 +34,9 @@ describe("resolveStrategy", () => {
     }
   });
 
-  it("maps custom + connect.steps → TwoStepStrategy", () => {
+  it("maps custom + connect.steps → LoginStrategy", () => {
     const a = { type: "custom", connect: { steps: [{}] } } as unknown as AuthDef;
-    expect(resolveStrategy(a)).toBeInstanceOf(TwoStepStrategy);
+    expect(resolveStrategy(a)).toBeInstanceOf(LoginStrategy);
   });
 
   it("maps custom + connect.tool → OrchestratedStrategy when an executor is supplied", () => {

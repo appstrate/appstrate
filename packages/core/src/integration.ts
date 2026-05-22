@@ -347,13 +347,13 @@ const credentialsSchemaObject = z.object({
 });
 
 // ─────────────────────────────────────────────
-// connect — declarative TwoStep acquisition (spec §4.8)
+// connect — declarative Login acquisition (spec §4.8)
 // ─────────────────────────────────────────────
 
-// One value pulled out of a step's response. `bind`/`output` arrays on the
-// step decide whether an extracted value becomes inter-step state or a final
-// injectable. `regex.pattern` is length-capped here (ReDoS surface) and runs
-// against a size-capped response body at execution time.
+// One value pulled out of the login response. The `output` array on the step
+// decides which extracted values become the final injectable bundle.
+// `regex.pattern` is length-capped here (ReDoS surface) and runs against a
+// size-capped response body at execution time.
 const connectExtractorSchema = z.discriminatedUnion("from", [
   z.object({ from: z.literal("json"), path: z.string().min(1).max(256) }),
   z.object({ from: z.literal("jwt"), token: z.string().min(1), path: z.string().min(1).max(256) }),
@@ -369,9 +369,9 @@ const connectExtractorSchema = z.discriminatedUnion("from", [
 const connectStepSchema = z.object({
   request: z.object({
     method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]),
-    // `{{...}}` placeholders are substituted (from credential inputs + prior
-    // step `bind`) by the platform-side engine — the manifest carries only
-    // placeholders, never the secret.
+    // `{{...}}` placeholders are substituted (from credential inputs) by the
+    // platform-side engine — the manifest carries only placeholders, never the
+    // secret.
     url: z.string().min(1),
     headers: z.record(z.string(), z.string()).optional(),
     body: z.string().optional(),
@@ -380,8 +380,6 @@ const connectStepSchema = z.object({
   // Declared OK statuses; defaults to 2xx when omitted.
   okStatus: z.array(z.number().int().min(100).max(599)).optional(),
   extract: z.record(z.string(), connectExtractorSchema).optional(),
-  // Names (subset of `extract` keys) promoted to inter-step state.
-  bind: z.array(z.string()).optional(),
   // Names (subset of `extract` keys) promoted to the final injectable bundle.
   output: z.array(z.string()).optional(),
 });
@@ -394,9 +392,14 @@ const connectLimitsSchema = z.object({
 });
 
 const connectSchema = z.object({
-  // ── TwoStep (declarative) — mutually exclusive with `tool` ──
-  // Declarative multi-step login (TWO_STEP). Bounded: max 8 steps.
-  steps: z.array(connectStepSchema).min(1).max(8).optional(),
+  // ── Declarative login (stateless) — mutually exclusive with `tool` ──
+  // A single login request: substitute the credential into one HTTP call and
+  // extract the injectable token/cookie from its response. Intentionally
+  // single-shot and stateless — no inter-step state, no cookie jar, no
+  // redirect following. Anything stateful (multi-cookie sessions, TLS
+  // impersonation, refresh, redirect chains) belongs on `tool` (Orchestrated).
+  // Modelled as a 1-element array for forward compatibility / shape stability.
+  steps: z.array(connectStepSchema).length(1).optional(),
   limits: connectLimitsSchema.optional(),
   // Output name holding seconds-to-expiry → computes expires_at.
   expiresInOutput: z.string().optional(),
@@ -538,9 +541,9 @@ const authSchema = z
 
     credentials: credentialsSchemaObject.optional(),
 
-    // Declarative multi-step acquisition (TwoStep). `custom`-only. The
-    // platform-side engine runs the chain; no untrusted code (cf. the
-    // code-orchestrated connect.tool, a later phase).
+    // Declarative single-request login (Login). `custom`-only. The
+    // platform-side engine runs the request; no untrusted code (cf. the
+    // code-orchestrated connect.tool).
     connect: connectSchema.optional(),
 
     delivery: deliverySchema,
@@ -580,7 +583,7 @@ const authSchema = z
     }
     // `connect` is only meaningful for `custom` auths — oauth2 has its own
     // flow, api_key/basic are paste-the-bag. It is EITHER a declarative
-    // `steps` chain (TwoStep) OR a code-orchestrated `tool` (Orchestrated) —
+    // `steps` chain (Login) OR a code-orchestrated `tool` (Orchestrated) —
     // never both (spec §4.2/§4.3).
     if (auth.connect) {
       const { connect } = auth;
@@ -597,31 +600,22 @@ const authSchema = z
         ctx.addIssue({
           code: "custom",
           message:
-            "auth.connect must declare exactly one of `steps` (TwoStep) or `tool` (Orchestrated)",
+            "auth.connect must declare exactly one of `steps` (declarative login) or `tool` (Orchestrated)",
           path: ["connect"],
         });
       }
 
       // The set of injectable outputs this auth declares — what `delivery.*`
-      // is allowed to reference (§4.6 gating). TwoStep: the union of step
+      // is allowed to reference (§4.6 gating). Declarative login: the step's
       // `output` names. Orchestrated: the `produces` list.
       const declaredOutputs = new Set<string>();
 
       if (hasSteps) {
-        // Collect every name declared by any step's extractors; bind/output
-        // must reference a name extracted in the SAME step, and the final
-        // outputs set must cover expiresInOutput / identityOutputs.
+        // Each `output` must reference a name extracted in the same login
+        // request, and the final outputs set must cover expiresInOutput /
+        // identityOutputs.
         connect.steps!.forEach((step, i) => {
           const extractKeys = new Set(Object.keys(step.extract ?? {}));
-          for (const name of step.bind ?? []) {
-            if (!extractKeys.has(name)) {
-              ctx.addIssue({
-                code: "custom",
-                message: `connect.steps[${i}].bind '${name}' has no matching extractor in the same step`,
-                path: ["connect", "steps", i, "bind"],
-              });
-            }
-          }
           for (const name of step.output ?? []) {
             if (!extractKeys.has(name)) {
               ctx.addIssue({

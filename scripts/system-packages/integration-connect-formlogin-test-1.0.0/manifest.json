@@ -8,7 +8,7 @@
   "description": "Phase 3 reference — declarative form-login that captures a session cookie (`connect.steps` cookie extractor). A lespac/orgabusiness-shaped flow against https://formlogin.test.appstrate.dev: POST the credentials form, capture `JSESSIONID` + `AWSALB` from Set-Cookie, and inject them as a `Cookie` header. No untrusted code — the platform engine drives the chain and substitutes `{{username}}`/`{{password}}` at the boundary. Used by the connect E2E to confirm cookie-capture connects end-to-end against a fake upstream.",
   "license": "Apache-2.0",
   "author": "Appstrate",
-  "keywords": ["connect", "twostep", "cookie", "test"],
+  "keywords": ["connect", "formlogin", "cookie", "test"],
   "server": {
     "type": "api_call"
   },

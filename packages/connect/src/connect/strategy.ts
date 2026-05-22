@@ -4,7 +4,7 @@
  * `connect` — the {@link ConnectStrategy} abstraction (spec §4.1).
  *
  * One interface unifies every acquisition path: OAuth2 (authorization-code +
- * PKCE), Fields (api_key/basic/custom paste), TwoStep (declarative multi-step)
+ * PKCE), Fields (api_key/basic/custom paste), Login (declarative multi-step)
  * and Orchestrated (code connect-tool). Refresh becomes `reacquire`.
  *
  * Pure contract only — the concrete strategies that persist / read Redis live
@@ -20,7 +20,7 @@ import type { CredentialBundle } from "./types.ts";
  * integration auth, and (for reconnect/upgrade) which existing row to target.
  *
  * `proxy` is the substituting `api_call` access the code connect-tool needs
- * (Phase 4); it is absent for OAuth2/Fields/TwoStep, which never run untrusted
+ * (Phase 4); it is absent for OAuth2/Fields/Login, which never run untrusted
  * code. Modelled optional so Phases 1–3 don't carry it.
  */
 export interface ConnectContext {
@@ -50,7 +50,7 @@ export interface BeginResult {
  * Terminal acquisition input. Discriminated by the strategy that consumes it:
  *   - OAuth2   → `{ code, state }` (callback).
  *   - Fields   → `{ credentials }` (submitted bag).
- *   - TwoStep  → `{ credentials }` (bootstrap secrets feeding the steps).
+ *   - Login  → `{ credentials }` (bootstrap secrets feeding the steps).
  *   - Orchestrated → `{ credentials }` (handed to the connect-tool as inputs).
  */
 export type ConnectInput =

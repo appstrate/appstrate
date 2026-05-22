@@ -5,7 +5,7 @@
  * acquisition strategy:
  *
  *   - `oauth2`                          → OAuth2Strategy
- *   - `custom` + `connect.steps`        → TwoStepStrategy (declarative)
+ *   - `custom` + `connect.steps`        → LoginStrategy (declarative)
  *   - `custom` + `connect.tool`         → OrchestratedStrategy (code, needs executor)
  *   - `api_key` / `basic` / bare custom → FieldsStrategy (paste-the-bag)
  *
@@ -22,7 +22,7 @@ import { invalidRequest } from "../../lib/errors.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { OAuth2Strategy } from "./oauth2-strategy.ts";
 import { FieldsStrategy } from "./fields-strategy.ts";
-import { TwoStepStrategy } from "./twostep-strategy.ts";
+import { LoginStrategy } from "./login-strategy.ts";
 import { OrchestratedStrategy, type ConnectToolExecutor } from "./orchestrated-strategy.ts";
 import type { IntegrationConnectStrategy } from "./strategy.ts";
 
@@ -41,8 +41,8 @@ export function resolveStrategy(
     case "oauth2":
       return new OAuth2Strategy();
     case "custom":
-      // Declarative multi-step login → TwoStep.
-      if (auth.connect?.steps) return new TwoStepStrategy();
+      // Declarative single login request → Login.
+      if (auth.connect?.steps) return new LoginStrategy();
       // Code-orchestrated login → Orchestrated (requires the connect-run substrate).
       if (auth.connect?.tool) {
         if (!opts.connectToolExecutor) {
