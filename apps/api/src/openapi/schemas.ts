@@ -4,58 +4,6 @@ import { orgRoleEnum } from "@appstrate/db/schema";
 
 const ORG_ROLES = [...orgRoleEnum.enumValues];
 
-// ─── Shared building blocks for ProviderConfig{,Input,Update} ───────────────
-//
-// The three provider-config schemas (read response, create input, update input)
-// share most of their property bag verbatim. We expose the common pieces as
-// JS-level constants and spread them into each schema, so the rendered OpenAPI
-// stays flat (no `allOf`) — `verify-openapi.ts` reads `properties`/`required`
-// directly off the resolved schema and does not chase `allOf` composition.
-
-const providerAuthModeEnum = {
-  type: "string",
-  enum: ["oauth2", "oauth1", "api_key", "basic", "custom"],
-} as const;
-
-const providerTokenContentTypeProperty = {
-  type: "string",
-  enum: ["application/x-www-form-urlencoded", "application/json"],
-  description:
-    "Content-Type used for OAuth2 token endpoint request bodies. Defaults to application/x-www-form-urlencoded; set to application/json for providers like Atlassian/Jira that require a JSON body.",
-} as const;
-
-const providerCredentialTransformProperty = {
-  type: "object",
-  required: ["template", "encoding"],
-  properties: {
-    template: {
-      type: "string",
-      minLength: 1,
-      description:
-        "Free-form template with {{var}} placeholders resolved against the user-provided credential fields.",
-    },
-    encoding: {
-      type: "string",
-      enum: ["base64"],
-      description:
-        "Whitelisted post-substitution transform applied to the rendered template. AFPS v1: base64 only.",
-    },
-  },
-  description:
-    "Generic, template-based pre-encoding for api_key credentials. Lets manifests express any provider-specific Basic-auth convention (Freshdesk/Teamwork, Zendesk, …) without spec changes.",
-} as const;
-
-const providerAvailableScopesProperty = {
-  type: "array",
-  items: {
-    type: "object",
-    properties: {
-      value: { type: "string" },
-      label: { type: "string" },
-    },
-  },
-} as const;
-
 /**
  * All OpenAPI schema definitions (components/schemas).
  */
@@ -193,34 +141,6 @@ export const schemas = {
       },
     },
   },
-  ProviderStatus: {
-    type: "object",
-    required: ["id", "provider", "status", "authMode"],
-    properties: {
-      id: { type: "string", description: "Provider requirement ID" },
-      provider: { type: "string", description: "Provider ID" },
-      description: { type: "string" },
-      status: { type: "string", enum: ["connected", "not_connected", "needs_reconnection"] },
-      authMode: { type: "string" },
-      scopesRequired: { type: "array", items: { type: "string" } },
-      scopesGranted: { type: "array", items: { type: "string" } },
-      scopesSufficient: { type: "boolean" },
-      scopesMissing: { type: "array", items: { type: "string" } },
-      source: {
-        type: "string",
-        enum: ["app_binding", "user_profile"],
-        description: "How the connection profile was resolved",
-      },
-      profileName: {
-        type: ["string", "null"],
-        description: "Name of the connection profile used",
-      },
-      profileOwnerName: {
-        type: ["string", "null"],
-        description: "Name of the owner of the connection profile",
-      },
-    },
-  },
   AgentSkillRef: {
     type: "object",
     required: ["id", "name"],
@@ -329,7 +249,6 @@ export const schemas = {
       dependencies: {
         type: "object",
         properties: {
-          providers: { type: "array", items: { $ref: "#/components/schemas/ProviderStatus" } },
           skills: { type: "array", items: { $ref: "#/components/schemas/AgentSkillRef" } },
           integrations: {
             type: "array",
@@ -373,15 +292,6 @@ export const schemas = {
       hasUnarchivedChanges: {
         type: "boolean",
         description: "Whether the active version has changes not yet archived as a version",
-      },
-      populatedProviders: {
-        type: "object",
-        additionalProperties: { $ref: "#/components/schemas/ProviderConfig" },
-        description: "ProviderConfig keyed by provider ID for the agent's required providers",
-      },
-      callbackUrl: {
-        type: "string",
-        description: "OAuth callback URL for provider connections",
       },
     },
   },
@@ -579,53 +489,6 @@ export const schemas = {
       updatedAt: { type: "string", format: "date-time" },
       actorName: { type: ["string", "null"], description: "Display name of the schedule actor" },
       actorType: { type: ["string", "null"], enum: ["user", "end_user", null] },
-    },
-  },
-  ProviderConfig: {
-    type: "object",
-    required: ["id", "displayName", "authMode"],
-    properties: {
-      id: { type: "string" },
-      displayName: { type: "string" },
-      authMode: providerAuthModeEnum,
-      source: { type: "string", enum: ["built-in", "custom"] },
-      hasCredentials: {
-        type: "boolean",
-        description: "Whether admin credentials are currently configured for this provider",
-      },
-      enabled: {
-        type: "boolean",
-        description: "Whether this provider is enabled for use in the organization",
-      },
-      adminCredentialSchema: {
-        type: "object",
-        description:
-          "JSON Schema describing admin credential fields. Undefined means no admin credentials needed.",
-      },
-      authorizationUrl: { type: "string" },
-      tokenUrl: { type: "string" },
-      refreshUrl: { type: "string" },
-      requestTokenUrl: { type: "string", description: "OAuth1 request token endpoint" },
-      accessTokenUrl: { type: "string", description: "OAuth1 access token endpoint" },
-      defaultScopes: { type: "array", items: { type: "string" } },
-      scopeSeparator: { type: "string" },
-      pkceEnabled: { type: "boolean" },
-      tokenAuthMethod: { type: "string", enum: ["client_secret_post", "client_secret_basic"] },
-      tokenContentType: providerTokenContentTypeProperty,
-      authorizationParams: { type: "object" },
-      tokenParams: { type: "object" },
-      credentialSchema: { type: "object" },
-      credentialFieldName: { type: "string" },
-      credentialHeaderName: { type: "string" },
-      credentialHeaderPrefix: { type: "string" },
-      credentialTransform: providerCredentialTransformProperty,
-      availableScopes: providerAvailableScopesProperty,
-      authorizedUris: { type: "array", items: { type: "string" } },
-      allowAllUris: { type: "boolean" },
-      iconUrl: { type: "string" },
-      categories: { type: "array", items: { type: "string" } },
-      docsUrl: { type: "string" },
-      usedByAgents: { type: "integer" },
     },
   },
   ApiKeyInfo: {
@@ -881,10 +744,6 @@ export const schemas = {
   SkillManifest: {
     description: "AFPS Skill manifest. See https://afps.appstrate.dev for field reference.",
     $ref: "https://afps.appstrate.dev/packages/schema/v1/skill.schema.json",
-  },
-  ProviderManifest: {
-    description: "AFPS Provider manifest. See https://afps.appstrate.dev for field reference.",
-    $ref: "https://afps.appstrate.dev/packages/schema/v1/provider.schema.json",
   },
   FileConstraintsMap: {
     type: "object",

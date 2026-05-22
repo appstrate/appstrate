@@ -187,22 +187,6 @@ const expectedEndpoints = [
   "DELETE /api/packages/skills/{scope}/{name}/versions/{version}",
   "GET /api/packages/skills/{scope}/{name}/versions/{version}",
 
-  // Packages — Providers (package CRUD)
-  "GET /api/packages/providers",
-  "POST /api/packages/providers",
-  "GET /api/packages/providers/{scope}/{name}",
-  "PUT /api/packages/providers/{scope}/{name}",
-  "DELETE /api/packages/providers/{scope}/{name}",
-  "GET /api/packages/providers/{id}",
-  "PUT /api/packages/providers/{id}",
-  "DELETE /api/packages/providers/{id}",
-  "GET /api/packages/providers/{scope}/{name}/versions",
-  "GET /api/packages/providers/{scope}/{name}/versions/info",
-  "POST /api/packages/providers/{scope}/{name}/versions",
-  "POST /api/packages/providers/{scope}/{name}/versions/{version}/restore",
-  "DELETE /api/packages/providers/{scope}/{name}/versions/{version}",
-  "GET /api/packages/providers/{scope}/{name}/versions/{version}",
-
   // Packages — Agents
   "GET /api/packages/agents",
   "POST /api/packages/agents",

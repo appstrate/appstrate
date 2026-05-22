@@ -246,7 +246,7 @@ export const runsPaths = {
                 manifest: {
                   type: "object",
                   description:
-                    "Full AFPS manifest (agent type). All referenced skills/tools/providers must already exist in the org or system catalog — registry-only dependencies.",
+                    "Full AFPS manifest (agent type). All referenced skills/integrations must already exist in the org or system catalog — registry-only dependencies.",
                 },
                 prompt: {
                   type: "string",
@@ -647,7 +647,7 @@ export const runsPaths = {
                         manifest: {
                           type: "object",
                           description:
-                            "Full AFPS manifest (agent type). All referenced skills/tools/providers must already exist in the org or system catalog.",
+                            "Full AFPS manifest (agent type). All referenced skills/integrations must already exist in the org or system catalog.",
                         },
                         prompt: { type: "string", minLength: 1 },
                         providerProfiles: {

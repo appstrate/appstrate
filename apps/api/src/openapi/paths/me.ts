@@ -115,7 +115,7 @@ export const mePaths = {
                         "connections",
                       ],
                       properties: {
-                        kind: { type: "string", enum: ["provider", "integration"] },
+                        kind: { type: "string", enum: ["integration"] },
                         sourceId: { type: "string" },
                         displayName: { type: "string" },
                         logo: { type: "string" },
@@ -133,7 +133,6 @@ export const mePaths = {
                               "needsReconnection",
                               "expiresAt",
                               "identity",
-                              "profile",
                               "authKey",
                               "sharedWithOrg",
                               "reusedByAgents",
@@ -142,7 +141,7 @@ export const mePaths = {
                             ],
                             properties: {
                               connectionId: { type: "string" },
-                              kind: { type: "string", enum: ["provider", "integration"] },
+                              kind: { type: "string", enum: ["integration"] },
                               label: { type: ["string", "null"] },
                               scopesGranted: { type: "array", items: { type: "string" } },
                               connectedAt: { type: "string", format: "date-time" },
@@ -152,20 +151,6 @@ export const mePaths = {
                               },
                               identity: { type: ["string", "null"] },
                               reusedByAgents: { type: ["integer", "null"] },
-                              profile: {
-                                oneOf: [
-                                  {
-                                    type: "object",
-                                    required: ["id", "name", "isDefault"],
-                                    properties: {
-                                      id: { type: "string" },
-                                      name: { type: "string" },
-                                      isDefault: { type: "boolean" },
-                                    },
-                                  },
-                                  { type: "null" },
-                                ],
-                              },
                               authKey: { type: ["string", "null"] },
                               sharedWithOrg: { type: "boolean" },
                               org: {
