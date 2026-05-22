@@ -503,7 +503,7 @@ export async function listOrgModelProviderCredentials(
       return {
         id: r.id,
         label: r.label,
-        apiShape: cfg?.apiShape ?? "openai-chat",
+        apiShape: cfg?.apiShape ?? "openai-completions",
         baseUrl: effectiveBaseUrl(r.providerId, r.baseUrlOverride) ?? "",
         source: "custom",
         authMode: cfg?.authMode ?? "api_key",

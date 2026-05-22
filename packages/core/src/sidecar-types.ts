@@ -248,7 +248,6 @@ export type LlmProxyConfig = LlmProxyApiKeyConfig | LlmProxyOauthConfig;
  */
 export type ModelApiShape =
   | "anthropic-messages"
-  | "openai-chat"
   | "openai-completions"
   | "openai-responses"
   | "openai-codex-responses"

@@ -302,7 +302,6 @@ function defaultProviderId(apiShape: string | undefined, baseUrl: string | undef
     case "openai-responses":
       return "openai";
     case "openai":
-    case "openai-chat":
       return "openai-compatible";
     case "openai-completions":
       return "cerebras";

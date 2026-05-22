@@ -358,7 +358,7 @@ export interface AppstrateModule {
    * modelProviders: () => [{
    *   providerId: "my-oauth-provider",
    *   displayName: "My OAuth Provider",
-   *   apiShape: "openai-chat",
+   *   apiShape: "openai-completions",
    *   authMode: "oauth2",
    *   oauth: { clientId: "...", ... },
    *   featuredModels: [...],

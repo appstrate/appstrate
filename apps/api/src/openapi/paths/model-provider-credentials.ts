@@ -48,7 +48,6 @@ export const modelProviderCredentialsPaths = {
                           type: "string",
                           enum: [
                             "anthropic-messages",
-                            "openai-chat",
                             "openai-completions",
                             "openai-responses",
                             "openai-codex-responses",
@@ -157,7 +156,7 @@ export const modelProviderCredentialsPaths = {
                   {
                     id: "cm7stu901",
                     label: "OpenAI Production",
-                    apiShape: "openai-chat",
+                    apiShape: "openai-completions",
                     baseUrl: "https://api.openai.com",
                     source: "custom",
                     authMode: "api_key",

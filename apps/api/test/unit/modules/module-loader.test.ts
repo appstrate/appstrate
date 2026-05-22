@@ -862,7 +862,7 @@ describe("module-loader", () => {
         providerId: id,
         displayName: id,
         iconUrl: "openai",
-        apiShape: "openai-chat",
+        apiShape: "openai-completions",
         defaultBaseUrl: "https://api.example.com",
         baseUrlOverridable: false,
         authMode: "api_key",
