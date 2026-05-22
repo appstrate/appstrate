@@ -17,6 +17,7 @@ import { invalidRequest } from "../../lib/errors.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { OAuth2Strategy } from "./oauth2-strategy.ts";
 import { FieldsStrategy } from "./fields-strategy.ts";
+import { TwoStepStrategy } from "./twostep-strategy.ts";
 import type { IntegrationConnectStrategy } from "./strategy.ts";
 
 type IntegrationAuthDef = NonNullable<IntegrationManifest["auths"]>[string];
@@ -25,9 +26,12 @@ export function resolveStrategy(auth: IntegrationAuthDef): IntegrationConnectStr
   switch (auth.type) {
     case "oauth2":
       return new OAuth2Strategy();
+    case "custom":
+      // Declarative multi-step login → TwoStep; otherwise paste-the-bag Fields.
+      // (Code-orchestrated connect.tool is a later phase.)
+      return auth.connect?.steps ? new TwoStepStrategy() : new FieldsStrategy();
     case "api_key":
     case "basic":
-    case "custom":
       return new FieldsStrategy();
     default:
       throw invalidRequest(`Auth type '${auth.type}' has no connect strategy`);

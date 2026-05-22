@@ -346,6 +346,63 @@ const credentialsSchemaObject = z.object({
   schema: z.looseObject({}),
 });
 
+// ─────────────────────────────────────────────
+// connect — declarative TwoStep acquisition (spec §4.8)
+// ─────────────────────────────────────────────
+
+// One value pulled out of a step's response. `bind`/`output` arrays on the
+// step decide whether an extracted value becomes inter-step state or a final
+// injectable. `regex.pattern` is length-capped here (ReDoS surface) and runs
+// against a size-capped response body at execution time.
+const connectExtractorSchema = z.discriminatedUnion("from", [
+  z.object({ from: z.literal("json"), path: z.string().min(1).max(256) }),
+  z.object({ from: z.literal("jwt"), token: z.string().min(1), path: z.string().min(1).max(256) }),
+  z.object({
+    from: z.literal("regex"),
+    pattern: z.string().min(1).max(256),
+    group: z.number().int().min(0).max(20).optional(),
+  }),
+  z.object({ from: z.literal("header"), name: z.string().min(1) }),
+  z.object({ from: z.literal("cookie"), name: z.string().min(1) }),
+]);
+
+const connectStepSchema = z.object({
+  request: z.object({
+    method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]),
+    // `{{...}}` placeholders are substituted (from credential inputs + prior
+    // step `bind`) by the platform-side engine — the manifest carries only
+    // placeholders, never the secret.
+    url: z.string().min(1),
+    headers: z.record(z.string(), z.string()).optional(),
+    body: z.string().optional(),
+    contentType: z.enum(["application/x-www-form-urlencoded", "application/json"]).optional(),
+  }),
+  // Declared OK statuses; defaults to 2xx when omitted.
+  okStatus: z.array(z.number().int().min(100).max(599)).optional(),
+  extract: z.record(z.string(), connectExtractorSchema).optional(),
+  // Names (subset of `extract` keys) promoted to inter-step state.
+  bind: z.array(z.string()).optional(),
+  // Names (subset of `extract` keys) promoted to the final injectable bundle.
+  output: z.array(z.string()).optional(),
+});
+
+const connectLimitsSchema = z.object({
+  stepTimeoutMs: z.number().int().min(1).max(60_000).optional(),
+  totalBudgetMs: z.number().int().min(1).max(120_000).optional(),
+  maxResponseBytes: z.number().int().min(1).max(5_000_000).optional(),
+  maxRedirects: z.number().int().min(0).max(5).optional(),
+});
+
+const connectSchema = z.object({
+  // Declarative multi-step login (TWO_STEP). Bounded: max 8 steps.
+  steps: z.array(connectStepSchema).min(1).max(8),
+  limits: connectLimitsSchema.optional(),
+  // Output name holding seconds-to-expiry → computes expires_at.
+  expiresInOutput: z.string().optional(),
+  // Output names to also record as identity claims.
+  identityOutputs: z.array(z.string()).optional(),
+});
+
 const authSchema = z
   .object({
     type: authTypeEnum,
@@ -429,6 +486,11 @@ const authSchema = z
 
     credentials: credentialsSchemaObject.optional(),
 
+    // Declarative multi-step acquisition (TwoStep). `custom`-only. The
+    // platform-side engine runs the chain; no untrusted code (cf. the
+    // code-orchestrated connect.tool, a later phase).
+    connect: connectSchema.optional(),
+
     delivery: deliverySchema,
   })
   .superRefine((auth, ctx) => {
@@ -463,6 +525,66 @@ const authSchema = z
         message: `${auth.type} auth requires credentials.schema declaring the field shape`,
         path: ["credentials"],
       });
+    }
+    // `connect` (TwoStep) is only meaningful for `custom` auths — oauth2 has
+    // its own flow, api_key/basic are paste-the-bag.
+    if (auth.connect) {
+      if (auth.type !== "custom") {
+        ctx.addIssue({
+          code: "custom",
+          message: `auth.connect (TwoStep) is only valid on type 'custom' (got '${auth.type}')`,
+          path: ["connect"],
+        });
+      }
+      // Collect every name declared by any step's extractors; bind/output must
+      // reference a name extracted in the SAME step, and the final outputs set
+      // must cover expiresInOutput / identityOutputs.
+      const allOutputs = new Set<string>();
+      auth.connect.steps.forEach((step, i) => {
+        const extractKeys = new Set(Object.keys(step.extract ?? {}));
+        for (const name of step.bind ?? []) {
+          if (!extractKeys.has(name)) {
+            ctx.addIssue({
+              code: "custom",
+              message: `connect.steps[${i}].bind '${name}' has no matching extractor in the same step`,
+              path: ["connect", "steps", i, "bind"],
+            });
+          }
+        }
+        for (const name of step.output ?? []) {
+          if (!extractKeys.has(name)) {
+            ctx.addIssue({
+              code: "custom",
+              message: `connect.steps[${i}].output '${name}' has no matching extractor in the same step`,
+              path: ["connect", "steps", i, "output"],
+            });
+          }
+          allOutputs.add(name);
+        }
+      });
+      if (allOutputs.size === 0) {
+        ctx.addIssue({
+          code: "custom",
+          message: "auth.connect must declare at least one step `output` (the injectable result)",
+          path: ["connect"],
+        });
+      }
+      if (auth.connect.expiresInOutput && !allOutputs.has(auth.connect.expiresInOutput)) {
+        ctx.addIssue({
+          code: "custom",
+          message: `connect.expiresInOutput '${auth.connect.expiresInOutput}' is not a declared output`,
+          path: ["connect", "expiresInOutput"],
+        });
+      }
+      for (const name of auth.connect.identityOutputs ?? []) {
+        if (!allOutputs.has(name)) {
+          ctx.addIssue({
+            code: "custom",
+            message: `connect.identityOutputs '${name}' is not a declared output`,
+            path: ["connect", "identityOutputs"],
+          });
+        }
+      }
     }
     // If both `scopes` (defaults) and `availableScopes` (catalog) are
     // declared, defaults must be a subset of the catalog — protects

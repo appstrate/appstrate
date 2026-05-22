@@ -1172,3 +1172,104 @@ describe("requiredAuthKeysForAgent / requiredScopesForAgent — apiCall scope-on
     ).toEqual([]);
   });
 });
+
+describe("integrationManifestSchema — connect (TwoStep)", () => {
+  function withAuth(auth: Record<string, unknown>): Record<string, unknown> {
+    return baseManifest({ auths: { session: auth } });
+  }
+  const validConnect = {
+    steps: [
+      {
+        request: {
+          method: "POST",
+          url: "https://idp.example.com/token",
+          body: "grant_type=password&username={{email}}&password={{password}}",
+        },
+        extract: {
+          access_token: { from: "json", path: "$.access_token" },
+          expires_in: { from: "json", path: "$.expires_in" },
+        },
+        bind: ["access_token"],
+        output: ["access_token", "expires_in"],
+      },
+    ],
+    expiresInOutput: "expires_in",
+    identityOutputs: ["access_token"],
+  };
+  const customAuth = (connect: unknown): Record<string, unknown> => ({
+    type: "custom",
+    credentials: { schema: { type: "object" } },
+    authorizedUris: ["https://idp.example.com/**"],
+    delivery: { http: { headerName: "Authorization", valueFrom: "access_token" } },
+    connect,
+  });
+
+  it("accepts a valid custom + connect.steps auth", () => {
+    const r = integrationManifestSchema.safeParse(withAuth(customAuth(validConnect)));
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects connect on a non-custom auth", () => {
+    const r = integrationManifestSchema.safeParse(
+      withAuth({
+        type: "api_key",
+        credentials: { schema: { type: "object" } },
+        authorizedUris: ["https://idp.example.com/**"],
+        delivery: { http: { headerName: "X-Key", valueFrom: "api_key" } },
+        connect: validConnect,
+      }),
+    );
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects bind/output referencing an undeclared extractor", () => {
+    const r = integrationManifestSchema.safeParse(
+      withAuth(
+        customAuth({
+          steps: [
+            {
+              request: { method: "POST", url: "https://idp.example.com/token" },
+              extract: { access_token: { from: "json", path: "$.access_token" } },
+              output: ["nonexistent"],
+            },
+          ],
+        }),
+      ),
+    );
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects connect with no declared outputs", () => {
+    const r = integrationManifestSchema.safeParse(
+      withAuth(
+        customAuth({
+          steps: [
+            {
+              request: { method: "POST", url: "https://idp.example.com/token" },
+              extract: { access_token: { from: "json", path: "$.access_token" } },
+            },
+          ],
+        }),
+      ),
+    );
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects expiresInOutput that is not a declared output", () => {
+    const r = integrationManifestSchema.safeParse(
+      withAuth(
+        customAuth({
+          steps: [
+            {
+              request: { method: "POST", url: "https://idp.example.com/token" },
+              extract: { access_token: { from: "json", path: "$.access_token" } },
+              output: ["access_token"],
+            },
+          ],
+          expiresInOutput: "expires_in",
+        }),
+      ),
+    );
+    expect(r.success).toBe(false);
+  });
+});

@@ -12,3 +12,13 @@ export type {
   ConnectInput,
   ConnectStrategy,
 } from "./strategy.ts";
+export { runTwoStep, TwoStepError, DEFAULT_TWOSTEP_LIMITS } from "./twostep-engine.ts";
+export type {
+  TwoStepConfig,
+  TwoStepStep,
+  TwoStepRequest,
+  TwoStepExtractor,
+  TwoStepLimits,
+  TwoStepContext,
+  TwoStepResult,
+} from "./twostep-engine.ts";
