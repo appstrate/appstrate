@@ -59,20 +59,9 @@ const DOS_EPOCH_MS = Date.UTC(1980, 0, 2, 12, 0, 0);
 function buildAfps(opts: {
   manifest: Record<string, unknown>;
   content: string;
-  type: "agent" | "skill" | "tool" | "provider";
+  type: "agent" | "skill";
 }): Uint8Array {
-  const filename = (() => {
-    switch (opts.type) {
-      case "agent":
-        return "prompt.md";
-      case "skill":
-        return "SKILL.md";
-      case "tool":
-        return "tool.ts";
-      case "provider":
-        return "PROVIDER.md";
-    }
-  })();
+  const filename = opts.type === "agent" ? "prompt.md" : "SKILL.md";
   const entries: Record<string, [Uint8Array, { mtime?: number; level?: number }]> = {
     "manifest.json": [
       enc(JSON.stringify(opts.manifest, null, 2)),
@@ -92,22 +81,15 @@ function buildAfps(opts: {
 /** Default content per type — minimal payload that satisfies
  *  parsePackageZip's per-type validation (skill needs YAML frontmatter,
  *  etc). */
-function defaultContentFor(type: "agent" | "skill" | "tool" | "provider"): string {
-  switch (type) {
-    case "agent":
-      return "Test prompt.";
-    case "skill":
-      return "---\nname: test-skill\ndescription: A test skill.\n---\nSkill body.";
-    case "tool":
-      return "export default function tool() {}";
-    case "provider":
-      return "Provider doc.";
-  }
+function defaultContentFor(type: "agent" | "skill"): string {
+  return type === "agent"
+    ? "Test prompt."
+    : "---\nname: test-skill\ndescription: A test skill.\n---\nSkill body.";
 }
 
 async function seedVersionedPackage(opts: {
   id: `@${string}/${string}`;
-  type: "agent" | "skill" | "tool" | "provider";
+  type: "agent" | "skill";
   version: string;
   orgId: string;
   manifest: Record<string, unknown>;

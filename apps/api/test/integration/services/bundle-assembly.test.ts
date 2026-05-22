@@ -47,7 +47,7 @@ function buildAfps(manifest: Record<string, unknown>, content: string): Uint8Arr
 
 async function seedPackageWithZip(opts: {
   id: `@${string}/${string}`;
-  type: "agent" | "skill" | "tool" | "provider";
+  type: "agent" | "skill";
   version: string;
   orgId: string;
   manifest: Record<string, unknown>;

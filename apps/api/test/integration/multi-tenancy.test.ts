@@ -230,21 +230,19 @@ describe("Multi-tenancy isolation", () => {
       expect(res.status).toBe(404);
     });
 
-    it("cannot read another org's tool", async () => {
+    it("cannot read another org's skill", async () => {
       await seedAgent({
-        id: "@org-a/my-tool",
+        id: "@org-a/my-skill",
         orgId: orgA.orgId,
-        type: "tool",
+        type: "skill",
         draftManifest: {
-          name: "@org-a/my-tool",
+          name: "@org-a/my-skill",
           version: "1.0.0",
-          type: "tool",
-          entrypoint: "tool.ts",
-          tool: { name: "my-tool", description: "Test", inputSchema: { type: "object" } },
+          type: "skill",
         },
       });
 
-      const res = await app.request("/api/packages/tools/@org-a/my-tool", {
+      const res = await app.request("/api/packages/skills/@org-a/my-skill", {
         headers: authHeaders(orgB),
       });
 

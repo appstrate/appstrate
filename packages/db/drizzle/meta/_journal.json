@@ -232,6 +232,13 @@
       "when": 1790035200000,
       "tag": "0032_drop_connection_profiles",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1790121600000,
+      "tag": "0033_drop_tool_provider_package_type",
+      "breakpoints": true
     }
   ]
 }
