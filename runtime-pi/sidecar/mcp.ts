@@ -611,7 +611,7 @@ function buildSidecarTools(options: MountMcpOptions): {
   // integrations is only known after the background bootstrap finishes.
   const makeApiCallTool = (integ: ApiCallIntegrationConfig): AppstrateToolDefinition => {
     const baseSchema = CREDENTIAL_PROXY_INPUT_SCHEMA as unknown as {
-      properties: Record<string, unknown>;
+      properties: Record<string, object>;
       required?: string[];
       [k: string]: unknown;
     };

@@ -62,7 +62,10 @@ export function createApiCallCredentialAdapter(opts: {
   return {
     fetchCredentials: async () => toPayload(),
     refreshCredentials: async () => {
-      await source.refreshOnUnauthorized(authKey).catch(() => false);
+      // `refreshOnUnauthorized` is optional on the source (static api_key
+      // sources have no refresh hook); the optional call short-circuits the
+      // whole chain when absent, so we just re-read the current payload.
+      await source.refreshOnUnauthorized?.(authKey).catch(() => false);
       return toPayload();
     },
   };
