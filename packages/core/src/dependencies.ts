@@ -99,8 +99,7 @@ export interface ManifestIntegrationEntry {
 
 /**
  * Merge an agent manifest's `dependencies.integrations` (version) with
- * its top-level `integrations` (tool/scope selection). Counterpart of
- * {@link parseManifestProviders} for integrations.
+ * its top-level `integrations` (tool/scope selection).
  */
 export function parseManifestIntegrations(
   manifest: Record<string, unknown>,

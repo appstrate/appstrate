@@ -15,7 +15,6 @@ import {
   integrationServerTypeEnum,
   getAvailableScopes,
   getDeclaredToolNames,
-  getToolRequiredScopes,
   getApiCallConfig,
   API_CALL_TOOL_NAME,
   validateAgentIntegrationScopes,
@@ -841,7 +840,7 @@ describe("integrationManifestSchema — system package gmail-mcp manifest", () =
 // (pure functions consumed by the apps/api scope-validation service)
 // ─────────────────────────────────────────────
 
-describe("getAvailableScopes / getDeclaredToolNames / getToolRequiredScopes", () => {
+describe("getAvailableScopes / getDeclaredToolNames", () => {
   function gmailManifest(): IntegrationManifest {
     return integrationManifestSchema.parse(
       baseManifest({
@@ -885,13 +884,6 @@ describe("getAvailableScopes / getDeclaredToolNames / getToolRequiredScopes", ()
   it("getDeclaredToolNames returns [] for manifests without a tools block", () => {
     const m = integrationManifestSchema.parse(baseManifest());
     expect(getDeclaredToolNames(m)).toEqual([]);
-  });
-
-  it("getToolRequiredScopes reads from the manifest, [] for unknown tool", () => {
-    const m = gmailManifest();
-    expect(getToolRequiredScopes(m, "list_messages")).toEqual(["read"]);
-    expect(getToolRequiredScopes(m, "ping")).toEqual([]);
-    expect(getToolRequiredScopes(m, "no_such_tool")).toEqual([]);
   });
 });
 

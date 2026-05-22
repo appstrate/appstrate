@@ -123,10 +123,10 @@ export interface IntegrationSpawnSpec {
     name: string;
     version: string;
     /**
-     * MCP server to spawn/connect. Optional: a pure-proxy integration
-     * (`apiCall` with no `server` — the migrated-provider shape) has no
-     * MCP server. The sidecar skips spawn entirely for such specs and
-     * only exposes the generic `api_call` tool.
+     * MCP server to spawn/connect. Optional on the spawn spec: the
+     * resolver omits it for `server.type: api_call` integrations, which
+     * expose only the generic `api_call` tool. The sidecar skips spawn
+     * entirely for such specs.
      */
     server?: {
       type: string;

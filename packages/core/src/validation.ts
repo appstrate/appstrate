@@ -196,7 +196,7 @@ function parseWithSchema(
 
 /**
  * Validate a raw manifest object by dispatching to the appropriate type-specific schema.
- * Determines the schema from the `type` field (agent, skill, tool, provider, integration) and validates accordingly.
+ * Determines the schema from the `type` field (agent, skill, integration) and validates accordingly.
  * @param raw - The raw manifest object to validate (typically parsed from JSON)
  * @returns Validation result with parsed manifest on success, or error messages on failure
  */

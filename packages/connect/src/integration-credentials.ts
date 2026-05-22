@@ -259,16 +259,10 @@ function renderTemplate(
   template: string,
   fields: Readonly<Record<string, string>>,
   encoding: "base64" | undefined,
-  identityClaims?: Readonly<Record<string, string>>,
 ): string {
   const rendered = template.replace(/\{\{\s*(\w+)\s*\}\}/g, (_match, key: string) => {
     const value = readCredentialField(fields, key);
     if (value !== undefined) return value;
-    if (identityClaims) {
-      if (identityClaims[key] !== undefined) return identityClaims[key];
-      const alias = ALIAS_MAP[key] ?? REVERSE_ALIAS_MAP[key];
-      if (alias && identityClaims[alias] !== undefined) return identityClaims[alias];
-    }
     return "";
   });
   if (encoding === "base64") return Buffer.from(rendered, "utf8").toString("base64");

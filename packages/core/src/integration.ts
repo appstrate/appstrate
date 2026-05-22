@@ -71,8 +71,6 @@ export const integrationServerTypeEnum = z.enum([
   "uvx",
 ]);
 
-export type IntegrationServerType = z.infer<typeof integrationServerTypeEnum>;
-
 const ociPackageRefSchema = z.object({
   registryType: z.literal("oci"),
   identifier: z.string().min(1),
@@ -559,8 +557,6 @@ const toolsRecordSchema = z.record(
   toolMetadataSchema,
 );
 
-export type IntegrationToolMetadata = z.infer<typeof toolMetadataSchema>;
-
 // ─────────────────────────────────────────────
 // Integration manifest (root)
 // ─────────────────────────────────────────────
@@ -758,19 +754,6 @@ export function getApiCallConfig(
     authKey,
     uploadProtocols: manifest.server.uploadProtocols ?? [],
   };
-}
-
-/**
- * Required OAuth scopes for a single tool, looked up against the
- * integration manifest's `tools.{name}.requiredScopes`. Returns an
- * empty array when the tool isn't declared, which the resolver
- * (Phase 2+) treats as "no scope contribution from this tool".
- */
-export function getToolRequiredScopes(
-  manifest: IntegrationManifest,
-  toolName: string,
-): readonly string[] {
-  return manifest.tools?.[toolName]?.requiredScopes ?? [];
 }
 
 /**
