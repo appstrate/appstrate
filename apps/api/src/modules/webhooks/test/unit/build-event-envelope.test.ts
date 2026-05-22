@@ -69,12 +69,12 @@ describe("buildEventEnvelope", () => {
     expect(data.object.package).toBeUndefined();
   });
 
-  it("lets the caller override the inner `object` discriminator (run.integrations_missing path)", () => {
-    // run.integrations_missing fires before a run row exists, so the caller
+  it("lets the caller override the inner `object` discriminator (run.connection_missing path)", () => {
+    // run.connection_missing fires before a run row exists, so the caller
     // tags the `run` payload with `object: "run_attempt"` to make it
     // self-describing. The envelope passes the caller's `object` through.
     const { payload } = buildEventEnvelope({
-      eventType: "run.integrations_missing",
+      eventType: "run.connection_missing",
       run: {
         object: "run_attempt",
         packageId: "@acme/agent",

@@ -137,7 +137,7 @@ export async function validateAgentReadiness(params: AgentReadinessParams): Prom
     // integration-gated paths (collection above only runs when actor is
     // non-null), so the assertion is safe.
     if (params.actor) {
-      void emitEvent("onRunIntegrationsMissing", {
+      void emitEvent("onRunConnectionMissing", {
         orgId: params.orgId,
         applicationId: params.applicationId,
         packageId: params.agent.id,

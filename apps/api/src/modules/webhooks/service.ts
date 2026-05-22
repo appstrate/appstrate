@@ -44,10 +44,10 @@ export const webhookEventSchema = z.enum([
   "run.failed",
   "run.timeout",
   "run.cancelled",
-  // Fired by `onRunIntegrationsMissing` when run kickoff is rejected because
+  // Fired by `onRunConnectionMissing` when run kickoff is rejected because
   // the actor is missing or under-scoped on one or more integration
   // connections. No run row exists when this fires.
-  "run.integrations_missing",
+  "run.connection_missing",
 ]);
 
 type WebhookEventType = z.infer<typeof webhookEventSchema>;
@@ -497,7 +497,7 @@ export function buildEventEnvelope(params: {
 
   // Default the inner `object` discriminator to "run" so run-lifecycle
   // callers don't have to set it; callers for non-run events (e.g.
-  // `dispatchRunIntegrationsMissingWebhook`) put their own discriminator
+  // `dispatchRunConnectionMissingWebhook`) put their own discriminator
   // on the `run` payload before calling.
   const execObj: Record<string, unknown> = { object: "run", ...params.run };
 
@@ -776,19 +776,19 @@ export function dispatchRunWebhook(
  * (not `run`) because nothing is persisted — consumers MUST treat the payload
  * as informational, not as a run reference.
  */
-export function dispatchRunIntegrationsMissingWebhook(
+export function dispatchRunConnectionMissingWebhook(
   scope: AppScope,
   packageId: string,
   actor: { type: "user" | "end_user"; id: string },
   errors: ReadonlyArray<{ field: string; code: string; message: string; title?: string }>,
 ): void {
-  dispatchWebhookEvents(scope, "run.integrations_missing", {
+  dispatchWebhookEvents(scope, "run.connection_missing", {
     object: "run_attempt",
     packageId,
     actor,
     errors,
   }).catch((err) => {
-    logger.warn("run.integrations_missing webhook dispatch failed", {
+    logger.warn("run.connection_missing webhook dispatch failed", {
       packageId,
       error: getErrorMessage(err),
     });

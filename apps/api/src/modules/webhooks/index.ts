@@ -13,12 +13,12 @@ import { z } from "zod";
 import type {
   AppstrateModule,
   ModuleInitContext,
-  RunIntegrationsMissingParams,
+  RunConnectionMissingParams,
   RunStatusChangeParams,
 } from "@appstrate/core/module";
 import { createWebhooksRouter, createWebhookSchema, updateWebhookSchema } from "./routes.ts";
 import {
-  dispatchRunIntegrationsMissingWebhook,
+  dispatchRunConnectionMissingWebhook,
   dispatchRunWebhook,
   initWebhookWorker,
   shutdownWebhookWorker,
@@ -119,8 +119,8 @@ const webhooksModule: AppstrateModule = {
         },
       );
     },
-    onRunIntegrationsMissing: (params: RunIntegrationsMissingParams) => {
-      dispatchRunIntegrationsMissingWebhook(
+    onRunConnectionMissing: (params: RunConnectionMissingParams) => {
+      dispatchRunConnectionMissingWebhook(
         { orgId: params.orgId, applicationId: params.applicationId },
         params.packageId,
         params.actor,

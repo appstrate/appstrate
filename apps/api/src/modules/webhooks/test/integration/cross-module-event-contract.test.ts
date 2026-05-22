@@ -130,19 +130,19 @@ describe("cross-module contract — onRunStatusChange → webhook delivery", () 
     expect(rows).toHaveLength(0);
   });
 
-  it("webhooks module exposes an onRunIntegrationsMissing handler", () => {
-    expect(webhooksModule.events?.onRunIntegrationsMissing).toBeDefined();
+  it("webhooks module exposes an onRunConnectionMissing handler", () => {
+    expect(webhooksModule.events?.onRunConnectionMissing).toBeDefined();
   });
 
-  it("the onRunIntegrationsMissing handler persists a run.integrations_missing delivery", async () => {
+  it("the onRunConnectionMissing handler persists a run.connection_missing delivery", async () => {
     const webhook = await createWebhook({
       level: "application",
       scope: { orgId, applicationId },
       url: "https://no-such-domain-xyz123.test/hook",
-      events: ["run.integrations_missing"],
+      events: ["run.connection_missing"],
     });
 
-    await webhooksModule.events!.onRunIntegrationsMissing!({
+    await webhooksModule.events!.onRunConnectionMissing!({
       orgId,
       applicationId,
       packageId: "@scope/agent",
@@ -158,6 +158,6 @@ describe("cross-module contract — onRunStatusChange → webhook delivery", () 
 
     const row = await waitForDelivery(webhook.id, WAIT_TIMEOUT_MS);
     expect(row).not.toBeNull();
-    expect(row?.eventType).toBe("run.integrations_missing");
+    expect(row?.eventType).toBe("run.connection_missing");
   });
 });

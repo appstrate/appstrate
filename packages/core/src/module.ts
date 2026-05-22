@@ -496,7 +496,7 @@ export interface ModuleEvents {
    * errors that triggered the block. Useful for surfacing under-provisioned
    * agents to downstream dashboards without polling for 4xx responses.
    */
-  onRunIntegrationsMissing: (params: RunIntegrationsMissingParams) => void | Promise<void>;
+  onRunConnectionMissing: (params: RunConnectionMissingParams) => void | Promise<void>;
   /** Org created — broadcast after a new organization is created. */
   onOrgCreate: (orgId: string, userEmail: string) => void | Promise<void>;
   /** Org deleted — broadcast before an organization is deleted. */
@@ -957,11 +957,11 @@ export interface RunStatusChangeParams {
 
 /**
  * Single field-level error entry carried on
- * {@link RunIntegrationsMissingParams.errors}. Mirrors the shape platform
+ * {@link RunConnectionMissingParams.errors}. Mirrors the shape platform
  * routes return as 4xx envelopes — modules can forward this verbatim to
  * downstream consumers (webhook payloads, Slack messages) without remapping.
  */
-export interface RunIntegrationsMissingError {
+export interface RunConnectionMissingError {
   /** Dotted field path the failure attaches to (e.g. `integrations.@official/gmail.api_key`). */
   field: string;
   /** Stable machine code (e.g. `missing_integration_connection`). */
@@ -972,8 +972,8 @@ export interface RunIntegrationsMissingError {
   title?: string;
 }
 
-/** Parameters passed to the `onRunIntegrationsMissing` event. */
-export interface RunIntegrationsMissingParams {
+/** Parameters passed to the `onRunConnectionMissing` event. */
+export interface RunConnectionMissingParams {
   orgId: string;
   applicationId: string;
   /** Agent package id whose kickoff was blocked. */
@@ -981,7 +981,7 @@ export interface RunIntegrationsMissingParams {
   /** Actor whose request was blocked (user or end_user from the headless API). */
   actor: { type: "user" | "end_user"; id: string };
   /** Field-level errors that triggered the block (same shape as 4xx envelopes). */
-  errors: RunIntegrationsMissingError[];
+  errors: RunConnectionMissingError[];
 }
 
 // ---------------------------------------------------------------------------
