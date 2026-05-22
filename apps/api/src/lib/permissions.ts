@@ -115,10 +115,6 @@ const OWNER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   // Persistence (unified checkpoints + memories — see ADR-011)
   "persistence:read",
   "persistence:delete",
-  // Connections
-  "connections:read",
-  "connections:connect",
-  "connections:disconnect",
   // Infrastructure
   "models:read",
   "models:write",
@@ -177,11 +173,8 @@ const MEMBER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "schedules:delete",
   // Persistence (read only — unified checkpoints + memories)
   "persistence:read",
-  // Connections (full self-service)
-  "connections:read",
-  "connections:connect",
-  "connections:disconnect",
-  // Integrations (members can browse + self-connect; install/uninstall is admin)
+  // Integrations (members can browse + self-connect their connections;
+  // install/uninstall is admin)
   "integrations:read",
   "integrations:connect",
   "integrations:disconnect",
@@ -205,7 +198,6 @@ const VIEWER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "runs:read",
   "schedules:read",
   "persistence:read",
-  "connections:read",
   "models:read",
   "proxies:read",
   "applications:read",
@@ -267,11 +259,8 @@ export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permissio
   "proxies:read",
   "proxies:write",
   "proxies:delete",
-  // Connections (end-user OAuth via API key + Appstrate-User header)
-  "connections:read",
-  "connections:connect",
-  "connections:disconnect",
-  // Integrations (browse catalog + install/connect via API key for headless flows)
+  // Integrations (browse catalog + install/connect via API key for headless
+  // flows, incl. end-user OAuth via Appstrate-User header)
   "integrations:read",
   "integrations:install",
   "integrations:uninstall",

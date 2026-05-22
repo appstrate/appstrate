@@ -195,8 +195,6 @@ describe("CoreResources ↔ CORE_RESOURCE_NAMES drift", () => {
       runs: true,
       schedules: true,
       persistence: true,
-      connections: true,
-
       models: true,
       "model-provider-credentials": true,
       proxies: true,
@@ -223,8 +221,6 @@ describe("CoreResources ↔ CORE_RESOURCE_NAMES drift", () => {
       runs: true,
       schedules: true,
       persistence: true,
-      connections: true,
-
       models: true,
       "model-provider-credentials": true,
       proxies: true,

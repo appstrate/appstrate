@@ -97,7 +97,7 @@ async function registerClient(
       level: "application",
       name: "E2E Satellite",
       redirectUris: ["https://satellite.example.com/callback"],
-      scopes: ["openid", "profile", "email", "offline_access", "connections:read", "runs:read"],
+      scopes: ["openid", "profile", "email", "offline_access", "integrations:read", "runs:read"],
       referencedApplicationId: ctx.defaultAppId,
       isFirstParty: false,
       // Secure-by-default `allowSignup=false` would block fresh

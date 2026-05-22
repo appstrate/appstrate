@@ -33,9 +33,9 @@ describe("resolvePermissions", () => {
     expect(perms.has("runs:read")).toBe(true);
     // Can run
     expect(perms.has("agents:run")).toBe(true);
-    // Can manage connections
-    expect(perms.has("connections:connect")).toBe(true);
-    expect(perms.has("connections:disconnect")).toBe(true);
+    // Can manage integration connections
+    expect(perms.has("integrations:connect")).toBe(true);
+    expect(perms.has("integrations:disconnect")).toBe(true);
     // Can cancel runs
     expect(perms.has("runs:cancel")).toBe(true);
     // Can write end-users
@@ -69,7 +69,7 @@ describe("resolvePermissions", () => {
     // Cannot do anything else
     expect(perms.has("agents:write")).toBe(false);
     expect(perms.has("agents:run")).toBe(false);
-    expect(perms.has("connections:connect")).toBe(false);
+    expect(perms.has("integrations:connect")).toBe(false);
     expect(perms.has("runs:cancel")).toBe(false);
     expect(perms.has("org:update")).toBe(false);
     expect(perms.has("org:delete")).toBe(false);
@@ -185,9 +185,9 @@ describe("API_KEY_ALLOWED_SCOPES", () => {
       "end-users:delete",
       "applications:read",
       "applications:write",
-      "connections:read",
-      "connections:connect",
-      "connections:disconnect",
+      "integrations:read",
+      "integrations:connect",
+      "integrations:disconnect",
       "schedules:read",
       "schedules:write",
       "schedules:delete",

@@ -70,7 +70,6 @@ export interface CoreResources {
   // Unified `package_persistence` (checkpoints + memories) with first-class
   // actor scoping. Supersedes the dropped `memories` resource.
   persistence: "read" | "delete";
-  connections: "read" | "connect" | "disconnect";
   models: "read" | "write" | "delete";
   "model-provider-credentials": "read" | "write" | "delete";
   proxies: "read" | "write" | "delete";
@@ -80,9 +79,9 @@ export interface CoreResources {
   "credential-proxy": "call";
   "llm-proxy": "call";
   // AFPS integrations (INTEGRATIONS_PROPOSAL Phase 1.3 — marketplace UI).
-  // Read = browse catalog. Install/uninstall = manage per-app
-  // installation. Connect/disconnect = manage credentials per declared
-  // `auths.{key}`.
+  // Read = browse catalog + view the actor's connection inventory.
+  // Install/uninstall = manage per-app installation. Connect/disconnect =
+  // manage credentials (connections) per declared `auths.{key}`.
   integrations: "read" | "install" | "uninstall" | "connect" | "disconnect";
 }
 
@@ -118,7 +117,6 @@ export const CORE_RESOURCE_NAMES: ReadonlySet<string> = new Set<string>([
   "runs",
   "schedules",
   "persistence",
-  "connections",
   "models",
   "model-provider-credentials",
   "proxies",

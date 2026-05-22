@@ -66,7 +66,7 @@ describe("renderConsentPage", () => {
     const out = renderConsentPage({
       ...DEFAULT_PROPS,
       clientName: "Acme",
-      scopes: ["openid", "agents:run", "connections:connect"],
+      scopes: ["openid", "agents:run", "integrations:connect"],
       action: "/x",
     }).value;
     expect(out).toContain("Votre identité");
