@@ -241,6 +241,32 @@ describe("zipArtifact / unzipArtifact roundtrip", () => {
   });
 });
 
+describe("zipArtifact determinism", () => {
+  it("produces identical bytes across builds (fixed mtime)", () => {
+    const entries = {
+      "manifest.json": new TextEncoder().encode('{"a":1}'),
+      "prompt.md": new TextEncoder().encode("hello"),
+    };
+    const a = zipArtifact(entries);
+    const b = zipArtifact(entries);
+    expect(Buffer.from(a).equals(Buffer.from(b))).toBe(true);
+  });
+
+  it("is independent of entry insertion order (sorted output)", () => {
+    const forward = zipArtifact({
+      "a.txt": new TextEncoder().encode("1"),
+      "b.txt": new TextEncoder().encode("2"),
+      "c.txt": new TextEncoder().encode("3"),
+    });
+    const reversed = zipArtifact({
+      "c.txt": new TextEncoder().encode("3"),
+      "b.txt": new TextEncoder().encode("2"),
+      "a.txt": new TextEncoder().encode("1"),
+    });
+    expect(Buffer.from(forward).equals(Buffer.from(reversed))).toBe(true);
+  });
+});
+
 // ─────────────────────────────────────────────
 // Path traversal & sanitization
 // ─────────────────────────────────────────────

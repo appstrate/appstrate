@@ -38,7 +38,7 @@ import {
   getAllSystemPackageVersions,
   type SystemPackageEntry,
 } from "../services/system-packages.ts";
-import { createVersionAndUpload, replaceVersionContent } from "../services/package-versions.ts";
+import { createVersionAndUpload } from "../services/package-versions.ts";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { uploadPackageFiles, SYSTEM_STORAGE_NAMESPACE } from "../services/package-items/storage.ts";
 import { storageFolderForType } from "../services/package-items/config.ts";
@@ -403,12 +403,15 @@ async function loadAndSyncSystemPackages(): Promise<void> {
   // Step 2 — register every loaded version in `package_versions` so semver
   // ranges (e.g. `^1.0.0`) keep resolving when a newer major ships
   // alongside the legacy line. createVersionAndUpload is idempotent
-  // (skip-if-exists). When a system source is rebuilt with the same
-  // version but new bytes (deterministic build differences, manifest
-  // tweaks, runtime changes), the existing row's `integrity` would drift
-  // from the freshly-computed hash — the sidecar then refuses to spawn
-  // the bundle with an `Integrity check failed`. Heal in place via
-  // `replaceVersionContent` whenever the source hash differs from DB.
+  // (skip-if-exists).
+  //
+  // Published versions are immutable. `zipArtifact` produces reproducible
+  // bytes, so a source rebuilt at the same version yields the same integrity
+  // hash — any drift from the stored row therefore means the source content
+  // changed without a version bump (a developer mistake), not rebuild noise.
+  // We refuse to overwrite the published bytes and log an actionable error
+  // instead; the previously-loaded version stays authoritative until the
+  // version is bumped.
   const syncVersion = async (entry: SystemPackageEntry) => {
     const freshIntegrity = computeIntegrity(new Uint8Array(entry.zipBuffer));
 
@@ -424,27 +427,27 @@ async function loadAndSyncSystemPackages(): Promise<void> {
       .limit(1);
 
     if (existing && existing.integrity !== freshIntegrity) {
-      logger.warn("System package version drift — healing in place", {
-        packageId: entry.packageId,
-        version: entry.version,
-        dbIntegrity: existing.integrity,
-        sourceIntegrity: freshIntegrity,
-      });
-      await replaceVersionContent({
-        packageId: entry.packageId,
-        version: entry.version,
-        zipBuffer: entry.zipBuffer,
-        manifest: entry.manifest as unknown as Record<string, unknown>,
-      });
-    } else {
-      await createVersionAndUpload({
-        packageId: entry.packageId,
-        version: entry.version,
-        createdBy: null,
-        zipBuffer: entry.zipBuffer,
-        manifest: entry.manifest as unknown as Record<string, unknown>,
-      });
+      logger.error(
+        "System package content changed without a version bump — refusing to " +
+          "overwrite a published, immutable version. Bump the version in the " +
+          "source manifest; the previously-loaded bytes remain authoritative.",
+        {
+          packageId: entry.packageId,
+          version: entry.version,
+          dbIntegrity: existing.integrity,
+          sourceIntegrity: freshIntegrity,
+        },
+      );
+      return;
     }
+
+    await createVersionAndUpload({
+      packageId: entry.packageId,
+      version: entry.version,
+      createdBy: null,
+      zipBuffer: entry.zipBuffer,
+      manifest: entry.manifest as unknown as Record<string, unknown>,
+    });
     syncedVersions++;
   };
 

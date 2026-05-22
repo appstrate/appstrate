@@ -14,7 +14,24 @@ import {
 export type { Zippable };
 
 /**
+ * Fixed modification time stamped on every ZIP entry. fflate defaults each
+ * entry's mtime to the current clock, which makes archive bytes — and thus
+ * their integrity hash — change on every build even when the contents are
+ * identical. ZIP mtimes are never read back (`unzipArtifact` discards them),
+ * so pinning a constant costs nothing and makes the output reproducible.
+ * Reproducibility is what lets the system-package loader treat an integrity
+ * drift as a genuine content change (forgotten version bump) rather than
+ * rebuild noise. 2020-01-01 UTC — any constant ≥ 1980 works (DOS time epoch).
+ */
+const DETERMINISTIC_MTIME = new Date("2020-01-01T00:00:00Z");
+
+/**
  * Create a ZIP archive from a set of file entries.
+ *
+ * Output is deterministic: entries are emitted in sorted path order with a
+ * fixed mtime, so identical inputs always produce identical bytes regardless
+ * of filesystem `readdir` order or wall-clock time.
+ *
  * @param entries - Map of file paths to Uint8Array content
  * @param level - Compression level (0=none, 9=max). Defaults to 6.
  * @returns The compressed ZIP as a Uint8Array
@@ -35,7 +52,13 @@ export function zipArtifact(
       );
     }
   }
-  return zipSync(entries, { level });
+  // Re-key in sorted order so insertion order (e.g. readdir order) can't
+  // perturb the output; fflate preserves key iteration order.
+  const sorted: Zippable = {};
+  for (const key of Object.keys(entries).sort()) {
+    sorted[key] = (entries as Record<string, Zippable[string]>)[key]!;
+  }
+  return zipSync(sorted, { level, mtime: DETERMINISTIC_MTIME });
 }
 
 /**
