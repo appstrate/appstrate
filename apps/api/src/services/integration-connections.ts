@@ -1,30 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Phase 1.3 — integration connection layer (marketplace UI backend).
+ * Integration connection layer — the write side of `/api/integrations/*`.
  *
- * Backs the `/api/integrations/*` REST surface. Covers:
+ * Covers:
  *
  *   - Per-application OAuth2 client registration (admin) backing the
- *     marketplace's "Configure OAuth" admin form. Stored in
- *     `integration_oauth_clients` with the client_secret v1-envelope
- *     encrypted (empty string for public clients).
- *   - End-user connect flows for all 5 auth types declared by the
- *     manifest's `auths.{key}` map: `api_key`, `basic`, `custom`,
- *     `oauth2`, `oauth1`. OAuth2 drives PKCE S256 via
- *     `@appstrate/connect/integration-oauth`. OAuth1 returns a NOT
- *     IMPLEMENTED error for now (the runtime layer in Phase 1.2a knows
- *     how to consume oauth1 credentials but the user-facing connect
- *     popup needs platform OAuth1 endpoints — out of scope for the
- *     marketplace MVP, falls back to `custom` auth where the user
- *     pastes tokens).
- *   - Per-(integration, auth, account) connection storage in
+ *     "Configure OAuth" admin form. Stored in `integration_oauth_clients`
+ *     with the client_secret v1-envelope encrypted (empty string for
+ *     public clients).
+ *   - Connection writers (`persistCredentialBundle`, `saveIntegrationConnection`)
+ *     that store per-(integration, auth, account) rows in
  *     `integration_connections` with v1-envelope encrypted credentials.
- *   - Lookup helpers consumed by the marketplace UI (per-auth status,
- *     scopes granted, expiry, multi-account list).
+ *     The acquisition flows themselves live in `services/connect/*-strategy.ts`.
+ *   - Lookup helpers consumed by the UI (per-auth status, scopes granted,
+ *     expiry, multi-account list) and by the runtime resolver cascade.
  *
- * The runtime spawn path (Phase 1.2a/c) reads `integration_connections`
- * directly; this module is the user-facing write side that populates it.
+ * The runtime spawn path reads `integration_connections` directly; this
+ * module is the write side that populates it.
  */
 
 import { and, eq, or, sql } from "drizzle-orm";
@@ -174,7 +167,7 @@ export interface ResolvedConnectionRow extends ActorConnectionRow {
  * a snapshot-derived id always satisfies the access predicate; the AND
  * is a safety net against rogue callers, not a behavioural filter.
  */
-export async function loadActorConnection(
+async function loadActorConnection(
   packageId: string,
   authKey: string,
   context: { applicationId: string; actor: Actor; connectionId?: string },

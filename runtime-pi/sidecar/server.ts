@@ -87,8 +87,8 @@ if (process.env.CONNECT_LOGIN_JSON) {
 
 const cookieJar = new Map<string, string[]>();
 
-async function fetchCredentials(providerId: string): Promise<CredentialsResponse> {
-  const res = await fetch(`${config.platformApiUrl}/internal/credentials/${providerId}`, {
+async function fetchCredentials(integrationId: string): Promise<CredentialsResponse> {
+  const res = await fetch(`${config.platformApiUrl}/internal/credentials/${integrationId}`, {
     headers: { Authorization: `Bearer ${config.runToken}` },
   });
   if (!res.ok) {
@@ -99,18 +99,21 @@ async function fetchCredentials(providerId: string): Promise<CredentialsResponse
     } catch {
       // ignore parse failures
     }
-    throw new Error(detail || `Failed to fetch credentials for ${providerId}: ${res.status}`);
+    throw new Error(detail || `Failed to fetch credentials for ${integrationId}: ${res.status}`);
   }
   return res.json() as Promise<CredentialsResponse>;
 }
 
-async function refreshCredentials(providerId: string): Promise<CredentialsResponse> {
-  const res = await fetch(`${config.platformApiUrl}/internal/credentials/${providerId}/refresh`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${config.runToken}` },
-  });
+async function refreshCredentials(integrationId: string): Promise<CredentialsResponse> {
+  const res = await fetch(
+    `${config.platformApiUrl}/internal/credentials/${integrationId}/refresh`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${config.runToken}` },
+    },
+  );
   if (!res.ok) {
-    throw new Error(`Failed to refresh credentials for ${providerId}: ${res.status}`);
+    throw new Error(`Failed to refresh credentials for ${integrationId}: ${res.status}`);
   }
   return res.json() as Promise<CredentialsResponse>;
 }

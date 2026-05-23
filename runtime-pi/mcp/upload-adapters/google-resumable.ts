@@ -112,7 +112,7 @@ export const googleResumableAdapter: UploadAdapter = {
     if (!sessionUrl) {
       throw new UploadError(
         `google-resumable: init response missing 'Location' header (got status ${res.status}). ` +
-          `The provider's authorizedUris must allow the upload session URL — verify the manifest.`,
+          `The integration's authorizedUris must allow the upload session URL — verify the manifest.`,
         res.status,
         res.headers,
         res.body,

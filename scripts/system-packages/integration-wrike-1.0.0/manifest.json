@@ -51,7 +51,7 @@
         "http": {
           "headerName": "Authorization",
           "headerPrefix": "Bearer",
-          "valueFrom": "accessToken"
+          "valueFrom": "access_token"
         }
       }
     }

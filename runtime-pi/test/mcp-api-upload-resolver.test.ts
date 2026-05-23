@@ -4,7 +4,7 @@
  * Integration tests for `McpApiUploadResolver` — the
  * orchestrator behind `api_upload`.
  *
- * Test shape mirrors `mcp-provider-resolver.test.ts`: an in-process
+ * Test shape: an in-process
  * MCP pair where the server-side handler stands in for the sidecar's
  * `api_call` implementation. Each test wires a per-protocol
  * mock upstream simulator into that handler so we can verify

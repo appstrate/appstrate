@@ -90,10 +90,10 @@ Each text-path tool result carries an `appstrate://token-budget` `_meta` payload
 
 ## The `body.fromFile` contract
 
-The AFPS provider tool exposes `body.fromFile` so agents can upload workspace files without base64-encoding them into a JSON tool argument. **The sidecar has no workspace mount and no knowledge of `fromFile`** — that contract is purely runtime-side:
+The AFPS integration `api_call` tool exposes `body.fromFile` so agents can upload workspace files without base64-encoding them into a JSON tool argument. **The sidecar has no workspace mount and no knowledge of `fromFile`** — that contract is purely runtime-side:
 
 1. The agent calls `{ns}__api_call` with `{ body: { fromFile: "report.pdf" } }`.
-2. The runner-pi `McpProviderResolver` (in container mode) — or `RemoteAppstrateProviderResolver` (in CLI mode) — reads the workspace bytes locally via `resolveBodyForFetch` (path-safe, lstat-checked).
+2. The AFPS `IntegrationApiCallResolver` (`LocalIntegrationResolver` for local creds-file runs, `RemoteAppstrateIntegrationResolver` for remote-proxy runs) reads the workspace bytes locally via `resolveBodyForFetch` (path-safe, lstat-checked).
 3. JSON-RPC has no native byte type, so the resolver base64-encodes the bytes and ships them over MCP as `body: { fromBytes: <base64>, encoding: "base64" }`.
 4. The sidecar's `api_call` MCP handler decodes once and forwards the bytes byte-for-byte to upstream — never seeing the source path.
 
@@ -155,7 +155,7 @@ Files larger than `MAX_REQUEST_BODY_SIZE` (default 10 MB) cannot fit in a single
 
 Critically, **the sidecar is not modified**: each chunk transits through the existing `{ns}__api_call` MCP tool. Credential injection, `authorizedUris` enforcement, and SSRF protection apply per chunk identically. The chunking state machine lives in [`runtime-pi/mcp/upload-adapters/`](../mcp/upload-adapters/) — one ~150 LoC file per protocol — and never sees credentials.
 
-A provider opts into `api_upload` by declaring `definition.uploadProtocols: string[]` in its manifest. The tool is registered by the runtime only when ≥1 declared provider supports a known protocol; absent declarations, the tool isn't advertised.
+An integration declares `apiCall.uploadProtocols: string[]` in its manifest to opt into `api_upload`. The tool is registered by the runtime only when ≥1 declared integration supports a known protocol; absent declarations, the tool isn't advertised.
 
 The resolver streams the file off disk via `Bun.file().stream()`, slices it into `partSizeBytes`-sized chunks, computes a streaming SHA-256 over the bytes committed to the wire, and surfaces it in the result so post-upload byte-equivalence is verifiable. End-to-end memory ceiling is one chunk in the runtime + one chunk in the sidecar — bounded by `MAX_REQUEST_BODY_SIZE` regardless of file size.
 

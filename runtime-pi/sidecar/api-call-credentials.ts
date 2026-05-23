@@ -14,7 +14,7 @@
  *     `buildInjectedCredentialHeader` reads via `credentialFieldName`;
  *   - the auth's decrypted `fields` are exposed under `credentials` so an
  *     agent can still `{{var}}`-substitute them into the URL / headers /
- *     body, matching legacy provider ergonomics;
+ *     body;
  *   - `authorizedUris` is the auth's verbatim allowlist (integrations
  *     always declare ≥1 URI, so `allowAllUris` is always false).
  *
@@ -29,13 +29,13 @@ import { buildProxyCredentialsPayload } from "@appstrate/connect/integration-cre
 import type { IntegrationCredentialsSource } from "./integration-credentials-source.ts";
 
 export interface ApiCallCredentialAdapter {
-  fetchCredentials: (providerId: string) => Promise<ProxyCredentialsPayload>;
-  refreshCredentials: (providerId: string) => Promise<ProxyCredentialsPayload>;
+  fetchCredentials: (integrationId: string) => Promise<ProxyCredentialsPayload>;
+  refreshCredentials: (integrationId: string) => Promise<ProxyCredentialsPayload>;
 }
 
 /**
  * Build the `fetch` / `refresh` credential adapters for one integration's
- * `api_call` tool. `providerId` is ignored (the integration is fixed by
+ * `api_call` tool. `integrationId` is ignored (the integration is fixed by
  * closure) — the parameter exists only to satisfy the `ApiCallDeps`
  * signature used by `api_call`.
  */

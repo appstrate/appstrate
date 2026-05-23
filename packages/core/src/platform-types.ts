@@ -49,12 +49,12 @@ export interface PlatformPackageDependency {
 }
 
 /**
- * Stable public fields of a loaded package (agent, skill, provider).
+ * Stable public fields of a loaded package (agent, skill, integration).
  *
  * `prompt`, `skills` are populated by the platform when it resolves
  * a package row — modules that render or reason about a package can read
  * them without re-implementing manifest traversal. They remain optional so
- * future package shapes (e.g. provider definitions with no prompt) stay
+ * package shapes that lack them (e.g. integrations have no prompt) stay
  * assignable, and so adding more hydrated fields is non-breaking.
  */
 export interface PlatformPackage {

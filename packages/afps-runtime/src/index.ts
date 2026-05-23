@@ -135,7 +135,7 @@ export {
   RunCancelledError,
   RunTimeoutError,
   WorkloadExitError,
-  ProviderAuthorizationError,
+  AuthorizedUrisError,
   ResolverError,
   RunHistoryError,
   CredentialResolutionError,

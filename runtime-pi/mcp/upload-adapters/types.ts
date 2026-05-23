@@ -35,7 +35,7 @@ type AfpsUploadProtocol = IntegrationUploadProtocol;
  * different headers, different finalize step), but the orchestration
  * shape is identical: init → loop(chunks) → finalize, with cancel
  * always best-effort. The interface lifts that shape so the resolver
- * (`provider-upload-resolver.ts`) is protocol-agnostic and the
+ * (`api-upload-resolver.ts`) is protocol-agnostic and the
  * delta to add a fifth protocol is one new file in this directory.
  */
 
@@ -262,6 +262,6 @@ export interface UploadAdapter {
 /**
  * Set of all valid `uploadProtocol` values. Useful for schema
  * validation in the Pi tool surface. Single source of truth lives in
- * `@afps-spec/schema` (`uploadProtocolEnum`).
+ * `@appstrate/core/integration` (`integrationUploadProtocolEnum`).
  */
 export const UPLOAD_PROTOCOLS: readonly UploadProtocol[] = AFPS_UPLOAD_PROTOCOLS;

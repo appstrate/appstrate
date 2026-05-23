@@ -15,9 +15,7 @@ import {
 import { formatDateField } from "../../lib/markdown";
 import { LoadingState, EmptyState } from "../../components/page-states";
 import { ConfirmModal } from "../../components/confirm-modal";
-import { resolveScopeLabel } from "../../lib/scope-labels";
 import type { MeConnectionEntry, MeConnectionSourceGroup } from "@appstrate/shared-types";
-import type { AvailableScope } from "@appstrate/core/validation";
 
 // ─────────────────────────────────────────────
 // Helpers
@@ -109,12 +107,11 @@ function LabelEditor({
 }
 
 // ─────────────────────────────────────────────
-// Connection row (provider OR integration)
+// Connection row (integration connection)
 // ─────────────────────────────────────────────
 
 function ConnectionRow({
   conn,
-  availableScopes,
   onDisconnect,
   onUpdateLabel,
   onToggleShare,
@@ -122,7 +119,6 @@ function ConnectionRow({
   updating,
 }: {
   conn: MeConnectionEntry;
-  availableScopes?: AvailableScope[];
   onDisconnect: () => void;
   onUpdateLabel?: (label: string | null) => void;
   onToggleShare?: (next: boolean) => void;
@@ -175,7 +171,7 @@ function ConnectionRow({
   if (conn.scopesGranted.length > 0) {
     rows.push({
       label: t("connectors.scopesLabel"),
-      value: conn.scopesGranted.map((s) => resolveScopeLabel(s, availableScopes)).join(", "),
+      value: conn.scopesGranted.join(", "),
     });
   }
 
@@ -310,12 +306,9 @@ export function PreferencesConnectorsPage() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [confirmState, setConfirmState] = useState<{
     kind: "integration";
-    packageId: string;
     displayName: string;
     identity: string | null;
     connectionId: string;
-    orgId: string;
-    applicationId: string;
     /**
      * Number of agents that consume this integration in the application —
      * surfaced in the confirm dialog so the user understands the blast
@@ -338,10 +331,6 @@ export function PreferencesConnectorsPage() {
       else next.add(key);
       return next;
     });
-  };
-
-  const scopesForGroup = (_group: MeConnectionSourceGroup): AvailableScope[] | undefined => {
-    return undefined;
   };
 
   return (
@@ -378,7 +367,6 @@ export function PreferencesConnectorsPage() {
         <div className="flex flex-col gap-3">
           {(groups ?? []).map((group) => {
             const key = `${group.kind}:${group.sourceId}`;
-            const availableScopes = scopesForGroup(group);
             return (
               <SourceGroupCard
                 key={key}
@@ -388,18 +376,14 @@ export function PreferencesConnectorsPage() {
                 renderRow={(conn) => (
                   <ConnectionRow
                     conn={conn}
-                    availableScopes={availableScopes}
                     disconnecting={disconnectIntegration.isPending}
                     updating={updateIntegration.isPending}
                     onDisconnect={() =>
                       setConfirmState({
                         kind: "integration",
-                        packageId: group.sourceId,
                         displayName: group.displayName,
                         identity: conn.identity,
                         connectionId: conn.connectionId,
-                        orgId: conn.org.id,
-                        applicationId: conn.application.id,
                         reusedByAgents: conn.reusedByAgents ?? 0,
                       })
                     }
@@ -453,12 +437,7 @@ export function PreferencesConnectorsPage() {
         onConfirm={() => {
           if (!confirmState) return;
           disconnectIntegration.mutate(
-            {
-              packageId: confirmState.packageId,
-              connectionId: confirmState.connectionId,
-              orgId: confirmState.orgId,
-              applicationId: confirmState.applicationId,
-            },
+            { connectionId: confirmState.connectionId },
             { onSuccess: () => setConfirmState(null) },
           );
         }}

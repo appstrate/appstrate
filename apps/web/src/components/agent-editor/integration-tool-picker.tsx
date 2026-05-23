@@ -78,9 +78,9 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
   const declaredToolNames = Object.keys(declaredTools);
   const hasToolCatalog = declaredToolNames.length > 0;
 
-  // apiCall integrations (former providers) expose the generic `api_call`
-  // tool instead of discrete MCP tools. Surface it as a selectable tool so
-  // the agent author can opt in (the runtime gates injection on it).
+  // apiCall integrations expose the generic `api_call` tool instead of
+  // discrete MCP tools. Surface it as a selectable tool so the agent author
+  // can opt in (the runtime gates injection on it).
   const isApiCall = getApiCallConfig(detail.manifest) !== null;
   const apiCallSelected = (entry.tools ?? []).includes(API_CALL_TOOL_NAME);
   const toggleApiCall = () => {

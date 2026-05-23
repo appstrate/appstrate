@@ -17,7 +17,7 @@
 
 const proxySharedDescription =
   "High-value endpoint. Accepts an upstream HTTP request and forwards it to the " +
-  "provider after injecting the stored credentials server-side. Credentials never " +
+  "upstream API after injecting the stored credentials server-side. Credentials never " +
   "leave Appstrate.\n\n" +
   "Authentication: bearer only — either an API key with the `credential-proxy:call` " +
   "scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token " +
@@ -27,7 +27,7 @@ const proxySharedDescription =
   "Optional `Appstrate-User` header scopes the call to an end-user's connection " +
   "profile (API-key auth only).\n\n" +
   "URL and headers can contain `{{credential_field}}` placeholders substituted " +
-  "against the provider's credential schema. Set `X-Substitute-Body: true` to run " +
+  "against the integration's credential schema. Set `X-Substitute-Body: true` to run " +
   "the same substitution on the request body (verbs that carry one).";
 
 const proxyParameters = [
@@ -76,7 +76,7 @@ const proxyParameters = [
     name: "Appstrate-User",
     in: "header",
     required: false,
-    description: "Impersonation header — scopes the call to this end-user's connection profile.",
+    description: "Impersonation header — scopes the call to this end-user's connection.",
     schema: { type: "string", pattern: "^eu_" },
   },
   {
@@ -147,7 +147,7 @@ const proxyResponses = {
       "`authorizedUris`, session bound to a different principal, or cookie session used.",
   },
   "404": {
-    description: "No credentials or connection profile for the requested provider.",
+    description: "No credentials or connection for the requested integration.",
   },
   "429": { $ref: "#/components/responses/RateLimited" },
 } as const;
@@ -163,11 +163,11 @@ type ProxyVerb = "get" | "post" | "put" | "patch" | "delete";
 
 function makeProxyOperation(verb: ProxyVerb) {
   const summaries: Record<ProxyVerb, string> = {
-    get: "Proxy a GET request to a provider with server-side credential injection",
-    post: "Proxy a POST request to a provider with server-side credential injection",
-    put: "Proxy a PUT request to a provider with server-side credential injection",
-    patch: "Proxy a PATCH request to a provider with server-side credential injection",
-    delete: "Proxy a DELETE request to a provider with server-side credential injection",
+    get: "Proxy a GET request to an integration with server-side credential injection",
+    post: "Proxy a POST request to an integration with server-side credential injection",
+    put: "Proxy a PUT request to an integration with server-side credential injection",
+    patch: "Proxy a PATCH request to an integration with server-side credential injection",
+    delete: "Proxy a DELETE request to an integration with server-side credential injection",
   };
   const operationIds: Record<ProxyVerb, string> = {
     get: "credentialProxyGet",

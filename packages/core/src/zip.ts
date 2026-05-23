@@ -166,7 +166,7 @@ export function stripWrapperPrefix(
 export interface ParsedPackageZip {
   /** The validated manifest from manifest.json. */
   manifest: Manifest | AgentManifest | IntegrationManifest;
-  /** The primary content (prompt.md for agents, SKILL.md for skills, source for tools, etc.). */
+  /** The primary content (prompt.md for agents, SKILL.md for skills, manifest.json for integrations). */
   content: string;
   /** All files in the ZIP archive (path to content). */
   files: Record<string, Uint8Array>;

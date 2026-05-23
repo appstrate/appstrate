@@ -3,8 +3,7 @@
 
 /**
  * Agent-side Pi extensions registering the LLM-facing `{ns}__api_upload`
- * tools — the integration-era port of the retired provider-era
- * `api_upload`.
+ * tools for chunked uploads through an integration's `api_call`.
  *
  * Why a Pi extension and NOT a sidecar MCP tool:
  *   - The orchestration is purely client-side state (chunk index,

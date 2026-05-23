@@ -238,7 +238,7 @@ export interface MeConnectionSourceGroup {
 }
 
 /**
- * Fields shared by every package row when listed (agent or skill/tool/provider).
+ * Fields shared by every package row when listed (agent, skill, or integration).
  * Concrete list shapes (`AgentListItem`, `OrgPackageItem`) extend this with
  * what their respective list endpoints additionally return.
  */

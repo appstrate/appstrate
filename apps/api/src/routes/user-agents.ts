@@ -40,12 +40,7 @@ async function resolveCaretRanges(orgId: string, ids: string[]): Promise<Record<
 }
 
 /** Update the skills dep section in the manifest. */
-async function updateManifestDeps(
-  orgId: string,
-  packageId: string,
-  depKey: "skills",
-  ids: string[],
-): Promise<void> {
+async function updateManifestDeps(orgId: string, packageId: string, ids: string[]): Promise<void> {
   const [row] = await db
     .select({ draftManifest: packages.draftManifest })
     .from(packages)
@@ -55,7 +50,7 @@ async function updateManifestDeps(
 
   const manifest = asRecord(row.draftManifest);
   const deps = asRecord(manifest.dependencies);
-  deps[depKey] = await resolveCaretRanges(orgId, ids);
+  deps.skills = await resolveCaretRanges(orgId, ids);
   manifest.dependencies = deps;
 
   await db
@@ -88,7 +83,7 @@ export function createUserAgentsRouter() {
         );
       }
 
-      await updateManifestDeps(c.get("orgId"), packageId, "skills", skillIds);
+      await updateManifestDeps(c.get("orgId"), packageId, skillIds);
 
       return c.json({ packageId, skillIds, message: "Skill references updated" });
     },

@@ -4,7 +4,7 @@ import { describe, it, expect } from "bun:test";
 import {
   AfpsRuntimeError,
   CredentialResolutionError,
-  ProviderAuthorizationError,
+  AuthorizedUrisError,
   ResolverError,
   RunCancelledError,
   RunHistoryError,
@@ -28,8 +28,8 @@ describe("AfpsRuntimeError taxonomy", () => {
     expect(new RunTimeoutError("timed out").code).toBe("RUN_TIMEOUT");
     expect(new RunTimeoutError("timed out").name).toBe("RunTimeoutError");
 
-    expect(new ProviderAuthorizationError("PROVIDER_AUTHORIZED_URIS_EMPTY", "x").code).toBe(
-      "PROVIDER_AUTHORIZED_URIS_EMPTY",
+    expect(new AuthorizedUrisError("AUTHORIZED_URIS_EMPTY", "x").code).toBe(
+      "AUTHORIZED_URIS_EMPTY",
     );
 
     expect(new ResolverError("RESOLVER_INVALID_TOOL_SHAPE", "x").code).toBe(
@@ -54,8 +54,8 @@ describe("AfpsRuntimeError taxonomy", () => {
     expect(err.details).toEqual({ adapterName: "docker", exitCode: 1 });
   });
 
-  it("ProviderAuthorizationError preserves the security-relevant target + provider in details", () => {
-    const err = new ProviderAuthorizationError("PROVIDER_AUTHORIZED_URIS_MISMATCH", "rejected", {
+  it("AuthorizedUrisError preserves the security-relevant target + provider in details", () => {
+    const err = new AuthorizedUrisError("AUTHORIZED_URIS_MISMATCH", "rejected", {
       provider: "@appstrate/gmail",
       target: "https://evil.com/",
     });
@@ -68,9 +68,7 @@ describe("isAfpsError marker", () => {
     expect(isAfpsError(new RunCancelledError("x"))).toBe(true);
     expect(isAfpsError(new WorkloadExitError("d", 1))).toBe(true);
     expect(isAfpsError(new RunTimeoutError("x"))).toBe(true);
-    expect(isAfpsError(new ProviderAuthorizationError("PROVIDER_AUTHORIZED_URIS_EMPTY", "x"))).toBe(
-      true,
-    );
+    expect(isAfpsError(new AuthorizedUrisError("AUTHORIZED_URIS_EMPTY", "x"))).toBe(true);
     expect(isAfpsError(new ResolverError("RESOLVER_INVALID_TOOL_SHAPE", "x"))).toBe(true);
     expect(isAfpsError(new RunHistoryError("RUN_HISTORY_FETCH_FAILED", "x"))).toBe(true);
     expect(isAfpsError(new CredentialResolutionError("x"))).toBe(true);
@@ -90,14 +88,14 @@ describe("isAfpsError marker", () => {
 
 describe("toProblem (RFC 9457)", () => {
   it("emits problem+json from typed errors with code in the type URI", () => {
-    const err = new ProviderAuthorizationError("PROVIDER_AUTHORIZED_URIS_MISMATCH", "rejected", {
+    const err = new AuthorizedUrisError("AUTHORIZED_URIS_MISMATCH", "rejected", {
       provider: "@appstrate/gmail",
       target: "https://evil.com/",
     });
     const problem = toProblem(err);
-    expect(problem.code).toBe("PROVIDER_AUTHORIZED_URIS_MISMATCH");
-    expect(problem.type).toBe("https://errors.appstrate.dev/PROVIDER_AUTHORIZED_URIS_MISMATCH");
-    expect(problem.title).toBe("ProviderAuthorizationError");
+    expect(problem.code).toBe("AUTHORIZED_URIS_MISMATCH");
+    expect(problem.type).toBe("https://errors.appstrate.dev/AUTHORIZED_URIS_MISMATCH");
+    expect(problem.title).toBe("AuthorizedUrisError");
     expect(problem.status).toBe(422);
     expect(problem.detail).toBe("rejected");
     expect(problem.errors).toEqual({ provider: "@appstrate/gmail", target: "https://evil.com/" });

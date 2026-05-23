@@ -86,7 +86,7 @@
         "http": {
           "headerName": "Authorization",
           "headerPrefix": "Zoho-oauthtoken",
-          "valueFrom": "accessToken"
+          "valueFrom": "access_token"
         }
       }
     }

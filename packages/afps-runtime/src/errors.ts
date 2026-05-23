@@ -44,8 +44,8 @@ export type AfpsErrorCode =
   | "RUN_TIMEOUT"
   | "RUN_CANCELLED"
   | "WORKLOAD_EXIT_NONZERO"
-  | "PROVIDER_AUTHORIZED_URIS_EMPTY"
-  | "PROVIDER_AUTHORIZED_URIS_MISMATCH"
+  | "AUTHORIZED_URIS_EMPTY"
+  | "AUTHORIZED_URIS_MISMATCH"
   | "RESOLVER_INVALID_TOOL_SHAPE"
   | "RESOLVER_MISSING_REQUIRED"
   | "RESOLVER_BODY_REFERENCE_FORBIDDEN"
@@ -114,13 +114,13 @@ export class WorkloadExitError extends AfpsRuntimeError {
   }
 }
 
-/** A provider tool tried to call a target outside its allowlist. */
-export class ProviderAuthorizationError extends AfpsRuntimeError {
-  override readonly name = "ProviderAuthorizationError";
-  readonly code: "PROVIDER_AUTHORIZED_URIS_EMPTY" | "PROVIDER_AUTHORIZED_URIS_MISMATCH";
+/** An integration `api_call` tool tried to call a target outside its allowlist. */
+export class AuthorizedUrisError extends AfpsRuntimeError {
+  override readonly name = "AuthorizedUrisError";
+  readonly code: "AUTHORIZED_URIS_EMPTY" | "AUTHORIZED_URIS_MISMATCH";
 
   constructor(
-    code: "PROVIDER_AUTHORIZED_URIS_EMPTY" | "PROVIDER_AUTHORIZED_URIS_MISMATCH",
+    code: "AUTHORIZED_URIS_EMPTY" | "AUTHORIZED_URIS_MISMATCH",
     message: string,
     details?: Record<string, unknown>,
   ) {

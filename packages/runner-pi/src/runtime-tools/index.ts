@@ -40,6 +40,6 @@ export { recallMemoryTool as RECALL_MEMORY_INJECTED_TOOL };
  * appear in the `### Tools` listing and `toolDocs` block.
  *
  * Order rationale: `run_history` first (pure metadata, read-only),
- * `recall_memory` second (pairs with `note` from `@appstrate/note`).
+ * `recall_memory` second (pairs with the built-in `note` tool).
  */
 export const RUNTIME_INJECTED_TOOLS = [runHistoryTool, recallMemoryTool] as const;

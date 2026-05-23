@@ -97,7 +97,7 @@ export const runsPaths = {
         },
         "400": {
           description:
-            "Agent readiness validation failed (empty prompt, missing skill/tool, provider not connected, or incomplete config)",
+            "Agent readiness validation failed (empty prompt, missing skill, integration not connected, or incomplete config)",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },

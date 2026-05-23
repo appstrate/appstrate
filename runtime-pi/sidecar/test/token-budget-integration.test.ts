@@ -185,7 +185,7 @@ describe("token-aware spill — dense JSON (issue #390 primary)", () => {
     });
     const result = res.json.result as CallToolResult;
     expect(result.content[0]!.type).toBe("resource_link");
-    expect(result.content[0]!.uri).toMatch(/^appstrate:\/\/provider-response\//);
+    expect(result.content[0]!.uri).toMatch(/^appstrate:\/\/api-response\//);
 
     const meta = result._meta?.[TOKEN_BUDGET_META_KEY] as BudgetMeta | undefined;
     expect(meta).toBeDefined();

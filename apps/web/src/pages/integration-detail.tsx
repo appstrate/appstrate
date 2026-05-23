@@ -291,8 +291,8 @@ function AuthSection({
 /**
  * Admin OAuth client configuration — one registration form per declared
  * oauth2 auth. These are the app-level client credentials registered with
- * the IdP (the analog of a provider's admin-credentials config), a setup
- * concern distinct from the per-actor connections in the Connexions tab.
+ * the IdP, a setup concern distinct from the per-actor connections in the
+ * Connexions tab.
  */
 function OAuthClientsSection({
   packageId,
@@ -702,12 +702,7 @@ function ConnectionRow({
   const onDelete = () => {
     if (!orgId || !applicationId) return;
     if (!window.confirm(t("integration.connection.deleteConfirm"))) return;
-    disconnect.mutate({
-      packageId,
-      connectionId: connection.id,
-      orgId,
-      applicationId,
-    });
+    disconnect.mutate({ connectionId: connection.id });
   };
   return (
     <div

@@ -478,7 +478,7 @@ describe("POST /mcp — bounded response read", () => {
     };
     // The token-budget gate must have triggered the blob spill.
     expect(result.content[0]!.type).toBe("resource_link");
-    expect(result.content[0]!.uri).toMatch(/^appstrate:\/\/provider-response\//);
+    expect(result.content[0]!.uri).toMatch(/^appstrate:\/\/api-response\//);
   });
 });
 
@@ -493,7 +493,7 @@ describe("StreamableHTTPClientTransport interop (smoke test)", () => {
   });
 });
 
-describe("POST /mcp — api_call (provider→integration unification)", () => {
+describe("POST /mcp — api_call", () => {
   const integrationCreds = (token = "integ-tok-1") => ({
     credentials: { [PROXY_INJECTED_FIELD]: token },
     authorizedUris: ["https://gmail.googleapis.com/**"],
@@ -535,9 +535,9 @@ describe("POST /mcp — api_call (provider→integration unification)", () => {
     };
     const apiCall = result.tools.find((t) => t.name === "gmail__api_call");
     expect(apiCall).toBeDefined();
-    // The cloned descriptor drops `providerId` — the integration is implied.
-    expect(apiCall!.inputSchema.properties.providerId).toBeUndefined();
-    expect(apiCall!.inputSchema.required ?? []).not.toContain("providerId");
+    // The cloned descriptor drops `integrationId` — the integration is implied.
+    expect(apiCall!.inputSchema.properties.integrationId).toBeUndefined();
+    expect(apiCall!.inputSchema.required ?? []).not.toContain("integrationId");
     expect(apiCall!.inputSchema.required ?? []).toContain("target");
   });
 

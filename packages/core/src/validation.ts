@@ -32,7 +32,7 @@ export const PACKAGE_TYPES = packageTypeEnum.options;
 export const AFPS_SCHEMA_URLS: Record<PackageType, string> = {
   agent: "https://afps.appstrate.dev/packages/schema/v1/agent.schema.json",
   skill: "https://afps.appstrate.dev/packages/schema/v1/skill.schema.json",
-  integration: "https://afps.dev/schema/v1/integration.schema.json",
+  integration: "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
 };
 
 /** Base Zod schema for package manifests — common fields shared by all package types. */
@@ -48,24 +48,10 @@ export const manifestSchema = z.looseObject({
   dependencies: z
     .looseObject({
       skills: z.record(z.string(), z.string()).optional(),
-      // Niveau 2 — value accepts either the legacy bare semver range or
-      // an object selecting tools/scopes for the niveau 2 scope model.
-      // The base shape mirrors the AgentManifest narrowing so any caller
-      // that downcasts an AgentManifest to a base Manifest still type-
-      // checks.
-      integrations: z
-        .record(
-          z.string(),
-          z.union([
-            z.string(),
-            z.object({
-              version: z.string().min(1),
-              tools: z.array(z.string()).optional(),
-              scopes: z.array(z.string()).optional(),
-            }),
-          ]),
-        )
-        .optional(),
+      // Bare semver ranges (npm-style), same shape as the canonical
+      // agentManifestSchema. Per-integration tool/scope selection lives in
+      // the top-level `integrations` block, not in `dependencies`.
+      integrations: z.record(z.string(), z.string()).optional(),
     })
     .optional(),
 });

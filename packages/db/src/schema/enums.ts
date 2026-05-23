@@ -72,7 +72,7 @@ export const packageTypeValues = [
   "agent",
   "skill",
   // INTEGRATIONS_PROPOSAL §4.1. The legacy `tool`/`provider` values were
-  // dropped from the enum in migration 0033 (provider→integration migration).
+  // dropped from the enum during the provider→integration migration (squashed into the 0000_init baseline).
   "integration",
 ] as const;
 export const packageTypeEnum = pgEnum("package_type", packageTypeValues);

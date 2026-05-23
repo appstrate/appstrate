@@ -3,7 +3,7 @@
 /**
  * Build the {@link IntegrationApiCallResolver} used by `appstrate run`.
  *
- * Serverless `apiCall` integrations (the unified provider→integration
+ * Serverless `apiCall` integrations (the unified integration
  * surface) are exposed to the agent as `{ns}__api_call` tools. Three
  * modes, one per semantic:
  *
@@ -78,7 +78,7 @@ export class ResolverConfigError extends Error {
 
 /**
  * Build an {@link IntegrationApiCallResolver} matching the requested mode.
- * Serverless `apiCall` integrations (the unified provider→integration
+ * Serverless `apiCall` integrations (the unified integration
  * shape) get credential-injected HTTP calls; the resolver yields one
  * `{ns}__api_call` tool per integration. Each mode's pre-conditions are
  * checked upfront: we'd rather fail here than surface a confusing resolver

@@ -125,7 +125,7 @@ describe("spillResourcesToWorkspace", () => {
       content: [
         {
           type: "resource_link",
-          uri: "appstrate://provider-response/run_x/ULID",
+          uri: "appstrate://api-response/run_x/ULID",
           mimeType: "application/json",
         },
       ],
@@ -136,7 +136,7 @@ describe("spillResourcesToWorkspace", () => {
 
   it("fetches a resource_link, spills it to a file with a mime-derived extension", async () => {
     const json = JSON.stringify({ user: "Pierre", id: 1045141849 });
-    const uri = "appstrate://provider-response/run_x/06F5AZ8FKDQK7CFJVCCYE2Y858";
+    const uri = "appstrate://api-response/run_x/06F5AZ8FKDQK7CFJVCCYE2Y858";
     const result = {
       content: [{ type: "resource_link", uri, name: "response", mimeType: "application/json" }],
     } as unknown as CallToolResult;
@@ -168,7 +168,7 @@ describe("spillResourcesToWorkspace", () => {
       content: [
         {
           type: "resource_link",
-          uri: "appstrate://provider-response/run_x/Z",
+          uri: "appstrate://api-response/run_x/Z",
           mimeType: "text/html",
         },
       ],

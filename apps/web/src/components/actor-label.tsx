@@ -10,10 +10,9 @@ interface ActorLabelProps {
 }
 
 /**
- * Renders the actor (member or end-user) a schedule runs as. Replaces the
- * former connection-profile label after the profiles feature was removed.
+ * Renders the actor (member or end-user) a schedule runs as.
  */
-export function ProfileLabel({
+export function ActorLabel({
   actorType,
   actorName,
   iconSize = "size-3",

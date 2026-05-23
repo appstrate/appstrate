@@ -157,7 +157,7 @@ async function resolveOne(
   // encoding a typical (multi-MB) integration bundle blows past Linux's
   // env var size limit.
   //
-  // provider→integration unification — a serverless integration declares an
+  // A serverless integration declares an
   // `apiCall` block and no `server`: no runner to spawn, just the generic
   // credential-injecting tool. Exposed when the agent selected it
   // (least-privilege: the catch-all tool is never auto-granted).

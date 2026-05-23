@@ -40,12 +40,6 @@ export interface PrepareBundleOptions {
    * untouched to disable wrapping.
    */
   extensionWrapper?: (factory: ExtensionFactory, extensionId: string) => ExtensionFactory;
-  /**
-   * Notified when a dep package fails to materialise. The helper does NOT
-   * throw on per-package failures — it logs via this callback and
-   * continues so one broken package does not prevent the run.
-   */
-  onError?: (message: string, err?: unknown) => void;
 }
 
 export interface PreparedBundle {
@@ -63,10 +57,6 @@ export async function prepareBundleForPi(
   bundle: Bundle,
   opts: PrepareBundleOptions,
 ): Promise<PreparedBundle> {
-  // `onError` is retained on the options for API stability (callers still
-  // pass it); per-package materialisation no longer has a fallible branch
-  // now that provider-skill synthesis is gone, so it is currently unused.
-  void opts.onError;
   const piDir = path.join(opts.workspaceDir, ".pi");
 
   // ─── Step 1: materialise each skill dep package under its .pi/ subtree ─

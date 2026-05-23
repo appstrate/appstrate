@@ -20,4 +20,4 @@ import type { AgentDetail, RunStatus } from "@appstrate/shared-types";
 ## Dependencies
 
 - `@appstrate/db` — Schema type imports (Drizzle `InferSelectModel`)
-- `@appstrate/core` — Validation types (`PackageType`, `ResolvedProviderDefinition`)
+- `@appstrate/core` — Validation types (`PackageType`, `IntegrationManifest`)

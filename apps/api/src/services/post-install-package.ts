@@ -39,7 +39,7 @@ async function upsertItem(
 
 /**
  * Run per-type post-install side-effects after a package is saved to the DB.
- * Creates a version in packageVersions for ALL types (agent, skill, tool, provider),
+ * Creates a version in packageVersions for ALL types (agent, skill, integration),
  * handles skill/tool upsert + storage.
  */
 export async function postInstallPackage(params: {

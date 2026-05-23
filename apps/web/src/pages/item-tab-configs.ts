@@ -24,14 +24,10 @@ export interface ItemTabConfig {
   emptyIcon: LucideIcon;
 }
 
-const ITEM_TAB_CONFIGS: ItemTabConfig[] = [
-  {
-    type: "skill",
-    useData: () => usePackageList("skill"),
-    emptyMessageKey: "packages.emptyItems",
-    emptyHintKey: "packages.emptyItemsHint",
-    emptyIcon: Wrench,
-  },
-];
-
-export const skillTabConfig: ItemTabConfig = ITEM_TAB_CONFIGS[0]!;
+export const skillTabConfig: ItemTabConfig = {
+  type: "skill",
+  useData: () => usePackageList("skill"),
+  emptyMessageKey: "packages.emptyItems",
+  emptyHintKey: "packages.emptyItemsHint",
+  emptyIcon: Wrench,
+};

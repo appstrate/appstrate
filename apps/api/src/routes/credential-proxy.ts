@@ -25,7 +25,7 @@
  *     JWT and an API key, nor between two API keys of the same org.
  *   - Audit log on every call (requestId, authMethod, apiKeyId, userId,
  *     endUserId, integrationId, target, status)
- *   - URL allowlist enforced via the provider manifest
+ *   - URL allowlist enforced via the integration manifest
  *     (`authorizedUris` / `allowAllUris`)
  *   - Request / response size caps
  */
@@ -100,7 +100,7 @@ export function createCredentialProxyRouter() {
       // Accept headless API keys and bearer JWTs from the interactive CLI
       // (device-flow `oauth2-instance`) or dashboard (`oauth2-dashboard`).
       // Cookie sessions are refused — they would let a drive-by CSRF
-      // trigger arbitrary provider calls on behalf of a logged-in user.
+      // trigger arbitrary upstream calls on behalf of a logged-in user.
       const authMethod = c.get("authMethod");
       if (!ACCEPTED_AUTH_METHODS.has(authMethod)) {
         throw forbidden(

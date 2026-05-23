@@ -112,11 +112,8 @@ export const schedulesPaths = {
                 connectionOverrides: {
                   type: "object",
                   description:
-                    'Per-(integration, authKey) connection picks frozen on the schedule row (flat-connections mechanism #3). Shape: `{ "@scope/integration": { "<authKey>": "<connection_id>" } }`. Loses to admin pins (#1), beats actor-fallback (#4). Stored on `package_schedules.connection_overrides` and replayed on every fire.',
-                  additionalProperties: {
-                    type: "object",
-                    additionalProperties: { type: "string" },
-                  },
+                    'Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Shape: `{ "@scope/integration": "<connection_id>" }`. Loses to admin pins (#1), beats actor-fallback (#4). Stored on `package_schedules.connection_overrides` and replayed on every fire.',
+                  additionalProperties: { type: "string" },
                 },
               },
             },
@@ -245,11 +242,8 @@ export const schedulesPaths = {
                 connectionOverrides: {
                   type: ["object", "null"],
                   description:
-                    "Per-(integration, authKey) connection picks frozen on the schedule. Pass `null` to clear.",
-                  additionalProperties: {
-                    type: "object",
-                    additionalProperties: { type: "string" },
-                  },
+                    "Per-integration connection picks frozen on the schedule. Pass `null` to clear.",
+                  additionalProperties: { type: "string" },
                 },
               },
             },

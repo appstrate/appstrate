@@ -81,9 +81,9 @@ export {
   type SerializeFetchResponseContext,
 } from "./http-call-core.ts";
 
-// Integration `api_call` surface (provider→integration unification) — the
-// portable equivalent of the platform's `{ns}__api_call` MCP tool. Reuses
-// the same HTTP core (`makeApiCallTool`) as the provider resolvers.
+// Integration `api_call` surface — the portable equivalent of the platform's
+// `{ns}__api_call` MCP tool. Reuses the same HTTP core (`makeApiCallTool`) as
+// the runtime's spawned-integration resolvers.
 export {
   LocalIntegrationResolver,
   RemoteAppstrateIntegrationResolver,
@@ -97,8 +97,3 @@ export {
   type LocalIntegrationResolverOptions,
   type RemoteAppstrateIntegrationResolverOptions,
 } from "./integration-api-call.ts";
-
-// Spec-compliant platform tools (note, pin, output, log) — the
-// runtime no longer hardcodes these internally; agents declare them in
-// dependencies.tools[] and a BundledToolResolver loads them.
-export { noteTool, pinTool, outputTool, logTool, PLATFORM_TOOLS } from "./platform-tools.ts";

@@ -4,8 +4,7 @@
  * Integration connection resolver — single source of truth for "which
  * connection does this run use for each (integration, authKey)?".
  *
- * Replaces the connection-profile cascade for integrations with a flat
- * model (see CLAUDE.md "Flat connections + pins"):
+ * Flat resolution cascade (highest precedence first):
  *
  *   1. integration_pins (user_id IS NULL)      → admin force, per-agent
  *   2. integration_org_defaults (enforce)      → org-wide force, all agents
@@ -78,7 +77,7 @@ export interface IntegrationRequirement {
   agentTools: readonly string[];
   /**
    * The agent's explicitly-selected oauth scopes on this integration.
-   * apiCall integrations (former providers) expose no tools, so this is
+   * apiCall integrations expose no MCP tools, so this is
    * the only scope signal for them. Empty when none selected.
    */
   agentScopes: readonly string[];
