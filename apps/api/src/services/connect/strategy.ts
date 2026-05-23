@@ -22,7 +22,8 @@ import type {
   CredentialBundle,
 } from "@appstrate/connect/connect";
 import type { IntegrationOAuthCallbackResult } from "@appstrate/connect";
-import type { IntegrationConnectionSummary } from "../integration-connections.ts";
+import type { IntegrationConnectionSummary, PersistTarget } from "../integration-connections.ts";
+import { invalidRequest } from "../../lib/errors.ts";
 
 export type { ConnectContext, BeginOptions, BeginResult, CredentialBundle };
 
@@ -44,4 +45,39 @@ export interface IntegrationConnectStrategy {
   begin?(ctx: ConnectContext, opts: BeginOptions): Promise<BeginResult>;
   /** Terminal acquisition → persisted connection summary. */
   complete(ctx: ConnectContext, input: ConnectCompleteInput): Promise<IntegrationConnectionSummary>;
+}
+
+// ─────────────────────────────────────────────
+// Shared `complete()` guards (every non-OAuth strategy uses these)
+// ─────────────────────────────────────────────
+
+/**
+ * Assert the terminal acquisition input is the `fields` shape that every
+ * non-OAuth strategy's `complete()` requires, and return its credentials.
+ */
+export function assertFieldsInput(
+  input: ConnectCompleteInput,
+  strategyName: string,
+): Record<string, string> {
+  if (input.kind !== "fields") {
+    throw new Error(`${strategyName}.complete: unexpected input kind '${input.kind}'`);
+  }
+  return input.credentials;
+}
+
+/** Reject an empty credential bag with the shared `invalidRequest` UX. */
+export function requireNonEmptyCredentials(credentials: Record<string, string>): void {
+  if (!credentials || Object.keys(credentials).length === 0) {
+    throw invalidRequest("credentials payload cannot be empty", "credentials");
+  }
+}
+
+/**
+ * Build the {@link PersistTarget} for a strategy write: an owner-scoped update
+ * when reconnecting an existing connection, otherwise a fresh insert.
+ */
+export function connectionTarget(ctx: ConnectContext): PersistTarget {
+  return ctx.connectionId
+    ? { kind: "update-owned", scope: ctx.scope, actor: ctx.actor, connectionId: ctx.connectionId }
+    : { kind: "insert", scope: ctx.scope, actor: ctx.actor };
 }

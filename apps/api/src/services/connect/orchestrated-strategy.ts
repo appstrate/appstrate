@@ -40,6 +40,7 @@ import type {
   CredentialBundle,
   IntegrationConnectStrategy,
 } from "./strategy.ts";
+import { assertFieldsInput, requireNonEmptyCredentials, connectionTarget } from "./strategy.ts";
 
 /** One connect-tool login run, handed to the {@link ConnectToolExecutor}. */
 export interface ConnectToolExecution {
@@ -79,9 +80,7 @@ export class OrchestratedStrategy implements IntegrationConnectStrategy {
     ctx: ConnectContext,
     input: ConnectCompleteInput,
   ): Promise<IntegrationConnectionSummary> {
-    if (input.kind !== "fields") {
-      throw new Error(`OrchestratedStrategy.complete: unexpected input kind '${input.kind}'`);
-    }
+    const credentials = assertFieldsInput(input, "OrchestratedStrategy");
     const { manifest, auth } = await readIntegrationAuth(
       ctx.scope,
       ctx.integrationPackageId,
@@ -91,10 +90,7 @@ export class OrchestratedStrategy implements IntegrationConnectStrategy {
     if (!tool) {
       throw invalidRequest(`Auth '${ctx.authKey}' has no connect.tool declaration`);
     }
-    const credentials = input.credentials;
-    if (!credentials || Object.keys(credentials).length === 0) {
-      throw invalidRequest("credentials payload cannot be empty", "credentials");
-    }
+    requireNonEmptyCredentials(credentials);
 
     const bundle = await this.executor.run({
       scope: ctx.scope,
@@ -117,14 +113,7 @@ export class OrchestratedStrategy implements IntegrationConnectStrategy {
     // `inputs` plane (v2 envelope), so a later re-bootstrap can re-run the tool.
     const persistInputs = auth.connect?.persistLoginSecret ? credentials : undefined;
 
-    const target = ctx.connectionId
-      ? {
-          kind: "update-owned" as const,
-          scope: ctx.scope,
-          actor: ctx.actor,
-          connectionId: ctx.connectionId,
-        }
-      : { kind: "insert" as const, scope: ctx.scope, actor: ctx.actor };
+    const target = connectionTarget(ctx);
 
     const summary = await persistCredentialBundle(target, {
       credentials: bundle.outputs,
