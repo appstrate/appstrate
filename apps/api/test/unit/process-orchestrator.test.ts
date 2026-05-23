@@ -238,6 +238,33 @@ describe("ProcessOrchestrator", () => {
       // The sidecar process is gone after stopByRunId.
       expect(await waitForExit(capturedPid!)).toBe(true);
     }, 10_000);
+
+    it("defaults the sidecar's integration runtime adapter to 'process'", async () => {
+      // A non-containerized (process) run must not let the sidecar auto-select
+      // the Docker integration adapter (which needs the per-language runner
+      // images). The orchestrator pins INTEGRATION_RUNTIME_ADAPTER=process so
+      // integrations spawn as host subprocesses, matching the run itself.
+      const runId = "test-run-integ-adapter";
+      const boundary = await orchestrator.createIsolationBoundary(runId);
+      const fakeSidecar = join(boundary.id, "fake-sidecar.ts");
+      await writeFile(fakeSidecar, "setInterval(()=>{},60000);");
+
+      const originalSpawn = Bun.spawn;
+      let capturedEnv: Record<string, string> | undefined;
+      const patchedSpawn = ((cmd: string[], opts: Parameters<typeof Bun.spawn>[1]) => {
+        const replaced = cmd[0] === "bun" && cmd[1] === "run" ? ["bun", "run", fakeSidecar] : cmd;
+        capturedEnv = (opts as { env?: Record<string, string> } | undefined)?.env;
+        return originalSpawn(replaced, opts);
+      }) as typeof Bun.spawn;
+      (Bun as { spawn: typeof Bun.spawn }).spawn = patchedSpawn;
+      try {
+        await orchestrator.createSidecar(runId, boundary, { runToken: "tok" });
+      } finally {
+        (Bun as { spawn: typeof Bun.spawn }).spawn = originalSpawn;
+      }
+      expect(capturedEnv?.INTEGRATION_RUNTIME_ADAPTER).toBe("process");
+      await orchestrator.stopByRunId(runId);
+    }, 10_000);
   });
 
   describe("stopByRunId", () => {

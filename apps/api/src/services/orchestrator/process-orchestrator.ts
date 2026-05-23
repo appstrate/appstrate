@@ -201,6 +201,15 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
       PLATFORM_API_URL: platformApiUrl,
       RUN_TOKEN: spec.runToken,
     };
+    // This run is NOT containerized (process orchestrator). Spawn its
+    // integrations as host subprocesses too, rather than letting the sidecar's
+    // runtime-adapter auto-select Docker just because a daemon happens to be
+    // reachable — that path needs the per-language runner images built and is
+    // inconsistent with a host-process run. Respect an explicit operator
+    // override carried in from the environment.
+    if (!env.INTEGRATION_RUNTIME_ADAPTER) {
+      env.INTEGRATION_RUNTIME_ADAPTER = "process";
+    }
     if (spec.proxyUrl) env.PROXY_URL = spec.proxyUrl;
     if (spec.modelContextWindow != null) {
       env.MODEL_CONTEXT_WINDOW = String(spec.modelContextWindow);
