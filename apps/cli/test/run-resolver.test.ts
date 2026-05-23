@@ -9,28 +9,28 @@
 import { describe, it, expect } from "bun:test";
 import {
   buildIntegrationResolver,
-  parseProviderMode,
+  parseIntegrationMode,
   ResolverConfigError,
 } from "../src/commands/run/resolver.ts";
 
-describe("parseProviderMode", () => {
+describe("parseIntegrationMode", () => {
   it("defaults to remote when nothing is passed", () => {
-    expect(parseProviderMode(undefined)).toBe("remote");
+    expect(parseIntegrationMode(undefined)).toBe("remote");
   });
 
   it("accepts remote | local | none verbatim", () => {
-    expect(parseProviderMode("remote")).toBe("remote");
-    expect(parseProviderMode("local")).toBe("local");
-    expect(parseProviderMode("none")).toBe("none");
+    expect(parseIntegrationMode("remote")).toBe("remote");
+    expect(parseIntegrationMode("local")).toBe("local");
+    expect(parseIntegrationMode("none")).toBe("none");
   });
 
   it("throws ResolverConfigError on invalid input", () => {
-    expect(() => parseProviderMode("cloud")).toThrow(ResolverConfigError);
+    expect(() => parseIntegrationMode("cloud")).toThrow(ResolverConfigError);
   });
 
   it("error lists accepted modes", () => {
     try {
-      parseProviderMode("cloud");
+      parseIntegrationMode("cloud");
     } catch (err) {
       expect((err as ResolverConfigError).hint).toContain("remote");
       expect((err as ResolverConfigError).hint).toContain("local");
