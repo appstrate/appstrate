@@ -9,13 +9,10 @@
 
 import type { ProxyCredentialsPayload } from "./proxy-primitives.ts";
 
-// The `delivery.http` resolver + alias-aware field reader live once in
-// @appstrate/afps-runtime (the dependency-free bottom layer this package
-// already depends on); re-export them so existing `@appstrate/connect`
-// consumers keep their import path.
+// The `delivery.http` resolver lives once in @appstrate/afps-runtime (the
+// dependency-free bottom layer this package already depends on); re-export it
+// so existing `@appstrate/connect` consumers keep their import path.
 export {
-  ALIAS_MAP,
-  readCredentialField,
   resolveHttpDelivery,
   type HttpDeliveryConfig,
   type HttpDeliveryPlan,
@@ -29,9 +26,8 @@ export interface ResolvedAuthCredentials {
   /** Auth type (`oauth2`, `oauth1`, `api_key`, `basic`, `custom`). */
   authType: string;
   /**
-   * Credential fields, keyed by their **storage** name (snake_case).
-   * Lookups via {@link readCredentialField} also work with the
-   * camelCase manifest alias.
+   * Credential fields, keyed by their canonical **storage** name (snake_case)
+   * — the same convention manifest `delivery`/`{{var}}` refs must use.
    */
   fields: Readonly<Record<string, string>>;
   /** URL allowlist from the manifest. Same string format as legacy. */

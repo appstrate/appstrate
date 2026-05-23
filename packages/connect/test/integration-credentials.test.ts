@@ -7,35 +7,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import {
-  ALIAS_MAP,
-  readCredentialField,
-  resolveHttpDelivery,
-} from "../src/integration-credentials.ts";
-describe("ALIAS_MAP / readCredentialField — manifest aliases", () => {
-  it("looks up the camelCase manifest name against snake_case storage", () => {
-    expect(readCredentialField({ access_token: "tok" }, "accessToken")).toBe("tok");
-  });
-
-  it("looks up the snake_case storage name against camelCase storage", () => {
-    expect(readCredentialField({ accessToken: "tok" }, "access_token")).toBe("tok");
-  });
-
-  it("returns the direct hit when both shapes are present (no alias chase)", () => {
-    expect(readCredentialField({ access_token: "snake" }, "access_token")).toBe("snake");
-  });
-
-  it("returns undefined when neither shape is set", () => {
-    expect(readCredentialField({}, "accessToken")).toBeUndefined();
-  });
-
-  it("covers every documented alias from ALIAS_MAP", () => {
-    for (const [camel, snake] of Object.entries(ALIAS_MAP)) {
-      expect(readCredentialField({ [snake]: "v" }, camel)).toBe("v");
-      expect(readCredentialField({ [camel]: "v" }, snake)).toBe("v");
-    }
-  });
-});
+import { resolveHttpDelivery } from "../src/integration-credentials.ts";
 
 describe("resolveHttpDelivery — defaults per auth type", () => {
   it("oauth2 → Authorization: Bearer <accessToken>", () => {
@@ -76,7 +48,7 @@ describe("resolveHttpDelivery — explicit overrides", () => {
     const plan = resolveHttpDelivery(
       "oauth2",
       { access_token: "tok" },
-      { headerName: "X-Token", headerPrefix: "Token ", valueFrom: "accessToken" },
+      { headerName: "X-Token", headerPrefix: "Token ", valueFrom: "access_token" },
     );
     expect(plan).toEqual({
       headerName: "X-Token",

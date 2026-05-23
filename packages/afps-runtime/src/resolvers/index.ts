@@ -44,8 +44,6 @@ export { resolvePackageRef, readPackageText, readPackageBytes } from "./bundle-a
 // Canonical `delivery.http` credential-injection resolver (shared with
 // `@appstrate/connect`, which re-exports these).
 export {
-  ALIAS_MAP,
-  readCredentialField,
   resolveHttpDelivery,
   type HttpDeliveryConfig,
   type HttpDeliveryPlan,

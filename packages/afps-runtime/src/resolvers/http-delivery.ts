@@ -40,53 +40,20 @@ export interface HttpDeliveryPlan {
 }
 
 /**
- * Camel-cased manifest aliases → snake_case credential storage keys.
- * Bidirectional: {@link readCredentialField} looks up both forms transparently
- * so a manifest author can write `from: "accessToken"` regardless of how the
- * field was stored.
+ * Auth-type defaults for `delivery.http`. `valueFrom` names the credential
+ * field to inject, using the **canonical snake_case storage keys** — the same
+ * convention the OAuth2 strategy persists (`access_token`) and the AFPS spec
+ * documents (`{{api_key}}`). Manifest `valueFrom` / template `{{var}}` refs
+ * must match the stored field name exactly; there is no casing aliasing.
  *
- * Source: proposal §4.1.3 (fields exposed implicitly by auth type).
+ * Source: AFPS spec §4.1.3 (fields exposed implicitly by auth type).
  */
-export const ALIAS_MAP: Readonly<Record<string, string>> = {
-  accessToken: "access_token",
-  refreshToken: "refresh_token",
-  idToken: "id_token",
-  tokenType: "token_type",
-  expiresAt: "expires_at",
-  accessTokenSecret: "access_token_secret",
-  consumerKey: "consumer_key",
-  consumerSecret: "consumer_secret",
-  accountEmail: "account_email",
-  accountId: "account_id",
-  apiKey: "api_key",
-  credentialsJson: "credentials_json",
-};
-
-/** Reverse map — snake_case → camelCase. Built once. */
-const REVERSE_ALIAS_MAP: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.entries(ALIAS_MAP).map(([camel, snake]) => [snake, camel]),
-);
-
-/**
- * Read a credential field by its **manifest-side** name (camelCase OR
- * snake_case). Returns `undefined` if neither form is set.
- */
-export function readCredentialField(
-  fields: Readonly<Record<string, string>>,
-  name: string,
-): string | undefined {
-  if (fields[name] !== undefined) return fields[name];
-  const alias = ALIAS_MAP[name] ?? REVERSE_ALIAS_MAP[name];
-  if (alias && fields[alias] !== undefined) return fields[alias];
-  return undefined;
-}
-
 const AUTH_TYPE_HTTP_DEFAULTS: Readonly<
   Record<string, { headerName: string; headerPrefix: string; valueFrom: string }>
 > = {
-  oauth2: { headerName: "Authorization", headerPrefix: "Bearer ", valueFrom: "accessToken" },
-  oauth1: { headerName: "Authorization", headerPrefix: "", valueFrom: "accessToken" },
-  api_key: { headerName: "X-Api-Key", headerPrefix: "", valueFrom: "apiKey" },
+  oauth2: { headerName: "Authorization", headerPrefix: "Bearer ", valueFrom: "access_token" },
+  oauth1: { headerName: "Authorization", headerPrefix: "", valueFrom: "access_token" },
+  api_key: { headerName: "X-Api-Key", headerPrefix: "", valueFrom: "api_key" },
   basic: { headerName: "Authorization", headerPrefix: "Basic ", valueFrom: "" },
   custom: { headerName: "", headerPrefix: "", valueFrom: "" },
 };
@@ -97,7 +64,7 @@ function renderTemplate(
   encoding: "base64" | undefined,
 ): string {
   const rendered = template.replace(/\{\{\s*(\w+)\s*\}\}/g, (_match, key: string) => {
-    return readCredentialField(fields, key) ?? "";
+    return fields[key] ?? "";
   });
   if (encoding === "base64") return Buffer.from(rendered, "utf8").toString("base64");
   return rendered;
@@ -108,8 +75,8 @@ function renderTemplate(
  * header can be injected (e.g. `custom` auth without explicit `delivery.http`)
  * — callers treat that as "the proxy injects nothing for this auth".
  *
- * Defaults are derived from the auth type per proposal §4.1.4 — `oauth2` sends
- * `Authorization: Bearer <accessToken>`, `api_key` sends `X-Api-Key: <apiKey>`,
+ * Defaults are derived from the auth type per AFPS spec §4.1.4 — `oauth2` sends
+ * `Authorization: Bearer <access_token>`, `api_key` sends `X-Api-Key: <api_key>`,
  * etc. Explicit manifest values always win.
  */
 export function resolveHttpDelivery(
@@ -132,14 +99,14 @@ export function resolveHttpDelivery(
   if (typeof valueFrom === "string") {
     // basic / custom with no explicit valueFrom — value is empty; the proxy
     // builds the value itself (e.g. basic auth base64s username:password).
-    value = valueFrom.length === 0 ? "" : (readCredentialField(fields, valueFrom) ?? "");
+    value = valueFrom.length === 0 ? "" : (fields[valueFrom] ?? "");
   } else {
     value = renderTemplate(valueFrom.template, fields, valueFrom.encoding);
   }
 
   if (value.length === 0 && authType === "basic" && !http?.valueFrom) {
-    const username = readCredentialField(fields, "username") ?? "";
-    const password = readCredentialField(fields, "password") ?? "";
+    const username = fields["username"] ?? "";
+    const password = fields["password"] ?? "";
     value = Buffer.from(`${username}:${password}`, "utf8").toString("base64");
   }
 
