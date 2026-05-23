@@ -10,8 +10,8 @@
   "author": "Appstrate",
   "icon": "intercom",
   "keywords": ["customer-support", "messaging"],
-  "server": {
-    "type": "api_call"
+  "apiCall": {
+    "authKey": "primary"
   },
   "auths": {
     "primary": {

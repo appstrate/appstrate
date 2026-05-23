@@ -10,8 +10,8 @@
   "author": "Appstrate",
   "icon": "microsoftoutlook",
   "keywords": ["email", "productivity"],
-  "server": {
-    "type": "api_call"
+  "apiCall": {
+    "authKey": "primary"
   },
   "auths": {
     "primary": {

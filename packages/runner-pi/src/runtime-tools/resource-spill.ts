@@ -46,6 +46,17 @@ export interface ResourceSpillOptions {
   emit?: (event: { type: string; [k: string]: unknown }) => void;
   /** Run id stamped on the emitted event. */
   runId?: string;
+  /**
+   * Fetcher for `resource_link` blocks (URI-only, bytes live in the sidecar
+   * blob store — e.g. `{ns}__api_call` spilling a response > 32 KB). When
+   * provided, each link is resolved via MCP `resources/read` and spilled to a
+   * file just like an embedded resource, so the agent can grep / head / tail /
+   * read-with-offset it instead of receiving an unreadable `appstrate://` URI.
+   * Omitted ⇒ links are passed through untouched (legacy behaviour).
+   */
+  readResource?: (uri: string) => Promise<{
+    contents: Array<{ uri: string; mimeType?: string; text?: string; blob?: string }>;
+  }>;
 }
 
 type EmbeddedResource = {
@@ -56,63 +67,111 @@ type EmbeddedResource = {
 };
 
 /**
- * Rewrite a `CallToolResult` so every embedded `resource` block carrying
- * content (`text` or base64 `blob`) is written to a workspace file and
- * replaced by a `text` pointer. Blocks with nothing to spill (and
- * `resource_link`s, which carry only a URI) are passed through untouched, as
- * are results with no resource blocks (fast path — returns the input).
+ * Rewrite a `CallToolResult` so file payloads land in workspace files instead
+ * of the LLM context:
  *
- * Never throws: a write failure falls back to leaving the original block in
- * place so {@link callToolResultToPi} renders it inline as before.
+ *   - Embedded `resource` blocks (inline `text` / base64 `blob`) are always
+ *     spilled.
+ *   - `resource_link` blocks (URI only) are spilled when {@link
+ *     ResourceSpillOptions.readResource} is provided — the bytes are fetched
+ *     via MCP `resources/read` first. Without a fetcher they pass through.
+ *
+ * Each spilled block is replaced by a short `text` pointer naming the workspace
+ * file (with a mime-derived extension so `jq` / `grep` work), so the agent uses
+ * its native filesystem tools (read with offset, grep, head/tail) on it.
+ *
+ * Never throws: a fetch/write failure falls back to leaving the original block
+ * in place so {@link callToolResultToPi} renders it as before.
  */
 export async function spillResourcesToWorkspace(
   result: CallToolResult,
   opts: ResourceSpillOptions,
 ): Promise<CallToolResult> {
   const blocks = result.content;
-  if (!Array.isArray(blocks) || !blocks.some((c) => c.type === "resource")) {
+  const canFetchLinks = typeof opts.readResource === "function";
+  if (
+    !Array.isArray(blocks) ||
+    !blocks.some((c) => c.type === "resource" || (canFetchLinks && c.type === "resource_link"))
+  ) {
     return result;
   }
 
   const out: CallToolResult["content"] = [];
   let index = 0;
   for (const block of blocks) {
-    if (block.type !== "resource") {
-      out.push(block);
+    // Embedded resource — content is inline.
+    if (block.type === "resource") {
+      const inner = block.resource as EmbeddedResource;
+      const bytes = resourceBytes(inner);
+      const replaced = bytes ? await writeAndPointer(inner, bytes, index, opts) : null;
+      if (replaced) index++;
+      out.push(replaced ?? block);
       continue;
     }
-    const inner = block.resource as EmbeddedResource;
-    const bytes = resourceBytes(inner);
-    if (!bytes) {
-      out.push(block);
+    // Resource link — URI only; fetch the bytes via resources/read, then spill.
+    if (block.type === "resource_link" && canFetchLinks) {
+      const uri = (block as { uri?: unknown }).uri;
+      const linkMime = (block as { mimeType?: unknown }).mimeType;
+      let inner: EmbeddedResource | null = null;
+      let bytes: Uint8Array | null = null;
+      if (typeof uri === "string") {
+        try {
+          const res = await opts.readResource!(uri);
+          const c = res.contents?.[0];
+          if (c) {
+            inner = {
+              uri,
+              mimeType: c.mimeType ?? (typeof linkMime === "string" ? linkMime : undefined),
+              text: c.text,
+              blob: c.blob,
+            };
+            bytes = resourceBytes(inner);
+          }
+        } catch {
+          // Fetch failed — leave the link untouched (degraded, not dropped).
+        }
+      }
+      const replaced = inner && bytes ? await writeAndPointer(inner, bytes, index, opts) : null;
+      if (replaced) index++;
+      out.push(replaced ?? block);
       continue;
     }
-
-    const rel = `${SPILL_DIR}/${sanitizeSegment(opts.toolCallId)}-${basenameFromUri(inner.uri, index)}`;
-    index++;
-    try {
-      const abs = await resolveSafePath(opts.workspace, rel);
-      await fs.mkdir(path.dirname(abs), { recursive: true });
-      await fs.writeFile(abs, bytes);
-      opts.emit?.({
-        type: "resource.spilled",
-        runId: opts.runId,
-        toolCallId: opts.toolCallId,
-        uri: inner.uri,
-        path: rel,
-        bytes: bytes.byteLength,
-        timestamp: Date.now(),
-      });
-      out.push({ type: "text", text: pointerText(inner, rel, bytes) });
-    } catch {
-      // Spill failed (path escape, write error) — keep the original block so
-      // the downstream adapter still renders it inline. Better degraded than
-      // a dropped result.
-      out.push(block);
-    }
+    out.push(block);
   }
 
   return { ...result, content: out };
+}
+
+/**
+ * Write `bytes` to a workspace file derived from the resource URI + mime type
+ * and return the `text` pointer block that replaces it. Returns `null` on any
+ * write failure so the caller keeps the original block.
+ */
+async function writeAndPointer(
+  inner: EmbeddedResource,
+  bytes: Uint8Array,
+  index: number,
+  opts: ResourceSpillOptions,
+): Promise<{ type: "text"; text: string } | null> {
+  const base = ensureExtension(basenameFromUri(inner.uri, index), inner.mimeType);
+  const rel = `${SPILL_DIR}/${sanitizeSegment(opts.toolCallId)}-${base}`;
+  try {
+    const abs = await resolveSafePath(opts.workspace, rel);
+    await fs.mkdir(path.dirname(abs), { recursive: true });
+    await fs.writeFile(abs, bytes);
+    opts.emit?.({
+      type: "resource.spilled",
+      runId: opts.runId,
+      toolCallId: opts.toolCallId,
+      uri: inner.uri,
+      path: rel,
+      bytes: bytes.byteLength,
+      timestamp: Date.now(),
+    });
+    return { type: "text", text: pointerText(inner, rel, bytes) };
+  } catch {
+    return null;
+  }
 }
 
 /** Decode an embedded resource's payload to bytes, or `null` when it has none. */
@@ -149,6 +208,45 @@ function decodeUriComponentSafe(s: string): string {
     return decodeURIComponent(s);
   } catch {
     return s;
+  }
+}
+
+/**
+ * Append a mime-derived extension when the basename has none, so the agent's
+ * `jq` / `grep` / editor tooling recognises the file type. Blob URIs like
+ * `appstrate://provider-response/{runId}/{ulid}` have an extensionless ULID
+ * tail, so without this an `application/json` response would land as a bare
+ * `<ulid>` file.
+ */
+function ensureExtension(name: string, mimeType?: string): string {
+  if (/\.[A-Za-z0-9]{1,8}$/.test(name)) return name;
+  const ext = extFromMime(mimeType);
+  return ext ? `${name}.${ext}` : name;
+}
+
+/** Map a MIME type to a file extension, or `null` when unknown. */
+function extFromMime(mimeType?: string): string | null {
+  if (!mimeType) return null;
+  const m = mimeType.split(";", 1)[0]!.trim().toLowerCase();
+  switch (m) {
+    case "application/json":
+      return "json";
+    case "text/html":
+      return "html";
+    case "text/plain":
+      return "txt";
+    case "text/csv":
+      return "csv";
+    case "application/xml":
+    case "text/xml":
+      return "xml";
+    case "application/pdf":
+      return "pdf";
+    default:
+      if (m.endsWith("+json")) return "json";
+      if (m.endsWith("+xml")) return "xml";
+      if (m.startsWith("text/")) return "txt";
+      return null;
   }
 }
 

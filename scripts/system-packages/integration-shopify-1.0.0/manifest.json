@@ -5,13 +5,13 @@
   "name": "@appstrate/shopify",
   "version": "1.0.0",
   "displayName": "Shopify (API)",
-  "description": "E-commerce platform — manage products, orders, customers, and inventory",
+  "description": "E-commerce platform \u2014 manage products, orders, customers, and inventory",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "shopify",
   "keywords": ["e-commerce", "retail"],
-  "server": {
-    "type": "api_call"
+  "apiCall": {
+    "authKey": "primary"
   },
   "auths": {
     "primary": {

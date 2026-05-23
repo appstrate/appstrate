@@ -10,8 +10,8 @@
   "author": "Appstrate",
   "icon": "github",
   "keywords": ["development", "code"],
-  "server": {
-    "type": "api_call"
+  "apiCall": {
+    "authKey": "primary"
   },
   "auths": {
     "primary": {

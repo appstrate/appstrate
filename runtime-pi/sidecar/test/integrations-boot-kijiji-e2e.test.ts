@@ -34,6 +34,7 @@ import * as path from "node:path";
 import { readFileSync } from "node:fs";
 import { zipArtifact } from "@appstrate/core/zip";
 import { validateManifest } from "@appstrate/core/validation";
+import { getApiCallConfig, type IntegrationManifest } from "@appstrate/core/integration";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import type { IntegrationCredentialsWire } from "@appstrate/connect/integration-credentials";
 import { bootIntegrations } from "../integrations-boot.ts";
@@ -509,7 +510,13 @@ describe("@appstrate/kijiji integration manifest", () => {
     expect(session.delivery.http.headerName).toBe("Cookie");
     expect(session.delivery.http.valueFrom.template).toBe(COOKIE_TEMPLATE);
 
-    // login is the connect tool; whoami is the only agent-facing tool.
+    // login is the connect tool; whoami is the only agent-facing native tool.
     expect(Object.keys(manifest.tools).sort()).toEqual(["login", "whoami"]);
+
+    // Attachable api_call: kijiji also exposes the generic credential-injecting
+    // tool in-process, drawing from the `session` auth (bounded by its
+    // authorizedUris) — alongside the native `whoami`, no extra container.
+    const cfg = getApiCallConfig(raw as IntegrationManifest);
+    expect(cfg).toEqual({ authKey: "session", uploadProtocols: [] });
   });
 });

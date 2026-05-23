@@ -10,8 +10,8 @@
   "author": "Appstrate",
   "icon": "canva",
   "keywords": ["design", "marketing"],
-  "server": {
-    "type": "api_call"
+  "apiCall": {
+    "authKey": "primary"
   },
   "auths": {
     "primary": {

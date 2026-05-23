@@ -5,13 +5,13 @@
   "name": "@appstrate/telegram",
   "version": "1.0.0",
   "displayName": "Telegram (API)",
-  "description": "Messaging platform — send messages, manage bots, and interact with chats via the Bot API",
+  "description": "Messaging platform \u2014 send messages, manage bots, and interact with chats via the Bot API",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "telegram",
   "keywords": ["messaging", "communications"],
-  "server": {
-    "type": "api_call"
+  "apiCall": {
+    "authKey": "primary"
   },
   "auths": {
     "primary": {
