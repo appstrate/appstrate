@@ -43,6 +43,7 @@ import {
 import { InlineConnectButton } from "../integration-connect/inline-connect-button";
 import { FieldsConnectModal } from "../integration-connect/fields-connect-modal";
 import { useIntegrationOAuthPopup } from "../integration-connect/use-integration-oauth-popup";
+import { connectionAccount } from "../integration-connect/connection-label";
 import { pickDefaultAuth } from "../integration-connect/pick-default-auth";
 
 interface AgentIntegrationsBlockProps {
@@ -331,11 +332,13 @@ function buildReuseInfo(
   agentCount: number,
   t: (k: string, opts?: Record<string, unknown>) => string,
 ): string {
-  const account =
-    (connection.identityClaims?.accountEmail as string | undefined) ??
-    (connection.identityClaims?.account_email as string | undefined) ??
-    connection.label ??
-    connection.accountId;
+  // connectionAccount centralises `accountEmail ?? account_email ?? <floor>`.
+  // Here the floor is `label ?? accountId` so the email always wins over the
+  // user-set label, which in turn wins over the bare account id.
+  const account = connectionAccount({
+    ...connection,
+    accountId: connection.label ?? connection.accountId,
+  });
   if (agentCount <= 1) {
     return t("detail.integrationReuseSingle", { account });
   }
