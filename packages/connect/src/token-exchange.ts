@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Shared OAuth2 authorization-code exchange used by both
- * `handleOAuthCallback` (legacy provider flow) and
- * `handleIntegrationOAuthCallback` (integration flow).
+ * OAuth2 authorization-code exchange for the integration OAuth flow
+ * (`handleIntegrationOAuthCallback`).
  *
  * Centralises the five error branches (network failure, non-OK response,
  * `invalid_grant` revocation, non-JSON body, missing `access_token`) and
@@ -59,14 +58,12 @@ export interface ExchangeAuthorizationCodeInput {
   /** Scopes requested at authorize time — used for shortfall/creep classification. */
   scopesRequested: string[];
   /**
-   * Extra body params (e.g. RFC 8707 `resource` for integration flows,
-   * provider-supplied `tokenParams` for the legacy flow).
+   * Extra body params (e.g. RFC 8707 `resource` for integration flows).
    */
   extraTokenParams?: Record<string, string>;
   /**
    * Identifier surfaced in error messages and as `OAuthCallbackError.providerId`.
-   * Provider flow: the `providerId`. Integration flow: the sentinel
-   * `__integration__:<package>:<authKey>`.
+   * For integration flows this is the sentinel `__integration__:<package>:<authKey>`.
    */
   errorLabel: string;
   /** State key — deleted on `"revoked"` classification. */

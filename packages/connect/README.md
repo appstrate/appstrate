@@ -20,7 +20,7 @@ OAuth2/PKCE, API key authentication, and encrypted credential storage for provid
 
 ## OAuth error classification
 
-Both the initial token exchange (`handleOAuthCallback`) and the refresh flow
+Both the initial token exchange (`handleIntegrationOAuthCallback`) and the refresh flow
 (`forceRefresh`) classify failures through the shared `parseTokenErrorResponse`
 helper so revocation handling stays symmetric per RFC 6749 §5.2.
 

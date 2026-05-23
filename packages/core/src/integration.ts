@@ -29,8 +29,7 @@ const manifestVersionRegex = /^1\.(0|[1-9]\d*)$/;
 
 /**
  * Resumable-upload protocols an integration's generic `apiCall` tool can
- * advertise — ported from the legacy `provider` `uploadProtocols`
- * (AFPS v1 §7.7). Declared locally rather than imported from
+ * advertise (AFPS v1 §7.7). Declared locally rather than imported from
  * `./validation.ts` to preserve this module's circular-import guard.
  */
 export const integrationUploadProtocolEnum = z.enum([
@@ -461,16 +460,14 @@ const authSchema = z
 
     // When true, the auth skips the `authorizedUris` allowlist for the
     // generic `apiCall` tool — the agent may target any host (the SSRF
-    // blocklist for loopback / RFC1918 / metadata still applies). Mirrors
-    // the legacy `provider.definition.allowAllUris`; used by providers
-    // whose base URL is supplied by the user at connect time (self-hosted
-    // WooCommerce / WordPress, custom webhooks). The auth superRefine
+    // blocklist for loopback / RFC1918 / metadata still applies). Used by
+    // integrations whose base URL is supplied by the user at connect time
+    // (self-hosted WooCommerce / WordPress, custom webhooks). The auth superRefine
     // requires `authorizedUris` ≥ 1 unless this is set.
     allowAllUris: z.boolean().optional(),
 
     // Catalog of OAuth scopes the upstream IdP exposes for this auth.
-    // Mirrors `provider.definition.availableScopes`. Optional — when
-    // declared, agent-declared scopes and tool requiredScopes that
+    // Optional — when declared, agent-declared scopes and tool requiredScopes that
     // target this auth must be a subset (validated at install time,
     // not in this schema). The IdP remains the ultimate authority on
     // what scopes are accepted at consent time.
@@ -819,7 +816,7 @@ export const integrationManifestSchema = z
 
     // Per-tool scope + URL pattern metadata (niveau 2 scope model).
     // Optional and additive — integrations that don't declare `tools`
-    // keep the legacy behaviour (token scoped to auth.scopes defaults,
+    // keep the default behaviour (token scoped to auth.scopes defaults,
     // no per-tool URL enforcement, no scope inference from agent tool
     // selection).
     tools: toolsRecordSchema.optional(),
@@ -1149,7 +1146,7 @@ export function missingScopesForConnection(input: {
  * Used by {@link validateAgentIntegrationScopes} to refuse agent-declared
  * scopes that no auth on this integration even claims to support. When
  * no auth declares an `availableScopes` catalog, returns an empty list
- * and the caller skips the check (legacy behaviour).
+ * and the caller skips the check (default behaviour).
  */
 export function getAvailableScopes(manifest: IntegrationManifest): readonly string[] {
   if (!manifest.auths) return [];
@@ -1177,9 +1174,9 @@ export interface AgentIntegrationScopeError {
  * manifest's catalog. Returns an array of structured errors — empty
  * means the selection is install-valid.
  *
- * Backward compat semantics (Phase 0/1 strict):
+ * Default semantics when the `tools` block is absent:
  *  - When the integration declares no `tools` block, any agent tool
- *    selection is accepted (= legacy "all tools allowed" default).
+ *    selection is accepted (= the "all tools allowed" default).
  *  - When the integration declares no `availableScopes` catalog on any
  *    auth, any agent scope is accepted (the IdP is the ultimate
  *    authority at consent time).

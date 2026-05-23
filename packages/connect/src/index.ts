@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Types
-export type { Actor, ScopeValidationResult, OAuthStateRecord, OAuthStateStore } from "./types.ts";
+export type { Actor, OAuthStateRecord, OAuthStateStore } from "./types.ts";
 // Encryption
 export {
   encrypt,
@@ -12,9 +12,6 @@ export {
   decryptCredentialEnvelope,
 } from "./encryption.ts";
 export type { CredentialEnvelope } from "./encryption.ts";
-
-// Scopes
-export { validateScopes } from "./scopes.ts";
 
 // OAuth2 token-exchange error type (shared by token-exchange.ts + integration OAuth)
 export { OAuthCallbackError } from "./oauth.ts";
@@ -92,8 +89,8 @@ export { planMitmAction } from "./integration-mitm-planner.ts";
 export type { MitmAction, MitmRequestContext } from "./integration-mitm-planner.ts";
 
 // Phase 1.3 — OAuth2 user-facing connect flow for integration auths
-// (used by the marketplace UI; mirrors the legacy provider flow but parameterised
-// by manifest endpoints + admin-registered client credentials).
+// (used by the marketplace UI; parameterised by manifest endpoints +
+// admin-registered client credentials).
 export { initiateIntegrationOAuth, handleIntegrationOAuthCallback } from "./integration-oauth.ts";
 export type {
   InitiateIntegrationOAuthInput,

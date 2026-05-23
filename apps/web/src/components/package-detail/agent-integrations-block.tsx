@@ -66,7 +66,6 @@ interface AgentIntegrationsBlockProps {
  * Status derivation matches the backend gate (collectIntegrationDependencyErrors):
  *   ❌ not_connected         — no connection on any required auth
  *   ⚠️ needs_reconnection    — connection flagged for re-consent
- *   ⚠️ insufficient_scopes   — granted ⊉ required (oauth2 only)
  *   ✅ ok
  *
  * Per-tool scope inference (required = ⋃ tools.{t}.requiredScopes for selected
@@ -687,8 +686,8 @@ function MemberConnectionPicker({
  * Map status → connect action. `not_connected` picks the first required
  * auth (preferring oauth2) so the user gets a one-click flow; if the
  * integration declares multiple auths the agent only needs ONE of them
- * resolved (mirrors the spawn resolver). `needs_reconnection` and
- * `insufficient_scopes` already know which authKey is at fault.
+ * resolved (mirrors the spawn resolver). `needs_reconnection` already
+ * knows which authKey is at fault.
  */
 function resolveAction(
   status: IntegrationStatus,

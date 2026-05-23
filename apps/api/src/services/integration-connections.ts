@@ -155,9 +155,9 @@ export interface ResolvedConnectionRow extends ActorConnectionRow {
  * fallback for members who haven't connected, not a silent override.
  *
  * Single-row return — when multiple shared connections exist, the DB
- * order picks. The picker UI lands in p4 to disambiguate; for now
- * single-source-of-shared-credential is the supported pattern (matches
- * the documented workflow).
+ * order picks. Disambiguation across an accessible candidate set is the
+ * member picker's job on the agent surface; this shared-pool fallback
+ * stays single-source.
  *
  * `connectionId` override (#199 snapshot path): when set, the SELECT
  * additionally filters by id. The (own OR shared) predicate is kept as

@@ -22,13 +22,12 @@ export interface AgentReadinessParams {
   config?: Record<string, unknown>;
   applicationId: string;
   /**
-   * Actor whose integration connections we validate. When `null`/omitted,
-   * integration gating is skipped (preserves legacy callers that didn't
-   * own an actor context — e.g. pure provider readiness probes). Run
-   * kickoff paths must pass an actor so missing or under-scoped
-   * connections produce a 412 before the run is created.
+   * Actor whose integration connections we validate. Run kickoff paths
+   * pass an actor so missing or under-scoped connections produce a 412
+   * before the run is created. `null` skips integration gating — callers
+   * that resolve the actor from request context may not have one.
    */
-  actor?: Actor | null;
+  actor: Actor | null;
   /**
    * Skip individual checks already performed by an upstream validator. Used
    * by the inline-run preflight, which validates `prompt` via the manifest
@@ -75,11 +74,11 @@ export async function collectAgentReadinessErrors(
     });
   }
 
+  // Resolver enumerates own + shared connections, applies
+  // pin > run override > schedule override > fallback, and surfaces
+  // structured errors per (integration, authKey). Skipped when the caller
+  // has no actor context (integration gating only applies to run kickoff).
   if (actor) {
-    // New flat-connections + pins model (replaces the per-actor-only
-    // lookup). Resolver enumerates own + shared connections, applies
-    // pin > run override > schedule override > fallback, and surfaces
-    // structured errors per (integration, authKey).
     const resolution = await resolveConnectionsForRun({
       agentManifest: manifest as Record<string, unknown>,
       packageId: agent.id,
@@ -133,9 +132,8 @@ export async function validateAgentReadiness(params: AgentReadinessParams): Prom
   if (integrationErrors.length > 0) {
     const first = integrationErrors[0]!;
     // Fire-and-forget — modules opting in (e.g. webhooks) get a structured
-    // notification before we throw. The actor is always present on
-    // integration-gated paths (collection above only runs when actor is
-    // non-null), so the assertion is safe.
+    // notification before we throw. Integration errors only accumulate when
+    // an actor was present, so the guard narrows the type for the payload.
     if (params.actor) {
       void emitEvent("onRunConnectionMissing", {
         orgId: params.orgId,

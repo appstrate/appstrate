@@ -233,7 +233,7 @@ function ConnectionRow({
 }
 
 // ─────────────────────────────────────────────
-// Source group card (one per provider/integration)
+// Source group card (one per integration)
 // ─────────────────────────────────────────────
 
 function SourceGroupCard({

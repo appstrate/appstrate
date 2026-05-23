@@ -3,7 +3,7 @@
 
 /**
  * MCP exposure of the sidecar's capabilities — the only agent-facing
- * surface after the migration.
+ * surface.
  *
  * The sidecar's only first-party HTTP endpoint is `/health`; everything
  * the agent talks to (`{ns}__api_call`, `run_history`, `recall_memory`) is
@@ -1140,9 +1140,9 @@ interface ResponseToToolResultOptions {
    * `./upstream-meta.ts`; finalUrl is sanitised (userinfo + fragment
    * stripped) before serialisation.
    *
-   * Defaults to false on the `api_call` path so an existing agent
-   * connection sees no wire-format change. The `api_upload` Pi
-   * tool always passes `true`.
+   * Defaults to false for the first-party `run_history` / `recall_memory`
+   * tools. The `api_call` path always passes `true` (the runtime parser
+   * hard-requires `_meta`), as does the `api_upload` Pi tool.
    */
   attachUpstreamMeta?: boolean;
   /**

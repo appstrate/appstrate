@@ -7,17 +7,6 @@ import {
 } from "@appstrate/core/integration";
 
 /**
- * Canonical upload-protocol identifiers an integration's `apiCall`
- * capability may declare. Sourced from `@appstrate/core/integration`
- * (`integrationUploadProtocolEnum`) — the same enum the manifest schema
- * validates `apiCall.uploadProtocols` against — so the runtime's gating
- * enum cannot drift from the AFPS canonical set.
- */
-const AFPS_UPLOAD_PROTOCOLS: readonly IntegrationUploadProtocol[] =
-  integrationUploadProtocolEnum.options;
-type AfpsUploadProtocol = IntegrationUploadProtocol;
-
-/**
  * `UploadAdapter` interface — the contract every chunked-upload
  * protocol implementation conforms to.
  *
@@ -53,7 +42,7 @@ type AfpsUploadProtocol = IntegrationUploadProtocol;
  * lookup yields `undefined` for any value not present in the registry, which
  * the resolver surfaces to the agent as a structured failure.
  */
-export type UploadProtocol = AfpsUploadProtocol;
+export type UploadProtocol = IntegrationUploadProtocol;
 
 /**
  * Outcome of a single `apiCall` issued by an adapter.
@@ -260,8 +249,10 @@ export interface UploadAdapter {
 }
 
 /**
- * Set of all valid `uploadProtocol` values. Useful for schema
- * validation in the Pi tool surface. Single source of truth lives in
- * `@appstrate/core/integration` (`integrationUploadProtocolEnum`).
+ * Set of all valid `uploadProtocol` values. Useful for schema validation
+ * in the Pi tool surface. Sourced from `@appstrate/core/integration`
+ * (`integrationUploadProtocolEnum`) — the same enum the manifest schema
+ * validates `apiCall.uploadProtocols` against — so the runtime's gating
+ * enum cannot drift from the canonical set.
  */
-export const UPLOAD_PROTOCOLS: readonly UploadProtocol[] = AFPS_UPLOAD_PROTOCOLS;
+export const UPLOAD_PROTOCOLS: readonly UploadProtocol[] = integrationUploadProtocolEnum.options;
