@@ -40,6 +40,7 @@ import {
   type ApiCallFn,
   type ApiCallMeta,
 } from "./http-call-core.ts";
+import { resolveHttpDelivery, type HttpDeliveryConfig } from "./http-delivery.ts";
 import { resolvePackageRef } from "./bundle-adapter.ts";
 
 // ─────────────────────────────────────────────
@@ -80,14 +81,6 @@ export interface ApiCallIntegrationMeta {
   allowAllUris: boolean;
   /** `auths.{key}.delivery.http`, when declared. Drives header injection in local mode. */
   http?: HttpDeliveryConfig;
-}
-
-/** Subset of `auths.{key}.delivery.http` the local resolver consumes. */
-export interface HttpDeliveryConfig {
-  headerName?: string;
-  headerPrefix?: string;
-  valueFrom?: string | { template: string; encoding?: "base64" };
-  allowServerOverride?: boolean;
 }
 
 /**
@@ -369,7 +362,7 @@ function injectCredential(
   }
 
   // 2. Manifest `delivery.http` plan (auth-type defaults).
-  const plan = resolveLocalHttpDelivery(meta.authType, fields, meta.http);
+  const plan = resolveHttpDelivery(meta.authType, fields, meta.http);
   if (!plan || !plan.headerName) return;
   // `allowServerOverride: false` (default) → strip a caller-supplied header
   // of the same name before injecting (defence-in-depth, mirrors the sidecar).
@@ -379,90 +372,6 @@ function injectCredential(
     }
   }
   headers[plan.headerName] = `${plan.headerPrefix}${plan.value}`;
-}
-
-/**
- * Auth-type → header injection defaults. Portable mirror of
- * `@appstrate/connect`'s `AUTH_TYPE_HTTP_DEFAULTS` (afps-runtime cannot
- * depend on the platform's connect package).
- */
-const AUTH_TYPE_HTTP_DEFAULTS: Readonly<
-  Record<string, { headerName: string; headerPrefix: string; valueFrom: string }>
-> = {
-  oauth2: { headerName: "Authorization", headerPrefix: "Bearer ", valueFrom: "access_token" },
-  oauth1: { headerName: "Authorization", headerPrefix: "", valueFrom: "access_token" },
-  api_key: { headerName: "X-Api-Key", headerPrefix: "", valueFrom: "api_key" },
-  basic: { headerName: "Authorization", headerPrefix: "Basic ", valueFrom: "" },
-  custom: { headerName: "", headerPrefix: "", valueFrom: "" },
-};
-
-/** camelCase manifest alias → snake_case storage key (mirrors connect's ALIAS_MAP). */
-const ALIAS_MAP: Readonly<Record<string, string>> = {
-  accessToken: "access_token",
-  refreshToken: "refresh_token",
-  apiKey: "api_key",
-};
-const REVERSE_ALIAS_MAP: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.entries(ALIAS_MAP).map(([camel, snake]) => [snake, camel]),
-);
-
-function readCredentialField(fields: Record<string, string>, name: string): string | undefined {
-  if (fields[name] !== undefined) return fields[name];
-  const alias = ALIAS_MAP[name] ?? REVERSE_ALIAS_MAP[name];
-  if (alias && fields[alias] !== undefined) return fields[alias];
-  return undefined;
-}
-
-interface LocalHttpDeliveryPlan {
-  headerName: string;
-  headerPrefix: string;
-  value: string;
-  allowServerOverride: boolean;
-}
-
-/**
- * Portable equivalent of `@appstrate/connect`'s `resolveHttpDelivery`.
- * Resolves a `delivery.http` plan for one auth, applying auth-type defaults.
- * Returns `null` when no header can be injected.
- */
-function resolveLocalHttpDelivery(
-  authType: string,
-  fields: Record<string, string>,
-  http: HttpDeliveryConfig | undefined,
-): LocalHttpDeliveryPlan | null {
-  const defaults = AUTH_TYPE_HTTP_DEFAULTS[authType] ?? {
-    headerName: "",
-    headerPrefix: "",
-    valueFrom: "",
-  };
-  const headerName = http?.headerName ?? defaults.headerName;
-  if (!headerName) return null;
-  const headerPrefix = http?.headerPrefix ?? defaults.headerPrefix;
-
-  let value: string;
-  const valueFrom = http?.valueFrom ?? defaults.valueFrom;
-  if (typeof valueFrom === "string") {
-    value = valueFrom.length === 0 ? "" : (readCredentialField(fields, valueFrom) ?? "");
-  } else {
-    const rendered = valueFrom.template.replace(/\{\{\s*(\w+)\s*\}\}/g, (_m, key: string) => {
-      return readCredentialField(fields, key) ?? "";
-    });
-    value =
-      valueFrom.encoding === "base64" ? Buffer.from(rendered, "utf8").toString("base64") : rendered;
-  }
-
-  if (value.length === 0 && authType === "basic" && !http?.valueFrom) {
-    const username = readCredentialField(fields, "username") ?? "";
-    const password = readCredentialField(fields, "password") ?? "";
-    value = Buffer.from(`${username}:${password}`, "utf8").toString("base64");
-  }
-
-  return {
-    headerName,
-    headerPrefix,
-    value,
-    allowServerOverride: http?.allowServerOverride === true,
-  };
 }
 
 // ─────────────────────────────────────────────
