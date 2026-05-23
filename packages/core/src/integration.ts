@@ -1283,15 +1283,21 @@ export function validateAgentIntegrationScopes(
   // Tool allowlist must be a subset of declared tools (when declared).
   if (selection.tools && selection.tools.length > 0) {
     const declared = new Set(getDeclaredToolNames(integrationManifest));
+    // The generic `api_call` tool is SYNTHETIC — exposed in-process whenever the
+    // integration declares an api_call capability (`server.type: api_call` OR the
+    // attachable `apiCall` block), never listed in `tools`. Accept it alongside
+    // an integration's native tool catalog (it was already accepted on the
+    // serverless path, where `declared` is empty and enforcement is skipped).
+    const apiCallAllowed = getApiCallConfig(integrationManifest) !== null;
     if (declared.size > 0) {
       for (const tool of selection.tools) {
-        if (!declared.has(tool)) {
-          errors.push({
-            field: `integrations.${selection.id}.tools`,
-            code: "unknown_tool",
-            message: `Tool "${tool}" is not declared by integration ${selection.id}`,
-          });
-        }
+        if (declared.has(tool)) continue;
+        if (apiCallAllowed && tool === API_CALL_TOOL_NAME) continue;
+        errors.push({
+          field: `integrations.${selection.id}.tools`,
+          code: "unknown_tool",
+          message: `Tool "${tool}" is not declared by integration ${selection.id}`,
+        });
       }
     }
     // declared.size === 0 → integration opts out of catalog enforcement.

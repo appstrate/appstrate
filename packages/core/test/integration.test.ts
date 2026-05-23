@@ -988,6 +988,38 @@ describe("validateAgentIntegrationScopes", () => {
     );
     expect(errors).toEqual([]);
   });
+
+  it("accepts the synthetic api_call tool alongside native tools (attachable apiCall)", () => {
+    const m = integrationManifestSchema.parse(
+      baseManifest({
+        server: { type: "node", entryPoint: "./server.js" },
+        auths: {
+          session: {
+            type: "custom",
+            authorizedUris: ["https://api.example.com/**"],
+            credentials: { schema: { type: "object", required: ["token"] } },
+            delivery: { http: { headerName: "Authorization", valueFrom: "accessToken" } },
+          },
+        },
+        tools: { whoami: { requiredAuthKey: "session" } },
+        apiCall: { authKey: "session" },
+      }),
+    );
+    // api_call is synthetic (not in `tools`) but valid because the manifest
+    // declares an apiCall capability; whoami is a native tool.
+    expect(
+      validateAgentIntegrationScopes({ id: "@a/kijiji", tools: ["whoami", "api_call"] }, m),
+    ).toEqual([]);
+  });
+
+  it("still flags api_call when the integration declares no apiCall capability", () => {
+    const errors = validateAgentIntegrationScopes(
+      { id: "@a/i", tools: ["api_call"] },
+      catalogedManifest(),
+    );
+    expect(errors).toHaveLength(1);
+    expect(errors[0]!.code).toBe("unknown_tool");
+  });
 });
 
 describe("integrationManifestSchema — server.type api_call (generic credential-injecting tool)", () => {
