@@ -49,6 +49,11 @@ export {
   type HttpDeliveryPlan,
 } from "./http-delivery.ts";
 
+// Canonical `{{var}}` credential substitution — shared by the platform
+// credential proxy (`@appstrate/connect` re-export), the delivery.http
+// renderer, and the portable integration resolver.
+export { substituteVars } from "./template-vars.ts";
+
 // Reusable credential-injecting HTTP-call core — tool factory + helpers.
 export {
   ABSOLUTE_MAX_RESPONSE_SIZE,

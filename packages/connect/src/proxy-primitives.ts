@@ -9,18 +9,20 @@
  * impossible by construction.
  */
 
+import { substituteVars as substituteVarsCore } from "@appstrate/afps-runtime/resolvers";
+
 /**
  * Substitute `{{field}}` placeholders in `input` using `credentials`.
  *
  * Whitespace inside the `{{…}}` is tolerated so hand-written templates
- * can keep `{{ field }}`. Unknown placeholders are **left intact** —
- * callers MAY inspect the result via {@link findUnresolvedPlaceholders}
- * to fail closed, matching the sidecar's defensive pattern.
+ * can keep `{{ field }}`. Unknown placeholders are **left intact**
+ * (`keepUnresolved`) — callers MAY inspect the result via
+ * {@link findUnresolvedPlaceholders} to fail closed, matching the
+ * sidecar's defensive pattern. Delegates to the single canonical
+ * implementation in `@appstrate/afps-runtime`.
  */
 export function substituteVars(input: string, credentials: Record<string, string>): string {
-  return input.replace(/\{\{\s*(\w+)\s*\}\}/g, (match, key: string) => {
-    return key in credentials ? credentials[key]! : match;
-  });
+  return substituteVarsCore(input, credentials, { keepUnresolved: true });
 }
 
 /** Return the names of every unresolved `{{field}}` still present in `input`. */

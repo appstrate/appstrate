@@ -41,6 +41,7 @@ import {
   type ApiCallMeta,
 } from "./http-call-core.ts";
 import { resolveHttpDelivery, type HttpDeliveryConfig } from "./http-delivery.ts";
+import { substituteVars } from "./template-vars.ts";
 import { resolvePackageRef } from "./bundle-adapter.ts";
 
 // ─────────────────────────────────────────────
@@ -325,11 +326,6 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
       });
     };
   }
-}
-
-/** `{{var}}` substitution shared with the provider local resolver. */
-function substituteVars(input: string, fields: Record<string, string>): string {
-  return input.replace(/\{\{\s*(\w+)\s*\}\}/g, (_m, key: string) => fields[key] ?? "");
 }
 
 /**
