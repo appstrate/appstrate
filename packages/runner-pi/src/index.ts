@@ -19,7 +19,6 @@ export {
   buildApiCallExtensionFactory,
   readIntegrationRefs,
   type BuildApiCallExtensionFactoryOptions,
-  type ProviderEventEmitter,
 } from "./api-call-bridge.ts";
 
 export {
@@ -57,7 +56,7 @@ export {
   buildRuntimeToolFactories,
   callToolResultToPi,
   type BuildRuntimeToolFactoriesOptions,
-  type RuntimeToolEventEmitter,
+  type RuntimeEventEmitter,
 } from "./runtime-tools/mcp-forward.ts";
 
 export {

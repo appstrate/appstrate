@@ -237,7 +237,7 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
     return checkHealth(args, conn, "org_default_enforced");
   }
 
-  // 4. Run override.
+  // 3. Run override.
   if (args.runOverrideId) {
     const conn = args.connectionIndex.get(args.runOverrideId);
     if (!conn) {
@@ -249,7 +249,7 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
     return checkHealth(args, conn, "run_override");
   }
 
-  // 5. Schedule override.
+  // 4. Schedule override.
   if (args.scheduleOverrideId) {
     const conn = args.connectionIndex.get(args.scheduleOverrideId);
     if (!conn) {
@@ -261,7 +261,7 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
     return checkHealth(args, conn, "schedule_override");
   }
 
-  // 6. Member pin — actor's persisted preference for this agent.
+  // 5. Member pin — actor's persisted preference for this agent.
   if (args.memberPinId) {
     const conn = args.connectionIndex.get(args.memberPinId);
     if (!conn) {
@@ -273,7 +273,7 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
     return checkHealth(args, conn, "member_pin");
   }
 
-  // 7. Org default SOFT — org-wide baseline, just above the fallback. A
+  // 6. Org default SOFT — org-wide baseline, just above the fallback. A
   // missing connection (deleted/unshared) silently falls through to the
   // fallback rather than erroring, since the default is non-binding.
   if (args.orgDefault) {
@@ -281,7 +281,7 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
     if (conn) return checkHealth(args, conn, "org_default");
   }
 
-  // 8. Fallback — actor's accessible connections on this integration,
+  // 7. Fallback — actor's accessible connections on this integration,
   // any auth shape. The chosen connection carries its own authKey.
   const candidates = args.accessibleConnections.filter(
     (c) => c.integrationPackageId === args.integrationId,
@@ -300,7 +300,7 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
 
   // >1 — caller must pick. Surface the candidate ids so the UI can render
   // a picker (label + accountId + shared/owned badge). The picker writes
-  // a member pin, so the next run skips this branch and resolves via layer 4.
+  // a member pin, so the next run skips this branch and resolves via layer 5.
   return errorOf(args, {
     code: "must_choose_connection",
     message: `Multiple connections available for ${args.integrationId} — pick one.`,
@@ -435,6 +435,30 @@ export async function resolveConnectionsForRun(
     actorUserId,
     actorEndUserId,
   });
+}
+
+/** Per-run connection snapshot: resolved picks (null when none) + any errors. */
+export interface RunConnectionSnapshot {
+  resolved: ResolvedConnectionMap | null;
+  errors: ConnectionResolutionError[];
+}
+
+/**
+ * Resolve the per-run connection snapshot for a kickoff: run the mechanism
+ * cascade, then project an empty map to `null` ("no integrations declared / no
+ * picks"). Shared by the classic run pipeline and the remote run-creation path
+ * so the resolution call + the empty→null projection live once; each caller
+ * maps `errors` to its own transport (412 ApiError vs structured result),
+ * mirroring how `runPreflightGates` centralizes the shared preflight gates.
+ */
+export async function resolveRunConnectionSnapshot(
+  input: ResolveConnectionsForRunInput,
+): Promise<RunConnectionSnapshot> {
+  const resolution = await resolveConnectionsForRun(input);
+  return {
+    resolved: Object.keys(resolution.resolved).length > 0 ? resolution.resolved : null,
+    errors: resolution.errors,
+  };
 }
 
 async function buildRequirement(

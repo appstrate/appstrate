@@ -33,6 +33,7 @@ import {
   callToolResultToPi,
   RUNTIME_INJECTED_TOOLS,
   spillResourcesToWorkspace,
+  type RuntimeEventEmitter,
 } from "@appstrate/runner-pi";
 import { buildApiUploadToolFactory, isApiUploadToolName } from "./api-upload-extension.ts";
 
@@ -50,7 +51,7 @@ export const DIRECT_TOOL_PROMPT = [
 interface BuildMcpDirectFactoriesOptions {
   mcp: AppstrateMcpClient;
   runId: string;
-  emit: (event: { type: string; [k: string]: unknown }) => void;
+  emit: RuntimeEventEmitter;
   /**
    * Workspace root the agent's files live under. Required to resolve the
    * `fromFile` argument of `{ns}__api_upload` tools (resumable upload) —

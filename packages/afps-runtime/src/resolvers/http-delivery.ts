@@ -16,6 +16,8 @@
  * nothing should be injected).
  */
 
+import { substituteVars } from "./template-vars.ts";
+
 /** Subset of `auths.{key}.delivery.http` the resolver consumes (structural). */
 export interface HttpDeliveryConfig {
   headerName?: string;
@@ -63,9 +65,7 @@ function renderTemplate(
   fields: Readonly<Record<string, string>>,
   encoding: "base64" | undefined,
 ): string {
-  const rendered = template.replace(/\{\{\s*(\w+)\s*\}\}/g, (_match, key: string) => {
-    return fields[key] ?? "";
-  });
+  const rendered = substituteVars(template, fields);
   if (encoding === "base64") return Buffer.from(rendered, "utf8").toString("base64");
   return rendered;
 }

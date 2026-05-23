@@ -11,10 +11,10 @@ export interface OAuthPopupHandle {
 }
 
 /**
- * Driver for the OAuth-via-popup flow shared by every connect surface
- * (provider connections, integration connections, future module-owned
- * OAuth). Centralised so that popup-blocker handling, the 5-min
- * timeout, and the `popup.closed` poll cadence stay consistent.
+ * Generic driver for the OAuth-via-popup flow. Its only consumer is
+ * `useIntegrationOAuthPopup` (integration connections); it stays a separate
+ * generic hook so the popup-blocker handling, the 5-min timeout, and the
+ * `popup.closed` poll cadence live in one place.
  *
  * Open the popup synchronously (some browsers block popups opened
  * inside async callbacks), fetch the authUrl via the caller-supplied

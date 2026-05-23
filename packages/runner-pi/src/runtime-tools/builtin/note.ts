@@ -12,12 +12,7 @@
 
 import { Type } from "@mariozechner/pi-ai";
 import type { ExtensionAPI, ExtensionFactory } from "@mariozechner/pi-coding-agent";
-
-const RUN_ID = process.env.AGENT_RUN_ID ?? "unknown";
-
-function emit(obj: Record<string, unknown>): void {
-  process.stdout.write(JSON.stringify({ ...obj, timestamp: Date.now(), runId: RUN_ID }) + "\n");
-}
+import { emit } from "./emit.ts";
 
 export const noteTool: ExtensionFactory = (pi: ExtensionAPI) => {
   pi.registerTool({

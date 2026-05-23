@@ -15,6 +15,7 @@
 import { Type } from "@mariozechner/pi-ai";
 import type { ExtensionAPI, ExtensionFactory } from "@mariozechner/pi-coding-agent";
 import type { Bundle } from "@appstrate/afps-runtime/bundle";
+import type { RuntimeEventEmitter } from "./runtime-tools/mcp-forward.ts";
 import {
   apiCallRequestJsonSchema,
   readIntegrationRefs,
@@ -25,13 +26,6 @@ import {
   type Tool as AfpsTool,
   type ToolContext as AfpsToolContext,
 } from "@appstrate/afps-runtime/resolvers";
-
-/**
- * Event emitter for credentialled-call telemetry. Receives
- * `api_call.called` / `api_call.completed` / `api_call.failed` events
- * (named for historical continuity with the legacy provider surface).
- */
-export type ProviderEventEmitter = (event: { type: string; [k: string]: unknown }) => void;
 
 // Pull body + responseMode JSON schemas from the canonical AFPS source so
 // the LLM-facing schema documents the discriminated body union. Same
@@ -48,7 +42,7 @@ export interface BuildApiCallExtensionFactoryOptions {
   integrationResolver: IntegrationApiCallResolver;
   runId: string;
   workspace: string;
-  emitProvider: ProviderEventEmitter;
+  emitEvent: RuntimeEventEmitter;
 }
 
 /**
@@ -119,7 +113,7 @@ function makeApiCallExtension(
       async execute(toolCallId, params, signal) {
         const args = (params ?? {}) as Record<string, unknown>;
         const startedAt = Date.now();
-        opts.emitProvider({
+        opts.emitEvent({
           type: "api_call.called",
           runId: opts.runId,
           integrationId,
@@ -132,12 +126,12 @@ function makeApiCallExtension(
           workspace: opts.workspace,
           signal: signal ?? new AbortController().signal,
           emit(event) {
-            opts.emitProvider(event as { type: string; [k: string]: unknown });
+            opts.emitEvent(event as { type: string; [k: string]: unknown });
           },
         };
         try {
           const result = await tool.execute(args, ctx);
-          opts.emitProvider({
+          opts.emitEvent({
             type: "api_call.completed",
             runId: opts.runId,
             integrationId,
@@ -155,7 +149,7 @@ function makeApiCallExtension(
           );
           return { content, details: undefined, isError: result.isError };
         } catch (err) {
-          opts.emitProvider({
+          opts.emitEvent({
             type: "api_call.failed",
             runId: opts.runId,
             integrationId,

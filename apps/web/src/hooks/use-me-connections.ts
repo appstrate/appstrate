@@ -17,6 +17,7 @@ import i18n from "../i18n";
 import { api, apiList } from "../api";
 import type { MeConnectionSourceGroup } from "@appstrate/shared-types";
 import { onMutationError } from "./use-mutations";
+import { buildUpdateConnectionRequest } from "./use-integrations";
 
 /**
  * Unified user-scope connection list (integration connections), grouped by
@@ -94,18 +95,13 @@ export function useUpdateMeIntegrationConnection() {
       sharedWithOrg?: boolean;
     }) =>
       api<{ id: string; label: string | null; sharedWithOrg: boolean }>(
-        `/integrations/${encodeURI(packageId)}/connections/${connectionId}`,
-        {
-          method: "PATCH",
-          body: JSON.stringify({
-            ...(label !== undefined ? { label } : {}),
-            ...(sharedWithOrg !== undefined ? { sharedWithOrg } : {}),
-          }),
-          headers: {
-            "Content-Type": "application/json",
-            ...scopedHeaders({ orgId, applicationId }),
-          },
-        },
+        ...buildUpdateConnectionRequest({
+          packageId,
+          connectionId,
+          label,
+          sharedWithOrg,
+          extraHeaders: scopedHeaders({ orgId, applicationId }),
+        }),
       ),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["me-connections"] });

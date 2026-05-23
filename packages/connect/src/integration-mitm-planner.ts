@@ -11,7 +11,7 @@
  * the operational listener applies verbatim. No I/O, no node/Bun APIs,
  * no globals — every branch is unit-testable.
  *
- * Returned action covers four orthogonal mutations:
+ * Returned action covers three orthogonal mutations:
  *
  *   1. **Strip** — header names (case-insensitive) the listener MUST
  *      remove from the inbound request before injecting. Defaults to
@@ -24,16 +24,7 @@
  *      on the upstream request. `null` when no auth matches (proposal
  *      §4.1.4 step 1 — forward without credentials, let upstream 401).
  *
- *   3. **Refuse** — set when the request is structurally forbidden:
- *      a matched auth whose `authorizedUris` is exhaustively
- *      enumerated and the URL falls outside, AND `allowAllUris` is not
- *      enabled on that auth. Currently the spec does not surface
- *      `allowAllUris` on the integration manifest schema (only on the
- *      legacy provider path), so this branch defaults to "forward
- *      without injection" — kept here as a structural hook for the
- *      follow-up that introduces the integration-side `allowAllUris`.
- *
- *   4. **Retry401** — boolean: when the upstream returns 401 on the
+ *   3. **Retry401** — boolean: when the upstream returns 401 on the
  *      first attempt and the matched auth is OAuth-shaped, the listener
  *      forces a credential refresh and retries once (§4.1.4 step 5).
  *      Pure planner cannot know if the refresh succeeded — it just

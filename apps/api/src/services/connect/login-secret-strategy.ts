@@ -24,7 +24,6 @@
  * secret, so there is no long-lived session to refresh.
  */
 
-import { invalidRequest } from "../../lib/errors.ts";
 import {
   persistCredentialBundle,
   readIntegrationAuth,
@@ -35,31 +34,20 @@ import type {
   ConnectCompleteInput,
   IntegrationConnectStrategy,
 } from "./strategy.ts";
+import { assertFieldsInput, requireNonEmptyCredentials, connectionTarget } from "./strategy.ts";
 
 export class LoginSecretStrategy implements IntegrationConnectStrategy {
   async complete(
     ctx: ConnectContext,
     input: ConnectCompleteInput,
   ): Promise<IntegrationConnectionSummary> {
-    if (input.kind !== "fields") {
-      throw new Error(`LoginSecretStrategy.complete: unexpected input kind '${input.kind}'`);
-    }
-    const credentials = input.credentials;
-    if (!credentials || Object.keys(credentials).length === 0) {
-      throw invalidRequest("credentials payload cannot be empty", "credentials");
-    }
+    const credentials = assertFieldsInput(input, "LoginSecretStrategy");
+    requireNonEmptyCredentials(credentials);
     // Read the auth (validates the manifest declares it). The session is
     // minted at run-start, so we don't run the tool or extract identity here.
     await readIntegrationAuth(ctx.scope, ctx.integrationPackageId, ctx.authKey);
 
-    const target = ctx.connectionId
-      ? {
-          kind: "update-owned" as const,
-          scope: ctx.scope,
-          actor: ctx.actor,
-          connectionId: ctx.connectionId,
-        }
-      : { kind: "insert" as const, scope: ctx.scope, actor: ctx.actor };
+    const target = connectionTarget(ctx);
 
     const summary = await persistCredentialBundle(target, {
       // No injectable outputs yet — the session is minted at run-start.

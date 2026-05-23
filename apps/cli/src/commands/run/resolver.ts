@@ -33,7 +33,7 @@ import {
   RemoteAppstrateIntegrationResolver,
 } from "@appstrate/afps-runtime/resolvers";
 
-export type ProviderMode = "remote" | "local" | "none";
+export type IntegrationMode = "remote" | "local" | "none";
 
 export interface RemoteResolverInputs {
   instance: string;
@@ -85,7 +85,7 @@ export class ResolverConfigError extends Error {
  * error mid-run.
  */
 export function buildIntegrationResolver(
-  mode: ProviderMode,
+  mode: IntegrationMode,
   inputs: RemoteResolverInputs | LocalResolverInputs | null,
 ): IntegrationApiCallResolver {
   switch (mode) {
@@ -129,7 +129,7 @@ export function buildIntegrationResolver(
   }
 }
 
-export function parseProviderMode(raw: string | undefined): ProviderMode {
+export function parseIntegrationMode(raw: string | undefined): IntegrationMode {
   const value = raw ?? "remote";
   if (value !== "remote" && value !== "local" && value !== "none") {
     throw new ResolverConfigError(

@@ -16,17 +16,13 @@ export type IntegrationAuthType = IntegrationManifestAuth["type"];
 
 /**
  * An agent's `dependencies.integrations` entry flattened by
- * `parseManifestIntegrations` (`@appstrate/core/integration`): the bare
- * version dep merged with the optional top-level `integrations[id]`
- * tool/scope selection. Shared so the backend (`AgentDetail`) and the
- * frontend agent-integrations block read one definition.
+ * `parseManifestIntegrations`: the bare version dep merged with the optional
+ * top-level `integrations[id]` tool/scope selection. Structurally identical to
+ * core's `ManifestIntegrationEntry` (the return shape of that parser), so it is
+ * re-exported under the agent-facing name rather than duplicated — backend
+ * (`AgentDetail`) and frontend read one definition that cannot drift.
  */
-export interface AgentIntegrationEntry {
-  id: string;
-  version: string;
-  tools?: string[];
-  scopes?: string[];
-}
+export type { ManifestIntegrationEntry as AgentIntegrationEntry } from "@appstrate/core/dependencies";
 
 export interface IntegrationSummary {
   id: string;

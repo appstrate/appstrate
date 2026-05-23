@@ -17,8 +17,8 @@
  *
  * The chunked-upload resolver dispatches each chunk through the
  * per-integration `{ns}__api_call` tool. The integration is implied by
- * the tool name, so no separate `integrationId` arg is sent — `req.integrationId`
- * carries the `{ns}__api_call` tool name the wrapper dispatches to.
+ * the tool name — `req.apiCallToolName` carries the `{ns}__api_call`
+ * tool name the wrapper dispatches to.
  *
  * Lifecycle
  * ---------
@@ -82,10 +82,9 @@ const ABORT_CLEANUP_TIMEOUT_MS = 5_000;
 export interface IntegrationUploadRequest {
   /**
    * The `{ns}__api_call` MCP tool name to dispatch each chunk through.
-   * The integration is implied by the tool name, so this string IS the
-   * tool name and no separate `integrationId` arg is sent.
+   * The integration is implied by the tool name.
    */
-  integrationId: string;
+  apiCallToolName: string;
   target: string;
   fromFile: string;
   uploadProtocol: UploadProtocol;
@@ -224,7 +223,7 @@ export class McpApiUploadResolver {
     let bytesAcked = 0;
 
     const adapterCtx: AdapterContext = {
-      integrationId: req.integrationId,
+      apiCallToolName: req.apiCallToolName,
       target: req.target,
       totalBytes,
       metadata: req.metadata ?? {},
@@ -360,11 +359,10 @@ export class McpApiUploadResolver {
    */
   private makeApiCall(signal: AbortSignal) {
     return async (req: AdapterApiCallRequest): Promise<AdapterApiCallResponse> => {
-      // `req.integrationId` is the per-integration `{ns}__api_call` tool
-      // name. That tool does NOT accept a `integrationId` argument (the
-      // integration is fixed by the tool name), so we dispatch to the
-      // named tool and omit it.
-      const toolName = req.integrationId;
+      // The `{ns}__api_call` tool does NOT accept a tool-name argument
+      // (the integration is fixed by the tool name), so we dispatch to
+      // the named tool directly.
+      const toolName = req.apiCallToolName;
       const args: Record<string, unknown> = {
         target: req.target,
         method: req.method,

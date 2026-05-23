@@ -105,8 +105,6 @@ describe("validateOptsForMode — local mode", () => {
         report: "true",
         reportFallback: "console",
         sinkTtl: 600,
-        noPreflight: true,
-        preflightTimeout: 60,
       }),
     ).not.toThrow();
   });
@@ -130,8 +128,6 @@ describe("validateOptsForMode — remote mode", () => {
     ["report", { report: "true" }],
     ["reportFallback", { reportFallback: "console" }],
     ["sinkTtl", { sinkTtl: 600 }],
-    ["noPreflight", { noPreflight: true }],
-    ["preflightTimeout", { preflightTimeout: 60 }],
   ])("rejects %s in remote mode", (_label, opts) => {
     expect(() => validateOptsForMode("remote", opts)).toThrow(ExecutionModeError);
   });

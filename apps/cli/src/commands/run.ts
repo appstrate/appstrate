@@ -47,9 +47,9 @@ import { createConsoleSink } from "./run/sink.ts";
 import { resolveVerbosity } from "./run/format.ts";
 import {
   buildIntegrationResolver,
-  parseProviderMode,
+  parseIntegrationMode,
   ResolverConfigError,
-  type ProviderMode,
+  type IntegrationMode,
   type RemoteResolverInputs,
   type LocalResolverInputs,
 } from "./run/resolver.ts";
@@ -82,7 +82,6 @@ import {
   RunConfigFetchError,
   type InheritedRunConfig,
 } from "./run/inherit-config.ts";
-import { preflightCheck, PreflightAbortError } from "./run/preflight.ts";
 import {
   resolveExecutionMode,
   validateOptsForMode,
@@ -138,10 +137,6 @@ export interface RunCommandOptions {
    * must not drift the run.
    */
   noInherit?: boolean;
-  /** Skip the readiness preflight entirely (CI mode). */
-  noPreflight?: boolean;
-  /** Override the preflight polling timeout. Default 5 minutes. */
-  preflightTimeout?: number;
   /**
    * Verbose tool-call rendering — pretty-print args + emit the full
    * truncated result (~2 KB). Mutually exclusive with `--quiet`.
@@ -196,7 +191,7 @@ export async function runCommand(opts: RunCommandOptions): Promise<void> {
 
 async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   // ─── 1. Resolve provider mode + profile state ──────────────────────
-  const mode: ProviderMode = parseProviderMode(opts.providers);
+  const mode: IntegrationMode = parseIntegrationMode(opts.providers);
   const target = parseRunTarget(opts.bundle);
   // Auto-default to `preset` when the user runs an agent by id (the
   // "UI parity" path) AND has a remote provider context. Path mode
@@ -257,32 +252,6 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
       ? await readBundleFromFile(bundleSource.path)
       : readBundleFromBuffer(bundleSource.bytes);
   const bundleLabel = bundleSource.label;
-
-  // ─── 3.5 Preflight readiness ─────────────────────────────────────
-  // Only meaningful when the user is running an agent by id against a
-  // remote instance — in path-mode there's no platform handle, and in
-  // local/none provider modes there are no credentials to be ready
-  // about. The check itself reuses the same dependency-validation
-  // machinery the run pipeline uses, so the answer is in lockstep with
-  // what the run would actually do.
-  if (
-    target.kind === "id" &&
-    resolverInputs &&
-    "bearerToken" in resolverInputs &&
-    !opts.noPreflight
-  ) {
-    await preflightCheck({
-      instance: resolverInputs.instance,
-      bearerToken: resolverInputs.bearerToken,
-      applicationId: resolverInputs.applicationId,
-      orgId: resolverInputs.orgId,
-      scope: target.scope,
-      name: target.name,
-      json: opts.json === true,
-      skip: false,
-      ...(opts.preflightTimeout ? { timeoutSeconds: opts.preflightTimeout } : {}),
-    });
-  }
 
   // ─── 3a. Optional: register run + build reporting session ─────────
   const reportSession = await resolveReportSession(opts, bundle, bundleSource, resolverInputs);
@@ -392,8 +361,9 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     integrationResolver,
     runId,
     workspace: workspaceDir,
-    emitProvider: () => {
-      // Same rationale as provider factories above — events swallowed in CLI.
+    emitEvent: () => {
+      // Events are swallowed in the CLI — the run-result aggregate is
+      // assembled from stdout CloudEvents, not from these telemetry hooks.
     },
   });
   if (!opts.json && apiCallFactories.length > 0) {
@@ -854,7 +824,7 @@ async function resolveProfileNameForPreset(opts: RunCommandOptions): Promise<str
 }
 
 async function buildResolverInputs(
-  mode: ProviderMode,
+  mode: IntegrationMode,
   opts: RunCommandOptions,
 ): Promise<RemoteResolverInputs | LocalResolverInputs | null> {
   if (mode === "none") return null;
@@ -1211,7 +1181,6 @@ export {
   PackageSpecError,
   BundleFetchError,
   RunConfigFetchError,
-  PreflightAbortError,
   ExecutionModeError,
   RemoteRunError,
 };
@@ -1223,7 +1192,7 @@ export {
  * asserted without spinning up a real profile / browser / instance.
  */
 export async function _buildResolverInputsForTesting(
-  mode: ProviderMode,
+  mode: IntegrationMode,
   opts: RunCommandOptions,
 ): Promise<RemoteResolverInputs | LocalResolverInputs | null> {
   return buildResolverInputs(mode, opts);

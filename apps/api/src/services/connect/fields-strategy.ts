@@ -21,16 +21,14 @@ import type {
   ConnectCompleteInput,
   IntegrationConnectStrategy,
 } from "./strategy.ts";
+import { assertFieldsInput, requireNonEmptyCredentials } from "./strategy.ts";
 
 export class FieldsStrategy implements IntegrationConnectStrategy {
   async complete(
     ctx: ConnectContext,
     input: ConnectCompleteInput,
   ): Promise<IntegrationConnectionSummary> {
-    if (input.kind !== "fields") {
-      throw new Error(`FieldsStrategy.complete: unexpected input kind '${input.kind}'`);
-    }
-    const credentials = input.credentials;
+    const credentials = assertFieldsInput(input, "FieldsStrategy");
     const { manifest, auth } = await readIntegrationAuth(
       ctx.scope,
       ctx.integrationPackageId,
@@ -41,9 +39,7 @@ export class FieldsStrategy implements IntegrationConnectStrategy {
         `Auth '${ctx.authKey}' is type '${auth.type}' — use the OAuth flow, not the fields flow`,
       );
     }
-    if (!credentials || Object.keys(credentials).length === 0) {
-      throw invalidRequest("credentials payload cannot be empty", "credentials");
-    }
+    requireNonEmptyCredentials(credentials);
 
     const { accountId, identityClaims } = extractIdentity(manifest, ctx.authKey, credentials);
     return saveIntegrationConnection(ctx.scope, {

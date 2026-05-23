@@ -155,7 +155,7 @@ function ConnectionRow({
   // Reuse hint (integration only) — tells the user this connection is
   // shared across N agents in the application, killing the "do I need
   // one connection per agent?" confusion.
-  if (conn.kind === "integration" && typeof conn.reusedByAgents === "number") {
+  if (typeof conn.reusedByAgents === "number") {
     rows.push({
       label: t("connectors.reusedByLabel"),
       value:
@@ -184,7 +184,7 @@ function ConnectionRow({
       <div className="flex flex-1 flex-col gap-2">
         {/* Header: label (editable for integration) + status */}
         <div className="flex flex-wrap items-center gap-2">
-          {conn.kind === "integration" && onUpdateLabel ? (
+          {onUpdateLabel ? (
             <LabelEditor current={conn.label} saving={updating} onSave={onUpdateLabel} />
           ) : (
             <span className="text-foreground text-sm font-medium">
@@ -192,7 +192,7 @@ function ConnectionRow({
             </span>
           )}
           {statusBadge(t, conn)}
-          {conn.kind === "integration" && conn.sharedWithOrg && (
+          {conn.sharedWithOrg && (
             <span className="rounded-full border border-blue-500/40 bg-blue-500/10 px-2 py-px text-[0.65rem] text-blue-700">
               {t("connectors.sharedBadge")}
             </span>
@@ -210,7 +210,7 @@ function ConnectionRow({
         </div>
 
         {/* Share toggle (integration only) */}
-        {conn.kind === "integration" && onToggleShare && (
+        {onToggleShare && (
           <label className="text-muted-foreground inline-flex items-center gap-2 text-xs">
             <input
               type="checkbox"

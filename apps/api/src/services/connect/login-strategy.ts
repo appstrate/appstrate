@@ -27,15 +27,14 @@ import type {
   ConnectCompleteInput,
   IntegrationConnectStrategy,
 } from "./strategy.ts";
+import { assertFieldsInput, requireNonEmptyCredentials } from "./strategy.ts";
 
 export class LoginStrategy implements IntegrationConnectStrategy {
   async complete(
     ctx: ConnectContext,
     input: ConnectCompleteInput,
   ): Promise<IntegrationConnectionSummary> {
-    if (input.kind !== "fields") {
-      throw new Error(`LoginStrategy.complete: unexpected input kind '${input.kind}'`);
-    }
+    const credentials = assertFieldsInput(input, "LoginStrategy");
     const { manifest, auth } = await readIntegrationAuth(
       ctx.scope,
       ctx.integrationPackageId,
@@ -44,12 +43,10 @@ export class LoginStrategy implements IntegrationConnectStrategy {
     if (!auth.connect) {
       throw invalidRequest(`Auth '${ctx.authKey}' has no connect.steps declaration`);
     }
-    if (!input.credentials || Object.keys(input.credentials).length === 0) {
-      throw invalidRequest("credentials payload cannot be empty", "credentials");
-    }
+    requireNonEmptyCredentials(credentials);
 
     const { outputs, identityClaims, expiresAt } = await runLogin(auth.connect as LoginConfig, {
-      inputs: input.credentials,
+      inputs: credentials,
       authorizedUris: auth.authorizedUris ?? null,
       allowAllUris: auth.allowAllUris ?? false,
     });

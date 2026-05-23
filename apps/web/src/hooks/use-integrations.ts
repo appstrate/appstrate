@@ -52,6 +52,41 @@ export type {
 const KEY = (orgId: string | null | undefined, applicationId: string | null | undefined) =>
   ["integrations", orgId ?? undefined, applicationId ?? undefined] as const;
 
+/**
+ * Shared request builder for `PATCH /integrations/{packageId}/connections/{id}`.
+ *
+ * Both the agent-context update (`useUpdateIntegrationConnection`) and the
+ * user-scope update (`useUpdateMeIntegrationConnection`) PATCH the same
+ * endpoint with the same conditional `{ label?, sharedWithOrg? }` body. They
+ * differ only in extra headers (the user-scope variant pins org/app) and which
+ * React Query keys they invalidate — both of which stay in the calling hook.
+ * The caller passes the result straight to `api<T>(path, init)`, keeping its
+ * own response type.
+ */
+export function buildUpdateConnectionRequest(args: {
+  packageId: string;
+  connectionId: string;
+  label?: string | null;
+  sharedWithOrg?: boolean;
+  extraHeaders?: Record<string, string>;
+}): [string, RequestInit] {
+  const { packageId, connectionId, label, sharedWithOrg, extraHeaders } = args;
+  return [
+    `/integrations/${encodeURI(packageId)}/connections/${connectionId}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        ...(label !== undefined ? { label } : {}),
+        ...(sharedWithOrg !== undefined ? { sharedWithOrg } : {}),
+      }),
+      headers: {
+        "Content-Type": "application/json",
+        ...extraHeaders,
+      },
+    },
+  ];
+}
+
 export function useIntegrations() {
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
@@ -478,15 +513,7 @@ export function useUpdateIntegrationConnection() {
       sharedWithOrg?: boolean;
     }) =>
       api<{ id: string; label: string | null; sharedWithOrg: boolean; updatedAt: string }>(
-        `/integrations/${encodeURI(packageId)}/connections/${connectionId}`,
-        {
-          method: "PATCH",
-          body: JSON.stringify({
-            ...(label !== undefined ? { label } : {}),
-            ...(sharedWithOrg !== undefined ? { sharedWithOrg } : {}),
-          }),
-          headers: { "Content-Type": "application/json" },
-        },
+        ...buildUpdateConnectionRequest({ packageId, connectionId, label, sharedWithOrg }),
       ),
     onSuccess: (_data, vars) => {
       toast.success(t("integration.connection.updated"));
