@@ -99,6 +99,7 @@ export function AgentConnectorsTab({
   packageId: string;
   detail?: import("@appstrate/shared-types").AgentDetail;
 }) {
+  if (!detail) return null;
   return <AgentConnectionsSection packageId={packageId} detail={detail} />;
 }
 

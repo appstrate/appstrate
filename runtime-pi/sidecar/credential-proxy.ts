@@ -75,16 +75,16 @@ function redactHost(url: string): string {
 function mergeSetCookieIntoJar(
   setCookieHeaders: string[],
   cookieJar: Map<string, string[]>,
-  providerId: string,
+  integrationId: string,
 ): void {
   if (!setCookieHeaders.length) return;
   const byName = new Map<string, string>();
-  for (const ck of cookieJar.get(providerId) ?? []) byName.set(ck.split("=")[0]!, ck);
+  for (const ck of cookieJar.get(integrationId) ?? []) byName.set(ck.split("=")[0]!, ck);
   for (const h of setCookieHeaders) {
     const ck = h.split(";")[0]!.trim();
     byName.set(ck.split("=")[0]!, ck);
   }
-  cookieJar.set(providerId, [...byName.values()]);
+  cookieJar.set(integrationId, [...byName.values()]);
 }
 
 /** Parse a `Cookie:` header value into name→pair entries, deduped by name. */
@@ -103,7 +103,7 @@ interface RedirectFollowOptions {
   init: RequestInit;
   fetchFn: typeof fetch;
   cookieJar: Map<string, string[]>;
-  providerId: string;
+  integrationId: string;
   /** Lowercased name of the credential header server-injected by the proxy. */
   injectedCredentialHeader: string | null;
   /**
@@ -169,7 +169,7 @@ async function fetchFollowingRedirectsCapturingCookies(
     init,
     fetchFn,
     cookieJar,
-    providerId,
+    integrationId,
     injectedCredentialHeader,
     authorizedUris,
     allowAllUris,
@@ -184,7 +184,7 @@ async function fetchFollowingRedirectsCapturingCookies(
 
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
     const response = await fetchFn(currentUrl, currentInit);
-    mergeSetCookieIntoJar(response.headers.getSetCookie(), cookieJar, providerId);
+    mergeSetCookieIntoJar(response.headers.getSetCookie(), cookieJar, integrationId);
 
     if (response.status < 300 || response.status >= 400) {
       return { response, finalUrl: currentUrl };
@@ -214,7 +214,7 @@ async function fetchFollowingRedirectsCapturingCookies(
     // allowlist hosts without these guards.
     if (isBlockedUrl(nextUrl)) {
       logger.warn("Redirect refused (SSRF blocklist)", {
-        providerId,
+        integrationId,
         hop,
         host: redactHost(nextUrl),
       });
@@ -222,7 +222,7 @@ async function fetchFollowingRedirectsCapturingCookies(
     }
     if (hasAllowlist && !allowAllUris && !matchesAuthorizedUri(nextUrl, authorizedUris!)) {
       logger.warn("Redirect refused (not in authorizedUris)", {
-        providerId,
+        integrationId,
         hop,
         host: redactHost(nextUrl),
       });
@@ -242,7 +242,7 @@ async function fetchFollowingRedirectsCapturingCookies(
     headers.delete("cookie");
     // Compose Cookie from caller-supplied + jar (jar wins on dup name).
     const merged = new Map(callerCookies);
-    for (const ck of cookieJar.get(providerId) ?? []) merged.set(ck.split("=")[0]!, ck);
+    for (const ck of cookieJar.get(integrationId) ?? []) merged.set(ck.split("=")[0]!, ck);
     if (merged.size) headers.set("cookie", [...merged.values()].join("; "));
     if (dropBody) {
       headers.delete("content-length");
@@ -277,7 +277,7 @@ async function fetchFollowingRedirectsCapturingCookies(
  * part must see the refreshed token after a 401-retry, identical to
  * the buffered text path.
  */
-export type ProviderRequestBody =
+type ApiCallRequestBody =
   | { kind: "none" }
   | { kind: "buffered"; bytes: ArrayBuffer; text?: string }
   | { kind: "streaming"; stream: ReadableStream }
@@ -294,12 +294,12 @@ export type ProviderRequestBody =
     };
 
 export interface ApiCallArgs {
-  providerId: string;
+  integrationId: string;
   targetUrl: string;
   method: string;
   /** Hop-by-hop and routing headers must already be filtered out. */
   callerHeaders: Record<string, string>;
-  body: ProviderRequestBody;
+  body: ApiCallRequestBody;
   /** When true, substitute `{{credential}}` placeholders inside the body. */
   substituteBody?: boolean;
   /** Outbound HTTP proxy URL — empty string disables. */
@@ -345,8 +345,8 @@ export interface ApiCallDeps {
   config: SidecarConfig;
   cookieJar: Map<string, string[]>;
   fetchFn: typeof fetch;
-  fetchCredentials: (providerId: string) => Promise<CredentialsResponse>;
-  refreshCredentials?: (providerId: string) => Promise<CredentialsResponse>;
+  fetchCredentials: (integrationId: string) => Promise<CredentialsResponse>;
+  refreshCredentials?: (integrationId: string) => Promise<CredentialsResponse>;
   /**
    * Set tracking which providers already had a persistent auth
    * failure logged in this run. Mutated by the function — shared
@@ -367,18 +367,18 @@ export interface ApiCallDeps {
 export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Promise<ApiCallResult> {
   const { config, cookieJar, fetchFn, fetchCredentials, refreshCredentials, reportedAuthFailures } =
     deps;
-  const { providerId, targetUrl, method, callerHeaders, body, substituteBody } = args;
+  const { integrationId, targetUrl, method, callerHeaders, body, substituteBody } = args;
 
-  // 1. Validate providerId format (defence in depth — callers should
+  // 1. Validate integrationId format (defence in depth — callers should
   //    have already done this, but cheap to repeat).
-  if (!INTEGRATION_ID_RE.test(providerId)) {
+  if (!INTEGRATION_ID_RE.test(integrationId)) {
     return { ok: false, status: 400, error: "Invalid X-Integration format" };
   }
 
   // 2. Fetch credentials.
   let creds: CredentialsResponse;
   try {
-    creds = await fetchCredentials(providerId);
+    creds = await fetchCredentials(integrationId);
   } catch (err) {
     return {
       ok: false,
@@ -409,7 +409,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       return {
         ok: false,
         status: 403,
-        error: `URL not authorized for provider "${providerId}". Allowed: ${creds.authorizedUris.join(", ")}`,
+        error: `URL not authorized for integration "${integrationId}". Allowed: ${creds.authorizedUris.join(", ")}`,
       };
     }
   } else {
@@ -496,7 +496,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     applyInjectedCredentialHeader(resolvedHeaders, activeCreds);
     normalizeAuthScheme(resolvedHeaders);
     // Re-inject sticky cookies for the provider.
-    const storedCookies = cookieJar.get(providerId);
+    const storedCookies = cookieJar.get(integrationId);
     if (storedCookies && storedCookies.length) {
       const existing = resolvedHeaders["cookie"] || "";
       resolvedHeaders["cookie"] = existing
@@ -542,7 +542,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       init,
       fetchFn,
       cookieJar,
-      providerId,
+      integrationId,
       injectedCredentialHeader: activeCreds.credentialHeaderName?.toLowerCase() ?? null,
       authorizedUris: creds.authorizedUris ?? undefined,
       allowAllUris: creds.allowAllUris,
@@ -571,10 +571,10 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     refreshCredentials &&
     config.platformApiUrl &&
     config.runToken &&
-    !reportedAuthFailures.has(providerId)
+    !reportedAuthFailures.has(integrationId)
   ) {
     try {
-      const refreshed = await refreshCredentials(providerId);
+      const refreshed = await refreshCredentials(integrationId);
       if (body.kind !== "streaming") {
         try {
           const r = await doUpstreamRequest(refreshed);
@@ -596,15 +596,15 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   // 8. Terminal-hop Set-Cookie capture. No-op for buffered (the
   //    follower already merged every hop); load-bearing for streaming
   //    (final hop only — bodies can't be replayed).
-  mergeSetCookieIntoJar(upstream.headers.getSetCookie(), cookieJar, providerId);
+  mergeSetCookieIntoJar(upstream.headers.getSetCookie(), cookieJar, integrationId);
 
   // 9. Log persistent auth failures locally (once per provider per
   //    run, only if the retry above did NOT fix it). The Set also
   //    gates the 401-retry path above so a dead credential triggers
   //    at most one refresh attempt per provider.
-  if (upstream.status === 401 && !reportedAuthFailures.has(providerId)) {
-    reportedAuthFailures.add(providerId);
-    logger.warn("Upstream returned 401 after retry", { providerId });
+  if (upstream.status === 401 && !reportedAuthFailures.has(integrationId)) {
+    reportedAuthFailures.add(integrationId);
+    logger.warn("Upstream returned 401 after retry", { integrationId });
   }
 
   return { ok: true, response: upstream, finalUrl: upstreamFinalUrl, authRefreshed };

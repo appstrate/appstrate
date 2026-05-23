@@ -39,11 +39,11 @@ function makeDeps(overrides: Partial<ApiCallDeps> = {}): ApiCallDeps {
 }
 
 describe("executeApiCall — structured failures", () => {
-  it("rejects malformed providerId without touching credentials", async () => {
+  it("rejects malformed integrationId without touching credentials", async () => {
     const fetchCredentials = mock(async () => ({}) as never);
     const result = await executeApiCall(
       {
-        providerId: "../traversal",
+        integrationId: "../traversal",
         targetUrl: "https://api.example.com/x",
         method: "GET",
         callerHeaders: {},
@@ -62,7 +62,7 @@ describe("executeApiCall — structured failures", () => {
   it("returns 400 on unresolved URL placeholders", async () => {
     const result = await executeApiCall(
       {
-        providerId: "gmail",
+        integrationId: "gmail",
         targetUrl: "https://api.example.com/{{missing}}",
         method: "GET",
         callerHeaders: {},
@@ -77,7 +77,7 @@ describe("executeApiCall — structured failures", () => {
   it("returns 403 when the URL is not in authorizedUris", async () => {
     const result = await executeApiCall(
       {
-        providerId: "gmail",
+        integrationId: "gmail",
         targetUrl: "https://other.example.com/x",
         method: "GET",
         callerHeaders: {},
@@ -108,7 +108,7 @@ describe("executeApiCall — happy path", () => {
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
     const result = await executeApiCall(
       {
-        providerId: "gmail",
+        integrationId: "gmail",
         targetUrl: "https://api.example.com/messages",
         method: "GET",
         callerHeaders: { "X-Custom": "x" },
@@ -164,7 +164,7 @@ describe("executeApiCall — 401 retry path", () => {
     });
     const result = await executeApiCall(
       {
-        providerId: "gmail",
+        integrationId: "gmail",
         targetUrl: "https://api.example.com/x",
         method: "GET",
         callerHeaders: {},
@@ -208,7 +208,7 @@ describe("executeApiCall — 401 retry path", () => {
     });
     const result = await executeApiCall(
       {
-        providerId: "gmail",
+        integrationId: "gmail",
         targetUrl: "https://api.example.com/upload",
         method: "POST",
         callerHeaders: {},
@@ -260,7 +260,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
     const result = await executeApiCall(
       {
-        providerId: "kijiji",
+        integrationId: "kijiji",
         targetUrl: "https://api.example.com/login",
         method: "GET",
         callerHeaders: {},
@@ -302,7 +302,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
     await executeApiCall(
       {
-        providerId: "demo",
+        integrationId: "demo",
         targetUrl: "https://api.example.com/a",
         method: "GET",
         callerHeaders: {},
@@ -339,7 +339,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
     const result = await executeApiCall(
       {
-        providerId: "demo",
+        integrationId: "demo",
         targetUrl: "https://api.example.com/post",
         method: "POST",
         callerHeaders: { "content-type": "application/json" },
@@ -374,7 +374,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
     const result = await executeApiCall(
       {
-        providerId: "demo",
+        integrationId: "demo",
         targetUrl: "https://api.example.com/post",
         method: "POST",
         callerHeaders: { "content-type": "application/json" },
@@ -406,7 +406,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
     const result = await executeApiCall(
       {
-        providerId: "demo",
+        integrationId: "demo",
         targetUrl: "https://api.example.com/loop",
         method: "GET",
         callerHeaders: {},
@@ -455,7 +455,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     });
     await executeApiCall(
       {
-        providerId: "demo",
+        integrationId: "demo",
         targetUrl: "https://api.example.com/start",
         method: "GET",
         callerHeaders: { authorization: "Bearer caller-token" },
@@ -488,7 +488,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     });
     const result = await executeApiCall(
       {
-        providerId: "demo",
+        integrationId: "demo",
         targetUrl: "https://api.example.com/upload",
         method: "POST",
         callerHeaders: {},
@@ -525,7 +525,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
     await executeApiCall(
       {
-        providerId: "demo",
+        integrationId: "demo",
         targetUrl: "https://api.example.com/a",
         method: "GET",
         // Caller passes two cookies — one will be rotated by upstream, one won't.
@@ -568,7 +568,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
     const result = await executeApiCall(
       {
-        providerId: "demo",
+        integrationId: "demo",
         targetUrl: "https://api.example.com/v1/login",
         method: "GET",
         callerHeaders: {},
@@ -603,7 +603,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
     const result = await executeApiCall(
       {
-        providerId: "demo",
+        integrationId: "demo",
         targetUrl: "https://api.example.com/start",
         method: "GET",
         callerHeaders: {},
@@ -637,7 +637,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
     const result = await executeApiCall(
       {
-        providerId: "demo",
+        integrationId: "demo",
         targetUrl: "https://api.example.com/old",
         method: "PUT",
         callerHeaders: { "content-type": "application/json" },
@@ -672,7 +672,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
     const result = await executeApiCall(
       {
-        providerId: "demo",
+        integrationId: "demo",
         targetUrl: "https://api.example.com/check",
         method: "HEAD",
         callerHeaders: {},
@@ -702,7 +702,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     form.set("field", "value");
     const result = await executeApiCall(
       {
-        providerId: "demo",
+        integrationId: "demo",
         targetUrl: "https://api.example.com/upload",
         method: "POST",
         callerHeaders: {},
@@ -759,7 +759,7 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
       });
       const result = await executeApiCall(
         {
-          providerId: "demo",
+          integrationId: "demo",
           targetUrl: "https://api.example.com/start",
           method: "GET",
           callerHeaders: {},
@@ -791,7 +791,7 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
     const result = await executeApiCall(
       {
-        providerId: "demo",
+        integrationId: "demo",
         targetUrl: "https://api.example.com/start",
         method: "GET",
         callerHeaders: {},
@@ -849,7 +849,7 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
     });
     const result = await executeApiCall(
       {
-        providerId: "dropbox",
+        integrationId: "dropbox",
         targetUrl: "https://api.dropboxapi.com/2/files/get_metadata",
         method: "GET",
         callerHeaders: {},
@@ -899,7 +899,7 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
     });
     const result = await executeApiCall(
       {
-        providerId: "webhooks",
+        integrationId: "webhooks",
         targetUrl: "https://hook.example.com/trigger",
         method: "GET",
         callerHeaders: {},
@@ -931,7 +931,7 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
     const result = await executeApiCall(
       {
-        providerId: "demo",
+        integrationId: "demo",
         targetUrl: "https://api.example.com/start",
         method: "GET",
         callerHeaders: {},
@@ -965,7 +965,7 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
     await executeApiCall(
       {
-        providerId: "demo",
+        integrationId: "demo",
         targetUrl: "https://api.example.com/start",
         method: "GET",
         callerHeaders: {},
@@ -990,7 +990,7 @@ describe("executeApiCall — finalUrl exposure (#471)", () => {
     const deps = makeDeps();
     const result = await executeApiCall(
       {
-        providerId: "gmail",
+        integrationId: "gmail",
         targetUrl: "https://api.example.com/messages",
         method: "GET",
         callerHeaders: {},
@@ -1022,7 +1022,7 @@ describe("executeApiCall — finalUrl exposure (#471)", () => {
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
     const result = await executeApiCall(
       {
-        providerId: "demo",
+        integrationId: "demo",
         targetUrl: "https://api.example.com/authorize",
         method: "GET",
         callerHeaders: {},
@@ -1055,7 +1055,7 @@ describe("executeApiCall — finalUrl exposure (#471)", () => {
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
     const result = await executeApiCall(
       {
-        providerId: "demo",
+        integrationId: "demo",
         targetUrl: "https://api.example.com/a",
         method: "GET",
         callerHeaders: {},
@@ -1088,7 +1088,7 @@ describe("executeApiCall — finalUrl exposure (#471)", () => {
     });
     const result = await executeApiCall(
       {
-        providerId: "demo",
+        integrationId: "demo",
         targetUrl: "https://api.example.com/upload",
         method: "POST",
         callerHeaders: {},
@@ -1135,7 +1135,7 @@ describe("executeApiCall — finalUrl exposure (#471)", () => {
     });
     const result = await executeApiCall(
       {
-        providerId: "gmail",
+        integrationId: "gmail",
         targetUrl: "https://api.example.com/x",
         method: "GET",
         callerHeaders: {},

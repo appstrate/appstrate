@@ -258,7 +258,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
 
   // ─── 3b. Build the integration api_call resolver ──────────────────
   // Thread X-Run-Id into credential-proxy calls when reporting is on.
-  // Serverless `apiCall` integrations (the unified provider→integration
+  // Serverless `apiCall` integrations (the unified integration
   // surface) get credential-injected HTTP calls; the resolver yields one
   // `{ns}__api_call` tool per integration.
   const effectiveResolverInputs =
@@ -342,11 +342,6 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "appstrate-run-"));
   const prepared = await prepareBundleForPi(bundle, {
     workspaceDir,
-    onError: (message, err) => {
-      if (!opts.json) {
-        process.stderr.write(`warn: ${message}${err ? `: ${getErrorMessage(err)}` : ""}\n`);
-      }
-    },
   });
 
   // ─── 7a. Integration api_call tools — one {ns}__api_call per integration ──
@@ -399,8 +394,8 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     envValue: process.env.APPSTRATE_VERBOSE,
   });
   // Stdout-JSONL bridge wiring (see `attachStdoutBridge` for the full
-  // rationale). System tools (`@appstrate/output`, `@appstrate/report`,
-  // `@appstrate/note`, `@appstrate/pin`) emit canonical events via
+  // rationale). The built-in runtime tools (`output`, `report`, `note`, `pin`)
+  // emit canonical events via
   // `process.stdout.write(JSON+\n)`. Without the bridge these events
   // never reach the configured sink — they're printed as raw JSON noise
   // and lost. The bridge intercepts stdout, parses canonical events,

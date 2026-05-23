@@ -51,15 +51,11 @@ function scopedHeaders({ orgId, applicationId }: OrgAppHeaders) {
  * surfaced from an agent context. The legacy
  * `DELETE /api/integrations/:packageId/connections/:id` is deprecated and
  * no longer called from the UI.
- *
- * `packageId` is unused at the network layer (the new endpoint derives
- * applicationId from the connection row itself) but kept in the signature
- * so the page-level call site doesn't need refactoring.
  */
 export function useDisconnectIntegrationConnection() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ connectionId }: OrgAppHeaders & { packageId: string; connectionId: string }) =>
+    mutationFn: ({ connectionId }: { connectionId: string }) =>
       api<void>(`/me/connections/${connectionId}`, { method: "DELETE" }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["me-connections"] });

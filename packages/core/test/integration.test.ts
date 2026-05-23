@@ -1154,7 +1154,7 @@ describe("integrationManifestSchema — allowAllUris (migrated provider parity)"
 });
 
 describe("requiredAuthKeysForAgent / requiredScopesForAgent — apiCall scope-only", () => {
-  // apiCall integrations (former providers) expose no `tools` — the agent's
+  // apiCall integrations expose no `tools` — the agent's
   // selected oauth `scopes` are the only "active usage" signal. The gate must
   // treat scope selection like tool selection or these integrations become
   // structurally unconnectable.

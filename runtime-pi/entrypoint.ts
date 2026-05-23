@@ -269,9 +269,6 @@ if (bundle) {
     const prepared = await prepareBundleForPi(bundle, {
       workspaceDir: WORKSPACE,
       extensionWrapper: (factory, id) => wrapExtensionFactory(factory, id, appstrateCtxProvider),
-      onError: (message, err) => {
-        void emitError(err ? `${message}: ${getErrorMessage(err)}` : message);
-      },
     });
     extensionFactories.push(...prepared.extensionFactories);
 

@@ -17,7 +17,7 @@ export const libraryPaths = {
       summary: "List all packages visible to the org with per-app install state",
       description:
         "Returns every package available to the caller's organization (org-owned + system) " +
-        "grouped by type (`agent`, `skill`, `tool`, `provider`). Each package carries an " +
+        "grouped by type (`agent`, `skill`, `integration`). Each package carries an " +
         "`installedIn` array of application ids — the applications belonging to the caller's " +
         "org where the package is currently installed. Ephemeral packages are excluded.\n\n" +
         "The response also includes the org's applications (id, name, isDefault) so the UI " +

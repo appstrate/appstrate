@@ -443,9 +443,7 @@ const authSchema = z
     pkceEnabled: z.boolean().optional(),
 
     // Extra static query parameters merged verbatim into the OAuth2
-    // authorize URL (oauth2 only). Mirrors the legacy
-    // `provider.definition.oauth2.authorizationParams` that the
-    // provider→integration migration dropped. Required by IdPs that gate
+    // authorize URL (oauth2 only). Required by IdPs that gate
     // refresh-token issuance on an authorize-time flag — notably Google,
     // which only returns a `refresh_token` when `access_type=offline` (and
     // re-issues one on re-consent only with `prompt=consent`). Without it
@@ -1001,7 +999,7 @@ export function requiredAuthKeysForAgent(
   const hasTools = !!agentTools && agentTools.length > 0;
   const hasScopes = !!agentScopes && agentScopes.length > 0;
   // "Active" = the agent declared a usage. MCP integrations express it via
-  // selected tools; apiCall integrations (former providers) expose no tools,
+  // selected tools; apiCall integrations expose no MCP tools,
   // so selected oauth scopes are the only signal. Neither → inert, no auth.
   if (!hasTools && !hasScopes) return [];
   const declaredAuths = manifest.auths ? Object.keys(manifest.auths) : [];

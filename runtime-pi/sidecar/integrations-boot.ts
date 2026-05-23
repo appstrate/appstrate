@@ -653,7 +653,7 @@ export async function bootIntegrations(
 
   for (const spec of specs) {
     try {
-      // ─── provider→integration unification — generic api_call tool ───
+      // ─── generic api_call tool ───
       // Independent of how (or whether) the integration spawns a server:
       // build the credential adapter from a dedicated credentials source,
       // then host the generic `api_call` (+ optional `api_upload`) tools as
@@ -662,8 +662,8 @@ export async function bootIntegrations(
       // namespacing (`{ns}__api_call`) + name validation. A pure-proxy
       // integration (an `apiCall` block, no `spec.manifest.server`) does
       // ONLY this and skips spawn.
-      // Attach the in-process generic `api_call` tool (provider→integration
-      // unification). Hosted on the McpHost OUTSIDE any spawned container, so
+      // Attach the in-process generic `api_call` tool.
+      // Hosted on the McpHost OUTSIDE any spawned container, so
       // the server code never sees the credential. Two modes:
       //  - serverless (`apiCall` block, no `spec.manifest.server`):
       //    api_call is the namespace's PRIMARY client (`intoNamespace` omitted).

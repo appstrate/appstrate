@@ -45,7 +45,7 @@ export { matchesAuthorizedUriSpec } from "@appstrate/afps-runtime/resolvers";
 /**
  * Payload returned by `resolveCredentialsForProxy` /
  * `forceRefreshCredentials` (platform, DB-backed) and by the sidecar's
- * `/internal/providers/credentials` HTTP fetch (container, HTTP-backed).
+ * `/internal/integration-credentials` HTTP fetch (container, HTTP-backed).
  * Single type definition — both entrypoints import it from here, so the
  * wire format cannot drift between platform and sidecar.
  *

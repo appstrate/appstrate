@@ -16,7 +16,7 @@ export interface SystemPackageEntry {
   scope: string;
   /** Package name without scope. */
   name: string;
-  /** Package type (agent, skill, tool, provider). */
+  /** Package type (agent, skill, integration). */
   type: PackageType;
   /** Semver version from the manifest. */
   version: string;

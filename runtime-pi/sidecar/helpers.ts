@@ -152,7 +152,7 @@ export type {
 // wire-identical to what the platform's `/api/credential-proxy/proxy`
 // route resolves from the DB — both are `ProxyCredentialsPayload`. The
 // local alias keeps call sites readable (this is the HTTP response
-// body from `/internal/providers/credentials`).
+// body from `/internal/integration-credentials/{scope}/{name}`).
 export type { ProxyCredentialsPayload as CredentialsResponse } from "@appstrate/connect/proxy-primitives";
 
 // Import from the dedicated subpath so the compiled sidecar binary does

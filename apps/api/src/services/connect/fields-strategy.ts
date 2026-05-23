@@ -9,7 +9,6 @@
  * unchanged.
  */
 
-import { invalidRequest } from "../../lib/errors.ts";
 import {
   extractIdentity,
   readIntegrationAuth,
@@ -29,16 +28,11 @@ export class FieldsStrategy implements IntegrationConnectStrategy {
     input: ConnectCompleteInput,
   ): Promise<IntegrationConnectionSummary> {
     const credentials = assertFieldsInput(input, "FieldsStrategy");
-    const { manifest, auth } = await readIntegrationAuth(
+    const { manifest } = await readIntegrationAuth(
       ctx.scope,
       ctx.integrationPackageId,
       ctx.authKey,
     );
-    if (auth.type === "oauth2" || auth.type === "oauth1") {
-      throw invalidRequest(
-        `Auth '${ctx.authKey}' is type '${auth.type}' — use the OAuth flow, not the fields flow`,
-      );
-    }
     requireNonEmptyCredentials(credentials);
 
     const { accountId, identityClaims } = extractIdentity(manifest, ctx.authKey, credentials);

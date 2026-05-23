@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AFPS integration catalogue (INTEGRATIONS_PROPOSAL Phase 1.3).
+ * AFPS integration catalogue.
  *
- * Mirrors the providers page UX:
  *   - Tabs: Activés (active in this app) / Installés (full catalogue).
  *   - Search: by displayName, name, description, keywords.
  *   - Per-card: an "Activé / Non activé" badge + a "Configurer" button
  *     that opens the detail page. Activation/deactivation itself lives on
- *     the detail page (mirrors providers' configure flow).
+ *     the detail page.
  *
  * Detail flows (activate, per-auth connect, OAuth client registration,
  * governance) live on `<IntegrationDetailPage />`.

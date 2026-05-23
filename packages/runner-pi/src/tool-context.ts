@@ -8,7 +8,7 @@
  * by the sidecar — the tool never sees the raw key (ADR-003 invariant).
  *
  * `readResource` resolves an MCP `resource_link` URI (typically
- * `appstrate://provider-response/{runId}/{ulid}`) returned by `apiCall`
+ * `appstrate://api-response/{runId}/{ulid}`) returned by `apiCall`
  * when the upstream response exceeds `INLINE_RESPONSE_THRESHOLD` (32 KB).
  * Without this, a tool that fetches large payloads would have to call the
  * sidecar's MCP `resources/read` over HTTP itself — duplicated boilerplate

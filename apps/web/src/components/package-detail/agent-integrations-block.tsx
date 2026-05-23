@@ -58,10 +58,10 @@ interface AgentIntegrationsBlockProps {
 }
 
 /**
- * Phase B.1 — connection-status block for every integration declared in the
- * agent manifest. Mirrors the provider block: one card per dependency, three
- * states (OK / action-required / not-connected), CTA jumps to the
- * integration detail page where the actor can connect / re-consent.
+ * Connection-status block for every integration declared in the agent
+ * manifest. One card per dependency, three states (OK / action-required /
+ * not-connected), CTA jumps to the integration detail page where the actor
+ * can connect / re-consent.
  *
  * Status derivation matches the backend gate (collectIntegrationDependencyErrors):
  *   ❌ not_connected         — no connection on any required auth
@@ -158,10 +158,10 @@ function IntegrationConnectionCard({
   // regardless of auth shape).
   //
   // "Active" = the agent declared a usage for this integration. For MCP
-  // integrations that's a tool selection; for apiCall integrations (former
-  // providers) there are no discrete tools — the usage is the selected
-  // oauth scopes. Gating on tools alone made apiCall integrations
-  // structurally unconnectable from the agent page.
+  // integrations that's a tool selection; for apiCall integrations there
+  // are no discrete tools — the usage is the selected oauth scopes. Gating
+  // on tools alone made apiCall integrations structurally unconnectable
+  // from the agent page.
   const isActive = (agentTools?.length ?? 0) > 0 || (agentScopes?.length ?? 0) > 0;
   const showMemberPicker = !!agentPackageId && isActive;
 

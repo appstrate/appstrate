@@ -22,7 +22,7 @@
  *
  * Spilling materialises each resource into a workspace file and replaces the
  * inline block with a short pointer the LLM can pass straight to `fromFile`.
- * This mirrors the legacy provider `responseMode.toFile` behaviour, but
+ * This mirrors the `api_call` `responseMode.toFile` behaviour, but
  * generalised to every MCP server that returns resources.
  *
  * Always spills (no size threshold): the whole point is to keep file bytes
@@ -215,7 +215,7 @@ function decodeUriComponentSafe(s: string): string {
 /**
  * Append a mime-derived extension when the basename has none, so the agent's
  * `jq` / `grep` / editor tooling recognises the file type. Blob URIs like
- * `appstrate://provider-response/{runId}/{ulid}` have an extensionless ULID
+ * `appstrate://api-response/{runId}/{ulid}` have an extensionless ULID
  * tail, so without this an `application/json` response would land as a bare
  * `<ulid>` file.
  */

@@ -596,7 +596,7 @@ function buildSidecarTools(options: MountMcpOptions): {
         fetchCredentials: integ.fetchCredentials,
         refreshCredentials: integ.refreshCredentials,
       },
-      providerId: integ.integrationId,
+      integrationId: integ.integrationId,
       label: "api_call",
     };
     return {
@@ -618,7 +618,7 @@ function buildSidecarTools(options: MountMcpOptions): {
     };
   };
 
-  // provider→integration unification (resumable upload) — advertise a
+  // Resumable upload — advertise a
   // `{ns}__api_upload` tool for an integration whose `apiCall` declared
   // ≥1 `uploadProtocols`. The sidecar ONLY advertises this tool: the
   // descriptor (gating enum + JSON schema) lives here so it cannot drift,
@@ -720,7 +720,7 @@ function buildSidecarTools(options: MountMcpOptions): {
    */
   async function credentialProxyInner(
     rawArgs: unknown,
-    ctx: { proxyDeps: ApiCallDeps; providerId: string; label: string },
+    ctx: { proxyDeps: ApiCallDeps; integrationId: string; label: string },
   ): Promise<CallToolResult> {
     {
       const args = rawArgs as {
@@ -888,7 +888,7 @@ function buildSidecarTools(options: MountMcpOptions): {
 
       const result = await executeApiCall(
         {
-          providerId: ctx.providerId,
+          integrationId: ctx.integrationId,
           targetUrl: args.target,
           method,
           callerHeaders,
@@ -925,7 +925,7 @@ function buildSidecarTools(options: MountMcpOptions): {
       return responseToToolResult(result.response, {
         ...(blobStore ? { blobStore } : {}),
         ...(tokenBudget ? { tokenBudget } : {}),
-        source: `${ctx.label}:${ctx.providerId}`,
+        source: `${ctx.label}:${ctx.integrationId}`,
         // Attach upstream `{ status, headers, finalUrl }` to the
         // CallToolResult `_meta` payload so the agent-side resolver
         // can surface real HTTP status / response headers (Location,
@@ -1533,7 +1533,7 @@ async function readBodyBounded(res: Response, maxBytes: number): Promise<string>
  * tool then performs.
  */
 /**
- * One integration's `api_call` wiring (provider→integration unification).
+ * One integration's `api_call` wiring.
  * The credential adapters are built by the sidecar boot from the
  * integration's live credentials source; `mountMcp` threads them into a
  * per-integration `ApiCallDeps` so the generic tool reuses the
@@ -1542,7 +1542,7 @@ async function readBodyBounded(res: Response, maxBytes: number): Promise<string>
 export interface ApiCallIntegrationConfig {
   /** McpHost-style namespace — the tool is named `{namespace}__api_call`. */
   namespace: string;
-  /** Integration package id (used as the proxy `providerId` + audit source). */
+  /** Integration package id (used as the proxy `integrationId` + audit source). */
   integrationId: string;
   /** Resolve the integration's credentials into the proxy payload. */
   fetchCredentials: ApiCallDeps["fetchCredentials"];
@@ -1580,7 +1580,7 @@ export interface ApiCallToolDeps {
  * Build the `api_call` (+ optional `api_upload`) {@link AppstrateToolDefinition}s
  * for one integration, named UNPREFIXED (`api_call` / `api_upload`). The
  * caller registers them on the McpHost, which applies the `{ns}__` prefix
- * (matching the legacy `{ns}__api_call` name) + tool-name validation. The
+ * (yielding the `{ns}__api_call` name) + tool-name validation. The
  * handlers reuse the exact credential-proxy core (`credentialProxyInner`)
  * via {@link buildSidecarTools}, with the integration's credential adapters
  * injected per-call.
@@ -1672,8 +1672,8 @@ export interface MountMcpOptions {
  * not the happy path. Mirrors the agent-side MCP connect deadline so a
  * truly hung integration boot surfaces as the agent's own handshake
  * timeout rather than as an empty toolset (the failure mode that hides
- * the bug — the LLM cheerfully tells the user "no provider connected"
- * instead of erroring out).
+ * the bug — the LLM cheerfully tells the user the integration is not
+ * connected instead of erroring out).
  */
 const INTEGRATION_BOOT_WAIT_MS = 30_000;
 
@@ -1777,8 +1777,8 @@ export function mountMcp(app: Hono, options: MountMcpOptions): void {
     if (bootReady) await bootReady;
     // Resolve tools per-request so integrations that finish booting AFTER
     // the sidecar's HTTP listener is up still surface on the next call.
-    // provider→integration unification — the generic `api_call` (+ optional
-    // `api_upload`) tools are now registered on the McpHost as trusted
+    // The generic `api_call` (+ optional
+    // `api_upload`) tools are registered on the McpHost as trusted
     // in-process MCP servers at boot (see integrations-boot.ts), so they
     // arrive here through `additionalToolsProvider` (= host.buildTools)
     // exactly like any spawned/remote integration tool. One pipeline.

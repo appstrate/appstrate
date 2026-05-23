@@ -22,7 +22,7 @@ import { RunList } from "../components/run-list";
 import { NextRunPreview } from "../components/next-run-preview";
 import { usePaginatedRuns } from "../hooks/use-paginated-runs";
 import { ScheduleStatusBadge } from "../components/schedule-status-badge";
-import { ProfileLabel } from "../components/profile-label";
+import { ActorLabel } from "../components/actor-label";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { useScheduleById, useUpdateSchedule, useDeleteSchedule } from "../hooks/use-schedules";
 import { useAgents } from "../hooks/use-packages";
@@ -158,7 +158,7 @@ function ScheduleParams({
         <div className="border-border bg-muted/30 rounded-lg border p-4">
           <p className="text-muted-foreground mb-1 text-xs">{t("schedule.paramActor")}</p>
           <p className="inline-flex items-center gap-1.5 text-sm font-medium">
-            <ProfileLabel
+            <ActorLabel
               actorType={schedule.actorType}
               actorName={schedule.actorName}
               iconSize="size-3.5"

@@ -2,7 +2,7 @@
 // Copyright 2026 Appstrate
 
 /**
- * AFPS integration `api_call` resolver (provider→integration unification).
+ * AFPS integration `api_call` resolver.
  *
  * A serverless integration — one that declares `apiCall` and no `server`,
  * backed by a single auth whose `delivery.http` describes how to inject the
@@ -51,7 +51,7 @@ import { resolvePackageRef } from "./bundle-adapter.ts";
 /**
  * Reference to an integration the agent declared in
  * `dependencies.integrations`. Same npm-style `{ name, version }` shape
- * used for providers/skills/tools.
+ * used for integration dependencies.
  */
 export interface IntegrationRef {
   name: string;
@@ -87,7 +87,7 @@ export interface ApiCallIntegrationMeta {
 /**
  * Derive {@link IntegrationRef}s from the bundle root manifest's
  * `dependencies.integrations` record (npm-style `id → semver` map). Mirrors
- * `readProviderRefs` but for the unified integration dependency block.
+ * the integration dependency block (`dependencies.integrations`).
  */
 export function readIntegrationRefs(bundle: Bundle): IntegrationRef[] {
   const root = bundle.packages.get(bundle.root);
@@ -167,7 +167,7 @@ function projectApiCallMeta(name: string, parsed: unknown): ApiCallIntegrationMe
 }
 
 /** Build the {@link ApiCallMeta} the HTTP core uses for `authorizedUris` enforcement. */
-function toProviderMeta(meta: ApiCallIntegrationMeta): ApiCallMeta {
+function toApiCallMeta(meta: ApiCallIntegrationMeta): ApiCallMeta {
   return {
     name: meta.name,
     authorizedUris: meta.authorizedUris,
@@ -198,7 +198,7 @@ export interface IntegrationApiCallResolver {
 // ─────────────────────────────────────────────
 
 /**
- * Local creds file for integrations — mirrors the provider creds file but
+ * Local creds file for integrations —
  * keyed by integration id. Each entry carries the decrypted credential
  * `fields` (exposed for `{{var}}` substitution into URL / headers / body)
  * and an optional `injection` override. When `injection` is omitted, the
@@ -267,7 +267,7 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
         );
       }
       tools.push(
-        makeApiCallTool(toProviderMeta(meta), this.buildCall(meta, entry), {
+        makeApiCallTool(toApiCallMeta(meta), this.buildCall(meta, entry), {
           toolName: apiCallToolName(meta),
           description:
             `Make an authenticated request through the "${meta.name}" integration's ` +
@@ -336,7 +336,7 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
  *
  * When neither yields a header (e.g. `custom` auth with no `delivery.http`),
  * nothing is injected — the agent supplies its own auth via `{{var}}`
- * substitution, exactly like a legacy `custom` provider.
+ * substitution, as for a `custom` auth.
  */
 function injectCredential(
   headers: Record<string, string>,

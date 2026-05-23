@@ -22,7 +22,7 @@ import * as nodePath from "node:path";
 
 import { z } from "zod";
 import type { JSONSchema, Tool, ToolContext, ToolResult } from "./types.ts";
-import { ProviderAuthorizationError, ResolverError } from "../errors.ts";
+import { AuthorizedUrisError, ResolverError } from "../errors.ts";
 
 /**
  * Default inline cap for response bodies that come back without an
@@ -473,7 +473,7 @@ export function applyTransportHeaders(
 }
 
 export interface MakeApiCallToolOptions {
-  /** Tool name override. Defaults to `<sluggedProviderName>_call`. */
+  /** Tool name override. Defaults to `<sluggedIntegrationName>_call`. */
   toolName?: string;
   /** Description override. */
   description?: string;
@@ -497,7 +497,7 @@ export function makeApiCallTool(
   const toolName = opts.toolName ?? defaultApiCallToolName(meta.name);
   const description =
     opts.description ??
-    `Call the ${meta.name} provider. Supply method, target URL, optional headers/body, and responseMode. ` +
+    `Call the ${meta.name} integration. Supply method, target URL, optional headers/body, and responseMode. ` +
       `Pass binary uploads via { fromFile } and route binary downloads via responseMode.toFile — ` +
       `inline bytes are decoded as text and bloat the LLM context.`;
 
@@ -1578,8 +1578,8 @@ function enforceAuthorizedUris(meta: ApiCallMeta, target: string): void {
   if (meta.allowAllUris) return;
   const patterns = meta.authorizedUris ?? [];
   if (patterns.length === 0) {
-    throw new ProviderAuthorizationError(
-      "PROVIDER_AUTHORIZED_URIS_EMPTY",
+    throw new AuthorizedUrisError(
+      "AUTHORIZED_URIS_EMPTY",
       `Provider ${meta.name}: authorizedUris allowlist is empty; every target is forbidden. ` +
         `Declare authorizedUris in the provider manifest or set allowAllUris: true.`,
       { provider: meta.name, target },
@@ -1588,8 +1588,8 @@ function enforceAuthorizedUris(meta: ApiCallMeta, target: string): void {
   for (const pattern of patterns) {
     if (matchesAuthorizedUriSpec(pattern, target)) return;
   }
-  throw new ProviderAuthorizationError(
-    "PROVIDER_AUTHORIZED_URIS_MISMATCH",
+  throw new AuthorizedUrisError(
+    "AUTHORIZED_URIS_MISMATCH",
     `Provider ${meta.name}: target ${target} is not in authorizedUris allowlist`,
     { provider: meta.name, target, allowlist: patterns },
   );

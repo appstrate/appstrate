@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 import { Badge } from "./status-badge";
 import { ScheduleStatusBadge } from "./schedule-status-badge";
 import { NextRunPreview } from "./next-run-preview";
-import { ProfileLabel } from "./profile-label";
+import { ActorLabel } from "./actor-label";
 import { useScheduleRuns } from "../hooks/use-schedules";
 import { ACTIVE_RUN_STATUSES, type EnrichedSchedule } from "@appstrate/shared-types";
 
@@ -39,7 +39,7 @@ export function ScheduleCard({ schedule, agentName }: ScheduleCardProps) {
           </span>
         )}
         {runningRuns > 0 && <Badge status="running" />}
-        <ProfileLabel
+        <ActorLabel
           actorType={schedule.actorType}
           actorName={schedule.actorName}
           className="text-muted-foreground ml-auto text-xs"

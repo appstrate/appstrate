@@ -29,7 +29,7 @@ import {
 
 // Pull body + responseMode JSON schemas from the canonical AFPS source so
 // the LLM-facing schema documents the discriminated body union. Same
-// rationale as the legacy provider bridge.
+// rationale as the sidecar api_call bridge.
 const SCHEMA_PROPERTIES =
   (apiCallRequestJsonSchema as { properties?: Record<string, unknown> }).properties ?? {};
 const BODY_SCHEMA = SCHEMA_PROPERTIES.body ?? {};

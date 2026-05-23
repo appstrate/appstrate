@@ -167,8 +167,8 @@ export interface IntegrationSpawnSpec {
     };
   };
   /**
-   * Generic credential-injecting HTTP tool (provider→integration
-   * unification). Set when the manifest declares `apiCall` AND the agent
+   * Generic credential-injecting HTTP tool. Set when the manifest declares
+   * `apiCall` AND the agent
    * selected the `api_call` tool. The sidecar registers a
    * `{namespace}__api_call` tool that proxies an arbitrary upstream
    * request bounded by {@link authorizedUris}, injecting the resolved
@@ -415,7 +415,7 @@ export interface OAuthTokenResponse {
   /** Epoch milliseconds. `null` when expiry is unknown — sidecar treats this as "always refresh". */
   expiresAt: number | null;
   /**
-   * Abstract account/tenant identifier surfaced by the provider's
+   * Abstract account/tenant identifier surfaced by the integration's
    * `extractTokenIdentity` hook. Echoed by the sidecar as the header
    * named by {@link OAuthWireFormat.accountIdHeader} (when both are set).
    */
