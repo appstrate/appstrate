@@ -119,4 +119,67 @@ describe("spillResourcesToWorkspace", () => {
     const out = await spillResourcesToWorkspace(result, { workspace, toolCallId: "tc4" });
     expect(out.content[0]).toEqual(result.content[0]!);
   });
+
+  it("passes a resource_link through untouched when no readResource fetcher is given", async () => {
+    const result = {
+      content: [
+        {
+          type: "resource_link",
+          uri: "appstrate://provider-response/run_x/ULID",
+          mimeType: "application/json",
+        },
+      ],
+    } as unknown as CallToolResult;
+    const out = await spillResourcesToWorkspace(result, { workspace, toolCallId: "tc5" });
+    expect(out).toBe(result);
+  });
+
+  it("fetches a resource_link, spills it to a file with a mime-derived extension", async () => {
+    const json = JSON.stringify({ user: "Pierre", id: 1045141849 });
+    const uri = "appstrate://provider-response/run_x/06F5AZ8FKDQK7CFJVCCYE2Y858";
+    const result = {
+      content: [{ type: "resource_link", uri, name: "response", mimeType: "application/json" }],
+    } as unknown as CallToolResult;
+
+    const out = await spillResourcesToWorkspace(result, {
+      workspace,
+      toolCallId: "tc6",
+      readResource: async (u) => {
+        expect(u).toBe(uri);
+        return { contents: [{ uri: u, mimeType: "application/json", text: json }] };
+      },
+    });
+
+    const pointer = out.content[0] as { type: "text"; text: string };
+    expect(pointer.type).toBe("text");
+    // ULID tail has no extension → derived from mime → `.json` so jq/grep work.
+    expect(pointer.text).toContain("resources/tc6-06F5AZ8FKDQK7CFJVCCYE2Y858.json");
+    expect(pointer.text).toContain("application/json");
+
+    const written = await fs.readFile(
+      path.join(workspace, "resources", "tc6-06F5AZ8FKDQK7CFJVCCYE2Y858.json"),
+      "utf-8",
+    );
+    expect(written).toBe(json);
+  });
+
+  it("leaves a resource_link inline when the fetch fails (degraded, not dropped)", async () => {
+    const result = {
+      content: [
+        {
+          type: "resource_link",
+          uri: "appstrate://provider-response/run_x/Z",
+          mimeType: "text/html",
+        },
+      ],
+    } as unknown as CallToolResult;
+    const out = await spillResourcesToWorkspace(result, {
+      workspace,
+      toolCallId: "tc7",
+      readResource: async () => {
+        throw new Error("resource not found");
+      },
+    });
+    expect(out.content[0]).toEqual(result.content[0]!);
+  });
 });

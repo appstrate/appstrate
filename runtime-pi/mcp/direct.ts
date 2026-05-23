@@ -171,17 +171,19 @@ function buildIntegrationToolFactories(
             isError: result.isError === true,
             timestamp: Date.now(),
           });
-          // Materialise any embedded MCP resources (e.g. GitHub MCP's
-          // `get_file_contents`, attachments) to workspace files before the
-          // adapter flattens them. Keeps file bytes out of the LLM context —
-          // the agent gets a `fromFile`-ready pointer instead of re-emitting
-          // the whole file into a `write` call, and binary `blob` resources
-          // survive (the inline renderer would drop them).
+          // Materialise MCP resources to workspace files before the adapter
+          // flattens them, keeping file bytes out of the LLM context:
+          //  - embedded `resource` blocks (GitHub MCP `get_file_contents`, …),
+          //  - `resource_link` blocks (e.g. `{ns}__api_call` spilling a
+          //    response > 32 KB to the sidecar blob store) — fetched via
+          //    `readResource` so the agent grep/head/tail/reads the file
+          //    instead of receiving an unreadable `appstrate://` URI.
           const spilled = await spillResourcesToWorkspace(result, {
             workspace: opts.workspace,
             toolCallId,
             emit: opts.emit,
             runId: opts.runId,
+            readResource: (uri) => opts.mcp.readResource({ uri }),
           });
           return callToolResultToPi(spilled);
         },
