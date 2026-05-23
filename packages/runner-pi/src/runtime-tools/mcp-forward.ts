@@ -73,11 +73,13 @@ export function callToolResultToPi(result: CallToolResult): PiToolResult {
 }
 
 /**
- * Event emitter signature shared with `api-call-bridge.ts`. Generic
- * shape so callers can route events into any sink (CloudEvents,
+ * Event emitter signature shared across the runner-pi runtime (the
+ * runtime-injected tools here, the `{ns}__api_call` bridge, the
+ * resource-spill helper, and the runtime container's `mcp/direct.ts`).
+ * Generic shape so callers can route events into any sink (CloudEvents,
  * console, in-memory test recorder, …).
  */
-export type RuntimeToolEventEmitter = (event: { type: string; [k: string]: unknown }) => void;
+export type RuntimeEventEmitter = (event: { type: string; [k: string]: unknown }) => void;
 
 export interface BuildRuntimeToolFactoriesOptions {
   /** MCP client connected to the sidecar advertising the runtime-injected tools. */
@@ -85,7 +87,7 @@ export interface BuildRuntimeToolFactoriesOptions {
   /** Run id stamped on `<tool>.called` / `<tool>.completed` events. */
   runId: string;
   /** Telemetry sink for `<tool>.called` / `<tool>.completed` events. */
-  emit: RuntimeToolEventEmitter;
+  emit: RuntimeEventEmitter;
   /**
    * Override the descriptor list. Defaults to {@link
    * RUNTIME_INJECTED_TOOLS} — the canonical set the platform prompt

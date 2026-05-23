@@ -33,6 +33,7 @@ import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { resolveSafePath } from "@appstrate/afps-runtime/resolvers";
 import type { CallToolResult } from "@appstrate/mcp-transport";
+import type { RuntimeEventEmitter } from "./mcp-forward.ts";
 
 /** Workspace-relative directory spilled resources land in. */
 const SPILL_DIR = "resources";
@@ -43,7 +44,7 @@ export interface ResourceSpillOptions {
   /** Tool call id — namespaces the spilled filename to avoid cross-call collisions. */
   toolCallId: string;
   /** Optional telemetry sink — emits `resource.spilled` per materialised file. */
-  emit?: (event: { type: string; [k: string]: unknown }) => void;
+  emit?: RuntimeEventEmitter;
   /** Run id stamped on the emitted event. */
   runId?: string;
   /**

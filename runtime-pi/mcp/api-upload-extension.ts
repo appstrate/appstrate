@@ -33,6 +33,7 @@
 import { Type } from "@mariozechner/pi-ai";
 import type { ExtensionAPI, ExtensionFactory } from "@mariozechner/pi-coding-agent";
 import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
+import type { RuntimeEventEmitter } from "@appstrate/runner-pi";
 import { McpApiUploadResolver } from "./api-upload-resolver.ts";
 import { UPLOAD_PROTOCOLS, type UploadProtocol } from "./upload-adapters/index.ts";
 
@@ -40,8 +41,6 @@ import { UPLOAD_PROTOCOLS, type UploadProtocol } from "./upload-adapters/index.t
 export const API_UPLOAD_TOOL_SUFFIX = "__api_upload";
 /** Suffix the sidecar appends to an integration namespace for its api_call tool. */
 export const API_CALL_TOOL_SUFFIX = "__api_call";
-
-export type ApiUploadEventEmitter = (event: { type: string; [k: string]: unknown }) => void;
 
 /**
  * `true` when an advertised sidecar tool name is a per-integration
@@ -82,7 +81,7 @@ export interface BuildApiUploadFactoryOptions {
   runId: string;
   /** Workspace root the `fromFile` path is resolved against (symlink-safe). */
   workspace: string;
-  emit: ApiUploadEventEmitter;
+  emit: RuntimeEventEmitter;
 }
 
 /**
@@ -182,9 +181,7 @@ function makeExtension(
 
         const result = await resolver.executeUpload(
           {
-            // `integrationId` carries the sibling `{ns}__api_call` tool name
-            // the resolver dispatches each chunk through.
-            integrationId: apiCallTool,
+            apiCallToolName: apiCallTool,
             target: args.target,
             fromFile: args.fromFile,
             uploadProtocol: protocol as UploadProtocol,

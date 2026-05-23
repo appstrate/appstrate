@@ -47,9 +47,9 @@ import { createConsoleSink } from "./run/sink.ts";
 import { resolveVerbosity } from "./run/format.ts";
 import {
   buildIntegrationResolver,
-  parseProviderMode,
+  parseIntegrationMode,
   ResolverConfigError,
-  type ProviderMode,
+  type IntegrationMode,
   type RemoteResolverInputs,
   type LocalResolverInputs,
 } from "./run/resolver.ts";
@@ -191,7 +191,7 @@ export async function runCommand(opts: RunCommandOptions): Promise<void> {
 
 async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   // ─── 1. Resolve provider mode + profile state ──────────────────────
-  const mode: ProviderMode = parseProviderMode(opts.providers);
+  const mode: IntegrationMode = parseIntegrationMode(opts.providers);
   const target = parseRunTarget(opts.bundle);
   // Auto-default to `preset` when the user runs an agent by id (the
   // "UI parity" path) AND has a remote provider context. Path mode
@@ -361,8 +361,9 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     integrationResolver,
     runId,
     workspace: workspaceDir,
-    emitProvider: () => {
-      // Same rationale as provider factories above — events swallowed in CLI.
+    emitEvent: () => {
+      // Events are swallowed in the CLI — the run-result aggregate is
+      // assembled from stdout CloudEvents, not from these telemetry hooks.
     },
   });
   if (!opts.json && apiCallFactories.length > 0) {
@@ -823,7 +824,7 @@ async function resolveProfileNameForPreset(opts: RunCommandOptions): Promise<str
 }
 
 async function buildResolverInputs(
-  mode: ProviderMode,
+  mode: IntegrationMode,
   opts: RunCommandOptions,
 ): Promise<RemoteResolverInputs | LocalResolverInputs | null> {
   if (mode === "none") return null;
@@ -1191,7 +1192,7 @@ export {
  * asserted without spinning up a real profile / browser / instance.
  */
 export async function _buildResolverInputsForTesting(
-  mode: ProviderMode,
+  mode: IntegrationMode,
   opts: RunCommandOptions,
 ): Promise<RemoteResolverInputs | LocalResolverInputs | null> {
   return buildResolverInputs(mode, opts);
