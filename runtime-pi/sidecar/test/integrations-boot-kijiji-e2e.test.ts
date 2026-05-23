@@ -4,7 +4,8 @@
  * Kijiji connect.tool (run-start) substrate — REAL spawned node MCP server e2e.
  *
  * Exercises the migrated `@default/kijiji` integration: the kijiji `server.js`
- * (the same Path-A cookie-jar CAS dance shipped at /implantation) spawned
+ * (the same Path-A cookie-jar CAS dance shipped as the @appstrate/kijiji
+ * system package) spawned
  * through the process runtime adapter, with a per-run CA + per-SNI MITM
  * listener, against a mocked Kijiji upstream (www / id).
  *
@@ -30,7 +31,7 @@
 
 import { describe, it, expect } from "bun:test";
 import * as path from "node:path";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { zipArtifact } from "@appstrate/core/zip";
 import { validateManifest } from "@appstrate/core/validation";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
@@ -67,15 +68,12 @@ const runE2e: typeof it = RUNNABLE ? it : (it.skip as unknown as typeof it);
 // Fixture bundle (the kijiji node connector, zipped on the fly)
 // ─────────────────────────────────────────────
 
-// Prefer the REAL migrated connector at /implantation/providers/kijiji so this
-// e2e exercises the actual `server.js` shipped there, not just a mirror. Falls
-// back to the in-repo mirror fixture when /implantation is absent (e.g. CI),
-// keeping the test self-contained. The two server.js are kept byte-identical.
-const REAL_CONNECTOR_DIR = "/Users/pierrecabriere/Dev/implantation/providers/kijiji";
-const MIRROR_DIR = path.join(import.meta.dir, "fixtures/kijiji");
-const FIXTURE_DIR = existsSync(path.join(REAL_CONNECTOR_DIR, "server.js"))
-  ? REAL_CONNECTOR_DIR
-  : MIRROR_DIR;
+// The kijiji connector ships as a system package; this e2e zips its real
+// `server.js` on the fly (same pattern as the other connect e2e fixtures).
+const FIXTURE_DIR = path.join(
+  import.meta.dir,
+  "../../../scripts/system-packages/integration-kijiji-1.2.0",
+);
 const INTEG_ID = "@default/kijiji";
 const NAMESPACE = "kijiji";
 
@@ -468,62 +466,10 @@ describe("kijiji connect.tool run-start — real spawned node MCP server (e2e)",
 // Migrated manifest contract (no spawn — always runs)
 // ─────────────────────────────────────────────
 
-describe("@default/kijiji integration manifest", () => {
+describe("@appstrate/kijiji integration manifest", () => {
   it("validates and declares the connect.tool run-start cookie contract", () => {
-    // Validate the migrated /implantation manifest in-place.
-    const manifestPath = path.join(
-      import.meta.dir,
-      "../../../../implantation/providers/kijiji/manifest.json",
-    );
-    let raw: unknown;
-    try {
-      raw = JSON.parse(readFileSync(manifestPath, "utf-8"));
-    } catch {
-      // /implantation is a sibling repo and may be absent in CI — fall back to
-      // the bundled fixture manifest so the contract assertion still runs.
-      raw = JSON.parse(
-        JSON.stringify({
-          $schema: "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
-          manifestVersion: "1.1",
-          type: "integration",
-          name: INTEG_ID,
-          version: "1.2.0",
-          displayName: "Kijiji",
-          server: { type: "node", entryPoint: "./server.js" },
-          auths: {
-            session: {
-              type: "custom",
-              required: true,
-              authorizedUris: AUTHORIZED_URIS,
-              credentials: {
-                schema: {
-                  type: "object",
-                  required: ["email", "password"],
-                  properties: {
-                    email: { type: "string" },
-                    password: { type: "string" },
-                  },
-                },
-              },
-              connect: {
-                tool: "login",
-                runAt: "run-start",
-                persistLoginSecret: true,
-                produces: ["kj_st", "kj_at", "kj_ct", "sub"],
-                reauthOn: [401],
-              },
-              delivery: {
-                http: { headerName: "Cookie", valueFrom: { template: COOKIE_TEMPLATE } },
-              },
-            },
-          },
-          tools: {
-            login: { requiredAuthKey: "session" },
-            whoami: { requiredAuthKey: "session" },
-          },
-        }),
-      );
-    }
+    // Validate the shipped system-package manifest in-place.
+    const raw: unknown = JSON.parse(readFileSync(path.join(FIXTURE_DIR, "manifest.json"), "utf-8"));
 
     const result = validateManifest(raw);
     expect(result.valid).toBe(true);
@@ -547,7 +493,7 @@ describe("@default/kijiji integration manifest", () => {
     };
 
     expect(manifest.type).toBe("integration");
-    expect(manifest.name).toBe(INTEG_ID);
+    expect(manifest.name).toBe("@appstrate/kijiji");
     expect(manifest.server.type).toBe("node");
 
     const session = manifest.auths.session!;
