@@ -201,6 +201,14 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
       PLATFORM_API_URL: platformApiUrl,
       RUN_TOKEN: spec.runToken,
     };
+    // This run is NOT containerized (process orchestrator), so its integrations
+    // must spawn as host subprocesses too. The sidecar selects its integration
+    // runtime purely from INTEGRATION_RUNTIME_ADAPTER (no auto-detection), so we
+    // pin it to mirror this orchestrator's RUN_ADAPTER. Respect an explicit
+    // operator override carried in from the environment.
+    if (!env.INTEGRATION_RUNTIME_ADAPTER) {
+      env.INTEGRATION_RUNTIME_ADAPTER = "process";
+    }
     if (spec.proxyUrl) env.PROXY_URL = spec.proxyUrl;
     if (spec.modelContextWindow != null) {
       env.MODEL_CONTEXT_WINDOW = String(spec.modelContextWindow);
@@ -223,6 +231,10 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     // Phase 1.4 — integrations the sidecar will spawn + multiplex.
     if (spec.integrations && spec.integrations.length > 0) {
       env.INTEGRATIONS_TO_SPAWN_JSON = JSON.stringify(spec.integrations);
+    }
+    // P4 — connect-run mode. Sidecar runs `runConnectOnce` then exits.
+    if (spec.connectLoginSpec) {
+      env.CONNECT_LOGIN_JSON = JSON.stringify(spec.connectLoginSpec);
     }
 
     const proc = Bun.spawn(["bun", "run", SIDECAR_ENTRY], {

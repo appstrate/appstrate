@@ -10,8 +10,8 @@
   "author": "Appstrate",
   "icon": "https://api.iconify.design/logos/monday-icon.svg",
   "keywords": ["project-management", "collaboration"],
-  "server": {
-    "type": "api_call"
+  "apiCall": {
+    "authKey": "primary"
   },
   "auths": {
     "primary": {

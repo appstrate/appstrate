@@ -22,8 +22,10 @@
  */
 
 import type {
+  HttpDeliveryPlan,
   IntegrationCredentialsPayload,
   IntegrationCredentialsWire,
+  ResolvedAuthCredentials,
 } from "@appstrate/connect/integration-credentials";
 import type { MitmCredentialSource } from "./integration-mitm-listener.ts";
 import { logger } from "./logger.ts";
@@ -57,6 +59,57 @@ export interface CreateIntegrationCredentialsSourceOptions {
 export interface IntegrationCredentialsSource extends MitmCredentialSource {
   /** Latest known payload — useful for telemetry/tests. */
   snapshot(): IntegrationCredentialsWire;
+  /**
+   * Connect-login primitive (P1) — make a freshly-captured login session
+   * injectable for the rest of the run. Replaces `payload.auths` with the
+   * single supplied `auth`, installs its rendered `plan` under
+   * `deliveryPlans[auth.authKey]`, and records the expiry (epoch ms or
+   * null) in `expiresAtEpochMs[auth.authKey]`. After this call the MITM
+   * listener injects the captured session header on every matching
+   * upstream request.
+   */
+  setSessionOutputs(auth: ResolvedAuthCredentials, plan: HttpDeliveryPlan): void;
+  /**
+   * Open the transient-input substitution window. While a non-null bag is
+   * active, the MITM listener substitutes `{{key}}` placeholders in the
+   * outbound URL / body / headers (proxy-side) so the integration's login
+   * tool never receives the raw secret. Fail-closed: an unresolved
+   * placeholder refuses the request rather than forwarding a literal.
+   *
+   * When `acquiringAuthKey` is supplied, that auth's delivery plan is
+   * SUPPRESSED from {@link MitmCredentialSource.deliveryPlans} for as long as
+   * the window is open. The session being (re-)acquired is not yet injectable —
+   * the login tool manages its own headers (e.g. a cookie jar carried across
+   * the login redirect chain). Without this, a stale prior session (present on
+   * a re-login) would be injected over, and its same-named header stripped
+   * from, the login tool's own request — clobbering the fresh login. Dependency
+   * auths (different keys) keep their plans and stay injectable during login.
+   */
+  setActiveInputs(bag: Record<string, string>, acquiringAuthKey?: string): void;
+  /** Close the substitution window. Idempotent. */
+  clearActiveInputs(): void;
+  /** The active transient-input bag, or `null` when the window is closed. */
+  activeInputs(): Record<string, string> | null;
+  /**
+   * connect.tool mid-run re-login (P3) — register a per-authKey re-login
+   * closure plus the upstream status codes that should trigger it. After this
+   * call, {@link shouldReauth} returns true for the registered statuses and
+   * {@link MitmCredentialSource.refreshOnUnauthorized} runs the handler (a
+   * fresh `runConnectLogin`) instead of the platform refresh POST. The handler
+   * resolves `true` on a fresh session so the listener retries the request.
+   */
+  setReloginHandler(
+    authKey: string,
+    handler: () => Promise<boolean>,
+    reauthStatuses: readonly number[],
+  ): void;
+  /**
+   * True when a re-login handler is registered for `authKey` AND `status` is
+   * one of its declared reauth statuses. The listener consults this to decide
+   * whether a non-401 (or 401-but-non-OAuth) response should trigger the
+   * connect.tool re-login retry path.
+   */
+  shouldReauth(authKey: string, status: number): boolean;
 }
 
 /**
@@ -70,16 +123,39 @@ export function createIntegrationCredentialsSource(
   const fetchFn = options.fetchFn ?? fetch;
   const minRefreshIntervalMs = options.minRefreshIntervalMs ?? 5_000;
   let payload = options.initialPayload;
+  // Transient-input substitution window (connect-login P1). Default null
+  // (closed) — the MITM listener behaves byte-identically to today unless
+  // a connect-login is actively in flight.
+  let activeInputBag: Record<string, string> | null = null;
+  // While a connect-login is in flight, the auth being (re-)acquired is not yet
+  // injectable — its delivery plan is suppressed from `deliveryPlans()` so the
+  // login tool's own headers (cookie jar) reach upstream untouched.
+  let acquiringAuthKey: string | null = null;
   // Last successful refresh per authKey (or "*" for full-payload refreshes).
   const lastRefreshAt = new Map<string, number>();
   // Coalesce concurrent refreshes for the same authKey.
   const inflight = new Map<string, Promise<boolean>>();
+  // connect.tool re-login handlers (P3) — keyed by authKey. When registered,
+  // `refreshOnUnauthorized` runs the handler instead of the platform POST.
+  const reloginHandlers = new Map<
+    string,
+    { handler: () => Promise<boolean>; reauthStatuses: ReadonlySet<number> }
+  >();
 
   const current = (): IntegrationCredentialsPayload => ({
     auths: [...payload.auths],
   });
 
-  const deliveryPlans = () => payload.deliveryPlans;
+  const deliveryPlans = () => {
+    // Suppress the in-flight acquired auth's plan so the login tool's own
+    // headers (cookie jar) survive the MITM and a stale prior session is not
+    // injected during a re-login.
+    if (acquiringAuthKey && acquiringAuthKey in payload.deliveryPlans) {
+      const { [acquiringAuthKey]: _suppressed, ...rest } = payload.deliveryPlans;
+      return rest;
+    }
+    return payload.deliveryPlans;
+  };
 
   const refreshOnUnauthorized = async (authKey: string): Promise<boolean> => {
     // Cheap dedup against retry storms. We don't track per-authKey
@@ -101,7 +177,12 @@ export function createIntegrationCredentialsSource(
     }
     const existing = inflight.get(authKey);
     if (existing) return existing;
-    const promise = doRefresh(authKey);
+    // connect.tool re-login (P3): when a handler is registered for this
+    // authKey, mint a fresh session via the login tool instead of POSTing the
+    // platform refresh endpoint. Reuses the same cooldown + in-flight dedup so
+    // a hot-looping reauth status can't hammer the login tool.
+    const relogin = reloginHandlers.get(authKey);
+    const promise = relogin ? runRelogin(authKey, relogin.handler) : doRefresh(authKey);
     inflight.set(authKey, promise);
     try {
       return await promise;
@@ -109,6 +190,30 @@ export function createIntegrationCredentialsSource(
       inflight.delete(authKey);
     }
   };
+
+  async function runRelogin(authKey: string, handler: () => Promise<boolean>): Promise<boolean> {
+    let ok = false;
+    try {
+      ok = await handler();
+    } catch (err) {
+      logger.warn("integration connect-login re-login handler failed", {
+        integrationId: options.integrationId,
+        authKey,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      ok = false;
+    }
+    // Stamp the cooldown on every attempt (success or failure) so a failing
+    // re-login can't be retried faster than the configured interval.
+    lastRefreshAt.set(authKey, Date.now());
+    if (ok) {
+      logger.info("integration connect-login session re-minted", {
+        integrationId: options.integrationId,
+        authKey,
+      });
+    }
+    return ok;
+  }
 
   async function doRefresh(authKey: string): Promise<boolean> {
     const url = `${options.platformApiUrl}/internal/integration-credentials/${options.integrationId}/refresh`;
@@ -170,11 +275,50 @@ export function createIntegrationCredentialsSource(
     return true;
   }
 
+  const setSessionOutputs = (auth: ResolvedAuthCredentials, plan: HttpDeliveryPlan): void => {
+    // Re-build the immutable wire payload around the freshly-captured
+    // session. The auth becomes the only injectable auth; its delivery
+    // plan + expiry are keyed by authKey so the planner / listener pick
+    // them up on the next request.
+    payload = {
+      auths: [auth],
+      deliveryPlans: { ...payload.deliveryPlans, [auth.authKey]: plan },
+      expiresAtEpochMs: {
+        ...payload.expiresAtEpochMs,
+        [auth.authKey]: auth.expiresAt ? Date.parse(auth.expiresAt) : null,
+      },
+    };
+    logger.info("integration session outputs installed", {
+      integrationId: options.integrationId,
+      authKey: auth.authKey,
+    });
+  };
+
   return {
     current,
     deliveryPlans,
     refreshOnUnauthorized,
     snapshot: () => payload,
+    setSessionOutputs,
+    setActiveInputs: (bag: Record<string, string>, acquiring?: string) => {
+      activeInputBag = bag;
+      acquiringAuthKey = acquiring ?? null;
+    },
+    clearActiveInputs: () => {
+      activeInputBag = null;
+      acquiringAuthKey = null;
+    },
+    activeInputs: () => activeInputBag,
+    setReloginHandler: (authKey, handler, reauthStatuses) => {
+      reloginHandlers.set(authKey, {
+        handler,
+        reauthStatuses: new Set(reauthStatuses),
+      });
+    },
+    shouldReauth: (authKey, status) => {
+      const entry = reloginHandlers.get(authKey);
+      return entry ? entry.reauthStatuses.has(status) : false;
+    },
   };
 }
 

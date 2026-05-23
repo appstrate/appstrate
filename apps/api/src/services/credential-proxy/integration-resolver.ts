@@ -40,9 +40,9 @@ import {
 } from "../integration-connections.ts";
 import { fetchIntegrationManifest } from "../integration-service.ts";
 import {
-  forceRefreshIntegrationConnection,
   buildIntegrationOAuthRefreshContext,
   decryptIntegrationConnectionFields,
+  forceRefreshIntegrationConnection,
 } from "../integration-token-refresh.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 
@@ -141,6 +141,8 @@ export async function forceRefreshIntegrationProxyCredentials(
   if (!refreshContext) return null;
 
   try {
+    // Re-acquisition = fast-path refresh_token POST. `authDef.type` is gated
+    // to oauth2 above, so this is the only refreshable auth.
     const refreshed = await forceRefreshIntegrationConnection(
       connection.id,
       input.integrationId,

@@ -121,10 +121,5 @@ export function createProcessIntegrationRuntimeAdapter(): IntegrationRuntimeAdap
 
 registerIntegrationRuntimeAdapter({
   id: "process",
-  // Lowest priority — the universal fallback. Always available, so
-  // it only wins when docker (and any future higher-priority adapter)
-  // probes false.
-  priority: 0,
-  isAvailable: async () => true,
   create: createProcessIntegrationRuntimeAdapter,
 });

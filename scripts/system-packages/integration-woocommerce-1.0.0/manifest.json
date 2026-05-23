@@ -5,13 +5,13 @@
   "name": "@appstrate/woocommerce",
   "version": "1.0.0",
   "displayName": "WooCommerce (API)",
-  "description": "E-commerce plugin for WordPress — manage products, orders, customers, and coupons",
+  "description": "E-commerce plugin for WordPress \u2014 manage products, orders, customers, and coupons",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "woo",
   "keywords": ["e-commerce", "retail"],
-  "server": {
-    "type": "api_call"
+  "apiCall": {
+    "authKey": "primary"
   },
   "auths": {
     "primary": {

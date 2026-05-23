@@ -1,6 +1,14 @@
 # dependencies (bun install)
 node_modules
 
+# Local-only test system-packages + the e2e tests that depend on them.
+# Kept on disk for local runs, deliberately out of the repo/PR (the shipped
+# tree only carries production packages like integration-kijiji-1.2.0).
+local-test-packages/
+apps/api/test/integration/services/connect-e2e.test.ts
+runtime-pi/sidecar/test/integrations-boot-connect-tool-e2e.test.ts
+runtime-pi/sidecar/test/run-connect-once-e2e.test.ts
+
 # output
 out
 dist

@@ -46,6 +46,8 @@ import {
 import { planCaBundle, type CaBundle } from "@appstrate/connect/proxy-ca-planner";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 
+import type { CredentialBundle } from "@appstrate/connect/connect";
+
 import { McpHost } from "./mcp-host.ts";
 import { logger } from "./logger.ts";
 import { createOpensslCertGenerator } from "./ca-cert-openssl.ts";
@@ -57,8 +59,10 @@ import {
 import {
   createIntegrationCredentialsSource,
   fetchInitialIntegrationCredentials,
+  type IntegrationCredentialsSource,
 } from "./integration-credentials-source.ts";
 import { createApiCallCredentialAdapter } from "./api-call-credentials.ts";
+import { runConnectLogin } from "./connect-login.ts";
 import {
   createApiCallToolDefs,
   type ApiCallIntegrationConfig,
@@ -67,6 +71,7 @@ import {
 import {
   selectIntegrationRuntimeAdapter,
   type IntegrationRuntimeAdapter,
+  type RuntimeAdapterRunContext,
   type RuntimeMitmContext,
 } from "./integration-runtime-adapter.ts";
 // Side-effect imports — each adapter module registers itself on load.
@@ -289,6 +294,270 @@ async function connectRemoteHttpIntegration(
 }
 
 /**
+ * P2 — mint a `connect.tool` + `runAt: "run-start"` session at boot.
+ *
+ * Called after the integration's MCP client connected, its MITM source was
+ * created, and `host.register(...)` ran. Drives `runConnectLogin` against the
+ * integration's `login` tool with the decrypted login secret substituted
+ * proxy-side. On success, the source now injects the captured session header
+ * for the rest of the run.
+ *
+ * Throws when `spec.connectLogin` is set but no MITM source exists (CA
+ * bring-up failed, or the spawn resolver didn't emit `httpDeliveryAuths`) or
+ * when the login tool itself fails — the caller maps the throw onto the boot
+ * result's `failed[]` list. Exported for unit testing; production callers go
+ * through {@link bootIntegrations}.
+ *
+ * `allocatedNamespace` is the value {@link McpHost.register} returned for this
+ * integration — the host may have disambiguated `spec.namespace` with a
+ * suffix, and {@link McpHost.getUpstreamClient} keys against the allocated
+ * form.
+ */
+export async function runConnectLoginHook(
+  spec: IntegrationSpawnSpec,
+  host: McpHost,
+  mitmSource: IntegrationCredentialsSource | null,
+  allocatedNamespace: string,
+): Promise<void> {
+  const cl = spec.connectLogin;
+  if (!cl) return;
+  if (!mitmSource) {
+    throw new Error(
+      "connect-login requires the integration's MITM credentials source, but none was created (CA bring-up may have failed)",
+    );
+  }
+  // Same opts drive the initial login AND every mid-run re-login. The
+  // namespace MUST be the ALLOCATED one (McpHost may have suffixed it) so the
+  // re-login closure resolves the same upstream client.
+  const loginOpts = {
+    host,
+    namespace: allocatedNamespace,
+    toolName: cl.toolName,
+    ...(cl.produces ? { produces: cl.produces } : {}),
+    inputs: cl.inputs,
+    source: mitmSource,
+    authKey: cl.authKey,
+    authType: cl.authType,
+    authorizedUris: cl.authorizedUris,
+    deliveryHttp: cl.deliveryHttp,
+  };
+  await runConnectLogin(loginOpts);
+  logger.info("integration connect-login session minted", {
+    integrationId: spec.integrationId,
+    namespace: spec.namespace,
+    authKey: cl.authKey,
+  });
+  // P3 — register the mid-run re-login handler. When an upstream returns one
+  // of `reauthOn` (default `[401]`) for a request using this session, the MITM
+  // listener calls `source.refreshOnUnauthorized(authKey)`, which routes to
+  // this handler (a fresh `runConnectLogin`) and retries the request once.
+  // A failed re-login resolves `false`, so the listener leaves the original
+  // failed upstream response untouched (no retry, no loop).
+  //
+  // CONCURRENCY REQUIREMENT: re-login calls the integration's `login` tool on
+  // the SAME MCP server that is mid-flight serving the data-tool call that
+  // triggered the reauth. A server that processes JSON-RPC strictly serially
+  // (e.g. a naive `for line in stdin` loop) deadlocks — it cannot read the
+  // `login` request until the parked data call returns, but that call is
+  // blocked waiting on this very re-login. Real MCP-SDK servers handle
+  // concurrent requests and are unaffected; hand-rolled stdio servers that
+  // declare `reauthOn` MUST serve requests concurrently.
+  mitmSource.setReloginHandler(
+    cl.authKey,
+    () =>
+      runConnectLogin(loginOpts)
+        .then(() => true)
+        .catch(() => false),
+    cl.reauthOn ?? [401],
+  );
+}
+
+/**
+ * Per-run CA materials shared by every MITM listener in a run: one CA per run,
+ * N listeners share the minter (which lazily mints per-SNI leaf certs). The CA
+ * cert PEM is materialised on local fs (mode 0444) so the runtime adapter can
+ * ferry it into each runner's trust store; the private key never leaves memory.
+ */
+interface RunCaMaterials {
+  bundle: CaBundle;
+  minter: CertMinter;
+  /** Local-fs path to the CA cert PEM. Unlinked by the caller at teardown. */
+  certHostPath: string;
+}
+
+/**
+ * Mint a per-run CA + cert minter and materialise the cert PEM on local fs.
+ * Shared by the agent-run path ({@link bootIntegrations}) and the ephemeral
+ * connect-run ({@link runConnectOnce}). The caller owns error handling:
+ * `bootIntegrations` degrades to env-delivery-only on failure, `runConnectOnce`
+ * lets the throw abort the connect.
+ */
+async function prepareRunCa(runId: string, dirPrefix: string): Promise<RunCaMaterials> {
+  const bundle = await planCaBundle({
+    runId,
+    // /run is tmpfs on the sidecar image. The planner ONLY uses tmpfsRoot for
+    // derived path strings inside the CaBundle return value — it doesn't write
+    // anything itself. We materialise the CA cert below at our own location.
+    tmpfsRoot: "/run/afps",
+    notAfterSeconds: 3600,
+    generator: createOpensslCertGenerator(),
+  });
+  const caDir = await mkdtemp(join(tmpdir(), dirPrefix));
+  const certHostPath = join(caDir, "ca.pem");
+  await writeFile(certHostPath, bundle.pems.caCertPem, { mode: 0o444 });
+  const minter = createCertMinter({
+    caCertPem: bundle.pems.caCertPem,
+    caKeyPem: bundle.pems.caKeyPem,
+  });
+  return { bundle, minter, certHostPath };
+}
+
+interface SpawnAndConnectResult {
+  /** The wrapped MCP client (already registered + pushed onto `clients`). */
+  wrapped: AppstrateMcpClient;
+  /** Namespace the host actually allocated (may be a disambiguated suffix). */
+  allocatedNs: string;
+  /** The MITM credentials source when a listener was created, else null. */
+  mitmSource: IntegrationCredentialsSource | null;
+  /** Tools added to the host by this registration. */
+  toolCount: number;
+  /** Adapter diagnostic id (e.g. container id), when the adapter reports one. */
+  diagnosticId?: string;
+}
+
+/**
+ * The SINGLE spawn→connect→register pipeline for a local (node|python|binary)
+ * integration MCP server. Used identically by the agent-run path
+ * ({@link bootIntegrations}) and the ephemeral connect-run
+ * ({@link runConnectOnce}); they diverge only in what they do AFTER (keep the
+ * session alive for the agent vs. run the login tool once + tear down).
+ *
+ * Steps: optional per-integration MITM listener (when `wantsMitm` && a CA is
+ * available) → fetch + extract the bundle → `adapter.spawn` → open the MCP
+ * client with a 30s connect race → `host.register`.
+ *
+ * Resources are pushed onto the caller-owned `clients` / `mitmListeners`
+ * collectors AS they are created, so a throw mid-pipeline still lets the
+ * caller's teardown reclaim a half-built listener/client (no leak on error).
+ */
+async function spawnAndConnectLocalIntegration(params: {
+  spec: IntegrationSpawnSpec;
+  runId: string;
+  adapter: IntegrationRuntimeAdapter;
+  adapterCtx: RuntimeAdapterRunContext;
+  host: McpHost;
+  bundleFetchOpts: BundleFetchOptions;
+  /** Per-run CA materials; null disables MITM (env-delivery-only path). */
+  ca: RunCaMaterials | null;
+  /** Front this integration with a MITM listener (also needs `ca`). */
+  wantsMitm: boolean;
+  /** Phase 4 tool-URL envelope to enforce; omitted for connect-run. */
+  toolUrlEnvelope?: IntegrationSpawnSpec["toolUrlEnvelope"];
+  /** Allowlist for `host.register`. `[]` exposes nothing (connect-run). */
+  allowedTools: string[] | undefined;
+  /** Log-message prefix: `"integration"` (agent-run) | `"connect-run"`. */
+  logLabel: string;
+  /** Caller-owned teardown collectors — appended to as resources are built. */
+  clients: AppstrateMcpClient[];
+  mitmListeners: MitmListenerHandle[];
+}): Promise<SpawnAndConnectResult> {
+  const { spec, runId, adapter, adapterCtx, host, bundleFetchOpts, ca, logLabel } = params;
+
+  let mitmCtx: RuntimeMitmContext | null = null;
+  let mitmSource: IntegrationCredentialsSource | null = null;
+  if (params.wantsMitm && ca !== null) {
+    const initial = await fetchInitialIntegrationCredentials(spec.integrationId, bundleFetchOpts);
+    const source = createIntegrationCredentialsSource({
+      integrationId: spec.integrationId,
+      platformApiUrl: bundleFetchOpts.platformApiUrl,
+      runToken: bundleFetchOpts.runToken,
+      initialPayload: initial,
+    });
+    mitmSource = source;
+    const listener = createIntegrationMitmListener({
+      caBundle: ca.bundle,
+      minter: ca.minter,
+      credentials: source,
+      // Adapter decides where the listener binds so the runner can reach it
+      // (0.0.0.0 for bridged networks, 127.0.0.1 when it shares the parent NS).
+      host: adapterCtx.listenerBindHost,
+      // Phase 4 — narrow the per-request URL surface to the union of
+      // agent-selected tool urlPatterns. `undefined` leaves enforcement on the
+      // per-auth `authorizedUris` only (connect-run omits it entirely).
+      ...(params.toolUrlEnvelope ? { toolUrlEnvelope: params.toolUrlEnvelope } : {}),
+      onEvent: (event) => {
+        // Filter sensitive bits (URLs may carry signed query params).
+        const safe =
+          event.kind === "request-forwarded"
+            ? {
+                kind: event.kind,
+                status: event.status,
+                authKey: event.authKey,
+                retried: event.retried,
+              }
+            : event;
+        logger.info(`${logLabel} mitm event`, { integrationId: spec.integrationId, ...safe });
+      },
+    });
+    await listener.ready;
+    params.mitmListeners.push(listener);
+    const port = listener.address().port;
+    mitmCtx = { proxyUrl: adapterCtx.proxyUrlFor(port), caCertHostPath: ca.certHostPath };
+    logger.info(`${logLabel} MITM listener ready`, {
+      integrationId: spec.integrationId,
+      localUrl: listener.proxyUrl(),
+      runnerProxyUrl: mitmCtx.proxyUrl,
+    });
+  }
+
+  const bytes = await fetchBundleBytes(spec.integrationId, bundleFetchOpts);
+  const root = await extractBundle(bytes, spec.namespace);
+
+  const spawnedIntegration = await adapter.spawn({
+    runId,
+    spec,
+    bundleRoot: root,
+    mitm: mitmCtx,
+    onStderrLine: (line) => {
+      logger.info(`${logLabel} integration stderr`, { integrationId: spec.integrationId, line });
+    },
+  });
+
+  const client = new Client({ name: "appstrate-sidecar-integration-host", version: "0.1.0" });
+  const connectPromise = client.connect(spawnedIntegration.transport);
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error("MCP connect timeout (30s)")), 30_000);
+    timeoutId.unref?.();
+  });
+  try {
+    await Promise.race([connectPromise, timeoutPromise]);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
+  const wrapped = wrapClient(client, spawnedIntegration.transport);
+  params.clients.push(wrapped);
+
+  const sizeBefore = host.size();
+  const allocatedNs = await host.register({
+    namespace: spec.namespace,
+    client: wrapped,
+    // Niveau 2 Phase 3 — McpHost.register filters `tools/list` to the agent's
+    // declared tools. `undefined` keeps the legacy "all tools allowed".
+    ...(params.allowedTools !== undefined ? { allowedTools: params.allowedTools } : {}),
+  });
+  const toolCount = host.size() - sizeBefore;
+
+  return {
+    wrapped,
+    allocatedNs,
+    mitmSource,
+    toolCount,
+    ...(spawnedIntegration.diagnosticId ? { diagnosticId: spawnedIntegration.diagnosticId } : {}),
+  };
+}
+
+/**
  * Spawn every integration in parallel, register the surviving ones on a
  * shared {@link McpHost}, and return the materialised tool list. The
  * function never throws — per-integration failures are captured in
@@ -337,7 +606,7 @@ export async function bootIntegrations(
   // `registerIntegrationRuntimeAdapter()`.
   let adapter: IntegrationRuntimeAdapter;
   try {
-    adapter = await selectIntegrationRuntimeAdapter();
+    adapter = selectIntegrationRuntimeAdapter();
   } catch (err) {
     logger.error("integration runtime adapter selection failed", {
       runId,
@@ -360,33 +629,15 @@ export async function bootIntegrations(
   const mitmIntegrationCount = specs.filter(
     (s) => s.httpDeliveryAuths && Object.keys(s.httpDeliveryAuths).length > 0,
   ).length;
-  let runCaBundle: CaBundle | null = null;
-  let runCaCertHostPath: string | null = null;
-  let sharedMinter: CertMinter | null = null;
+  let runCa: RunCaMaterials | null = null;
   if (mitmIntegrationCount > 0) {
     try {
-      runCaBundle = await planCaBundle({
-        runId,
-        // /run is tmpfs on the sidecar image. The planner ONLY uses
-        // tmpfsRoot for derived path strings inside the CaBundle return
-        // value — it doesn't write anything itself. We materialise the
-        // CA cert below at our own location.
-        tmpfsRoot: "/run/afps",
-        notAfterSeconds: 3600,
-        generator: createOpensslCertGenerator(),
-      });
-      const caDir = await mkdtemp(join(tmpdir(), "afps-ca-"));
-      runCaCertHostPath = join(caDir, "ca.pem");
-      await writeFile(runCaCertHostPath, runCaBundle.pems.caCertPem, { mode: 0o444 });
-      sharedMinter = createCertMinter({
-        caCertPem: runCaBundle.pems.caCertPem,
-        caKeyPem: runCaBundle.pems.caKeyPem,
-      });
+      runCa = await prepareRunCa(runId, "afps-ca-");
       logger.info("integration MITM CA minted", {
         runId,
         integrations: mitmIntegrationCount,
-        caCertPath: runCaCertHostPath,
-        notAfter: runCaBundle.notAfter,
+        caCertPath: runCa.certHostPath,
+        notAfter: runCa.bundle.notAfter,
       });
     } catch (err) {
       // CA bring-up failed — every MITM integration will fail to register
@@ -409,69 +660,82 @@ export async function bootIntegrations(
       // a TRUSTED in-process MCP server registered on the same McpHost as
       // every spawned/remote integration. One pipeline → McpHost owns the
       // namespacing (`{ns}__api_call`) + name validation. A pure-proxy
-      // integration (server.type api_call, no spec.manifest.server) does
+      // integration (an `apiCall` block, no `spec.manifest.server`) does
       // ONLY this and skips spawn.
-      let apiCallToolCount = 0;
-      if (spec.apiCall) {
+      // Attach the in-process generic `api_call` tool (provider→integration
+      // unification). Hosted on the McpHost OUTSIDE any spawned container, so
+      // the server code never sees the credential. Two modes:
+      //  - serverless (`apiCall` block, no `spec.manifest.server`):
+      //    api_call is the namespace's PRIMARY client (`intoNamespace` omitted).
+      //  - attachable (additive on a spawned/remote server): pass the server's
+      //    ALLOCATED namespace so `{ns}__api_call` sits next to the native
+      //    tools under one namespace; the spawned server stays primary.
+      // Returns the number of tools added so callers can sum the tool count.
+      const attachApiCall = async (intoNamespace?: string): Promise<number> => {
+        if (!spec.apiCall) return 0;
         if (!apiCallDeps) {
           logger.warn("integration declares api_call but sidecar has no proxy deps; skipping", {
             integrationId: spec.integrationId,
           });
-        } else {
-          const initial = await fetchInitialIntegrationCredentials(
-            spec.integrationId,
-            bundleFetchOpts,
-          );
-          const source = createIntegrationCredentialsSource({
-            integrationId: spec.integrationId,
-            platformApiUrl: bundleFetchOpts.platformApiUrl,
-            runToken: bundleFetchOpts.runToken,
-            initialPayload: initial,
-          });
-          const credAdapter = createApiCallCredentialAdapter({
-            source,
-            authKey: spec.apiCall.authKey,
-            authorizedUris: spec.apiCall.authorizedUris,
-            ...(spec.apiCall.allowAllUris ? { allowAllUris: true } : {}),
-          });
-          const integ: ApiCallIntegrationConfig = {
-            namespace: spec.namespace, // McpHost.register normalises it
-            integrationId: spec.integrationId,
-            fetchCredentials: credAdapter.fetchCredentials,
-            refreshCredentials: credAdapter.refreshCredentials,
-            // Resumable-upload protocols the manifest declared (plumbed via
-            // the spawn resolver). When non-empty the factory also emits an
-            // `api_upload` tool; the agent-side resolver drives it.
-            ...(spec.apiCall.uploadProtocols && spec.apiCall.uploadProtocols.length > 0
-              ? { uploadProtocols: spec.apiCall.uploadProtocols }
-              : {}),
-          };
-          const defs = createApiCallToolDefs(integ, apiCallDeps);
-          const pair = await createInProcessPair(defs, {
-            serverInfo: { name: `appstrate-api-call-${spec.integrationId}`, version: "1" },
-          });
-          const wrapped = wrapClient(pair.client, { close: () => pair.close() });
-          const sizeBefore = host.size();
-          await host.register({
-            namespace: spec.namespace,
-            client: wrapped,
-            trusted: true,
-            allowedTools: defs.map((d) => d.descriptor.name),
-          });
-          apiCallToolCount = host.size() - sizeBefore;
-          clients.push(wrapped);
-          logger.info("integration api_call registered (in-process)", {
-            integrationId: spec.integrationId,
-            namespace: spec.namespace,
-            authKey: spec.apiCall.authKey,
-            toolCount: apiCallToolCount,
-          });
+          return 0;
         }
-      }
+        const initial = await fetchInitialIntegrationCredentials(
+          spec.integrationId,
+          bundleFetchOpts,
+        );
+        const source = createIntegrationCredentialsSource({
+          integrationId: spec.integrationId,
+          platformApiUrl: bundleFetchOpts.platformApiUrl,
+          runToken: bundleFetchOpts.runToken,
+          initialPayload: initial,
+        });
+        const credAdapter = createApiCallCredentialAdapter({
+          source,
+          authKey: spec.apiCall.authKey,
+          authorizedUris: spec.apiCall.authorizedUris,
+          ...(spec.apiCall.allowAllUris ? { allowAllUris: true } : {}),
+        });
+        const integ: ApiCallIntegrationConfig = {
+          namespace: spec.namespace, // McpHost.register normalises it
+          integrationId: spec.integrationId,
+          fetchCredentials: credAdapter.fetchCredentials,
+          refreshCredentials: credAdapter.refreshCredentials,
+          // Resumable-upload protocols the manifest declared (plumbed via
+          // the spawn resolver). When non-empty the factory also emits an
+          // `api_upload` tool; the agent-side resolver drives it.
+          ...(spec.apiCall.uploadProtocols && spec.apiCall.uploadProtocols.length > 0
+            ? { uploadProtocols: spec.apiCall.uploadProtocols }
+            : {}),
+        };
+        const defs = createApiCallToolDefs(integ, apiCallDeps);
+        const pair = await createInProcessPair(defs, {
+          serverInfo: { name: `appstrate-api-call-${spec.integrationId}`, version: "1" },
+        });
+        const wrapped = wrapClient(pair.client, { close: () => pair.close() });
+        const sizeBefore = host.size();
+        await host.register({
+          namespace: spec.namespace,
+          client: wrapped,
+          trusted: true,
+          allowedTools: defs.map((d) => d.descriptor.name),
+          ...(intoNamespace ? { intoNamespace } : {}),
+        });
+        const count = host.size() - sizeBefore;
+        clients.push(wrapped);
+        logger.info("integration api_call registered (in-process)", {
+          integrationId: spec.integrationId,
+          namespace: intoNamespace ?? spec.namespace,
+          authKey: spec.apiCall.authKey,
+          attached: intoNamespace !== undefined,
+          toolCount: count,
+        });
+        return count;
+      };
 
-      // Serverless integration (api_call-only, no MCP server) — nothing to
-      // spawn; the in-process api_call server above is its entire surface.
+      // Serverless integration (api_call-only, no MCP server) — the in-process
+      // api_call server is its entire surface (registered as the primary).
       if (!spec.manifest.server) {
+        const apiCallToolCount = await attachApiCall();
         spawned.push({
           integrationId: spec.integrationId,
           namespace: spec.namespace,
@@ -492,7 +756,7 @@ export async function bootIntegrations(
       if (server.type === "http") {
         const { client, authKey } = await connectRemoteHttpIntegration(spec, bundleFetchOpts);
         const sizeBefore = host.size();
-        await host.register({
+        const allocatedNs = await host.register({
           namespace: spec.namespace,
           client,
           // Phase 3 tool allowlist still applies — McpHost filters
@@ -501,140 +765,82 @@ export async function bootIntegrations(
         });
         const added = host.size() - sizeBefore;
         clients.push(client);
+        // Attach the in-process api_call tool alongside the remote MCP's tools.
+        const apiCallAdded = await attachApiCall(allocatedNs);
         spawned.push({
           integrationId: spec.integrationId,
           namespace: spec.namespace,
-          toolCount: added,
+          toolCount: added + apiCallAdded,
         });
         logger.info("integration registered (remote http)", {
           integrationId: spec.integrationId,
           namespace: spec.namespace,
           serverUrl: server.url,
           authKey,
-          toolCount: added,
+          toolCount: added + apiCallAdded,
         });
         continue;
       }
 
+      // ─── SINGLE spawn→connect→register pipeline (shared with connect-run) ──
+      // MITM is created only when the CA came up AND this integration declared
+      // `delivery.http`. `mitmSource` is returned so the connect-login hook
+      // (run-start acquisition, below) drives `setSessionOutputs` on the same
+      // source the MITM listener reads from.
       const wantsMitm =
         spec.httpDeliveryAuths !== undefined && Object.keys(spec.httpDeliveryAuths).length > 0;
-
-      // Per-integration MITM listener (only when the CA came up + the
-      // integration declared `delivery.http`).
-      let listener: MitmListenerHandle | null = null;
-      let mitmCtx: RuntimeMitmContext | null = null;
-      if (
-        wantsMitm &&
-        sharedMinter !== null &&
-        runCaBundle !== null &&
-        runCaCertHostPath !== null
-      ) {
-        const initial = await fetchInitialIntegrationCredentials(
-          spec.integrationId,
-          bundleFetchOpts,
-        );
-        const source = createIntegrationCredentialsSource({
-          integrationId: spec.integrationId,
-          platformApiUrl: bundleFetchOpts.platformApiUrl,
-          runToken: bundleFetchOpts.runToken,
-          initialPayload: initial,
-        });
-        listener = createIntegrationMitmListener({
-          caBundle: runCaBundle,
-          minter: sharedMinter,
-          credentials: source,
-          // Adapter decides where the listener should bind so the
-          // runner can reach it (0.0.0.0 for bridged networks, 127.0.0.1
-          // when the runner shares the parent's NS).
-          host: adapterCtx.listenerBindHost,
-          // Phase 4 — narrow the per-request URL surface to the union
-          // of agent-selected tool urlPatterns. `undefined` (legacy or
-          // under-declared tools) leaves enforcement on the per-auth
-          // `authorizedUris` only.
-          ...(spec.toolUrlEnvelope ? { toolUrlEnvelope: spec.toolUrlEnvelope } : {}),
-          onEvent: (event) => {
-            // Filter sensitive bits (URLs may carry signed query params).
-            const safe =
-              event.kind === "request-forwarded"
-                ? {
-                    kind: event.kind,
-                    status: event.status,
-                    authKey: event.authKey,
-                    retried: event.retried,
-                  }
-                : event;
-            logger.info("integration mitm event", {
-              integrationId: spec.integrationId,
-              ...safe,
-            });
-          },
-        });
-        await listener.ready;
-        mitmListeners.push(listener);
-        const port = listener.address().port;
-        const runnerProxyUrl = adapterCtx.proxyUrlFor(port);
-        mitmCtx = {
-          proxyUrl: runnerProxyUrl,
-          caCertHostPath: runCaCertHostPath,
-        };
-        logger.info("integration MITM listener ready", {
-          integrationId: spec.integrationId,
-          localUrl: listener.proxyUrl(),
-          runnerProxyUrl,
-        });
-      }
-
-      const bytes = await fetchBundleBytes(spec.integrationId, bundleFetchOpts);
-      const root = await extractBundle(bytes, spec.namespace);
-
-      const spawnedIntegration = await adapter.spawn({
-        runId,
+      const {
+        allocatedNs,
+        mitmSource,
+        toolCount: added,
+        diagnosticId,
+      } = await spawnAndConnectLocalIntegration({
         spec,
-        bundleRoot: root,
-        mitm: mitmCtx,
-        onStderrLine: (line) => {
-          logger.info("integration stderr", { integrationId: spec.integrationId, line });
-        },
+        runId,
+        adapter,
+        adapterCtx,
+        host,
+        bundleFetchOpts,
+        ca: runCa,
+        wantsMitm,
+        ...(spec.toolUrlEnvelope ? { toolUrlEnvelope: spec.toolUrlEnvelope } : {}),
+        allowedTools: spec.toolAllowlist,
+        logLabel: "integration",
+        clients,
+        mitmListeners,
       });
 
-      const client = new Client({ name: "appstrate-sidecar-integration-host", version: "0.1.0" });
-      const connectPromise = client.connect(spawnedIntegration.transport);
-      let timeoutId: ReturnType<typeof setTimeout> | undefined;
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        timeoutId = setTimeout(() => reject(new Error("MCP connect timeout (30s)")), 30_000);
-        timeoutId.unref?.();
-      });
-      try {
-        await Promise.race([connectPromise, timeoutPromise]);
-      } finally {
-        if (timeoutId !== undefined) clearTimeout(timeoutId);
+      // ─── P2 — connect.tool `runAt: "run-start"` session acquisition ───
+      // Only the login secret was stored at dashboard connect; mint the
+      // session now by running the integration's login tool. The secret is
+      // substituted proxy-side (never handed to tool code) and the captured
+      // session header becomes injectable for the rest of the run via
+      // `source.setSessionOutputs` (called inside runConnectLogin).
+      //
+      // A failure here throws into the outer catch → the integration lands
+      // on `failed` and is NOT pushed to `spawned`; the agent gets a
+      // tool-error if it tries to use it rather than a silent half-session.
+      // The connect-login tool is reached via the ALLOCATED namespace (the
+      // host may have disambiguated `spec.namespace` with a suffix).
+      if (spec.connectLogin) {
+        await runConnectLoginHook(spec, host, mitmSource, allocatedNs);
       }
-      const wrapped = wrapClient(client, spawnedIntegration.transport);
-      const sizeBefore = host.size();
-      await host.register({
-        namespace: spec.namespace,
-        client: wrapped,
-        // Niveau 2 Phase 3 — pass the agent-declared tool allowlist
-        // through so McpHost.register filters `tools/list` to only the
-        // tools the agent declared in its `dependencies.integrations[id].tools[]`.
-        // `undefined` keeps the legacy "all tools allowed" semantics.
-        ...(spec.toolAllowlist ? { allowedTools: spec.toolAllowlist } : {}),
-      });
-      const added = host.size() - sizeBefore;
-      clients.push(wrapped);
+
+      // Attach the in-process api_call tool alongside the spawned server's
+      // native tools, under the same (allocated) namespace.
+      const apiCallAdded = await attachApiCall(allocatedNs);
+
       spawned.push({
         integrationId: spec.integrationId,
         namespace: spec.namespace,
-        toolCount: added,
+        toolCount: added + apiCallAdded,
       });
       logger.info("integration registered", {
         integrationId: spec.integrationId,
         namespace: spec.namespace,
         adapter: adapter.id,
-        ...(spawnedIntegration.diagnosticId
-          ? { diagnosticId: spawnedIntegration.diagnosticId }
-          : {}),
-        toolCount: added,
+        ...(diagnosticId ? { diagnosticId } : {}),
+        toolCount: added + apiCallAdded,
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -687,13 +893,152 @@ export async function bootIntegrations(
           // ignore — listener already torn down via SIGTERM
         }
       }
-      if (runCaCertHostPath) {
+      if (runCa) {
         try {
-          await rm(runCaCertHostPath, { force: true });
+          await rm(runCa.certHostPath, { force: true });
         } catch {
           // ignore — best-effort
         }
       }
     },
   };
+}
+
+/**
+ * P4 — ephemeral connect-run (`runAt: "link"`). Spawn ONE integration's MCP
+ * server, mint a per-run CA + MITM listener for it, run its `login` MCP tool
+ * exactly ONCE via {@link runConnectLogin} (the secret substituted proxy-side),
+ * capture the resulting {@link CredentialBundle}, then tear EVERYTHING down.
+ *
+ * This is the sidecar-side primitive the platform's `ConnectToolExecutor`
+ * binding drives in connect mode (see `runtime-pi/sidecar/server.ts`). It
+ * reuses the SAME building blocks `bootIntegrations` uses for the agent-run
+ * path (runtime adapter spawn + per-run CA/MITM source + McpHost register +
+ * `runConnectLogin`) but for a single integration, and RETURNS the bundle
+ * rather than installing a long-lived session for an agent run.
+ *
+ * Unlike the agent-run path, `runConnectOnce` THROWS on any failure (no
+ * `failed[]` accumulation) — the caller maps the throw onto the connect-run's
+ * error result. The teardown (`finally`) runs even on error so no listener /
+ * subprocess / CA file leaks past this primitive.
+ *
+ * The bundle's `outputs` are never logged — the caller transports them on the
+ * sentinel line only.
+ */
+export async function runConnectOnce(
+  spec: IntegrationSpawnSpec,
+  bundleFetchOpts: BundleFetchOptions,
+): Promise<CredentialBundle> {
+  const cl = spec.connectLogin;
+  if (!cl) {
+    throw new Error("runConnectOnce: spec has no connectLogin block");
+  }
+  const server = spec.manifest.server;
+  if (!server) {
+    throw new Error("runConnectOnce: spec has no manifest.server to spawn");
+  }
+  if (server.type === "http") {
+    throw new Error("runConnectOnce: remote http MCP integrations cannot run connect-login");
+  }
+
+  const runId = process.env.RUN_ID ?? `nosrunid-${randomUUID().slice(0, 8)}`;
+
+  const adapter = selectIntegrationRuntimeAdapter();
+  const adapterCtx = await adapter.prepare(runId);
+
+  const host = new McpHost({
+    onLog: (event) =>
+      logger.info("connect-run host event", {
+        source: event.source,
+        level: event.level,
+        data: event.data,
+      }),
+  });
+
+  const clients: AppstrateMcpClient[] = [];
+  const mitmListeners: MitmListenerHandle[] = [];
+  let runCaCertHostPath: string | null = null;
+
+  try {
+    // Per-run CA — connect-login ALWAYS needs the MITM (the login secret is
+    // substituted proxy-side; there is no plaintext-arg path), so unlike
+    // `bootIntegrations` we let a CA failure throw rather than degrade.
+    const ca = await prepareRunCa(runId, "afps-ca-connect-");
+    runCaCertHostPath = ca.certHostPath;
+
+    // Same spawn→connect→register pipeline the agent-run path uses, but
+    // `allowedTools: []` (connect-run never serves an agent; register() is only
+    // needed so `getUpstreamClient` resolves the login tool) and `wantsMitm`
+    // forced on. The initial credential payload is a placeholder session with
+    // an empty value — the real session is what `runConnectLogin` captures.
+    const { allocatedNs, mitmSource } = await spawnAndConnectLocalIntegration({
+      spec,
+      runId,
+      adapter,
+      adapterCtx,
+      host,
+      bundleFetchOpts,
+      ca,
+      wantsMitm: true,
+      allowedTools: [],
+      logLabel: "connect-run",
+      clients,
+      mitmListeners,
+    });
+    if (!mitmSource) {
+      // Unreachable: wantsMitm=true + ca!=null always builds the source. Guard
+      // narrows the type and fails loudly if that invariant ever breaks.
+      throw new Error("runConnectOnce: MITM source was not created");
+    }
+
+    // Run the login tool ONCE and capture the bundle. The secret in
+    // `cl.inputs` is substituted proxy-side by the MITM source.
+    const bundle = await runConnectLogin({
+      host,
+      namespace: allocatedNs,
+      toolName: cl.toolName,
+      ...(cl.produces ? { produces: cl.produces } : {}),
+      inputs: cl.inputs,
+      source: mitmSource,
+      authKey: cl.authKey,
+      authType: cl.authType,
+      authorizedUris: cl.authorizedUris,
+      deliveryHttp: cl.deliveryHttp,
+    });
+
+    logger.info("connect-run captured session", {
+      integrationId: spec.integrationId,
+      authKey: cl.authKey,
+      outputCount: Object.keys(bundle.outputs).length,
+    });
+
+    return bundle;
+  } finally {
+    await host.dispose().catch(() => {});
+    for (const c of clients) {
+      await c.close().catch(() => {});
+    }
+    try {
+      await adapter.shutdown();
+    } catch (err) {
+      logger.warn("connect-run adapter shutdown failed", {
+        adapter: adapter.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    for (const l of mitmListeners) {
+      try {
+        await l.close();
+      } catch {
+        // ignore — listener already torn down
+      }
+    }
+    if (runCaCertHostPath) {
+      try {
+        await rm(runCaCertHostPath, { force: true });
+      } catch {
+        // ignore — best-effort
+      }
+    }
+  }
 }

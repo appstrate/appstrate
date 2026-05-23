@@ -518,6 +518,197 @@ describe("MITM listener — 401 refresh + retry", () => {
   });
 });
 
+describe("MITM listener — connect.tool re-login (P3)", () => {
+  runIfOpenssl(
+    "re-logins + retries once when an upstream status matches reauthOn (custom auth, no retry401)",
+    async () => {
+      const bundle = await makeCaBundle();
+      const minter = createCertMinter({
+        caCertPem: bundle.pems.caCertPem,
+        caKeyPem: bundle.pems.caKeyPem,
+      });
+
+      let upstreamCallNo = 0;
+      let reauthCalls = 0;
+      let activeToken = "stale";
+
+      // `custom` auth → planMitmAction sets retry401 = false. The reauth path
+      // is driven purely by `shouldReauth`.
+      const dp: Record<string, HttpDeliveryPlan> = {
+        vendor: plan("X-Session", activeToken, ""),
+      };
+      const pl = payload("vendor", "custom", { session: activeToken }, [
+        "https://api.test.local/**",
+      ]);
+
+      const creds: MitmCredentialSource = {
+        current: () => pl,
+        deliveryPlans: () => dp,
+        shouldReauth: (authKey, status) => authKey === "vendor" && status === 401,
+        async refreshOnUnauthorized(authKey) {
+          reauthCalls += 1;
+          expect(authKey).toBe("vendor");
+          // Simulate runConnectLogin → setSessionOutputs swapping the plan.
+          activeToken = "fresh";
+          dp.vendor = plan("X-Session", activeToken, "");
+          return true;
+        },
+      };
+
+      const recorded = makeRecordingFetch(async (_url, init) => {
+        upstreamCallNo += 1;
+        const headers = init.headers as Headers;
+        const session = headers.get("x-session");
+        if (session === "fresh") {
+          return new Response(`{"ok":true}`, {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(`{"err":"session_expired"}`, { status: 401 });
+      });
+
+      const listener = createIntegrationMitmListener({
+        caBundle: bundle,
+        minter,
+        credentials: creds,
+        fetch: recorded.fetch,
+      });
+      await listener.ready;
+      try {
+        const addr = listener.address();
+        const out = await drivenFetch({
+          listenerPort: addr.port,
+          sni: "api.test.local",
+          caCertPem: bundle.pems.caCertPem,
+          method: "GET",
+          path: "/v1/items",
+          headers: {},
+        });
+        expect(out.status).toBe(200);
+        // At-most-one retry: exactly two upstream calls, one reauth.
+        expect(upstreamCallNo).toBe(2);
+        expect(reauthCalls).toBe(1);
+      } finally {
+        await listener.close();
+      }
+    },
+  );
+
+  runIfOpenssl("does not retry when the status is outside reauthOn", async () => {
+    const bundle = await makeCaBundle();
+    const minter = createCertMinter({
+      caCertPem: bundle.pems.caCertPem,
+      caKeyPem: bundle.pems.caKeyPem,
+    });
+
+    let upstreamCallNo = 0;
+    let reauthCalls = 0;
+
+    const dp: Record<string, HttpDeliveryPlan> = {
+      vendor: plan("X-Session", "stale", ""),
+    };
+    const pl = payload("vendor", "custom", { session: "stale" }, ["https://api.test.local/**"]);
+
+    const creds: MitmCredentialSource = {
+      current: () => pl,
+      deliveryPlans: () => dp,
+      // Only 401 re-triggers; the upstream returns 403 below.
+      shouldReauth: (authKey, status) => authKey === "vendor" && status === 401,
+      async refreshOnUnauthorized() {
+        reauthCalls += 1;
+        return true;
+      },
+    };
+
+    const recorded = makeRecordingFetch(async () => {
+      upstreamCallNo += 1;
+      return new Response(`{"err":"forbidden"}`, { status: 403 });
+    });
+
+    const listener = createIntegrationMitmListener({
+      caBundle: bundle,
+      minter,
+      credentials: creds,
+      fetch: recorded.fetch,
+    });
+    await listener.ready;
+    try {
+      const addr = listener.address();
+      const out = await drivenFetch({
+        listenerPort: addr.port,
+        sni: "api.test.local",
+        caCertPem: bundle.pems.caCertPem,
+        method: "GET",
+        path: "/v1/items",
+        headers: {},
+      });
+      expect(out.status).toBe(403);
+      expect(upstreamCallNo).toBe(1);
+      expect(reauthCalls).toBe(0);
+    } finally {
+      await listener.close();
+    }
+  });
+
+  runIfOpenssl("leaves the original failed response when re-login fails (no loop)", async () => {
+    const bundle = await makeCaBundle();
+    const minter = createCertMinter({
+      caCertPem: bundle.pems.caCertPem,
+      caKeyPem: bundle.pems.caKeyPem,
+    });
+
+    let upstreamCallNo = 0;
+    let reauthCalls = 0;
+
+    const dp: Record<string, HttpDeliveryPlan> = {
+      vendor: plan("X-Session", "stale", ""),
+    };
+    const pl = payload("vendor", "custom", { session: "stale" }, ["https://api.test.local/**"]);
+
+    const creds: MitmCredentialSource = {
+      current: () => pl,
+      deliveryPlans: () => dp,
+      shouldReauth: (authKey, status) => authKey === "vendor" && status === 401,
+      async refreshOnUnauthorized() {
+        reauthCalls += 1;
+        return false; // re-login failed → no retry
+      },
+    };
+
+    const recorded = makeRecordingFetch(async () => {
+      upstreamCallNo += 1;
+      return new Response(`{"err":"session_expired"}`, { status: 401 });
+    });
+
+    const listener = createIntegrationMitmListener({
+      caBundle: bundle,
+      minter,
+      credentials: creds,
+      fetch: recorded.fetch,
+    });
+    await listener.ready;
+    try {
+      const addr = listener.address();
+      const out = await drivenFetch({
+        listenerPort: addr.port,
+        sni: "api.test.local",
+        caCertPem: bundle.pems.caCertPem,
+        method: "GET",
+        path: "/v1/items",
+        headers: {},
+      });
+      expect(out.status).toBe(401);
+      // refreshOnUnauthorized was attempted once, but the failed result means
+      // the original 401 is returned and there is no second upstream call.
+      expect(reauthCalls).toBe(1);
+      expect(upstreamCallNo).toBe(1);
+    } finally {
+      await listener.close();
+    }
+  });
+});
+
 describe("MITM listener — telemetry", () => {
   runIfOpenssl("emits connect-accepted and request-forwarded events", async () => {
     const bundle = await makeCaBundle();
@@ -663,6 +854,67 @@ describe("MITM listener — tool URL envelope (Phase 4)", () => {
       await listener.close();
     }
   });
+
+  runIfOpenssl(
+    "bypasses the envelope while a connect-login is in flight (activeInputs set)",
+    async () => {
+      // Regression: the tool-URL envelope is derived from the AGENT's selected
+      // data tools. The connect-login (`login`) tool runs at run-start and walks
+      // its OWN URLs (csrf → signin → CAS → session) that the data-tool envelope
+      // deliberately excludes. Enforcing the envelope during the login phase
+      // 403'd the very first login request and the session was never minted.
+      // While `activeInputs()` is set, the envelope must not apply — the per-auth
+      // `authorizedUris` floor remains the bound.
+      const bundle = await makeCaBundle();
+      const minter = createCertMinter({
+        caCertPem: bundle.pems.caCertPem,
+        caKeyPem: bundle.pems.caKeyPem,
+      });
+
+      const pl = payload("vendor", "custom", {}, ["https://api.test.local/**"]);
+      const dp: Record<string, HttpDeliveryPlan> = {};
+      const creds: MitmCredentialSource = {
+        current: () => pl,
+        deliveryPlans: () => dp,
+        // Connect-login window open: the login tool's outbound requests carry
+        // the substitutable inputs and must not be gated by the agent envelope.
+        activeInputs: () => ({ email: "u@example.com", password: "secret" }),
+      };
+
+      const upstreamCalls: string[] = [];
+      const recordedFetch = (async (input: string | URL | Request) => {
+        upstreamCalls.push(typeof input === "string" ? input : (input as Request).url);
+        return new Response("ok", { status: 200 });
+      }) as unknown as typeof fetch;
+
+      const listener = createIntegrationMitmListener({
+        caBundle: bundle,
+        minter,
+        credentials: creds,
+        fetch: recordedFetch,
+        // Envelope only admits the data tool's endpoint — NOT the login URLs.
+        toolUrlEnvelope: [{ pattern: "https://api.test.local/v1/session" }],
+      });
+      await listener.ready;
+
+      try {
+        const addr = listener.address();
+        // A login-phase request to an off-envelope URL must still be forwarded.
+        const out = await drivenFetch({
+          listenerPort: addr.port,
+          sni: "api.test.local",
+          caCertPem: bundle.pems.caCertPem,
+          method: "GET",
+          path: "/api/auth/csrf",
+          headers: {},
+        });
+        expect(out.status).toBe(200);
+        expect(upstreamCalls).toEqual(["https://api.test.local/api/auth/csrf"]);
+      } finally {
+        await listener.close();
+      }
+    },
+  );
 
   runIfOpenssl("refuses when URL matches but method is outside the allowed set", async () => {
     const bundle = await makeCaBundle();

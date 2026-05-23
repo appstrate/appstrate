@@ -29,24 +29,14 @@ import { z } from "zod";
 import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { applicationPackages, packages } from "@appstrate/db/schema";
-import { getEnv } from "@appstrate/env";
-import { decodeJwtPayload } from "@appstrate/core/jwt";
 import {
-  initiateIntegrationOAuth,
   handleIntegrationOAuthCallback,
   OAuthCallbackError,
   type IntegrationOAuthCallbackResult,
 } from "@appstrate/connect";
 import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
-import {
-  ApiError,
-  forbidden,
-  invalidRequest,
-  internalError,
-  notFound,
-  parseBody,
-} from "../lib/errors.ts";
+import { ApiError, invalidRequest, internalError, notFound, parseBody } from "../lib/errors.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { popupHtmlClose, popupHtmlError } from "../lib/oauth-popup-html.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
@@ -54,20 +44,19 @@ import { getActor } from "../lib/actor.ts";
 import { getAppScope } from "../lib/scope.ts";
 import { recordAuditFromContext } from "./../services/audit.ts";
 import { installPackage, uninstallPackage } from "../services/application-packages.ts";
-import { listIntegrations, getIntegration } from "../services/integration-service.ts";
+import { listIntegrations } from "../services/integration-service.ts";
 import {
   assertIsIntegration,
-  connectIntegrationWithFields,
   deleteIntegrationOAuthClient,
-  extractIdentity,
   getIntegrationAuthStatuses,
   getIntegrationOAuthClient,
   type IntegrationOAuthClient,
   listIntegrationConnections,
   readIntegrationAuth,
-  saveIntegrationConnection,
   upsertIntegrationOAuthClient,
 } from "../services/integration-connections.ts";
+import { resolveStrategy } from "../services/connect/registry.ts";
+import { createConnectRunExecutor } from "../services/connect/connect-run-launcher.ts";
 import {
   computeRequiredScopes,
   getCurrentScopesGranted,
@@ -249,107 +238,27 @@ export function createIntegrationsRouter() {
       return c.html(popupHtmlError(`Error: ${msg}`));
     }
 
-    // Persist the connection. Identity extraction reads the manifest's
-    // `extractTokenIdentity` mapping against the raw token response —
-    // some IdPs return identity claims directly in the token bag (e.g.
-    // Slack's `team`/`user` keys), others only in `/userinfo` (which
-    // belongs in a later phase — for now we trust whatever the token
-    // response surfaces).
+    // Persist via the OAuth2 strategy. The exchange above reconstructed the
+    // actor/scope context from the signed state; the strategy does identity
+    // extraction (token response + id_token + userinfo) + persist through the
+    // single credential writer.
     try {
       const scope = { orgId: result.orgId, applicationId: result.applicationId };
-      const manifest = (await getIntegration(scope.orgId, result.packageId))?.manifest;
-      if (!manifest) {
-        logger.error("Integration vanished between initiate and callback", {
-          packageId: result.packageId,
-        });
-        return c.html(popupHtmlError("Integration not found"));
-      }
-      // Build the identity source for `extractIdentity`. Three layers,
-      // applied in order so later layers don't overwrite earlier ones:
-      //   1. Token response top-level (some IdPs put identity there).
-      //   2. `id_token` JWT claims — OIDC providers (Google, Microsoft,
-      //      Okta, …). No sig check: PKCE + signed state already vetted
-      //      the channel, we use the claims for identity hints only.
-      //   3. `userinfoUrl` GET — non-OIDC OAuth2 (GitHub, Slack, Notion,
-      //      …) returns identity from a Bearer-protected endpoint. Without
-      //      this fetch, `accountId` would fall back to the literal
-      //      "default" and every new connection collapses onto the same
-      //      row (the bug that made "Add another connection" silently
-      //      overwrite the existing one).
-      const identitySource: Record<string, unknown> = { ...result.tokenResponse };
-      const idToken = result.tokenResponse.id_token;
-      if (typeof idToken === "string") {
-        const claims = decodeJwtPayload(idToken);
-        if (claims) {
-          for (const [k, v] of Object.entries(claims)) {
-            if (identitySource[k] === undefined) identitySource[k] = v;
-          }
-        }
-      }
-      const authDecl = manifest.auths?.[result.authKey];
-      const userinfoUrl = authDecl?.userinfoUrl;
-      if (userinfoUrl) {
-        try {
-          const res = await fetch(userinfoUrl, {
-            headers: {
-              Authorization: `Bearer ${result.accessToken}`,
-              Accept: "application/json",
-              "User-Agent": "Appstrate",
-            },
-          });
-          if (res.ok) {
-            const body = (await res.json()) as unknown;
-            if (body && typeof body === "object") {
-              for (const [k, v] of Object.entries(body as Record<string, unknown>)) {
-                if (identitySource[k] === undefined) identitySource[k] = v;
-              }
-            }
-          } else {
-            logger.warn("Integration userinfo fetch non-2xx", {
-              packageId: result.packageId,
-              authKey: result.authKey,
-              status: res.status,
-            });
-          }
-        } catch (err) {
-          logger.warn("Integration userinfo fetch failed", {
-            packageId: result.packageId,
-            authKey: result.authKey,
-            err: String(err),
-          });
-        }
-      }
-      const { accountId, identityClaims } = extractIdentity(
-        manifest,
-        result.authKey,
-        identitySource,
+      const { auth } = await readIntegrationAuth(scope, result.packageId, result.authKey);
+      const strategy = resolveStrategy(auth);
+      await strategy.complete(
+        {
+          scope,
+          actor: result.actor,
+          integrationPackageId: result.packageId,
+          authKey: result.authKey,
+          ...(result.connectionId ? { connectionId: result.connectionId } : {}),
+        },
+        { kind: "oauth2-result", result },
       );
-      const credentials: Record<string, unknown> = {
-        access_token: result.accessToken,
-        ...(result.refreshToken ? { refresh_token: result.refreshToken } : {}),
-        ...(result.tokenResponse.token_type
-          ? { token_type: String(result.tokenResponse.token_type) }
-          : {}),
-        ...(result.tokenResponse.id_token
-          ? { id_token: String(result.tokenResponse.id_token) }
-          : {}),
-        scope: result.scopesGranted.join(" "),
-      };
-      await saveIntegrationConnection(scope, {
-        packageId: result.packageId,
-        authKey: result.authKey,
-        accountId,
-        credentials,
-        identityClaims,
-        scopesGranted: result.scopesGranted,
-        expiresAt: result.expiresAt ? new Date(result.expiresAt) : null,
-        actor: result.actor,
-        ...(result.connectionId ? { connectionId: result.connectionId } : {}),
-      });
       logger.info("Integration OAuth callback success", {
         packageId: result.packageId,
         authKey: result.authKey,
-        accountId,
         scopeShortfall: result.scopeShortfall,
       });
     } catch (err) {
@@ -479,12 +388,21 @@ export function createIntegrationsRouter() {
       await assertConnectionCreationAllowed(c, scope.applicationId, packageId);
       const body = parseBody(connectFieldsSchema, await c.req.json());
       try {
-        const conn = await connectIntegrationWithFields(
-          scope,
-          packageId,
-          authKey,
-          body.credentials,
-          actor,
+        const { auth } = await readIntegrationAuth(scope, packageId, authKey);
+        if (auth.type === "oauth2" || auth.type === "oauth1") {
+          throw invalidRequest(
+            `Auth '${authKey}' is type '${auth.type}' — use the OAuth flow, not the fields flow`,
+          );
+        }
+        // A `custom` + `connect.tool` (runAt:"link") auth resolves to the
+        // OrchestratedStrategy, which needs the connect-run substrate to run
+        // the untrusted login tool. Supply it lazily so the plain
+        // paste-the-bag / declarative paths don't construct an executor.
+        const conn = await resolveStrategy(auth, {
+          connectToolExecutor: createConnectRunExecutor(),
+        }).complete(
+          { scope, actor, integrationPackageId: packageId, authKey },
+          { kind: "fields", credentials: body.credentials },
         );
         await recordAuditFromContext(c, {
           action: "integration.connection.created",
@@ -518,42 +436,18 @@ export function createIntegrationsRouter() {
           `Auth '${authKey}' is type '${auth.type}' — use the fields flow instead`,
         );
       }
-      if (!auth.authorizationUrl || !auth.tokenUrl) {
-        // Mode B (discovery) is implemented in `@appstrate/connect/oauth-discovery`
-        // but the user-facing flow needs resolved endpoints up front so the popup
-        // can navigate immediately. Delegate that resolution to the runtime spawn
-        // path for now; surface a clear error here.
-        throw invalidRequest(
-          "OAuth Mode B (RFC 9728 discovery) connection flow not yet wired — manifest must declare explicit authorizationUrl + tokenUrl for marketplace connect.",
-        );
-      }
-      const client = await getIntegrationOAuthClient(scope, packageId, authKey);
-      if (!client) {
-        throw forbidden(
-          `Administrator must register OAuth client credentials for '${packageId}' auth '${authKey}' before connection`,
-        );
-      }
-      const redirectUri = client.redirectUri ?? `${getEnv().APP_URL}/api/integrations/callback`;
-      // Niveau 2 (Phase 2) — request the strict superset of:
+      // Niveau 2 — request the strict superset of:
       //   - manifest defaults (`auth.scopes`)
       //   - caller-supplied (`body.scopes`)
       //   - inferred from agents installed in this app (`computeRequiredScopes`)
       //   - currently granted across the actor's existing connections
       //     (`getCurrentScopesGranted`) → incremental consent
-      // Granted is unioned so re-consent never silently shrinks the set
-      // the user already authorized.
+      // Granted is unioned so re-consent never silently shrinks the set the
+      // user already authorized. Endpoint validation + client lookup live in
+      // OAuth2Strategy.begin.
       const [computed, granted] = await Promise.all([
-        computeRequiredScopes({
-          scope,
-          integrationPackageId: packageId,
-          authKey,
-        }),
-        getCurrentScopesGranted({
-          scope,
-          integrationPackageId: packageId,
-          authKey,
-          actor,
-        }),
+        computeRequiredScopes({ scope, integrationPackageId: packageId, authKey }),
+        getCurrentScopesGranted({ scope, integrationPackageId: packageId, authKey, actor }),
       ]);
       const scopes = [
         ...new Set([
@@ -563,26 +457,21 @@ export function createIntegrationsRouter() {
           ...granted,
         ]),
       ];
-      const result = await initiateIntegrationOAuth(oauthStateStore, {
-        packageId,
-        authKey,
-        authorizationUrl: auth.authorizationUrl,
-        tokenUrl: auth.tokenUrl,
-        clientId: client.clientId,
-        clientSecret: client.clientSecret,
-        tokenAuthMethod: auth.tokenAuthMethod,
-        scopes,
-        scopeSeparator: auth.scopeSeparator,
-        audience: auth.audience,
-        ...(auth.authorizationParams ? { authorizationParams: auth.authorizationParams } : {}),
-        redirectUri,
-        orgId: scope.orgId,
-        applicationId: scope.applicationId,
-        actor,
-        forceAccountSelect: body.forceAccountSelect ?? false,
-        ...(body.connectionId ? { connectionId: body.connectionId } : {}),
-      });
-      return c.json({ authUrl: result.authUrl, state: result.state });
+      const strategy = resolveStrategy(auth);
+      if (!strategy.begin) {
+        throw internalError();
+      }
+      const result = await strategy.begin(
+        {
+          scope,
+          actor,
+          integrationPackageId: packageId,
+          authKey,
+          ...(body.connectionId ? { connectionId: body.connectionId } : {}),
+        },
+        { scopes, forceAccountSelect: body.forceAccountSelect ?? false },
+      );
+      return c.json({ authUrl: result.redirectUrl, state: result.state });
     },
   );
 

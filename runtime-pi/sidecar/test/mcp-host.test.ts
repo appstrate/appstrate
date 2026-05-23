@@ -492,3 +492,77 @@ describe("McpHost — emitLog (D4.5 transducer)", () => {
     host.emitLog("any", "info", {});
   });
 });
+
+describe("McpHost — intoNamespace (attachable api_call)", () => {
+  // Simulates the attachable-api_call wiring: a spawned server registers under
+  // a namespace, then the in-process api_call tool merges into it.
+  function apiCallTool(): AppstrateToolDefinition[] {
+    return [
+      {
+        descriptor: { name: "api_call", description: "raw HTTP", inputSchema: { type: "object" } },
+        handler: async () => ({ content: [{ type: "text", text: "api_call-result" }] }),
+      },
+    ];
+  }
+
+  it("merges tools into an existing namespace, keeping the primary upstream", async () => {
+    const server = await makeUpstream(notionTool()); // native: search_pages
+    const apiCall = await makeUpstream(apiCallTool());
+    const host = new McpHost();
+    try {
+      const ns = await host.register({ namespace: "kijiji", client: server.client });
+      const merged = await host.register({
+        namespace: "kijiji",
+        client: apiCall.client,
+        trusted: true,
+        intoNamespace: ns,
+      });
+      // Same namespace — no `_2` suffix.
+      expect(merged).toBe("kijiji");
+      const names = host.buildTools().map((t) => t.descriptor.name);
+      expect(names).toContain("kijiji__search_pages");
+      expect(names).toContain("kijiji__api_call");
+      // The primary upstream (getUpstreamClient / connect-login) stays the
+      // spawned server, NOT the merged api_call client.
+      expect(host.getUpstreamClient("kijiji")).toBe(server.client);
+    } finally {
+      await host.dispose();
+    }
+  });
+
+  it("routes each merged tool to its OWN client", async () => {
+    const server = await makeUpstream(notionTool());
+    const apiCall = await makeUpstream(apiCallTool());
+    const host = new McpHost();
+    try {
+      const ns = await host.register({ namespace: "kijiji", client: server.client });
+      await host.register({
+        namespace: "kijiji",
+        client: apiCall.client,
+        trusted: true,
+        intoNamespace: ns,
+      });
+      const tools = host.buildTools();
+      const search = tools.find((t) => t.descriptor.name === "kijiji__search_pages")!;
+      const apicall = tools.find((t) => t.descriptor.name === "kijiji__api_call")!;
+      const r1 = await search.handler({}, {} as never);
+      const r2 = await apicall.handler({}, {} as never);
+      expect((r1.content as [{ text: string }])[0].text).toBe("notion-results");
+      expect((r2.content as [{ text: string }])[0].text).toBe("api_call-result");
+    } finally {
+      await host.dispose();
+    }
+  });
+
+  it("throws when intoNamespace targets an unregistered namespace", async () => {
+    const apiCall = await makeUpstream(apiCallTool());
+    const host = new McpHost();
+    try {
+      await expect(
+        host.register({ namespace: "kijiji", client: apiCall.client, intoNamespace: "ghost" }),
+      ).rejects.toThrow(/not a registered namespace/);
+    } finally {
+      await host.dispose();
+    }
+  });
+});

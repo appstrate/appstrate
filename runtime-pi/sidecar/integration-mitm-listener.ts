@@ -62,7 +62,12 @@ import {
   type MitmRequestContext,
 } from "@appstrate/connect/integration-mitm-planner";
 import type { CaBundle } from "@appstrate/connect/proxy-ca-planner";
-import { HOP_BY_HOP_HEADERS, matchesAuthorizedUriSpec } from "@appstrate/connect/proxy-primitives";
+import {
+  HOP_BY_HOP_HEADERS,
+  matchesAuthorizedUriSpec,
+  substituteVars,
+  findUnresolvedPlaceholders,
+} from "@appstrate/connect/proxy-primitives";
 import type { CertMinter } from "./integration-cert-minter.ts";
 
 // ─────────────────────────────────────────────
@@ -73,6 +78,25 @@ export interface MitmCredentialSource {
   current(): IntegrationCredentialsPayload;
   deliveryPlans(): Readonly<Record<string, HttpDeliveryPlan>>;
   refreshOnUnauthorized?(authKey: string): Promise<boolean>;
+  /**
+   * connect.tool mid-run re-login (P3) — when this returns true for
+   * `(authKey, status)`, the listener treats `status` as a re-acquire trigger:
+   * it calls {@link refreshOnUnauthorized} (which routes to the registered
+   * re-login handler), rebuilds the action with the fresh session, and retries
+   * the request once — even when the response wasn't a 401 and OAuth's
+   * `retry401` isn't set. Optional — sources that don't implement it behave
+   * exactly as before (OAuth-only 401 retry).
+   */
+  shouldReauth?(authKey: string, status: number): boolean;
+  /**
+   * Connect-login primitive (P1) — when this returns a non-null bag, the
+   * listener substitutes `{{key}}` placeholders into the outbound URL,
+   * body, and inbound header values BEFORE building the credential action
+   * (so the integration's login tool delivers the user's transient login
+   * secret proxy-side, never as tool input). Optional — sources that don't
+   * implement it behave exactly as before.
+   */
+  activeInputs?(): Record<string, string> | null;
 }
 
 /**
@@ -491,6 +515,73 @@ export function extractSni(buf: Buffer): string | null {
 }
 
 // ─────────────────────────────────────────────
+// Connect-login transient-input substitution (P1)
+// ─────────────────────────────────────────────
+
+/**
+ * Result of {@link applyConnectInputSubstitution}: either the substituted
+ * request parts, or a fail-closed marker carrying the first unresolved
+ * placeholder name.
+ */
+export type ConnectInputSubstitutionResult =
+  | { url: string; bodyText: string | null; headers: Record<string, string> }
+  | { failed: string };
+
+/**
+ * Pure, unit-testable helper for connect-login transient-input
+ * substitution. Runs {@link substituteVars} over the URL, body, and each
+ * header value using `inputs`, then re-checks each field with
+ * {@link findUnresolvedPlaceholders}.
+ *
+ * Fail-closed contract: if any field that originally contained a `{{...}}`
+ * placeholder still contains one after substitution, we return
+ * `{ failed: <name> }` rather than forwarding a half-substituted value
+ * upstream. A literal secret/placeholder must NEVER leak upstream nor into
+ * a tool result — refusing the request is the only safe outcome.
+ *
+ * Fields that never contained a placeholder are passed through untouched
+ * (substituteVars is a no-op on them), so a request with no placeholders is
+ * returned verbatim.
+ */
+export function applyConnectInputSubstitution(
+  parts: { url: string; bodyText: string | null; headers: Record<string, string> },
+  inputs: Record<string, string>,
+): ConnectInputSubstitutionResult {
+  const checkField = (original: string, substituted: string): string | null => {
+    // Only fail-closed when the ORIGINAL field carried a placeholder. A
+    // field that legitimately contains `{{...}}`-looking text but was never
+    // a substitution target (no placeholder before substitution) can't have
+    // a half-substituted secret in it — but here `original === substituted`
+    // for a field with no resolvable placeholder, so we gate on whether the
+    // original had any placeholder at all.
+    if (findUnresolvedPlaceholders(original).length === 0) return null;
+    const remaining = findUnresolvedPlaceholders(substituted);
+    return remaining.length > 0 ? remaining[0]! : null;
+  };
+
+  const url = substituteVars(parts.url, inputs);
+  const urlFail = checkField(parts.url, url);
+  if (urlFail) return { failed: urlFail };
+
+  let bodyText: string | null = null;
+  if (parts.bodyText !== null) {
+    bodyText = substituteVars(parts.bodyText, inputs);
+    const bodyFail = checkField(parts.bodyText, bodyText);
+    if (bodyFail) return { failed: bodyFail };
+  }
+
+  const headers: Record<string, string> = {};
+  for (const [k, v] of Object.entries(parts.headers)) {
+    const sub = substituteVars(v, inputs);
+    const headerFail = checkField(v, sub);
+    if (headerFail) return { failed: headerFail };
+    headers[k] = sub;
+  }
+
+  return { url, bodyText, headers };
+}
+
+// ─────────────────────────────────────────────
 // Inner-request handler — Bun.serve fetch callback
 // ─────────────────────────────────────────────
 
@@ -507,18 +598,11 @@ async function handleInnerRequest(
   // gives us the absolute URL but it points at our local 127.0.0.1
   // listener — we replace the origin with the SNI host (port 443).
   const incoming = new URL(req.url);
-  const targetUrl = `https://${sniHost}${incoming.pathname}${incoming.search}`;
+  let targetUrl = `https://${sniHost}${incoming.pathname}${incoming.search}`;
 
-  // Phase 4 — envelope check happens BEFORE credential injection. A
-  // request that won't be forwarded must never see the credential
-  // header materialise, even briefly. Per-auth `authorizedUris` still
-  // runs downstream via `planMitmAction`; envelope is the tighter
-  // tool-derived restriction.
-  if (envelope && !matchesEnvelope(envelope, targetUrl, req.method)) {
-    emit({ kind: "request-refused", url: targetUrl, reason: "tool url envelope" });
-    return new Response("MITM listener: URL outside tool envelope", { status: 403 });
-  }
-
+  // Read the body up-front. Connect-login substitution (below) may need
+  // to rewrite it, and the envelope/planner checks must run on the
+  // SUBSTITUTED url, so the body read can no longer be deferred past them.
   let body: Buffer = Buffer.alloc(0);
   if (req.body) {
     try {
@@ -538,8 +622,63 @@ async function handleInnerRequest(
     }
   }
 
+  // The Headers we forward downstream. When a connect-login is in flight we
+  // replace the inbound values with their substituted counterparts so the
+  // raw login secret reaches upstream proxy-side only — never the tool code
+  // and never a tool result.
+  let headersForOutbound = req.headers;
+
+  // Connect-login transient-input substitution (P1). Runs BEFORE the
+  // envelope check and before `planMitmAction`, so the envelope is enforced
+  // against the substituted URL and the credential header only materialises
+  // for a request that will actually be forwarded. Fail-closed: an
+  // unresolved placeholder refuses the request rather than forwarding a
+  // half-substituted literal upstream.
+  const inputs = credentials.activeInputs?.() ?? null;
+  if (inputs) {
+    const inboundHeaders: Record<string, string> = {};
+    req.headers.forEach((v, k) => {
+      inboundHeaders[k] = v;
+    });
+    const bodyText = body.byteLength > 0 ? body.toString("utf-8") : null;
+    const result = applyConnectInputSubstitution(
+      { url: targetUrl, bodyText, headers: inboundHeaders },
+      inputs,
+    );
+    if ("failed" in result) {
+      emit({ kind: "request-refused", url: targetUrl, reason: "unresolved login placeholder" });
+      return new Response("MITM listener: unresolved login placeholder", { status: 400 });
+    }
+    targetUrl = result.url;
+    if (result.bodyText !== null) body = Buffer.from(result.bodyText, "utf-8");
+    const subbed = new Headers();
+    for (const [k, v] of Object.entries(result.headers)) subbed.set(k, v);
+    headersForOutbound = subbed;
+  }
+
+  // Phase 4 — envelope check happens BEFORE credential injection (and now
+  // AFTER connect-login substitution, so the post-substitution URL is what
+  // gets matched). A request that won't be forwarded must never see the
+  // credential header materialise, even briefly. Per-auth `authorizedUris`
+  // still runs downstream via `planMitmAction`; envelope is the tighter
+  // tool-derived restriction.
+  //
+  // The envelope is derived from the AGENT's selected tools (their
+  // `urlPatterns`). It must NOT gate the connect-login (`login` tool) phase:
+  // the login tool runs at run-start, is never agent-selected, and walks its
+  // own URLs (csrf → signin → CAS → session) which the agent's data-tool
+  // envelope deliberately excludes. While a connect-login is in flight
+  // (`inputs` set), the per-auth `authorizedUris` floor — enforced downstream
+  // by `planMitmAction` — remains the bound; the agent-tool envelope does not
+  // apply. Without this, the login tool's first request (e.g. `/api/auth/csrf`)
+  // is 403'd by the envelope and the session is never minted.
+  if (!inputs && envelope && !matchesEnvelope(envelope, targetUrl, req.method)) {
+    emit({ kind: "request-refused", url: targetUrl, reason: "tool url envelope" });
+    return new Response("MITM listener: URL outside tool envelope", { status: 403 });
+  }
+
   const callerHeaderNames: string[] = [];
-  req.headers.forEach((_v, k) => callerHeaderNames.push(k));
+  headersForOutbound.forEach((_v, k) => callerHeaderNames.push(k));
 
   const buildAction = () => {
     const ctx: MitmRequestContext = {
@@ -553,7 +692,7 @@ async function handleInnerRequest(
   const action = buildAction();
 
   const outboundHeaders = buildOutboundHeaders(
-    req.headers,
+    headersForOutbound,
     sniHost,
     action.strippedHeaderNames,
     action.injectedHeader,
@@ -572,19 +711,27 @@ async function handleInnerRequest(
     return new Response(`MITM upstream error: ${(err as Error).message}`, { status: 502 });
   }
 
-  if (
-    response.status === 401 &&
-    action.retry401 &&
-    action.matchedAuth &&
-    credentials.refreshOnUnauthorized
-  ) {
+  // Two retry paths converge here:
+  //   - OAuth (existing): a 401 on an auth whose plan declared `retry401`
+  //     triggers a platform token-refresh + single retry.
+  //   - connect.tool re-login (P3): any status the manifest's
+  //     `auth.connect.reauthOn` declares (default `[401]`) triggers a
+  //     re-run of the integration's login tool + single retry. The source's
+  //     `refreshOnUnauthorized` routes to the registered re-login handler;
+  //     `setSessionOutputs` (inside the handler) updates the source's
+  //     deliveryPlans, so the rebuilt action injects the fresh session header.
+  const oauthRetry = response.status === 401 && action.retry401;
+  const connectReauth =
+    !!action.matchedAuth &&
+    credentials.shouldReauth?.(action.matchedAuth.authKey, response.status) === true;
+  if ((oauthRetry || connectReauth) && action.matchedAuth && credentials.refreshOnUnauthorized) {
     const refreshed = await credentials
       .refreshOnUnauthorized(action.matchedAuth.authKey)
       .catch(() => false);
     if (refreshed) {
       const action2 = buildAction();
       const outbound2 = buildOutboundHeaders(
-        req.headers,
+        headersForOutbound,
         sniHost,
         action2.strippedHeaderNames,
         action2.injectedHeader,
@@ -628,8 +775,17 @@ function passthroughResponse(response: Response): Response {
     const lower = k.toLowerCase();
     if (lower === "transfer-encoding" || lower === "content-encoding" || lower === "content-length")
       return;
+    // Set-Cookie is handled below to preserve multiplicity — Headers.forEach
+    // folds repeated Set-Cookie into one comma-joined value, and `.set` would
+    // overwrite. A cookie-session login (e.g. a connect.tool tool building its
+    // own jar across the redirect chain) needs each Set-Cookie intact, and
+    // expiry dates inside them contain commas — folding is lossy/ambiguous.
+    if (lower === "set-cookie") return;
     headers.set(k, v);
   });
+  const getSetCookie = (response.headers as { getSetCookie?: () => string[] }).getSetCookie;
+  const setCookies = typeof getSetCookie === "function" ? getSetCookie.call(response.headers) : [];
+  for (const cookie of setCookies) headers.append("set-cookie", cookie);
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,

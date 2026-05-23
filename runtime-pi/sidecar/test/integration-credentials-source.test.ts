@@ -207,6 +207,142 @@ describe("createIntegrationCredentialsSource", () => {
   });
 });
 
+describe("createIntegrationCredentialsSource — connect.tool re-login (P3)", () => {
+  it("shouldReauth is true only for a registered authKey + declared status", () => {
+    const source = createIntegrationCredentialsSource({
+      integrationId: "@test/integ",
+      platformApiUrl: "http://api",
+      runToken: "run-tok",
+      initialPayload: makePayload("tok-1"),
+      fetchFn: (async () => new Response("", { status: 500 })) as unknown as typeof fetch,
+    });
+    // Nothing registered yet → always false.
+    expect(source.shouldReauth("primary", 401)).toBe(false);
+
+    source.setReloginHandler("primary", async () => true, [401, 419]);
+    expect(source.shouldReauth("primary", 401)).toBe(true);
+    expect(source.shouldReauth("primary", 419)).toBe(true);
+    // Status not in the declared set → false.
+    expect(source.shouldReauth("primary", 403)).toBe(false);
+    // Unregistered authKey → false.
+    expect(source.shouldReauth("other", 401)).toBe(false);
+  });
+
+  it("refreshOnUnauthorized routes to the re-login handler (NOT the platform POST)", async () => {
+    let postCalls = 0;
+    const fetchFn = (async () => {
+      postCalls += 1;
+      return new Response(JSON.stringify(makePayload("tok-platform")), { status: 200 });
+    }) as unknown as typeof fetch;
+    const source = createIntegrationCredentialsSource({
+      integrationId: "@test/integ",
+      platformApiUrl: "http://api",
+      runToken: "run-tok",
+      initialPayload: makePayload("tok-1"),
+      fetchFn,
+    });
+
+    let handlerRan = 0;
+    source.setReloginHandler(
+      "primary",
+      async () => {
+        handlerRan += 1;
+        return true;
+      },
+      [401],
+    );
+
+    const ok = await source.refreshOnUnauthorized("primary");
+    expect(ok).toBe(true);
+    expect(handlerRan).toBe(1);
+    // The platform refresh endpoint must NOT have been called.
+    expect(postCalls).toBe(0);
+  });
+
+  it("still POSTs the platform when no re-login handler is registered", async () => {
+    let postCalls = 0;
+    const fetchFn = (async () => {
+      postCalls += 1;
+      return new Response(JSON.stringify(makePayload("tok-2")), { status: 200 });
+    }) as unknown as typeof fetch;
+    const source = createIntegrationCredentialsSource({
+      integrationId: "@test/integ",
+      platformApiUrl: "http://api",
+      runToken: "run-tok",
+      initialPayload: makePayload("tok-1"),
+      fetchFn,
+    });
+    // Handler registered for a DIFFERENT authKey — primary still uses POST.
+    source.setReloginHandler("other", async () => true, [401]);
+
+    expect(await source.refreshOnUnauthorized("primary")).toBe(true);
+    expect(postCalls).toBe(1);
+    expect(source.current().auths[0]!.fields.apiKey).toBe("tok-2");
+  });
+
+  it("applies cooldown + in-flight dedup to the re-login path", async () => {
+    const source = createIntegrationCredentialsSource({
+      integrationId: "@test/integ",
+      platformApiUrl: "http://api",
+      runToken: "run-tok",
+      initialPayload: makePayload("tok-1"),
+      fetchFn: (async () => new Response("", { status: 500 })) as unknown as typeof fetch,
+      minRefreshIntervalMs: 60_000,
+    });
+
+    let handlerRan = 0;
+    let resolvePending: ((v: boolean) => void) | null = null;
+    const pending = new Promise<boolean>((resolve) => {
+      resolvePending = resolve;
+    });
+    source.setReloginHandler(
+      "primary",
+      () => {
+        handlerRan += 1;
+        return pending;
+      },
+      [401],
+    );
+
+    // In-flight dedup: two concurrent calls run the handler once.
+    const p1 = source.refreshOnUnauthorized("primary");
+    const p2 = source.refreshOnUnauthorized("primary");
+    expect(handlerRan).toBe(1);
+    resolvePending!(true);
+    expect(await p1).toBe(true);
+    expect(await p2).toBe(true);
+
+    // Cooldown: a subsequent call within the interval is suppressed without
+    // re-running the handler.
+    expect(await source.refreshOnUnauthorized("primary")).toBe(false);
+    expect(handlerRan).toBe(1);
+  });
+
+  it("returns false (and arms cooldown) when the re-login handler throws", async () => {
+    const source = createIntegrationCredentialsSource({
+      integrationId: "@test/integ",
+      platformApiUrl: "http://api",
+      runToken: "run-tok",
+      initialPayload: makePayload("tok-1"),
+      fetchFn: (async () => new Response("", { status: 500 })) as unknown as typeof fetch,
+      minRefreshIntervalMs: 60_000,
+    });
+    let handlerRan = 0;
+    source.setReloginHandler(
+      "primary",
+      async () => {
+        handlerRan += 1;
+        throw new Error("login tool exploded");
+      },
+      [401],
+    );
+    expect(await source.refreshOnUnauthorized("primary")).toBe(false);
+    // Cooldown armed → second attempt suppressed.
+    expect(await source.refreshOnUnauthorized("primary")).toBe(false);
+    expect(handlerRan).toBe(1);
+  });
+});
+
 describe("fetchInitialIntegrationCredentials", () => {
   it("GETs the right URL with the bearer and returns the body", async () => {
     const payload = makePayload("tok-x");

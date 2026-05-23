@@ -9,6 +9,18 @@
  * via environment variables at container start.
  */
 
+import type { IntegrationManifest } from "./integration.ts";
+
+/**
+ * Manifest `auths.{key}.delivery.http` block — the header-render config the
+ * sidecar's connect-login primitive feeds to `resolveHttpDelivery`. Reused
+ * verbatim from the integration manifest type so the spawn-side and
+ * sidecar-side shapes can never drift.
+ */
+export type ManifestDeliveryHttp = NonNullable<
+  NonNullable<IntegrationManifest["auths"]>[string]["delivery"]["http"]
+>;
+
 /**
  * Sidecar runtime configuration. The sidecar process reads this from its
  * own environment at boot and uses it for the lifetime of the run. The
@@ -68,6 +80,20 @@ export interface SidecarLaunchSpec {
    * `runtime-pi/sidecar/server.ts`.
    */
   integrations?: ReadonlyArray<IntegrationSpawnSpec>;
+  /**
+   * P4 — connect-run mode (`runAt: "link"`). When set, the sidecar runs in
+   * "connect mode": it boots the SINGLE integration carried in `integrations`,
+   * runs its `login` MCP tool exactly once (`runConnectOnce`), emits the
+   * captured credential bundle on a sentinel stdout line, and exits — the
+   * agent-facing `/mcp` server is never started.
+   *
+   * Serialised by the orchestrator as the `CONNECT_LOGIN_JSON` env var read by
+   * `runtime-pi/sidecar/server.ts`. The value is the same single
+   * {@link IntegrationSpawnSpec} (with its `connectLogin` block) that
+   * `integrations` carries; it is sensitive (the `connectLogin.inputs` plane
+   * is the decrypted login secret) and never logged.
+   */
+  connectLoginSpec?: IntegrationSpawnSpec;
 }
 
 /**
@@ -124,9 +150,9 @@ export interface IntegrationSpawnSpec {
     version: string;
     /**
      * MCP server to spawn/connect. Optional on the spawn spec: the
-     * resolver omits it for `server.type: api_call` integrations, which
-     * expose only the generic `api_call` tool. The sidecar skips spawn
-     * entirely for such specs.
+     * resolver omits it for serverless integrations (an `apiCall` block and
+     * no `server`), which expose only the generic `api_call` tool. The
+     * sidecar skips spawn entirely for such specs.
      */
     server?: {
       type: string;
@@ -224,6 +250,44 @@ export interface IntegrationSpawnSpec {
     pattern: string;
     methods?: readonly string[];
   }>;
+  /**
+   * connect.tool substrate — `runAt: "run-start"` acquisition (P2). When
+   * set, the integration's session is NOT pre-resolved at spawn: only the
+   * login secret (`inputs`) was stored at dashboard connect. The sidecar
+   * mints the session at boot by calling the integration's `login` MCP tool
+   * via `runConnectLogin`, substituting `inputs` proxy-side. After capture,
+   * the integration's MITM source injects the session header for the rest
+   * of the run.
+   *
+   * `inputs` is the decrypted login-secret plane — sidecar-only, same trust
+   * level as {@link spawnEnv} (travels in `INTEGRATIONS_TO_SPAWN_JSON`).
+   * Never logged. The login tool is excluded from {@link toolAllowlist} so
+   * the agent can never invoke it directly.
+   */
+  connectLogin?: {
+    /** MCP tool name from `auths.{key}.connect.tool`. */
+    toolName: string;
+    /** Declared injectable outputs (`connect.produces`) — runner validates against this. */
+    produces?: readonly string[];
+    /** Auth key the captured session maps to. */
+    authKey: string;
+    /** Auth type (`custom`, `oauth2`, …) — drives delivery defaults. */
+    authType: string;
+    /** URL allowlist carried onto the captured session. */
+    authorizedUris: readonly string[];
+    /** Manifest `delivery.http` block used to render the session header. */
+    deliveryHttp: ManifestDeliveryHttp;
+    /** Decrypted login secret — sidecar-only, used for proxy-side substitution. */
+    inputs: Record<string, string>;
+    /**
+     * Upstream status codes that trigger a mid-run re-login (from
+     * `auths.{key}.connect.reauthOn`). When an upstream returns one of these
+     * for a request using the captured session, the sidecar re-runs the login
+     * tool to mint a fresh session and retries the request once. Omitted when
+     * the manifest didn't declare `reauthOn` — the sidecar defaults to `[401]`.
+     */
+    reauthOn?: number[];
+  };
 }
 
 /**

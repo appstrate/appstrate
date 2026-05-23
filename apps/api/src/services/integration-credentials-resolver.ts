@@ -19,9 +19,6 @@
  * `MitmCredentialSource.current()` and `.deliveryPlans()`.
  */
 
-import { eq } from "drizzle-orm";
-import { db } from "@appstrate/db/client";
-import { integrationConnections } from "@appstrate/db/schema";
 import {
   RefreshError,
   resolveHttpDelivery,
@@ -36,11 +33,15 @@ import { logger } from "../lib/logger.ts";
 import { notFound, forbidden, internalError, badGateway } from "../lib/errors.ts";
 import type { Actor } from "../lib/actor.ts";
 import {
-  forceRefreshIntegrationConnection,
   buildIntegrationOAuthRefreshContext,
   decryptIntegrationConnectionFields,
+  forceRefreshIntegrationConnection,
 } from "./integration-token-refresh.ts";
-import { assertIntegrationActive, selectAccessibleConnection } from "./integration-connections.ts";
+import {
+  assertIntegrationActive,
+  selectAccessibleConnection,
+  markIntegrationConnectionNeedsReconnection,
+} from "./integration-connections.ts";
 import { computeRequiredScopes } from "./integration-scope-resolver.ts";
 import { fetchIntegrationManifest } from "./integration-service.ts";
 
@@ -155,6 +156,8 @@ export async function resolveLiveIntegrationCredentials(
     );
     if (refreshContext) {
       try {
+        // Re-acquisition = fast-path refresh_token POST. `needsRefresh`
+        // already gated type=oauth2, so this is the only refreshable auth.
         const refreshed = await forceRefreshIntegrationConnection(
           connection.id,
           integrationId,
@@ -181,10 +184,7 @@ export async function resolveLiveIntegrationCredentials(
           });
           const missing = required.filter((s) => !granted.includes(s));
           if (missing.length > 0) {
-            await db
-              .update(integrationConnections)
-              .set({ needsReconnection: true, updatedAt: new Date() })
-              .where(eq(integrationConnections.id, connection.id));
+            await markIntegrationConnectionNeedsReconnection(connection.id);
             logger.warn("Integration scope shrink dropped below required floor", {
               runId: context.runId,
               integrationId,

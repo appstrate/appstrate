@@ -36,7 +36,11 @@ import {
   applications,
   packages,
 } from "@appstrate/db/schema";
-import { encryptCredentials, decryptCredentials } from "@appstrate/connect";
+import {
+  encryptCredentials,
+  encryptCredentialEnvelope,
+  decryptCredentials,
+} from "@appstrate/connect";
 import { logger } from "../lib/logger.ts";
 import { notFound, conflict, invalidRequest } from "../lib/errors.ts";
 import type { AppScope } from "../lib/scope.ts";
@@ -547,90 +551,204 @@ export interface StoreConnectionInput {
 }
 
 /**
- * Persist a new connection (INSERT) or refresh an existing one
- * (UPDATE — caller passes `connectionId`). Returns the persisted
- * summary view.
+ * Where a {@link persistCredentialBundle} write lands. Matches the three
+ * converged write sites:
  *
- * Why no upsert-by-accountId: the previous model collapsed every
- * connection on the same `(packageId, authKey, accountId, app, owner)`
- * tuple, and `accountId` defaulted to the literal "default" whenever
- * the manifest didn't declare identity extraction. Result: "Add
- * another connection" silently overwrote the existing row. The new
- * model trusts the caller's intent — explicit connectionId = update;
- * no id = insert.
+ *   - `insert`       — first acquisition (OAuth2 callback / fields submit).
+ *   - `update-owned` — user-initiated reconnect / scope upgrade. Owner-scoped
+ *                      WHERE (id + applicationId + actor identity); throws
+ *                      `notFound` when the row isn't the caller's.
+ *   - `update-by-id` — system write-back (proactive token refresh). Keyed by
+ *                      id only — the id came from an already-authorized
+ *                      resolution — and silently no-ops when the row is gone
+ *                      (matches the pre-convergence refresh behaviour).
  */
-export async function saveIntegrationConnection(
-  scope: AppScope,
-  input: StoreConnectionInput,
-): Promise<IntegrationConnectionSummary> {
-  await assertAppBelongsToOrg(scope);
-  const { userId, endUserId } = assertActorIdentity(input.actor);
-  const ciphertext = encryptCredentials(input.credentials);
+export type PersistTarget =
+  | { kind: "insert"; scope: AppScope; actor: Actor }
+  | { kind: "update-owned"; scope: AppScope; actor: Actor; connectionId: string }
+  | { kind: "update-by-id"; connectionId: string };
+
+/**
+ * Persist input for the credential columns.
+ *
+ * `credentials` is the injectable **outputs** plane. `inputs` (spec §4.6) is
+ * the bootstrap-secret plane, persisted ONLY when an OrchestratedStrategy
+ * declares `persistLoginSecret` — when present (non-empty) the writer emits a
+ * structured v2 envelope `{ v:2, outputs, inputs }`; otherwise it stays a flat
+ * v1 blob, byte-identical to every pre-Phase-4 write. The injection path can
+ * never read `inputs` (it only ever projects `outputs`).
+ *
+ * UPDATE column semantics (preserving today's behaviour exactly):
+ *   - `credentials`, `expiresAt`, `needsReconnection` are ALWAYS written.
+ *   - `accountId`, `identityClaims`, `scopesGranted` are written ONLY when
+ *     provided (`undefined` = leave untouched). The refresh write-back relies
+ *     on this: it must not clobber the identity, nor — when the IdP omits
+ *     `scope` — the scope high-water-mark.
+ */
+export interface PersistCredentialInput {
+  credentials: Record<string, unknown>;
+  /** Bootstrap secrets (login password) — persisted NON-injectable (v2). */
+  inputs?: Record<string, string>;
+  expiresAt?: Date | null;
+  needsReconnection?: boolean;
+  accountId?: string;
+  identityClaims?: Record<string, unknown>;
+  scopesGranted?: string[];
+  /** INSERT only — the `(packageId, authKey)` the new row belongs to. */
+  packageId?: string;
+  authKey?: string;
+}
+
+/**
+ * The single low-level writer of the credential columns
+ * (`credentials_encrypted`, `expires_at`, `scopes_granted`, `identity_claims`,
+ * `needs_reconnection`) on `integration_connections`. Every acquisition and
+ * refresh path converges here (spec §4.1 — "1 writer"). Returns the persisted
+ * summary for INSERT / `update-owned`; `null` for `update-by-id` (the refresh
+ * write-back consumes its own result shape and ignores this).
+ *
+ * Why no upsert-by-accountId: the previous model collapsed every connection on
+ * the same `(packageId, authKey, accountId, app, owner)` tuple and silently
+ * overwrote rows when `accountId` defaulted to "default". The current model
+ * trusts the caller's intent — explicit connectionId = update; no id = insert.
+ */
+export async function persistCredentialBundle(
+  target: PersistTarget,
+  input: PersistCredentialInput,
+): Promise<IntegrationConnectionSummary | null> {
+  // v2 structured envelope only when a bootstrap secret is being persisted
+  // (`persistLoginSecret`); otherwise a flat v1 blob, byte-identical to every
+  // pre-Phase-4 write so existing connections/round-trips are unchanged.
+  const hasInputs = input.inputs && Object.keys(input.inputs).length > 0;
+  const ciphertext = hasInputs
+    ? encryptCredentialEnvelope({ outputs: input.credentials, inputs: input.inputs })
+    : encryptCredentials(input.credentials);
   const now = new Date();
 
-  const ownerPredicate = userId
-    ? eq(integrationConnections.userId, userId)
-    : eq(integrationConnections.endUserId, endUserId!);
-
-  // Reconnect / upgrade path — target row known up front.
-  if (input.connectionId) {
-    const updated = await db
-      .update(integrationConnections)
-      .set({
+  if (target.kind === "insert") {
+    await assertAppBelongsToOrg(target.scope);
+    const { userId, endUserId } = assertActorIdentity(target.actor);
+    if (!input.packageId || !input.authKey || input.accountId === undefined) {
+      throw new Error("persistCredentialBundle(insert): packageId, authKey, accountId required");
+    }
+    // No mono-auth-per-actor gate: an actor may hold N connections across any
+    // mix of declared auths (OAuth + PAT + custom). The runtime picks exactly
+    // one per run via the resolver cascade; the member picker disambiguates
+    // when >1 candidate is accessible.
+    const inserted = await db
+      .insert(integrationConnections)
+      .values({
+        integrationPackageId: input.packageId,
+        authKey: input.authKey,
         accountId: input.accountId,
+        applicationId: target.scope.applicationId,
+        userId,
+        endUserId,
         credentialsEncrypted: ciphertext,
         identityClaims: input.identityClaims ?? {},
         scopesGranted: input.scopesGranted ?? [],
-        needsReconnection: false,
+        needsReconnection: input.needsReconnection ?? false,
         expiresAt: input.expiresAt ?? null,
+        createdAt: now,
         updatedAt: now,
       })
+      .returning();
+    const row = inserted[0];
+    if (!row) {
+      throw new Error("persistCredentialBundle: insert returned no row");
+    }
+    return rowToSummary(row);
+  }
+
+  // UPDATE — shared column set; WHERE differs by target.
+  const set: Partial<typeof integrationConnections.$inferInsert> = {
+    credentialsEncrypted: ciphertext,
+    expiresAt: input.expiresAt ?? null,
+    needsReconnection: input.needsReconnection ?? false,
+    updatedAt: now,
+  };
+  if (input.accountId !== undefined) set.accountId = input.accountId;
+  if (input.identityClaims !== undefined) set.identityClaims = input.identityClaims;
+  if (input.scopesGranted !== undefined) set.scopesGranted = input.scopesGranted;
+
+  if (target.kind === "update-owned") {
+    await assertAppBelongsToOrg(target.scope);
+    const { userId, endUserId } = assertActorIdentity(target.actor);
+    const ownerPredicate = userId
+      ? eq(integrationConnections.userId, userId)
+      : eq(integrationConnections.endUserId, endUserId!);
+    const updated = await db
+      .update(integrationConnections)
+      .set(set)
       .where(
         and(
-          eq(integrationConnections.id, input.connectionId),
-          eq(integrationConnections.applicationId, scope.applicationId),
+          eq(integrationConnections.id, target.connectionId),
+          eq(integrationConnections.applicationId, target.scope.applicationId),
           ownerPredicate,
         ),
       )
       .returning();
     const row = updated[0];
     if (!row) {
-      throw notFound(`Connection '${input.connectionId}' not found or not owned by caller`);
+      throw notFound(`Connection '${target.connectionId}' not found or not owned by caller`);
     }
     return rowToSummary(row);
   }
 
-  // No mono-auth-per-actor gate: an actor may hold N connections across
-  // any mix of declared auths (OAuth + PAT + custom). The runtime picks
-  // exactly one per run via the 5-layer resolver cascade (admin pin →
-  // run override → schedule override → member pin → fallback), and the
-  // member picker on the agent surface disambiguates when >1 candidate
-  // is accessible. Letting the user keep multiple shapes coexist matches
-  // real workflows — interactive OAuth in the UI + PAT for CI agents,
-  // for instance.
-  const inserted = await db
-    .insert(integrationConnections)
-    .values({
-      integrationPackageId: input.packageId,
-      authKey: input.authKey,
-      accountId: input.accountId,
-      applicationId: scope.applicationId,
-      userId,
-      endUserId,
-      credentialsEncrypted: ciphertext,
-      identityClaims: input.identityClaims ?? {},
-      scopesGranted: input.scopesGranted ?? [],
-      needsReconnection: false,
-      expiresAt: input.expiresAt ?? null,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .returning();
-  const row = inserted[0];
-  if (!row) {
-    throw new Error("saveIntegrationConnection: insert returned no row");
-  }
-  return rowToSummary(row);
+  // update-by-id (system write-back) — keyed by id only, silent no-op on miss.
+  await db
+    .update(integrationConnections)
+    .set(set)
+    .where(eq(integrationConnections.id, target.connectionId));
+  return null;
+}
+
+/**
+ * The single writer of `needs_reconnection = true` that does NOT touch the
+ * stored credentials. Flips a row to "re-connect required" — used by the
+ * refresh paths (no refresh_token / revoked grant) and the scope-shrink-
+ * below-floor guard. Keyed by id (system write); no-ops when the row is gone.
+ */
+export async function markIntegrationConnectionNeedsReconnection(
+  connectionId: string,
+): Promise<void> {
+  await db
+    .update(integrationConnections)
+    .set({ needsReconnection: true, updatedAt: new Date() })
+    .where(eq(integrationConnections.id, connectionId));
+}
+
+/**
+ * Persist a new connection (INSERT) or refresh an existing one (UPDATE —
+ * caller passes `connectionId`) from the user-facing acquisition paths.
+ * Thin adapter over {@link persistCredentialBundle}: it passes explicit
+ * `?? {}` / `?? []` defaults so the acquisition write always sets
+ * `identityClaims`/`scopesGranted` (matching the pre-convergence behaviour),
+ * unlike the refresh write-back which leaves them untouched.
+ */
+export async function saveIntegrationConnection(
+  scope: AppScope,
+  input: StoreConnectionInput,
+): Promise<IntegrationConnectionSummary> {
+  const persistInput: PersistCredentialInput = {
+    credentials: input.credentials,
+    accountId: input.accountId,
+    identityClaims: input.identityClaims ?? {},
+    scopesGranted: input.scopesGranted ?? [],
+    needsReconnection: false,
+    expiresAt: input.expiresAt ?? null,
+  };
+  const summary = input.connectionId
+    ? await persistCredentialBundle(
+        { kind: "update-owned", scope, actor: input.actor, connectionId: input.connectionId },
+        persistInput,
+      )
+    : await persistCredentialBundle(
+        { kind: "insert", scope, actor: input.actor },
+        { ...persistInput, packageId: input.packageId, authKey: input.authKey },
+      );
+  // INSERT and update-owned always return a summary (or throw).
+  return summary!;
 }
 
 /**
@@ -718,40 +836,9 @@ function rowToSummary(
 // Non-OAuth connect flows
 // ─────────────────────────────────────────────
 
-/**
- * Connect an `api_key` / `basic` / `custom` auth. The `credentials`
- * payload shape is validated against the auth's declared
- * `credentials.schema` (best-effort — full AJV validation lives in the
- * route layer; this guard catches obviously empty payloads).
- */
-export async function connectIntegrationWithFields(
-  scope: AppScope,
-  packageId: string,
-  authKey: string,
-  credentials: Record<string, string>,
-  actor: Actor,
-): Promise<IntegrationConnectionSummary> {
-  const manifest = await loadManifestOrThrow(scope, packageId);
-  const auth = lookupAuth(manifest, authKey);
-  if (auth.type === "oauth2" || auth.type === "oauth1") {
-    throw invalidRequest(
-      `Auth '${authKey}' is type '${auth.type}' — use the OAuth flow, not the fields flow`,
-    );
-  }
-  if (!credentials || Object.keys(credentials).length === 0) {
-    throw invalidRequest("credentials payload cannot be empty", "credentials");
-  }
-
-  const { accountId, identityClaims } = extractIdentity(manifest, authKey, credentials);
-  return saveIntegrationConnection(scope, {
-    packageId,
-    authKey,
-    accountId,
-    credentials,
-    identityClaims,
-    actor,
-  });
-}
+// The api_key/basic/custom paste-the-bag connect flow now lives in
+// `services/connect/fields-strategy.ts` (FieldsStrategy) — selected via
+// `resolveStrategy` and reached through the connect/fields route adapter.
 
 // ─────────────────────────────────────────────
 // Aggregate views for the marketplace UI

@@ -5,13 +5,13 @@
   "name": "@appstrate/webhooks",
   "version": "1.0.0",
   "displayName": "Webhooks (API)",
-  "description": "Generic webhook provider — send HTTP requests to any URL with optional authentication",
+  "description": "Generic webhook provider \u2014 send HTTP requests to any URL with optional authentication",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "webhook",
   "keywords": ["integration", "automation"],
-  "server": {
-    "type": "api_call"
+  "apiCall": {
+    "authKey": "primary"
   },
   "auths": {
     "primary": {
@@ -29,11 +29,11 @@
             },
             "secret_header_name": {
               "type": "string",
-              "description": "Custom authentication header name (e.g. X-Webhook-Secret) — optional"
+              "description": "Custom authentication header name (e.g. X-Webhook-Secret) \u2014 optional"
             },
             "secret_header_value": {
               "type": "string",
-              "description": "Secret value for the authentication header — optional"
+              "description": "Secret value for the authentication header \u2014 optional"
             }
           },
           "required": ["webhook_url"]

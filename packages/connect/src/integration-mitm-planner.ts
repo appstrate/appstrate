@@ -176,19 +176,26 @@ export function planMitmAction(
     // that the proxy must never forward a server-supplied Authorization
     // header, even if the server claims override is allowed for its
     // own configured header (confused-deputy boundary).
-    if (!plan.allowServerOverride && !looseEquals(plan.headerName, "Authorization")) {
+    if (plan.allowServerOverride && looseEquals(plan.headerName, "Authorization")) {
+      // Override allowed for Authorization → drop it from the strip list so
+      // the caller's own value survives.
+      const idx = stripped.findIndex((h) => looseEquals(h, "Authorization"));
+      if (idx >= 0) stripped.splice(idx, 1);
+    } else if (
+      plan.value.length > 0 &&
+      !plan.allowServerOverride &&
+      !looseEquals(plan.headerName, "Authorization")
+    ) {
+      // Protect the injected credential header from server override — but ONLY
+      // when we actually have a credential to inject. An empty delivery value
+      // means "no credential yet": e.g. a `connect.tool` session still being
+      // acquired at run-start, where the placeholder plan is `value: ""`.
+      // Stripping the caller's same-named header then would clobber the login
+      // tool's own cookie jar (the CSRF / session cookies it must carry across
+      // the login redirect chain) while protecting nothing — there is no
+      // injected credential to shadow. The universal Authorization /
+      // Proxy-Authorization strip above still applies unconditionally.
       stripped.push(plan.headerName);
-    } else if (plan.allowServerOverride) {
-      // Override allowed: drop the manifest header from the strip list
-      // when it equals Authorization, so the caller's value survives.
-      // For non-Authorization custom headers, do not add to strip list.
-      if (looseEquals(plan.headerName, "Authorization")) {
-        const idx = stripped.findIndex((h) => looseEquals(h, "Authorization"));
-        if (idx >= 0) stripped.splice(idx, 1);
-      }
-    } else {
-      // headerName equals Authorization and allowServerOverride is false:
-      // already in stripped, no extra action.
     }
   }
 

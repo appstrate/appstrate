@@ -5,8 +5,13 @@ import { createForwardProxy } from "./forward-proxy.ts";
 import type { CredentialsResponse, LlmProxyConfig } from "./helpers.ts";
 import { logger } from "./logger.ts";
 import { OAuthTokenCache } from "./oauth-token-cache.ts";
-import { bootIntegrations, readIntegrationSpecsFromEnv } from "./integrations-boot.ts";
+import {
+  bootIntegrations,
+  readIntegrationSpecsFromEnv,
+  runConnectOnce,
+} from "./integrations-boot.ts";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
+import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 
 function readLlmConfigFromEnv(): LlmProxyConfig | undefined {
   // OAuth credentials ship as a single JSON env var carrying the full
@@ -50,6 +55,35 @@ const config = {
   modelContextWindow: readPositiveIntFromEnv("MODEL_CONTEXT_WINDOW"),
   modelMaxTokens: readPositiveIntFromEnv("MODEL_MAX_TOKENS"),
 };
+
+// ─── P4 — connect mode (`runAt: "link"` ephemeral connect-run) ───
+// When `CONNECT_LOGIN_JSON` is present the sidecar is NOT serving an agent
+// run: it runs the single integration's `login` tool exactly once via
+// `runConnectOnce`, emits the captured CredentialBundle on a sentinel stdout
+// line, and exits. The agent-facing `/mcp` server is never started.
+//
+// Result protocol (stdout, one line):
+//   APPSTRATE_CONNECT_RESULT:<json>   — JSON = the CredentialBundle (exit 0)
+//   APPSTRATE_CONNECT_ERROR:<message> — failure (exit 1)
+// The bundle values are NEVER logged anywhere else — that line is the
+// transport. The platform's connect-run launcher parses this from the
+// container's stdout.
+if (process.env.CONNECT_LOGIN_JSON) {
+  const platformApiUrl = process.env.PLATFORM_API_URL || "http://localhost:3000";
+  const runToken = process.env.RUN_TOKEN || "";
+  try {
+    const spec = JSON.parse(process.env.CONNECT_LOGIN_JSON) as IntegrationSpawnSpec;
+    const bundle = await runConnectOnce(spec, { platformApiUrl, runToken });
+    // Sentinel line — the bundle is the transport, written directly to
+    // stdout (NOT via the JSON logger, which would log the secret values).
+    process.stdout.write(`APPSTRATE_CONNECT_RESULT:${JSON.stringify(bundle)}\n`);
+    process.exit(0);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    process.stdout.write(`APPSTRATE_CONNECT_ERROR:${message}\n`);
+    process.exit(1);
+  }
+}
 
 const cookieJar = new Map<string, string[]>();
 

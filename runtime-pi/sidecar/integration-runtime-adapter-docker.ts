@@ -125,22 +125,6 @@ async function killContainer(containerId: string): Promise<void> {
   await dockerExec(["kill", containerId]).catch(() => {});
 }
 
-/**
- * Single `docker info` roundtrip cached per process. The sidecar IS
- * per-run, so this is effectively a one-shot probe at boot.
- */
-let dockerAvailableCache: boolean | null = null;
-async function isDockerAvailable(): Promise<boolean> {
-  if (dockerAvailableCache !== null) return dockerAvailableCache;
-  try {
-    await dockerExec(["info", "--format", "{{.ServerVersion}}"]);
-    dockerAvailableCache = true;
-  } catch {
-    dockerAvailableCache = false;
-  }
-  return dockerAvailableCache;
-}
-
 export function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
   const containerIds: string[] = [];
   let runNetwork: string | null = null;
@@ -262,9 +246,5 @@ export function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapt
 
 registerIntegrationRuntimeAdapter({
   id: "docker",
-  // High priority — when a docker daemon is reachable, container
-  // isolation is the production default.
-  priority: 100,
-  isAvailable: isDockerAvailable,
   create: createDockerIntegrationRuntimeAdapter,
 });

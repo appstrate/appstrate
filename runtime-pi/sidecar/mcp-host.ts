@@ -64,6 +64,17 @@ export interface McpHostUpstream {
    * + tool-name validation still apply.
    */
   trusted?: boolean;
+  /**
+   * Register this upstream's tools UNDER an existing namespace instead of
+   * allocating a fresh (possibly suffixed) one. Used to attach the in-process
+   * `api_call` tool to an integration that ALSO spawns its own MCP server, so
+   * the agent sees `{ns}__api_call` alongside `{ns}__<native tools>` under one
+   * namespace. The pre-existing upstream stays the namespace's PRIMARY (what
+   * {@link McpHost.getUpstreamClient} returns, e.g. for the connect-login
+   * tool); these merged tools route to THIS client via the per-tool index.
+   * The namespace must already exist (register the primary server first).
+   */
+  intoNamespace?: string;
 }
 
 export interface McpHostOptions {
@@ -89,6 +100,13 @@ export interface McpHostOptions {
 export class McpHost {
   private readonly upstreams = new Map<string, McpHostUpstream>();
   private readonly toolToNamespace = new Map<string, string>();
+  // Per-tool → owning client. Decoupled from `upstreams` (namespace → primary
+  // client) so a single namespace can aggregate tools from more than one
+  // client (e.g. a spawned server + the in-process `api_call`, see
+  // `intoNamespace`). Dispatch routes by this map, never by namespace alone.
+  private readonly toolToClient = new Map<string, AppstrateMcpClient>();
+  // Every distinct client registered, primary or merged — closed on dispose.
+  private readonly clients = new Set<AppstrateMcpClient>();
   private readonly originalToolNames = new Map<string, string>();
   private readonly toolDescriptors: Tool[] = [];
   private readonly options: McpHostOptions;
@@ -103,7 +121,15 @@ export class McpHost {
    * subsequent server-side `notifications/tools/list_changed` are NOT
    * tracked yet (third-party MCP servers rarely emit them in practice).
    */
-  async register(upstream: McpHostUpstream): Promise<void> {
+  /**
+   * Ingest an upstream MCP server. Returns the ALLOCATED namespace — the
+   * normalised slug, possibly disambiguated with a `_2`/`_3`/… suffix on
+   * collision. This is the value {@link getUpstreamClient} keys against, so
+   * callers that need to reach the raw client afterwards (e.g. the P2
+   * connect-login hook) must use the returned namespace, not the one they
+   * passed in.
+   */
+  async register(upstream: McpHostUpstream): Promise<string> {
     if (this.disposed) throw new Error("McpHost: cannot register after dispose()");
     const baseNamespace = normaliseNamespace(upstream.namespace);
     if (!baseNamespace) {
@@ -114,9 +140,20 @@ export class McpHost {
     // `@vendor/gmail`) → auto-suffix `_2`, `_3`, … with an audit log,
     // instead of throwing. Throwing would let one badly-named package
     // gate every install of any other package sharing its slug.
-    const normalisedNs = this.allocateNamespace(baseNamespace, upstream.namespace);
+    // `intoNamespace` merges into an existing namespace (no allocation, no
+    // suffix); otherwise allocate a fresh slot, disambiguating on collision.
+    const merging = upstream.intoNamespace !== undefined;
+    if (merging && !this.upstreams.has(upstream.intoNamespace!)) {
+      throw new Error(
+        `McpHost: intoNamespace '${upstream.intoNamespace}' is not a registered namespace`,
+      );
+    }
+    const normalisedNs = merging
+      ? upstream.intoNamespace!
+      : this.allocateNamespace(baseNamespace, upstream.namespace);
     const effectiveUpstream: McpHostUpstream = { ...upstream, namespace: normalisedNs };
-    if (normalisedNs !== baseNamespace) {
+    this.clients.add(effectiveUpstream.client);
+    if (!merging && normalisedNs !== baseNamespace) {
       this.options.onLog?.({
         source: `host:${normalisedNs}`,
         level: "warn",
@@ -149,8 +186,8 @@ export class McpHost {
 
     if (capabilities && !capabilities.tools) {
       // Server explicitly does NOT support tools — no point asking.
-      this.upstreams.set(normalisedNs, effectiveUpstream);
-      return;
+      if (!merging) this.upstreams.set(normalisedNs, effectiveUpstream);
+      return normalisedNs;
     }
 
     const { tools } = await effectiveUpstream.client.listTools();
@@ -197,11 +234,15 @@ export class McpHost {
         ? namespacedName
         : `${normalisedNs}__tool_${this.toolDescriptors.length}`;
       this.toolToNamespace.set(finalName, normalisedNs);
+      this.toolToClient.set(finalName, effectiveUpstream.client);
       this.originalToolNames.set(finalName, tool.name);
       this.toolDescriptors.push({ ...sanitised, name: finalName });
     }
 
-    this.upstreams.set(normalisedNs, effectiveUpstream);
+    // Merged upstreams (`intoNamespace`) contribute tools but never become the
+    // namespace's primary client — keep the pre-existing primary in place.
+    if (!merging) this.upstreams.set(normalisedNs, effectiveUpstream);
+    return normalisedNs;
   }
 
   /**
@@ -228,6 +269,23 @@ export class McpHost {
   }
 
   /**
+   * Connect-login primitive (P1) — return the underlying MCP client for a
+   * registered upstream so a caller can invoke a tool directly (bypassing
+   * the namespaced tool-dispatch surface). `namespace` is the normalised
+   * form used as the `{namespace}__tool` prefix (the same value
+   * {@link normaliseNamespace} produces, after any collision-disambiguation
+   * suffix). Returns `undefined` when no upstream is registered under it.
+   *
+   * The returned client exposes `.callTool({ name, arguments }, { signal? })`
+   * — the connect-login primitive uses it to call the integration's `login`
+   * tool while the credential source's transient-input substitution window
+   * is open.
+   */
+  getUpstreamClient(namespace: string): AppstrateMcpClient | undefined {
+    return this.upstreams.get(namespace)?.client;
+  }
+
+  /**
    * Build {@link AppstrateToolDefinition}s — a flat list ready for
    * `createMcpServer(...)`. The handler dispatches `tools/call` to the
    * upstream client identified by the prefix.
@@ -242,16 +300,17 @@ export class McpHost {
     const thirdParty: AppstrateToolDefinition[] = [];
     for (const desc of this.toolDescriptors) {
       if (firstPartyNames.has(desc.name)) continue;
-      const namespace = this.toolToNamespace.get(desc.name)!;
       const originalName = this.originalToolNames.get(desc.name)!;
-      const upstream = this.upstreams.get(namespace);
-      if (!upstream) continue;
+      // Route by the per-tool client index, not the namespace — a namespace
+      // may aggregate tools from more than one client (`intoNamespace`).
+      const client = this.toolToClient.get(desc.name);
+      if (!client) continue;
       thirdParty.push({
         descriptor: desc,
         handler: async (args, extra): Promise<CallToolResult> => {
           // Forward to upstream with the original (un-namespaced) name.
           // Cancellation via the SDK's RequestHandlerExtra signal.
-          return upstream.client.callTool(
+          return client.callTool(
             { name: originalName, arguments: args },
             { ...(extra.signal ? { signal: extra.signal } : {}) },
           );
@@ -276,8 +335,8 @@ export class McpHost {
     if (this.disposed) return;
     this.disposed = true;
     await Promise.all(
-      [...this.upstreams.values()].map((u) =>
-        u.client.close().catch(() => {
+      [...this.clients].map((c) =>
+        c.close().catch(() => {
           // Swallow close errors — we're tearing down; the caller
           // already learned the run is over.
         }),
@@ -285,6 +344,8 @@ export class McpHost {
     );
     this.upstreams.clear();
     this.toolToNamespace.clear();
+    this.toolToClient.clear();
+    this.clients.clear();
     this.originalToolNames.clear();
     this.toolDescriptors.length = 0;
   }

@@ -176,6 +176,54 @@ describe("planMitmAction — empty delivery value", () => {
     // Still strips so a leaked stale Bearer can't reach upstream.
     expect(action.strippedHeaderNames.map((s) => s.toLowerCase())).toContain("authorization");
   });
+
+  it("does NOT strip a custom (non-Authorization) header when the value is empty", () => {
+    // Run-start `connect.tool` login: the session isn't captured yet, so its
+    // placeholder delivery plan carries `value: ""`. The login tool manages
+    // its own cookie jar (CSRF + session cookies across the redirect chain) on
+    // the SAME header name the session will later inject (`Cookie`). Stripping
+    // it now would clobber the jar while protecting nothing — there is no
+    // injected credential to shadow.
+    const plan: HttpDeliveryPlan = {
+      headerName: "Cookie",
+      headerPrefix: "",
+      value: "",
+      allowServerOverride: false,
+    };
+    const a = auth("kijiji", { authType: "custom" });
+    const ctx: MitmRequestContext = {
+      url: "https://api.kijiji.com/login",
+      headerNames: ["Cookie", "Content-Type"],
+      deliveryPlans: { kijiji: plan },
+    };
+    const action = planMitmAction(ctx, payload(a));
+    expect(action.injectedHeader).toBeNull();
+    const lower = action.strippedHeaderNames.map((s) => s.toLowerCase());
+    expect(lower).not.toContain("cookie");
+    // The universal pair is still stripped regardless.
+    expect(lower).toContain("authorization");
+    expect(lower).toContain("proxy-authorization");
+  });
+
+  it("DOES strip the custom header once a non-empty value is present", () => {
+    // After capture, the session has real cookies → injection + strip resume,
+    // so the integration can no longer set its own `Cookie` to shadow ours.
+    const plan: HttpDeliveryPlan = {
+      headerName: "Cookie",
+      headerPrefix: "",
+      value: "kj-st=abc; kj-at=def",
+      allowServerOverride: false,
+    };
+    const a = auth("kijiji", { authType: "custom" });
+    const ctx: MitmRequestContext = {
+      url: "https://api.kijiji.com/whoami",
+      headerNames: ["Cookie"],
+      deliveryPlans: { kijiji: plan },
+    };
+    const action = planMitmAction(ctx, payload(a));
+    expect(action.injectedHeader).toEqual({ name: "Cookie", value: "kj-st=abc; kj-at=def" });
+    expect(action.strippedHeaderNames.map((s) => s.toLowerCase())).toContain("cookie");
+  });
 });
 
 describe("planMitmAction — no delivery plan for matched auth", () => {

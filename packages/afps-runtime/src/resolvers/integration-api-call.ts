@@ -137,7 +137,7 @@ export function readApiCallIntegrationMeta(
 function projectApiCallMeta(name: string, parsed: unknown): ApiCallIntegrationMeta | null {
   if (!parsed || typeof parsed !== "object") return null;
   const m = parsed as {
-    server?: { type?: string; authKey?: string };
+    apiCall?: { authKey?: string };
     auths?: Record<
       string,
       {
@@ -148,14 +148,10 @@ function projectApiCallMeta(name: string, parsed: unknown): ApiCallIntegrationMe
       }
     >;
   };
-  if (m.server?.type !== "api_call") return null;
+  // Only integrations declaring an `apiCall` block expose the generic tool.
+  if (!m.apiCall?.authKey) return null;
   const auths = m.auths ?? {};
-  const authKeys = Object.keys(auths);
-  if (authKeys.length === 0) return null;
-  // `server.authKey` is optional when there's exactly one auth; otherwise it
-  // disambiguates. Fall back to the single declared auth.
-  const authKey = m.server.authKey ?? (authKeys.length === 1 ? authKeys[0]! : undefined);
-  if (!authKey) return null;
+  const authKey = m.apiCall.authKey;
   const auth = auths[authKey];
   if (!auth) return null;
 

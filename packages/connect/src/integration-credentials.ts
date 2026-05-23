@@ -9,7 +9,6 @@
 
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import type { ProxyCredentialsPayload } from "./proxy-primitives.ts";
-import { decryptCredentials } from "./encryption.ts";
 
 /**
  * Camel-cased manifest aliases → snake_case credential storage keys.
@@ -69,24 +68,12 @@ export interface IntegrationCredentialsPayload {
 }
 
 /**
- * Decrypt a `credentials_encrypted` blob and project it to a flat
- * `Record<string, string>` — non-string values are silently dropped.
- *
- * Used by both the live credentials resolver (sidecar-facing) and the
- * token-refresh path, which need the credentials as a string map to
- * feed into header injection / token-endpoint POST bodies. Throws on
- * decryption failure (key rotation issue, corrupted ciphertext) —
- * callers wrap in try/catch if they want to log + skip vs propagate.
- */
-export function decryptCredentialsToStringMap(ciphertext: string): Record<string, string> {
-  return projectToStringMap(decryptCredentials<Record<string, unknown>>(ciphertext) ?? {});
-}
-
-/**
  * Project an already-decrypted credentials object to a flat
  * `Record<string, string>`, dropping non-string (incl. `undefined`)
- * values. Shared by {@link decryptCredentialsToStringMap} and the
- * provider-side credential resolvers so the projection rule lives once.
+ * values. Shared by the credential-envelope decryptors (`./credential-decrypt.ts`)
+ * and the provider-side credential resolvers so the projection rule lives once.
+ * Stays here (no crypto dependency) so the sidecar can import this module
+ * without pulling in the encryption keyring.
  */
 export function projectToStringMap(raw: Record<string, unknown>): Record<string, string> {
   const out: Record<string, string> = {};

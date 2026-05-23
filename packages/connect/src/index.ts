@@ -3,7 +3,15 @@
 // Types
 export type { Actor, ScopeValidationResult, OAuthStateRecord, OAuthStateStore } from "./types.ts";
 // Encryption
-export { encrypt, decrypt, encryptCredentials, decryptCredentials } from "./encryption.ts";
+export {
+  encrypt,
+  decrypt,
+  encryptCredentials,
+  decryptCredentials,
+  encryptCredentialEnvelope,
+  decryptCredentialEnvelope,
+} from "./encryption.ts";
+export type { CredentialEnvelope } from "./encryption.ts";
 
 // Scopes
 export { validateScopes } from "./scopes.ts";
@@ -49,12 +57,17 @@ export type { ProxyCredentialsPayload } from "./proxy-primitives.ts";
 // Multi-auth credential resolver + delivery planners.
 export {
   ALIAS_MAP,
-  decryptCredentialsToStringMap,
   readCredentialField,
   resolveHttpDelivery,
   buildProxyCredentialsPayload,
   PROXY_INJECTED_FIELD,
 } from "./integration-credentials.ts";
+// Credential-envelope decryptors — split out so they (and `encryption.ts` →
+// `@appstrate/env`) stay off the sidecar's import graph. Platform-only.
+export {
+  decryptCredentialsToStringMap,
+  decryptCredentialInputsToStringMap,
+} from "./credential-decrypt.ts";
 export type {
   ResolvedAuthCredentials,
   IntegrationCredentialsPayload,
