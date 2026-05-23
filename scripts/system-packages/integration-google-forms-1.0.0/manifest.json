@@ -10,8 +10,8 @@
   "author": "Appstrate",
   "icon": "googleforms",
   "keywords": ["forms", "productivity"],
-  "server": {
-    "type": "api_call"
+  "apiCall": {
+    "authKey": "primary"
   },
   "auths": {
     "primary": {
@@ -26,7 +26,10 @@
         "https://www.googleapis.com/auth/forms.responses.readonly"
       ],
       "scopeSeparator": " ",
-      "authorizationParams": { "access_type": "offline", "prompt": "consent" },
+      "authorizationParams": {
+        "access_type": "offline",
+        "prompt": "consent"
+      },
       "pkceEnabled": false,
       "tokenAuthMethod": "client_secret_post",
       "availableScopes": [

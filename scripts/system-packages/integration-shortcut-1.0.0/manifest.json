@@ -10,8 +10,8 @@
   "author": "Appstrate",
   "icon": "shortcut",
   "keywords": ["project-management", "issue-tracking", "development"],
-  "server": {
-    "type": "api_call"
+  "apiCall": {
+    "authKey": "primary"
   },
   "auths": {
     "primary": {

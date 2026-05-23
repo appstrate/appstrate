@@ -10,8 +10,8 @@
   "author": "Appstrate",
   "icon": "brevo",
   "keywords": ["email", "marketing", "crm"],
-  "server": {
-    "type": "api_call"
+  "apiCall": {
+    "authKey": "primary"
   },
   "auths": {
     "primary": {

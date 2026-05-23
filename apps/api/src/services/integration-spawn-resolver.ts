@@ -158,12 +158,11 @@ async function resolveOne(
   // encoding a typical (multi-MB) integration bundle blows past Linux's
   // env var size limit.
   //
-  // provider→integration unification — `server.type: "api_call"` is the
-  // serverless kind: no runner to spawn, just the generic credential-injecting
-  // tool. Exposed when the agent selected it (least-privilege: the catch-all
-  // tool is never auto-granted). `authorizedUris` come from the auth the
-  // api_call config resolved to.
-  const isApiCallServer = manifest.server?.type === "api_call";
+  // provider→integration unification — a serverless integration declares an
+  // `apiCall` block and no `server`: no runner to spawn, just the generic
+  // credential-injecting tool. Exposed when the agent selected it
+  // (least-privilege: the catch-all tool is never auto-granted).
+  // `authorizedUris` come from the auth the api_call config resolved to.
   const apiCallCfg = getApiCallConfig(manifest);
   const exposeApiCall =
     apiCallCfg !== null && (agentToolSelection ?? []).includes(API_CALL_TOOL_NAME);
@@ -219,11 +218,12 @@ async function resolveOne(
     manifest: {
       name: manifest.name,
       version: manifest.version,
-      // Serverless integrations (`server.type: "api_call"`) omit `server` in
-      // the spec — the sidecar's serverless path (no spec.manifest.server)
-      // skips spawn and only wires the generic api_call tool. Real runners
-      // (node|python|binary|…) and remote MCP (http) propagate normally.
-      ...(manifest.server && !isApiCallServer
+      // Serverless integrations (no `server`, only an `apiCall` block) omit
+      // `server` in the spec — the sidecar's serverless path (no
+      // spec.manifest.server) skips spawn and only wires the generic api_call
+      // tool. Real runners (node|python|binary|…) and remote MCP (http)
+      // propagate normally.
+      ...(manifest.server
         ? {
             server: {
               type: manifest.server.type,

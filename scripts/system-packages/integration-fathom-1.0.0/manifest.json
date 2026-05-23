@@ -10,8 +10,8 @@
   "author": "Appstrate",
   "icon": "https://cdn.simpleicons.org/fathom",
   "keywords": ["meetings", "productivity"],
-  "server": {
-    "type": "api_call"
+  "apiCall": {
+    "authKey": "primary"
   },
   "auths": {
     "primary": {

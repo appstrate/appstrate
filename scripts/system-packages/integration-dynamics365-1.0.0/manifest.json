@@ -10,8 +10,8 @@
   "author": "Appstrate",
   "icon": "microsoftdynamics",
   "keywords": ["crm", "sales", "erp"],
-  "server": {
-    "type": "api_call"
+  "apiCall": {
+    "authKey": "primary"
   },
   "auths": {
     "primary": {

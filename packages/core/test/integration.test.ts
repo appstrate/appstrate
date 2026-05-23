@@ -1022,7 +1022,7 @@ describe("validateAgentIntegrationScopes", () => {
   });
 });
 
-describe("integrationManifestSchema — server.type api_call (generic credential-injecting tool)", () => {
+describe("integrationManifestSchema — apiCall capability (generic credential-injecting tool)", () => {
   const oauthAuth = {
     type: "oauth2" as const,
     authorizationUrl: "https://idp/a",
@@ -1031,63 +1031,73 @@ describe("integrationManifestSchema — server.type api_call (generic credential
     delivery: { http: {} },
   };
 
-  it("accepts a serverless api_call integration (migrated-provider shape)", () => {
-    const m = baseManifest({ server: { type: "api_call" }, auths: { primary: oauthAuth } });
+  it("accepts a serverless apiCall integration (migrated-provider shape)", () => {
+    const m = baseManifest({
+      server: undefined,
+      apiCall: { authKey: "primary" },
+      auths: { primary: oauthAuth },
+    });
     const parsed = integrationManifestSchema.parse(m);
-    expect(parsed.server!.type).toBe("api_call");
+    expect(parsed.server).toBeUndefined();
     expect(getApiCallConfig(parsed)).not.toBeNull();
   });
 
-  it("an MCP server integration does not expose api_call", () => {
+  it("accepts apiCall alongside a spawned server (attachable shape)", () => {
+    const m = baseManifest({
+      apiCall: { authKey: "primary" },
+      auths: { primary: oauthAuth },
+    });
+    const parsed = integrationManifestSchema.parse(m);
+    expect(parsed.server!.type).toBe("node");
+    expect(getApiCallConfig(parsed)?.authKey).toBe("primary");
+  });
+
+  it("an MCP server integration with no apiCall block does not expose api_call", () => {
     const m = baseManifest({ auths: { primary: oauthAuth } });
     const parsed = integrationManifestSchema.parse(m);
     expect(parsed.server!.type).toBe("node");
     expect(getApiCallConfig(parsed)).toBeNull();
   });
 
-  it("rejects an integration with no server", () => {
+  it("rejects an integration with neither server nor apiCall", () => {
     const r = integrationManifestSchema.safeParse(baseManifest({ server: undefined }));
     expect(r.success).toBe(false);
   });
 
-  it("rejects server.type api_call with no declared auth", () => {
-    const r = integrationManifestSchema.safeParse(baseManifest({ server: { type: "api_call" } }));
+  it("rejects an apiCall block whose authKey matches no declared auth", () => {
+    const r = integrationManifestSchema.safeParse(
+      baseManifest({ server: undefined, apiCall: { authKey: "primary" } }),
+    );
     expect(r.success).toBe(false);
   });
 
-  it("rejects server.authKey that matches no auth", () => {
+  it("rejects apiCall.authKey that matches no auth", () => {
     const r = integrationManifestSchema.safeParse(
       baseManifest({
-        server: { type: "api_call", authKey: "ghost" },
+        server: undefined,
+        apiCall: { authKey: "ghost" },
         auths: { primary: oauthAuth },
       }),
     );
     expect(r.success).toBe(false);
   });
 
-  it("requires server.authKey when multiple auths are declared", () => {
+  it("names the auth explicitly when multiple auths are declared", () => {
     const r = integrationManifestSchema.safeParse(
       baseManifest({
-        server: { type: "api_call" },
+        server: undefined,
+        apiCall: { authKey: "secondary" },
         auths: { primary: oauthAuth, secondary: oauthAuth },
       }),
     );
-    expect(r.success).toBe(false);
+    expect(r.success).toBe(true);
+    if (r.success) expect(getApiCallConfig(r.data)?.authKey).toBe("secondary");
   });
 
-  it("rejects server.authKey/uploadProtocols on a non-api_call server.type", () => {
-    const r = integrationManifestSchema.safeParse(
-      baseManifest({
-        server: { type: "node", entryPoint: "./server.js", uploadProtocols: ["google-resumable"] },
-        auths: { primary: oauthAuth },
-      }),
-    );
-    expect(r.success).toBe(false);
-  });
-
-  it("accepts server.uploadProtocols and surfaces them via getApiCallConfig", () => {
+  it("accepts apiCall.uploadProtocols and surfaces them via getApiCallConfig", () => {
     const m = baseManifest({
-      server: { type: "api_call", uploadProtocols: ["google-resumable"] },
+      server: undefined,
+      apiCall: { authKey: "primary", uploadProtocols: ["google-resumable"] },
       auths: { primary: oauthAuth },
     });
     const parsed = integrationManifestSchema.parse(m);
@@ -1095,9 +1105,9 @@ describe("integrationManifestSchema — server.type api_call (generic credential
     expect(cfg).toEqual({ authKey: "primary", uploadProtocols: ["google-resumable"] });
   });
 
-  it("getApiCallConfig resolves the lone auth key and returns null when not api_call", () => {
+  it("getApiCallConfig returns the block authKey and null when no apiCall", () => {
     const withCall = integrationManifestSchema.parse(
-      baseManifest({ server: { type: "api_call" }, auths: { only: oauthAuth } }),
+      baseManifest({ server: undefined, apiCall: { authKey: "only" }, auths: { only: oauthAuth } }),
     );
     expect(getApiCallConfig(withCall)?.authKey).toBe("only");
     const noCall = integrationManifestSchema.parse(baseManifest());
@@ -1112,7 +1122,8 @@ describe("integrationManifestSchema — server.type api_call (generic credential
 describe("integrationManifestSchema — allowAllUris (migrated provider parity)", () => {
   it("accepts an auth with empty authorizedUris when allowAllUris is set", () => {
     const m = baseManifest({
-      server: { type: "api_call" },
+      server: undefined,
+      apiCall: { authKey: "primary" },
       auths: {
         primary: {
           type: "custom",
@@ -1154,7 +1165,7 @@ describe("requiredAuthKeysForAgent / requiredScopesForAgent — apiCall scope-on
       name: "@official/github",
       version: "1.0.0",
       displayName: "GitHub",
-      server: { type: "api_call" },
+      apiCall: { authKey: "primary" },
       auths: {
         primary: {
           type: "oauth2",
@@ -1468,10 +1479,11 @@ describe("integrationManifestSchema — attachable apiCall capability", () => {
     expect(getApiCallConfig(m)).toEqual({ authKey: "session", uploadProtocols: ["tus"] });
   });
 
-  it("getApiCallConfig still resolves the serverless server.type api_call form", () => {
+  it("getApiCallConfig resolves a serverless apiCall block (no server)", () => {
     const m = integrationManifestSchema.parse(
       baseManifest({
-        server: { type: "api_call", authKey: "session" },
+        server: undefined,
+        apiCall: { authKey: "session" },
         auths: {
           session: {
             type: "custom",
@@ -1488,24 +1500,6 @@ describe("integrationManifestSchema — attachable apiCall capability", () => {
   it("rejects an apiCall block whose authKey matches no auth", () => {
     const r = integrationManifestSchema.safeParse(
       nodeWithApiCall({ apiCall: { authKey: "ghost" } }),
-    );
-    expect(r.success).toBe(false);
-  });
-
-  it("rejects an apiCall block combined with server.type api_call (redundant)", () => {
-    const r = integrationManifestSchema.safeParse(
-      baseManifest({
-        server: { type: "api_call", authKey: "session" },
-        auths: {
-          session: {
-            type: "custom",
-            authorizedUris: ["https://api.example.com/**"],
-            credentials: { schema: { type: "object", required: ["token"] } },
-            delivery: { http: { headerName: "Authorization", valueFrom: "accessToken" } },
-          },
-        },
-        apiCall: { authKey: "session" },
-      }),
     );
     expect(r.success).toBe(false);
   });

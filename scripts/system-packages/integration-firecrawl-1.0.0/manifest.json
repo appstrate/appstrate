@@ -5,13 +5,13 @@
   "name": "@appstrate/firecrawl",
   "version": "1.0.0",
   "displayName": "Firecrawl (API)",
-  "description": "Web scraping and crawling API — extract clean data from any website",
+  "description": "Web scraping and crawling API \u2014 extract clean data from any website",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "https://avatars.githubusercontent.com/u/135057108",
   "keywords": ["web-scraping", "data-extraction", "ai"],
-  "server": {
-    "type": "api_call"
+  "apiCall": {
+    "authKey": "primary"
   },
   "auths": {
     "primary": {
