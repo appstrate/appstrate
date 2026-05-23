@@ -80,6 +80,20 @@ export interface SidecarLaunchSpec {
    * `runtime-pi/sidecar/server.ts`.
    */
   integrations?: ReadonlyArray<IntegrationSpawnSpec>;
+  /**
+   * P4 — connect-run mode (`runAt: "link"`). When set, the sidecar runs in
+   * "connect mode": it boots the SINGLE integration carried in `integrations`,
+   * runs its `login` MCP tool exactly once (`runConnectOnce`), emits the
+   * captured credential bundle on a sentinel stdout line, and exits — the
+   * agent-facing `/mcp` server is never started.
+   *
+   * Serialised by the orchestrator as the `CONNECT_LOGIN_JSON` env var read by
+   * `runtime-pi/sidecar/server.ts`. The value is the same single
+   * {@link IntegrationSpawnSpec} (with its `connectLogin` block) that
+   * `integrations` carries; it is sensitive (the `connectLogin.inputs` plane
+   * is the decrypted login secret) and never logged.
+   */
+  connectLoginSpec?: IntegrationSpawnSpec;
 }
 
 /**

@@ -157,7 +157,9 @@ export async function resolveLiveIntegrationCredentials(
     if (refreshContext) {
       try {
         // Single re-acquisition path — OAuth2Strategy.reacquire wraps the
-        // fast-path refresh_token POST. needsRefresh already gated type=oauth2.
+        // fast-path refresh_token POST. needsRefresh already gated type=oauth2,
+        // so the connect.tool OrchestratedStrategy is never reached here and no
+        // connect-run executor is constructed on this hot path.
         const refreshed = await resolveStrategy(authDef).reacquire!({
           connectionId: connection.id,
           packageId: integrationId,

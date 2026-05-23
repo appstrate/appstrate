@@ -224,6 +224,10 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     if (spec.integrations && spec.integrations.length > 0) {
       env.INTEGRATIONS_TO_SPAWN_JSON = JSON.stringify(spec.integrations);
     }
+    // P4 — connect-run mode. Sidecar runs `runConnectOnce` then exits.
+    if (spec.connectLoginSpec) {
+      env.CONNECT_LOGIN_JSON = JSON.stringify(spec.connectLoginSpec);
+    }
 
     const proc = Bun.spawn(["bun", "run", SIDECAR_ENTRY], {
       env,

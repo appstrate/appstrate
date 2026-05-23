@@ -133,6 +133,11 @@ export class DockerOrchestrator implements ContainerOrchestrator {
     if (spec.integrations && spec.integrations.length > 0) {
       sidecarEnv.INTEGRATIONS_TO_SPAWN_JSON = JSON.stringify(spec.integrations);
     }
+    // P4 — connect-run mode. When set, the sidecar runs `runConnectOnce`
+    // against this single integration and exits (no agent /mcp server).
+    if (spec.connectLoginSpec) {
+      sidecarEnv.CONNECT_LOGIN_JSON = JSON.stringify(spec.connectLoginSpec);
+    }
 
     // Create sidecar on egress network (primary) so it has DNS + internet.
     // Then connect to run network (internal) with "sidecar" alias for agent DNS.

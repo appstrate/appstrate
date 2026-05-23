@@ -56,6 +56,7 @@ import {
   upsertIntegrationOAuthClient,
 } from "../services/integration-connections.ts";
 import { resolveStrategy } from "../services/connect/registry.ts";
+import { createConnectRunExecutor } from "../services/connect/connect-run-launcher.ts";
 import {
   computeRequiredScopes,
   getCurrentScopesGranted,
@@ -393,7 +394,13 @@ export function createIntegrationsRouter() {
             `Auth '${authKey}' is type '${auth.type}' — use the OAuth flow, not the fields flow`,
           );
         }
-        const conn = await resolveStrategy(auth).complete(
+        // A `custom` + `connect.tool` (runAt:"link") auth resolves to the
+        // OrchestratedStrategy, which needs the connect-run substrate to run
+        // the untrusted login tool. Supply it lazily so the plain
+        // paste-the-bag / declarative paths don't construct an executor.
+        const conn = await resolveStrategy(auth, {
+          connectToolExecutor: createConnectRunExecutor(),
+        }).complete(
           { scope, actor, integrationPackageId: packageId, authKey },
           { kind: "fields", credentials: body.credentials },
         );

@@ -142,7 +142,9 @@ export async function forceRefreshIntegrationProxyCredentials(
 
   try {
     // Single re-acquisition path — OAuth2Strategy.reacquire (authDef.type is
-    // gated to oauth2 above).
+    // gated to oauth2 above, so this resolver never reaches the connect.tool
+    // OrchestratedStrategy and needs no connect-run executor here). connect.tool
+    // re-bootstrap flows through `integration-credentials-resolver.ts` instead.
     const refreshed = await resolveStrategy(authDef).reacquire!({
       connectionId: connection.id,
       packageId: input.integrationId,
