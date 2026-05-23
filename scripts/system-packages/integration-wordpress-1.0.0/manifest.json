@@ -5,13 +5,13 @@
   "name": "@appstrate/wordpress",
   "version": "1.0.0",
   "displayName": "WordPress (API)",
-  "description": "Content management system — manage posts, pages, media, and users via the REST API",
+  "description": "Content management system \u2014 manage posts, pages, media, and users via the REST API",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "wordpress",
   "keywords": ["cms", "content"],
-  "server": {
-    "type": "api_call"
+  "apiCall": {
+    "authKey": "primary"
   },
   "auths": {
     "primary": {
@@ -33,7 +33,7 @@
             },
             "application_password": {
               "type": "string",
-              "description": "Application Password (generated in Users → Profile → Application Passwords)"
+              "description": "Application Password (generated in Users \u2192 Profile \u2192 Application Passwords)"
             }
           },
           "required": ["site_url", "username", "application_password"]

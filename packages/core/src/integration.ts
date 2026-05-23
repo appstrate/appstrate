@@ -60,12 +60,6 @@ export const integrationServerTypeEnum = z.enum([
   "binary",
   "docker",
   "http",
-  // Serverless: no MCP server spawned/connected — the integration exposes the
-  // single generic credential-injecting `api_call` tool, bounded by its auth's
-  // `authorizedUris`. Unifies the former `apiCall` block into the `server.type`
-  // discriminator so there is one declaration model for what an integration
-  // does (spawn a runner | connect a remote MCP | expose api_call).
-  "api_call",
   // Author-time sugars — converted by `afps bundle` (Phase 1.05).
   "npx",
   "uvx",
@@ -133,17 +127,6 @@ const serverSchema = z
     variables: z.record(z.string(), serverVariableSchema).optional(),
     mcpConfig: mcpConfigSchema.optional(),
     toolsDynamic: z.boolean().optional(),
-
-    // `api_call`-only sugars (the former top-level `apiCall` block). Which
-    // declared auth supplies credentials + `authorizedUris` for the generic
-    // call (optional when the integration declares exactly one auth), and the
-    // resumable-upload protocols the generic tool advertises. Forbidden on any
-    // other server.type (enforced in the superRefine below).
-    authKey: z
-      .string()
-      .regex(/^[a-z][a-z0-9_]*$/, { error: "server.authKey must match an auths.{key}" })
-      .optional(),
-    uploadProtocols: z.array(integrationUploadProtocolEnum).optional(),
   })
   .superRefine((server, ctx) => {
     // Exactly one of {entryPoint, package, url} per type
@@ -265,28 +248,6 @@ const serverSchema = z
         }
         break;
       }
-      case "api_call": {
-        // Serverless: no runner to point at. The credential-injecting tool is
-        // bounded by its auth's `authorizedUris` (cross-validated against
-        // `auths.{key}` in the root superRefine, which has the auth map).
-        if (hasEntry || hasPackage || hasUrl) {
-          ctx.addIssue({
-            code: "custom",
-            message: 'server.entryPoint/package/url forbidden when server.type is "api_call"',
-            path: hasEntry ? ["entryPoint"] : hasPackage ? ["package"] : ["url"],
-          });
-        }
-        break;
-      }
-    }
-
-    // `authKey` / `uploadProtocols` are api_call-only sugars.
-    if (server.type !== "api_call" && (server.authKey !== undefined || server.uploadProtocols)) {
-      ctx.addIssue({
-        code: "custom",
-        message: 'server.authKey/uploadProtocols are only valid when server.type is "api_call"',
-        path: server.authKey !== undefined ? ["authKey"] : ["uploadProtocols"],
-      });
     }
   });
 
@@ -844,11 +805,10 @@ export const integrationManifestSchema = z
       .optional(),
     _meta: z.looseObject({}).optional(),
 
-    // Every integration declares a `server` — its `type` is the single
-    // discriminator for what the integration does: spawn a runner
-    // (node|python|binary|…), connect a remote MCP (http), or expose the
-    // generic credential-injecting tool (api_call). Optional only so the root
-    // superRefine can emit a friendly "must declare a server" error.
+    // A `server` capability spawns a runner (node|python|binary|…) or connects
+    // a remote MCP (http). Optional: an integration may instead (or also)
+    // expose the generic credential-injecting tool via the `apiCall` block
+    // below. The root superRefine requires at least one of { server, apiCall }.
     server: serverSchema.optional(),
     auths: z
       .record(
@@ -866,15 +826,15 @@ export const integrationManifestSchema = z
     // selection).
     tools: toolsRecordSchema.optional(),
 
-    // Attachable generic `api_call` capability (additive). Exposes the
-    // in-process credential-injecting `api_call` tool ALONGSIDE a spawned MCP
-    // server (`server.type: node|bun|python|npx|uvx`) or a remote MCP
-    // (`http`). The tool runs on the sidecar's McpHost — OUTSIDE the
-    // integration's container — so the server code never sees the credential;
-    // it is bounded by `auths.{authKey}.authorizedUris` exactly like the
-    // serverless `server.type: "api_call"` path. For `server.type: "api_call"`
-    // the capability is implicit (`server.authKey`); declaring this block
-    // there is redundant and rejected in the root superRefine.
+    // Generic `api_call` capability — the single model for exposing the
+    // in-process credential-injecting `api_call` tool. Two shapes:
+    //   - alone (no `server`): the serverless integration — the tool IS the
+    //     integration (Gmail, Stripe, … — the dominant catalog pattern).
+    //   - alongside a `server` (node|…|http): the tool runs on the sidecar's
+    //     McpHost, OUTSIDE the integration's container, so the server code
+    //     never sees the credential.
+    // Either way it is bounded by `auths.{authKey}.authorizedUris`. `authKey`
+    // names which declared auth supplies the credential + URL allowlist.
     apiCall: z
       .object({
         authKey: z.string().regex(/^[a-z][a-z0-9_]*$/, {
@@ -885,53 +845,20 @@ export const integrationManifestSchema = z
       .optional(),
   })
   .superRefine((m, ctx) => {
-    // An integration must declare a `server` — its `type` says what it does.
-    if (!m.server) {
+    // An integration must declare at least one capability: a `server` (spawn a
+    // runner | connect a remote MCP) and/or the generic `apiCall` tool.
+    if (!m.server && !m.apiCall) {
       ctx.addIssue({
         code: "custom",
-        message: "an integration must declare a server",
+        message: "an integration must declare a server and/or an apiCall capability",
         path: ["server"],
       });
     }
 
-    // `api_call` injects a credential, so it needs an auth to draw from.
-    if (m.server?.type === "api_call") {
-      const authKeys = m.auths ? Object.keys(m.auths) : [];
-      if (authKeys.length === 0) {
-        ctx.addIssue({
-          code: "custom",
-          message: 'server.type "api_call" requires at least one declared auth in auths.{key}',
-          path: ["server"],
-        });
-      } else if (m.server.authKey) {
-        if (!authKeys.includes(m.server.authKey)) {
-          ctx.addIssue({
-            code: "custom",
-            message: `server.authKey "${m.server.authKey}" does not match any auths.{key}`,
-            path: ["server", "authKey"],
-          });
-        }
-      } else if (authKeys.length > 1) {
-        ctx.addIssue({
-          code: "custom",
-          message: "server.authKey is required when the integration declares multiple auths",
-          path: ["server", "authKey"],
-        });
-      }
-    }
-
-    // Attachable `apiCall` block — additive on top of a spawned/remote server.
+    // `apiCall` injects a credential, so it needs an auth to draw from. The
+    // referenced auth must exist; its own schema already guarantees a URL
+    // bound (`authorizedUris` non-empty OR `allowAllUris`), so no extra check.
     if (m.apiCall) {
-      if (m.server?.type === "api_call") {
-        ctx.addIssue({
-          code: "custom",
-          message:
-            'the `apiCall` block is redundant when server.type is "api_call" — use server.authKey instead',
-          path: ["apiCall"],
-        });
-      }
-      // The referenced auth must exist; its own schema already guarantees a URL
-      // bound (`authorizedUris` non-empty OR `allowAllUris`), so no extra check.
       const authKeys = m.auths ? Object.keys(m.auths) : [];
       if (!authKeys.includes(m.apiCall.authKey)) {
         ctx.addIssue({
@@ -1016,29 +943,17 @@ export const API_CALL_TOOL_NAME = "api_call";
 
 /**
  * Resolve the effective `api_call` configuration for an integration, or
- * `null` when the integration exposes no `api_call` tool.
+ * `null` when the integration declares no `apiCall` capability.
  *
- * Two sources, mutually exclusive (enforced by the manifest schema):
- *  - `server.type: "api_call"` — serverless: the tool IS the integration.
- *    `authKey` is `server.authKey` or the lone declared auth.
- *  - top-level `apiCall` block — additive: the tool runs in-process ALONGSIDE
- *    a spawned (`node`|…) or remote (`http`) server. `authKey` is explicit.
- *
- * The schema guarantees a validated manifest resolves unambiguously, so this
- * cannot fail for a validated manifest.
+ * Single source: the top-level `apiCall` block. It may stand alone (the
+ * serverless integration — the tool IS the integration) or sit alongside a
+ * spawned (`node`|…) or remote (`http`) `server`. `authKey` is explicit and
+ * the schema guarantees it names a declared auth, so this cannot fail for a
+ * validated manifest.
  */
 export function getApiCallConfig(
   manifest: IntegrationManifest,
 ): { authKey: string; uploadProtocols: IntegrationUploadProtocol[] } | null {
-  if (manifest.server?.type === "api_call") {
-    const authKeys = manifest.auths ? Object.keys(manifest.auths) : [];
-    const authKey = manifest.server.authKey ?? authKeys[0];
-    if (!authKey) return null;
-    return {
-      authKey,
-      uploadProtocols: manifest.server.uploadProtocols ?? [],
-    };
-  }
   if (manifest.apiCall) {
     const { authKey } = manifest.apiCall;
     if (!manifest.auths?.[authKey]) return null;
@@ -1101,7 +1016,7 @@ export function requiredAuthKeysForAgent(
     if (declaredAuths.includes(tool.requiredAuthKey)) out.add(tool.requiredAuthKey);
   }
   // The generic `api_call` tool isn't in `manifest.tools`; pin the auth it
-  // draws from (server.authKey or the attachable `apiCall` block) when selected.
+  // draws from (the `apiCall` block) when selected.
   if (agentTools?.includes(API_CALL_TOOL_NAME)) {
     const cfg = getApiCallConfig(manifest);
     if (cfg && declaredAuths.includes(cfg.authKey)) out.add(cfg.authKey);
@@ -1284,10 +1199,10 @@ export function validateAgentIntegrationScopes(
   if (selection.tools && selection.tools.length > 0) {
     const declared = new Set(getDeclaredToolNames(integrationManifest));
     // The generic `api_call` tool is SYNTHETIC — exposed in-process whenever the
-    // integration declares an api_call capability (`server.type: api_call` OR the
-    // attachable `apiCall` block), never listed in `tools`. Accept it alongside
-    // an integration's native tool catalog (it was already accepted on the
-    // serverless path, where `declared` is empty and enforcement is skipped).
+    // integration declares an `apiCall` capability, never listed in `tools`.
+    // Accept it alongside an integration's native tool catalog (it is also
+    // accepted on the serverless path, where `declared` is empty and
+    // enforcement is skipped).
     const apiCallAllowed = getApiCallConfig(integrationManifest) !== null;
     if (declared.size > 0) {
       for (const tool of selection.tools) {

@@ -10,8 +10,8 @@
   "author": "Appstrate",
   "icon": "https://www.google.com/s2/favicons?domain=freshdesk.com&sz=128",
   "keywords": ["crm", "support", "customer-service"],
-  "server": {
-    "type": "api_call"
+  "apiCall": {
+    "authKey": "primary"
   },
   "auths": {
     "primary": {

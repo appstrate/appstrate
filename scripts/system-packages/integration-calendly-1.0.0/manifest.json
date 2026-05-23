@@ -10,8 +10,8 @@
   "author": "Appstrate",
   "icon": "calendly",
   "keywords": ["calendar", "scheduling"],
-  "server": {
-    "type": "api_call"
+  "apiCall": {
+    "authKey": "primary"
   },
   "auths": {
     "primary": {

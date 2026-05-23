@@ -5,13 +5,13 @@
   "name": "@appstrate/activecampaign",
   "version": "1.0.0",
   "displayName": "ActiveCampaign (API)",
-  "description": "Marketing automation and CRM platform — contacts, deals, campaigns, and automations",
+  "description": "Marketing automation and CRM platform \u2014 contacts, deals, campaigns, and automations",
   "license": "Apache-2.0",
   "author": "Appstrate",
   "icon": "https://api.iconify.design/logos/active-campaign.svg",
   "keywords": ["marketing", "crm"],
-  "server": {
-    "type": "api_call"
+  "apiCall": {
+    "authKey": "primary"
   },
   "auths": {
     "primary": {
@@ -29,7 +29,7 @@
             },
             "api_key": {
               "type": "string",
-              "description": "API key from Settings → Developer"
+              "description": "API key from Settings \u2192 Developer"
             }
           },
           "required": ["account_name", "api_key"]
