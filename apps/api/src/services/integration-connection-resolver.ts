@@ -437,6 +437,30 @@ export async function resolveConnectionsForRun(
   });
 }
 
+/** Per-run connection snapshot: resolved picks (null when none) + any errors. */
+export interface RunConnectionSnapshot {
+  resolved: ResolvedConnectionMap | null;
+  errors: ConnectionResolutionError[];
+}
+
+/**
+ * Resolve the per-run connection snapshot for a kickoff: run the mechanism
+ * cascade, then project an empty map to `null` ("no integrations declared / no
+ * picks"). Shared by the classic run pipeline and the remote run-creation path
+ * so the resolution call + the empty→null projection live once; each caller
+ * maps `errors` to its own transport (412 ApiError vs structured result),
+ * mirroring how `runPreflightGates` centralizes the shared preflight gates.
+ */
+export async function resolveRunConnectionSnapshot(
+  input: ResolveConnectionsForRunInput,
+): Promise<RunConnectionSnapshot> {
+  const resolution = await resolveConnectionsForRun(input);
+  return {
+    resolved: Object.keys(resolution.resolved).length > 0 ? resolution.resolved : null,
+    errors: resolution.errors,
+  };
+}
+
 async function buildRequirement(
   entry: ManifestIntegrationEntry,
 ): Promise<IntegrationRequirement | null> {

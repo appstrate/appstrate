@@ -32,7 +32,7 @@ import type { Actor } from "../lib/actor.ts";
 import type { FileReference, UploadedFile } from "./run-launcher/types.ts";
 import { prepareAndExecuteRun, extractRunAgentDenorm } from "./run-pipeline.ts";
 import { validateAgentReadiness } from "./agent-readiness.ts";
-import { resolveConnectionsForRun } from "./integration-connection-resolver.ts";
+import { resolveRunConnectionSnapshot } from "./integration-connection-resolver.ts";
 import type { ResolvedConnectionMap } from "@appstrate/core/integration";
 import { createRun as createRunRow } from "./state/runs.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
@@ -213,7 +213,7 @@ async function createRemoteRun(input: CreateRunInput): Promise<CreateRunResult> 
   //     gets a structured agent_not_ready it can surface verbatim.
   let resolvedConnections: ResolvedConnectionMap | null = null;
   if (actor) {
-    const resolution = await resolveConnectionsForRun({
+    const snapshot = await resolveRunConnectionSnapshot({
       agentManifest: agent.manifest as Record<string, unknown>,
       packageId: agent.id,
       actor,
@@ -221,17 +221,17 @@ async function createRemoteRun(input: CreateRunInput): Promise<CreateRunResult> 
       runOverrides: input.connectionOverrides ?? null,
       scheduleOverrides: input.scheduleConnectionOverrides ?? null,
     });
-    if (resolution.errors.length > 0) {
+    if (snapshot.errors.length > 0) {
       return {
         ok: false,
         error: {
           code: "agent_not_ready",
-          message: resolution.errors[0]!.message,
+          message: snapshot.errors[0]!.message,
           status: 412,
         },
       };
     }
-    resolvedConnections = Object.keys(resolution.resolved).length > 0 ? resolution.resolved : null;
+    resolvedConnections = snapshot.resolved;
   }
 
   // --- Mint sink credentials ---

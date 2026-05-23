@@ -11,7 +11,7 @@ import { createRun } from "./state/runs.ts";
 import { getPackageConfig } from "./application-packages.ts";
 import { executeAgentInBackground } from "../routes/runs.ts";
 import { validateAgentReadiness, translateResolutionError } from "./agent-readiness.ts";
-import { resolveConnectionsForRun } from "./integration-connection-resolver.ts";
+import { resolveRunConnectionSnapshot } from "./integration-connection-resolver.ts";
 import type { ConnectionOverrides, ResolvedConnectionMap } from "@appstrate/core/integration";
 import { parseScopedName } from "@appstrate/core/naming";
 import { mintSinkCredentials } from "../lib/mint-sink-credentials.ts";
@@ -208,7 +208,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   // way the caller needs structured feedback, not a silent fallback.
   let resolvedConnections: ResolvedConnectionMap | null = null;
   if (actor) {
-    const resolution = await resolveConnectionsForRun({
+    const snapshot = await resolveRunConnectionSnapshot({
       agentManifest: agent.manifest as Record<string, unknown>,
       packageId: agent.id,
       actor,
@@ -216,17 +216,16 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
       runOverrides: params.connectionOverrides ?? null,
       scheduleOverrides: params.scheduleConnectionOverrides ?? null,
     });
-    if (resolution.errors.length > 0) {
-      const first = resolution.errors[0]!;
+    if (snapshot.errors.length > 0) {
       throw new ApiError({
         status: 412,
         code: "missing_integration_connection",
         title: "Missing Integration Connection",
-        detail: first.message,
-        errors: resolution.errors.map(translateResolutionError),
+        detail: snapshot.errors[0]!.message,
+        errors: snapshot.errors.map(translateResolutionError),
       });
     }
-    resolvedConnections = Object.keys(resolution.resolved).length > 0 ? resolution.resolved : null;
+    resolvedConnections = snapshot.resolved;
   }
 
   // --- Step 1: Build run context ---
