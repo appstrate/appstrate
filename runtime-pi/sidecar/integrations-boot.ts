@@ -350,6 +350,15 @@ export async function runConnectLoginHook(
   // this handler (a fresh `runConnectLogin`) and retries the request once.
   // A failed re-login resolves `false`, so the listener leaves the original
   // failed upstream response untouched (no retry, no loop).
+  //
+  // CONCURRENCY REQUIREMENT: re-login calls the integration's `login` tool on
+  // the SAME MCP server that is mid-flight serving the data-tool call that
+  // triggered the reauth. A server that processes JSON-RPC strictly serially
+  // (e.g. a naive `for line in stdin` loop) deadlocks — it cannot read the
+  // `login` request until the parked data call returns, but that call is
+  // blocked waiting on this very re-login. Real MCP-SDK servers handle
+  // concurrent requests and are unaffected; hand-rolled stdio servers that
+  // declare `reauthOn` MUST serve requests concurrently.
   mitmSource.setReloginHandler(
     cl.authKey,
     () =>
