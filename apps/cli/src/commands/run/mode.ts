@@ -51,8 +51,6 @@ export interface ModeResolutionOpts {
   report?: string;
   reportFallback?: string;
   sinkTtl?: number;
-  noPreflight?: boolean;
-  preflightTimeout?: number;
 }
 
 export class ExecutionModeError extends Error {
@@ -166,18 +164,6 @@ export function validateOptsForMode(mode: ExecutionMode, opts: ModeResolutionOpt
     offenders.push({
       flag: "--sink-ttl",
       reason: "remote runs are reported natively — no client sink to configure",
-    });
-  }
-  if (opts.noPreflight === true) {
-    offenders.push({
-      flag: "--no-preflight",
-      reason: "the server runs its own preflight before launching the container",
-    });
-  }
-  if (opts.preflightTimeout !== undefined) {
-    offenders.push({
-      flag: "--preflight-timeout",
-      reason: "the server runs its own preflight before launching the container",
     });
   }
 

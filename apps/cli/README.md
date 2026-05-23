@@ -543,15 +543,13 @@ Run-config inheritance (model, proxy, agent config, version pin) is fetched from
 
 **Selected flags**
 
-| Flag                      | Purpose                                                                                                                                                |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `--proxy <id>`            | Proxy id to associate with the run (overrides the per-app inherited value).                                                                            |
-| `--no-inherit`            | Skip per-application run-config inheritance — flags + env vars + defaults only.                                                                        |
-| `--no-preflight`          | Skip the connections-readiness preflight (CI mode; fails fast on missing connections via the structured-error path).                                   |
-| `--preflight-timeout <s>` | Maximum seconds to poll for connections during the preflight. Default `300`.                                                                           |
-| `--json`                  | Emit canonical RunEvents as JSONL on stdout. Forces non-interactive preflight.                                                                         |
-| `-v, --verbose`           | Verbose tool-call output: pretty-print args + reveal full results (~2 KB). Honoured only in human mode (without `--json`). Env: `APPSTRATE_VERBOSE=1`. |
-| `-q, --quiet`             | Suppress per-tool output lines (name, args, result). Errors and final summary still print. Mutually exclusive with `--verbose`.                        |
+| Flag            | Purpose                                                                                                                                                |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--proxy <id>`  | Proxy id to associate with the run (overrides the per-app inherited value).                                                                            |
+| `--no-inherit`  | Skip per-application run-config inheritance — flags + env vars + defaults only.                                                                        |
+| `--json`        | Emit canonical RunEvents as JSONL on stdout.                                                                                                           |
+| `-v, --verbose` | Verbose tool-call output: pretty-print args + reveal full results (~2 KB). Honoured only in human mode (without `--json`). Env: `APPSTRATE_VERBOSE=1`. |
+| `-q, --quiet`   | Suppress per-tool output lines (name, args, result). Errors and final summary still print. Mutually exclusive with `--verbose`.                        |
 
 **Tool-call rendering**
 
@@ -567,9 +565,9 @@ Defaults match the dashboard log viewer: args truncated at 200 chars, result pre
 
 The full flag set is documented under `appstrate run --help`.
 
-**Preflight readiness**
+**Connection readiness**
 
-Before launching, the CLI calls `GET /api/agents/{scope}/{name}/readiness` to check that every required integration has a healthy connection. Missing or expired connections in an interactive terminal trigger a prompt to open `${instance}/preferences/connectors` in a browser, then poll until ready or `--preflight-timeout` is reached. In `--json` or non-TTY contexts, the run aborts with exit code 1 and a structured error containing `{ code: "connections_missing", missing, connectUrl }` on stdout.
+Connection readiness is enforced server-side at run-trigger time: a run that targets an integration without a healthy connection is rejected with HTTP 412 (`missing_integration_connection`) before the container launches. Connect or repair the connection from the dashboard's connectors panel (`${instance}/preferences/connectors`).
 
 ## Profiles
 

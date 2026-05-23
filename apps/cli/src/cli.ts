@@ -811,15 +811,6 @@ program
     "Skip the per-app run-config inheritance — run with flags + env vars + defaults only (deterministic CI)",
   )
   .option(
-    "--no-preflight",
-    "Skip the connections-readiness preflight (CI mode; fails fast on missing connections).",
-  )
-  .option(
-    "--preflight-timeout <seconds>",
-    "Maximum seconds to wait for connections during the preflight polling loop (default 300).",
-    parsePreflightTimeout,
-  )
-  .option(
     "-v, --verbose",
     "Verbose tool-call output: pretty-print args + reveal full results (~2 KB). Honoured only in human mode (without --json).",
   )
@@ -856,10 +847,6 @@ program
       // `opts.inherit === false`. Default (no flag) is `undefined` →
       // inheritance enabled.
       noInherit: opts.inherit === false,
-      // commander maps `--no-preflight` to `opts.preflight === false`.
-      noPreflight: opts.preflight === false,
-      preflightTimeout:
-        typeof opts.preflightTimeout === "number" ? opts.preflightTimeout : undefined,
       verbose: opts.verbose === true,
       quiet: opts.quiet === true,
     });
@@ -875,16 +862,6 @@ function parseReportFallback(raw: unknown): "abort" | "console" | undefined {
   if (typeof raw !== "string") return undefined;
   if (raw === "abort" || raw === "console") return raw;
   throw new Error(`Invalid --report-fallback value "${raw}" (expected: abort | console)`);
-}
-
-function parsePreflightTimeout(raw: unknown): number {
-  const n = typeof raw === "string" ? Number(raw) : NaN;
-  if (!Number.isInteger(n) || n <= 0) {
-    throw new Error(
-      `Invalid --preflight-timeout "${raw}" (expected a positive integer number of seconds)`,
-    );
-  }
-  return n;
 }
 
 function parseSinkTtl(raw: unknown): number | undefined {

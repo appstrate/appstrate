@@ -82,7 +82,6 @@ import {
   RunConfigFetchError,
   type InheritedRunConfig,
 } from "./run/inherit-config.ts";
-import { preflightCheck, PreflightAbortError } from "./run/preflight.ts";
 import {
   resolveExecutionMode,
   validateOptsForMode,
@@ -138,10 +137,6 @@ export interface RunCommandOptions {
    * must not drift the run.
    */
   noInherit?: boolean;
-  /** Skip the readiness preflight entirely (CI mode). */
-  noPreflight?: boolean;
-  /** Override the preflight polling timeout. Default 5 minutes. */
-  preflightTimeout?: number;
   /**
    * Verbose tool-call rendering — pretty-print args + emit the full
    * truncated result (~2 KB). Mutually exclusive with `--quiet`.
@@ -257,32 +252,6 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
       ? await readBundleFromFile(bundleSource.path)
       : readBundleFromBuffer(bundleSource.bytes);
   const bundleLabel = bundleSource.label;
-
-  // ─── 3.5 Preflight readiness ─────────────────────────────────────
-  // Only meaningful when the user is running an agent by id against a
-  // remote instance — in path-mode there's no platform handle, and in
-  // local/none provider modes there are no credentials to be ready
-  // about. The check itself reuses the same dependency-validation
-  // machinery the run pipeline uses, so the answer is in lockstep with
-  // what the run would actually do.
-  if (
-    target.kind === "id" &&
-    resolverInputs &&
-    "bearerToken" in resolverInputs &&
-    !opts.noPreflight
-  ) {
-    await preflightCheck({
-      instance: resolverInputs.instance,
-      bearerToken: resolverInputs.bearerToken,
-      applicationId: resolverInputs.applicationId,
-      orgId: resolverInputs.orgId,
-      scope: target.scope,
-      name: target.name,
-      json: opts.json === true,
-      skip: false,
-      ...(opts.preflightTimeout ? { timeoutSeconds: opts.preflightTimeout } : {}),
-    });
-  }
 
   // ─── 3a. Optional: register run + build reporting session ─────────
   const reportSession = await resolveReportSession(opts, bundle, bundleSource, resolverInputs);
@@ -1211,7 +1180,6 @@ export {
   PackageSpecError,
   BundleFetchError,
   RunConfigFetchError,
-  PreflightAbortError,
   ExecutionModeError,
   RemoteRunError,
 };
