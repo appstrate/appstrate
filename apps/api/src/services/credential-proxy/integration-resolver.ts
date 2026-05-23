@@ -34,8 +34,7 @@ import type { Actor } from "../../lib/actor.ts";
 import { logger } from "../../lib/logger.ts";
 import {
   assertIntegrationActive,
-  loadActorConnection,
-  pickAnyAccessibleConnection,
+  selectAccessibleConnection,
   type ResolvedConnectionRow,
 } from "../integration-connections.ts";
 import { fetchIntegrationManifest } from "../integration-service.ts";
@@ -197,23 +196,15 @@ async function resolveConnection(
   input: ResolveIntegrationProxyInput,
   declaredAuthKeys: string[],
 ): Promise<ResolvedConnectionRow | null> {
-  if (input.connectionId) {
-    // Pin to a specific connection id (validated against the actor's
-    // accessible set) — walk declared auths so the right authKey surfaces.
-    for (const authKey of declaredAuthKeys) {
-      const row = await loadActorConnection(input.integrationId, authKey, {
-        applicationId: input.applicationId,
-        actor: input.actor,
-        connectionId: input.connectionId,
-      });
-      if (row) return { ...row, authKey };
-    }
-    return null;
-  }
-  return pickAnyAccessibleConnection(input.integrationId, declaredAuthKeys, {
-    applicationId: input.applicationId,
-    actor: input.actor,
-  });
+  // Single source of truth for connection selection (snapshot-pin-by-id vs
+  // auto-pick over declared auths) — shared with the spawn + credentials
+  // resolvers so the proxy can't drift on which connection it picks.
+  return selectAccessibleConnection(
+    input.integrationId,
+    declaredAuthKeys,
+    input.connectionId ?? null,
+    { applicationId: input.applicationId, actor: input.actor },
+  );
 }
 
 function buildPayload(

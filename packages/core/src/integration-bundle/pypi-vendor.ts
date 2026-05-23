@@ -89,20 +89,6 @@ const defaultInstallPackage: InstallPypiFn = async (spec) => {
   const uvExitCode = await uvProbe.exited;
   const useUv = uvExitCode === 0;
 
-  const cmd = useUv
-    ? [
-        "uv",
-        "pip",
-        "install",
-        "--target",
-        spec.targetDir,
-        "--no-deps",
-        // Force a re-resolve including transitive deps so the bundle is
-        // self-contained. `--no-deps` above only ensures we get the
-        // exact version, then we re-run with deps.
-      ]
-    : ["python", "-m", "pip", "install", "--target", spec.targetDir, "--no-input"];
-
   const installCmd = useUv
     ? ["uv", "pip", "install", "--target", spec.targetDir, `${spec.identifier}==${spec.version}`]
     : [
@@ -115,7 +101,6 @@ const defaultInstallPackage: InstallPypiFn = async (spec) => {
         "--no-input",
         `${spec.identifier}==${spec.version}`,
       ];
-  void cmd;
 
   const proc = Bun.spawn({ cmd: installCmd, stdout: "pipe", stderr: "pipe" });
   const exitCode = await proc.exited;

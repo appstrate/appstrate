@@ -6,10 +6,10 @@ import { useInitiateIntegrationOAuth } from "../../hooks/use-integrations";
 import { useOAuthPopup } from "../../hooks/use-oauth-popup";
 
 /**
- * Integration-side wrapper around the generic OAuth popup driver.
+ * Integration-side wrapper around the generic OAuth popup driver
+ * (`useOAuthPopup`).
  *
- * Same flow used by the legacy provider connect path (`useConnectOAuth`)
- * — wired here against `/api/integrations/.../connect/oauth2` so the
+ * Wired against `/api/integrations/.../connect/oauth2` so the
  * inline connect button on agent surfaces (`AgentIntegrationsBlock`,
  * `MissingConnectionsModal`) can pass the agent's per-tool scope
  * inference into the kickoff. The backend resolver still unions the

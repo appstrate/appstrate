@@ -56,8 +56,6 @@ export type { ProxyCredentialsPayload } from "./proxy-primitives.ts";
 // ─── AFPS integration manifest (Phase 1.1) ─────────────────────────────
 // Multi-auth credential resolver + delivery planners.
 export {
-  ALIAS_MAP,
-  readCredentialField,
   resolveHttpDelivery,
   buildProxyCredentialsPayload,
   PROXY_INJECTED_FIELD,

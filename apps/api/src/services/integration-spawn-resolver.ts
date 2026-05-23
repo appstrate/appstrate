@@ -29,7 +29,6 @@
 import {
   decryptCredentialsToStringMap,
   decryptCredentialInputsToStringMap,
-  readCredentialField,
   resolveHttpDelivery,
 } from "@appstrate/connect";
 import {
@@ -484,7 +483,7 @@ async function resolveDeliveries(
   const envMap = auth.delivery?.env;
   if (envMap && Object.keys(envMap).length > 0) {
     for (const [envKey, conf] of Object.entries(envMap)) {
-      const value = readCredentialField(fields, conf.from);
+      const value = fields[conf.from];
       if (value === undefined || value.length === 0) {
         logger.info("delivery.env source field missing on credentials", {
           integrationId,

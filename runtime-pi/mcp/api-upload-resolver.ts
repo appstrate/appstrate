@@ -79,7 +79,7 @@ const ABORT_CLEANUP_TIMEOUT_MS = 5_000;
  * The resolver validates these inside `executeUpload` so the surface
  * is a single function, easy to unit-test.
  */
-export interface ProviderUploadRequest {
+export interface IntegrationUploadRequest {
   /**
    * The `{ns}__api_call` MCP tool name to dispatch each chunk through.
    * The integration is implied by the tool name, so this string IS the
@@ -99,7 +99,7 @@ export interface ProviderUploadRequest {
  * was used, only "did it succeed, what did the upstream say, what's
  * the hash for verification".
  */
-export type ProviderUploadResult =
+export type IntegrationUploadResult =
   | {
       ok: true;
       protocol: UploadProtocol;
@@ -139,9 +139,9 @@ export class McpApiUploadResolver {
    * extension and by tests — keeps the surface narrow.
    */
   async executeUpload(
-    req: ProviderUploadRequest,
+    req: IntegrationUploadRequest,
     ctx: ApiCallContext,
-  ): Promise<ProviderUploadResult> {
+  ): Promise<IntegrationUploadResult> {
     const adapter = ADAPTERS[req.uploadProtocol];
     if (!adapter) {
       return {
@@ -557,7 +557,7 @@ function throwIfAborted(signal: AbortSignal): void {
   }
 }
 
-function failure(adapter: UploadAdapter, err: unknown, bytesSent: number): ProviderUploadResult {
+function failure(adapter: UploadAdapter, err: unknown, bytesSent: number): IntegrationUploadResult {
   // Adapter errors carry structured upstream context when they
   // came from a non-2xx upstream — surface that to the agent.
   const e = err as {

@@ -29,8 +29,8 @@
  *     endpoints; caller plumbs result into `initiateIntegrationOAuth`).
  *   - DCR (RFC 7591) → `./dynamic-client-registration.ts` (caller may use
  *     it to obtain `clientId`/`clientSecret` before initiating).
- *   - Refresh, revoke → `./token-refresh.ts` (covers both legacy provider
- *     and integration paths).
+ *   - Refresh → `./token-refresh.ts` (`performRefreshTokenExchange`; the
+ *     `integration_connections` write-back wraps it in apps/api).
  */
 
 import type { Actor, OAuthStateRecord, OAuthStateStore } from "./types.ts";

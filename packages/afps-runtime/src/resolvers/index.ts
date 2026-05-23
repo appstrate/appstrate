@@ -41,6 +41,14 @@ export {
 export { BundledSkillResolver, BundledSkillResolutionError } from "./bundled-skill-resolver.ts";
 export { resolvePackageRef, readPackageText, readPackageBytes } from "./bundle-adapter.ts";
 
+// Canonical `delivery.http` credential-injection resolver (shared with
+// `@appstrate/connect`, which re-exports these).
+export {
+  resolveHttpDelivery,
+  type HttpDeliveryConfig,
+  type HttpDeliveryPlan,
+} from "./http-delivery.ts";
+
 // Reusable credential-injecting HTTP-call core — tool factory + helpers.
 export {
   ABSOLUTE_MAX_RESPONSE_SIZE,
@@ -53,7 +61,6 @@ export {
   isReproducibleBody,
   apiCallRequestJsonSchema,
   resolveBodyForFetch,
-  resolveBodyStream,
   resolveSafeFile,
   resolveSafePath,
   serializeFetchResponse,
@@ -81,7 +88,6 @@ export {
   type IntegrationApiCallResolver,
   type IntegrationRef,
   type ApiCallIntegrationMeta,
-  type HttpDeliveryConfig,
   type LocalIntegrationCredentialsFile,
   type LocalIntegrationResolverOptions,
   type RemoteAppstrateIntegrationResolverOptions,

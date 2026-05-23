@@ -57,6 +57,10 @@ import { useDisconnectIntegrationConnection } from "../hooks/use-me-connections"
 import { useCurrentOrgId } from "../hooks/use-org";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
 import { InlineConnectButton } from "../components/integration-connect/inline-connect-button";
+import {
+  connectionAccount,
+  connectionDisplayLabel,
+} from "../components/integration-connect/connection-label";
 
 // ─────────────────────────────────────────────
 // OAuth client (admin) form
@@ -386,11 +390,7 @@ function OrgDefaultSection({ packageId }: { packageId: string }) {
   const connectionDisplay = (id: string): string => {
     const c = (connections ?? []).find((x) => x.id === id);
     if (!c) return id;
-    const account =
-      (c.identityClaims?.accountEmail as string | undefined) ??
-      (c.identityClaims?.account_email as string | undefined) ??
-      c.accountId;
-    return c.label ? `${c.label} (${account})` : account;
+    return connectionDisplayLabel(c);
   };
 
   const [connectionId, setConnectionId] = useState("");
@@ -499,11 +499,7 @@ function PinManagementSection({ packageId }: { packageId: string }) {
   const connectionDisplay = (id: string): string => {
     const c = (connections ?? []).find((x) => x.id === id);
     if (!c) return id;
-    const account =
-      (c.identityClaims?.accountEmail as string | undefined) ??
-      (c.identityClaims?.account_email as string | undefined) ??
-      c.accountId;
-    return c.label ? `${c.label} (${account})` : account;
+    return connectionDisplayLabel(c);
   };
 
   const onSubmitNewPin = () => {
@@ -678,10 +674,7 @@ function ConnectionRow({
   const applicationId = useCurrentApplicationId();
   const [editing, setEditing] = useState(false);
   const [draftLabel, setDraftLabel] = useState(connection.label ?? "");
-  const accountLabel =
-    (connection.identityClaims?.accountEmail as string | undefined) ??
-    (connection.identityClaims?.account_email as string | undefined) ??
-    connection.accountId;
+  const accountLabel = connectionAccount(connection);
   const isShared = connection.sharedWithOrg === true;
   const startEdit = () => {
     setDraftLabel(connection.label ?? "");

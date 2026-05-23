@@ -33,7 +33,14 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
-import type { OpensslSpawnFn } from "./ca-cert-openssl.ts";
+import {
+  runOpenssl as runOpensslExec,
+  readPem as readPemExec,
+  resolveBunSpawn as resolveBunSpawnExec,
+  secondsToDaysCeil,
+  type OpensslSpawnFn,
+  type OpensslExecError,
+} from "./openssl-exec.ts";
 
 // ─────────────────────────────────────────────
 // Public types
@@ -91,6 +98,15 @@ export type CertMintErrorCode =
   | "OPENSSL_NONZERO_EXIT"
   | "PEM_NOT_PRODUCED"
   | "WORKDIR_UNWRITABLE";
+
+// Bind the shared openssl-exec helpers (./openssl-exec.ts) to this module's
+// error class so call sites stay class-agnostic.
+const makeError: OpensslExecError = (code, message, stderr) =>
+  new CertMintError(code as CertMintErrorCode, message, stderr);
+const runOpenssl = (spawn: OpensslSpawnFn, bin: string, args: string[]) =>
+  runOpensslExec(spawn, bin, args, makeError);
+const readPem = (filePath: string, label: string) => readPemExec(filePath, label, makeError);
+const resolveBunSpawn = () => resolveBunSpawnExec(makeError);
 
 // ─────────────────────────────────────────────
 // Factory
@@ -255,71 +271,6 @@ async function mintLeaf(
   }
 }
 
-async function runOpenssl(spawn: OpensslSpawnFn, bin: string, args: string[]): Promise<void> {
-  let proc: ReturnType<OpensslSpawnFn>;
-  try {
-    proc = spawn([bin, ...args], { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
-  } catch (err) {
-    throw new CertMintError(
-      "OPENSSL_NOT_FOUND",
-      `failed to spawn '${bin}': ${(err as Error).message}`,
-    );
-  }
-  const stderrText = await collectStream(proc.stderr);
-  const code = await proc.exited;
-  if (code !== 0) {
-    throw new CertMintError(
-      "OPENSSL_NONZERO_EXIT",
-      `'${bin} ${args.slice(0, 2).join(" ")}' exited ${code}`,
-      stderrText,
-    );
-  }
-}
-
-async function collectStream(stream: ReadableStream<Uint8Array>): Promise<string> {
-  const chunks: Uint8Array[] = [];
-  const reader = stream.getReader();
-  try {
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      if (value) chunks.push(value);
-    }
-  } catch {
-    // ignore
-  } finally {
-    try {
-      reader.releaseLock();
-    } catch {
-      // ignore
-    }
-  }
-  const total = chunks.reduce((n, c) => n + c.byteLength, 0);
-  const out = new Uint8Array(total);
-  let off = 0;
-  for (const c of chunks) {
-    out.set(c, off);
-    off += c.byteLength;
-  }
-  return new TextDecoder().decode(out);
-}
-
-async function readPem(filePath: string, label: string): Promise<string> {
-  let raw: string;
-  try {
-    raw = await fs.readFile(filePath, "utf-8");
-  } catch (err) {
-    throw new CertMintError(
-      "PEM_NOT_PRODUCED",
-      `expected ${label} at '${filePath}': ${(err as Error).message}`,
-    );
-  }
-  if (raw.length === 0) {
-    throw new CertMintError("PEM_NOT_PRODUCED", `${label} is empty`);
-  }
-  return raw;
-}
-
 function normaliseHost(host: string): string {
   const trimmed = host.trim().toLowerCase();
   if (!trimmed) {
@@ -332,21 +283,4 @@ function normaliseHost(host: string): string {
     throw new CertMintError("INVALID_HOST", `host '${host}' contains invalid characters`);
   }
   return trimmed;
-}
-
-function secondsToDaysCeil(seconds: number): number {
-  return Math.max(1, Math.ceil(seconds / 86_400));
-}
-
-function resolveBunSpawn(): OpensslSpawnFn {
-  const fn = (globalThis as unknown as { Bun?: { spawn?: unknown } }).Bun?.spawn as
-    | OpensslSpawnFn
-    | undefined;
-  if (!fn) {
-    throw new CertMintError(
-      "OPENSSL_NOT_FOUND",
-      "Bun.spawn is not available — cert minter requires the Bun runtime",
-    );
-  }
-  return fn;
 }
