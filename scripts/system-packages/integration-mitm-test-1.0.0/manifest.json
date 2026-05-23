@@ -23,9 +23,9 @@
       "credentials": {
         "schema": {
           "type": "object",
-          "required": ["apiKey"],
+          "required": ["api_key"],
           "properties": {
-            "apiKey": {
+            "api_key": {
               "type": "string",
               "description": "Test API key — any non-empty string. The integration never sees this value; the sidecar's MITM proxy injects it as `X-Mitm-Test-Token` on every upstream call."
             }
@@ -36,7 +36,7 @@
         "http": {
           "headerName": "X-Mitm-Test-Token",
           "headerPrefix": "",
-          "valueFrom": "apiKey"
+          "valueFrom": "api_key"
         }
       }
     }

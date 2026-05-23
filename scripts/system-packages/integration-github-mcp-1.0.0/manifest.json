@@ -150,9 +150,9 @@
       "credentials": {
         "schema": {
           "type": "object",
-          "required": ["personalAccessToken"],
+          "required": ["personal_access_token"],
           "properties": {
-            "personalAccessToken": {
+            "personal_access_token": {
               "type": "string",
               "description": "GitHub Personal Access Token (classic at https://github.com/settings/tokens, or fine-grained at https://github.com/settings/personal-access-tokens). For full functionality grant the equivalent of `repo + workflow + notifications + gist + read:org + security_events + project + write:discussion + write:packages`. Injected as `Authorization: Bearer <PAT>`."
             }
@@ -163,7 +163,7 @@
         "http": {
           "headerName": "Authorization",
           "headerPrefix": "Bearer ",
-          "valueFrom": "personalAccessToken"
+          "valueFrom": "personal_access_token"
         }
       }
     }
