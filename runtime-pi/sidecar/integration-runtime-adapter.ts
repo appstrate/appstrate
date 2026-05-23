@@ -86,14 +86,14 @@ export interface IntegrationRuntimeAdapter {
 }
 
 /**
- * Factory + availability probe. Probes run in descending-priority order
- * during auto-detect; first available wins. Process adapter registers
- * with priority 0 as the universal fallback.
+ * Factory entry keyed by `id`. Selection is purely by `id` — the platform
+ * orchestrator that launches the sidecar sets `INTEGRATION_RUNTIME_ADAPTER`
+ * to mirror its own `RUN_ADAPTER`, so the integration runtime always matches
+ * the run runtime. There is NO availability probing / auto-detection: the
+ * sidecar never guesses its backend.
  */
 export interface IntegrationRuntimeAdapterEntry {
   readonly id: string;
-  readonly priority: number;
-  isAvailable(): Promise<boolean>;
   create(): IntegrationRuntimeAdapter;
 }
 
@@ -104,42 +104,38 @@ export function registerIntegrationRuntimeAdapter(entry: IntegrationRuntimeAdapt
     throw new Error(`integration runtime adapter '${entry.id}' already registered`);
   }
   REGISTRY.push(entry);
-  REGISTRY.sort((a, b) => b.priority - a.priority);
 }
 
 /**
- * Pick the adapter for this sidecar process. When
- * `INTEGRATION_RUNTIME_ADAPTER` is set, that id MUST exist in the
- * registry; otherwise we walk it in descending-priority order and pick
- * the first one whose `isAvailable()` resolves true. Throws if nothing
- * matches.
+ * Pick the adapter for this sidecar process by `INTEGRATION_RUNTIME_ADAPTER`.
+ * The platform orchestrator that launched the sidecar sets it to mirror its
+ * own `RUN_ADAPTER` (docker-orchestrator → `docker`, process-orchestrator →
+ * `process`), so the integration runtime deterministically matches the run
+ * runtime — no probing, no guessing. The id MUST be registered. Throws when
+ * the var is unset or unknown (a fail-fast, since every launch path sets it).
  */
-export async function selectIntegrationRuntimeAdapter(
+export function selectIntegrationRuntimeAdapter(
   env: NodeJS.ProcessEnv = process.env,
-): Promise<IntegrationRuntimeAdapter> {
+): IntegrationRuntimeAdapter {
   if (REGISTRY.length === 0) {
     throw new Error(
       "no integration runtime adapter registered — import the docker/process adapter modules before calling selectIntegrationRuntimeAdapter",
     );
   }
-  const explicit = env.INTEGRATION_RUNTIME_ADAPTER;
-  if (explicit) {
-    const entry = REGISTRY.find((e) => e.id === explicit);
-    if (!entry) {
-      throw new Error(
-        `INTEGRATION_RUNTIME_ADAPTER='${explicit}' not registered. Available: ${REGISTRY.map(
-          (e) => e.id,
-        ).join(", ")}`,
-      );
-    }
-    return entry.create();
+  const requested = env.INTEGRATION_RUNTIME_ADAPTER;
+  const available = REGISTRY.map((e) => e.id).join(", ");
+  if (!requested) {
+    throw new Error(
+      `INTEGRATION_RUNTIME_ADAPTER is not set — the launching orchestrator must pin it to match RUN_ADAPTER. Available: ${available}`,
+    );
   }
-  for (const entry of REGISTRY) {
-    if (await entry.isAvailable()) return entry.create();
+  const entry = REGISTRY.find((e) => e.id === requested);
+  if (!entry) {
+    throw new Error(
+      `INTEGRATION_RUNTIME_ADAPTER='${requested}' not registered. Available: ${available}`,
+    );
   }
-  throw new Error(
-    `no integration runtime adapter available; registered: ${REGISTRY.map((e) => e.id).join(", ")}`,
-  );
+  return entry.create();
 }
 
 // ─────────────────────────────────────────────

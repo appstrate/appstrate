@@ -643,7 +643,7 @@ export async function bootIntegrations(
   // `registerIntegrationRuntimeAdapter()`.
   let adapter: IntegrationRuntimeAdapter;
   try {
-    adapter = await selectIntegrationRuntimeAdapter();
+    adapter = selectIntegrationRuntimeAdapter();
   } catch (err) {
     logger.error("integration runtime adapter selection failed", {
       runId,
@@ -961,7 +961,7 @@ export async function runConnectOnce(
 
   const runId = process.env.RUN_ID ?? `nosrunid-${randomUUID().slice(0, 8)}`;
 
-  const adapter = await selectIntegrationRuntimeAdapter();
+  const adapter = selectIntegrationRuntimeAdapter();
   const adapterCtx = await adapter.prepare(runId);
 
   const host = new McpHost({

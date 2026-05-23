@@ -133,6 +133,11 @@ export class DockerOrchestrator implements ContainerOrchestrator {
     if (spec.integrations && spec.integrations.length > 0) {
       sidecarEnv.INTEGRATIONS_TO_SPAWN_JSON = JSON.stringify(spec.integrations);
     }
+    // The sidecar selects its integration runtime purely from this var (no
+    // auto-detection). Pin it to mirror this orchestrator's RUN_ADAPTER so a
+    // containerized run spawns its integrations as containers too. Respect an
+    // explicit operator override carried in from the environment.
+    sidecarEnv.INTEGRATION_RUNTIME_ADAPTER = process.env.INTEGRATION_RUNTIME_ADAPTER ?? "docker";
     // P4 — connect-run mode. When set, the sidecar runs `runConnectOnce`
     // against this single integration and exits (no agent /mcp server).
     if (spec.connectLoginSpec) {
