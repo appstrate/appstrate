@@ -3,24 +3,27 @@
 /**
  * Kijiji connect.tool (run-start) substrate — REAL spawned node MCP server e2e.
  *
- * Mirrors `integrations-boot-connect-tool-e2e.test.ts` but for the migrated
- * `@default/kijiji` integration: a kijiji-shaped node MCP fixture (the same
- * CAS + OAuth login logic as /implantation's `providers/kijiji/server.js`)
- * spawned through the process runtime adapter, with a per-run CA + per-SNI
- * MITM listener, against a mocked Kijiji upstream (www / id / capi).
+ * Exercises the migrated `@default/kijiji` integration: the kijiji `server.js`
+ * (the same Path-A cookie-jar CAS dance shipped at /implantation) spawned
+ * through the process runtime adapter, with a per-run CA + per-SNI MITM
+ * listener, against a mocked Kijiji upstream (www / id).
  *
- * The session model is multi-cookie: `login` captures kj-st / kj-at / kj-ct
- * and the manifest's `delivery.http` renders them into a single `Cookie`
- * header the MITM injects on `whoami` / `get_conversations`.
+ * The session model is multi-cookie: `login` maintains its OWN cookie jar,
+ * follows redirects, and captures kj-st / kj-at / kj-ct from real `Set-Cookie`
+ * headers across the chain. The manifest's `delivery.http` renders them into a
+ * single `Cookie` header the MITM injects on `whoami`.
  *
  * What is REAL: the node `server.js` subprocess driven over MCP stdio; the
- * 4-step HTTPS dance through HTTPS_PROXY, TLS-intercepted by the MITM with a
- * minted leaf cert the process trusts; the `{{email}}`/`{{password}}`
- * substitution + the `Cookie` injection in the listener; the reauthOn:[401]
- * re-login path on a real upstream 401.
+ * HTTPS dance through HTTPS_PROXY, TLS-intercepted by the MITM with a minted
+ * leaf cert the process trusts; the `{{email}}`/`{{password}}` substitution +
+ * the `Cookie` injection in the listener; the suppression of the in-flight
+ * acquired session so the login jar survives; the reauthOn:[401] re-login.
  *
  * What is mocked: the platform `/internal/integration-*` endpoints (injected
  * fetchFn) and the Kijiji upstream hosts (globalThis.fetch routing).
+ *
+ * The live-network counterpart (against the real Kijiji service) was validated
+ * out-of-band; this committed test is self-contained and deterministic.
  *
  * Skipped when openssl or node are missing (process-mode requires both).
  */
@@ -61,14 +64,13 @@ if (!RUNNABLE) {
 const runE2e: typeof it = RUNNABLE ? it : (it.skip as unknown as typeof it);
 
 // ─────────────────────────────────────────────
-// Fixture bundle (the kijiji-shaped node fixture, zipped on the fly)
+// Fixture bundle (the kijiji node connector, zipped on the fly)
 // ─────────────────────────────────────────────
 
 // Prefer the REAL migrated connector at /implantation/providers/kijiji so this
 // e2e exercises the actual `server.js` shipped there, not just a mirror. Falls
 // back to the in-repo mirror fixture when /implantation is absent (e.g. CI),
-// keeping the test self-contained. The two server.js implement the same CAS
-// dance; testing the real one locally removes the drift gap.
+// keeping the test self-contained. The two server.js are kept byte-identical.
 const REAL_CONNECTOR_DIR = "/Users/pierrecabriere/Dev/implantation/providers/kijiji";
 const MIRROR_DIR = path.join(import.meta.dir, "fixtures/kijiji");
 const FIXTURE_DIR = existsSync(path.join(REAL_CONNECTOR_DIR, "server.js"))
@@ -79,8 +81,7 @@ const NAMESPACE = "kijiji";
 
 const WWW = "www.kijiji.ca";
 const ID = "id.kijiji.ca";
-const CAPI = "capi.kijiji.ca";
-const AUTHORIZED_URIS = [`https://${WWW}/**`, `https://${ID}/**`, `https://${CAPI}/**`];
+const AUTHORIZED_URIS = [`https://${WWW}/**`, `https://${ID}/**`];
 
 const REAL_EMAIL = "seller@orga.example";
 const REAL_PASSWORD = "kj-sup3r-s3cret-pw";
@@ -98,7 +99,7 @@ function fixtureBundleBytes(): Uint8Array {
     manifestVersion: "1.1",
     type: "integration",
     name: INTEG_ID,
-    version: "1.1.0",
+    version: "1.2.0",
     displayName: "Kijiji",
     server: { type: "node", entryPoint: "./server.js" },
     transport: { type: "stdio" },
@@ -127,7 +128,6 @@ function fixtureBundleBytes(): Uint8Array {
     tools: {
       login: { requiredAuthKey: "session" },
       whoami: { requiredAuthKey: "session" },
-      get_conversations: { requiredAuthKey: "session" },
     },
   };
   return zipArtifact({
@@ -154,13 +154,13 @@ function spec(): IntegrationSpawnSpec {
     namespace: NAMESPACE,
     manifest: {
       name: INTEG_ID,
-      version: "1.1.0",
+      version: "1.2.0",
       server: { type: "node", entryPoint: "./server.js" },
     },
     spawnEnv: {},
     // The spawn resolver strips `login` from the allowlist — the agent only
     // ever selects the data tools.
-    toolAllowlist: ["whoami", "get_conversations"],
+    toolAllowlist: ["whoami"],
     httpDeliveryAuths: {
       session: {
         authType: "custom",
@@ -203,8 +203,8 @@ function makePlatformFetch(): typeof fetch {
 }
 
 // ─────────────────────────────────────────────
-// Kijiji upstream mock (www / id / capi) — a fake CAS host.
-// Installed by routing globalThis.fetch for the three kijiji hosts to a local
+// Kijiji upstream mock (www / id) — a fake CAS host that sets real Set-Cookie.
+// Installed by routing globalThis.fetch for the two kijiji hosts to a local
 // handler. The MITM listener forwards via globalThis.fetch.
 // ─────────────────────────────────────────────
 
@@ -216,7 +216,6 @@ interface UpstreamObservations {
   signinHits: number;
   casLoginHits: number;
   sessionCookieHeaders: string[]; // Cookie header seen on /api/auth/session
-  conversationsCookieHeaders: string[];
 }
 
 interface UpstreamHandle {
@@ -226,7 +225,7 @@ interface UpstreamHandle {
   restore(): void;
 }
 
-const KIJIJI_HOSTS = new Set([WWW, ID, CAPI]);
+const KIJIJI_HOSTS = new Set([WWW, ID]);
 
 function installUpstream(): UpstreamHandle {
   const obs: UpstreamObservations = {
@@ -237,18 +236,11 @@ function installUpstream(): UpstreamHandle {
     signinHits: 0,
     casLoginHits: 0,
     sessionCookieHeaders: [],
-    conversationsCookieHeaders: [],
   };
   let pendingSession401 = false;
   let cookieCounter = 0;
   // Cookies minted by the most recent successful CAS login.
   let current: { st: string; at: string; ct: string } | null = null;
-  // Set by a successful CAS /login, consumed by the immediately-following
-  // /api/auth/session login-validation hop. During that hop the freshly-minted
-  // session header is not yet installed (login is *capturing* it) and on a
-  // re-login the STALE session header is still installed — so the validation
-  // hop must surface the new session regardless of the injected cookie.
-  let justLoggedIn = false;
 
   const originalFetch = globalThis.fetch;
 
@@ -274,11 +266,11 @@ function installUpstream(): UpstreamHandle {
       });
     }
 
-    // ── www.kijiji.ca/api/auth/signin/cis → CAS form HTML ──
+    // ── www.kijiji.ca/api/auth/signin/cis → CAS form HTML (action → id host) ──
     if (host === WWW && p === "/api/auth/signin/cis") {
       obs.signinHits += 1;
       const html =
-        '<html><body><form id="login" method="post">' +
+        '<html><body><form id="login" method="post" action="https://id.kijiji.ca/login">' +
         '<input type="hidden" name="execution" value="e1s1-exec-token" />' +
         '<input type="hidden" name="tmSessionId" value="tm-session-xyz" />' +
         '<input type="hidden" name="service" value="https://www.kijiji.ca/api/auth/callback/cis" />' +
@@ -287,7 +279,7 @@ function installUpstream(): UpstreamHandle {
       return new Response(html, { status: 200, headers: { "Content-Type": "text/html" } });
     }
 
-    // ── id.kijiji.ca/login → mint cookies on the right creds ──
+    // ── id.kijiji.ca/login → mint cookies on the right creds (real Set-Cookie) ──
     if (host === ID && p === "/login") {
       obs.casLoginHits += 1;
       const bodyText = init?.body ? String(init.body) : "";
@@ -302,65 +294,40 @@ function installUpstream(): UpstreamHandle {
           at: `at-${cookieCounter}`,
           ct: `ct-${cookieCounter}`,
         };
-        justLoggedIn = true;
-        return new Response("", {
-          status: 302,
-          headers: {
-            Location: "https://www.kijiji.ca/",
-            // Real Kijiji sets these across the redirect chain; the fixture
-            // also exposes them on /api/auth/session for capture.
-            "Set-Cookie": `kj-st=${current.st}; kj-at=${current.at}; kj-ct=${current.ct}`,
-          },
-        });
+        // Real Kijiji sets each cookie as its own Set-Cookie header across the
+        // redirect chain; the connector captures them into its jar.
+        const resHeaders = new Headers({ Location: "https://www.kijiji.ca/" });
+        resHeaders.append("Set-Cookie", `kj-st=${current.st}; Path=/; HttpOnly`);
+        resHeaders.append("Set-Cookie", `kj-at=${current.at}; Path=/; HttpOnly`);
+        resHeaders.append("Set-Cookie", `kj-ct=${current.ct}; Path=/; HttpOnly`);
+        return new Response("", { status: 302, headers: resHeaders });
       }
       return new Response("bad credentials", { status: 401 });
     }
 
-    // ── www.kijiji.ca/api/auth/session → whoami / login validation ──
+    // ── www.kijiji.ca/ (redirect landing after CAS) ──
+    if (host === WWW && p === "/") {
+      return new Response("<html><body>ok</body></html>", {
+        status: 200,
+        headers: { "Content-Type": "text/html" },
+      });
+    }
+
+    // ── www.kijiji.ca/api/auth/session → login validation + whoami ──
     if (host === WWW && p === "/api/auth/session") {
       const cookie = headers.get("Cookie");
       obs.sessionCookieHeaders.push(cookie ?? "");
-
-      // login-validation hop — the /session call the login tool makes right
-      // after a successful CAS login. The fresh session header isn't installed
-      // yet (and on re-login the stale one still is), so accept it regardless
-      // of the injected cookie and surface the fresh session for capture.
-      if (justLoggedIn && current) {
-        justLoggedIn = false;
-        return new Response(
-          JSON.stringify({
-            user: { sub: "kj-user-42", type: "FSBO" },
-            cookies: { "kj-st": current.st, "kj-at": current.at, "kj-ct": current.ct },
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
-      }
 
       if (pendingSession401) {
         pendingSession401 = false;
         return new Response(JSON.stringify({ error: "expired" }), { status: 401 });
       }
-      if (!current || !hasSessionCookies(cookie)) {
-        return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 });
-      }
-      // Authenticated whoami via injected cookies.
-      return new Response(
-        JSON.stringify({
-          user: { sub: "kj-user-42", type: "FSBO" },
-          cookies: { "kj-st": current.st, "kj-at": current.at, "kj-ct": current.ct },
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
-    }
-
-    // ── capi.kijiji.ca/web/v8/conversations ──
-    if (host === CAPI && p === "/web/v8/conversations") {
-      const cookie = headers.get("Cookie");
-      obs.conversationsCookieHeaders.push(cookie ?? "");
+      // Validate against the captured session — during login the connector
+      // sends its own jar; for whoami the MITM injects the same cookies.
       if (!hasSessionCookies(cookie)) {
         return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 });
       }
-      return new Response(JSON.stringify({ conversations: [{ id: "conv-1", peer: "buyer-1" }] }), {
+      return new Response(JSON.stringify({ user: { sub: "kj-user-42", type: "FSBO" } }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
@@ -409,7 +376,7 @@ function installUpstream(): UpstreamHandle {
 
 describe("kijiji connect.tool run-start — real spawned node MCP server (e2e)", () => {
   runE2e(
-    "mints the cookie session at boot, hides login, injects Cookie on data tools, re-logins on 401",
+    "captures the cookie session at boot, hides login, injects Cookie on whoami, re-logins on 401",
     async () => {
       const upstream = installUpstream();
       const platformFetch = makePlatformFetch();
@@ -447,7 +414,6 @@ describe("kijiji connect.tool run-start — real spawned node MCP server (e2e)",
         const agentToolNames = boot.tools.map((t) => t.descriptor.name);
         expect(agentToolNames.some((n) => n.endsWith("__login"))).toBe(false);
         expect(agentToolNames.some((n) => n.endsWith("__whoami"))).toBe(true);
-        expect(agentToolNames.some((n) => n.endsWith("__get_conversations"))).toBe(true);
 
         const whoamiTool = boot.tools.find((t) => t.descriptor.name.endsWith("__whoami"));
         expect(whoamiTool).toBeDefined();
@@ -471,15 +437,11 @@ describe("kijiji connect.tool run-start — real spawned node MCP server (e2e)",
         expect(lastSessionCookie).toContain("kj-at=at-1");
         expect(lastSessionCookie).toContain("kj-ct=ct-1");
 
-        // get_conversations rides the same injected session.
-        const convTool = boot.tools.find((t) => t.descriptor.name.endsWith("__get_conversations"));
-        const rc = await callTool(convTool!);
-        expect(rc.status).toBe(200);
-        const convCookie = upstream.obs.conversationsCookieHeaders.at(-1) ?? "";
-        expect(convCookie).toContain("kj-st=st-1");
-
         // ── Assertion 4: reauthOn:[401] — a 401 on /api/auth/session re-runs
-        // the real login tool (fresh cookie snapshot) and the retry succeeds. ──
+        // the real login tool (fresh cookie snapshot) and the retry succeeds.
+        // This exercises the in-flight-session suppression: during the re-login
+        // the STALE snapshot-1 plan must not be injected over the connector's
+        // fresh snapshot-2 jar. ──
         upstream.armSession401Once();
         const r2 = await callTool(whoamiTool!);
         expect(r2.status).toBe(200);
@@ -519,57 +481,48 @@ describe("@default/kijiji integration manifest", () => {
     } catch {
       // /implantation is a sibling repo and may be absent in CI — fall back to
       // the bundled fixture manifest so the contract assertion still runs.
-      const fallback = JSON.parse(
-        new TextDecoder().decode(
-          (function () {
-            // reuse fixtureBundleBytes' manifest by reconstructing it inline
-            return new TextEncoder().encode(
-              JSON.stringify({
-                $schema: "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
-                manifestVersion: "1.1",
-                type: "integration",
-                name: INTEG_ID,
-                version: "1.1.0",
-                displayName: "Kijiji",
-                server: { type: "node", entryPoint: "./server.js" },
-                auths: {
-                  session: {
-                    type: "custom",
-                    required: true,
-                    authorizedUris: AUTHORIZED_URIS,
-                    credentials: {
-                      schema: {
-                        type: "object",
-                        required: ["email", "password"],
-                        properties: {
-                          email: { type: "string" },
-                          password: { type: "string" },
-                        },
-                      },
-                    },
-                    connect: {
-                      tool: "login",
-                      runAt: "run-start",
-                      persistLoginSecret: true,
-                      produces: ["kj_st", "kj_at", "kj_ct", "sub"],
-                      reauthOn: [401],
-                    },
-                    delivery: {
-                      http: { headerName: "Cookie", valueFrom: { template: COOKIE_TEMPLATE } },
-                    },
+      raw = JSON.parse(
+        JSON.stringify({
+          $schema: "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+          manifestVersion: "1.1",
+          type: "integration",
+          name: INTEG_ID,
+          version: "1.2.0",
+          displayName: "Kijiji",
+          server: { type: "node", entryPoint: "./server.js" },
+          auths: {
+            session: {
+              type: "custom",
+              required: true,
+              authorizedUris: AUTHORIZED_URIS,
+              credentials: {
+                schema: {
+                  type: "object",
+                  required: ["email", "password"],
+                  properties: {
+                    email: { type: "string" },
+                    password: { type: "string" },
                   },
                 },
-                tools: {
-                  login: { requiredAuthKey: "session" },
-                  whoami: { requiredAuthKey: "session" },
-                  get_conversations: { requiredAuthKey: "session" },
-                },
-              }),
-            );
-          })(),
-        ),
+              },
+              connect: {
+                tool: "login",
+                runAt: "run-start",
+                persistLoginSecret: true,
+                produces: ["kj_st", "kj_at", "kj_ct", "sub"],
+                reauthOn: [401],
+              },
+              delivery: {
+                http: { headerName: "Cookie", valueFrom: { template: COOKIE_TEMPLATE } },
+              },
+            },
+          },
+          tools: {
+            login: { requiredAuthKey: "session" },
+            whoami: { requiredAuthKey: "session" },
+          },
+        }),
       );
-      raw = fallback;
     }
 
     const result = validateManifest(raw);
@@ -610,7 +563,7 @@ describe("@default/kijiji integration manifest", () => {
     expect(session.delivery.http.headerName).toBe("Cookie");
     expect(session.delivery.http.valueFrom.template).toBe(COOKIE_TEMPLATE);
 
-    // login is the connect tool; whoami + get_conversations are agent-facing.
-    expect(Object.keys(manifest.tools).sort()).toEqual(["get_conversations", "login", "whoami"]);
+    // login is the connect tool; whoami is the only agent-facing tool.
+    expect(Object.keys(manifest.tools).sort()).toEqual(["login", "whoami"]);
   });
 });

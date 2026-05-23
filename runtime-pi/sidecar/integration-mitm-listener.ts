@@ -765,8 +765,17 @@ function passthroughResponse(response: Response): Response {
     const lower = k.toLowerCase();
     if (lower === "transfer-encoding" || lower === "content-encoding" || lower === "content-length")
       return;
+    // Set-Cookie is handled below to preserve multiplicity — Headers.forEach
+    // folds repeated Set-Cookie into one comma-joined value, and `.set` would
+    // overwrite. A cookie-session login (e.g. a connect.tool tool building its
+    // own jar across the redirect chain) needs each Set-Cookie intact, and
+    // expiry dates inside them contain commas — folding is lossy/ambiguous.
+    if (lower === "set-cookie") return;
     headers.set(k, v);
   });
+  const getSetCookie = (response.headers as { getSetCookie?: () => string[] }).getSetCookie;
+  const setCookies = typeof getSetCookie === "function" ? getSetCookie.call(response.headers) : [];
+  for (const cookie of setCookies) headers.append("set-cookie", cookie);
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,

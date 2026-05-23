@@ -95,8 +95,17 @@ export interface IntegrationCredentialsSource extends MitmCredentialSource {
    * outbound URL / body / headers (proxy-side) so the integration's login
    * tool never receives the raw secret. Fail-closed: an unresolved
    * placeholder refuses the request rather than forwarding a literal.
+   *
+   * When `acquiringAuthKey` is supplied, that auth's delivery plan is
+   * SUPPRESSED from {@link MitmCredentialSource.deliveryPlans} for as long as
+   * the window is open. The session being (re-)acquired is not yet injectable —
+   * the login tool manages its own headers (e.g. a cookie jar carried across
+   * the login redirect chain). Without this, a stale prior session (present on
+   * a re-login) would be injected over, and its same-named header stripped
+   * from, the login tool's own request — clobbering the fresh login. Dependency
+   * auths (different keys) keep their plans and stay injectable during login.
    */
-  setActiveInputs(bag: Record<string, string>): void;
+  setActiveInputs(bag: Record<string, string>, acquiringAuthKey?: string): void;
   /** Close the substitution window. Idempotent. */
   clearActiveInputs(): void;
   /** The active transient-input bag, or `null` when the window is closed. */
@@ -138,6 +147,10 @@ export function createIntegrationCredentialsSource(
   // (closed) — the MITM listener behaves byte-identically to today unless
   // a connect-login is actively in flight.
   let activeInputBag: Record<string, string> | null = null;
+  // While a connect-login is in flight, the auth being (re-)acquired is not yet
+  // injectable — its delivery plan is suppressed from `deliveryPlans()` so the
+  // login tool's own headers (cookie jar) reach upstream untouched.
+  let acquiringAuthKey: string | null = null;
   // Last successful refresh per authKey (or "*" for full-payload refreshes).
   const lastRefreshAt = new Map<string, number>();
   // Coalesce concurrent refreshes for the same authKey.
@@ -153,7 +166,16 @@ export function createIntegrationCredentialsSource(
     auths: [...payload.auths],
   });
 
-  const deliveryPlans = () => payload.deliveryPlans;
+  const deliveryPlans = () => {
+    // Suppress the in-flight acquired auth's plan so the login tool's own
+    // headers (cookie jar) survive the MITM and a stale prior session is not
+    // injected during a re-login.
+    if (acquiringAuthKey && acquiringAuthKey in payload.deliveryPlans) {
+      const { [acquiringAuthKey]: _suppressed, ...rest } = payload.deliveryPlans;
+      return rest;
+    }
+    return payload.deliveryPlans;
+  };
 
   const refreshOnUnauthorized = async (authKey: string): Promise<boolean> => {
     // Cheap dedup against retry storms. We don't track per-authKey
@@ -318,11 +340,13 @@ export function createIntegrationCredentialsSource(
     snapshot: () => payload,
     setSessionOutputs,
     seedDependencyAuths,
-    setActiveInputs: (bag: Record<string, string>) => {
+    setActiveInputs: (bag: Record<string, string>, acquiring?: string) => {
       activeInputBag = bag;
+      acquiringAuthKey = acquiring ?? null;
     },
     clearActiveInputs: () => {
       activeInputBag = null;
+      acquiringAuthKey = null;
     },
     activeInputs: () => activeInputBag,
     setReloginHandler: (authKey, handler, reauthStatuses) => {

@@ -78,8 +78,11 @@ interface LoginToolResult {
 export async function runConnectLogin(opts: RunConnectLoginOptions): Promise<CredentialBundle> {
   // Open the proxy-side substitution window. From here until the `finally`
   // below, the MITM listener will substitute `{{key}}` placeholders in the
-  // login tool's outbound requests.
-  opts.source.setActiveInputs(opts.inputs);
+  // login tool's outbound requests. Passing `authKey` also suppresses that
+  // auth's (possibly stale) delivery plan for the duration, so the login tool's
+  // own headers — e.g. a cookie jar carried across the login redirect chain —
+  // reach upstream untouched and a re-login isn't clobbered by the dead session.
+  opts.source.setActiveInputs(opts.inputs, opts.authKey);
   try {
     const client = opts.host.getUpstreamClient(opts.namespace);
     if (!client) {
