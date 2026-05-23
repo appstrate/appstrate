@@ -50,11 +50,8 @@ export const runsPaths = {
                 connectionOverrides: {
                   type: "object",
                   description:
-                    'Per-(integration, authKey) connection picks for THIS run (flat-connections mechanism #2). Shape: `{ "@scope/integration": { "<authKey>": "<connection_id>" } }`. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor.',
-                  additionalProperties: {
-                    type: "object",
-                    additionalProperties: { type: "string" },
-                  },
+                    'Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor.',
+                  additionalProperties: { type: "string" },
                 },
               },
             },
@@ -261,12 +258,6 @@ export const runsPaths = {
                   description:
                     "Per-run config overrides validated against manifest.config.schema (AJV).",
                 },
-                providerProfiles: {
-                  type: "object",
-                  additionalProperties: { type: "string", format: "uuid" },
-                  description:
-                    "Map of providerId → connection-profile UUID. Per-provider override layered over the caller's default profile.",
-                },
                 modelId: { type: ["string", "null"] },
                 proxyId: { type: ["string", "null"] },
               },
@@ -357,10 +348,6 @@ export const runsPaths = {
                 prompt: { type: "string" },
                 input: { type: "object" },
                 config: { type: "object" },
-                providerProfiles: {
-                  type: "object",
-                  additionalProperties: { type: "string", format: "uuid" },
-                },
                 modelId: { type: ["string", "null"] },
                 proxyId: { type: ["string", "null"] },
               },
@@ -650,10 +637,6 @@ export const runsPaths = {
                             "Full AFPS manifest (agent type). All referenced skills/integrations must already exist in the org or system catalog.",
                         },
                         prompt: { type: "string", minLength: 1 },
-                        providerProfiles: {
-                          type: "object",
-                          additionalProperties: { type: "string" },
-                        },
                         config: { type: "object" },
                         modelId: { type: ["string", "null"] },
                         proxyId: { type: ["string", "null"] },
@@ -685,10 +668,6 @@ export const runsPaths = {
                           type: "string",
                           description:
                             "Optional SRI digest (`sha256-…`) the runner received with the bundle download. Triggers a structured warn-log when the resolved version's stored artifact integrity diverges (dist-tag drift, mid-flight draft edit). Never a rejection signal.",
-                        },
-                        providerProfiles: {
-                          type: "object",
-                          additionalProperties: { type: "string" },
                         },
                         config: { type: "object" },
                         modelId: { type: ["string", "null"] },

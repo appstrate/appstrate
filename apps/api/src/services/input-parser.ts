@@ -38,10 +38,11 @@ export interface ParsedInput {
    */
   configOverride?: Record<string, unknown>;
   /**
-   * Per-(integration, authKey) connection picks for THIS run (#199).
+   * Per-integration connection picks for THIS run (#199).
    * Wire field `connectionOverrides` on the request body; flows into the
    * resolver's mechanism #2 and is persisted on `runs.connection_overrides`.
-   * Shape: `{ "<integrationId>": { "<authKey>": "<connectionId>" } }`.
+   * Flat shape: `{ "<integrationId>": "<connectionId>" }` — one connection
+   * per integration; the chosen connection carries its own authKey.
    */
   connectionOverrides?: Record<string, string>;
 }
