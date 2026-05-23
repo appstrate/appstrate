@@ -1405,3 +1405,100 @@ describe("integrationManifestSchema — connect.tool (Orchestrated) + delivery g
     expect(r.success).toBe(true);
   });
 });
+
+describe("integrationManifestSchema — attachable apiCall capability", () => {
+  // A node MCP server with a custom session auth + the additive `apiCall` block.
+  function nodeWithApiCall(overrides: Record<string, unknown> = {}) {
+    return baseManifest({
+      server: { type: "node", entryPoint: "./server.js" },
+      auths: {
+        session: {
+          type: "custom",
+          authorizedUris: ["https://api.example.com/**"],
+          credentials: { schema: { type: "object", required: ["token"] } },
+          delivery: { http: { headerName: "Authorization", valueFrom: "accessToken" } },
+        },
+      },
+      apiCall: { authKey: "session" },
+      ...overrides,
+    });
+  }
+
+  it("accepts a node server with an attachable apiCall block", () => {
+    const r = integrationManifestSchema.safeParse(nodeWithApiCall());
+    expect(r.success).toBe(true);
+  });
+
+  it("getApiCallConfig resolves the block alongside a spawned server", () => {
+    const m = integrationManifestSchema.parse(
+      nodeWithApiCall({ apiCall: { authKey: "session", uploadProtocols: ["tus"] } }),
+    );
+    expect(getApiCallConfig(m)).toEqual({ authKey: "session", uploadProtocols: ["tus"] });
+  });
+
+  it("getApiCallConfig still resolves the serverless server.type api_call form", () => {
+    const m = integrationManifestSchema.parse(
+      baseManifest({
+        server: { type: "api_call", authKey: "session" },
+        auths: {
+          session: {
+            type: "custom",
+            authorizedUris: ["https://api.example.com/**"],
+            credentials: { schema: { type: "object", required: ["token"] } },
+            delivery: { http: { headerName: "Authorization", valueFrom: "accessToken" } },
+          },
+        },
+      }),
+    );
+    expect(getApiCallConfig(m)).toEqual({ authKey: "session", uploadProtocols: [] });
+  });
+
+  it("rejects an apiCall block whose authKey matches no auth", () => {
+    const r = integrationManifestSchema.safeParse(
+      nodeWithApiCall({ apiCall: { authKey: "ghost" } }),
+    );
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects an apiCall block combined with server.type api_call (redundant)", () => {
+    const r = integrationManifestSchema.safeParse(
+      baseManifest({
+        server: { type: "api_call", authKey: "session" },
+        auths: {
+          session: {
+            type: "custom",
+            authorizedUris: ["https://api.example.com/**"],
+            credentials: { schema: { type: "object", required: ["token"] } },
+            delivery: { http: { headerName: "Authorization", valueFrom: "accessToken" } },
+          },
+        },
+        apiCall: { authKey: "session" },
+      }),
+    );
+    expect(r.success).toBe(false);
+  });
+
+  it("requiredAuthKeysForAgent pins the apiCall auth when api_call is selected (multi-auth)", () => {
+    const m = integrationManifestSchema.parse(
+      baseManifest({
+        server: { type: "node", entryPoint: "./server.js" },
+        auths: {
+          session: {
+            type: "custom",
+            authorizedUris: ["https://api.example.com/**"],
+            credentials: { schema: { type: "object", required: ["token"] } },
+            delivery: { http: { headerName: "Authorization", valueFrom: "accessToken" } },
+          },
+          other: {
+            type: "api_key",
+            authorizedUris: ["https://other.example.com/**"],
+            credentials: { schema: { type: "object", required: ["key"] } },
+            delivery: { env: { TOKEN: { from: "api_key" } } },
+          },
+        },
+        apiCall: { authKey: "session" },
+      }),
+    );
+    expect(requiredAuthKeysForAgent(m, ["api_call"])).toEqual(["session"]);
+  });
+});

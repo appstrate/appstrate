@@ -865,6 +865,24 @@ export const integrationManifestSchema = z
     // no per-tool URL enforcement, no scope inference from agent tool
     // selection).
     tools: toolsRecordSchema.optional(),
+
+    // Attachable generic `api_call` capability (additive). Exposes the
+    // in-process credential-injecting `api_call` tool ALONGSIDE a spawned MCP
+    // server (`server.type: node|bun|python|npx|uvx`) or a remote MCP
+    // (`http`). The tool runs on the sidecar's McpHost — OUTSIDE the
+    // integration's container — so the server code never sees the credential;
+    // it is bounded by `auths.{authKey}.authorizedUris` exactly like the
+    // serverless `server.type: "api_call"` path. For `server.type: "api_call"`
+    // the capability is implicit (`server.authKey`); declaring this block
+    // there is redundant and rejected in the root superRefine.
+    apiCall: z
+      .object({
+        authKey: z.string().regex(/^[a-z][a-z0-9_]*$/, {
+          error: "apiCall.authKey must match an auths.{key}",
+        }),
+        uploadProtocols: z.array(integrationUploadProtocolEnum).optional(),
+      })
+      .optional(),
   })
   .superRefine((m, ctx) => {
     // An integration must declare a `server` — its `type` says what it does.
@@ -898,6 +916,28 @@ export const integrationManifestSchema = z
           code: "custom",
           message: "server.authKey is required when the integration declares multiple auths",
           path: ["server", "authKey"],
+        });
+      }
+    }
+
+    // Attachable `apiCall` block — additive on top of a spawned/remote server.
+    if (m.apiCall) {
+      if (m.server?.type === "api_call") {
+        ctx.addIssue({
+          code: "custom",
+          message:
+            'the `apiCall` block is redundant when server.type is "api_call" — use server.authKey instead',
+          path: ["apiCall"],
+        });
+      }
+      // The referenced auth must exist; its own schema already guarantees a URL
+      // bound (`authorizedUris` non-empty OR `allowAllUris`), so no extra check.
+      const authKeys = m.auths ? Object.keys(m.auths) : [];
+      if (!authKeys.includes(m.apiCall.authKey)) {
+        ctx.addIssue({
+          code: "custom",
+          message: `apiCall.authKey "${m.apiCall.authKey}" does not match any auths.{key}`,
+          path: ["apiCall", "authKey"],
         });
       }
     }
@@ -976,23 +1016,38 @@ export const API_CALL_TOOL_NAME = "api_call";
 
 /**
  * Resolve the effective `api_call` configuration for an integration, or
- * `null` when `server.type !== "api_call"`. Returns the resolved `authKey`
- * (explicit `server.authKey`, or the lone declared auth) and the declared
- * `server.uploadProtocols`. The manifest schema guarantees that for an
- * `api_call` server there is at least one auth and `authKey` is unambiguous,
- * so the resolution here cannot fail for a validated manifest.
+ * `null` when the integration exposes no `api_call` tool.
+ *
+ * Two sources, mutually exclusive (enforced by the manifest schema):
+ *  - `server.type: "api_call"` — serverless: the tool IS the integration.
+ *    `authKey` is `server.authKey` or the lone declared auth.
+ *  - top-level `apiCall` block — additive: the tool runs in-process ALONGSIDE
+ *    a spawned (`node`|…) or remote (`http`) server. `authKey` is explicit.
+ *
+ * The schema guarantees a validated manifest resolves unambiguously, so this
+ * cannot fail for a validated manifest.
  */
 export function getApiCallConfig(
   manifest: IntegrationManifest,
 ): { authKey: string; uploadProtocols: IntegrationUploadProtocol[] } | null {
-  if (manifest.server?.type !== "api_call") return null;
-  const authKeys = manifest.auths ? Object.keys(manifest.auths) : [];
-  const authKey = manifest.server.authKey ?? authKeys[0];
-  if (!authKey) return null;
-  return {
-    authKey,
-    uploadProtocols: manifest.server.uploadProtocols ?? [],
-  };
+  if (manifest.server?.type === "api_call") {
+    const authKeys = manifest.auths ? Object.keys(manifest.auths) : [];
+    const authKey = manifest.server.authKey ?? authKeys[0];
+    if (!authKey) return null;
+    return {
+      authKey,
+      uploadProtocols: manifest.server.uploadProtocols ?? [],
+    };
+  }
+  if (manifest.apiCall) {
+    const { authKey } = manifest.apiCall;
+    if (!manifest.auths?.[authKey]) return null;
+    return {
+      authKey,
+      uploadProtocols: manifest.apiCall.uploadProtocols ?? [],
+    };
+  }
+  return null;
 }
 
 /**
@@ -1044,6 +1099,12 @@ export function requiredAuthKeysForAgent(
     const tool = toolsRecord[toolName];
     if (!tool || !tool.requiredAuthKey) continue;
     if (declaredAuths.includes(tool.requiredAuthKey)) out.add(tool.requiredAuthKey);
+  }
+  // The generic `api_call` tool isn't in `manifest.tools`; pin the auth it
+  // draws from (server.authKey or the attachable `apiCall` block) when selected.
+  if (agentTools?.includes(API_CALL_TOOL_NAME)) {
+    const cfg = getApiCallConfig(manifest);
+    if (cfg && declaredAuths.includes(cfg.authKey)) out.add(cfg.authKey);
   }
   // Scope-only selection (apiCall integrations) maps each selected scope to
   // the auth(s) whose `availableScopes` catalog declares it.
