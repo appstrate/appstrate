@@ -1,0 +1,42 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/agent.schema.json",
+  "schemaVersion": "1.1",
+  "type": "agent",
+  "name": "@appstrate/kijiji-test",
+  "version": "1.0.0",
+  "displayName": "Kijiji Test Agent — connect.tool cookie-session E2E",
+  "description": "End-to-end harness for the @appstrate/kijiji connect.tool (run-start) integration. Once the Kijiji account is connected (email/password login secret stored), this agent calls the integration's `whoami` tool. At run-start the sidecar runs the integration's `login` tool (the CAS + OAuth cookie-jar dance, with the secret substituted proxy-side) and the MITM injects the captured session cookies on `whoami`. The agent reports the authenticated account it sees — proving the full platform run path mints + injects the session without the agent ever holding the secret.",
+  "timeout": 90,
+  "dependencies": {
+    "integrations": {
+      "@appstrate/kijiji": "^1.2.0"
+    }
+  },
+  "integrations": {
+    "@appstrate/kijiji": { "tools": ["whoami"] }
+  },
+  "output": {
+    "schema": {
+      "type": "object",
+      "required": ["status", "sub", "secret_leaked"],
+      "properties": {
+        "status": {
+          "type": "integer",
+          "description": "The HTTP status the whoami tool reported for GET /api/auth/session (200 when the injected session is valid)."
+        },
+        "sub": {
+          "type": "string",
+          "description": "The authenticated account id (user.sub) the session endpoint returned, or an error message if the call failed."
+        },
+        "name": {
+          "type": "string",
+          "description": "The authenticated account display name (user.name), if present."
+        },
+        "secret_leaked": {
+          "type": "boolean",
+          "description": "true only if you were ever given or saw the account password — must be false (you only call whoami; the proxy injects the session cookies)."
+        }
+      }
+    }
+  }
+}
