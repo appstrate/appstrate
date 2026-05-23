@@ -57,13 +57,17 @@ export type { ProxyCredentialsPayload } from "./proxy-primitives.ts";
 // Multi-auth credential resolver + delivery planners.
 export {
   ALIAS_MAP,
-  decryptCredentialsToStringMap,
-  decryptCredentialInputsToStringMap,
   readCredentialField,
   resolveHttpDelivery,
   buildProxyCredentialsPayload,
   PROXY_INJECTED_FIELD,
 } from "./integration-credentials.ts";
+// Credential-envelope decryptors — split out so they (and `encryption.ts` →
+// `@appstrate/env`) stay off the sidecar's import graph. Platform-only.
+export {
+  decryptCredentialsToStringMap,
+  decryptCredentialInputsToStringMap,
+} from "./credential-decrypt.ts";
 export type {
   ResolvedAuthCredentials,
   IntegrationCredentialsPayload,

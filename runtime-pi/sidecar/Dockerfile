@@ -66,10 +66,6 @@ COPY packages/connect/src        packages/connect/src
 COPY packages/afps-runtime/src   packages/afps-runtime/src
 COPY packages/mcp-transport/src  packages/mcp-transport/src
 COPY packages/core/src           packages/core/src
-# @appstrate/env — pulled in transitively by @appstrate/connect/integration-credentials
-# (encryption.ts → getEnv) and connect-login's connect.tool path.
-# Single-file package; its only workspace dep (@appstrate/core/env) is copied above.
-COPY packages/env/src            packages/env/src
 
 # Sidecar sources. Glob is single-level (no recursion into `test/`),
 # so adding a new `.ts` file at `runtime-pi/sidecar/*.ts` is picked up

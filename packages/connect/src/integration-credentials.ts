@@ -9,7 +9,6 @@
 
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import type { ProxyCredentialsPayload } from "./proxy-primitives.ts";
-import { decryptCredentialEnvelope } from "./encryption.ts";
 
 /**
  * Camel-cased manifest aliases → snake_case credential storage keys.
@@ -69,40 +68,12 @@ export interface IntegrationCredentialsPayload {
 }
 
 /**
- * Decrypt a `credentials_encrypted` blob and project its **injectable
- * outputs** to a flat `Record<string, string>` — non-string values are
- * silently dropped.
- *
- * Used by both the live credentials resolver (sidecar-facing) and the
- * token-refresh path, which need the credentials as a string map to
- * feed into header injection / token-endpoint POST bodies. Returns only
- * the `outputs` plane of the structured envelope (spec §4.6) — bootstrap
- * `inputs` (login secrets) are NEVER returned here, so the injection path
- * can never reference them. A v1 flat blob reads back as all-outputs, so
- * legacy connections behave identically. Throws on decryption failure
- * (key rotation issue, corrupted ciphertext).
- */
-export function decryptCredentialsToStringMap(ciphertext: string): Record<string, string> {
-  return projectToStringMap(decryptCredentialEnvelope(ciphertext).outputs);
-}
-
-/**
- * Decrypt a `credentials_encrypted` blob and project its **bootstrap
- * inputs** to a flat `Record<string, string>` (spec §4.6). Returns `{}`
- * for v1 flat blobs and for v2 envelopes persisted without
- * `persistLoginSecret`. The ONLY caller is the run-start spawn resolver,
- * which needs the login secret to re-bootstrap an expired session — the
- * injection path must never call this.
- */
-export function decryptCredentialInputsToStringMap(ciphertext: string): Record<string, string> {
-  return projectToStringMap(decryptCredentialEnvelope(ciphertext).inputs);
-}
-
-/**
  * Project an already-decrypted credentials object to a flat
  * `Record<string, string>`, dropping non-string (incl. `undefined`)
- * values. Shared by {@link decryptCredentialsToStringMap} and the
- * provider-side credential resolvers so the projection rule lives once.
+ * values. Shared by the credential-envelope decryptors (`./credential-decrypt.ts`)
+ * and the provider-side credential resolvers so the projection rule lives once.
+ * Stays here (no crypto dependency) so the sidecar can import this module
+ * without pulling in the encryption keyring.
  */
 export function projectToStringMap(raw: Record<string, unknown>): Record<string, string> {
   const out: Record<string, string> = {};
