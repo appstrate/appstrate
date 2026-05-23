@@ -46,11 +46,15 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
 
   // apiCall integrations expose the generic `api_call` tool, which the runtime
   // injects only when it's present in the agent's `tools[]`. Default it on when
-  // the integration is freshly added (`tools` still undefined) so the
-  // integration works out of the box; the user can uncheck it below.
+  // a freshly-added integration (`tools` still undefined) exposes api_call as
+  // its ONLY surface (no native MCP tools) so it works out of the box. When the
+  // integration ALSO ships native tools (attachable api_call), the generic tool
+  // is an opt-in escape hatch — don't grant it by default; the native tools are
+  // the primary surface and the user opts into api_call below.
   useEffect(() => {
     if (!detail || getApiCallConfig(detail.manifest) === null) return;
     if (entry.tools !== undefined) return;
+    if (Object.keys(detail.manifest.tools ?? {}).length > 0) return;
     onChange({ ...entry, tools: [API_CALL_TOOL_NAME] });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail, entry.tools]);

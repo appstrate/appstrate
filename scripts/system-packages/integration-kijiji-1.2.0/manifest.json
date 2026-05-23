@@ -69,5 +69,8 @@
       "requiredAuthKey": "session",
       "urlPatterns": [{ "pattern": "https://www.kijiji.ca/api/auth/session" }]
     }
+  },
+  "apiCall": {
+    "authKey": "session"
   }
 }
