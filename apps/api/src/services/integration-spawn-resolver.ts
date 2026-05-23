@@ -28,6 +28,7 @@
 
 import {
   decryptCredentialsToStringMap,
+  decryptCredentialInputsToStringMap,
   readCredentialField,
   resolveHttpDelivery,
 } from "@appstrate/connect";
@@ -203,6 +204,15 @@ async function resolveOne(
     ? undefined
     : computeToolUrlEnvelope(manifest, agentToolSelection);
 
+  // The connect-login tool is a credential-acquisition primitive, never an
+  // agent-facing capability — exclude it from the allowlist so the agent's
+  // LLM can never invoke it directly. (It is normally not in the selection
+  // anyway, but defence-in-depth: an author could have listed it.)
+  const baseAllowlist = agentToolSelection ?? [];
+  const toolAllowlist = deliveries.connectLogin
+    ? baseAllowlist.filter((t) => t !== deliveries.connectLogin!.toolName)
+    : baseAllowlist;
+
   return {
     integrationId,
     namespace,
@@ -251,8 +261,9 @@ async function resolveOne(
     // the sidecar's McpHost registers nothing for this integration.
     // The agent author has to explicitly opt into each tool via the
     // editor UI.
-    toolAllowlist: agentToolSelection ?? [],
+    toolAllowlist,
     ...(toolUrlEnvelope !== undefined ? { toolUrlEnvelope } : {}),
+    ...(deliveries.connectLogin ? { connectLogin: deliveries.connectLogin } : {}),
   };
 }
 
@@ -316,6 +327,13 @@ export function computeToolUrlEnvelope(
 interface ResolvedDeliveries {
   spawnEnv: Record<string, string>;
   httpDeliveryAuths?: NonNullable<IntegrationSpawnSpec["httpDeliveryAuths"]>;
+  /**
+   * Set when the chosen connection's auth is `connect.tool` + `runAt:
+   * "run-start"`: the sidecar mints the session at boot by running the
+   * login tool with the decrypted login secret. `resolveOne` copies this
+   * onto `IntegrationSpawnSpec.connectLogin`.
+   */
+  connectLogin?: NonNullable<IntegrationSpawnSpec["connectLogin"]>;
 }
 
 /**
@@ -375,6 +393,75 @@ async function resolveDeliveries(
       connectionId: row.id,
     });
     return null;
+  }
+
+  // ─── connect.tool + runAt:"run-start" — store-the-secret acquisition ───
+  // The injectable outputs plane is empty at rest: only the login secret was
+  // persisted (NON-injectable `inputs`). The sidecar mints the session at
+  // boot by running the integration's login tool with the decrypted secret.
+  const httpDecl0 = auth.delivery?.http;
+  if (auth.type === "custom" && auth.connect?.tool && auth.connect.runAt === "run-start") {
+    if (!httpDecl0) {
+      // A run-start connect.tool auth without delivery.http has nothing to
+      // inject the captured session into — the manifest is mis-declared.
+      logger.warn("run-start connect.tool auth has no delivery.http; skipping", {
+        integrationId,
+        authKey: row.authKey,
+      });
+      return null;
+    }
+    let inputs: Record<string, string>;
+    try {
+      inputs = decryptCredentialInputsToStringMap(row.credentialsEncrypted);
+    } catch (err) {
+      logger.warn("decrypt failed for run-start login secret", {
+        integrationId,
+        authKey: row.authKey,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }
+    if (Object.keys(inputs).length === 0) {
+      // No persisted login secret → treat as not-connected for this run.
+      // Do NOT spawn a half-broken session.
+      logger.info("run-start connect.tool connection has no persisted login secret; skipping", {
+        integrationId,
+        authKey: row.authKey,
+      });
+      return null;
+    }
+    // Placeholder MITM entry so the sidecar creates the per-integration
+    // credentials source + listener. The real session header is installed at
+    // boot by `runConnectLogin` (`source.setSessionOutputs`). The value is
+    // intentionally empty at rest — no live session exists yet.
+    const placeholderPlan = resolveHttpDelivery(auth.type, {}, httpDecl0) ?? {
+      headerName: "",
+      headerPrefix: "",
+      value: "",
+      allowServerOverride: false,
+    };
+    const httpDeliveryAuths: NonNullable<IntegrationSpawnSpec["httpDeliveryAuths"]> = {
+      [row.authKey]: {
+        ...placeholderPlan,
+        authType: auth.type,
+        authorizedUris: [...auth.authorizedUris],
+        expiresAtEpochMs: null,
+      },
+    };
+    return {
+      spawnEnv: {},
+      httpDeliveryAuths,
+      connectLogin: {
+        toolName: auth.connect.tool,
+        ...(auth.connect.produces ? { produces: auth.connect.produces } : {}),
+        authKey: row.authKey,
+        authType: auth.type,
+        authorizedUris: [...auth.authorizedUris],
+        deliveryHttp: httpDecl0,
+        inputs,
+        ...(auth.connect.reauthOn ? { reauthOn: [...auth.connect.reauthOn] } : {}),
+      },
+    };
   }
 
   let fields: Record<string, string>;

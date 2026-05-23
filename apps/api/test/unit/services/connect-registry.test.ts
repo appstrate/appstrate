@@ -5,6 +5,7 @@ import { resolveStrategy } from "../../../src/services/connect/registry.ts";
 import { OAuth2Strategy } from "../../../src/services/connect/oauth2-strategy.ts";
 import { FieldsStrategy } from "../../../src/services/connect/fields-strategy.ts";
 import { LoginStrategy } from "../../../src/services/connect/login-strategy.ts";
+import { LoginSecretStrategy } from "../../../src/services/connect/login-secret-strategy.ts";
 import {
   OrchestratedStrategy,
   type ConnectToolExecutor,
@@ -39,14 +40,24 @@ describe("resolveStrategy", () => {
     expect(resolveStrategy(a)).toBeInstanceOf(LoginStrategy);
   });
 
-  it("maps custom + connect.tool → OrchestratedStrategy when an executor is supplied", () => {
-    const a = { type: "custom", connect: { tool: "login" } } as unknown as AuthDef;
+  it("maps custom + connect.tool + run-start → LoginSecretStrategy (no executor needed)", () => {
+    const a = {
+      type: "custom",
+      connect: { tool: "login", runAt: "run-start" },
+    } as unknown as AuthDef;
+    // No executor supplied — run-start stores only the secret, so it must
+    // resolve without one (the session is minted at run-start by the sidecar).
+    expect(resolveStrategy(a)).toBeInstanceOf(LoginSecretStrategy);
+  });
+
+  it("maps custom + connect.tool + link → OrchestratedStrategy when an executor is supplied", () => {
+    const a = { type: "custom", connect: { tool: "login", runAt: "link" } } as unknown as AuthDef;
     const s = resolveStrategy(a, { connectToolExecutor: fakeExecutor });
     expect(s).toBeInstanceOf(OrchestratedStrategy);
   });
 
-  it("throws for custom + connect.tool with no executor (no silent half-acquisition)", () => {
-    const a = { type: "custom", connect: { tool: "login" } } as unknown as AuthDef;
+  it("throws for custom + connect.tool + link with no executor (no silent half-acquisition)", () => {
+    const a = { type: "custom", connect: { tool: "login", runAt: "link" } } as unknown as AuthDef;
     expect(() => resolveStrategy(a)).toThrow(/connect-run substrate/);
   });
 

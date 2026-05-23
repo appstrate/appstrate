@@ -103,7 +103,15 @@ export class McpHost {
    * subsequent server-side `notifications/tools/list_changed` are NOT
    * tracked yet (third-party MCP servers rarely emit them in practice).
    */
-  async register(upstream: McpHostUpstream): Promise<void> {
+  /**
+   * Ingest an upstream MCP server. Returns the ALLOCATED namespace — the
+   * normalised slug, possibly disambiguated with a `_2`/`_3`/… suffix on
+   * collision. This is the value {@link getUpstreamClient} keys against, so
+   * callers that need to reach the raw client afterwards (e.g. the P2
+   * connect-login hook) must use the returned namespace, not the one they
+   * passed in.
+   */
+  async register(upstream: McpHostUpstream): Promise<string> {
     if (this.disposed) throw new Error("McpHost: cannot register after dispose()");
     const baseNamespace = normaliseNamespace(upstream.namespace);
     if (!baseNamespace) {
@@ -150,7 +158,7 @@ export class McpHost {
     if (capabilities && !capabilities.tools) {
       // Server explicitly does NOT support tools — no point asking.
       this.upstreams.set(normalisedNs, effectiveUpstream);
-      return;
+      return normalisedNs;
     }
 
     const { tools } = await effectiveUpstream.client.listTools();
@@ -202,6 +210,7 @@ export class McpHost {
     }
 
     this.upstreams.set(normalisedNs, effectiveUpstream);
+    return normalisedNs;
   }
 
   /**
@@ -225,6 +234,23 @@ export class McpHost {
   /** Total number of upstream-advertised tools currently known. */
   size(): number {
     return this.toolDescriptors.length;
+  }
+
+  /**
+   * Connect-login primitive (P1) — return the underlying MCP client for a
+   * registered upstream so a caller can invoke a tool directly (bypassing
+   * the namespaced tool-dispatch surface). `namespace` is the normalised
+   * form used as the `{namespace}__tool` prefix (the same value
+   * {@link normaliseNamespace} produces, after any collision-disambiguation
+   * suffix). Returns `undefined` when no upstream is registered under it.
+   *
+   * The returned client exposes `.callTool({ name, arguments }, { signal? })`
+   * — the connect-login primitive uses it to call the integration's `login`
+   * tool while the credential source's transient-input substitution window
+   * is open.
+   */
+  getUpstreamClient(namespace: string): AppstrateMcpClient | undefined {
+    return this.upstreams.get(namespace)?.client;
   }
 
   /**

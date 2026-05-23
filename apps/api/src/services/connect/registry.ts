@@ -23,6 +23,7 @@ import type { IntegrationManifest } from "@appstrate/core/integration";
 import { OAuth2Strategy } from "./oauth2-strategy.ts";
 import { FieldsStrategy } from "./fields-strategy.ts";
 import { LoginStrategy } from "./login-strategy.ts";
+import { LoginSecretStrategy } from "./login-secret-strategy.ts";
 import { OrchestratedStrategy, type ConnectToolExecutor } from "./orchestrated-strategy.ts";
 import type { IntegrationConnectStrategy } from "./strategy.ts";
 
@@ -43,6 +44,12 @@ export function resolveStrategy(
     case "custom":
       // Declarative single login request → Login.
       if (auth.connect?.steps) return new LoginStrategy();
+      // connect.tool + runAt:"run-start" → store-the-secret only (P2). The
+      // session is minted at each agent run by the sidecar's connect-login
+      // primitive — no executor needed at dashboard connect.
+      if (auth.connect?.tool && auth.connect.runAt === "run-start") {
+        return new LoginSecretStrategy();
+      }
       // Code-orchestrated login → Orchestrated (requires the connect-run substrate).
       if (auth.connect?.tool) {
         if (!opts.connectToolExecutor) {

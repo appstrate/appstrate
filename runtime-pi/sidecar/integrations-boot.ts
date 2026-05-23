@@ -57,8 +57,10 @@ import {
 import {
   createIntegrationCredentialsSource,
   fetchInitialIntegrationCredentials,
+  type IntegrationCredentialsSource,
 } from "./integration-credentials-source.ts";
 import { createApiCallCredentialAdapter } from "./api-call-credentials.ts";
+import { runConnectLogin } from "./connect-login.ts";
 import {
   createApiCallToolDefs,
   type ApiCallIntegrationConfig,
@@ -286,6 +288,76 @@ async function connectRemoteHttpIntegration(
     retry: { deadlineMs: 30_000 },
   });
   return { client, authKey };
+}
+
+/**
+ * P2 — mint a `connect.tool` + `runAt: "run-start"` session at boot.
+ *
+ * Called after the integration's MCP client connected, its MITM source was
+ * created, and `host.register(...)` ran. Drives `runConnectLogin` against the
+ * integration's `login` tool with the decrypted login secret substituted
+ * proxy-side. On success, the source now injects the captured session header
+ * for the rest of the run.
+ *
+ * Throws when `spec.connectLogin` is set but no MITM source exists (CA
+ * bring-up failed, or the spawn resolver didn't emit `httpDeliveryAuths`) or
+ * when the login tool itself fails — the caller maps the throw onto the boot
+ * result's `failed[]` list. Exported for unit testing; production callers go
+ * through {@link bootIntegrations}.
+ *
+ * `allocatedNamespace` is the value {@link McpHost.register} returned for this
+ * integration — the host may have disambiguated `spec.namespace` with a
+ * suffix, and {@link McpHost.getUpstreamClient} keys against the allocated
+ * form.
+ */
+export async function runConnectLoginHook(
+  spec: IntegrationSpawnSpec,
+  host: McpHost,
+  mitmSource: IntegrationCredentialsSource | null,
+  allocatedNamespace: string,
+): Promise<void> {
+  const cl = spec.connectLogin;
+  if (!cl) return;
+  if (!mitmSource) {
+    throw new Error(
+      "connect-login requires the integration's MITM credentials source, but none was created (CA bring-up may have failed)",
+    );
+  }
+  // Same opts drive the initial login AND every mid-run re-login. The
+  // namespace MUST be the ALLOCATED one (McpHost may have suffixed it) so the
+  // re-login closure resolves the same upstream client.
+  const loginOpts = {
+    host,
+    namespace: allocatedNamespace,
+    toolName: cl.toolName,
+    ...(cl.produces ? { produces: cl.produces } : {}),
+    inputs: cl.inputs,
+    source: mitmSource,
+    authKey: cl.authKey,
+    authType: cl.authType,
+    authorizedUris: cl.authorizedUris,
+    deliveryHttp: cl.deliveryHttp,
+  };
+  await runConnectLogin(loginOpts);
+  logger.info("integration connect-login session minted", {
+    integrationId: spec.integrationId,
+    namespace: spec.namespace,
+    authKey: cl.authKey,
+  });
+  // P3 — register the mid-run re-login handler. When an upstream returns one
+  // of `reauthOn` (default `[401]`) for a request using this session, the MITM
+  // listener calls `source.refreshOnUnauthorized(authKey)`, which routes to
+  // this handler (a fresh `runConnectLogin`) and retries the request once.
+  // A failed re-login resolves `false`, so the listener leaves the original
+  // failed upstream response untouched (no retry, no loop).
+  mitmSource.setReloginHandler(
+    cl.authKey,
+    () =>
+      runConnectLogin(loginOpts)
+        .then(() => true)
+        .catch(() => false),
+    cl.reauthOn ?? [401],
+  );
 }
 
 /**
@@ -523,6 +595,10 @@ export async function bootIntegrations(
       // integration declared `delivery.http`).
       let listener: MitmListenerHandle | null = null;
       let mitmCtx: RuntimeMitmContext | null = null;
+      // Hoisted so the connect-login hook (run-start acquisition, below)
+      // can drive `setSessionOutputs` on the same source the MITM listener
+      // reads from.
+      let mitmSource: ReturnType<typeof createIntegrationCredentialsSource> | null = null;
       if (
         wantsMitm &&
         sharedMinter !== null &&
@@ -539,6 +615,7 @@ export async function bootIntegrations(
           runToken: bundleFetchOpts.runToken,
           initialPayload: initial,
         });
+        mitmSource = source;
         listener = createIntegrationMitmListener({
           caBundle: runCaBundle,
           minter: sharedMinter,
@@ -611,7 +688,7 @@ export async function bootIntegrations(
       }
       const wrapped = wrapClient(client, spawnedIntegration.transport);
       const sizeBefore = host.size();
-      await host.register({
+      const allocatedNs = await host.register({
         namespace: spec.namespace,
         client: wrapped,
         // Niveau 2 Phase 3 — pass the agent-declared tool allowlist
@@ -622,6 +699,23 @@ export async function bootIntegrations(
       });
       const added = host.size() - sizeBefore;
       clients.push(wrapped);
+
+      // ─── P2 — connect.tool `runAt: "run-start"` session acquisition ───
+      // Only the login secret was stored at dashboard connect; mint the
+      // session now by running the integration's login tool. The secret is
+      // substituted proxy-side (never handed to tool code) and the captured
+      // session header becomes injectable for the rest of the run via
+      // `source.setSessionOutputs` (called inside runConnectLogin).
+      //
+      // A failure here throws into the outer catch → the integration lands
+      // on `failed` and is NOT pushed to `spawned`; the agent gets a
+      // tool-error if it tries to use it rather than a silent half-session.
+      // The connect-login tool is reached via the ALLOCATED namespace (the
+      // host may have disambiguated `spec.namespace` with a suffix).
+      if (spec.connectLogin) {
+        await runConnectLoginHook(spec, host, mitmSource, allocatedNs);
+      }
+
       spawned.push({
         integrationId: spec.integrationId,
         namespace: spec.namespace,
