@@ -135,11 +135,21 @@ export function readCredentialField(
 // Delivery — HTTP
 // ─────────────────────────────────────────────
 
-// `HttpDeliveryPlan` (the resolved plan returned by `resolveHttpDelivery`) is a
-// spawn-boundary shape, so it is owned by `@appstrate/core/sidecar-types` and
-// re-exported here for `@appstrate/connect` consumers.
-import type { HttpDeliveryPlan } from "@appstrate/core/sidecar-types";
-export type { HttpDeliveryPlan };
+/**
+ * Plan returned by {@link resolveHttpDelivery}. The proxy uses this to
+ * decide whether to inject a header and what value to set; the
+ * `allowServerOverride` flag mirrors the manifest setting (default
+ * false → proxy strips any caller-supplied header of the same name
+ * before injection).
+ */
+export interface HttpDeliveryPlan {
+  headerName: string;
+  headerPrefix: string;
+  /** Rendered, post-encoding value ready to be sent as the header value. */
+  value: string;
+  /** Mirrors manifest; default `false` means the proxy MUST strip caller overrides. */
+  allowServerOverride: boolean;
+}
 
 /**
  * Wire payload returned by both `/internal/integration-credentials/{scope}/{name}`

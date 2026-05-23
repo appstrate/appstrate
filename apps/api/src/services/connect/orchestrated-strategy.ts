@@ -61,8 +61,6 @@ export interface ConnectToolExecution {
   inputs: Record<string, string>;
   /** Names of the bootstrap fields the tool may reference as `{{name}}`. */
   inputFields: string[];
-  /** Integrations the tool may call during the dance (`connect.dependsOn`). */
-  dependsOn?: readonly string[];
 }
 
 /**
@@ -108,7 +106,6 @@ export class OrchestratedStrategy implements IntegrationConnectStrategy {
       produces: auth.connect?.produces,
       inputs: credentials,
       inputFields: Object.keys(credentials),
-      dependsOn: auth.connect?.dependsOn,
     });
 
     // Identity from injectable outputs + promoted claims — same mapping the

@@ -313,39 +313,6 @@ async function connectRemoteHttpIntegration(
  * suffix, and {@link McpHost.getUpstreamClient} keys against the allocated
  * form.
  */
-/**
- * connect.dependsOn — translate the spec's `dependsOnAuths` (platform-resolved
- * credentials for OTHER integrations the login tool may call during the dance)
- * into the `{ auth, plan }` pairs {@link IntegrationCredentialsSource.seedDependencyAuths}
- * consumes. The authKeys are already namespaced (`${depId}::${authKey}`) by the
- * platform, so the merged payload keeps the dependency's auth distinct from the
- * login integration's own auth (distinct authorizedUris ⇒ the MITM planner only
- * injects a dependency credential for that dependency's hosts).
- */
-function seedDependsOnAuths(
-  spec: IntegrationSpawnSpec,
-  mitmSource: IntegrationCredentialsSource,
-): void {
-  const deps = spec.connectLogin?.dependsOnAuths;
-  if (!deps || deps.length === 0) return;
-  mitmSource.seedDependencyAuths(
-    deps.map((d) => ({
-      auth: {
-        authKey: d.authKey,
-        authType: d.authType,
-        fields: d.fields,
-        authorizedUris: d.authorizedUris,
-      },
-      plan: {
-        headerName: d.deliveryPlan.headerName,
-        headerPrefix: d.deliveryPlan.headerPrefix,
-        value: d.deliveryPlan.value,
-        allowServerOverride: d.deliveryPlan.allowServerOverride,
-      },
-    })),
-  );
-}
-
 export async function runConnectLoginHook(
   spec: IntegrationSpawnSpec,
   host: McpHost,
@@ -359,10 +326,6 @@ export async function runConnectLoginHook(
       "connect-login requires the integration's MITM credentials source, but none was created (CA bring-up may have failed)",
     );
   }
-  // Merge connect.dependsOn credentials BEFORE running the login tool, so the
-  // tool's outbound calls to a dependency's authorizedUris get that dependency's
-  // credential injected by the MITM planner.
-  seedDependsOnAuths(spec, mitmSource);
   // Same opts drive the initial login AND every mid-run re-login. The
   // namespace MUST be the ALLOCATED one (McpHost may have suffixed it) so the
   // re-login closure resolves the same upstream client.
@@ -1008,11 +971,6 @@ export async function runConnectOnce(
       // narrows the type and fails loudly if that invariant ever breaks.
       throw new Error("runConnectOnce: MITM source was not created");
     }
-
-    // connect.dependsOn — merge dependency credentials into this source before
-    // running login so the tool's calls to a dependency's authorizedUris get
-    // the dependency's credential injected by the MITM planner.
-    seedDependsOnAuths(spec, mitmSource);
 
     // Run the login tool ONCE and capture the bundle. The secret in
     // `cl.inputs` is substituted proxy-side by the MITM source.

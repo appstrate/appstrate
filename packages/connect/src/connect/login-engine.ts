@@ -15,7 +15,7 @@
  * surface. It is bounded by construction:
  *   - the request URL must match the integration's `authorizedUris` allowlist
  *     (unless `allowAllUris`);
- *   - per-request timeout + total budget; capped response body;
+ *   - per-request timeout; capped response body;
  *   - regex patterns are length-capped (schema) and run against a size-capped
  *     body (true ReDoS needs RE2 — documented residual; the body cap bounds
  *     worst-case input length);
@@ -36,16 +36,12 @@ import { decodeJwtPayload } from "@appstrate/core/jwt";
 
 export interface LoginLimits {
   stepTimeoutMs: number;
-  totalBudgetMs: number;
   maxResponseBytes: number;
-  maxRedirects: number;
 }
 
 export const DEFAULT_LOGIN_LIMITS: LoginLimits = {
   stepTimeoutMs: 15_000,
-  totalBudgetMs: 45_000,
   maxResponseBytes: 1_000_000,
-  maxRedirects: 3,
 };
 
 export type LoginExtractor =
@@ -107,7 +103,6 @@ export class LoginError extends Error {
       | "response_too_large"
       | "timeout"
       | "extract_failed"
-      | "budget_exceeded"
       | "invalid_config",
   ) {
     super(message);
@@ -246,124 +241,114 @@ export async function runLogin(config: LoginConfig, ctx: LoginContext): Promise<
 
   const outputs: Record<string, string> = {};
 
-  for (let i = 0; i < config.steps.length; i++) {
-    const step = config.steps[i]!;
-    if (now() - start > limits.totalBudgetMs) {
-      throw new LoginError(
-        `total connect budget ${limits.totalBudgetMs}ms exceeded`,
-        i,
-        "budget_exceeded",
-      );
-    }
+  // The schema caps `connect.steps` at exactly one (spec §4.8): a single,
+  // stateless login request. Process it (index 0 throughout).
+  const step = config.steps[0];
+  if (!step) {
+    throw new LoginError("connect.steps declared no login request", 0, "invalid_config");
+  }
 
-    const vars = { ...ctx.inputs };
-    const url = substituteVars(step.request.url, vars);
-    const body =
-      step.request.body !== undefined ? substituteVars(step.request.body, vars) : undefined;
-    const headers: Record<string, string> = {};
-    for (const [k, v] of Object.entries(step.request.headers ?? {}))
-      headers[k] = substituteVars(v, vars);
-    if (step.request.contentType && headers["Content-Type"] === undefined) {
-      headers["Content-Type"] = step.request.contentType;
-    }
+  const vars = { ...ctx.inputs };
+  const url = substituteVars(step.request.url, vars);
+  const body =
+    step.request.body !== undefined ? substituteVars(step.request.body, vars) : undefined;
+  const headers: Record<string, string> = {};
+  for (const [k, v] of Object.entries(step.request.headers ?? {}))
+    headers[k] = substituteVars(v, vars);
+  if (step.request.contentType && headers["Content-Type"] === undefined) {
+    headers["Content-Type"] = step.request.contentType;
+  }
 
-    // Fail closed on any unresolved `{{...}}` (a typo'd placeholder must never
-    // be sent literally upstream).
-    const unresolved = [
-      ...findUnresolvedPlaceholders(url),
-      ...(body ? findUnresolvedPlaceholders(body) : []),
-      ...Object.values(headers).flatMap(findUnresolvedPlaceholders),
-    ];
-    if (unresolved.length > 0) {
-      throw new LoginError(
-        `step ${i}: unresolved placeholders: ${[...new Set(unresolved)].join(", ")}`,
-        i,
-        "unresolved_placeholder",
-      );
-    }
-
-    // Per-step URL allowlist (defence beyond the SSRF blocklist).
-    if (!ctx.allowAllUris) {
-      const allowed = (ctx.authorizedUris ?? []).some((spec) =>
-        matchesAuthorizedUriSpec(spec, url),
-      );
-      if (!allowed) {
-        throw new LoginError(
-          `step ${i}: url not in authorizedUris allowlist`,
-          i,
-          "url_not_allowed",
-        );
-      }
-    }
-
-    const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), limits.stepTimeoutMs);
-    let res: Response;
-    try {
-      res = await doFetch(url, {
-        method: step.request.method,
-        headers,
-        ...(body !== undefined ? { body } : {}),
-        redirect: "manual",
-        signal: ac.signal,
-      });
-    } catch (err) {
-      if (ac.signal.aborted) {
-        throw new LoginError(`step ${i}: timed out after ${limits.stepTimeoutMs}ms`, i, "timeout");
-      }
-      throw new LoginError(`step ${i}: request failed: ${String(err)}`, i, "extract_failed");
-    } finally {
-      clearTimeout(timer);
-    }
-
-    if (!isOkStatus(res.status, step.okStatus)) {
-      // Never log/echo the body — only the status.
-      throw new LoginError(`step ${i}: unexpected status ${res.status}`, i, "bad_status");
-    }
-
-    const needsBody = Object.values(step.extract ?? {}).some(
-      (e) => e.from === "json" || e.from === "regex",
+  // Fail closed on any unresolved `{{...}}` (a typo'd placeholder must never
+  // be sent literally upstream).
+  const unresolved = [
+    ...findUnresolvedPlaceholders(url),
+    ...(body ? findUnresolvedPlaceholders(body) : []),
+    ...Object.values(headers).flatMap(findUnresolvedPlaceholders),
+  ];
+  if (unresolved.length > 0) {
+    throw new LoginError(
+      `step 0: unresolved placeholders: ${[...new Set(unresolved)].join(", ")}`,
+      0,
+      "unresolved_placeholder",
     );
-    const bodyText = needsBody ? await readBoundedText(res, limits.maxResponseBytes, i) : "";
+  }
 
-    // Extract in two passes so a `jwt` extractor can reference any other
-    // same-request value regardless of key order. We can't rely on insertion
-    // order: the manifest is persisted as JSONB, which does NOT preserve key
-    // order, so the decrypted `extract` map comes back reordered. Pass 1 runs
-    // every self-contained extractor (json/regex/header/cookie); pass 2 runs
-    // `jwt`, whose `token` names another extracted value.
-    const extracted: Record<string, string> = {};
-    const entries = Object.entries(step.extract ?? {});
-    for (const [name, ex] of entries) {
-      if (ex.from === "jwt") continue;
-      const scope = { ...extracted };
-      extracted[name] = applyExtractor(ex, bodyText, res.headers, scope, i, name);
+  // URL allowlist (defence beyond the SSRF blocklist).
+  if (!ctx.allowAllUris) {
+    const allowed = (ctx.authorizedUris ?? []).some((spec) => matchesAuthorizedUriSpec(spec, url));
+    if (!allowed) {
+      throw new LoginError("step 0: url not in authorizedUris allowlist", 0, "url_not_allowed");
     }
-    for (const [name, ex] of entries) {
-      if (ex.from !== "jwt") continue;
-      const scope = { ...extracted };
-      extracted[name] = applyExtractor(ex, bodyText, res.headers, scope, i, name);
+  }
+
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), limits.stepTimeoutMs);
+  let res: Response;
+  try {
+    res = await doFetch(url, {
+      method: step.request.method,
+      headers,
+      ...(body !== undefined ? { body } : {}),
+      redirect: "manual",
+      signal: ac.signal,
+    });
+  } catch (err) {
+    if (ac.signal.aborted) {
+      throw new LoginError(`step 0: timed out after ${limits.stepTimeoutMs}ms`, 0, "timeout");
     }
-    for (const name of step.output ?? []) {
-      if (!(name in extracted)) {
-        throw new LoginError(
-          `step ${i}: output '${name}' has no matching extractor`,
-          i,
-          "invalid_config",
-        );
-      }
-      // Fail closed on a present-but-empty extraction: a declared `output` is a
-      // required injectable. Persisting "" would yield a silently-broken
-      // connection (e.g. `Authorization: Bearer ` or `Cookie: JSESSIONID=`).
-      if (extracted[name] === "") {
-        throw new LoginError(
-          `step ${i}: output '${name}' extracted an empty value`,
-          i,
-          "extract_failed",
-        );
-      }
-      outputs[name] = extracted[name]!;
+    throw new LoginError(`step 0: request failed: ${String(err)}`, 0, "extract_failed");
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (!isOkStatus(res.status, step.okStatus)) {
+    // Never log/echo the body — only the status.
+    throw new LoginError(`step 0: unexpected status ${res.status}`, 0, "bad_status");
+  }
+
+  const needsBody = Object.values(step.extract ?? {}).some(
+    (e) => e.from === "json" || e.from === "regex",
+  );
+  const bodyText = needsBody ? await readBoundedText(res, limits.maxResponseBytes, 0) : "";
+
+  // Extract in two passes so a `jwt` extractor can reference any other
+  // same-request value regardless of key order. We can't rely on insertion
+  // order: the manifest is persisted as JSONB, which does NOT preserve key
+  // order, so the decrypted `extract` map comes back reordered. Pass 1 runs
+  // every self-contained extractor (json/regex/header/cookie); pass 2 runs
+  // `jwt`, whose `token` names another extracted value.
+  const extracted: Record<string, string> = {};
+  const entries = Object.entries(step.extract ?? {});
+  for (const [name, ex] of entries) {
+    if (ex.from === "jwt") continue;
+    const scope = { ...extracted };
+    extracted[name] = applyExtractor(ex, bodyText, res.headers, scope, 0, name);
+  }
+  for (const [name, ex] of entries) {
+    if (ex.from !== "jwt") continue;
+    const scope = { ...extracted };
+    extracted[name] = applyExtractor(ex, bodyText, res.headers, scope, 0, name);
+  }
+  for (const name of step.output ?? []) {
+    if (!(name in extracted)) {
+      throw new LoginError(
+        `step 0: output '${name}' has no matching extractor`,
+        0,
+        "invalid_config",
+      );
     }
+    // Fail closed on a present-but-empty extraction: a declared `output` is a
+    // required injectable. Persisting "" would yield a silently-broken
+    // connection (e.g. `Authorization: Bearer ` or `Cookie: JSESSIONID=`).
+    if (extracted[name] === "") {
+      throw new LoginError(
+        `step 0: output '${name}' extracted an empty value`,
+        0,
+        "extract_failed",
+      );
+    }
+    outputs[name] = extracted[name]!;
   }
 
   let expiresAt: string | null = null;

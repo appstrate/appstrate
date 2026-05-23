@@ -386,9 +386,7 @@ const connectStepSchema = z.object({
 
 const connectLimitsSchema = z.object({
   stepTimeoutMs: z.number().int().min(1).max(60_000).optional(),
-  totalBudgetMs: z.number().int().min(1).max(120_000).optional(),
   maxResponseBytes: z.number().int().min(1).max(5_000_000).optional(),
-  maxRedirects: z.number().int().min(0).max(5).optional(),
 });
 
 const connectSchema = z.object({
@@ -425,9 +423,6 @@ const connectSchema = z.object({
   // Injectable outputs the tool is expected to produce. Authoritative set the
   // `delivery.*` gating (spec §4.6) is validated against.
   produces: z.array(z.string().min(1)).max(32).optional(),
-  // Other integrations the connect-tool may call during the dance (e.g.
-  // craigslist → Gmail magic-link). Bounded.
-  dependsOn: z.array(z.string().min(1)).max(8).optional(),
 });
 
 /** Extract `{{name}}` placeholder names from a delivery template. */
@@ -681,7 +676,6 @@ const authSchema = z
           "reauthOn",
           "persistLoginSecret",
           "produces",
-          "dependsOn",
         ] as const) {
           if (connect[field] !== undefined) {
             ctx.addIssue({

@@ -1299,7 +1299,6 @@ describe("integrationManifestSchema — connect.tool (Orchestrated) + delivery g
           reauthOn: [401],
           persistLoginSecret: true,
           produces: ["JSESSIONID", "AWSALB"],
-          dependsOn: ["@appstrate/gmail"],
         }),
       ),
     );

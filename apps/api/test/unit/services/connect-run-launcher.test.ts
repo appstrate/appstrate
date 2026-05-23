@@ -162,33 +162,6 @@ describe("buildConnectLoginSpec", () => {
     expect(spec.httpDeliveryAuths?.session).toBeDefined();
   });
 
-  it("embeds connect.dependsOn credentials when provided", () => {
-    const spec = buildConnectLoginSpec(execution(), [
-      {
-        authKey: "@dep/gmail::primary",
-        authType: "api_key",
-        fields: { apiKey: "gmail-tok" },
-        authorizedUris: ["https://gmail.googleapis.com/**"],
-        deliveryPlan: {
-          headerName: "Authorization",
-          headerPrefix: "Bearer ",
-          value: "gmail-tok",
-          allowServerOverride: false,
-        },
-      },
-    ]);
-    expect(spec.connectLogin!.dependsOnAuths).toHaveLength(1);
-    const dep = spec.connectLogin!.dependsOnAuths![0]!;
-    expect(dep.authKey).toBe("@dep/gmail::primary");
-    expect(dep.authorizedUris).toEqual(["https://gmail.googleapis.com/**"]);
-    expect(dep.deliveryPlan.value).toBe("gmail-tok");
-  });
-
-  it("omits dependsOnAuths when no dependencies resolved", () => {
-    const spec = buildConnectLoginSpec(execution(), []);
-    expect(spec.connectLogin!.dependsOnAuths).toBeUndefined();
-  });
-
   it("throws when the auth has no delivery.http", () => {
     const ex = execution();
     const noHttp = JSON.parse(JSON.stringify(MANIFEST)) as IntegrationManifest;

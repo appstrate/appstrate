@@ -186,6 +186,7 @@ export async function buildRunContext(params: {
     agentManifest: agent.manifest as Record<string, unknown>,
     resolvedConnections: params.resolvedConnections ?? null,
   });
+
   const plan: AppstrateRunPlan = {
     bundle,
     rawPrompt: agent.prompt,
