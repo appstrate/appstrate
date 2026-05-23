@@ -8,12 +8,12 @@
  * no sidecar — only the data contract that orchestration (apps/api) and the
  * sidecar executor consume.
  *
- * Staging note: the structured `outputs`/`inputs` envelope below is the
- * **target** shape (spec §4.6). Phases 0–3 still persist a flat credentials
- * map under v1 encryption; the strategies bridge `outputs ∪ inputs` into that
- * flat map until the v2 structured envelope lands in Phase 4. The gating rule
- * — only `outputs` is referenceable by `delivery.*` — is enforced once the
- * envelope is split.
+ * Persistence: `persistCredentialBundle` writes the v2 structured envelope
+ * (`{ outputs, inputs }`, spec §4.6) whenever a bootstrap secret is present
+ * (`connect.persistLoginSecret`); otherwise it writes a flat v1 blob,
+ * byte-identical to every pre-envelope write (which reads back as all-outputs).
+ * The gating rule — only `outputs` is referenceable by `delivery.*` — holds in
+ * both shapes.
  */
 
 /**
@@ -26,8 +26,8 @@ export interface CredentialBundle {
   /**
    * INJECTABLE material — access tokens, cookies, session ids. Only these
    * fields are referenceable by `delivery.{http,env,files}` (spec §4.6).
-   * Maps to `credentials_encrypted.outputs` once the v2 envelope exists; today
-   * it is flattened into the v1 credentials map.
+   * Maps to `credentials_encrypted.outputs` in the v2 envelope, or the whole
+   * flat v1 blob when no `inputs` are persisted.
    */
   outputs: Record<string, string>;
   /**

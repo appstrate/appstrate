@@ -101,13 +101,13 @@ const proxyParameters = [
     schema: { type: "string" },
   },
   {
-    name: "X-Connection-Profile-Id",
+    name: "X-Connection-Id",
     in: "header",
     required: false,
     description:
-      "Optional explicit connection profile UUID. When set, the proxy narrows to that profile " +
-      "after validating it belongs to the caller (own user / end-user profile, or an app " +
-      "profile in the request's application). When absent the route falls back to the " +
+      "Optional explicit connection UUID. When set, the proxy narrows to that connection " +
+      "after validating it belongs to the caller (own user / end-user connection, or a " +
+      "shared connection in the request's application). When absent the route falls back to the " +
       "implicit default chain (end-user default → app default → user default). Mismatched " +
       "or unknown ids surface as `404 — no credentials`, identical to the implicit-default path.",
     schema: { type: "string", format: "uuid" },

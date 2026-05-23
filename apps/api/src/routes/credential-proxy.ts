@@ -118,12 +118,14 @@ export function createCredentialProxyRouter() {
       // mismatched runId is a reporting oddity, not a security boundary.
       const runIdHeader = c.req.header("X-Run-Id");
       const runId = runIdHeader && runIdHeader.length > 0 ? runIdHeader : null;
-      // X-Connection-Profile-Id is optional — when set the route narrows
-      // to that profile (after ownership validation in resolveProfileId);
-      // when absent the implicit default chain still applies.
-      const explicitProfileHeader = c.req.header("X-Connection-Profile-Id");
-      const explicitProfileId =
-        explicitProfileHeader && explicitProfileHeader.length > 0 ? explicitProfileHeader : null;
+      // X-Connection-Id is optional — when set the route narrows to that
+      // connection (validated against the actor's accessible set in the
+      // resolver); when absent the implicit default chain still applies.
+      const explicitConnectionHeader = c.req.header("X-Connection-Id");
+      const explicitConnectionId =
+        explicitConnectionHeader && explicitConnectionHeader.length > 0
+          ? explicitConnectionHeader
+          : null;
 
       if (!integrationId) throw invalidRequest("Missing X-Integration header");
       if (!target) throw invalidRequest("Missing X-Target header");
@@ -168,8 +170,8 @@ export function createCredentialProxyRouter() {
       //   - `Appstrate-User` impersonation → the end-user's connection
       //   - dashboard / CLI-JWT / API-key callers → the platform user's
       //     own connection (or any `shared_with_org` connection in the app).
-      // `X-Connection-Profile-Id` (when present) pins a specific connection
-      // id, validated against the actor's accessible set in the resolver.
+      // `X-Connection-Id` (when present) pins a specific connection id,
+      // validated against the actor's accessible set in the resolver.
       const actor = getActor(c);
 
       // Streaming control headers from the runtime.
@@ -253,7 +255,7 @@ export function createCredentialProxyRouter() {
           applicationId,
           orgId,
           actor,
-          ...(explicitProfileId ? { connectionId: explicitProfileId } : {}),
+          ...(explicitConnectionId ? { connectionId: explicitConnectionId } : {}),
           integrationId,
           method,
           target,
@@ -398,7 +400,7 @@ const PROXY_CONTROL_HEADERS = new Set([
   "x-substitute-body",
   "x-run-id",
   "x-application-id",
-  "x-connection-profile-id",
+  "x-connection-id",
   // Streaming transport hints — consumed by this route, must not reach upstream.
   "x-stream-request",
   "x-stream-response",

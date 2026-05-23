@@ -16,7 +16,7 @@
  * `X-Integration` carries the integration package id (`@scope/name`). The
  * actor (dashboard user, CLI/JWT user, or impersonated end-user) selects
  * which `integration_connections` row is decrypted; an optional
- * connection id (from `X-Connection-Profile-Id`) pins a specific row.
+ * connection id (from `X-Connection-Id`) pins a specific row.
  *
  * Both this external-runner path and the in-container sidecar path
  * (`api-call-credentials.ts`) build the payload via the shared
@@ -70,7 +70,7 @@ export interface ResolveIntegrationProxyInput {
   applicationId: string;
   orgId: string;
   actor: Actor;
-  /** Optional connection id pin (from `X-Connection-Profile-Id`). */
+  /** Optional connection id pin (from `X-Connection-Id`). */
   connectionId?: string;
 }
 

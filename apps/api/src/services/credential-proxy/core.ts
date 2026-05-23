@@ -77,9 +77,9 @@ export interface ProxyCallInput {
    */
   actor: Actor;
   /**
-   * Optional `integration_connections` id pin (from the
-   * `X-Connection-Profile-Id` header). When set, narrows to that specific
-   * connection (validated against the actor's accessible set).
+   * Optional `integration_connections` id pin (from the `X-Connection-Id`
+   * header). When set, narrows to that specific connection (validated
+   * against the actor's accessible set).
    */
   connectionId?: string;
 
