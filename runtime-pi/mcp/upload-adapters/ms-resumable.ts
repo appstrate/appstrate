@@ -83,7 +83,7 @@ export const msResumableAdapter: UploadAdapter = {
       Object.keys(ctx.metadata ?? {}).length > 0 ? ctx.metadata : { item: {} },
     );
     const res = await ctx.apiCall({
-      integrationId: ctx.integrationId,
+      apiCallToolName: ctx.apiCallToolName,
       target: ctx.target,
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -133,7 +133,7 @@ export const msResumableAdapter: UploadAdapter = {
     const s = state as MsSessionState;
     ctx.hashUpdate(chunk.bytes);
     const res = await ctx.apiCall({
-      integrationId: ctx.integrationId,
+      apiCallToolName: ctx.apiCallToolName,
       target: s.uploadUrl,
       method: "PUT",
       headers: {
@@ -183,7 +183,7 @@ export const msResumableAdapter: UploadAdapter = {
     if (!s.uploadUrl) return;
     try {
       await ctx.apiCall({
-        integrationId: ctx.integrationId,
+        apiCallToolName: ctx.apiCallToolName,
         target: s.uploadUrl,
         method: "DELETE",
       });

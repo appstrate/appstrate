@@ -94,7 +94,7 @@ export const googleResumableAdapter: UploadAdapter = {
       headers["X-Upload-Content-Type"] = upstreamMime;
     }
     const res = await ctx.apiCall({
-      integrationId: ctx.integrationId,
+      apiCallToolName: ctx.apiCallToolName,
       target: ctx.target,
       method: "POST",
       headers,
@@ -134,7 +134,7 @@ export const googleResumableAdapter: UploadAdapter = {
     const s = state as GoogleSessionState;
     ctx.hashUpdate(chunk.bytes);
     const res = await ctx.apiCall({
-      integrationId: ctx.integrationId,
+      apiCallToolName: ctx.apiCallToolName,
       target: s.sessionUrl,
       method: "PUT",
       headers: {
@@ -186,7 +186,7 @@ export const googleResumableAdapter: UploadAdapter = {
     if (!s.sessionUrl) return;
     try {
       await ctx.apiCall({
-        integrationId: ctx.integrationId,
+        apiCallToolName: ctx.apiCallToolName,
         target: s.sessionUrl,
         method: "DELETE",
       });
