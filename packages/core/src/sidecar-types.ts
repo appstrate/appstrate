@@ -150,9 +150,9 @@ export interface IntegrationSpawnSpec {
     version: string;
     /**
      * MCP server to spawn/connect. Optional on the spawn spec: the
-     * resolver omits it for `server.type: api_call` integrations, which
-     * expose only the generic `api_call` tool. The sidecar skips spawn
-     * entirely for such specs.
+     * resolver omits it for serverless integrations (an `apiCall` block and
+     * no `server`), which expose only the generic `api_call` tool. The
+     * sidecar skips spawn entirely for such specs.
      */
     server?: {
       type: string;

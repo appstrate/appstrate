@@ -660,12 +660,12 @@ export async function bootIntegrations(
       // a TRUSTED in-process MCP server registered on the same McpHost as
       // every spawned/remote integration. One pipeline → McpHost owns the
       // namespacing (`{ns}__api_call`) + name validation. A pure-proxy
-      // integration (server.type api_call, no spec.manifest.server) does
+      // integration (an `apiCall` block, no `spec.manifest.server`) does
       // ONLY this and skips spawn.
       // Attach the in-process generic `api_call` tool (provider→integration
       // unification). Hosted on the McpHost OUTSIDE any spawned container, so
       // the server code never sees the credential. Two modes:
-      //  - serverless (`server.type: api_call`, no `spec.manifest.server`):
+      //  - serverless (`apiCall` block, no `spec.manifest.server`):
       //    api_call is the namespace's PRIMARY client (`intoNamespace` omitted).
       //  - attachable (additive on a spawned/remote server): pass the server's
       //    ALLOCATED namespace so `{ns}__api_call` sits next to the native
