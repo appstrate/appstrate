@@ -47,6 +47,7 @@ import {
 } from "../orchestrator/index.ts";
 import type { ConnectToolExecution, ConnectToolExecutor } from "./orchestrated-strategy.ts";
 import type { CredentialBundle } from "./strategy.ts";
+import { resolveDependsOnAuths, type DependsOnAuth } from "../integration-credentials-resolver.ts";
 
 const RESULT_SENTINEL = "APPSTRATE_CONNECT_RESULT:";
 const ERROR_SENTINEL = "APPSTRATE_CONNECT_ERROR:";
@@ -67,8 +68,17 @@ export interface ConnectRunExecutorOptions {
  * manifest auth — the same fields the spawn resolver emits for the run-start
  * path. Throws (mapped onto a structured strategy error) when the manifest
  * auth is mis-declared (missing auth or `delivery.http`).
+ *
+ * `dependsOnAuths` (pre-resolved by the caller via {@link resolveDependsOnAuths}
+ * — resolution is async + DB-bound, so it stays out of this pure builder)
+ * carries the ready-to-inject credentials for `connect.dependsOn` integrations
+ * the login tool may call during the dance. The sidecar merges them into the
+ * login runner's MITM source.
  */
-export function buildConnectLoginSpec(execution: ConnectToolExecution): IntegrationSpawnSpec {
+export function buildConnectLoginSpec(
+  execution: ConnectToolExecution,
+  dependsOnAuths: DependsOnAuth[] = [],
+): IntegrationSpawnSpec {
   const auths = execution.manifest.auths ?? {};
   const auth = auths[execution.authKey] as
     | NonNullable<IntegrationManifest["auths"]>[string]
@@ -131,6 +141,7 @@ export function buildConnectLoginSpec(execution: ConnectToolExecution): Integrat
       deliveryHttp,
       inputs: execution.inputs,
       ...(reauthOn ? { reauthOn: [...reauthOn] } : {}),
+      ...(dependsOnAuths.length > 0 ? { dependsOnAuths } : {}),
     },
   };
 }
@@ -186,7 +197,21 @@ class ConnectRunExecutor implements ConnectToolExecutor {
     const orch = this.orchestrator ?? getOrchestrator();
     const connectId = `connect_${randomBytes(12).toString("hex")}`;
     const runToken = signRunToken(connectId);
-    const spec = buildConnectLoginSpec(execution);
+
+    // connect.dependsOn — resolve each dependency's credentials for the SAME
+    // actor so the login tool can call their upstream APIs during the dance.
+    // Requires an acquiring actor: a system re-bootstrap (reacquire) has none,
+    // so dependency injection is unavailable there (the login tool then fails
+    // to reach the dependency — surfaced as a connect failure).
+    const dependsOn = execution.dependsOn ?? [];
+    const dependsOnAuths =
+      dependsOn.length > 0 && execution.actor
+        ? await resolveDependsOnAuths(
+            { applicationId: execution.scope.applicationId, actor: execution.actor },
+            dependsOn,
+          )
+        : [];
+    const spec = buildConnectLoginSpec(execution, dependsOnAuths);
 
     let boundary: IsolationBoundary | undefined;
     let sidecar: WorkloadHandle | undefined;

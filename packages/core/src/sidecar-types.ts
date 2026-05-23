@@ -287,6 +287,42 @@ export interface IntegrationSpawnSpec {
      * the manifest didn't declare `reauthOn` — the sidecar defaults to `[401]`.
      */
     reauthOn?: number[];
+    /**
+     * `connect.dependsOn` — resolved credentials for OTHER integrations the
+     * login tool may call DURING the login dance (e.g. craigslist's login
+     * reads a magic-link email via Gmail). The platform resolves each
+     * dependency's connection for the SAME actor and embeds its ready-to-inject
+     * credentials here; the sidecar merges them into the login runner's MITM
+     * credentials source so the planner injects a dependency's credential when
+     * the login tool hits that dependency's `authorizedUris`. The login
+     * integration's own auth (substitution window + captured session) is
+     * unaffected — distinct authKey, distinct authorizedUris.
+     *
+     * LIMITATION: this provides CREDENTIAL INJECTION for the dependency's
+     * `authorizedUris` (the login tool calls the dependency's REST API
+     * directly) — NOT access to the dependency's MCP tools. The dependency
+     * must therefore expose an http-injectable credential (`delivery.http`);
+     * dependencies that aren't connected for the actor or have no injectable
+     * delivery are skipped at resolution time (the login tool then fails to
+     * reach them, surfaced as a login failure). Bounded by the schema's
+     * `dependsOn` max (8).
+     *
+     * Sensitive (each `deliveryPlan.value` carries a live token / API key) —
+     * same decrypted-material trust level as {@link inputs}; never logged.
+     */
+    dependsOnAuths?: Array<{
+      /** Namespaced unique id, e.g. `${depIntegrationId}::${authKey}`. */
+      authKey: string;
+      authType: string;
+      fields: Record<string, string>;
+      authorizedUris: string[];
+      deliveryPlan: {
+        headerName: string;
+        headerPrefix: string;
+        value: string;
+        allowServerOverride: boolean;
+      };
+    }>;
   };
 }
 

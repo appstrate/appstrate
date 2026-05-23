@@ -70,6 +70,26 @@ export interface IntegrationCredentialsSource extends MitmCredentialSource {
    */
   setSessionOutputs(auth: ResolvedAuthCredentials, plan: HttpDeliveryPlan): void;
   /**
+   * connect.dependsOn (P5) — merge OTHER integrations' resolved credentials
+   * into THIS source's payload so the MITM planner can inject a dependency's
+   * credential when the login tool hits that dependency's `authorizedUris`.
+   * Each entry is appended to `payload.auths` and its delivery plan installed
+   * under `deliveryPlans[authKey]`. The authKeys are namespaced
+   * (`${depId}::${authKey}`) by the platform so they never collide with the
+   * login integration's own auth — its substitution window + captured session
+   * (distinct authKey, distinct authorizedUris) are unaffected.
+   *
+   * No relogin/refresh handler is registered for dependency auths (MVP): their
+   * credentials are resolved fresh at connect-login start; a mid-login
+   * dependency 401 is an accepted edge case (no reauth).
+   */
+  seedDependencyAuths(
+    deps: ReadonlyArray<{
+      auth: ResolvedAuthCredentials;
+      plan: HttpDeliveryPlan;
+    }>,
+  ): void;
+  /**
    * Open the transient-input substitution window. While a non-null bag is
    * active, the MITM listener substitutes `{{key}}` placeholders in the
    * outbound URL / body / headers (proxy-side) so the integration's login
@@ -272,12 +292,32 @@ export function createIntegrationCredentialsSource(
     });
   };
 
+  const seedDependencyAuths = (
+    deps: ReadonlyArray<{ auth: ResolvedAuthCredentials; plan: HttpDeliveryPlan }>,
+  ): void => {
+    if (deps.length === 0) return;
+    const nextAuths = [...payload.auths];
+    const nextPlans = { ...payload.deliveryPlans };
+    const nextExpiry = { ...payload.expiresAtEpochMs };
+    for (const { auth, plan } of deps) {
+      nextAuths.push(auth);
+      nextPlans[auth.authKey] = plan;
+      nextExpiry[auth.authKey] = auth.expiresAt ? Date.parse(auth.expiresAt) : null;
+    }
+    payload = { auths: nextAuths, deliveryPlans: nextPlans, expiresAtEpochMs: nextExpiry };
+    logger.info("integration dependency auths seeded into MITM source", {
+      integrationId: options.integrationId,
+      dependencyAuthKeys: deps.map((d) => d.auth.authKey),
+    });
+  };
+
   return {
     current,
     deliveryPlans,
     refreshOnUnauthorized,
     snapshot: () => payload,
     setSessionOutputs,
+    seedDependencyAuths,
     setActiveInputs: (bag: Record<string, string>) => {
       activeInputBag = bag;
     },

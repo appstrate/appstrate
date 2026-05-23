@@ -50,6 +50,7 @@ import { logger } from "../lib/logger.ts";
 import type { Actor } from "../lib/actor.ts";
 import { isIntegrationActive, selectAccessibleConnection } from "./integration-connections.ts";
 import { fetchIntegrationManifest } from "./integration-service.ts";
+import { resolveDependsOnAuths } from "./integration-credentials-resolver.ts";
 
 export interface ResolveIntegrationsInput {
   applicationId: string;
@@ -213,6 +214,24 @@ async function resolveOne(
     ? baseAllowlist.filter((t) => t !== deliveries.connectLogin!.toolName)
     : baseAllowlist;
 
+  // connect.dependsOn — when the login tool may call OTHER integrations'
+  // upstream APIs during the dance (e.g. craigslist → Gmail magic-link),
+  // resolve each dependency's connection for the same actor and embed its
+  // ready-to-inject credentials in the spec. The sidecar merges these into the
+  // login runner's MITM source so the planner injects a dependency's credential
+  // when the login tool hits that dependency's authorizedUris.
+  let connectLogin = deliveries.connectLogin;
+  if (connectLogin) {
+    const loginAuth = manifest.auths?.[connectLogin.authKey];
+    const dependsOn = loginAuth?.connect?.dependsOn;
+    if (dependsOn && dependsOn.length > 0) {
+      const dependsOnAuths = await resolveDependsOnAuths({ applicationId, actor }, dependsOn);
+      if (dependsOnAuths.length > 0) {
+        connectLogin = { ...connectLogin, dependsOnAuths };
+      }
+    }
+  }
+
   return {
     integrationId,
     namespace,
@@ -263,7 +282,7 @@ async function resolveOne(
     // editor UI.
     toolAllowlist,
     ...(toolUrlEnvelope !== undefined ? { toolUrlEnvelope } : {}),
-    ...(deliveries.connectLogin ? { connectLogin: deliveries.connectLogin } : {}),
+    ...(connectLogin ? { connectLogin } : {}),
   };
 }
 

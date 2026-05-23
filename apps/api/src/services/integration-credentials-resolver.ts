@@ -262,6 +262,136 @@ export async function resolveLiveIntegrationCredentials(
 }
 
 // ─────────────────────────────────────────────
+// connect.dependsOn — cross-integration credential injection
+// ─────────────────────────────────────────────
+
+/**
+ * One resolved dependency auth, ready to inject. Mirrors the shape embedded in
+ * {@link IntegrationSpawnSpec.connectLogin.dependsOnAuths} — the `authKey` is
+ * namespaced (`${depId}::${authKey}`) so it can never collide with the login
+ * integration's own auth in the merged MITM payload.
+ */
+export interface DependsOnAuth {
+  authKey: string;
+  authType: string;
+  fields: Record<string, string>;
+  authorizedUris: string[];
+  deliveryPlan: {
+    headerName: string;
+    headerPrefix: string;
+    value: string;
+    allowServerOverride: boolean;
+  };
+}
+
+/**
+ * Resolve `connect.dependsOn` into ready-to-inject credentials for the login
+ * tool's MITM source.
+ *
+ * For each dependency integration id, resolve the SAME actor's accessible
+ * connection, decrypt its credential fields, and build one {@link DependsOnAuth}
+ * per declared auth that yields a non-null HTTP delivery plan. The resulting
+ * `authKey` is namespaced (`${depId}::${authKey}`) so the merged MITM payload
+ * keeps the dependency's auth distinct from the login integration's own auth.
+ *
+ * A dependency is SKIPPED (logged at info, not fatal) when it:
+ *   - has no manifest / isn't an integration / fails validation,
+ *   - isn't connected for the actor,
+ *   - has no auth with an injectable `delivery.http` plan (the login tool then
+ *     simply fails to reach it — surfaced as a login failure, not a run abort).
+ *
+ * Bounded by the manifest schema's `dependsOn` max (8). OAuth refresh is NOT
+ * performed here (MVP): dependency credentials are resolved fresh at
+ * connect-login start; a mid-login dependency 401 is an accepted edge case.
+ */
+export async function resolveDependsOnAuths(
+  context: { applicationId: string; actor: Actor },
+  dependsOn: readonly string[],
+): Promise<DependsOnAuth[]> {
+  const out: DependsOnAuth[] = [];
+  for (const depId of dependsOn) {
+    const res = await fetchIntegrationManifest(depId);
+    if (!res.ok) {
+      logger.info("connect.dependsOn dependency manifest unavailable; skipping", {
+        dependencyId: depId,
+        reason: res.failure.kind,
+      });
+      continue;
+    }
+    const auths = res.manifest.auths ?? {};
+    const authKeys = Object.keys(auths);
+    if (authKeys.length === 0) {
+      logger.info("connect.dependsOn dependency declares no auth; skipping", {
+        dependencyId: depId,
+      });
+      continue;
+    }
+
+    // One connection per integration (flat model). No resolver snapshot on the
+    // connect-login path — fall back to the actor's accessible connection.
+    const connection = await selectAccessibleConnection(depId, authKeys, null, {
+      applicationId: context.applicationId,
+      actor: context.actor,
+    });
+    if (!connection) {
+      logger.info("connect.dependsOn dependency not connected for actor; skipping", {
+        dependencyId: depId,
+      });
+      continue;
+    }
+
+    const authDef = auths[connection.authKey];
+    if (!authDef) {
+      logger.info("connect.dependsOn dependency connection points at unknown authKey; skipping", {
+        dependencyId: depId,
+        authKey: connection.authKey,
+      });
+      continue;
+    }
+
+    const http = authDef.delivery?.http;
+    if (!http) {
+      logger.info("connect.dependsOn dependency auth has no delivery.http; skipping", {
+        dependencyId: depId,
+        authKey: connection.authKey,
+      });
+      continue;
+    }
+
+    const fields = decryptIntegrationConnectionFields(
+      connection.credentialsEncrypted,
+      depId,
+      connection.authKey,
+    );
+    if (!fields) continue;
+
+    const plan = resolveHttpDelivery(authDef.type, fields, http);
+    if (!plan) {
+      logger.info("connect.dependsOn dependency delivery.http produced no plan; skipping", {
+        dependencyId: depId,
+        authKey: connection.authKey,
+        authType: authDef.type,
+      });
+      continue;
+    }
+
+    out.push({
+      authKey: `${depId}::${connection.authKey}`,
+      authType: authDef.type,
+      fields,
+      authorizedUris: [...authDef.authorizedUris],
+      deliveryPlan: {
+        headerName: plan.headerName,
+        headerPrefix: plan.headerPrefix,
+        value: plan.value,
+        allowServerOverride: plan.allowServerOverride,
+      },
+    });
+  }
+  return out;
+}
+
+// ─────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────
 
