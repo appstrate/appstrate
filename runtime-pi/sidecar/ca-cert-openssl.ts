@@ -43,24 +43,20 @@ import type {
   CaGenerationRequest,
   CertGenerator,
 } from "@appstrate/connect/proxy-ca-planner";
+import {
+  runOpenssl as runOpensslExec,
+  readPem as readPemExec,
+  resolveBunSpawn as resolveBunSpawnExec,
+  secondsToDaysCeil,
+  type OpensslSpawnFn,
+  type OpensslExecError,
+} from "./openssl-exec.ts";
+
+export type { OpensslSpawnFn } from "./openssl-exec.ts";
 
 // ─────────────────────────────────────────────
 // Public types
 // ─────────────────────────────────────────────
-
-export type OpensslSpawnFn = (
-  cmd: string[],
-  opts: {
-    stdin?: "ignore" | "pipe";
-    stdout: "pipe";
-    stderr: "pipe";
-    cwd?: string;
-  },
-) => {
-  exited: Promise<number>;
-  stdout: ReadableStream<Uint8Array>;
-  stderr: ReadableStream<Uint8Array>;
-};
 
 export interface OpensslGeneratorOptions {
   /** Where the generator writes its temp files. Defaults to `os.tmpdir()`. */
@@ -88,6 +84,15 @@ export type OpensslCaErrorCode =
   | "AKI_NOT_REQUESTED"
   | "WORKDIR_UNWRITABLE"
   | "PEM_NOT_PRODUCED";
+
+// Bind the shared openssl-exec helpers (./openssl-exec.ts) to this module's
+// error class so call sites stay class-agnostic.
+const makeError: OpensslExecError = (code, message, stderr) =>
+  new OpensslCaGeneratorError(code as OpensslCaErrorCode, message, stderr);
+const runOpenssl = (spawn: OpensslSpawnFn, bin: string, args: string[]) =>
+  runOpensslExec(spawn, bin, args, makeError);
+const readPem = (filePath: string, label: string) => readPemExec(filePath, label, makeError);
+const resolveBunSpawn = () => resolveBunSpawnExec(makeError);
 
 /**
  * Build a {@link CertGenerator} bound to the system openssl. The returned
@@ -226,71 +231,6 @@ export function createOpensslCertGenerator(options: OpensslGeneratorOptions = {}
 // Internals
 // ─────────────────────────────────────────────
 
-async function runOpenssl(spawn: OpensslSpawnFn, bin: string, args: string[]): Promise<void> {
-  let proc: ReturnType<OpensslSpawnFn>;
-  try {
-    proc = spawn([bin, ...args], { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
-  } catch (err) {
-    throw new OpensslCaGeneratorError(
-      "OPENSSL_NOT_FOUND",
-      `failed to spawn '${bin}': ${(err as Error).message}`,
-    );
-  }
-  const stderrText = await collectStream(proc.stderr);
-  const code = await proc.exited;
-  if (code !== 0) {
-    throw new OpensslCaGeneratorError(
-      "OPENSSL_NONZERO_EXIT",
-      `'${bin} ${args.slice(0, 2).join(" ")}' exited ${code}`,
-      stderrText,
-    );
-  }
-}
-
-async function collectStream(stream: ReadableStream<Uint8Array>): Promise<string> {
-  const chunks: Uint8Array[] = [];
-  const reader = stream.getReader();
-  try {
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      if (value) chunks.push(value);
-    }
-  } catch {
-    // ignore
-  } finally {
-    try {
-      reader.releaseLock();
-    } catch {
-      // ignore
-    }
-  }
-  const total = chunks.reduce((n, c) => n + c.byteLength, 0);
-  const out = new Uint8Array(total);
-  let off = 0;
-  for (const c of chunks) {
-    out.set(c, off);
-    off += c.byteLength;
-  }
-  return new TextDecoder().decode(out);
-}
-
-async function readPem(filePath: string, label: string): Promise<string> {
-  let raw: string;
-  try {
-    raw = await fs.readFile(filePath, "utf-8");
-  } catch (err) {
-    throw new OpensslCaGeneratorError(
-      "PEM_NOT_PRODUCED",
-      `expected ${label} at '${filePath}': ${(err as Error).message}`,
-    );
-  }
-  if (raw.length === 0) {
-    throw new OpensslCaGeneratorError("PEM_NOT_PRODUCED", `${label} is empty`);
-  }
-  return raw;
-}
-
 /**
  * Build the SAN line passed to openssl. SANs are deduped (case-insensitive
  * on the DNS portion) so the leaf cert stays compact.
@@ -309,23 +249,4 @@ function buildSanLine(cn: string, sans: readonly string[]): string {
   push(cn);
   for (const s of sans) push(s);
   return out.join(",");
-}
-
-function secondsToDaysCeil(seconds: number): number {
-  // openssl -days takes an integer days count. Round up so a 3600s window
-  // doesn't collapse to "0 days" (which openssl rejects). 1 day minimum.
-  return Math.max(1, Math.ceil(seconds / 86_400));
-}
-
-function resolveBunSpawn(): OpensslSpawnFn {
-  const fn = (globalThis as unknown as { Bun?: { spawn?: unknown } }).Bun?.spawn as
-    | OpensslSpawnFn
-    | undefined;
-  if (!fn) {
-    throw new OpensslCaGeneratorError(
-      "OPENSSL_NOT_FOUND",
-      "Bun.spawn is not available — openssl CertGenerator requires the Bun runtime",
-    );
-  }
-  return fn;
 }

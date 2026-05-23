@@ -989,9 +989,9 @@ export function getToolUrlPatterns(
  * tool's `requiredAuthKey` (single-auth integrations route every tool
  * to the lone key).
  *
- * Pure function. Single source of truth for the frontend status badge
- * (`agent-integrations-block.tsx`) and the backend run-readiness gate
- * (`agent-readiness.ts`), so the two cannot drift.
+ * Pure function consumed by the run-overrides panel
+ * (`run-overrides-panel.tsx`) to decide which auths an agent's tool
+ * selection requires connected.
  */
 export function requiredAuthKeysForAgent(
   manifest: IntegrationManifest,

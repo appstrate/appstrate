@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Spinner } from "./spinner";
 import { InlineConnectButton } from "./integration-connect/inline-connect-button";
 import { pickDefaultAuth } from "./integration-connect/pick-default-auth";
+import { connectionAccount } from "./integration-connect/connection-label";
 import { useIntegrationDetail, useIntegrationConnections } from "../hooks/use-integrations";
 
 /**
@@ -220,10 +221,7 @@ function MissingRow({
           </p>
           <ul className="space-y-1">
             {candidates.map((c) => {
-              const accountLabel =
-                (c.identityClaims?.accountEmail as string | undefined) ??
-                (c.identityClaims?.account_email as string | undefined) ??
-                c.accountId;
+              const accountLabel = connectionAccount(c);
               const isPicked = c.id === pickedId;
               const clickable = !!onPick && !!authKey;
               return (

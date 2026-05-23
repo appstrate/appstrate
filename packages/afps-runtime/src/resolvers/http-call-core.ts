@@ -1029,67 +1029,12 @@ function decodeBase64Body(
   return decoded;
 }
 
-export async function resolveBodyStream(
-  body: ApiCallRequest["body"],
-  opts: ResolveBodyStreamOptions = {},
-): Promise<string | Uint8Array<ArrayBuffer> | undefined> {
-  if (body === undefined || body === null) return undefined;
-  if (typeof body === "string") {
-    return opts.transformString ? opts.transformString(body) : body;
-  }
-  if (body instanceof Uint8Array) return toArrayBufferUint8(body);
-  if (typeof body === "object" && body !== null && "multipart" in body) {
-    if (!opts.allowFromFile) {
-      throw new ResolverError(
-        "RESOLVER_BODY_REFERENCE_FORBIDDEN",
-        `resolveBodyStream: { multipart } body requires workspace access for file parts; pass allowFromFile`,
-      );
-    }
-    if (!opts.workspace) {
-      throw new ResolverError(
-        "RESOLVER_MISSING_REQUIRED",
-        `resolveBodyStream: { multipart } resolution requires a workspace`,
-      );
-    }
-    const { bytes } = await buildMultipartBytes(body.multipart, opts.workspace);
-    return bytes;
-  }
-  if (typeof body === "object" && body !== null && "fromBytes" in body) {
-    const decoded = decodeBase64Body(body.fromBytes, body.encoding, MAX_REQUEST_BODY_SIZE);
-    return toArrayBufferUint8(decoded);
-  }
-  if (!opts.allowFromFile) {
-    throw new ResolverError(
-      "RESOLVER_BODY_REFERENCE_FORBIDDEN",
-      `resolveBodyStream: { fromFile: "${body.fromFile}" } body references need workspace access; pass a string/bytes body or use a resolver with allowFromFile`,
-      { fromFile: body.fromFile },
-    );
-  }
-  if (!opts.workspace) {
-    throw new ResolverError(
-      "RESOLVER_MISSING_REQUIRED",
-      `resolveBodyStream: { fromFile } resolution requires a workspace; resolver did not pass one`,
-      { fromFile: body.fromFile },
-    );
-  }
-  const fs = await import("node:fs/promises");
-  const { absPath: safePath, stat: lst } = await resolveSafeFile(opts.workspace, body.fromFile);
-  if (lst.size > MAX_REQUEST_BODY_SIZE) {
-    throw new ResolverError(
-      "RESOLVER_BODY_TOO_LARGE",
-      `resolveBodyStream: ${JSON.stringify(body.fromFile)} is ${lst.size} bytes; max is ${MAX_REQUEST_BODY_SIZE}`,
-      { fromFile: body.fromFile, size: lst.size, max: MAX_REQUEST_BODY_SIZE },
-    );
-  }
-  return toArrayBufferUint8(await fs.readFile(safePath));
-}
-
 /**
- * Streaming-aware variant of {@link resolveBodyStream}. When
+ * Resolve an `ApiCallRequest["body"]` into a fetch-ready body. When
  * `allowStreaming` is set AND the body is a `{ fromFile }` reference
  * pointing at a file larger than {@link STREAMING_THRESHOLD}, returns a
  * `ReadableStream` that reads the file lazily from disk; otherwise
- * returns the bytes as before.
+ * returns the materialised bytes.
  *
  * The streaming path uses `Bun.file(path).stream()` when running under
  * Bun (preferred) and falls back to `fs.createReadStream` wrapped as a
@@ -1098,9 +1043,8 @@ export async function resolveBodyStream(
  * {@link ResolverError.code} `RESOLVER_BODY_TOO_LARGE` so an oversized
  * upload never opens a socket.
  *
- * Path safety, symlink refusal, and workspace rooting are identical to
- * {@link resolveBodyStream} — same {@link resolveSafePath} + lstat
- * pipeline.
+ * Path safety, symlink refusal, and workspace rooting all flow through
+ * the same {@link resolveSafeFile} + lstat pipeline.
  */
 export async function resolveBodyForFetch(
   body: ApiCallRequest["body"],

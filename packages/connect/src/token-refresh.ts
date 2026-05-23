@@ -20,7 +20,7 @@ export interface RefreshContext {
 }
 
 /**
- * Error thrown by forceRefresh when the OAuth token refresh call fails.
+ * Error thrown by performRefreshTokenExchange when the OAuth token refresh call fails.
  *
  * `kind` discriminates between two cases that callers MUST treat differently:
  *

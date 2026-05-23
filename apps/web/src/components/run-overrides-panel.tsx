@@ -22,6 +22,7 @@ import { findProviderByApiShapeAndBaseUrl } from "../lib/provider-registry-helpe
 import { getProviderIcon } from "./icons";
 import { useIntegrationDetail, useIntegrationConnections } from "../hooks/use-integrations";
 import { requiredAuthKeysForAgent } from "@appstrate/core/integration";
+import { connectionDisplayLabel } from "./integration-connect/connection-label";
 
 const INHERIT = "__inherit__";
 const NONE = "__none__";
@@ -392,11 +393,7 @@ function IntegrationOverrideRow({
             >
               <option value="">{t("schedule.connectionOverrides.inherit")}</option>
               {candidates.map((c) => {
-                const accountLabel =
-                  (c.identityClaims?.accountEmail as string | undefined) ??
-                  (c.identityClaims?.account_email as string | undefined) ??
-                  c.accountId;
-                const display = c.label ? `${c.label} (${accountLabel})` : accountLabel;
+                const display = connectionDisplayLabel(c);
                 return (
                   <option key={c.id} value={c.id}>
                     {c.sharedWithOrg ? `${display} ⋯ shared` : display}
