@@ -71,6 +71,7 @@ import {
 import {
   selectIntegrationRuntimeAdapter,
   type IntegrationRuntimeAdapter,
+  type RuntimeAdapterRunContext,
   type RuntimeMitmContext,
 } from "./integration-runtime-adapter.ts";
 // Side-effect imports — each adapter module registers itself on load.
@@ -409,6 +410,191 @@ export async function runConnectLoginHook(
 }
 
 /**
+ * Per-run CA materials shared by every MITM listener in a run: one CA per run,
+ * N listeners share the minter (which lazily mints per-SNI leaf certs). The CA
+ * cert PEM is materialised on local fs (mode 0444) so the runtime adapter can
+ * ferry it into each runner's trust store; the private key never leaves memory.
+ */
+interface RunCaMaterials {
+  bundle: CaBundle;
+  minter: CertMinter;
+  /** Local-fs path to the CA cert PEM. Unlinked by the caller at teardown. */
+  certHostPath: string;
+}
+
+/**
+ * Mint a per-run CA + cert minter and materialise the cert PEM on local fs.
+ * Shared by the agent-run path ({@link bootIntegrations}) and the ephemeral
+ * connect-run ({@link runConnectOnce}). The caller owns error handling:
+ * `bootIntegrations` degrades to env-delivery-only on failure, `runConnectOnce`
+ * lets the throw abort the connect.
+ */
+async function prepareRunCa(runId: string, dirPrefix: string): Promise<RunCaMaterials> {
+  const bundle = await planCaBundle({
+    runId,
+    // /run is tmpfs on the sidecar image. The planner ONLY uses tmpfsRoot for
+    // derived path strings inside the CaBundle return value — it doesn't write
+    // anything itself. We materialise the CA cert below at our own location.
+    tmpfsRoot: "/run/afps",
+    notAfterSeconds: 3600,
+    generator: createOpensslCertGenerator(),
+  });
+  const caDir = await mkdtemp(join(tmpdir(), dirPrefix));
+  const certHostPath = join(caDir, "ca.pem");
+  await writeFile(certHostPath, bundle.pems.caCertPem, { mode: 0o444 });
+  const minter = createCertMinter({
+    caCertPem: bundle.pems.caCertPem,
+    caKeyPem: bundle.pems.caKeyPem,
+  });
+  return { bundle, minter, certHostPath };
+}
+
+interface SpawnAndConnectResult {
+  /** The wrapped MCP client (already registered + pushed onto `clients`). */
+  wrapped: AppstrateMcpClient;
+  /** Namespace the host actually allocated (may be a disambiguated suffix). */
+  allocatedNs: string;
+  /** The MITM credentials source when a listener was created, else null. */
+  mitmSource: IntegrationCredentialsSource | null;
+  /** Tools added to the host by this registration. */
+  toolCount: number;
+  /** Adapter diagnostic id (e.g. container id), when the adapter reports one. */
+  diagnosticId?: string;
+}
+
+/**
+ * The SINGLE spawn→connect→register pipeline for a local (node|python|binary)
+ * integration MCP server. Used identically by the agent-run path
+ * ({@link bootIntegrations}) and the ephemeral connect-run
+ * ({@link runConnectOnce}); they diverge only in what they do AFTER (keep the
+ * session alive for the agent vs. run the login tool once + tear down).
+ *
+ * Steps: optional per-integration MITM listener (when `wantsMitm` && a CA is
+ * available) → fetch + extract the bundle → `adapter.spawn` → open the MCP
+ * client with a 30s connect race → `host.register`.
+ *
+ * Resources are pushed onto the caller-owned `clients` / `mitmListeners`
+ * collectors AS they are created, so a throw mid-pipeline still lets the
+ * caller's teardown reclaim a half-built listener/client (no leak on error).
+ */
+async function spawnAndConnectLocalIntegration(params: {
+  spec: IntegrationSpawnSpec;
+  runId: string;
+  adapter: IntegrationRuntimeAdapter;
+  adapterCtx: RuntimeAdapterRunContext;
+  host: McpHost;
+  bundleFetchOpts: BundleFetchOptions;
+  /** Per-run CA materials; null disables MITM (env-delivery-only path). */
+  ca: RunCaMaterials | null;
+  /** Front this integration with a MITM listener (also needs `ca`). */
+  wantsMitm: boolean;
+  /** Phase 4 tool-URL envelope to enforce; omitted for connect-run. */
+  toolUrlEnvelope?: IntegrationSpawnSpec["toolUrlEnvelope"];
+  /** Allowlist for `host.register`. `[]` exposes nothing (connect-run). */
+  allowedTools: string[] | undefined;
+  /** Log-message prefix: `"integration"` (agent-run) | `"connect-run"`. */
+  logLabel: string;
+  /** Caller-owned teardown collectors — appended to as resources are built. */
+  clients: AppstrateMcpClient[];
+  mitmListeners: MitmListenerHandle[];
+}): Promise<SpawnAndConnectResult> {
+  const { spec, runId, adapter, adapterCtx, host, bundleFetchOpts, ca, logLabel } = params;
+
+  let mitmCtx: RuntimeMitmContext | null = null;
+  let mitmSource: IntegrationCredentialsSource | null = null;
+  if (params.wantsMitm && ca !== null) {
+    const initial = await fetchInitialIntegrationCredentials(spec.integrationId, bundleFetchOpts);
+    const source = createIntegrationCredentialsSource({
+      integrationId: spec.integrationId,
+      platformApiUrl: bundleFetchOpts.platformApiUrl,
+      runToken: bundleFetchOpts.runToken,
+      initialPayload: initial,
+    });
+    mitmSource = source;
+    const listener = createIntegrationMitmListener({
+      caBundle: ca.bundle,
+      minter: ca.minter,
+      credentials: source,
+      // Adapter decides where the listener binds so the runner can reach it
+      // (0.0.0.0 for bridged networks, 127.0.0.1 when it shares the parent NS).
+      host: adapterCtx.listenerBindHost,
+      // Phase 4 — narrow the per-request URL surface to the union of
+      // agent-selected tool urlPatterns. `undefined` leaves enforcement on the
+      // per-auth `authorizedUris` only (connect-run omits it entirely).
+      ...(params.toolUrlEnvelope ? { toolUrlEnvelope: params.toolUrlEnvelope } : {}),
+      onEvent: (event) => {
+        // Filter sensitive bits (URLs may carry signed query params).
+        const safe =
+          event.kind === "request-forwarded"
+            ? {
+                kind: event.kind,
+                status: event.status,
+                authKey: event.authKey,
+                retried: event.retried,
+              }
+            : event;
+        logger.info(`${logLabel} mitm event`, { integrationId: spec.integrationId, ...safe });
+      },
+    });
+    await listener.ready;
+    params.mitmListeners.push(listener);
+    const port = listener.address().port;
+    mitmCtx = { proxyUrl: adapterCtx.proxyUrlFor(port), caCertHostPath: ca.certHostPath };
+    logger.info(`${logLabel} MITM listener ready`, {
+      integrationId: spec.integrationId,
+      localUrl: listener.proxyUrl(),
+      runnerProxyUrl: mitmCtx.proxyUrl,
+    });
+  }
+
+  const bytes = await fetchBundleBytes(spec.integrationId, bundleFetchOpts);
+  const root = await extractBundle(bytes, spec.namespace);
+
+  const spawnedIntegration = await adapter.spawn({
+    runId,
+    spec,
+    bundleRoot: root,
+    mitm: mitmCtx,
+    onStderrLine: (line) => {
+      logger.info(`${logLabel} integration stderr`, { integrationId: spec.integrationId, line });
+    },
+  });
+
+  const client = new Client({ name: "appstrate-sidecar-integration-host", version: "0.1.0" });
+  const connectPromise = client.connect(spawnedIntegration.transport);
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error("MCP connect timeout (30s)")), 30_000);
+    timeoutId.unref?.();
+  });
+  try {
+    await Promise.race([connectPromise, timeoutPromise]);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
+  const wrapped = wrapClient(client, spawnedIntegration.transport);
+  params.clients.push(wrapped);
+
+  const sizeBefore = host.size();
+  const allocatedNs = await host.register({
+    namespace: spec.namespace,
+    client: wrapped,
+    // Niveau 2 Phase 3 — McpHost.register filters `tools/list` to the agent's
+    // declared tools. `undefined` keeps the legacy "all tools allowed".
+    ...(params.allowedTools !== undefined ? { allowedTools: params.allowedTools } : {}),
+  });
+  const toolCount = host.size() - sizeBefore;
+
+  return {
+    wrapped,
+    allocatedNs,
+    mitmSource,
+    toolCount,
+    ...(spawnedIntegration.diagnosticId ? { diagnosticId: spawnedIntegration.diagnosticId } : {}),
+  };
+}
+
+/**
  * Spawn every integration in parallel, register the surviving ones on a
  * shared {@link McpHost}, and return the materialised tool list. The
  * function never throws — per-integration failures are captured in
@@ -480,33 +666,15 @@ export async function bootIntegrations(
   const mitmIntegrationCount = specs.filter(
     (s) => s.httpDeliveryAuths && Object.keys(s.httpDeliveryAuths).length > 0,
   ).length;
-  let runCaBundle: CaBundle | null = null;
-  let runCaCertHostPath: string | null = null;
-  let sharedMinter: CertMinter | null = null;
+  let runCa: RunCaMaterials | null = null;
   if (mitmIntegrationCount > 0) {
     try {
-      runCaBundle = await planCaBundle({
-        runId,
-        // /run is tmpfs on the sidecar image. The planner ONLY uses
-        // tmpfsRoot for derived path strings inside the CaBundle return
-        // value — it doesn't write anything itself. We materialise the
-        // CA cert below at our own location.
-        tmpfsRoot: "/run/afps",
-        notAfterSeconds: 3600,
-        generator: createOpensslCertGenerator(),
-      });
-      const caDir = await mkdtemp(join(tmpdir(), "afps-ca-"));
-      runCaCertHostPath = join(caDir, "ca.pem");
-      await writeFile(runCaCertHostPath, runCaBundle.pems.caCertPem, { mode: 0o444 });
-      sharedMinter = createCertMinter({
-        caCertPem: runCaBundle.pems.caCertPem,
-        caKeyPem: runCaBundle.pems.caKeyPem,
-      });
+      runCa = await prepareRunCa(runId, "afps-ca-");
       logger.info("integration MITM CA minted", {
         runId,
         integrations: mitmIntegrationCount,
-        caCertPath: runCaCertHostPath,
-        notAfter: runCaBundle.notAfter,
+        caCertPath: runCa.certHostPath,
+        notAfter: runCa.bundle.notAfter,
       });
     } catch (err) {
       // CA bring-up failed — every MITM integration will fail to register
@@ -636,117 +804,33 @@ export async function bootIntegrations(
         continue;
       }
 
+      // ─── SINGLE spawn→connect→register pipeline (shared with connect-run) ──
+      // MITM is created only when the CA came up AND this integration declared
+      // `delivery.http`. `mitmSource` is returned so the connect-login hook
+      // (run-start acquisition, below) drives `setSessionOutputs` on the same
+      // source the MITM listener reads from.
       const wantsMitm =
         spec.httpDeliveryAuths !== undefined && Object.keys(spec.httpDeliveryAuths).length > 0;
-
-      // Per-integration MITM listener (only when the CA came up + the
-      // integration declared `delivery.http`).
-      let listener: MitmListenerHandle | null = null;
-      let mitmCtx: RuntimeMitmContext | null = null;
-      // Hoisted so the connect-login hook (run-start acquisition, below)
-      // can drive `setSessionOutputs` on the same source the MITM listener
-      // reads from.
-      let mitmSource: ReturnType<typeof createIntegrationCredentialsSource> | null = null;
-      if (
-        wantsMitm &&
-        sharedMinter !== null &&
-        runCaBundle !== null &&
-        runCaCertHostPath !== null
-      ) {
-        const initial = await fetchInitialIntegrationCredentials(
-          spec.integrationId,
-          bundleFetchOpts,
-        );
-        const source = createIntegrationCredentialsSource({
-          integrationId: spec.integrationId,
-          platformApiUrl: bundleFetchOpts.platformApiUrl,
-          runToken: bundleFetchOpts.runToken,
-          initialPayload: initial,
-        });
-        mitmSource = source;
-        listener = createIntegrationMitmListener({
-          caBundle: runCaBundle,
-          minter: sharedMinter,
-          credentials: source,
-          // Adapter decides where the listener should bind so the
-          // runner can reach it (0.0.0.0 for bridged networks, 127.0.0.1
-          // when the runner shares the parent's NS).
-          host: adapterCtx.listenerBindHost,
-          // Phase 4 — narrow the per-request URL surface to the union
-          // of agent-selected tool urlPatterns. `undefined` (legacy or
-          // under-declared tools) leaves enforcement on the per-auth
-          // `authorizedUris` only.
-          ...(spec.toolUrlEnvelope ? { toolUrlEnvelope: spec.toolUrlEnvelope } : {}),
-          onEvent: (event) => {
-            // Filter sensitive bits (URLs may carry signed query params).
-            const safe =
-              event.kind === "request-forwarded"
-                ? {
-                    kind: event.kind,
-                    status: event.status,
-                    authKey: event.authKey,
-                    retried: event.retried,
-                  }
-                : event;
-            logger.info("integration mitm event", {
-              integrationId: spec.integrationId,
-              ...safe,
-            });
-          },
-        });
-        await listener.ready;
-        mitmListeners.push(listener);
-        const port = listener.address().port;
-        const runnerProxyUrl = adapterCtx.proxyUrlFor(port);
-        mitmCtx = {
-          proxyUrl: runnerProxyUrl,
-          caCertHostPath: runCaCertHostPath,
-        };
-        logger.info("integration MITM listener ready", {
-          integrationId: spec.integrationId,
-          localUrl: listener.proxyUrl(),
-          runnerProxyUrl,
-        });
-      }
-
-      const bytes = await fetchBundleBytes(spec.integrationId, bundleFetchOpts);
-      const root = await extractBundle(bytes, spec.namespace);
-
-      const spawnedIntegration = await adapter.spawn({
-        runId,
+      const {
+        allocatedNs,
+        mitmSource,
+        toolCount: added,
+        diagnosticId,
+      } = await spawnAndConnectLocalIntegration({
         spec,
-        bundleRoot: root,
-        mitm: mitmCtx,
-        onStderrLine: (line) => {
-          logger.info("integration stderr", { integrationId: spec.integrationId, line });
-        },
+        runId,
+        adapter,
+        adapterCtx,
+        host,
+        bundleFetchOpts,
+        ca: runCa,
+        wantsMitm,
+        ...(spec.toolUrlEnvelope ? { toolUrlEnvelope: spec.toolUrlEnvelope } : {}),
+        allowedTools: spec.toolAllowlist,
+        logLabel: "integration",
+        clients,
+        mitmListeners,
       });
-
-      const client = new Client({ name: "appstrate-sidecar-integration-host", version: "0.1.0" });
-      const connectPromise = client.connect(spawnedIntegration.transport);
-      let timeoutId: ReturnType<typeof setTimeout> | undefined;
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        timeoutId = setTimeout(() => reject(new Error("MCP connect timeout (30s)")), 30_000);
-        timeoutId.unref?.();
-      });
-      try {
-        await Promise.race([connectPromise, timeoutPromise]);
-      } finally {
-        if (timeoutId !== undefined) clearTimeout(timeoutId);
-      }
-      const wrapped = wrapClient(client, spawnedIntegration.transport);
-      const sizeBefore = host.size();
-      const allocatedNs = await host.register({
-        namespace: spec.namespace,
-        client: wrapped,
-        // Niveau 2 Phase 3 — pass the agent-declared tool allowlist
-        // through so McpHost.register filters `tools/list` to only the
-        // tools the agent declared in its `dependencies.integrations[id].tools[]`.
-        // `undefined` keeps the legacy "all tools allowed" semantics.
-        ...(spec.toolAllowlist ? { allowedTools: spec.toolAllowlist } : {}),
-      });
-      const added = host.size() - sizeBefore;
-      clients.push(wrapped);
 
       // ─── P2 — connect.tool `runAt: "run-start"` session acquisition ───
       // Only the login secret was stored at dashboard connect; mint the
@@ -773,9 +857,7 @@ export async function bootIntegrations(
         integrationId: spec.integrationId,
         namespace: spec.namespace,
         adapter: adapter.id,
-        ...(spawnedIntegration.diagnosticId
-          ? { diagnosticId: spawnedIntegration.diagnosticId }
-          : {}),
+        ...(diagnosticId ? { diagnosticId } : {}),
         toolCount: added,
       });
     } catch (err) {
@@ -829,9 +911,9 @@ export async function bootIntegrations(
           // ignore — listener already torn down via SIGTERM
         }
       }
-      if (runCaCertHostPath) {
+      if (runCa) {
         try {
-          await rm(runCaCertHostPath, { force: true });
+          await rm(runCa.certHostPath, { force: true });
         } catch {
           // ignore — best-effort
         }
@@ -896,101 +978,41 @@ export async function runConnectOnce(
   let runCaCertHostPath: string | null = null;
 
   try {
-    // Per-run CA + cert minter — connect-login always needs the MITM (the
-    // login secret is substituted proxy-side; there is no plaintext-arg path).
-    const runCaBundle = await planCaBundle({
-      runId,
-      tmpfsRoot: "/run/afps",
-      notAfterSeconds: 3600,
-      generator: createOpensslCertGenerator(),
-    });
-    const caDir = await mkdtemp(join(tmpdir(), "afps-ca-connect-"));
-    runCaCertHostPath = join(caDir, "ca.pem");
-    await writeFile(runCaCertHostPath, runCaBundle.pems.caCertPem, { mode: 0o444 });
-    const sharedMinter = createCertMinter({
-      caCertPem: runCaBundle.pems.caCertPem,
-      caKeyPem: runCaBundle.pems.caKeyPem,
-    });
+    // Per-run CA — connect-login ALWAYS needs the MITM (the login secret is
+    // substituted proxy-side; there is no plaintext-arg path), so unlike
+    // `bootIntegrations` we let a CA failure throw rather than degrade.
+    const ca = await prepareRunCa(runId, "afps-ca-connect-");
+    runCaCertHostPath = ca.certHostPath;
 
-    // Build the MITM credentials source for this integration's auth. The
-    // initial payload comes from the platform (a placeholder session with an
-    // empty value — the real session is what runConnectLogin captures).
-    const initial = await fetchInitialIntegrationCredentials(spec.integrationId, bundleFetchOpts);
-    const source = createIntegrationCredentialsSource({
-      integrationId: spec.integrationId,
-      platformApiUrl: bundleFetchOpts.platformApiUrl,
-      runToken: bundleFetchOpts.runToken,
-      initialPayload: initial,
-    });
-
-    const listener = createIntegrationMitmListener({
-      caBundle: runCaBundle,
-      minter: sharedMinter,
-      credentials: source,
-      host: adapterCtx.listenerBindHost,
-      onEvent: (event) => {
-        const safe =
-          event.kind === "request-forwarded"
-            ? {
-                kind: event.kind,
-                status: event.status,
-                authKey: event.authKey,
-                retried: event.retried,
-              }
-            : event;
-        logger.info("connect-run mitm event", { integrationId: spec.integrationId, ...safe });
-      },
-    });
-    await listener.ready;
-    mitmListeners.push(listener);
-    const port = listener.address().port;
-    const mitmCtx: RuntimeMitmContext = {
-      proxyUrl: adapterCtx.proxyUrlFor(port),
-      caCertHostPath: runCaCertHostPath,
-    };
-
-    // Fetch + extract the bundle, spawn the integration's MCP server.
-    const bytes = await fetchBundleBytes(spec.integrationId, bundleFetchOpts);
-    const root = await extractBundle(bytes, spec.namespace);
-    const spawnedIntegration = await adapter.spawn({
-      runId,
+    // Same spawn→connect→register pipeline the agent-run path uses, but
+    // `allowedTools: []` (connect-run never serves an agent; register() is only
+    // needed so `getUpstreamClient` resolves the login tool) and `wantsMitm`
+    // forced on. The initial credential payload is a placeholder session with
+    // an empty value — the real session is what `runConnectLogin` captures.
+    const { allocatedNs, mitmSource } = await spawnAndConnectLocalIntegration({
       spec,
-      bundleRoot: root,
-      mitm: mitmCtx,
-      onStderrLine: (line) => {
-        logger.info("connect-run integration stderr", {
-          integrationId: spec.integrationId,
-          line,
-        });
-      },
-    });
-
-    const client = new Client({ name: "appstrate-sidecar-connect-run", version: "0.1.0" });
-    const connectPromise = client.connect(spawnedIntegration.transport);
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timeoutId = setTimeout(() => reject(new Error("MCP connect timeout (30s)")), 30_000);
-      timeoutId.unref?.();
-    });
-    try {
-      await Promise.race([connectPromise, timeoutPromise]);
-    } finally {
-      if (timeoutId !== undefined) clearTimeout(timeoutId);
-    }
-    const wrapped = wrapClient(client, spawnedIntegration.transport);
-    // Register WITHOUT exposing tools (toolAllowlist `[]`) — connect-run never
-    // serves an agent. We still need register() so getUpstreamClient resolves.
-    const allocatedNs = await host.register({
-      namespace: spec.namespace,
-      client: wrapped,
+      runId,
+      adapter,
+      adapterCtx,
+      host,
+      bundleFetchOpts,
+      ca,
+      wantsMitm: true,
       allowedTools: [],
+      logLabel: "connect-run",
+      clients,
+      mitmListeners,
     });
-    clients.push(wrapped);
+    if (!mitmSource) {
+      // Unreachable: wantsMitm=true + ca!=null always builds the source. Guard
+      // narrows the type and fails loudly if that invariant ever breaks.
+      throw new Error("runConnectOnce: MITM source was not created");
+    }
 
     // connect.dependsOn — merge dependency credentials into this source before
     // running login so the tool's calls to a dependency's authorizedUris get
     // the dependency's credential injected by the MITM planner.
-    seedDependsOnAuths(spec, source);
+    seedDependsOnAuths(spec, mitmSource);
 
     // Run the login tool ONCE and capture the bundle. The secret in
     // `cl.inputs` is substituted proxy-side by the MITM source.
@@ -1000,7 +1022,7 @@ export async function runConnectOnce(
       toolName: cl.toolName,
       ...(cl.produces ? { produces: cl.produces } : {}),
       inputs: cl.inputs,
-      source,
+      source: mitmSource,
       authKey: cl.authKey,
       authType: cl.authType,
       authorizedUris: cl.authorizedUris,
