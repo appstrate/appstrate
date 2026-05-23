@@ -4,20 +4,21 @@
  * OrchestratedStrategy — code-driven login (spec §4.3). For the irreducible
  * cases the declarative Login can't express: CSRF/HTML scraping, stateful
  * cookie-jars, magic-links. The integration ships a `login` MCP tool; the
- * connect-runner executes it in a sandbox and returns a {@link CredentialBundle}.
+ * connect-run substrate executes it in a sandbox and returns a
+ * {@link CredentialBundle}.
  *
  * Boundary (spec §4.7): EXECUTION (running the untrusted tool) lives in the
- * sidecar/connect-runner and is reached here through an injected
+ * connect-run substrate and is reached here through an injected
  * {@link ConnectToolExecutor} — so this orchestration owns only strategy
  * selection + PERSISTENCE and stays unit/DB-testable without a container. The
  * executor's production binding (the connect-run substrate — sidecar run-start
- * hook / ephemeral spawn for `runAt: link`) is the spike-gated piece wired
- * separately; the security contract it must honour is fixed here:
+ * hook / ephemeral spawn for `runAt: link`) is wired separately; the security
+ * contract it must honour is fixed here:
  *
  *   - the tool receives field NAMES only (`inputFields`) — substitution of the
  *     transient `inputs` happens proxy-side, never in tool code;
  *   - the returned bundle's `outputs` are validated against `produces`
- *     (enforced inside the connect-runner);
+ *     (enforced inside the executor);
  *   - `persistLoginSecret` persists the bootstrap `inputs` in the v2 envelope's
  *     NON-injectable plane (so a future re-bootstrap can re-run the tool),
  *     never reachable by the injection path.
@@ -25,7 +26,6 @@
 
 import { invalidRequest } from "../../lib/errors.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
-import { RefreshError, decryptCredentialInputsToStringMap } from "@appstrate/connect";
 import type { AppScope } from "../../lib/scope.ts";
 import type { Actor } from "@appstrate/connect";
 import {
@@ -34,13 +34,11 @@ import {
   readIntegrationAuth,
   type IntegrationConnectionSummary,
 } from "../integration-connections.ts";
-import type { IntegrationRefreshResult } from "../integration-token-refresh.ts";
 import type {
   ConnectContext,
   ConnectCompleteInput,
   CredentialBundle,
   IntegrationConnectStrategy,
-  ReacquireInput,
 } from "./strategy.ts";
 
 /** One connect-tool login run, handed to the {@link ConnectToolExecutor}. */
@@ -143,68 +141,5 @@ export class OrchestratedStrategy implements IntegrationConnectStrategy {
     });
     // insert / update-owned always return a summary (or throw).
     return summary!;
-  }
-
-  /**
-   * Re-bootstrap an expired session (spec §4.4.1 / Phase 5). Re-runs the
-   * connect-tool with the persisted login secret (`inputs`) and writes the
-   * fresh outputs back, preserving the secret. Mirrors the OAuth2 fast-path's
-   * {@link IntegrationRefreshResult} shape so the live resolvers consume it the
-   * same way. Throws a `revoked` {@link RefreshError} (→ caller flips
-   * `needsReconnection`) when there is no persisted secret to re-bootstrap from
-   * — i.e. the connection was made without `persistLoginSecret`.
-   */
-  async reacquire(input: ReacquireInput): Promise<IntegrationRefreshResult> {
-    if (!input.scope) {
-      throw new RefreshError("orchestrated reacquire requires the connection scope", "transient");
-    }
-    const { manifest, auth } = await readIntegrationAuth(
-      input.scope,
-      input.packageId,
-      input.authKey,
-    );
-    const tool = auth.connect?.tool;
-    if (!tool) {
-      throw new RefreshError(`Auth '${input.authKey}' has no connect.tool`, "transient");
-    }
-
-    const inputs = decryptCredentialInputsToStringMap(input.credentialsEncrypted);
-    if (Object.keys(inputs).length === 0) {
-      // No persisted login secret → cannot re-bootstrap. Surface as revoked so
-      // the resolver flips needsReconnection (same outcome as a paste-the-bag
-      // 401), rather than looping.
-      throw new RefreshError("no persisted login secret to re-bootstrap", "revoked");
-    }
-
-    const bundle = await this.executor.run({
-      scope: input.scope,
-      integrationPackageId: input.packageId,
-      authKey: input.authKey,
-      manifest,
-      toolName: tool,
-      produces: auth.connect?.produces,
-      inputs,
-      inputFields: Object.keys(inputs),
-      dependsOn: auth.connect?.dependsOn,
-    });
-
-    // Write the fresh session back, preserving the login secret. Keyed by id —
-    // the id came from an already-authorised resolution.
-    await persistCredentialBundle(
-      { kind: "update-by-id", connectionId: input.connectionId },
-      {
-        credentials: bundle.outputs,
-        inputs,
-        expiresAt: bundle.expiresAt ? new Date(bundle.expiresAt) : null,
-        needsReconnection: false,
-      },
-    );
-
-    return {
-      fields: bundle.outputs,
-      expiresAt: bundle.expiresAt ? new Date(bundle.expiresAt) : null,
-      scopesGranted: bundle.scopesGranted ?? null,
-      shrinkDetected: false,
-    };
   }
 }

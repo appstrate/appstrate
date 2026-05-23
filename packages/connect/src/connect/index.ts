@@ -5,13 +5,7 @@
 // orchestration layer (apps/api) and the sidecar executor.
 
 export type { CredentialBundle } from "./types.ts";
-export type {
-  ConnectContext,
-  BeginOptions,
-  BeginResult,
-  ConnectInput,
-  ConnectStrategy,
-} from "./strategy.ts";
+export type { ConnectContext, BeginOptions, BeginResult } from "./strategy.ts";
 export { runLogin, LoginError, DEFAULT_LOGIN_LIMITS } from "./login-engine.ts";
 export type {
   LoginConfig,
@@ -22,9 +16,3 @@ export type {
   LoginContext,
   LoginResult,
 } from "./login-engine.ts";
-export { validateConnectToolResult, ConnectToolContractError } from "./tool-contract.ts";
-export type {
-  ConnectToolContext,
-  ConnectToolResult,
-  ConnectToolErrorReason,
-} from "./tool-contract.ts";

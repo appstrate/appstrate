@@ -3,15 +3,16 @@
 /**
  * Orchestration-side `connect` strategy contract (spec §4.7 boundary).
  *
- * The pure `ConnectStrategy` (in `@appstrate/connect/connect`) documents the
- * canonical shape — `complete` produces a {@link CredentialBundle}. Here, in
- * apps/api, the strategies additionally PERSIST (they own the DB) and so
- * return the persisted {@link IntegrationConnectionSummary}. They realize the
- * pure contract by building a bundle internally and routing it through the
- * single `persistCredentialBundle` writer.
+ * The pure context/option types (in `@appstrate/connect/connect`) document the
+ * canonical shapes. Here, in apps/api, the strategies additionally PERSIST
+ * (they own the DB) and so return the persisted
+ * {@link IntegrationConnectionSummary}. They realize the contract by building a
+ * bundle internally and routing it through the single `persistCredentialBundle`
+ * writer.
  *
- * `reacquire` (Phase 2) returns a bare `CredentialBundle` — its consumer (the
- * live credentials resolver) wants the refreshed fields, not a summary.
+ * Re-acquisition is OAuth2-only and is a direct call to
+ * `forceRefreshIntegrationConnection` from the live resolvers — not a strategy
+ * method — because the only refreshable auth type is `oauth2`.
  */
 
 import type {
@@ -21,37 +22,9 @@ import type {
   CredentialBundle,
 } from "@appstrate/connect/connect";
 import type { IntegrationOAuthCallbackResult } from "@appstrate/connect";
-import type { AppScope } from "../../lib/scope.ts";
 import type { IntegrationConnectionSummary } from "../integration-connections.ts";
-import type {
-  IntegrationRefreshContext,
-  IntegrationRefreshResult,
-} from "../integration-token-refresh.ts";
 
 export type { ConnectContext, BeginOptions, BeginResult, CredentialBundle };
-export type { IntegrationRefreshResult };
-
-/**
- * Inputs for {@link IntegrationConnectStrategy.reacquire}. The live credential
- * resolvers (MITM + api_call proxy) hold the encrypted blob + the per-app
- * OAuth refresh context, not a decrypted {@link CredentialBundle} — so the
- * orchestration `reacquire` takes the resolver's shape and returns the rich
- * {@link IntegrationRefreshResult} (fields + expiry + granted scopes + shrink
- * flag) those hot paths consume.
- */
-export interface ReacquireInput {
-  connectionId: string;
-  packageId: string;
-  authKey: string;
-  credentialsEncrypted: string;
-  refreshContext: IntegrationRefreshContext;
-  /**
-   * App scope of the connection. Optional because the OAuth2 fast-path
-   * refresh is keyed by id alone; the OrchestratedStrategy re-bootstrap NEEDS
-   * it to re-read the manifest (`connect.tool` / `produces`) for the re-run.
-   */
-  scope?: AppScope;
-}
 
 /**
  * Terminal acquisition input for the orchestration layer.
@@ -71,10 +44,4 @@ export interface IntegrationConnectStrategy {
   begin?(ctx: ConnectContext, opts: BeginOptions): Promise<BeginResult>;
   /** Terminal acquisition → persisted connection summary. */
   complete(ctx: ConnectContext, input: ConnectCompleteInput): Promise<IntegrationConnectionSummary>;
-  /**
-   * Re-acquisition (Phase 2). Present on OAuth2Strategy (fast-path
-   * refresh_token POST); absent on FieldsStrategy — a 401 on a paste-the-bag
-   * connection cannot be auto-recovered and surfaces as needsReconnection.
-   */
-  reacquire?(input: ReacquireInput): Promise<IntegrationRefreshResult>;
 }

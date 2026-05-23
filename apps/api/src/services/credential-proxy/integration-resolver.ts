@@ -42,8 +42,8 @@ import { fetchIntegrationManifest } from "../integration-service.ts";
 import {
   buildIntegrationOAuthRefreshContext,
   decryptIntegrationConnectionFields,
+  forceRefreshIntegrationConnection,
 } from "../integration-token-refresh.ts";
-import { resolveStrategy } from "../connect/registry.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 
 /** Errors mapped by the route to 404 (credential not found). */
@@ -141,17 +141,15 @@ export async function forceRefreshIntegrationProxyCredentials(
   if (!refreshContext) return null;
 
   try {
-    // Single re-acquisition path — OAuth2Strategy.reacquire (authDef.type is
-    // gated to oauth2 above, so this resolver never reaches the connect.tool
-    // OrchestratedStrategy and needs no connect-run executor here). connect.tool
-    // re-bootstrap flows through `integration-credentials-resolver.ts` instead.
-    const refreshed = await resolveStrategy(authDef).reacquire!({
-      connectionId: connection.id,
-      packageId: input.integrationId,
-      authKey: connection.authKey,
-      credentialsEncrypted: connection.credentialsEncrypted,
+    // Re-acquisition = fast-path refresh_token POST. `authDef.type` is gated
+    // to oauth2 above, so this is the only refreshable auth.
+    const refreshed = await forceRefreshIntegrationConnection(
+      connection.id,
+      input.integrationId,
+      connection.authKey,
+      connection.credentialsEncrypted,
       refreshContext,
-    });
+    );
     const fields = refreshed.fields;
     const payload = buildPayloadFromFields(manifest, connection.authKey, fields);
     if (!payload) return null;

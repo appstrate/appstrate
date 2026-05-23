@@ -3,7 +3,7 @@
 /**
  * `connect` — unified credential acquisition primitive (spec §4.1).
  *
- * Pure types shared by every {@link ConnectStrategy} (OAuth2, Fields,
+ * Pure types shared by every acquisition strategy (OAuth2, Fields,
  * Login, Orchestrated). This module is import-cost-free: no DB, no Redis,
  * no sidecar — only the data contract that orchestration (apps/api) and the
  * sidecar executor consume.

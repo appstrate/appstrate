@@ -1,19 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `connect` — the {@link ConnectStrategy} abstraction (spec §4.1).
+ * `connect` — the pure ambient types shared by every acquisition path (spec §4.1).
  *
- * One interface unifies every acquisition path: OAuth2 (authorization-code +
- * PKCE), Fields (api_key/basic/custom paste), Login (declarative multi-step)
- * and Orchestrated (code connect-tool). Refresh becomes `reacquire`.
- *
- * Pure contract only — the concrete strategies that persist / read Redis live
- * in `apps/api/src/services/connect/` (spec §4.7 boundary). This module stays
- * import-cost-free so the published package and the sidecar can share it.
+ * The concrete strategy interface that persists / reads Redis lives in
+ * `apps/api/src/services/connect/` (spec §4.7 boundary). This module stays
+ * import-cost-free so the published package and the sidecar can share these
+ * context/option shapes.
  */
 
 import type { Actor } from "../types.ts";
-import type { CredentialBundle } from "./types.ts";
 
 /**
  * Ambient context handed to every strategy call: who is connecting, to which
@@ -44,26 +40,4 @@ export interface BeginOptions {
 export interface BeginResult {
   redirectUrl: string;
   state: string;
-}
-
-/**
- * Terminal acquisition input. Discriminated by the strategy that consumes it:
- *   - OAuth2   → `{ code, state }` (callback).
- *   - Fields   → `{ credentials }` (submitted bag).
- *   - Login  → `{ credentials }` (bootstrap secrets feeding the steps).
- *   - Orchestrated → `{ credentials }` (handed to the connect-tool as inputs).
- */
-export type ConnectInput =
-  | { kind: "oauth2-callback"; code: string; state: string }
-  | { kind: "fields"; credentials: Record<string, string> };
-
-export interface ConnectStrategy {
-  /** Optional interactive step (OAuth2): returns a browser redirect + state. */
-  begin?(ctx: ConnectContext, opts: BeginOptions): Promise<BeginResult>;
-
-  /** Terminal acquisition: callback exchange | field submit | step chain. */
-  complete(ctx: ConnectContext, input: ConnectInput): Promise<CredentialBundle>;
-
-  /** Re-acquisition: OAuth2 refresh (fast POST) | re-bootstrap. Optional. */
-  reacquire?(ctx: ConnectContext, current: CredentialBundle): Promise<CredentialBundle>;
 }

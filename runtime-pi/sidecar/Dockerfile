@@ -67,7 +67,7 @@ COPY packages/afps-runtime/src   packages/afps-runtime/src
 COPY packages/mcp-transport/src  packages/mcp-transport/src
 COPY packages/core/src           packages/core/src
 # @appstrate/env — pulled in transitively by @appstrate/connect/integration-credentials
-# (encryption.ts → getEnv) and connect-login/connect-runner's connect.tool path.
+# (encryption.ts → getEnv) and connect-login's connect.tool path.
 # Single-file package; its only workspace dep (@appstrate/core/env) is copied above.
 COPY packages/env/src            packages/env/src
 

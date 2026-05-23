@@ -190,7 +190,7 @@ export function decryptCredentials<T = Record<string, string>>(encryptedStr: str
  *     reference these and nothing else.
  *   - `inputs`  — bootstrap secrets (a login password) persisted solely to
  *     re-bootstrap an expired session (`persistLoginSecret`). Readable ONLY
- *     by the connect-runner during `complete`/`reacquire`; never by the
+ *     by the connect-login path that re-runs the login tool; never by the
  *     injection path nor the agent.
  *
  * Values are typed `unknown` here; callers project to strings at the

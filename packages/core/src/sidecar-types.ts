@@ -22,6 +22,26 @@ export type ManifestDeliveryHttp = NonNullable<
 >;
 
 /**
+ * Resolved, ready-to-inject HTTP delivery — the output of `resolveHttpDelivery`.
+ * The proxy uses `headerName`/`value` to decide whether to inject a header and
+ * what value to set; `allowServerOverride` mirrors the manifest setting
+ * (default `false` → the proxy strips any caller-supplied header of the same
+ * name before injection).
+ *
+ * Lives in core (not `@appstrate/connect`) because it is a spawn-boundary shape
+ * crossing into the sidecar — `@appstrate/connect` re-exports it, and
+ * `IntegrationSpawnSpec` references it directly so the two can never drift.
+ */
+export interface HttpDeliveryPlan {
+  headerName: string;
+  headerPrefix: string;
+  /** Rendered, post-encoding value ready to be sent as the header value. */
+  value: string;
+  /** Mirrors manifest; default `false` means the proxy MUST strip caller overrides. */
+  allowServerOverride: boolean;
+}
+
+/**
  * Sidecar runtime configuration. The sidecar process reads this from its
  * own environment at boot and uses it for the lifetime of the run. The
  * platform sends every field as an env var when spawning the container.
@@ -316,12 +336,7 @@ export interface IntegrationSpawnSpec {
       authType: string;
       fields: Record<string, string>;
       authorizedUris: string[];
-      deliveryPlan: {
-        headerName: string;
-        headerPrefix: string;
-        value: string;
-        allowServerOverride: boolean;
-      };
+      deliveryPlan: HttpDeliveryPlan;
     }>;
   };
 }

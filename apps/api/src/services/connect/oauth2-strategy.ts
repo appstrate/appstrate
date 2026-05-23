@@ -10,7 +10,9 @@
  *                  /callback route (it reconstructs actor/scope from the signed
  *                  state and owns the `OAuthCallbackError` UX mapping); this
  *                  consumes the already-exchanged result.
- *   - `reacquire` → Phase 2.
+ *
+ * Re-acquisition (refresh) is not a strategy method — the live resolvers call
+ * `forceRefreshIntegrationConnection` directly, since only `oauth2` refreshes.
  *
  * Behaviour is unchanged from the inline route logic it replaces.
  */
@@ -28,15 +30,12 @@ import {
   saveIntegrationConnection,
   type IntegrationConnectionSummary,
 } from "../integration-connections.ts";
-import { forceRefreshIntegrationConnection } from "../integration-token-refresh.ts";
 import type {
   BeginOptions,
   BeginResult,
   ConnectContext,
   ConnectCompleteInput,
   IntegrationConnectStrategy,
-  ReacquireInput,
-  IntegrationRefreshResult,
 } from "./strategy.ts";
 
 export class OAuth2Strategy implements IntegrationConnectStrategy {
@@ -169,25 +168,5 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       actor: ctx.actor,
       ...(result.connectionId ? { connectionId: result.connectionId } : {}),
     });
-  }
-
-  /**
-   * Re-acquisition = fast-path refresh_token POST. The actual exchange +
-   * revoked/transient classification + write-back live in
-   * `forceRefreshIntegrationConnection` (which converged its write into
-   * persistCredentialBundle in Phase 0); this is the single strategy entry the
-   * live credential resolvers call into, so the refresh helper is never
-   * invoked directly. Niveau 2 scope-shrink DETECTION is computed inside that
-   * helper (returned as `shrinkDetected`); the below-floor reconnection flip
-   * stays in the resolver, which holds the agent-scope context.
-   */
-  async reacquire(input: ReacquireInput): Promise<IntegrationRefreshResult> {
-    return forceRefreshIntegrationConnection(
-      input.connectionId,
-      input.packageId,
-      input.authKey,
-      input.credentialsEncrypted,
-      input.refreshContext,
-    );
   }
 }
