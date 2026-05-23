@@ -855,6 +855,67 @@ describe("MITM listener — tool URL envelope (Phase 4)", () => {
     }
   });
 
+  runIfOpenssl(
+    "bypasses the envelope while a connect-login is in flight (activeInputs set)",
+    async () => {
+      // Regression: the tool-URL envelope is derived from the AGENT's selected
+      // data tools. The connect-login (`login`) tool runs at run-start and walks
+      // its OWN URLs (csrf → signin → CAS → session) that the data-tool envelope
+      // deliberately excludes. Enforcing the envelope during the login phase
+      // 403'd the very first login request and the session was never minted.
+      // While `activeInputs()` is set, the envelope must not apply — the per-auth
+      // `authorizedUris` floor remains the bound.
+      const bundle = await makeCaBundle();
+      const minter = createCertMinter({
+        caCertPem: bundle.pems.caCertPem,
+        caKeyPem: bundle.pems.caKeyPem,
+      });
+
+      const pl = payload("vendor", "custom", {}, ["https://api.test.local/**"]);
+      const dp: Record<string, HttpDeliveryPlan> = {};
+      const creds: MitmCredentialSource = {
+        current: () => pl,
+        deliveryPlans: () => dp,
+        // Connect-login window open: the login tool's outbound requests carry
+        // the substitutable inputs and must not be gated by the agent envelope.
+        activeInputs: () => ({ email: "u@example.com", password: "secret" }),
+      };
+
+      const upstreamCalls: string[] = [];
+      const recordedFetch = (async (input: string | URL | Request) => {
+        upstreamCalls.push(typeof input === "string" ? input : (input as Request).url);
+        return new Response("ok", { status: 200 });
+      }) as unknown as typeof fetch;
+
+      const listener = createIntegrationMitmListener({
+        caBundle: bundle,
+        minter,
+        credentials: creds,
+        fetch: recordedFetch,
+        // Envelope only admits the data tool's endpoint — NOT the login URLs.
+        toolUrlEnvelope: [{ pattern: "https://api.test.local/v1/session" }],
+      });
+      await listener.ready;
+
+      try {
+        const addr = listener.address();
+        // A login-phase request to an off-envelope URL must still be forwarded.
+        const out = await drivenFetch({
+          listenerPort: addr.port,
+          sni: "api.test.local",
+          caCertPem: bundle.pems.caCertPem,
+          method: "GET",
+          path: "/api/auth/csrf",
+          headers: {},
+        });
+        expect(out.status).toBe(200);
+        expect(upstreamCalls).toEqual(["https://api.test.local/api/auth/csrf"]);
+      } finally {
+        await listener.close();
+      }
+    },
+  );
+
   runIfOpenssl("refuses when URL matches but method is outside the allowed set", async () => {
     const bundle = await makeCaBundle();
     const minter = createCertMinter({

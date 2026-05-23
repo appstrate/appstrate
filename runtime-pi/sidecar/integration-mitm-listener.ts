@@ -662,7 +662,17 @@ async function handleInnerRequest(
   // credential header materialise, even briefly. Per-auth `authorizedUris`
   // still runs downstream via `planMitmAction`; envelope is the tighter
   // tool-derived restriction.
-  if (envelope && !matchesEnvelope(envelope, targetUrl, req.method)) {
+  //
+  // The envelope is derived from the AGENT's selected tools (their
+  // `urlPatterns`). It must NOT gate the connect-login (`login` tool) phase:
+  // the login tool runs at run-start, is never agent-selected, and walks its
+  // own URLs (csrf → signin → CAS → session) which the agent's data-tool
+  // envelope deliberately excludes. While a connect-login is in flight
+  // (`inputs` set), the per-auth `authorizedUris` floor — enforced downstream
+  // by `planMitmAction` — remains the bound; the agent-tool envelope does not
+  // apply. Without this, the login tool's first request (e.g. `/api/auth/csrf`)
+  // is 403'd by the envelope and the session is never minted.
+  if (!inputs && envelope && !matchesEnvelope(envelope, targetUrl, req.method)) {
     emit({ kind: "request-refused", url: targetUrl, reason: "tool url envelope" });
     return new Response("MITM listener: URL outside tool envelope", { status: 403 });
   }
