@@ -15,15 +15,11 @@ export interface OAuthStateRecord {
   redirectUri: string;
   createdAt: string;
   expiresAt: string;
-  authMode: string;
-  oauthTokenSecret?: string;
   /**
-   * Phase 1.3 — when the state was issued from an integration auth
-   * (`POST /api/integrations/:pkgId/auths/:authKey/connect/oauth2`), the
-   * callback dispatcher uses this discriminator to route the exchange to
-   * the integration handler rather than the legacy provider handler.
-   * `providerId` carries a sentinel string in that case but the real
-   * truth lives here.
+   * Integration-specific exchange parameters, carried from
+   * `POST /api/integrations/:pkgId/auths/:authKey/connect/oauth2` through
+   * to `handleIntegrationOAuthCallback`. `providerId` carries a sentinel
+   * string for integration flows; the authoritative details live here.
    */
   integration?: {
     packageId: string;
@@ -50,7 +46,7 @@ export interface OAuthStateRecord {
 }
 
 /**
- * Ephemeral OAuth state store — keyed by `state` (OAuth2) or `oauth_token` (OAuth1a).
+ * Ephemeral OAuth state store — keyed by `state` (OAuth2).
  * Implementations are expected to enforce TTL; expired records must be treated as absent.
  * In-process Redis or local-memory impls are injected by the platform layer.
  */
@@ -58,11 +54,4 @@ export interface OAuthStateStore {
   set(key: string, record: OAuthStateRecord, ttlSeconds: number): Promise<void>;
   get(key: string): Promise<OAuthStateRecord | null>;
   delete(key: string): Promise<void>;
-}
-
-export interface ScopeValidationResult {
-  sufficient: boolean;
-  granted: string[];
-  required: string[];
-  missing: string[];
 }

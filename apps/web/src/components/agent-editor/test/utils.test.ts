@@ -36,17 +36,17 @@ describe("getManifestName", () => {
 
 describe("getResourceEntries / setResourceEntries", () => {
   it("reads skills from manifest", () => {
-    const m = { dependencies: { providers: {}, skills: { "@org/research": "1.0.0" } } };
+    const m = { dependencies: { skills: { "@org/research": "1.0.0" } } };
     expect(getResourceEntries(m, "skills")).toEqual([{ id: "@org/research", version: "1.0.0" }]);
   });
 
   it("returns empty array when no deps", () => {
-    const m = { dependencies: { providers: {} } };
+    const m = { dependencies: {} };
     expect(getResourceEntries(m, "skills")).toEqual([]);
   });
 
   it("roundtrips through set/get", () => {
-    const m: Record<string, unknown> = { dependencies: { providers: {} } };
+    const m: Record<string, unknown> = { dependencies: {} };
     setResourceEntries(m, "skills", [
       { id: "@org/a", version: "1.0.0" },
       { id: "@org/b", version: "2.0.0" },
@@ -59,7 +59,7 @@ describe("getResourceEntries / setResourceEntries", () => {
 
   it("removes key when empty", () => {
     const m: Record<string, unknown> = {
-      dependencies: { providers: {}, skills: { "@org/a": "1.0.0" } },
+      dependencies: { skills: { "@org/a": "1.0.0" } },
     };
     setResourceEntries(m, "skills", []);
     expect((m.dependencies as Record<string, unknown>).skills).toBeUndefined();
@@ -70,7 +70,7 @@ describe("getResourceEntries / setResourceEntries", () => {
   // block. These tests pin the round-trip across both halves.
   describe("integrations (niveau 2 two-block layout)", () => {
     it("reads version from deps with no selection block", () => {
-      const m = { dependencies: { providers: {}, integrations: { "@vendor/gmail": "^1.0.0" } } };
+      const m = { dependencies: { integrations: { "@vendor/gmail": "^1.0.0" } } };
       expect(getResourceEntries(m, "integrations")).toEqual([
         { id: "@vendor/gmail", version: "^1.0.0" },
       ]);
@@ -78,7 +78,7 @@ describe("getResourceEntries / setResourceEntries", () => {
 
     it("merges version + selection from the two blocks", () => {
       const m = {
-        dependencies: { providers: {}, integrations: { "@vendor/gmail": "^1.0.0" } },
+        dependencies: { integrations: { "@vendor/gmail": "^1.0.0" } },
         integrations: {
           "@vendor/gmail": { tools: ["list_messages", "send_message"], scopes: ["delete"] },
         },
@@ -94,7 +94,7 @@ describe("getResourceEntries / setResourceEntries", () => {
     });
 
     it("writes only the dep map when no tools/scopes are set", () => {
-      const m: Record<string, unknown> = { dependencies: { providers: {} } };
+      const m: Record<string, unknown> = { dependencies: {} };
       setResourceEntries(m, "integrations", [{ id: "@vendor/gmail", version: "^1.0.0" }]);
       expect((m.dependencies as Record<string, unknown>).integrations).toEqual({
         "@vendor/gmail": "^1.0.0",
@@ -103,7 +103,7 @@ describe("getResourceEntries / setResourceEntries", () => {
     });
 
     it("writes the selection block when tools is an explicit array (even empty)", () => {
-      const m: Record<string, unknown> = { dependencies: { providers: {} } };
+      const m: Record<string, unknown> = { dependencies: {} };
       setResourceEntries(m, "integrations", [
         { id: "@vendor/gmail", version: "^1.0.0", tools: [] },
       ]);
@@ -114,7 +114,7 @@ describe("getResourceEntries / setResourceEntries", () => {
     });
 
     it("writes tools + scopes into the top-level integrations block", () => {
-      const m: Record<string, unknown> = { dependencies: { providers: {} } };
+      const m: Record<string, unknown> = { dependencies: {} };
       setResourceEntries(m, "integrations", [
         { id: "@vendor/gmail", version: "^1.0.0", tools: ["list_messages"], scopes: ["delete"] },
       ]);
@@ -127,7 +127,7 @@ describe("getResourceEntries / setResourceEntries", () => {
     });
 
     it("round-trips a mix of selection-less + selected entries", () => {
-      const m: Record<string, unknown> = { dependencies: { providers: {} } };
+      const m: Record<string, unknown> = { dependencies: {} };
       setResourceEntries(m, "integrations", [
         { id: "@vendor/none", version: "^1.0.0" },
         { id: "@vendor/picked", version: "^2.0.0", tools: ["read"] },

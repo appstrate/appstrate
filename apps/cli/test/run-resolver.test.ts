@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for the run command's ProviderResolver builder.
+ * Unit tests for the run command's IntegrationApiCallResolver builder.
  * Verifies validation + mode parsing without constructing any
  * actual HTTP client.
  */

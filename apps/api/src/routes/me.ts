@@ -235,8 +235,8 @@ router.delete("/integration-pins", requireAppContext(), async (c) => {
  * this credential anywhere again".
  *
  * The previous user-facing entrypoint on the agent surface
- * (`DELETE /api/integrations/:packageId/connections/:connectionId`) is
- * deprecated in favour of this single owner-scoped endpoint. Surfaced
+ * (`DELETE /api/integrations/:packageId/connections/:connectionId`) was
+ * removed in favour of this single owner-scoped endpoint. Surfaced
  * only from `/connections` (the user-owned management page) so members
  * can't accidentally trigger a global delete from an agent context.
  *

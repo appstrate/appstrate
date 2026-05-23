@@ -9,9 +9,8 @@
  * or a parsed token response (callback). No DB, no HTTP-fetch
  * sourcing — the platform layer (`apps/api/src/services/integration-connections.ts`)
  * loads the manifest, resolves the registered OAuth client, and feeds
- * us. Mirrors the shape of {@link initiateOAuth} / {@link handleOAuthCallback}
- * in `./oauth.ts` so the connections route's callback dispatcher can
- * treat both paths uniformly.
+ * us. Exposes an initiate (authorization URL) and a callback (token
+ * exchange) function for the integration OAuth flow.
  *
  * What this covers (Phase 1.3 ship scope):
  *   - **Mode A** explicit endpoints — `authorizationUrl`, `tokenUrl` come
@@ -42,10 +41,9 @@ const OAUTH_STATE_TTL_SECONDS = 10 * 60;
 
 /**
  * Provider identifier sentinel embedded in the {@link OAuthStateRecord}
- * for integration auth states. The OAuth callback dispatcher in
- * `apps/api/src/routes/connections.ts` checks the `integration` field
- * first; this sentinel just makes the state record self-describing for
- * audit logging.
+ * for integration auth states. The callback reads the `integration`
+ * field for the authoritative exchange params; this sentinel just makes
+ * the state record self-describing for audit logging.
  */
 function integrationProviderIdSentinel(packageId: string, authKey: string): string {
   return `__integration__:${packageId}:${authKey}`;
@@ -142,7 +140,6 @@ export async function initiateIntegrationOAuth(
     redirectUri: input.redirectUri,
     createdAt: now.toISOString(),
     expiresAt: new Date(now.getTime() + OAUTH_STATE_TTL_SECONDS * 1000).toISOString(),
-    authMode: "oauth2",
     integration: {
       packageId: input.packageId,
       authKey: input.authKey,
@@ -213,7 +210,7 @@ export interface IntegrationOAuthCallbackResult {
  * Exchange the authorization code for tokens using the endpoints,
  * client credentials, and PKCE verifier we stored at initiate time.
  * Throws {@link OAuthCallbackError} with the same `kind` discrimination
- * as the legacy provider path so the routes layer can apply identical
+ * across the connect surface so the routes layer can apply identical
  * UX (revoked → "please reconnect", transient → "retry").
  */
 export async function handleIntegrationOAuthCallback(
@@ -226,7 +223,7 @@ export async function handleIntegrationOAuthCallback(
     throw new OAuthCallbackError(
       "Invalid or expired OAuth state",
       "transient",
-      // The legacy error type expects a `providerId`; use the sentinel
+      // OAuthCallbackError carries a `providerId`; use the sentinel
       // pattern so audit logs make sense.
       "__integration__:unknown",
     );

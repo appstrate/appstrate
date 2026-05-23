@@ -1580,9 +1580,9 @@ function enforceAuthorizedUris(meta: ApiCallMeta, target: string): void {
   if (patterns.length === 0) {
     throw new AuthorizedUrisError(
       "AUTHORIZED_URIS_EMPTY",
-      `Provider ${meta.name}: authorizedUris allowlist is empty; every target is forbidden. ` +
-        `Declare authorizedUris in the provider manifest or set allowAllUris: true.`,
-      { provider: meta.name, target },
+      `Integration ${meta.name}: authorizedUris allowlist is empty; every target is forbidden. ` +
+        `Declare authorizedUris in the integration manifest or set allowAllUris: true.`,
+      { integration: meta.name, target },
     );
   }
   for (const pattern of patterns) {
@@ -1590,8 +1590,8 @@ function enforceAuthorizedUris(meta: ApiCallMeta, target: string): void {
   }
   throw new AuthorizedUrisError(
     "AUTHORIZED_URIS_MISMATCH",
-    `Provider ${meta.name}: target ${target} is not in authorizedUris allowlist`,
-    { provider: meta.name, target, allowlist: patterns },
+    `Integration ${meta.name}: target ${target} is not in authorizedUris allowlist`,
+    { integration: meta.name, target, allowlist: patterns },
   );
 }
 

@@ -16,7 +16,7 @@ export function getActor(c: Context): Actor {
 
 /**
  * Produces the `{userId, endUserId}` column pair for an INSERT. Both `runs`
- * and `connection_profiles` use those exact column names, so callers can
+ * and `integration_connections` use those exact column names, so callers can
  * spread the result into the values object directly without further mapping.
  */
 export function actorInsert(actor: Actor): {

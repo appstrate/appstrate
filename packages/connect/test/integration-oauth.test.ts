@@ -383,7 +383,6 @@ describe("handleIntegrationOAuthCallback", () => {
       redirectUri: "http://localhost/cb",
       createdAt: new Date().toISOString(),
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
-      authMode: "oauth2",
     };
     await store.set("S", record, 60);
     let err: unknown = null;

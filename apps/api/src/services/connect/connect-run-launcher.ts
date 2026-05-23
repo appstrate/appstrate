@@ -264,7 +264,7 @@ class ConnectRunExecutor implements ConnectToolExecutor {
     }, this.timeoutMs);
 
     try {
-      const exitCode = await orch.waitForExit(sidecar);
+      await orch.waitForExit(sidecar);
       // Drain remaining buffered log lines before parsing.
       logAbort.abort();
       await logStream;
@@ -272,11 +272,8 @@ class ConnectRunExecutor implements ConnectToolExecutor {
       if (timedOut) {
         throw new Error(`connect-run timed out after ${this.timeoutMs}ms`);
       }
-      if (exitCode !== 0) {
-        // Non-zero exit: still try to parse — the sidecar emits the ERROR
-        // sentinel before exiting 1, which carries the real cause.
-        return parseConnectResult(lines);
-      }
+      // Parse regardless of exit code: on a non-zero exit the sidecar emits
+      // the ERROR sentinel before exiting 1, which carries the real cause.
       return parseConnectResult(lines);
     } finally {
       clearTimeout(timer);

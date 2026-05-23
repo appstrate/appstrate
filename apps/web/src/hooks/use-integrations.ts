@@ -29,18 +29,14 @@ import { useCurrentApplicationId } from "./use-current-application";
 // live in `@appstrate/shared-types/integrations.ts`.
 export type {
   AgentIntegrationEntry,
-  ConsumingAgentSummary,
   IntegrationAgentResolution,
   IntegrationAuthStatus,
-  IntegrationAuthType,
   IntegrationCandidate,
   IntegrationConnection,
   IntegrationDetail,
   IntegrationManifestAuth,
-  IntegrationManifestTool,
   IntegrationManifestView,
   IntegrationOAuthClient,
-  IntegrationPickStatus,
   IntegrationPin,
   IntegrationSummary,
 } from "@appstrate/shared-types";
