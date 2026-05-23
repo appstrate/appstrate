@@ -62,7 +62,6 @@ import {
   MAX_MCP_ENVELOPE_SIZE,
   MAX_REQUEST_BODY_SIZE,
   MAX_RESPONSE_SIZE,
-  INTEGRATION_ID_RE,
   substituteVars,
 } from "./helpers.ts";
 import { TokenBudget } from "./token-budget.ts";
@@ -106,15 +105,6 @@ import {
 const API_CALL_PREFLIGHT_META: Record<string, unknown> = {
   [UPSTREAM_META_KEY]: buildPreflightUpstreamMeta(),
 };
-
-/**
- * JSON Schema `pattern` mirroring `INTEGRATION_ID_RE` from `helpers.ts` —
- * the source of truth shared with `executeApiCall`. We strip the
- * leading/trailing slashes and the regex flags so JSON Schema
- * validators (AJV / the MCP SDK / inspectors) see a portable
- * ECMA-compatible string. Anchors are preserved.
- */
-const INTEGRATION_ID_PATTERN = INTEGRATION_ID_RE.source;
 
 /**
  * Re-exported alias for the JSON-RPC envelope cap so call sites in this
@@ -472,31 +462,20 @@ function buildSidecarTools(options: MountMcpOptions): {
 } {
   const { blobStore, proxyDeps, tokenBudget, apiCallLimit } = options;
   const { config, fetchFn } = proxyDeps;
-  // Shared input schema for the credential-injecting proxy. The AFPS
-  // provider package type is retired — the only tool built from this
-  // schema is the generic `{ns}__api_call` per-integration tool, which
-  // omits the `providerId` argument (the integration is implied by the
-  // tool name).
+  // Input schema for the generic `{ns}__api_call` per-integration tool —
+  // the integration is implied by the tool name, so the request carries no
+  // integration identifier (just target + method + headers + body).
   const CREDENTIAL_PROXY_INPUT_SCHEMA = {
     type: "object",
     additionalProperties: false,
-    required: ["providerId", "target"],
+    required: ["target"],
     properties: {
-      providerId: {
-        type: "string",
-        description:
-          "Provider identifier as declared in `dependencies.providers[].id` (e.g. `@appstrate/gmail` or `gmail`).",
-        // The pattern source is `INTEGRATION_ID_RE` in `helpers.ts` —
-        // shared with `executeApiCall` so the same shape gates
-        // the MCP descriptor and the credential-proxy core.
-        pattern: INTEGRATION_ID_PATTERN,
-      },
       target: {
         type: "string",
         format: "uri",
         description:
-          "Absolute target URL. Must match an entry in the provider's `authorizedUris` " +
-          "(or be a non-private URL if the provider is `allowAllUris`).",
+          "Absolute target URL. Must match an entry in the integration auth's `authorizedUris` " +
+          "(or be a non-private URL if the integration is `allowAllUris`).",
       },
       method: {
         type: "string",
@@ -603,19 +582,14 @@ function buildSidecarTools(options: MountMcpOptions): {
   // Build one generic `{ns}__api_call` tool for an integration that opted
   // into `apiCall`. Runs the credential-proxy core (body parsing,
   // redirect/cookie/SSRF hardening, 401 refresh, blob spillover) via
-  // {@link credentialProxyInner}, with a fixed providerId (the integration
-  // package id) and integration-backed credentials. The descriptor omits a
-  // `providerId` argument (the integration is implied by the tool name).
+  // {@link credentialProxyInner}, scoped to one integration's
+  // package id and integration-backed credentials. The integration is
+  // implied by the tool name, so the request schema carries no integration
+  // identifier.
   //
   // Built lazily (per `/mcp` request) by `mountMcp` because the set of
   // integrations is only known after the background bootstrap finishes.
   const makeApiCallTool = (integ: ApiCallIntegrationConfig): AppstrateToolDefinition => {
-    const baseSchema = CREDENTIAL_PROXY_INPUT_SCHEMA as unknown as {
-      properties: Record<string, object>;
-      required?: string[];
-      [k: string]: unknown;
-    };
-    const { providerId: _omitProviderId, ...properties } = baseSchema.properties;
     const ctx = {
       proxyDeps: {
         ...proxyDeps,
@@ -634,11 +608,8 @@ function buildSidecarTools(options: MountMcpOptions): {
           "credential and forwards the request to the supplied target URL, which must match " +
           "the integration auth's `authorizedUris`. Binary upstream responses spill to MCP " +
           "`resources` and are returned as a `resource_link`.",
-        inputSchema: {
-          ...baseSchema,
-          properties,
-          required: (baseSchema.required ?? []).filter((r) => r !== "providerId"),
-        },
+        inputSchema:
+          CREDENTIAL_PROXY_INPUT_SCHEMA as unknown as AppstrateToolDefinition["descriptor"]["inputSchema"],
       },
       handler: async (rawArgs) =>
         apiCallLimit
