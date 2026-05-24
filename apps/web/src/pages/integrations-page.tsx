@@ -16,11 +16,9 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { Boxes, Search, Settings } from "lucide-react";
+import { Boxes, Puzzle, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { useIntegrations, type IntegrationSummary } from "../hooks/use-integrations";
@@ -50,40 +48,46 @@ function ActiveBadge({ active }: { active: boolean }) {
   );
 }
 
+/**
+ * Integration logo with a guaranteed fallback: no `icon` declared, or a
+ * broken/blocked image URL, both resolve to a neutral default tile so every
+ * card reads consistently. Tracks the load error in state rather than hiding
+ * the `<img>` (which previously left a blank gap).
+ */
+function IntegrationIcon({ src }: { src?: string }) {
+  const [errored, setErrored] = useState(false);
+  if (src && !errored) {
+    return (
+      <img
+        src={src}
+        alt=""
+        className="size-10 shrink-0 rounded-md object-contain"
+        onError={() => setErrored(true)}
+      />
+    );
+  }
+  return (
+    <div className="bg-muted text-muted-foreground flex size-10 shrink-0 items-center justify-center rounded-md">
+      <Puzzle size={20} />
+    </div>
+  );
+}
+
 function IntegrationCard({ integration }: { integration: IntegrationSummary }) {
-  const { t } = useTranslation("settings");
   const m = integration.manifest;
-  const isSystem = integration.source === "system";
   const isActive = Boolean(integration.active);
 
   return (
-    <div
+    <Link
+      to={`/integrations/${integration.id}`}
       data-testid="integration-card"
       data-integration-id={integration.id}
-      className="bg-card flex flex-col rounded-lg border p-4 transition-shadow hover:shadow-md"
+      className="bg-card hover:border-primary/40 flex flex-col rounded-lg border p-4 transition-colors hover:shadow-md"
     >
       <div className="flex items-start gap-3">
-        {m.icon ? (
-          <img
-            src={m.icon}
-            alt=""
-            className="size-10 rounded-md object-cover"
-            onError={(e) => {
-              (e.currentTarget as HTMLImageElement).style.display = "none";
-            }}
-          />
-        ) : (
-          <div className="bg-muted text-muted-foreground flex size-10 items-center justify-center rounded-md">
-            <Boxes size={20} />
-          </div>
-        )}
+        <IntegrationIcon src={m.icon} />
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="truncate text-sm font-semibold">{m.displayName}</h3>
-            <Badge variant="outline" className="font-mono text-xs">
-              v{m.version}
-            </Badge>
-          </div>
+          <h3 className="truncate text-sm font-semibold">{m.displayName}</h3>
           <p className="text-muted-foreground truncate font-mono text-xs">{integration.id}</p>
         </div>
         <ActiveBadge active={isActive} />
@@ -91,29 +95,7 @@ function IntegrationCard({ integration }: { integration: IntegrationSummary }) {
       {m.description && (
         <p className="text-muted-foreground mt-3 line-clamp-2 text-sm">{m.description}</p>
       )}
-      <div className="mt-3 flex flex-wrap gap-1">
-        {isSystem ? (
-          <Badge variant="secondary">{t("integrations.badge.system")}</Badge>
-        ) : (
-          <Badge variant="secondary">{t("integrations.badge.org")}</Badge>
-        )}
-        {m.auths &&
-          Object.entries(m.auths).map(([key, auth]) => (
-            <Badge key={key} variant="outline" className="font-mono text-[0.65rem]">
-              {key}:{auth.type}
-            </Badge>
-          ))}
-      </div>
-      <div className="mt-auto flex items-center pt-4">
-        <div className="flex-1" />
-        <Button asChild variant="outline" size="sm" data-testid="integration-configure-btn">
-          <Link to={`/integrations/${integration.id}`}>
-            <Settings size={14} className="mr-1" />
-            {t("integrations.btn.configure")}
-          </Link>
-        </Button>
-      </div>
-    </div>
+    </Link>
   );
 }
 
@@ -133,7 +115,14 @@ export function IntegrationsPage() {
 
   return (
     <div className="p-6">
-      <PageHeader emoji="🧩" title={t("integrations.title")}>
+      <PageHeader
+        emoji="🧩"
+        title={t("integrations.title")}
+        breadcrumbs={[
+          { label: t("nav.orgSection", { ns: "common" }), href: "/" },
+          { label: t("integrations.title") },
+        ]}
+      >
         <p className="text-muted-foreground mt-1 text-sm">{t("integrations.subtitle")}</p>
       </PageHeader>
 
