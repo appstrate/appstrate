@@ -536,7 +536,7 @@ appstrate run @scope/triage@1.2.0
 appstrate run @scope/triage@beta
 
 # Run a local bundle without hitting the instance
-appstrate run ./out/triage-1.2.0.afps-bundle --providers local --creds-file ./creds.json
+appstrate run ./out/triage-1.2.0.afps-bundle --integrations local --creds-file ./creds.json
 ```
 
 Run-config inheritance (model, proxy, agent config, version pin) is fetched from `/api/applications/{applicationId}/packages/{scope}/{name}/run-config` and merged with flag/env overrides. Use `--no-inherit` to opt out (deterministic CI).

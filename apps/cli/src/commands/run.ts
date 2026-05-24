@@ -4,7 +4,7 @@
  * `appstrate run <bundle.afps>` — execute an AFPS bundle locally.
  *
  * Runs the bundle in-process via @appstrate/runner-pi → PiRunner. The
- * LLM API key is user-supplied (env var / flag); provider credentials
+ * LLM API key is user-supplied (env var / flag); integration credentials
  * are resolved via the Appstrate instance (default), a local JSON file,
  * or disabled entirely.
  *
@@ -101,7 +101,7 @@ export interface RunCommandOptions {
   inputFile?: string;
   config?: string;
   snapshot?: string;
-  providers?: string;
+  integrations?: string;
   credsFile?: string;
   model?: string;
   modelApi?: string;
@@ -191,11 +191,11 @@ export async function runCommand(opts: RunCommandOptions): Promise<void> {
 }
 
 async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
-  // ─── 1. Resolve provider mode + profile state ──────────────────────
-  const mode: IntegrationMode = parseIntegrationMode(opts.providers);
+  // ─── 1. Resolve integration mode + profile state ──────────────────
+  const mode: IntegrationMode = parseIntegrationMode(opts.integrations);
   const target = parseRunTarget(opts.bundle);
   // Auto-default to `preset` when the user runs an agent by id (the
-  // "UI parity" path) AND has a remote provider context. Path mode
+  // "UI parity" path) AND has a remote integration context. Path mode
   // keeps `env` as the default — local file = local execution = local
   // credentials. The user can always override via --model-source or
   // APPSTRATE_MODEL_SOURCE.
@@ -203,12 +203,12 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     autoPreset: target.kind === "id" && mode !== "none" && mode !== "local",
   });
 
-  // Build provider resolver inputs FIRST so preset mode can reuse the
+  // Build integration resolver inputs FIRST so preset mode can reuse the
   // bearer token — they share the same auth surface.
   const resolverInputs = await buildResolverInputs(mode, opts);
 
   // ─── 1a. Inherited run-config ────────────────────────────────────
-  // When the user runs an agent by id with a remote provider context,
+  // When the user runs an agent by id with a remote integration context,
   // pull the per-app run-config so flags + env vars cascade over the
   // same persisted state the dashboard "Run" button uses. Skipped for
   // path-mode (local file, no platform handle) and for `--no-inherit`
@@ -240,7 +240,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   //     instance (with deps inlined) into memory only. The bytes are
   //     verified against the server's integrity header and discarded
   //     when the run finishes — no on-disk cache. Requires a remote
-  //     provider mode so we already have the bearer token + applicationId in
+  //     integration mode so we already have the bearer token + applicationId in
   //     `resolverInputs`. The inherited `versionPin` is applied as the
   //     spec when the user did not type `@spec` themselves.
   const bundleTarget =
@@ -433,7 +433,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   // CLI's safety-net finalize in the cleanup doesn't double-post.
   // PiRunner finalises itself on success and on non-abort errors, but
   // explicitly does NOT on cancellation — and any throw during setup
-  // (provider extension build, runtime-ready emit, …) bypasses
+  // (integration extension build, runtime-ready emit, …) bypasses
   // PiRunner entirely. Without this safety net the run sits open
   // until the watchdog times out.
   const wasHttpSinkFinalized = reportSession ? attachFinalizeTracker(reportSession.httpSink) : null;
@@ -748,7 +748,7 @@ function raceFinalizeAgainstTimeout(p: Promise<void>, timeoutMs: number): Promis
  * Resolve the effective `--model-source`. Exported for unit tests.
  * Precedence: explicit flag > `APPSTRATE_MODEL_SOURCE` env > auto.
  * Auto picks `preset` when the caller passes `{ autoPreset: true }`
- * (id-mode + remote provider context, the UI-parity path) and `env`
+ * (id-mode + remote integration context, the UI-parity path) and `env`
  * otherwise (local file, or any local-credentials run).
  */
 export function parseModelSource(
@@ -791,8 +791,8 @@ async function resolveLlmConfig(
   // Appstrate bearer token, which lives in the remote resolver inputs.
   if (!resolverInputs || !("bearerToken" in resolverInputs)) {
     throw new ModelResolutionError(
-      "--model-source preset requires remote provider mode",
-      "Remove --providers=none/local, or log in with `appstrate login`.",
+      "--model-source preset requires remote integration mode",
+      "Remove --integrations=none/local, or log in with `appstrate login`.",
     );
   }
   const profileName = await resolveProfileNameForPreset(opts);
@@ -830,7 +830,7 @@ async function buildResolverInputs(
   if (mode === "local") {
     if (!opts.credsFile) {
       throw new ResolverConfigError(
-        "--providers=local requires --creds-file <path>",
+        "--integrations=local requires --creds-file <path>",
         "Pass a JSON file with { version: 1, integrations: {…} }",
       );
     }
@@ -899,7 +899,7 @@ async function buildInteractiveRemoteInputs(
   const profile = resolved?.profile;
   if (!resolved || !profile) {
     throw new ResolverConfigError(
-      "--providers=remote requires a logged-in profile or an API key",
+      "--integrations=remote requires a logged-in profile or an API key",
       "Run `appstrate login`, or set APPSTRATE_API_KEY + APPSTRATE_INSTANCE + APPSTRATE_APP_ID (headless)",
     );
   }
@@ -1052,7 +1052,7 @@ function resolverInputsInstance(inputs: RemoteResolverInputs | LocalResolverInpu
 
 /**
  * Pull the resolved run-config from the pinned instance when running an
- * agent by id with a remote provider context. Returns a zeroed
+ * agent by id with a remote integration context. Returns a zeroed
  * inheritance record when the call cannot or should not be made — the
  * caller treats every field as a no-op merge in that case.
  */
@@ -1137,7 +1137,7 @@ async function resolveBundleSource(
     return { kind: "path", path: abs, label: path.basename(abs) };
   }
 
-  // id mode — needs remote provider context so we have a bearer + applicationId
+  // id mode — needs remote integration context so we have a bearer + applicationId
   // to authenticate the bundle download against the pinned instance.
   if (!resolverInputs || !("bearerToken" in resolverInputs)) {
     throw new PackageSpecError(

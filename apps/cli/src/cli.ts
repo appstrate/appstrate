@@ -759,11 +759,11 @@ program
     'Force remote execution on the pinned instance (same path as the dashboard "Run" button). Default for @scope/agent ids. Path-mode bundles are not yet supported in remote mode.',
   )
   .option(
-    "--providers <mode>",
-    "Provider resolution: remote (default, via Appstrate instance), local (creds file), or none. --local execution path only.",
+    "--integrations <mode>",
+    "Integration credential resolution: remote (default, via Appstrate instance), local (creds file), or none. --local execution path only.",
   )
-  .option("--creds-file <path>", "JSON credentials file for --providers=local")
-  .option("--api-key <key>", "Appstrate API key (ask_...) for --providers=remote")
+  .option("--creds-file <path>", "JSON credentials file for --integrations=local")
+  .option("--api-key <key>", "Appstrate API key (ask_...) for --integrations=remote")
   .option("--input <json>", "Input JSON object passed to the agent")
   .option("--input-file <path>", "Read input JSON from file")
   .option("--config <json>", "Config JSON object passed to the agent")
@@ -825,7 +825,7 @@ program
       bundle,
       local: opts.local === true,
       remote: opts.remote === true,
-      providers: typeof opts.providers === "string" ? opts.providers : undefined,
+      integrations: typeof opts.integrations === "string" ? opts.integrations : undefined,
       credsFile: typeof opts.credsFile === "string" ? opts.credsFile : undefined,
       apiKey: typeof opts.apiKey === "string" ? opts.apiKey : undefined,
       input: typeof opts.input === "string" ? opts.input : undefined,

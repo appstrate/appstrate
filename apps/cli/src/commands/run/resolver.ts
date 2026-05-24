@@ -96,7 +96,7 @@ export function buildIntegrationResolver(
       const local = inputs as LocalResolverInputs | null;
       if (!local?.credsFilePath) {
         throw new ResolverConfigError(
-          "--providers=local requires --creds-file <path>",
+          "--integrations=local requires --creds-file <path>",
           "Pass a JSON file with { version: 1, integrations: {…} }",
         );
       }
@@ -107,13 +107,13 @@ export function buildIntegrationResolver(
       const remote = inputs as RemoteResolverInputs | null;
       if (!remote) {
         throw new ResolverConfigError(
-          "--providers=remote requires a logged-in profile or an API key",
+          "--integrations=remote requires a logged-in profile or an API key",
           "Run `appstrate login`, or set APPSTRATE_API_KEY + APPSTRATE_INSTANCE + APPSTRATE_APP_ID",
         );
       }
       if (!remote.instance || !remote.bearerToken || !remote.applicationId) {
         throw new ResolverConfigError(
-          "--providers=remote requires instance + bearerToken + applicationId",
+          "--integrations=remote requires instance + bearerToken + applicationId",
           "Ensure your profile has an applicationId set (run `appstrate app switch`) and a usable session (run `appstrate login`)",
         );
       }
@@ -133,7 +133,7 @@ export function parseIntegrationMode(raw: string | undefined): IntegrationMode {
   const value = raw ?? "remote";
   if (value !== "remote" && value !== "local" && value !== "none") {
     throw new ResolverConfigError(
-      `Invalid --providers value "${value}"`,
+      `Invalid --integrations value "${value}"`,
       "Accepted: remote | local | none",
     );
   }

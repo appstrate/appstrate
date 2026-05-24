@@ -47,7 +47,7 @@ export interface ModeResolutionOpts {
   llmApiKey?: string;
   modelApi?: string;
   modelSource?: string;
-  providers?: string;
+  integrations?: string;
   report?: string;
   reportFallback?: string;
   sinkTtl?: number;
@@ -142,10 +142,10 @@ export function validateOptsForMode(mode: ExecutionMode, opts: ModeResolutionOpt
       reason: "the server always uses the preset path for remote runs",
     });
   }
-  if (opts.providers !== undefined && opts.providers !== "remote") {
+  if (opts.integrations !== undefined && opts.integrations !== "remote") {
     offenders.push({
-      flag: `--providers=${opts.providers}`,
-      reason: "remote runs always resolve providers via the platform",
+      flag: `--integrations=${opts.integrations}`,
+      reason: "remote runs always resolve integrations via the platform",
     });
   }
   if (opts.report !== undefined) {

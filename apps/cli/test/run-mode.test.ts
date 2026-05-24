@@ -101,7 +101,7 @@ describe("validateOptsForMode — local mode", () => {
         llmApiKey: "sk-test",
         modelApi: "openai-responses",
         modelSource: "env",
-        providers: "local",
+        integrations: "local",
         report: "true",
         reportFallback: "console",
         sinkTtl: 600,
@@ -115,8 +115,8 @@ describe("validateOptsForMode — remote mode", () => {
     expect(() => validateOptsForMode("remote", {})).not.toThrow();
   });
 
-  it("accepts --providers=remote (the implicit default)", () => {
-    expect(() => validateOptsForMode("remote", { providers: "remote" })).not.toThrow();
+  it("accepts --integrations=remote (the implicit default)", () => {
+    expect(() => validateOptsForMode("remote", { integrations: "remote" })).not.toThrow();
   });
 
   it.each([
@@ -132,9 +132,13 @@ describe("validateOptsForMode — remote mode", () => {
     expect(() => validateOptsForMode("remote", opts)).toThrow(ExecutionModeError);
   });
 
-  it("rejects --providers=local|none in remote mode", () => {
-    expect(() => validateOptsForMode("remote", { providers: "local" })).toThrow(ExecutionModeError);
-    expect(() => validateOptsForMode("remote", { providers: "none" })).toThrow(ExecutionModeError);
+  it("rejects --integrations=local|none in remote mode", () => {
+    expect(() => validateOptsForMode("remote", { integrations: "local" })).toThrow(
+      ExecutionModeError,
+    );
+    expect(() => validateOptsForMode("remote", { integrations: "none" })).toThrow(
+      ExecutionModeError,
+    );
   });
 
   it("error message lists every offender so the user fixes them in one pass", () => {
