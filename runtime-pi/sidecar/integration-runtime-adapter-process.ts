@@ -12,8 +12,6 @@
  * tests. In production the docker adapter takes precedence.
  */
 
-import { normalize, join, posix } from "node:path";
-
 import { SubprocessTransport } from "@appstrate/mcp-transport";
 
 import { logger } from "./logger.ts";
@@ -21,6 +19,7 @@ import type { IntegrationSpawnSpec } from "./integrations-boot.ts";
 import {
   buildMitmEnvBlock,
   registerIntegrationRuntimeAdapter,
+  resolveBundleEntry,
   type IntegrationRuntimeAdapter,
   type RuntimeAdapterRunContext,
   type SpawnIntegrationOptions,
@@ -67,10 +66,7 @@ function planSubprocess(spec: IntegrationSpawnSpec, bundleRoot: string): Subproc
       `integration-runtime-adapter-process: server.entryPoint required for server.type="${t}"`,
     );
   }
-  const absEntry = normalize(join(bundleRoot, entry));
-  if (!absEntry.startsWith(bundleRoot + posix.sep) && absEntry !== bundleRoot) {
-    throw new Error(`integration-runtime-adapter-process: server.entryPoint escapes bundle root`);
-  }
+  const absEntry = resolveBundleEntry(bundleRoot, entry);
   if (t === "binary") {
     return { command: absEntry, args: [], cwd: bundleRoot };
   }

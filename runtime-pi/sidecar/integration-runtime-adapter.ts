@@ -16,6 +16,8 @@
  * call; nothing in `integrations-boot.ts` needs to change.
  */
 
+import { normalize, join, posix } from "node:path";
+
 import type { SubprocessTransport } from "@appstrate/mcp-transport";
 import type { IntegrationSpawnSpec } from "./integrations-boot.ts";
 
@@ -141,6 +143,27 @@ export function selectIntegrationRuntimeAdapter(
 // ─────────────────────────────────────────────
 // Shared helpers
 // ─────────────────────────────────────────────
+
+/**
+ * Path-traversal guard shared by every spawning adapter (docker, process,
+ * future VM backends). Resolves a manifest-declared `entryPoint` against the
+ * extracted `bundleRoot` and asserts the result stays *inside* the bundle —
+ * so a malformed/malicious manifest (`../../etc/passwd`, an absolute path, a
+ * `a/../../b` escape) can never trick the sidecar into spawning or
+ * `docker cp`-ing a file outside the bundle root. Returns the normalized
+ * absolute host path on success; throws on containment violation.
+ *
+ * Containment rule: the resolved path must be `bundleRoot` itself, or live
+ * under `bundleRoot + sep`. Using the POSIX separator matches the sidecar's
+ * Linux filesystem (the only place bundles are extracted).
+ */
+export function resolveBundleEntry(bundleRoot: string, entryPoint: string): string {
+  const abs = normalize(join(bundleRoot, entryPoint));
+  if (!abs.startsWith(bundleRoot + posix.sep) && abs !== bundleRoot) {
+    throw new Error("integration entryPoint escapes bundle root");
+  }
+  return abs;
+}
 
 /**
  * Build the standard MITM-proxy env block. Adapters call this with the

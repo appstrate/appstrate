@@ -25,6 +25,31 @@ class DockerWorkloadHandle implements WorkloadHandle {
   ) {}
 }
 
+/**
+ * Docker socket gating invariant (host-escape boundary).
+ *
+ * The sidecar only needs the Docker socket + root when it has to spawn
+ * per-integration runner containers — i.e. when the run declares ≥1
+ * integration. Runs without integrations keep the image's locked-down
+ * default (`nobody:nobody`, no socket bind). Extracted as a pure helper so
+ * the gating decision is unit-testable without a Docker daemon.
+ *
+ * Returns the `HostConfig`/`User` overrides to merge into the
+ * `createContainer` options: the socket bind + `user: "0:0"` when
+ * integrations are present, otherwise an empty object (defaults apply).
+ */
+export function sidecarSocketOverrides(
+  spec: Pick<SidecarLaunchSpec, "integrations">,
+): { binds: string[]; user: string } | Record<string, never> {
+  const hasIntegrations = spec.integrations !== undefined && spec.integrations.length > 0;
+  return hasIntegrations
+    ? {
+        binds: ["/var/run/docker.sock:/var/run/docker.sock"],
+        user: "0:0",
+      }
+    : {};
+}
+
 export class DockerOrchestrator implements ContainerOrchestrator {
   private egressNetworkId: string | null = null;
   /**
@@ -164,7 +189,6 @@ export class DockerOrchestrator implements ContainerOrchestrator {
     // `docker`-group one, rootless Docker uses the calling UID). We only
     // grant it when the run actually has integrations — otherwise we keep
     // the sidecar locked down with the image's default `nobody:nobody`.
-    const hasIntegrations = spec.integrations !== undefined && spec.integrations.length > 0;
     const containerId = await docker.createContainer(runId, sidecarEnv, {
       image: env.SIDECAR_IMAGE,
       adapterName: "sidecar",
@@ -172,12 +196,7 @@ export class DockerOrchestrator implements ContainerOrchestrator {
       nanoCpus: SIDECAR_NANO_CPUS,
       networkId: this.egressNetworkId!,
       extraHosts: platformNetwork ? [] : ["host.docker.internal:host-gateway"],
-      ...(hasIntegrations
-        ? {
-            binds: ["/var/run/docker.sock:/var/run/docker.sock"],
-            user: "0:0",
-          }
-        : {}),
+      ...sidecarSocketOverrides(spec),
     });
 
     // Connect to run network (agent reaches sidecar via "sidecar" DNS alias)

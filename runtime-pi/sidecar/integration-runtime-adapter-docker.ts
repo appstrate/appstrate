@@ -11,7 +11,7 @@
  * at {@link CA_CONTAINER_PATH}.
  */
 
-import { join, normalize, posix } from "node:path";
+import { posix } from "node:path";
 
 import { SubprocessTransport } from "@appstrate/mcp-transport";
 
@@ -20,6 +20,7 @@ import type { IntegrationSpawnSpec } from "./integrations-boot.ts";
 import {
   buildMitmEnvBlock,
   registerIntegrationRuntimeAdapter,
+  resolveBundleEntry,
   type IntegrationRuntimeAdapter,
   type RuntimeAdapterRunContext,
   type SpawnIntegrationOptions,
@@ -112,10 +113,7 @@ function planContainer(spec: IntegrationSpawnSpec, bundleRoot: string): Containe
   // Path-traversal guard on the host-side path. We still re-derive the
   // container-side path below — this check exists so a malformed
   // manifest can't trick us into docker-cp'ing outside the bundle root.
-  const absHostEntry = normalize(join(bundleRoot, entry));
-  if (!absHostEntry.startsWith(bundleRoot + posix.sep) && absHostEntry !== bundleRoot) {
-    throw new Error(`integration-runtime-adapter-docker: server.entryPoint escapes bundle root`);
-  }
+  resolveBundleEntry(bundleRoot, entry);
   const rel = entry.replace(/^\.?\/+/, "");
   const containerEntry = posix.join("/bundle", rel);
   return { image, containerEntry };

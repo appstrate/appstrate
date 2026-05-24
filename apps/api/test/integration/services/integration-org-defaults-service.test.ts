@@ -1,0 +1,161 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * E-extra — integration org-defaults service.
+ *
+ * Org-wide default connection per (application, integration): the cross-agent
+ * governance baseline. CRUD round-trip + org isolation.
+ *
+ * `upsertOrgDefault` delegates target validation to `validatePinTarget` with
+ * `requireShared: true`, so the seeded connection must be `sharedWithOrg=true`,
+ * belong to the application, and reference the integration.
+ */
+
+import { describe, it, expect, beforeEach } from "bun:test";
+import { db, truncateAll } from "../../helpers/db.ts";
+import { createTestContext, type TestContext } from "../../helpers/auth.ts";
+import { seedPackage } from "../../helpers/seed.ts";
+import { integrationConnections } from "@appstrate/db/schema";
+import { encryptCredentials } from "@appstrate/connect";
+import {
+  upsertOrgDefault,
+  getOrgDefault,
+  listOrgDefaultsForResolver,
+  deleteOrgDefault,
+} from "../../../src/services/integration-org-defaults-service.ts";
+import type { AppScope } from "../../../src/lib/scope.ts";
+
+const INTEGRATION_ID = "@official/gmail";
+
+function integrationManifest(): Record<string, unknown> {
+  return {
+    manifestVersion: "1.1",
+    type: "integration",
+    name: INTEGRATION_ID,
+    version: "1.0.0",
+    displayName: "Gmail",
+    server: { type: "python", entryPoint: "./server.py" },
+    auths: {
+      primary: {
+        type: "api_key",
+        authorizedUris: ["https://api/*"],
+        delivery: { http: { headerName: "X-Api-Key", valueFrom: "api_key" } },
+      },
+    },
+  };
+}
+
+describe("integration-org-defaults-service", () => {
+  let ctx: TestContext;
+  let scope: AppScope;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "orgdef" });
+    scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    await seedPackage({
+      id: INTEGRATION_ID,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: integrationManifest(),
+    });
+  });
+
+  /** Seed a sharedWithOrg connection (the only valid org-default target). */
+  async function seedSharedConnection(applicationId = ctx.defaultAppId): Promise<string> {
+    const [row] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationPackageId: INTEGRATION_ID,
+        authKey: "primary",
+        accountId: "acct-shared",
+        applicationId,
+        userId: ctx.user.id,
+        credentialsEncrypted: encryptCredentials({ api_key: "k" }),
+        scopesGranted: [],
+        sharedWithOrg: true,
+      })
+      .returning({ id: integrationConnections.id });
+    return row!.id;
+  }
+
+  it("round-trips upsert → get → resolver-shape → delete (idempotent)", async () => {
+    const connId = await seedSharedConnection();
+
+    // upsert
+    const created = await upsertOrgDefault(scope, INTEGRATION_ID, {
+      connectionId: connId,
+      enforce: true,
+      createdBy: ctx.user.id,
+    });
+    expect(created.connectionId).toBe(connId);
+    expect(created.enforce).toBe(true);
+    expect(created.authKey).toBe("primary");
+
+    // get
+    const fetched = await getOrgDefault(scope, INTEGRATION_ID);
+    expect(fetched).not.toBeNull();
+    expect(fetched!.connectionId).toBe(connId);
+    expect(fetched!.enforce).toBe(true);
+    expect(fetched!.authKey).toBe("primary");
+
+    // listOrgDefaultsForResolver shape
+    const resolverMap = await listOrgDefaultsForResolver(ctx.defaultAppId);
+    expect(resolverMap[INTEGRATION_ID]).toEqual({ connectionId: connId, enforce: true });
+
+    // delete
+    const del = await deleteOrgDefault(scope, INTEGRATION_ID);
+    expect(del.deleted).toBe(true);
+    expect(await getOrgDefault(scope, INTEGRATION_ID)).toBeNull();
+
+    // delete is idempotent — second delete reports nothing removed.
+    const del2 = await deleteOrgDefault(scope, INTEGRATION_ID);
+    expect(del2.deleted).toBe(false);
+  });
+
+  it("upsert replaces the existing default on the (app, integration) unique index", async () => {
+    const connA = await seedSharedConnection();
+    const connB = await seedSharedConnection();
+
+    await upsertOrgDefault(scope, INTEGRATION_ID, {
+      connectionId: connA,
+      enforce: false,
+      createdBy: ctx.user.id,
+    });
+    const replaced = await upsertOrgDefault(scope, INTEGRATION_ID, {
+      connectionId: connB,
+      enforce: true,
+      createdBy: ctx.user.id,
+    });
+    expect(replaced.connectionId).toBe(connB);
+    expect(replaced.enforce).toBe(true);
+
+    const fetched = await getOrgDefault(scope, INTEGRATION_ID);
+    expect(fetched!.connectionId).toBe(connB);
+    expect(fetched!.enforce).toBe(true);
+  });
+
+  it("getOrgDefault returns null when no default is set", async () => {
+    expect(await getOrgDefault(scope, INTEGRATION_ID)).toBeNull();
+    expect(await listOrgDefaultsForResolver(ctx.defaultAppId)).toEqual({});
+  });
+
+  it("org isolation: one org cannot read another org's default", async () => {
+    const connId = await seedSharedConnection();
+    await upsertOrgDefault(scope, INTEGRATION_ID, {
+      connectionId: connId,
+      enforce: true,
+      createdBy: ctx.user.id,
+    });
+
+    // A second org with its own application — must not see org 1's default.
+    const otherCtx = await createTestContext({ orgSlug: "orgdef-other" });
+    const otherScope: AppScope = {
+      orgId: otherCtx.orgId,
+      applicationId: otherCtx.defaultAppId,
+    };
+    expect(await getOrgDefault(otherScope, INTEGRATION_ID)).toBeNull();
+    expect(await listOrgDefaultsForResolver(otherCtx.defaultAppId)).toEqual({});
+  });
+});

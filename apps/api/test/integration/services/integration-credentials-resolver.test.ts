@@ -1,0 +1,334 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * E2 — live integration credentials resolver (`resolveLiveIntegrationCredentials`).
+ *
+ * This is the sidecar `/internal/integration-credentials` backing: it decrypts
+ * the per-run connection's credentials and proactively refreshes OAuth2 tokens.
+ *
+ * Refresh seam used by these tests
+ * --------------------------------
+ * The resolver does NOT take an injectable refresh function. It calls
+ * `forceRefreshIntegrationConnection` directly, which in turn builds a
+ * `RefreshContext` from the manifest's `auths.{key}.tokenUrl` + the seeded
+ * per-application `integration_oauth_clients` row, then POSTs the
+ * `refresh_token` to that token URL via the shared
+ * `performRefreshTokenExchange`.
+ *
+ * So the lowest injectable boundary is the **token endpoint URL itself**:
+ * each test stands up a controllable `Bun.serve` and points
+ * `manifest.auths.primary.tokenUrl` at it. The server's response shape drives
+ * the `RefreshError` taxonomy and the scope-shrink path:
+ *   - HTTP 400 + `{ "error": "invalid_grant" }` → RefreshError(kind="revoked") → 410
+ *   - HTTP 500 (or any non-400)                 → RefreshError(kind="transient") → 502
+ *   - HTTP 200 + narrowed `scope`               → shrinkDetected → scope-floor check
+ *
+ * Refresh is triggered deterministically via `options.forceRefresh = true`
+ * (no clock games needed for the lead window).
+ */
+
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { db, truncateAll } from "../../helpers/db.ts";
+import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
+import { seedPackage } from "../../helpers/seed.ts";
+import { installPackage } from "../../../src/services/application-packages.ts";
+import { integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
+import { eq } from "drizzle-orm";
+import { encryptCredentials } from "@appstrate/connect";
+import { resolveLiveIntegrationCredentials } from "../../../src/services/integration-credentials-resolver.ts";
+
+const INTEGRATION_ID = "@official/gmail";
+
+// ── Controllable upstream token endpoint ─────────────────────
+interface TokenServer {
+  url: string;
+  setResponse: (body: Record<string, unknown> | string, status?: number) => void;
+  stop: () => void;
+}
+
+function startTokenServer(): TokenServer {
+  let nextBody: Record<string, unknown> | string = {};
+  let nextStatus = 200;
+  const server = (
+    globalThis as unknown as {
+      Bun: {
+        serve: (opts: {
+          port: number;
+          hostname: string;
+          fetch: (req: Request) => Promise<Response> | Response;
+        }) => { port: number; hostname: string; stop: () => void };
+      };
+    }
+  ).Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    fetch: () =>
+      new Response(typeof nextBody === "string" ? nextBody : JSON.stringify(nextBody), {
+        status: nextStatus,
+        headers: { "Content-Type": "application/json" },
+      }),
+  });
+  return {
+    url: `http://${server.hostname}:${server.port}/token`,
+    setResponse: (body, status = 200) => {
+      nextBody = body;
+      nextStatus = status;
+    },
+    stop: () => server.stop(),
+  };
+}
+
+function gmailManifest(tokenUrl: string): Record<string, unknown> {
+  return {
+    manifestVersion: "1.1",
+    type: "integration",
+    name: INTEGRATION_ID,
+    version: "1.0.0",
+    displayName: "Gmail",
+    server: { type: "python", entryPoint: "./server.py" },
+    auths: {
+      primary: {
+        type: "oauth2",
+        authorizationUrl: "https://idp/a",
+        tokenUrl,
+        tokenAuthMethod: "client_secret_post",
+        authorizedUris: ["https://api/*"],
+        delivery: {
+          http: { headerName: "Authorization", headerPrefix: "Bearer ", valueFrom: "access_token" },
+        },
+        availableScopes: [
+          { value: "read", label: "Read" },
+          { value: "send", label: "Send" },
+          { value: "delete", label: "Delete" },
+        ],
+      },
+    },
+    tools: {
+      list_messages: { requiredScopes: ["read"] },
+      send_message: { requiredScopes: ["send"] },
+      delete_message: { requiredScopes: ["delete"] },
+    },
+  };
+}
+
+function agentManifest(name: string, tools: string[]): Record<string, unknown> {
+  return {
+    name,
+    version: "1.0.0",
+    type: "agent",
+    schemaVersion: "1.0",
+    displayName: name,
+    dependencies: { integrations: { [INTEGRATION_ID]: "^1.0.0" } },
+    integrations: { [INTEGRATION_ID]: { tools } },
+  };
+}
+
+describe("resolveLiveIntegrationCredentials", () => {
+  let ctx: TestContext;
+  let token: TokenServer;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "creds" });
+    token = startTokenServer();
+    await seedPackage({
+      id: INTEGRATION_ID,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: gmailManifest(token.url),
+    });
+    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, INTEGRATION_ID);
+    // Per-app OAuth client → makes the auth refreshable (buildIntegrationOAuthRefreshContext).
+    await db.insert(integrationOauthClients).values({
+      applicationId: ctx.defaultAppId,
+      integrationPackageId: INTEGRATION_ID,
+      authKey: "primary",
+      clientId: "cid",
+      clientSecretEncrypted: encryptCredentials({ client_secret: "csec" }),
+    });
+  });
+
+  afterEach(() => {
+    token.stop();
+  });
+
+  /** Seed a connection for the given owner with a refresh token + scopes. */
+  async function seedConnection(opts: {
+    userId?: string;
+    endUserId?: string;
+    scopes?: string[];
+    accountId?: string;
+  }): Promise<string> {
+    const ciphertext = encryptCredentials({
+      access_token: "old-access",
+      accessToken: "old-access",
+      refresh_token: "rt-1",
+      refreshToken: "rt-1",
+    });
+    const [row] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationPackageId: INTEGRATION_ID,
+        authKey: "primary",
+        accountId: opts.accountId ?? "acct-1",
+        applicationId: ctx.defaultAppId,
+        userId: opts.userId ?? null,
+        endUserId: opts.endUserId ?? null,
+        credentialsEncrypted: ciphertext,
+        scopesGranted: opts.scopes ?? ["read", "send"],
+      })
+      .returning({ id: integrationConnections.id });
+    return row!.id;
+  }
+
+  function resolverContext() {
+    return {
+      runId: "run_test",
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      agentPackageId: "@creds/agent",
+      actor: { type: "user" as const, id: ctx.user.id },
+    };
+  }
+
+  async function needsReconnection(connId: string): Promise<boolean> {
+    const [row] = await db
+      .select({ needsReconnection: integrationConnections.needsReconnection })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connId));
+    return row!.needsReconnection;
+  }
+
+  it("throws 410 and flags needsReconnection when the refresh token is revoked", async () => {
+    const connId = await seedConnection({ userId: ctx.user.id });
+    // RFC 6749 §5.2 revocation.
+    token.setResponse({ error: "invalid_grant", error_description: "token revoked" }, 400);
+
+    let status: number | undefined;
+    try {
+      await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(), {
+        forceRefresh: true,
+      });
+      throw new Error("expected resolveLiveIntegrationCredentials to throw");
+    } catch (err) {
+      status = (err as { status?: number }).status;
+    }
+    expect(status).toBe(410);
+    expect(await needsReconnection(connId)).toBe(true);
+  });
+
+  it("throws 502 and does NOT flag the connection on a transient refresh failure", async () => {
+    const connId = await seedConnection({ userId: ctx.user.id });
+    token.setResponse({ error: "temporarily_unavailable" }, 500);
+
+    let status: number | undefined;
+    try {
+      await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(), {
+        forceRefresh: true,
+      });
+      throw new Error("expected resolveLiveIntegrationCredentials to throw");
+    } catch (err) {
+      status = (err as { status?: number }).status;
+    }
+    expect(status).toBe(502);
+    expect(await needsReconnection(connId)).toBe(false);
+  });
+
+  it("flips needsReconnection when a scope shrink drops below the installed-agent floor", async () => {
+    // Agent requires `delete`; the refresh narrows the grant to read+send only.
+    await seedPackage({
+      id: "@creds/agent-deleter",
+      orgId: ctx.orgId,
+      type: "agent",
+      draftManifest: agentManifest("@creds/agent-deleter", ["delete_message"]),
+    });
+    await installPackage(
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      "@creds/agent-deleter",
+    );
+    const connId = await seedConnection({
+      userId: ctx.user.id,
+      scopes: ["read", "send", "delete"],
+    });
+    token.setResponse({ access_token: "new-access", expires_in: 3600, scope: "read send" });
+
+    const out = await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(), {
+      forceRefresh: true,
+    });
+    // Credentials still resolve (the refresh succeeded) ...
+    expect(out.auths.length).toBe(1);
+    // ... but the connection is flagged because `delete` is now missing.
+    expect(await needsReconnection(connId)).toBe(true);
+  });
+
+  it("absorbs a scope shrink silently when it still covers the required floor", async () => {
+    // Agent requires only `read`; the refresh shrinks delete away but keeps read.
+    await seedPackage({
+      id: "@creds/agent-reader",
+      orgId: ctx.orgId,
+      type: "agent",
+      draftManifest: agentManifest("@creds/agent-reader", ["list_messages"]),
+    });
+    await installPackage(
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      "@creds/agent-reader",
+    );
+    const connId = await seedConnection({
+      userId: ctx.user.id,
+      scopes: ["read", "send", "delete"],
+    });
+    // Shrinks delete+send away but keeps read (the required floor).
+    token.setResponse({ access_token: "new-access", expires_in: 3600, scope: "read" });
+
+    const out = await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(), {
+      forceRefresh: true,
+    });
+    expect(out.auths.length).toBe(1);
+    expect(await needsReconnection(connId)).toBe(false);
+  });
+
+  it("does not resolve another actor's connection (actor-scope isolation)", async () => {
+    const other = await createTestUser();
+    // The only connection belongs to a DIFFERENT user; it is not shared.
+    await seedConnection({ userId: other.id, accountId: "other-acct" });
+
+    // No force-refresh: we want to observe selection, not the refresh path.
+    const out = await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext());
+    // No accessible connection → empty credential surface. The foreign row is
+    // never decrypted, never returned (no cross-actor leak).
+    expect(out.auths).toEqual([]);
+    expect(out.deliveryPlans).toEqual({});
+  });
+
+  it("throws 404 when the integration is not installed in the application", async () => {
+    // A different integration the agent never declared / installed.
+    await seedPackage({
+      id: "@official/uninstalled",
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: gmailManifest(token.url),
+    });
+
+    let status: number | undefined;
+    try {
+      await resolveLiveIntegrationCredentials("@official/uninstalled", resolverContext());
+      throw new Error("expected resolveLiveIntegrationCredentials to throw");
+    } catch (err) {
+      status = (err as { status?: number }).status;
+    }
+    expect(status).toBe(404);
+  });
+
+  it("throws 404 when the integration package does not exist", async () => {
+    let status: number | undefined;
+    try {
+      await resolveLiveIntegrationCredentials("@official/does-not-exist", resolverContext());
+      throw new Error("expected resolveLiveIntegrationCredentials to throw");
+    } catch (err) {
+      status = (err as { status?: number }).status;
+    }
+    expect(status).toBe(404);
+  });
+});
