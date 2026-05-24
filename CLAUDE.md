@@ -392,7 +392,7 @@ Key invariants:
 - **CA hygiene**: per-run CA, 1 h validity (matches max run duration), private key lives in memory on the sidecar — only the cert PEM (not the key) lands on local fs (`mode 0444`) for `docker cp`. Unlinked on `bootIntegrations().shutdown()`.
 - **Graceful degradation**: if openssl is missing or CA bring-up fails, the sidecar logs `HTTP-delivery integrations will skip` and continues with env-delivery-only integrations. `delivery.env` integrations are unchanged from Phase 1.4 — credentials baked in at container create time.
 - **`allowServerOverride`**: defaults to `false`. When the integration sets its own header of the same name as the injection target, the proxy strips it before forwarding (defence against integration code accidentally pre-empting the injection).
-- **Reference integration**: `@appstrate/mitm-test` (under `system-packages/`) — a pure-stdlib Python MCP server with a `call_upstream` tool that fetches `https://api.test.appstrate.dev/<path>`. Its `api_key` auth declares `delivery.http` with `X-Mitm-Test-Token`. The integration never reads the API key — proves the injection happens entirely sidecar-side.
+- **Dev reference fixture**: `@appstrate/mitm-test` (under `local-test-packages/`, not shipped) — a pure-stdlib Python MCP server with a `call_upstream` tool that fetches `https://api.test.appstrate.dev/<path>`. Its `api_key` auth declares `delivery.http` with `X-Mitm-Test-Token`. The integration never reads the API key — proves the injection happens entirely sidecar-side.
 
 ### AFPS Integrations — scope model & tool selection (niveau 2)
 

@@ -818,7 +818,7 @@ describe("integrationManifestSchema — tools.{name} metadata", () => {
 describe("integrationManifestSchema — system package gmail-mcp manifest", () => {
   it("validates the live integration-gmail-mcp manifest with catalog + tools", async () => {
     const path = new URL(
-      "../../../scripts/system-packages/integration-gmail-mcp-1.0.0/manifest.json",
+      "../../../scripts/system-packages/integration-gmail-mcp-2.0.0/manifest.json",
       import.meta.url,
     );
     const raw = JSON.parse(await Bun.file(path).text()) as Record<string, unknown>;

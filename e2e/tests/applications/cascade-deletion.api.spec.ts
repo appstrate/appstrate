@@ -13,7 +13,6 @@ import {
   createApplication,
   createWebhook,
   createEndUser,
-  createConnectionProfile,
   createSchedule,
   installPackageInApp,
 } from "../../helpers/seed.ts";
@@ -98,12 +97,7 @@ test.describe("Application cascade deletion", () => {
       applicationId: customApp.id,
     });
 
-    const profile = await createConnectionProfile(
-      request,
-      orgContext.auth.cookie,
-      orgContext.org.orgId,
-    );
-    const schedule = await createSchedule(customClient, scope, agentName, profile.id);
+    const schedule = await createSchedule(customClient, scope, agentName);
 
     // Verify schedule exists
     let res = await customClient.get(`/schedules/${schedule.id}`);
