@@ -61,14 +61,15 @@ describe("resolveStrategy", () => {
     expect(() => resolveStrategy(a)).toThrow(/connect-run substrate/);
   });
 
-  it("throws for an auth type without a connect strategy (oauth1)", () => {
-    expect(() => resolveStrategy(auth("oauth1"))).toThrow();
+  it("throws for an unknown auth type without a connect strategy", () => {
+    const a = { type: "unsupported" } as unknown as AuthDef;
+    expect(() => resolveStrategy(a)).toThrow(/no connect strategy/);
   });
 });
 
 describe("FieldsStrategy.complete", () => {
   it("refuses a wrong-kind input rather than persisting", async () => {
-    // Defence-in-depth: the route guards oauth/oauth1 too, but the strategy
+    // Defence-in-depth: the route guards oauth2 too, but the strategy
     // rejects a non-fields input before any DB access.
     const s = new FieldsStrategy();
     await expect(

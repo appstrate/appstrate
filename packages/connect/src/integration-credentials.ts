@@ -23,7 +23,7 @@ import type { HttpDeliveryPlan } from "@appstrate/afps-runtime/resolvers";
 export interface ResolvedAuthCredentials {
   /** Auth key as declared in `auths.{key}` of the manifest. */
   authKey: string;
-  /** Auth type (`oauth2`, `oauth1`, `api_key`, `basic`, `custom`). */
+  /** Auth type (`oauth2`, `api_key`, `basic`, `custom`). */
   authType: string;
   /**
    * Credential fields, keyed by their canonical **storage** name (snake_case)

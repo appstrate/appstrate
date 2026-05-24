@@ -737,7 +737,6 @@
   "integration.auth.noOauthClient": "Aucun client OAuth enregistré — un administrateur doit configurer le clientId/secret avant la connexion.",
   "integration.auth.noClientHint": "Aucun client OAuth configuré — configurez-le dans l'onglet « Accès » avant de connecter un compte.",
   "integration.auth.type.oauth2": "OAuth",
-  "integration.auth.type.oauth1": "OAuth 1.0",
   "integration.auth.type.api_key": "Clé API",
   "integration.auth.type.basic": "Identifiant + mot de passe",
   "integration.auth.type.custom": "Identifiants personnalisés",

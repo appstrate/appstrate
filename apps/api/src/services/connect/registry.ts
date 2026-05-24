@@ -9,8 +9,6 @@
  *   - `custom` + `connect.tool`         → OrchestratedStrategy (code, needs executor)
  *   - `api_key` / `basic` / bare custom → FieldsStrategy (paste-the-bag)
  *
- * `oauth1` has no working connect path (removed in Phase 7).
- *
  * `connect.tool` (Orchestrated) requires a {@link ConnectToolExecutor} — the
  * connect-run substrate that actually runs the untrusted login tool. Callers
  * that can supply one (the connect-run / sidecar boot path) pass it; the plain

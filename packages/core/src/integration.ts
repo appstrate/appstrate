@@ -277,7 +277,7 @@ const deliverySchema = z
     message: "delivery must declare at least one of: http, env, files",
   });
 
-const authTypeEnum = z.enum(["oauth2", "oauth1", "api_key", "basic", "custom"]);
+const authTypeEnum = z.enum(["oauth2", "api_key", "basic", "custom"]);
 
 const credentialsSchemaObject = z.object({
   schema: z.looseObject({}),
@@ -1092,7 +1092,7 @@ export function expandScopesGranted(
  * children) — the single source of truth for the insufficient-scopes diff
  * used by both the connection resolver and the agent-page picker.
  *
- * Scopes are an OAuth2 concept: api_key / basic / custom / oauth1 auths
+ * Scopes are an OAuth2 concept: api_key / basic / custom auths
  * grant access wholesale and carry no scope catalog, so an agent's declared
  * scopes can never be "missing" from such a connection. Diffing against one
  * would spuriously report every declared scope as missing (its `granted`

@@ -74,7 +74,7 @@ export interface ApiCallIntegrationMeta {
   namespace: string;
   /** Auth key supplying credentials (`apiCall.authKey` or the single auth). */
   authKey: string;
-  /** Auth type (`oauth2` | `oauth1` | `api_key` | `basic` | `custom`). */
+  /** Auth type (`oauth2` | `api_key` | `basic` | `custom`). */
   authType: string;
   /** URL allowlist enforced by the tool before dispatch. */
   authorizedUris: string[];
