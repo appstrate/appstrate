@@ -810,6 +810,12 @@ export async function bootIntegrations(
       // upstream URLs through a hosted MCP — the upstream decides).
       if (server.type === "http") {
         const { client, authKey } = await connectRemoteHttpIntegration(spec, bundleFetchOpts);
+        // Register on the caller-owned teardown collector BEFORE host.register
+        // so a register failure (namespace collision / suffix exhaustion,
+        // which throw before McpHost adds the client to its own set) still
+        // closes the open Streamable HTTP client. Mirrors the local-spawn
+        // path's leak-safe ordering.
+        clients.push(client);
         const sizeBefore = host.size();
         const allocatedNs = await host.register({
           namespace: spec.namespace,
@@ -819,7 +825,6 @@ export async function bootIntegrations(
           allowedTools: spec.toolAllowlist,
         });
         const added = host.size() - sizeBefore;
-        clients.push(client);
         // Attach the in-process api_call tool alongside the remote MCP's tools.
         const apiCallAdded = await attachApiCall(allocatedNs);
         spawned.push({

@@ -329,6 +329,8 @@
   "schedule.connectionOverrides.hint": "Force a specific connection per integration the agent depends on. Leave on \"Inherit\" to use the default resolution (admin pin → user fallback) at each fire time.",
   "schedule.connectionOverrides.inherit": "— Inherit (default resolution at runtime) —",
   "schedule.connectionOverrides.noCandidate": "No connection available for this integration.",
+  "schedule.connectionOverrides.sharedSuffix": "{{label}} ⋯ shared",
+  "schedule.connectionOverrides.selectAria": "Connection override for {{authKey}}",
   "detail.configSectionProxy": "Proxy",
   "detail.configAlert": "Required configuration fields are not filled in.",
   "detail.tabApi": "API",

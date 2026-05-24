@@ -50,6 +50,8 @@ import {
   buildIntegrationResolver,
   parseIntegrationMode,
   ResolverConfigError,
+  ERR_LOCAL_REQUIRES_CREDS,
+  ERR_REMOTE_REQUIRES_AUTH,
   type IntegrationMode,
   type RemoteResolverInputs,
   type LocalResolverInputs,
@@ -830,8 +832,8 @@ async function buildResolverInputs(
   if (mode === "local") {
     if (!opts.credsFile) {
       throw new ResolverConfigError(
-        "--integrations=local requires --creds-file <path>",
-        "Pass a JSON file with { version: 1, integrations: {…} }",
+        ERR_LOCAL_REQUIRES_CREDS.message,
+        ERR_LOCAL_REQUIRES_CREDS.hint,
       );
     }
     return { credsFilePath: path.resolve(opts.credsFile) };
@@ -898,10 +900,7 @@ async function buildInteractiveRemoteInputs(
   const resolved = await resolveActiveProfile(opts.profile).catch(() => null);
   const profile = resolved?.profile;
   if (!resolved || !profile) {
-    throw new ResolverConfigError(
-      "--integrations=remote requires a logged-in profile or an API key",
-      "Run `appstrate login`, or set APPSTRATE_API_KEY + APPSTRATE_INSTANCE + APPSTRATE_APP_ID (headless)",
-    );
+    throw new ResolverConfigError(ERR_REMOTE_REQUIRES_AUTH.message, ERR_REMOTE_REQUIRES_AUTH.hint);
   }
   if (!profile.applicationId) {
     throw new ResolverConfigError(

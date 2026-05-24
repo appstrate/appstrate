@@ -329,6 +329,8 @@
   "schedule.connectionOverrides.hint": "Forcez une connexion spécifique pour chaque intégration dont dépend l'agent. Laisser sur « Hériter » pour utiliser la résolution par défaut (épingle admin → fallback utilisateur) au moment de chaque déclenchement.",
   "schedule.connectionOverrides.inherit": "— Hériter (résolution par défaut au runtime) —",
   "schedule.connectionOverrides.noCandidate": "Aucune connexion disponible pour cette intégration.",
+  "schedule.connectionOverrides.sharedSuffix": "{{label}} ⋯ partagé",
+  "schedule.connectionOverrides.selectAria": "Connexion forcée pour {{authKey}}",
   "detail.configSectionProxy": "Proxy",
   "detail.configAlert": "Des champs de configuration obligatoires ne sont pas remplis.",
   "detail.tabApi": "API",

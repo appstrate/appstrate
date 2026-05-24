@@ -390,13 +390,16 @@ function IntegrationOverrideRow({
               }}
               className="border-border bg-background flex-1 rounded border px-2 py-1 text-xs"
               data-testid={`schedule-conn-select-${integration.id}-${authKey}`}
+              aria-label={t("schedule.connectionOverrides.selectAria", { authKey })}
             >
               <option value="">{t("schedule.connectionOverrides.inherit")}</option>
               {candidates.map((c) => {
                 const display = connectionDisplayLabel(c);
                 return (
                   <option key={c.id} value={c.id}>
-                    {c.sharedWithOrg ? `${display} ⋯ shared` : display}
+                    {c.sharedWithOrg
+                      ? t("schedule.connectionOverrides.sharedSuffix", { label: display })
+                      : display}
                   </option>
                 );
               })}

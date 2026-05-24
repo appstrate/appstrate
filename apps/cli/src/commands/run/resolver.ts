@@ -76,6 +76,18 @@ export class ResolverConfigError extends Error {
   }
 }
 
+// Shared (message, hint) pairs so the two precondition gates — the eager
+// one in `run.ts:buildResolverInputs` and the safety-net one in
+// `buildIntegrationResolver` below — can't drift apart.
+export const ERR_LOCAL_REQUIRES_CREDS = {
+  message: "--integrations=local requires --creds-file <path>",
+  hint: "Pass a JSON file with { version: 1, integrations: {…} }",
+} as const;
+export const ERR_REMOTE_REQUIRES_AUTH = {
+  message: "--integrations=remote requires a logged-in profile or an API key",
+  hint: "Run `appstrate login`, or set APPSTRATE_API_KEY + APPSTRATE_INSTANCE + APPSTRATE_APP_ID (headless)",
+} as const;
+
 /**
  * Build an {@link IntegrationApiCallResolver} matching the requested mode.
  * Serverless `apiCall` integrations (the unified integration
@@ -96,8 +108,8 @@ export function buildIntegrationResolver(
       const local = inputs as LocalResolverInputs | null;
       if (!local?.credsFilePath) {
         throw new ResolverConfigError(
-          "--integrations=local requires --creds-file <path>",
-          "Pass a JSON file with { version: 1, integrations: {…} }",
+          ERR_LOCAL_REQUIRES_CREDS.message,
+          ERR_LOCAL_REQUIRES_CREDS.hint,
         );
       }
       return new LocalIntegrationResolver({ creds: local.credsFilePath });
@@ -107,8 +119,8 @@ export function buildIntegrationResolver(
       const remote = inputs as RemoteResolverInputs | null;
       if (!remote) {
         throw new ResolverConfigError(
-          "--integrations=remote requires a logged-in profile or an API key",
-          "Run `appstrate login`, or set APPSTRATE_API_KEY + APPSTRATE_INSTANCE + APPSTRATE_APP_ID",
+          ERR_REMOTE_REQUIRES_AUTH.message,
+          ERR_REMOTE_REQUIRES_AUTH.hint,
         );
       }
       if (!remote.instance || !remote.bearerToken || !remote.applicationId) {

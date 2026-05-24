@@ -152,11 +152,6 @@ export async function planCaBundle(options: PlanCaBundleOptions): Promise<CaBund
 }
 
 // ─────────────────────────────────────────────
-// Mount plan — emitted alongside the bundle so the sidecar wires the
-// same tmpfs structure deterministically.
-// ─────────────────────────────────────────────
-
-// ─────────────────────────────────────────────
 // Internals
 // ─────────────────────────────────────────────
 

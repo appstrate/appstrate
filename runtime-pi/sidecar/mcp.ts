@@ -1771,7 +1771,7 @@ export function mountMcp(app: Hono, options: MountMcpOptions): void {
     }
 
     // Wait for the integration runtime to finish its first bootstrap
-    // pass (max 10s). The wait is amortised: only the first `/mcp`
+    // pass (max INTEGRATION_BOOT_WAIT_MS = 30s). The wait is amortised: only the first `/mcp`
     // request pays it; once the promise resolves we drop the reference
     // so subsequent requests skip the await entirely.
     if (bootReady) await bootReady;

@@ -3,6 +3,7 @@
 import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { useInitiateIntegrationOAuth } from "../../hooks/use-integrations";
 
 const OAUTH_POPUP_TIMEOUT_MS = 5 * 60_000;
@@ -93,11 +94,11 @@ export function useIntegrationOAuthPopup() {
         ]);
       } catch (err) {
         if (err instanceof Error && err.message === "popup_blocked") {
-          window.alert(t("integration.popup.blocked"));
+          toast.error(t("integration.popup.blocked"));
           return;
         }
         if (err instanceof Error && err.message === "oauth_timeout") {
-          window.alert(t("integration.popup.timeout"));
+          toast.error(t("integration.popup.timeout"));
           return;
         }
         throw err;

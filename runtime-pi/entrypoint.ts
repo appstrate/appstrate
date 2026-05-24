@@ -376,7 +376,7 @@ await progress(
 
 const sidecarUrl = env.sidecarUrl;
 
-// When no sidecar is attached (plan with empty providers[] + static API
+// When no sidecar is attached (no integrations + static API
 // key), the agent runs without MCP-backed tools. The platform wires
 // MODEL_BASE_URL directly to the upstream provider; the LLM only sees
 // the agent's bundle tools + runtime extensions.

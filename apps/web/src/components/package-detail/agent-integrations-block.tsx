@@ -747,7 +747,7 @@ type IntegrationStatus =
 
 function deriveIntegrationStatus(input: {
   manifest: IntegrationManifestView;
-  connections: { authKey: string; scopesGranted: string[]; needsReconnection: boolean }[];
+  connections: { authKey: string; needsReconnection: boolean }[];
   agentTools: string[] | undefined;
   agentScopes: string[] | undefined;
 }): IntegrationStatus {
