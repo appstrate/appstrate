@@ -991,16 +991,6 @@ export function IntegrationDetailPage() {
   const version = pkg?.version ?? m.version;
   const isBuiltIn = source === "system";
   const isImported = !isBuiltIn && !isOwned;
-  // The package `content` is the INTEGRATION.md companion when the bundle
-  // ships one, otherwise it falls back to the manifest JSON text (see
-  // @appstrate/core/zip parsePackageZip). Only surface the companion menu
-  // item for a real doc — the manifest already has its own "view" item, so
-  // showing the JSON fallback here would just duplicate it.
-  const companionContent = pkg?.content;
-  const companionFile =
-    companionContent && !companionContent.trimStart().startsWith("{")
-      ? { name: "INTEGRATION.md", content: companionContent }
-      : undefined;
   const onActivate = () => activate.mutate(packageId);
 
   return (
@@ -1042,7 +1032,6 @@ export function IntegrationDetailPage() {
               packageId={packageId}
               type="integration"
               manifest={m as unknown as Record<string, unknown>}
-              companionFile={companionFile}
               isOwned={isOwned}
               isImported={isImported}
               isBuiltIn={isBuiltIn}
