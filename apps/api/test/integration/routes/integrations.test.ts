@@ -412,6 +412,32 @@ describe("OAuth client CRUD", () => {
     });
     expect(res.status).toBe(400);
   });
+
+  it("forbids a non-admin member from persisting an OAuth client secret (403)", async () => {
+    // PUT .../oauth-clients/:authKey requires `integrations:install`, which
+    // the `member` role does not hold (it only has read/connect/disconnect).
+    // Persisting a clientSecret must therefore be admin-gated.
+    const member = await createTestUser({ email: "oauth-member@myorg.test" });
+    await addOrgMember(ctx.orgId, member.id, "member");
+    const memberHeaders = {
+      Cookie: member.cookie,
+      "X-Org-Id": ctx.orgId,
+      "X-Application-Id": ctx.defaultAppId,
+      "Content-Type": "application/json",
+    };
+    const res = await app.request("/api/integrations/@myorg/gmail/oauth-clients/google", {
+      method: "PUT",
+      headers: memberHeaders,
+      body: JSON.stringify({ clientId: "abc", clientSecret: "shh" }),
+    });
+    expect(res.status).toBe(403);
+    // Nothing persisted.
+    const rows = await db
+      .select()
+      .from(integrationOauthClients)
+      .where(eq(integrationOauthClients.integrationPackageId, "@myorg/gmail"));
+    expect(rows).toHaveLength(0);
+  });
 });
 
 describe("OAuth2 connect initiate", () => {

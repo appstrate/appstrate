@@ -24,7 +24,7 @@ import { seedPackage } from "../../helpers/seed.ts";
 import { applicationPackages, integrationConnections } from "@appstrate/db/schema";
 import { encryptCredentials } from "@appstrate/connect";
 import type { IntegrationManifest } from "@appstrate/core/integration";
-import { proxyCall } from "../../../src/services/credential-proxy/core.ts";
+import { proxyCall, ProxySubstitutionError } from "../../../src/services/credential-proxy/core.ts";
 
 async function seedIntegration(orgId: string, manifest: IntegrationManifest) {
   return seedPackage({
@@ -260,5 +260,55 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
     });
 
     expect(captured?.["x-api-key"]).toBe("caller-override-key");
+  });
+
+  it("throws ProxySubstitutionError (fail-closed) when the target references an unresolved {{field}}", async () => {
+    const packageId = "@cpinjectorg/failclosed";
+    await seedIntegration(ctx.orgId, {
+      manifestVersion: "1.0",
+      type: "integration",
+      name: packageId,
+      version: "1.0.0",
+      displayName: "FailClosed",
+      description: "FailClosed integration",
+      server: { type: "node", entryPoint: "main.js" },
+      auths: {
+        api: {
+          type: "api_key",
+          // `**` allows any path, so the only gate that can fire is the
+          // unresolved-placeholder fail-closed check — not the allowlist.
+          authorizedUris: ["https://api.example.com/**"],
+          credentials: { schema: { type: "object", properties: { api_key: { type: "string" } } } },
+          delivery: {
+            http: { headerName: "X-Api-Key", valueFrom: "api_key" },
+          },
+        },
+      },
+    });
+    // Resolved credential fields = { api_key }. The target references
+    // {{mailbox}}, which is NOT a credential field → must fail closed.
+    await installAndConnect(ctx, packageId, "api", { api_key: "sk_live_abc" });
+
+    let upstreamHit = false;
+    const fakeFetch = (() => {
+      upstreamHit = true;
+      return Promise.resolve(new Response("{}", { status: 200 }));
+    }) as unknown as typeof fetch;
+
+    await expect(
+      proxyCall({
+        applicationId: ctx.defaultAppId,
+        orgId: ctx.orgId,
+        actor: { type: "user", id: ctx.user.id },
+        integrationId: packageId,
+        method: "GET",
+        target: "https://api.example.com/users/{{mailbox}}/messages",
+        headers: {},
+        fetch: fakeFetch,
+      }),
+    ).rejects.toBeInstanceOf(ProxySubstitutionError);
+
+    // Fail-closed: the upstream fetch must never be issued.
+    expect(upstreamHit).toBe(false);
   });
 });
