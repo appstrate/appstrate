@@ -1,16 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Phase 2 — dynamic OAuth scope computation for integration connect flows.
- *
- * The OAuth kickoff (`POST /api/integrations/.../connect/oauth2`) used
- * to request `auth.scopes` defaults + the caller-supplied `body.scopes`.
- * Niveau 2 widens that to:
- *
- *   request = defaults
- *           ∪ caller-supplied
- *           ∪ inferred-from-installed-agents (this module)
- *           ∪ currently-granted (high-water-mark, incremental consent)
+ * Phase 2 — OAuth scope inference for integration connect flows.
  *
  * `computeRequiredScopes` walks every agent installed in the application,
  * reads its `dependencies.integrations[id]` rich-form selection, and
@@ -26,11 +17,17 @@
  *     allowed" default that mirrors Phase 3's runtime allowlist
  *     semantics).
  *
- * `getCurrentScopesGranted` reads the high-water-mark across every row in
- * `integration_connections` matching `(app, integration, authKey, actor)`
- * — typically one row per Google/etc. account the actor connected. We
- * union across accounts so the re-consent prompt requests the strict
- * superset, regardless of which account the user picks at the IdP.
+ * This is the floor every installed agent needs. It is NOT injected into
+ * the connect kickoff — connecting requests the manifest defaults (plus
+ * whatever the caller explicitly forwards), so a plain "connect" never
+ * inherits unrelated agents' scopes. The union is consumed at refresh time
+ * (`integration-credentials-resolver`) to detect when an IdP-side scope
+ * shrink drops a connection below what the installed agents require, and
+ * the agent surface uses the per-agent slice to drive an explicit upgrade.
+ *
+ * `getCurrentScopesGranted` reads the `scopesGranted` of one connection row
+ * (the one being reconnected/upgraded) so the kickoff can keep re-consent a
+ * strict superset of what that account already authorized.
  *
  * Both functions are read-only and safe to call from non-mutating routes.
  */
@@ -124,23 +121,29 @@ export async function computeRequiredScopes(
 }
 
 /**
- * Union of `scopesGranted` across every connection row the actor owns
- * for this (integration, authKey) — typically one row per IdP account.
- * Empty when the actor has never connected. Used by the kickoff route
- * to keep the re-consent prompt strict-superset of what's already
- * granted (incremental consent semantics).
+ * `scopesGranted` of a single connection row the actor owns — the row
+ * being reconnected/upgraded, keyed by `connectionId`. The kickoff route
+ * unions this into the re-consent request so an upgrade never silently
+ * shrinks what that specific account already authorized (incremental
+ * consent is per-account). A fresh connect has no `connectionId` and the
+ * route skips this entirely, so it stays at the manifest default scopes.
+ *
+ * Actor-filtered for safety — a caller can't read another actor's granted
+ * scopes by guessing a connection id.
  */
 export async function getCurrentScopesGranted(input: {
   scope: AppScope;
   integrationPackageId: string;
   authKey: string;
   actor: Actor;
+  connectionId: string;
 }): Promise<string[]> {
   const rows = await db
     .select({ scopesGranted: integrationConnections.scopesGranted })
     .from(integrationConnections)
     .where(
       and(
+        eq(integrationConnections.id, input.connectionId),
         eq(integrationConnections.integrationPackageId, input.integrationPackageId),
         eq(integrationConnections.authKey, input.authKey),
         eq(integrationConnections.applicationId, input.scope.applicationId),
@@ -150,9 +153,5 @@ export async function getCurrentScopesGranted(input: {
         }),
       ),
     );
-  const out = new Set<string>();
-  for (const r of rows) {
-    for (const s of r.scopesGranted ?? []) out.add(s);
-  }
-  return [...out];
+  return [...new Set(rows.flatMap((r) => r.scopesGranted ?? []))];
 }

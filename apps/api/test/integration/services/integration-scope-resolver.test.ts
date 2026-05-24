@@ -12,7 +12,7 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
-import { createTestContext, type TestContext } from "../../helpers/auth.ts";
+import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
 import { integrationConnections } from "@appstrate/db/schema";
@@ -255,19 +255,21 @@ describe("integration-scope-resolver", () => {
   });
 
   describe("getCurrentScopesGranted", () => {
-    it("returns empty when the actor has no connection", async () => {
+    it("returns empty when the connection id doesn't exist", async () => {
       const granted = await getCurrentScopesGranted({
         scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
         integrationPackageId: INTEGRATION_ID,
         authKey: "primary",
         actor: { type: "user", id: ctx.user.id },
+        connectionId: "00000000-0000-0000-0000-000000000000",
       });
       expect(granted).toEqual([]);
     });
 
-    it("returns the union across the actor's existing connections (multi-account)", async () => {
-      await db.insert(integrationConnections).values([
-        {
+    it("returns the scopesGranted of the targeted connection only (not other accounts)", async () => {
+      const [target] = await db
+        .insert(integrationConnections)
+        .values({
           integrationPackageId: INTEGRATION_ID,
           authKey: "primary",
           accountId: "acct-1",
@@ -275,54 +277,51 @@ describe("integration-scope-resolver", () => {
           userId: ctx.user.id,
           credentialsEncrypted: "x",
           scopesGranted: ["read"],
-        },
-        {
-          integrationPackageId: INTEGRATION_ID,
-          authKey: "primary",
-          accountId: "acct-2",
-          applicationId: ctx.defaultAppId,
-          userId: ctx.user.id,
-          credentialsEncrypted: "x",
-          scopesGranted: ["read", "send"],
-        },
-      ]);
-      const granted = await getCurrentScopesGranted({
-        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        })
+        .returning({ id: integrationConnections.id });
+      // A second account the actor owns must NOT leak into the target's set —
+      // incremental consent is per-account, scoped to connectionId.
+      await db.insert(integrationConnections).values({
         integrationPackageId: INTEGRATION_ID,
         authKey: "primary",
-        actor: { type: "user", id: ctx.user.id },
+        accountId: "acct-2",
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        credentialsEncrypted: "x",
+        scopesGranted: ["read", "send"],
       });
-      expect(granted.sort()).toEqual(["read", "send"]);
-    });
-
-    it("filters by authKey — connections for a different auth don't leak", async () => {
-      await db.insert(integrationConnections).values([
-        {
-          integrationPackageId: INTEGRATION_ID,
-          authKey: "primary",
-          accountId: "acct-1",
-          applicationId: ctx.defaultAppId,
-          userId: ctx.user.id,
-          credentialsEncrypted: "x",
-          scopesGranted: ["read"],
-        },
-        {
-          integrationPackageId: INTEGRATION_ID,
-          authKey: "secondary",
-          accountId: "acct-2",
-          applicationId: ctx.defaultAppId,
-          userId: ctx.user.id,
-          credentialsEncrypted: "x",
-          scopesGranted: ["admin"],
-        },
-      ]);
       const granted = await getCurrentScopesGranted({
         scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
         integrationPackageId: INTEGRATION_ID,
         authKey: "primary",
         actor: { type: "user", id: ctx.user.id },
+        connectionId: target!.id,
       });
       expect(granted).toEqual(["read"]);
+    });
+
+    it("doesn't return another actor's connection scopes (ownership filter)", async () => {
+      const other = await createTestUser();
+      const [foreign] = await db
+        .insert(integrationConnections)
+        .values({
+          integrationPackageId: INTEGRATION_ID,
+          authKey: "primary",
+          accountId: "acct-foreign",
+          applicationId: ctx.defaultAppId,
+          userId: other.id,
+          credentialsEncrypted: "x",
+          scopesGranted: ["admin"],
+        })
+        .returning({ id: integrationConnections.id });
+      const granted = await getCurrentScopesGranted({
+        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        integrationPackageId: INTEGRATION_ID,
+        authKey: "primary",
+        actor: { type: "user", id: ctx.user.id },
+        connectionId: foreign!.id,
+      });
+      expect(granted).toEqual([]);
     });
   });
 });

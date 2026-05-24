@@ -45,8 +45,11 @@ interface InlineConnectButtonProps {
   /**
    * Scopes inferred from the agent's `tools[]` selection. Forwarded
    * verbatim to the OAuth kickoff so the consent prompt asks for the
-   * minimum the agent needs (backend still unions with defaults +
-   * already-granted for incremental consent).
+   * minimum the agent needs. The backend requests `defaults ∪ these ∪
+   * what the target connection already granted` — it does NOT walk
+   * installed agents, so omitting this (e.g. the integration page's "+
+   * Add account") connects with the manifest defaults only. Scope
+   * upgrades pass the missing scopes here explicitly.
    */
   scopes?: string[];
   /**
