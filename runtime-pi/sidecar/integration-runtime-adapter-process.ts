@@ -34,6 +34,10 @@ import {
  */
 const HOST_INTERPRETER_BY_TYPE: Record<string, { command: string; argsBefore: string[] }> = {
   node: { command: "node", argsBefore: [] },
+  // `bun` runs the entry directly (`.ts` / `.js`) — the sidecar's own
+  // runtime, always on PATH in process mode. In docker mode the docker
+  // adapter runs bun in the `appstrate-mcp-runner-bun` container instead.
+  bun: { command: "bun", argsBefore: [] },
   python: { command: "python3", argsBefore: ["-u"] },
   // `binary` is a no-op: exec the bundle entry directly.
   binary: { command: "", argsBefore: [] },

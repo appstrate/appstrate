@@ -34,6 +34,11 @@ import {
  */
 const RUNNER_IMAGE_BY_TYPE: Record<string, string> = {
   node: "appstrate-mcp-runner-node:latest",
+  // In process mode `bun` runs as a host subprocess; in docker mode it gets
+  // its own container here, like every other runtime — keeps tier-3's
+  // cgroup/cap-drop/network isolation (the sidecar runs as root with the
+  // Docker socket mounted, so third-party bun code never shares its process).
+  bun: "appstrate-mcp-runner-bun:latest",
   python: "appstrate-mcp-runner-python:latest",
   binary: "appstrate-mcp-runner-binary:latest",
 };

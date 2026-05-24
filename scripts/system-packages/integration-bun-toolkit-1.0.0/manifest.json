@@ -1,0 +1,76 @@
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
+  "manifestVersion": "1.1",
+  "type": "integration",
+  "name": "@appstrate/bun-toolkit",
+  "version": "1.0.0",
+  "displayName": "Bun Toolkit (in-process)",
+  "description": "Reference integration for `server.type: \"bun\"`. A self-contained, zero-dependency Bun MCP server exercising Bun-native APIs that prove it runs on the Bun runtime rather than node: an in-memory bun:sqlite key/value store (stateful across calls), Bun.CryptoHasher hashing, Bun.password argon2/bcrypt hash+verify, crypto.randomUUID, and a runtime self-report. It also declares an api_key auth with delivery.http so the sidecar's MITM proxy injects X-Toolkit-Token on the upstream-calling tool — proving credential injection works without the server code ever reading the secret. A generic api_call tool is attached alongside the native tools. Runs as a host subprocess in process mode (tier 0-2) and in the appstrate-mcp-runner-bun container in docker mode (tier 3).",
+  "license": "Apache-2.0",
+  "author": "Appstrate",
+  "keywords": ["bun", "in-process", "reference", "test", "toolkit"],
+  "server": {
+    "type": "bun",
+    "entryPoint": "./server.ts"
+  },
+  "transport": {
+    "type": "stdio"
+  },
+  "auths": {
+    "primary": {
+      "type": "api_key",
+      "required": false,
+      "authorizedUris": ["https://httpbin.org/**"],
+      "availableScopes": [
+        {
+          "value": "read",
+          "label": "Read",
+          "description": "Read-only upstream calls (echo / fetch)."
+        },
+        {
+          "value": "write",
+          "label": "Write",
+          "description": "Mutating upstream calls.",
+          "implies": ["read"]
+        }
+      ],
+      "credentials": {
+        "schema": {
+          "type": "object",
+          "required": ["apiKey"],
+          "properties": {
+            "apiKey": {
+              "type": "string",
+              "description": "Any non-empty string. The integration never reads this value; the sidecar's MITM proxy injects it as the `X-Toolkit-Token` header on every upstream call from the `fetch_echo` tool and the generic `api_call` tool."
+            }
+          }
+        }
+      },
+      "delivery": {
+        "http": {
+          "headerName": "X-Toolkit-Token",
+          "headerPrefix": "",
+          "valueFrom": "apiKey"
+        }
+      }
+    }
+  },
+  "apiCall": {
+    "authKey": "primary"
+  },
+  "tools": {
+    "kv_set": {},
+    "kv_get": {},
+    "kv_list": {},
+    "hash": {},
+    "password_hash": {},
+    "password_verify": {},
+    "uuid": {},
+    "system_info": {},
+    "fetch_echo": {
+      "requiredAuthKey": "primary",
+      "requiredScopes": ["read"],
+      "urlPatterns": [{ "pattern": "https://httpbin.org/anything/**", "methods": ["GET"] }]
+    }
+  }
+}
