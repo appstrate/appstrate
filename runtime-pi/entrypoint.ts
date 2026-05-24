@@ -38,6 +38,7 @@ import type { Api, Model } from "@mariozechner/pi-ai";
 import {
   PiRunner,
   prepareBundleForPi,
+  buildRuntimeToolExtensions,
   emitRuntimeReady,
   emitBootProgress,
   startSinkHeartbeat,
@@ -501,6 +502,33 @@ if (sidecarUrl) {
   // SIDECAR_URL past this point.
   delete process.env.SIDECAR_URL;
 } else {
+  // No sidecar attached (skip-sidecar: no integrations + static API key).
+  // The platform runtime tools (output/log/note/pin/report) the agent
+  // selected are normally served by the sidecar over MCP; with no sidecar
+  // we register the SAME tool definitions (`@appstrate/core/runtime-tool-defs`)
+  // as Pi extensions in-process. Their canonical events are re-emitted into
+  // the run sink by the wrapper (default stdout-JSONL → the stdout bridge).
+  const rootManifest = bundle
+    ? (bundle.packages.get(bundle.root)?.manifest as { runtimeTools?: string[] } | undefined)
+    : undefined;
+  let outputSchema: Record<string, unknown> | null = null;
+  if (process.env.OUTPUT_SCHEMA) {
+    try {
+      outputSchema = JSON.parse(process.env.OUTPUT_SCHEMA) as Record<string, unknown>;
+    } catch {
+      outputSchema = null;
+    }
+  }
+  extensionFactories.push(
+    ...buildRuntimeToolExtensions({
+      ...(rootManifest?.runtimeTools ? { runtimeTools: rootManifest.runtimeTools } : {}),
+      outputSchema,
+      emit: (event) => {
+        void bridgedSink.handle(event as RunEvent);
+      },
+    }),
+  );
+
   // No sidecar attached — wire a stub tool ctx that rejects any
   // credentialed call. Integrations expose their own {ns}__api_call MCP
   // tools when a sidecar is present; without one a misconfigured bundle

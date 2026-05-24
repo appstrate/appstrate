@@ -81,6 +81,23 @@ export interface SidecarLaunchSpec {
    */
   integrations?: ReadonlyArray<IntegrationSpawnSpec>;
   /**
+   * Platform runtime tools the agent selected (`manifest.runtimeTools`):
+   * any of `output` / `log` / `note` / `pin` / `report`. The sidecar hosts
+   * the selected ones as in-process MCP tools on the agent-facing `/mcp`
+   * surface (`@appstrate/core/runtime-tool-defs`), so they are unified with
+   * the integration tools instead of being Pi-SDK-specific extensions.
+   * Empty / omitted = none. Serialised as the `RUNTIME_TOOLS_JSON` env var.
+   */
+  runtimeTools?: readonly string[];
+  /**
+   * Output JSON Schema (`manifest.output.schema`). Forwarded so the
+   * sidecar's `output` runtime tool exposes it as the `data` argument
+   * schema (constrained decoding) and validates against it at call time.
+   * Serialised as the `OUTPUT_SCHEMA` env var. Omitted when the agent
+   * declares no output schema.
+   */
+  outputSchema?: Record<string, unknown>;
+  /**
    * P4 — connect-run mode (`runAt: "link"`). When set, the sidecar runs in
    * "connect mode": it boots the SINGLE integration carried in `integrations`,
    * runs its `login` MCP tool exactly once (`runConnectOnce`), emits the

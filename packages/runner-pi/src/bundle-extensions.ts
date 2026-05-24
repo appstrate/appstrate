@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * prepareBundleForPi — takes a {@link Bundle} and materialises the
- * on-disk layout the Pi SDK expects (`.pi/skills/`), then returns the
- * {@link ExtensionFactory}s for the agent's selected built-in runtime
- * tools (output/log/note/pin/report).
+ * prepareBundleForPi — takes a {@link Bundle} and materialises the on-disk
+ * layout the Pi SDK expects (`.pi/skills/`).
  *
- * Tools are no longer AFPS packages: the former `@appstrate/{output,log,
- * note,pin,report}` tool packages are baked into the runtime image
- * (`./runtime-tools/builtin/`). All of them — `output` included — are
- * opt-in via the agent manifest's `runtimeTools[]` field; none is injected
- * unless the agent selects it.
+ * The platform runtime tools (`output` / `log` / `note` / `pin` / `report`)
+ * are NO LONGER registered here. They are transport-neutral MCP tool
+ * definitions (`@appstrate/core/runtime-tool-defs`) hosted either by the
+ * sidecar (served over `/mcp`) or — on the no-sidecar path — registered as
+ * Pi extensions via {@link buildRuntimeToolExtensions} at the call site
+ * (`runtime-pi/entrypoint.ts` skip-sidecar branch + the `appstrate run`
+ * CLI). This helper is now skills-only; `extensionFactories` is always
+ * empty (kept for API stability).
  *
  * Used by:
  *   1. `runtime-pi/entrypoint.ts` — the in-container agent bootloader.
@@ -27,7 +28,6 @@ import * as fs from "node:fs/promises";
 import type { ExtensionFactory } from "@mariozechner/pi-coding-agent";
 import type { Bundle, BundlePackage } from "@appstrate/afps-runtime/bundle";
 import { parsePackageIdentity } from "@appstrate/afps-runtime/bundle";
-import { selectBuiltinRuntimeToolFactories } from "./runtime-tools/builtin/index.ts";
 
 export interface PrepareBundleOptions {
   /**
@@ -71,18 +71,12 @@ export async function prepareBundleForPi(
     }
   }
 
-  // ─── Step 2: register selected built-in runtime tools ────────────
-  // Tools (output/log/note/pin/report) are no longer AFPS packages —
-  // they are baked into the runtime image and all opt-in via the agent
-  // manifest's `runtimeTools[]`. None is injected unless selected.
-  const rootPkg = bundle.packages.get(bundle.root);
-  const rootManifest = (rootPkg?.manifest ?? {}) as { runtimeTools?: string[] };
-
+  // Runtime tools (output/log/note/pin/report) are NOT registered here —
+  // they are MCP tool definitions (`@appstrate/core/runtime-tool-defs`)
+  // hosted by the sidecar or registered as Pi extensions by the no-sidecar
+  // call site via `buildRuntimeToolExtensions`. This helper is skills-only.
+  void opts.extensionWrapper;
   const factories: ExtensionFactory[] = [];
-  for (const { id, factory } of selectBuiltinRuntimeToolFactories(rootManifest.runtimeTools)) {
-    const wrapped = opts.extensionWrapper ? opts.extensionWrapper(factory, id) : factory;
-    factories.push(wrapped);
-  }
 
   return {
     extensionFactories: factories,

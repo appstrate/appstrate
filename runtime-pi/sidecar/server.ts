@@ -12,6 +12,31 @@ import {
 } from "./integrations-boot.ts";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import type { IntegrationSpawnSpec, IntegrationBootReport } from "@appstrate/core/sidecar-types";
+import { buildRuntimeToolDefs } from "@appstrate/core/runtime-tool-defs";
+
+/** Parse the agent-selected runtime tools forwarded as `RUNTIME_TOOLS_JSON`. */
+function readRuntimeToolsFromEnv(): string[] {
+  const raw = process.env.RUNTIME_TOOLS_JSON;
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Parse the output schema forwarded as `OUTPUT_SCHEMA` (for the `output` tool). */
+function readOutputSchemaFromEnv(): Record<string, unknown> | null {
+  const raw = process.env.OUTPUT_SCHEMA;
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
 
 function readLlmConfigFromEnv(): LlmProxyConfig | undefined {
   // OAuth credentials ship as a single JSON env var carrying the full
@@ -145,6 +170,16 @@ const runtimeDeps = buildSidecarRuntimeDeps({
   ...(process.env.RUN_ID ? { runId: process.env.RUN_ID } : {}),
 });
 
+// Platform runtime tools (output/log/note/pin/report) the agent selected,
+// hosted in-process as MCP tools on the agent-facing `/mcp` surface — the
+// same transport every other tool uses, so they are no longer Pi-SDK
+// extensions. Static for the run's lifetime (selection + output schema are
+// fixed at boot). Re-emission of their canonical events happens agent-side.
+const runtimeToolDefs = buildRuntimeToolDefs({
+  runtimeTools: readRuntimeToolsFromEnv(),
+  outputSchema: readOutputSchemaFromEnv(),
+}) as unknown as AppstrateToolDefinition[];
+
 let integrationTools: AppstrateToolDefinition[] = [];
 const specs = readIntegrationSpecsFromEnv();
 const declaredIntegrations = specs?.length ?? 0;
@@ -205,7 +240,7 @@ const app = createApp({
   runtimeDeps,
   isReady: () => proxy.readySync,
   oauthTokenCache,
-  additionalMcpToolsProvider: () => integrationTools,
+  additionalMcpToolsProvider: () => [...runtimeToolDefs, ...integrationTools],
   integrationBootPromise,
   integrationBootReportProvider: () => integrationBootReport,
 });

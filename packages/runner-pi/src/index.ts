@@ -61,6 +61,11 @@ export {
 } from "./runtime-tools/mcp-forward.ts";
 
 export {
+  buildRuntimeToolExtensions,
+  type BuildRuntimeToolExtensionsOptions,
+} from "./runtime-tools/runtime-tool-extensions.ts";
+
+export {
   spillResourcesToWorkspace,
   type ResourceSpillOptions,
 } from "./runtime-tools/resource-spill.ts";

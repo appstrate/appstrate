@@ -162,10 +162,23 @@ export async function runPlatformContainer(
       ...(plan.integrations && plan.integrations.length > 0
         ? { integrations: plan.integrations }
         : {}),
+      // Platform runtime tools (output/log/note/pin/report) the sidecar
+      // hosts as in-process MCP tools — unified with the integration tool
+      // surface. The no-sidecar path reads the same selection from the
+      // bundle manifest instead.
+      ...(plan.runtimeTools && plan.runtimeTools.length > 0
+        ? { runtimeTools: plan.runtimeTools }
+        : {}),
     };
 
     const hasOutputSchema =
       plan.outputSchema?.properties && Object.keys(plan.outputSchema.properties).length > 0;
+    // Forward the output schema to the sidecar so its `output` runtime tool
+    // can constrain + validate the `data` argument (mirrors the agent
+    // container's OUTPUT_SCHEMA env for the no-sidecar path).
+    if (hasOutputSchema && plan.outputSchema) {
+      sidecarSpec.outputSchema = plan.outputSchema as unknown as Record<string, unknown>;
+    }
     // The agent container only ever receives the placeholder
     // (apiKeyPlaceholder); the real access token never leaves the
     // platform/sidecar boundary. The sidecar overwrites Authorization with
