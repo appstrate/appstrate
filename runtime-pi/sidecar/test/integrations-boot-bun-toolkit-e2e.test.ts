@@ -4,7 +4,8 @@
  * Bun Toolkit reference integration — REAL spawned bun MCP server e2e.
  *
  * Boots the `@appstrate/bun-toolkit` dev fixture (a complex, multi-tool,
- * zero-dependency Bun MCP server, under `local-test-packages/`) through the full
+ * zero-dependency Bun MCP server, a versioned test fixture under
+ * `./fixtures/bun-toolkit/`) through the full
  * `bootIntegrations` loop and exercises its Bun-native tools. Proves a
  * `server.type: "bun"` integration runs end-to-end — including that the
  * spawned process is long-lived (bun:sqlite state survives across separate
@@ -26,10 +27,7 @@ import { validateManifest } from "@appstrate/core/validation";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import { bootIntegrations } from "../integrations-boot.ts";
 
-const FIXTURE_DIR = path.join(
-  import.meta.dir,
-  "../../../local-test-packages/scripts/system-packages/integration-bun-toolkit-1.0.0",
-);
+const FIXTURE_DIR = path.join(import.meta.dir, "fixtures/bun-toolkit");
 const INTEG_ID = "@appstrate/bun-toolkit";
 const NAMESPACE = "buntoolkit";
 
