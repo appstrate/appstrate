@@ -458,9 +458,10 @@ export async function updateConnectionMetadata(
         .limit(1),
     ]);
     if (pins.length > 0) {
+      // Existence check only (`.limit(1)`), so don't claim a count.
       throw conflict(
         "connection_pinned",
-        `Connection cannot be unshared while it is pinned to ${pins.length} agent(s). Remove the pin(s) first.`,
+        "Connection cannot be unshared while it is pinned to one or more agents. Remove the pin(s) first.",
       );
     }
     if (orgDefaults.length > 0) {

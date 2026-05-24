@@ -106,29 +106,12 @@ export async function upsertOrgDefault(
   });
 
   const now = new Date();
-  const [existing] = await db
-    .select({ id: integrationOrgDefaults.id })
-    .from(integrationOrgDefaults)
-    .where(
-      and(
-        eq(integrationOrgDefaults.applicationId, scope.applicationId),
-        eq(integrationOrgDefaults.integrationPackageId, integrationPackageId),
-      ),
-    )
-    .limit(1);
-
-  if (existing) {
-    await db
-      .update(integrationOrgDefaults)
-      .set({
-        connectionId: input.connectionId,
-        enforce: input.enforce,
-        createdBy: input.createdBy,
-        updatedAt: now,
-      })
-      .where(eq(integrationOrgDefaults.id, existing.id));
-  } else {
-    await db.insert(integrationOrgDefaults).values({
+  // Atomic upsert on the (application, integration) unique index — avoids the
+  // check-then-insert race where two concurrent first-writers both miss the
+  // SELECT and the loser's INSERT throws a raw unique-violation (500).
+  await db
+    .insert(integrationOrgDefaults)
+    .values({
       applicationId: scope.applicationId,
       integrationPackageId,
       connectionId: input.connectionId,
@@ -136,8 +119,16 @@ export async function upsertOrgDefault(
       createdBy: input.createdBy,
       createdAt: now,
       updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [integrationOrgDefaults.applicationId, integrationOrgDefaults.integrationPackageId],
+      set: {
+        connectionId: input.connectionId,
+        enforce: input.enforce,
+        createdBy: input.createdBy,
+        updatedAt: now,
+      },
     });
-  }
 
   return {
     integrationPackageId,

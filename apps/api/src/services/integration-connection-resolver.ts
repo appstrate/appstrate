@@ -482,9 +482,9 @@ async function loadAccessibleConnections(
   integrationIds: string[],
 ): Promise<ConnectionRow[]> {
   if (integrationIds.length === 0) return [];
-  // Own (any application — XOR check is on owner) OR shared-with-org
-  // matching this application. Both branches scoped to integrations the
-  // agent actually requires to avoid loading the world.
+  // Own OR shared-with-org, both scoped to THIS application (the
+  // applicationId predicate is applied outside the OR) and to the
+  // integrations the agent actually requires, to avoid loading the world.
   const rows = await db
     .select()
     .from(integrationConnections)

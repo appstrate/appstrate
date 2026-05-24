@@ -138,16 +138,27 @@ export function parseTokenResponse(
   requestedScopes?: string[],
   fallbackRefreshToken?: string,
 ): ParsedTokenResponse {
-  const accessToken = tokenData.access_token as string;
-  if (!accessToken) {
-    throw new Error("No access_token in token response");
+  if (typeof tokenData.access_token !== "string" || !tokenData.access_token) {
+    throw new Error("No (string) access_token in token response");
   }
+  const accessToken = tokenData.access_token;
 
-  const refreshToken = (tokenData.refresh_token as string | undefined) ?? fallbackRefreshToken;
+  const refreshToken =
+    typeof tokenData.refresh_token === "string" ? tokenData.refresh_token : fallbackRefreshToken;
 
+  // Some IdPs (Azure AD v1, certain Keycloak configs) serialize `expires_in`
+  // as a JSON string ("3600"). Coerce so the proactive lead-window refresh
+  // still fires — a strict `typeof === "number"` check would drop it and
+  // leave `expiresAt: null` (token treated as never-expiring).
   let expiresAt: string | null = null;
-  if (typeof tokenData.expires_in === "number") {
-    expiresAt = new Date(Date.now() + tokenData.expires_in * 1000).toISOString();
+  const expiresIn =
+    typeof tokenData.expires_in === "number"
+      ? tokenData.expires_in
+      : typeof tokenData.expires_in === "string"
+        ? Number(tokenData.expires_in)
+        : NaN;
+  if (Number.isFinite(expiresIn)) {
+    expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
   }
 
   const scopeStr = typeof tokenData.scope === "string" ? tokenData.scope : "";

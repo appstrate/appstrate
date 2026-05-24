@@ -251,6 +251,11 @@ async function fetchFollowingRedirectsCapturingCookies(
     if (stripCred) {
       headers.delete("authorization");
       if (injectedCredentialHeader) headers.delete(injectedCredentialHeader);
+      // Cookies are credentials too. The jar/caller cookies were composed
+      // above unconditionally (to follow intra-allowlist multi-host flows);
+      // strip them on an out-of-boundary cross-origin hop so an
+      // upstream-controlled redirect can't exfiltrate the session jar.
+      headers.delete("cookie");
     }
 
     currentInit = {
@@ -527,13 +532,18 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       proxy: args.proxyUrl || undefined,
     };
     if (init.body instanceof ReadableStream) {
-      // Streaming bodies can't be replayed across hops — fall back to
-      // native fetch (intermediate-hop Set-Cookie lost, step 8 captures
-      // the final hop only). Per-hop SSRF/allowlist validation is NOT
-      // applied on this path: bytes have already flown before the
-      // sidecar can see the 30x. The initial-URL allowlist check at
-      // step 4 bounds the surface.
+      // Streaming bodies can't be replayed across hops, so the manual
+      // redirect follower (which re-issues each hop) can't run here.
+      // `redirect: "manual"` is mandatory, NOT a default: native
+      // `redirect: "follow"` would carry the injected credential header
+      // (and any cookie jar) into an upstream-controlled cross-origin
+      // redirect — WHATWG fetch strips `Authorization` cross-origin but
+      // NOT custom headers like `X-Api-Key`, the usual injection target.
+      // Returning the 30x unfollowed keeps the credential on the initial
+      // (allowlist-checked) origin only; the caller re-issues against the
+      // surfaced `finalUrl` if it wants to follow.
       init.duplex = "half";
+      init.redirect = "manual";
       const response = await fetchFn(resolvedUrl, init);
       return { response, finalUrl: response.url || resolvedUrl };
     }

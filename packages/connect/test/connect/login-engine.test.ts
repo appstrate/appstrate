@@ -81,6 +81,28 @@ describe("runLogin — declarative login", () => {
     expect(JSON.stringify(res.outputs)).not.toContain("s3cr3t");
   });
 
+  it("SSRF blocklist applies even under allowAllUris (runs in-process)", async () => {
+    const { impl, calls } = fakeFetch([{ status: 200, body: "{}" }]);
+    const config: LoginConfig = {
+      steps: [
+        {
+          request: { method: "GET", url: "http://169.254.169.254/latest/meta-data/" },
+          extract: { access_token: { from: "header", path: "x-token" } },
+          output: ["access_token"],
+        },
+      ],
+    };
+    const run = runLogin(config, {
+      inputs: {},
+      authorizedUris: [],
+      allowAllUris: true, // waives the allowlist — must NOT waive the blocklist
+      fetchImpl: impl,
+    });
+    await expect(run).rejects.toMatchObject({ reason: "url_not_allowed" });
+    // Fail-closed: the request never went out.
+    expect(calls.length).toBe(0);
+  });
+
   it("extracts a JWT claim (petitspas-like personId)", async () => {
     const jwt = `${b64url({ alg: "none" })}.${b64url({ AUTH: [{ personId: "P-42" }] })}.`;
     const { impl } = fakeFetch([{ status: 200, body: JSON.stringify({ access_token: jwt }) }]);
