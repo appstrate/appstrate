@@ -187,10 +187,16 @@ export async function buildRunContext(params: {
     resolvedConnections: params.resolvedConnections ?? null,
   });
 
+  const manifestRuntimeTools = (agent.manifest as { runtimeTools?: unknown }).runtimeTools;
+  const runtimeTools = Array.isArray(manifestRuntimeTools)
+    ? manifestRuntimeTools.filter((t): t is string => typeof t === "string")
+    : undefined;
+
   const plan: AppstrateRunPlan = {
     bundle,
     rawPrompt: agent.prompt,
     outputSchema: extractManifestSchemas(agent.manifest).output,
+    ...(runtimeTools && runtimeTools.length > 0 ? { runtimeTools } : {}),
     llmConfig: modelResult,
     runToken: signRunToken(runId),
     proxyUrl,

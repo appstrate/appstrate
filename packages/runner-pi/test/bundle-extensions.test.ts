@@ -81,20 +81,25 @@ describe("prepareBundleForPi — skills/ install", () => {
     await cleanup();
   });
 
-  it("injects `output` when the agent manifest selects it", async () => {
+  it("does NOT register runtime tools — they are MCP defs hosted elsewhere", async () => {
+    // Runtime tools (output/log/note/pin/report) are no longer Pi extensions
+    // built here: they are transport-neutral MCP defs
+    // (`@appstrate/core/runtime-tool-defs`) served by the sidecar or
+    // registered by the no-sidecar call site via `buildRuntimeToolExtensions`.
+    // `prepareBundleForPi` is skills-only, so even a `runtimeTools` selection
+    // yields no factories.
     const root = makeBundlePackage(
       "@acme/agent",
       "1.0.0",
       "agent",
       {},
-      { runtimeTools: ["output"] },
+      { runtimeTools: ["output", "log"] },
     );
     const bundle = makeTestBundle(root);
     const { extensionFactories, cleanup } = await prepareBundleForPi(bundle, {
       workspaceDir: workspace,
     });
-    expect(extensionFactories).toHaveLength(1);
-    expect(typeof extensionFactories[0]).toBe("function");
+    expect(extensionFactories).toHaveLength(0);
     await cleanup();
   });
 });

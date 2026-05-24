@@ -232,6 +232,14 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     if (spec.integrations && spec.integrations.length > 0) {
       env.INTEGRATIONS_TO_SPAWN_JSON = JSON.stringify(spec.integrations);
     }
+    // Platform runtime tools (output/log/note/pin/report) the sidecar hosts
+    // as in-process MCP tools, plus the output schema they validate against.
+    if (spec.runtimeTools && spec.runtimeTools.length > 0) {
+      env.RUNTIME_TOOLS_JSON = JSON.stringify(spec.runtimeTools);
+    }
+    if (spec.outputSchema) {
+      env.OUTPUT_SCHEMA = JSON.stringify(spec.outputSchema);
+    }
     // P4 — connect-run mode. Sidecar runs `runConnectOnce` then exits.
     if (spec.connectLoginSpec) {
       env.CONNECT_LOGIN_JSON = JSON.stringify(spec.connectLoginSpec);

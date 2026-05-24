@@ -1,71 +1,46 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect } from "bun:test";
+import {
+  buildRuntimeToolDefs,
+  RUNTIME_TOOL_EVENTS_META_KEY,
+  type RuntimeToolEvent,
+} from "@appstrate/core/runtime-tool-defs";
 
 /**
- * Tests for the output built-in runtime tool.
- *
- * Since the tool reads process.env.OUTPUT_SCHEMA at factory-call time,
- * we set the env var BEFORE invoking the factory. Each test uses a fresh
- * dynamic import via a cache-busting query string so the module-level
- * `RUN_ID` / Ajv instance are re-evaluated cleanly.
- *
- * The source lives in packages/runner-pi/src/runtime-tools/builtin/output.ts
- * (named export `outputTool`) since the `tool` AFPS package type was removed
- * and the five former system tools were baked into the runner. It depends on
- * @mariozechner/pi-ai (installed in runtime-pi/node_modules); Bun resolves the
- * Pi SDK via the runtime-pi workspace's node_modules.
+ * Tests for the `output` runtime tool — now a transport-neutral MCP tool
+ * definition (`@appstrate/core/runtime-tool-defs`) rather than a Pi-SDK
+ * extension. The output JSON Schema is passed explicitly (no longer read
+ * from `process.env.OUTPUT_SCHEMA`): the schema constrains the `data`
+ * argument (constrained decoding) AND is validated at call time. The call
+ * returns its canonical `output.emitted` event under the result `_meta`
+ * key for the host to re-emit into the run sink.
  */
 
-/** Helper: create a mock pi that captures registered tools. */
-function createMockPi() {
-  const tools: any[] = [];
-  return {
-    tools,
-    registerTool(config: any) {
-      tools.push(config);
-    },
-  };
+function outputDef(outputSchema?: Record<string, unknown>) {
+  const def = buildRuntimeToolDefs({
+    runtimeTools: ["output"],
+    ...(outputSchema !== undefined ? { outputSchema } : {}),
+  })[0];
+  if (!def) throw new Error("output def not built");
+  return def;
 }
 
-/** Absolute path to the output built-in runtime tool source. */
-const OUTPUT_PATH = new URL(
-  "../../packages/runner-pi/src/runtime-tools/builtin/output.ts",
-  import.meta.url,
-).pathname;
-
-/** Helper: import the tool with a fresh module evaluation. */
-async function importExtension(envValue?: string) {
-  if (envValue !== undefined) {
-    process.env.OUTPUT_SCHEMA = envValue;
-  } else {
-    delete process.env.OUTPUT_SCHEMA;
-  }
-
-  const cacheBuster = `${Date.now()}-${Math.random()}`;
-  const mod = await import(`${OUTPUT_PATH}?v=${cacheBuster}`);
-  const factory = mod.outputTool;
-
-  const pi = createMockPi();
-  factory(pi);
-  return pi.tools[0];
+function eventsOf(meta: Record<string, unknown> | undefined): RuntimeToolEvent[] {
+  const raw = meta?.[RUNTIME_TOOL_EVENTS_META_KEY];
+  return Array.isArray(raw) ? (raw as RuntimeToolEvent[]) : [];
 }
 
-describe("output extension — schema exposure", () => {
-  beforeEach(() => {
-    delete process.env.OUTPUT_SCHEMA;
-  });
-
-  it("uses generic object schema when OUTPUT_SCHEMA is not set", async () => {
-    const tool = await importExtension(undefined);
-
-    expect(tool.name).toBe("output");
-    const dataSchema = tool.parameters.properties.data;
+describe("output runtime tool — schema exposure", () => {
+  it("uses generic object schema when no output schema is provided", () => {
+    const def = outputDef();
+    expect(def.descriptor.name).toBe("output");
+    const dataSchema = (def.descriptor.inputSchema.properties as Record<string, any>).data;
     expect(dataSchema.type).toBe("object");
     expect(dataSchema.properties).toBeUndefined();
   });
 
-  it("injects output schema properties when OUTPUT_SCHEMA is set", async () => {
+  it("injects output schema properties when provided", () => {
     const schema = {
       type: "object",
       properties: {
@@ -74,147 +49,75 @@ describe("output extension — schema exposure", () => {
       },
       required: ["total", "items"],
     };
-
-    const tool = await importExtension(JSON.stringify(schema));
-
-    const dataSchema = tool.parameters.properties.data;
+    const def = outputDef(schema);
+    const dataSchema = (def.descriptor.inputSchema.properties as Record<string, any>).data;
     expect(dataSchema.type).toBe("object");
     expect(dataSchema.properties.total.type).toBe("number");
     expect(dataSchema.properties.items.type).toBe("array");
+    expect(dataSchema.required).toEqual(["total", "items"]);
   });
 
-  it("preserves required fields in tool parameter schema", async () => {
-    const schema = {
-      type: "object",
-      properties: {
-        name: { type: "string" },
-        age: { type: "number" },
-      },
-      required: ["name", "age"],
-    };
-
-    const tool = await importExtension(JSON.stringify(schema));
-
-    const dataSchema = tool.parameters.properties.data;
-    expect(dataSchema.required).toEqual(["name", "age"]);
-    expect(dataSchema.properties.name.type).toBe("string");
-    expect(dataSchema.properties.age.type).toBe("number");
-  });
-
-  it("falls back to generic schema on invalid JSON", async () => {
-    const tool = await importExtension("not-valid-json{{{");
-
-    const dataSchema = tool.parameters.properties.data;
-    expect(dataSchema.type).toBe("object");
-    expect(dataSchema.properties).toBeUndefined();
-  });
-
-  it("preserves description from output schema", async () => {
-    const schema = {
+  it("preserves the output schema description, defaulting when absent", () => {
+    const withDesc = outputDef({
       type: "object",
       description: "Customer order summary",
       properties: { orderId: { type: "string" } },
-    };
+    });
+    expect(
+      (withDesc.descriptor.inputSchema.properties as Record<string, any>).data.description,
+    ).toBe("Customer order summary");
 
-    const tool = await importExtension(JSON.stringify(schema));
-
-    const dataSchema = tool.parameters.properties.data;
-    expect(dataSchema.description).toBe("Customer order summary");
-  });
-
-  it("adds default description when output schema has none", async () => {
-    const schema = {
-      type: "object",
-      properties: { count: { type: "number" } },
-    };
-
-    const tool = await importExtension(JSON.stringify(schema));
-
-    const dataSchema = tool.parameters.properties.data;
-    expect(dataSchema.description).toBe("JSON object to return as the run output");
+    const noDesc = outputDef({ type: "object", properties: { count: { type: "number" } } });
+    expect((noDesc.descriptor.inputSchema.properties as Record<string, any>).data.description).toBe(
+      "JSON object to return as the run output",
+    );
   });
 });
 
-describe("output extension — execute validation", () => {
-  beforeEach(() => {
-    delete process.env.OUTPUT_SCHEMA;
-  });
-
+describe("output runtime tool — execute validation", () => {
   it("rejects empty data when required fields are declared", async () => {
-    const schema = {
+    const def = outputDef({
       type: "object",
       properties: { name: { type: "string" } },
       required: ["name"],
-    };
-    const tool = await importExtension(JSON.stringify(schema));
-
-    const result = await tool.execute("call-1", { data: {} });
-
+    });
+    const result = await def.handler({ data: {} });
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("validation failed");
-    expect(result.content[0].text).toContain("name");
+    expect(result.content[0]!.text).toContain("validation failed");
+    expect(result.content[0]!.text).toContain("name");
+    expect(eventsOf(result._meta)).toHaveLength(0);
   });
 
   it("rejects type mismatches", async () => {
-    const schema = {
+    const def = outputDef({
       type: "object",
       properties: { count: { type: "number" } },
       required: ["count"],
-    };
-    const tool = await importExtension(JSON.stringify(schema));
-
-    const result = await tool.execute("call-1", { data: { count: "not a number" } });
-
+    });
+    const result = await def.handler({ data: { count: "not a number" } });
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("validation failed");
+    expect(result.content[0]!.text).toContain("validation failed");
   });
 
-  it("accepts valid data and emits output.emitted", async () => {
-    const schema = {
+  it("accepts valid data and returns an output.emitted event", async () => {
+    const def = outputDef({
       type: "object",
-      properties: {
-        name: { type: "string" },
-        age: { type: "number" },
-      },
+      properties: { name: { type: "string" }, age: { type: "number" } },
       required: ["name", "age"],
-    };
-    const tool = await importExtension(JSON.stringify(schema));
-
-    // Capture stdout to verify the emitted event
-    const writes: string[] = [];
-    const originalWrite = process.stdout.write.bind(process.stdout);
-    (process.stdout as any).write = (chunk: any) => {
-      writes.push(typeof chunk === "string" ? chunk : chunk.toString());
-      return true;
-    };
-
-    try {
-      const result = await tool.execute("call-1", { data: { name: "Ada", age: 36 } });
-      expect(result.isError).toBeUndefined();
-      expect(result.content[0].text).toBe("Output recorded");
-      expect(result.details.data).toEqual({ name: "Ada", age: 36 });
-
-      const emitted = writes
-        .map((w) => {
-          try {
-            return JSON.parse(w);
-          } catch {
-            return null;
-          }
-        })
-        .find((e) => e?.type === "output.emitted");
-      expect(emitted).toBeTruthy();
-      expect(emitted.data).toEqual({ name: "Ada", age: 36 });
-    } finally {
-      (process.stdout as any).write = originalWrite;
-    }
+    });
+    const result = await def.handler({ data: { name: "Ada", age: 36 } });
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0]!.text).toBe("Output recorded");
+    const events = eventsOf(result._meta);
+    expect(events).toHaveLength(1);
+    expect(events[0]!.type).toBe("output.emitted");
+    expect(events[0]!.data).toEqual({ name: "Ada", age: 36 });
   });
 
-  it("accepts any data when OUTPUT_SCHEMA is not set", async () => {
-    const tool = await importExtension(undefined);
-
-    const result = await tool.execute("call-1", { data: {} });
+  it("accepts any data when no output schema is provided", async () => {
+    const def = outputDef();
+    const result = await def.handler({ data: { whatever: true } });
     expect(result.isError).toBeUndefined();
-    expect(result.content[0].text).toBe("Output recorded");
+    expect(eventsOf(result._meta)[0]!.type).toBe("output.emitted");
   });
 });

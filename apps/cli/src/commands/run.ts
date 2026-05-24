@@ -22,6 +22,7 @@ import {
   PiRunner,
   prepareBundleForPi,
   buildApiCallExtensionFactory,
+  buildRuntimeToolExtensions,
   emitRuntimeReady,
   startSinkHeartbeat,
   type SinkHeartbeatHandle,
@@ -365,6 +366,24 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     process.stderr.write(`→ wired ${apiCallFactories.length} integration api_call tool(s)\n`);
   }
 
+  // ─── 7b. Platform runtime tools (output/log/note/pin/report) ──────────
+  // Selected via `manifest.runtimeTools`. With no sidecar (the CLI always
+  // runs in-process), register the shared MCP tool definitions
+  // (`@appstrate/core/runtime-tool-defs`) as Pi extensions. The default
+  // emitter writes the canonical events as stdout-JSONL, harvested by the
+  // `attachStdoutBridge` wired below into the run sink — same wire contract
+  // the former built-in tools used.
+  const rootRuntimeTools = (
+    bundle.packages.get(bundle.root)?.manifest as { runtimeTools?: string[] } | undefined
+  )?.runtimeTools;
+  const runtimeToolFactories = buildRuntimeToolExtensions({
+    ...(rootRuntimeTools ? { runtimeTools: rootRuntimeTools } : {}),
+    outputSchema: (promptInputs.outputSchema ?? null) as Record<string, unknown> | null,
+  });
+  if (!opts.json && runtimeToolFactories.length > 0) {
+    process.stderr.write(`→ wired ${runtimeToolFactories.length} runtime tool(s)\n`);
+  }
+
   // ─── 8. Cancellation wiring ───────────────────────────────────────
   // The CLI's central shutdown coordinator owns SIGINT/SIGTERM/SIGHUP
   // and exposes a single AbortSignal we pass to the runner. Cleanup
@@ -514,7 +533,11 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
       systemPrompt,
       cwd: workspaceDir,
       agentDir: path.join(workspaceDir, ".pi-agent"),
-      extensionFactories: [...prepared.extensionFactories, ...apiCallFactories],
+      extensionFactories: [
+        ...prepared.extensionFactories,
+        ...apiCallFactories,
+        ...runtimeToolFactories,
+      ],
       authStoragePath: path.join(workspaceDir, ".pi-auth.json"),
     });
 
@@ -534,7 +557,8 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     // phase entirely because ES module imports are evaluated before any
     // top-level statement runs.
     const emittedRunId = reportSession?.runId ?? runId;
-    const extensionsCount = prepared.extensionFactories.length + apiCallFactories.length;
+    const extensionsCount =
+      prepared.extensionFactories.length + apiCallFactories.length + runtimeToolFactories.length;
     await emitRuntimeReady(sink, emittedRunId, {
       bundleLoaded: true,
       extensions: extensionsCount,

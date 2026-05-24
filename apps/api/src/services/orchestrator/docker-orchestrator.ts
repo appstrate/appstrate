@@ -133,6 +133,14 @@ export class DockerOrchestrator implements ContainerOrchestrator {
     if (spec.integrations && spec.integrations.length > 0) {
       sidecarEnv.INTEGRATIONS_TO_SPAWN_JSON = JSON.stringify(spec.integrations);
     }
+    // Platform runtime tools (output/log/note/pin/report) the sidecar hosts
+    // as in-process MCP tools, plus the output schema they validate against.
+    if (spec.runtimeTools && spec.runtimeTools.length > 0) {
+      sidecarEnv.RUNTIME_TOOLS_JSON = JSON.stringify(spec.runtimeTools);
+    }
+    if (spec.outputSchema) {
+      sidecarEnv.OUTPUT_SCHEMA = JSON.stringify(spec.outputSchema);
+    }
     // The sidecar selects its integration runtime purely from this var (no
     // auto-detection). Pin it to mirror this orchestrator's RUN_ADAPTER so a
     // containerized run spawns its integrations as containers too. Respect an

@@ -60,6 +60,7 @@
     "./version-policy": "./src/version-policy.ts",
     "./system-packages": "./src/system-packages.ts",
     "./runtime-tools-catalog": "./src/runtime-tools-catalog.ts",
+    "./runtime-tool-defs": "./src/runtime-tool-defs.ts",
     "./ssrf": "./src/ssrf.ts",
     "./html": "./src/html.ts",
     "./schemas": "./src/schemas.ts",
