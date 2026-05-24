@@ -13,7 +13,9 @@ import {
   Lock,
   ChevronDown,
   RefreshCw,
+  Settings,
 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -31,6 +33,7 @@ import {
   useAgentsConsumingIntegration,
   useIntegrationAgentResolution,
   type AgentIntegrationEntry,
+  type IntegrationAgentResolution,
   type IntegrationAuthStatus,
   type IntegrationCandidate,
   type IntegrationConnection,
@@ -45,6 +48,8 @@ import { FieldsConnectModal } from "../integration-connect/fields-connect-modal"
 import { useIntegrationOAuthPopup } from "../integration-connect/use-integration-oauth-popup";
 import { connectionDisplayLabel } from "../integration-connect/connection-label";
 import { pickDefaultAuth } from "../integration-connect/pick-default-auth";
+import { requiredScopesForAgent } from "@appstrate/core/integration";
+import { api } from "../../api";
 
 interface AgentIntegrationsBlockProps {
   entries: AgentIntegrationEntry[];
@@ -178,6 +183,8 @@ function IntegrationConnectionCard({
           manifest={detail.manifest}
           authStatuses={detail.auths}
           displayName={displayName}
+          agentTools={agentTools}
+          agentScopes={agentScopes}
         />
       </CardShell>
     );
@@ -261,7 +268,7 @@ function FallbackConnectCard({
     agentTools,
     agentScopes,
   });
-  const action = resolveAction(status, manifest);
+  const action = resolveAction(status, manifest, agentTools, agentScopes);
 
   // The connected connection drives the reuse hint below. We used to also
   // render an unlink button here, but it called the global delete endpoint
@@ -312,15 +319,27 @@ function FallbackConnectCard({
             : {})}
         />
       ) : (
-        addAnotherAuthKey && (
-          <InlineConnectButton
-            packageId={packageId}
-            authKey={addAnotherAuthKey}
-            intent="connect"
-            label={t("detail.integrationAddAnother")}
-            forceAccountSelect
-          />
-        )
+        addAnotherAuthKey &&
+        (() => {
+          // Another account for the same auth still has to satisfy THIS
+          // agent's tool scopes, so request them rather than manifest defaults.
+          const scopes = requiredScopesForAgent({
+            manifest,
+            authKey: addAnotherAuthKey,
+            agentTools,
+            agentScopes,
+          });
+          return (
+            <InlineConnectButton
+              packageId={packageId}
+              authKey={addAnotherAuthKey}
+              intent="connect"
+              label={t("detail.integrationAddAnother")}
+              forceAccountSelect
+              {...(scopes.length ? { scopes } : {})}
+            />
+          );
+        })()
       )}
     </CardShell>
   );
@@ -359,12 +378,16 @@ function MemberConnectionPicker({
   manifest,
   authStatuses,
   displayName,
+  agentTools,
+  agentScopes,
 }: {
   integrationPackageId: string;
   agentPackageId: string;
   manifest: IntegrationManifestView;
   authStatuses: IntegrationAuthStatus[];
   displayName: string;
+  agentTools: string[] | undefined;
+  agentScopes: string[] | undefined;
 }) {
   const { t } = useTranslation(["agents", "settings"]);
   const { data: resolution, isPending } = useIntegrationAgentResolution(
@@ -375,6 +398,7 @@ function MemberConnectionPicker({
   const deletePin = useDeleteMemberIntegrationPin();
   const { openPopup, isPending: oauthPending } = useIntegrationOAuthPopup();
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [fieldsAuthKey, setFieldsAuthKey] = useState<string | null>(null);
 
   const auths = manifest.auths ?? {};
@@ -452,12 +476,45 @@ function MemberConnectionPicker({
   const hasCandidates = candidates.length > 0;
   const underScoped = resolvedMissingScopes.length > 0;
 
+  // Select the connection the user just added: "add a connection" both
+  // creates AND selects it (they added it to use it), persisting a member pin
+  // so the resolver lands on it instead of dropping into a blocked
+  // "must_choose". Only when the member hasn't already pinned an explicit
+  // choice — an existing pin is respected, not overridden.
+  const selectConnection = async (connectionId: string) => {
+    await upsertPin.mutateAsync({ agentPackageId, integrationPackageId, connectionId });
+    await refresh();
+  };
+
   const triggerConnect = async (authKey: string) => {
     const auth = auths[authKey];
     if (!auth) return;
     if (auth.type === "oauth2") {
-      await openPopup({ packageId: integrationPackageId, authKey, forceAccountSelect: true });
-      await refresh();
+      // Snapshot the accessible set so we can identify the just-created
+      // connection afterwards — the OAuth popup can't return its id, and a
+      // cancelled popup adds nothing, leaving the prior resolution intact.
+      const before = new Set(candidates.map((c) => c.id));
+      const hadPin = !!memberPinnedConnectionId;
+      // Forward the agent's per-tool inferred scopes so consent asks for what
+      // THIS agent needs — not just the integration's manifest defaults (the
+      // integration detail page is the surface that connects at defaults).
+      const scopes = requiredScopesForAgent({ manifest, authKey, agentTools, agentScopes });
+      await openPopup({
+        packageId: integrationPackageId,
+        authKey,
+        ...(scopes.length ? { scopes } : {}),
+        forceAccountSelect: true,
+      });
+      if (hadPin) {
+        await refresh();
+        return;
+      }
+      const fresh = await api<IntegrationAgentResolution>(
+        `/integrations/${encodeURI(integrationPackageId)}/agent-resolution/${encodeURI(agentPackageId)}`,
+      );
+      const added = fresh.candidates.find((c) => !before.has(c.id));
+      if (added) await selectConnection(added.id);
+      else await refresh();
     } else {
       setFieldsAuthKey(authKey);
     }
@@ -614,6 +671,16 @@ function MemberConnectionPicker({
                 </DropdownMenuItem>
               );
             })}
+          <DropdownMenuSeparator />
+          {/* Escape hatch to the integration page for the full connection
+              management surface (rename, share-with-org, delete, OAuth client). */}
+          <DropdownMenuItem
+            onSelect={() => navigate(`/integrations/${integrationPackageId}`)}
+            data-testid={`member-pick-manage-${integrationPackageId}`}
+          >
+            <Settings className="size-3.5" />
+            <span>{t("detail.integrationMemberPicker.manageConnections")}</span>
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
       {/* Resolved connection is under-scoped → the run is blocked
@@ -671,6 +738,12 @@ function MemberConnectionPicker({
           authKey={fieldsAuthKey}
           auth={fieldsAuth}
           displayName={displayName}
+          // The fields connect returns the created connection, so select it
+          // directly — same "add = select it" rule as the OAuth path, and only
+          // when the member hasn't already pinned an explicit choice.
+          onConnected={(conn) => {
+            if (!memberPinnedConnectionId) void selectConnection(conn.id);
+          }}
         />
       )}
     </div>
@@ -687,14 +760,20 @@ function MemberConnectionPicker({
 function resolveAction(
   status: IntegrationStatus,
   manifest: IntegrationManifestView,
+  agentTools: string[] | undefined,
+  agentScopes: string[] | undefined,
 ): { authKey: string; scopes?: string[]; intent: "connect" | "reconnect" | "upgrade" } | null {
   if (status.kind === "ok") return null;
-  if (status.kind === "needs_reconnection") {
-    return { authKey: status.authKey, intent: "reconnect" };
-  }
-  // not_connected — pick first oauth2, falling back to first declared.
-  const authKey = pickDefaultAuth(manifest.auths);
-  return authKey ? { authKey, intent: "connect" } : null;
+  // Both connect and reconnect must request the agent's inferred scopes — the
+  // backend only adds manifest defaults for a plain connect, so the agent
+  // surface forwards what THIS agent needs (the integration page connects at
+  // defaults). Empty union (no tools/scopes picked) → omit, stay at defaults.
+  const authKey =
+    status.kind === "needs_reconnection" ? status.authKey : pickDefaultAuth(manifest.auths);
+  if (!authKey) return null;
+  const intent = status.kind === "needs_reconnection" ? "reconnect" : "connect";
+  const scopes = requiredScopesForAgent({ manifest, authKey, agentTools, agentScopes });
+  return { authKey, intent, ...(scopes.length ? { scopes } : {}) };
 }
 
 function CardShell({

@@ -64,6 +64,7 @@
   "detail.integrationMemberPicker.adminLocked": "Locked by an admin",
   "detail.integrationMemberPicker.addConnection": "Add a connection",
   "detail.integrationMemberPicker.addVia": "Add via {{label}}",
+  "detail.integrationMemberPicker.manageConnections": "Manage connections",
   "detail.integrationReuseSingle": "Connected via {{account}}",
   "detail.integrationReuseShared": "Connected via {{account}} — reused by {{count}} agents",
   "missingConnections.mustChoose.sharedBadge": "Shared",

@@ -64,6 +64,7 @@
   "detail.integrationMemberPicker.adminLocked": "Verrouillée par un admin",
   "detail.integrationMemberPicker.addConnection": "Ajouter une connexion",
   "detail.integrationMemberPicker.addVia": "Ajouter via {{label}}",
+  "detail.integrationMemberPicker.manageConnections": "Gérer les connexions",
   "detail.integrationReuseSingle": "Connecté via {{account}}",
   "detail.integrationReuseShared": "Connecté via {{account}} — réutilisée par {{count}} agents",
   "missingConnections.mustChoose.sharedBadge": "Partagée",

@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Modal } from "../modal";
 import {
   useConnectIntegrationFields,
+  type IntegrationConnection,
   type IntegrationManifestAuth,
 } from "../../hooks/use-integrations";
 
@@ -35,6 +36,8 @@ interface FieldsConnectModalProps {
   authKey: string;
   auth: IntegrationManifestAuth;
   displayName: string;
+  /** Fired with the created connection on a successful connect (before close). */
+  onConnected?: (connection: IntegrationConnection) => void;
 }
 
 export function FieldsConnectModal({
@@ -44,6 +47,7 @@ export function FieldsConnectModal({
   authKey,
   auth,
   displayName,
+  onConnected,
 }: FieldsConnectModalProps) {
   const { t } = useTranslation("settings");
   const [values, setValues] = useState<Record<string, string>>({});
@@ -56,7 +60,8 @@ export function FieldsConnectModal({
     mutation.mutate(
       { packageId, authKey, credentials: values },
       {
-        onSuccess: () => {
+        onSuccess: (connection) => {
+          onConnected?.(connection);
           setValues({});
           onClose();
         },
