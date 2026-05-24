@@ -14,6 +14,7 @@
  *   - `ProxyAuthorizationError` (target off the `authorizedUris` allowlist)
  *     → 403
  *   - `ProxyCredentialError` (no connection / integration not installed) → 404
+ *   - cookie-session rejection by the `ACCEPTED_AUTH_METHODS` gate → 403
  *
  * Auth is a Bearer API key scoped with `credential-proxy:call` — cookie
  * sessions are refused by design and the route only accepts API keys /
@@ -359,6 +360,56 @@ describe("POST /api/credential-proxy/proxy — error→status mapping", () => {
     });
     expect(res.status).toBe(403);
     // Allowlist gate fires before the upstream fetch.
+    expect(upstreamCalls).toBe(0);
+  });
+});
+
+describe("POST /api/credential-proxy/proxy — cookie-session rejection (ACCEPTED_AUTH_METHODS gate)", () => {
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    await flushRedis();
+    ctx = await createTestContext({ orgSlug: "cporg" });
+    await seedIntegrationWithConnection(ctx);
+    // Upstream must never be contacted — the auth-method gate fires inside
+    // the handler before any credential resolution / fetch.
+    mockUpstream(async () => new Response("should not be called", { status: 599 }));
+  });
+  afterEach(() => restoreFetch());
+
+  it("403s a cookie session even though the owner holds credential-proxy:call", async () => {
+    // The owner role grants `credential-proxy:call`, so `requirePermission`
+    // passes and execution reaches the `ACCEPTED_AUTH_METHODS` gate. That gate
+    // rejects `authMethod === "session"` — cookie sessions are refused because
+    // the drive-by CSRF threat model doesn't fit an endpoint that reaches
+    // third-party providers. Only Bearer API keys / device-flow JWTs are
+    // accepted.
+    let upstreamCalls = 0;
+    mockUpstream(async () => {
+      upstreamCalls += 1;
+      return new Response("should not be called", { status: 599 });
+    });
+
+    const res = await app.request("/api/credential-proxy/proxy", {
+      method: "GET",
+      headers: {
+        // Cookie session (NOT a Bearer api_key) → authMethod = "session".
+        Cookie: ctx.cookie,
+        "X-Org-Id": ctx.orgId,
+        "X-Application-Id": ctx.defaultAppId,
+        "X-Integration": INTEGRATION_ID,
+        "X-Target": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+        "X-Session-Id": uuidV4(),
+      },
+    });
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { detail?: string };
+    // Matches the route's verbatim message
+    // (`credential-proxy.ts` ACCEPTED_AUTH_METHODS branch).
+    expect(body.detail ?? "").toMatch(/cookie sessions and unknown strategies rejected/i);
+    expect(body.detail ?? "").toMatch(/auth method "session"/i);
+    // The gate fires before any credential resolution / upstream contact.
     expect(upstreamCalls).toBe(0);
   });
 });

@@ -266,4 +266,102 @@ describe("runLogin — security limits", () => {
       }),
     ).rejects.toMatchObject({ reason: "response_too_large" });
   });
+
+  it("classifies an aborted (timed-out) request as `timeout`", async () => {
+    // A fetchImpl that never resolves on its own but rejects the moment the
+    // engine's per-step AbortController fires. With stepTimeoutMs=1 the
+    // setTimeout-driven abort lands almost immediately, exercising the
+    // `ac.signal.aborted` branch (reason: "timeout") rather than the generic
+    // request-failed branch.
+    const hangingFetch = ((_url: string | URL | Request, init?: RequestInit) => {
+      return new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal;
+        if (signal) {
+          signal.addEventListener("abort", () =>
+            reject(signal.reason ?? new DOMException("aborted", "AbortError")),
+          );
+        }
+      });
+    }) as unknown as typeof fetch;
+
+    const config: LoginConfig = { steps: [baseStep], limits: { stepTimeoutMs: 1 } };
+    const err = await runLogin(config, {
+      inputs: {},
+      authorizedUris: ALLOW,
+      allowAllUris: false,
+      fetchImpl: hangingFetch,
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(LoginError);
+    expect((err as LoginError).reason).toBe("timeout");
+  });
+
+  it("extract_failed: a `json` extractor fed a non-JSON body", async () => {
+    // 200 OK but the body isn't JSON — JSON.parse throws inside applyExtractor,
+    // which the engine maps to reason: "extract_failed".
+    const { impl } = fakeFetch([{ status: 200, body: "<html>not json</html>" }]);
+    const config: LoginConfig = { steps: [baseStep] };
+    const err = await runLogin(config, {
+      inputs: {},
+      authorizedUris: ALLOW,
+      allowAllUris: false,
+      fetchImpl: impl,
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(LoginError);
+    expect((err as LoginError).reason).toBe("extract_failed");
+  });
+
+  it("extract_failed: a `jwt` extractor whose token ref is absent from scope", async () => {
+    // The `jwt` extractor names `token: "missing"`, but no other extractor
+    // produced a `missing` value — `scope[ex.token]` is undefined → fail closed.
+    const { impl } = fakeFetch([{ status: 200, body: JSON.stringify({ access_token: "TOK" }) }]);
+    const config: LoginConfig = {
+      steps: [
+        {
+          request: { method: "POST", url: "https://idp.example.com/token", body: "grant=pw" },
+          extract: {
+            access_token: { from: "json", path: "$.access_token" },
+            person_id: { from: "jwt", token: "missing", path: "$.sub" },
+          },
+          output: ["access_token", "person_id"],
+        },
+      ],
+    };
+    const err = await runLogin(config, {
+      inputs: {},
+      authorizedUris: ALLOW,
+      allowAllUris: false,
+      fetchImpl: impl,
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(LoginError);
+    expect((err as LoginError).reason).toBe("extract_failed");
+  });
+
+  it("extract_failed: a `jwt` extractor fed a garbage (undecodable) token", async () => {
+    // `access_token` is extracted as a non-JWT string ("garbage", no dots) and
+    // `person_id` references it as a jwt — decodeJwtPayload returns null →
+    // reason: "extract_failed".
+    const { impl } = fakeFetch([
+      { status: 200, body: JSON.stringify({ access_token: "garbage" }) },
+    ]);
+    const config: LoginConfig = {
+      steps: [
+        {
+          request: { method: "POST", url: "https://idp.example.com/token", body: "grant=pw" },
+          extract: {
+            access_token: { from: "json", path: "$.access_token" },
+            person_id: { from: "jwt", token: "access_token", path: "$.sub" },
+          },
+          output: ["access_token", "person_id"],
+        },
+      ],
+    };
+    const err = await runLogin(config, {
+      inputs: {},
+      authorizedUris: ALLOW,
+      allowAllUris: false,
+      fetchImpl: impl,
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(LoginError);
+    expect((err as LoginError).reason).toBe("extract_failed");
+  });
 });

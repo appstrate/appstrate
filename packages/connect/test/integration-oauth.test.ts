@@ -375,6 +375,9 @@ describe("handleIntegrationOAuthCallback", () => {
     }
     expect(err).toBeInstanceOf(OAuthCallbackError);
     expect((err as OAuthCallbackError).providerId).toBe("@official/gmail");
+    // Dispatcher mismatch is a `transient` failure — the routes layer maps it
+    // to a retryable error, NOT a "reconnect" prompt.
+    expect((err as OAuthCallbackError).kind).toBe("transient");
   });
 
   it("flags scope shortfall when the IdP returns fewer scopes than requested", async () => {

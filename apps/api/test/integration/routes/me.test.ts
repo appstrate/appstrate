@@ -24,6 +24,7 @@ import {
 import { seedApiKey, seedPackage } from "../../helpers/seed.ts";
 import { db } from "../../helpers/db.ts";
 import { integrationConnections } from "@appstrate/db/schema";
+import { eq } from "drizzle-orm";
 
 const app = getTestApp();
 
@@ -33,23 +34,27 @@ async function seedConnectionFor(opts: {
   integrationId: string;
   userId: string;
   label?: string;
-}): Promise<void> {
+}): Promise<string> {
   await seedPackage({
     id: opts.integrationId,
     orgId: opts.orgId,
     type: "integration",
     source: "local",
   });
-  await db.insert(integrationConnections).values({
-    integrationPackageId: opts.integrationId,
-    authKey: "google",
-    accountId: `acct-${crypto.randomUUID().slice(0, 8)}`,
-    applicationId: opts.applicationId,
-    userId: opts.userId,
-    credentialsEncrypted: "x",
-    scopesGranted: ["openid", "email"],
-    label: opts.label ?? null,
-  });
+  const [row] = await db
+    .insert(integrationConnections)
+    .values({
+      integrationPackageId: opts.integrationId,
+      authKey: "google",
+      accountId: `acct-${crypto.randomUUID().slice(0, 8)}`,
+      applicationId: opts.applicationId,
+      userId: opts.userId,
+      credentialsEncrypted: "x",
+      scopesGranted: ["openid", "email"],
+      label: opts.label ?? null,
+    })
+    .returning({ id: integrationConnections.id });
+  return row!.id;
 }
 
 describe("Me API (/api/me)", () => {
@@ -291,6 +296,93 @@ describe("Me API (/api/me)", () => {
 
     it("returns 401 without authentication", async () => {
       const res = await app.request("/api/me/connections");
+      expect(res.status).toBe(401);
+    });
+  });
+
+  describe("DELETE /api/me/connections/:connectionId", () => {
+    it("returns 204 and deletes nothing for a nonexistent connection id (no disclosure)", async () => {
+      const ctx = await createTestContext({ orgSlug: "del-org" });
+      // Seed one real connection so we can prove the no-op delete left it intact.
+      const survivorId = await seedConnectionFor({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        integrationId: "@del/gmail",
+        userId: ctx.user.id,
+      });
+
+      // A random UUID that has no matching row. The route returns 204 (not
+      // 404) so a caller probing ids can't distinguish "never existed" from
+      // "already deleted" — same end state, no information disclosure.
+      const randomId = crypto.randomUUID();
+      const res = await app.request(`/api/me/connections/${randomId}`, {
+        method: "DELETE",
+        headers: { Cookie: ctx.cookie },
+      });
+      expect(res.status).toBe(204);
+
+      // The unrelated survivor row is untouched.
+      const rows = await db.select({ id: integrationConnections.id }).from(integrationConnections);
+      expect(rows.map((r) => r.id)).toContain(survivorId);
+      expect(rows).toHaveLength(1);
+    });
+
+    it("does not let actor B delete actor A's connection (ownership boundary)", async () => {
+      // Actor A owns the connection in their own org/app.
+      const ctxA = await createTestContext({ orgSlug: "victim-org" });
+      const connId = await seedConnectionFor({
+        orgId: ctxA.orgId,
+        applicationId: ctxA.defaultAppId,
+        integrationId: "@del/owned-by-a",
+        userId: ctxA.user.id,
+      });
+
+      // Actor B is a completely separate user. /me/* skips org/app context,
+      // so B can address the row by id — but the service's (userId | endUserId)
+      // ownership filter must refuse to delete a row B doesn't own.
+      const userB = await createTestUser();
+      const res = await app.request(`/api/me/connections/${connId}`, {
+        method: "DELETE",
+        headers: { Cookie: userB.cookie },
+      });
+      // The route still returns 204 (it re-derives scope from the row and the
+      // service no-ops on the ownership filter rather than 404-ing), but A's
+      // row MUST survive — that's the security boundary under test.
+      expect([204, 404]).toContain(res.status);
+
+      const after = await db
+        .select({ id: integrationConnections.id })
+        .from(integrationConnections)
+        .where(eq(integrationConnections.id, connId));
+      expect(after).toHaveLength(1);
+    });
+
+    it("lets the owner delete their own connection (204, row gone)", async () => {
+      const ctx = await createTestContext({ orgSlug: "self-del-org" });
+      const connId = await seedConnectionFor({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        integrationId: "@del/mine",
+        userId: ctx.user.id,
+      });
+
+      const res = await app.request(`/api/me/connections/${connId}`, {
+        method: "DELETE",
+        headers: { Cookie: ctx.cookie },
+      });
+      expect(res.status).toBe(204);
+
+      const after = await db
+        .select({ id: integrationConnections.id })
+        .from(integrationConnections)
+        .where(eq(integrationConnections.id, connId));
+      expect(after).toHaveLength(0);
+    });
+
+    it("returns 401 without authentication", async () => {
+      const res = await app.request(`/api/me/connections/${crypto.randomUUID()}`, {
+        method: "DELETE",
+      });
       expect(res.status).toBe(401);
     });
   });
