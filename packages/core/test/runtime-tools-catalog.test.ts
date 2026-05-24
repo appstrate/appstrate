@@ -3,7 +3,6 @@
 import { describe, expect, it } from "bun:test";
 import {
   SELECTABLE_RUNTIME_TOOLS,
-  ALL_RUNTIME_TOOLS,
   RUNTIME_TOOL_CATALOG,
   isSelectableRuntimeTool,
 } from "../src/runtime-tools-catalog.ts";
@@ -16,18 +15,14 @@ describe("runtime-tools-catalog", () => {
     expect([...SELECTABLE_RUNTIME_TOOLS]).toEqual(["output", "log", "note", "pin", "report"]);
   });
 
-  it("ALL_RUNTIME_TOOLS == SELECTABLE_RUNTIME_TOOLS (every tool is opt-in)", () => {
-    expect([...ALL_RUNTIME_TOOLS]).toEqual([...SELECTABLE_RUNTIME_TOOLS]);
-  });
-
   it("output is present in the catalog and selectable like every other tool", () => {
     const output = RUNTIME_TOOL_CATALOG.find((e) => e.id === "output");
     expect(output).toBeDefined();
     expect(isSelectableRuntimeTool("output")).toBe(true);
   });
 
-  it("catalog ids == ALL_RUNTIME_TOOLS, in listing order", () => {
-    expect(RUNTIME_TOOL_CATALOG.map((e) => e.id)).toEqual([...ALL_RUNTIME_TOOLS]);
+  it("catalog ids == SELECTABLE_RUNTIME_TOOLS, in listing order", () => {
+    expect(RUNTIME_TOOL_CATALOG.map((e) => e.id)).toEqual([...SELECTABLE_RUNTIME_TOOLS]);
   });
 
   it("isSelectableRuntimeTool accepts every catalog id only", () => {

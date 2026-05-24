@@ -3650,7 +3650,7 @@
         "operationId": "listIntegrations",
         "tags": ["Integrations"],
         "summary": "List available integrations",
-        "description": "List every AFPS integration accessible to the current org (own + system), enriched with an `installed` flag for the current application.",
+        "description": "List every AFPS integration accessible to the current org (own + system), enriched with `active` + `blockUserConnections` flags for the current application.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -4709,116 +4709,6 @@
                           "updatedAt": {
                             "type": "string",
                             "format": "date-time"
-                          }
-                        }
-                      }
-                    },
-                    "hasMore": {
-                      "type": "boolean"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/integrations/{packageId}/accessible-connections": {
-      "get": {
-        "operationId": "listAccessibleIntegrationConnections",
-        "tags": ["Integrations"],
-        "summary": "List own + shared connections the actor could pick at run-time",
-        "description": "Drives the R3 pre-run picker on agent pages — returns every connection the caller could resolve to for this integration at run kickoff (own connections and connections others shared with the org). Same predicate as the spawn-time resolver's fallback step.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          },
-          {
-            "name": "packageId",
-            "in": "path",
-            "required": true,
-            "description": "Integration package id (e.g. `@official/gmail`).",
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Accessible connection list",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["object", "data", "hasMore"],
-                  "properties": {
-                    "object": {
-                      "type": "string",
-                      "enum": ["list"]
-                    },
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "required": [
-                          "id",
-                          "authKey",
-                          "accountId",
-                          "label",
-                          "ownerUserId",
-                          "ownerEndUserId",
-                          "ownerName",
-                          "scopesGranted",
-                          "sharedWithOrg",
-                          "needsReconnection"
-                        ],
-                        "properties": {
-                          "id": {
-                            "type": "string",
-                            "format": "uuid"
-                          },
-                          "authKey": {
-                            "type": "string"
-                          },
-                          "accountId": {
-                            "type": "string"
-                          },
-                          "label": {
-                            "type": ["string", "null"]
-                          },
-                          "ownerUserId": {
-                            "type": ["string", "null"]
-                          },
-                          "ownerEndUserId": {
-                            "type": ["string", "null"]
-                          },
-                          "ownerName": {
-                            "type": ["string", "null"]
-                          },
-                          "scopesGranted": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          },
-                          "sharedWithOrg": {
-                            "type": "boolean"
-                          },
-                          "needsReconnection": {
-                            "type": "boolean"
                           }
                         }
                       }
@@ -9167,7 +9057,7 @@
         "operationId": "listMyOrgs",
         "tags": ["Profile"],
         "summary": "List orgs the authenticated caller belongs to",
-        "description": "Returns every org the caller can access. Cookie sessions and OIDC dashboard JWTs see every org the user is a member of. API keys see only their bound org. OIDC end-user JWTs see the single org owning their application's owning org. **Does NOT require `X-Org-Id`** — this endpoint is the prerequisite to setting it.",
+        "description": "Returns every org the caller can access. Cookie sessions and OIDC dashboard JWTs see every org the user is a member of. API keys see only their bound org. OIDC end-user JWTs see the single org owning their application. **Does NOT require `X-Org-Id`** — this endpoint is the prerequisite to setting it.",
         "responses": {
           "200": {
             "description": "Orgs accessible to the caller",
@@ -9449,12 +9339,9 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "required": ["integrationPackageId", "authKey", "connectionId"],
+                        "required": ["integrationPackageId", "connectionId"],
                         "properties": {
                           "integrationPackageId": {
-                            "type": "string"
-                          },
-                          "authKey": {
                             "type": "string"
                           },
                           "connectionId": {
@@ -9496,15 +9383,12 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["agentPackageId", "integrationPackageId", "authKey", "connectionId"],
+                "required": ["agentPackageId", "integrationPackageId", "connectionId"],
                 "properties": {
                   "agentPackageId": {
                     "type": "string"
                   },
                   "integrationPackageId": {
-                    "type": "string"
-                  },
-                  "authKey": {
                     "type": "string"
                   },
                   "connectionId": {
@@ -9572,7 +9456,7 @@
       "delete": {
         "operationId": "deleteMyIntegrationPin",
         "tags": ["Profile"],
-        "summary": "Clear the caller's pin on a (agent, integration, authKey)",
+        "summary": "Clear the caller's pin on a (agent, integration)",
         "description": "Removes the caller's member pin so the resolver falls back to layer 5 (accessible connections). Idempotent — 204 even when no row exists.",
         "parameters": [
           {
@@ -9591,14 +9475,6 @@
           },
           {
             "name": "integrationPackageId",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "authKey",
             "in": "query",
             "required": true,
             "schema": {

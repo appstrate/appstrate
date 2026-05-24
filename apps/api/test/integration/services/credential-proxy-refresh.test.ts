@@ -129,7 +129,6 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
 
     const res = await proxyCall({
       applicationId: ctx.defaultAppId,
-      orgId: ctx.orgId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
       method: "GET",
@@ -168,7 +167,6 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
 
     const res = await proxyCall({
       applicationId: ctx.defaultAppId,
-      orgId: ctx.orgId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
       method: "GET",
@@ -196,7 +194,6 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
 
     const res = await proxyCall({
       applicationId: ctx.defaultAppId,
-      orgId: ctx.orgId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
       method: "GET",
@@ -239,7 +236,6 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
 
     const res = await proxyCall({
       applicationId: ctx.defaultAppId,
-      orgId: ctx.orgId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
       method: "POST",

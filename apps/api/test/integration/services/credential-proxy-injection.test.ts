@@ -106,7 +106,6 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
 
     const res = await proxyCall({
       applicationId: ctx.defaultAppId,
-      orgId: ctx.orgId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
       method: "GET",
@@ -153,7 +152,6 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
 
     const res = await proxyCall({
       applicationId: ctx.defaultAppId,
-      orgId: ctx.orgId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
       method: "GET",
@@ -204,7 +202,6 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
 
     await proxyCall({
       applicationId: ctx.defaultAppId,
-      orgId: ctx.orgId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
       method: "GET",
@@ -250,7 +247,6 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
 
     await proxyCall({
       applicationId: ctx.defaultAppId,
-      orgId: ctx.orgId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
       method: "GET",
@@ -298,7 +294,6 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
     await expect(
       proxyCall({
         applicationId: ctx.defaultAppId,
-        orgId: ctx.orgId,
         actor: { type: "user", id: ctx.user.id },
         integrationId: packageId,
         method: "GET",

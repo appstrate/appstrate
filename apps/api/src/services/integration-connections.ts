@@ -37,6 +37,7 @@ import {
 import { logger } from "../lib/logger.ts";
 import { notFound, conflict, invalidRequest } from "../lib/errors.ts";
 import type { AppScope } from "../lib/scope.ts";
+import { actorInsert } from "../lib/actor.ts";
 import type { Actor } from "@appstrate/connect";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import type { IntegrationAuthStatus } from "@appstrate/shared-types";
@@ -70,11 +71,6 @@ interface IntegrationOAuthClientWithSecret extends IntegrationOAuthClient {
 // ─────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────
-
-function assertActorIdentity(actor: Actor): { userId: string | null; endUserId: string | null } {
-  if (actor.type === "user") return { userId: actor.id, endUserId: null };
-  return { userId: null, endUserId: actor.id };
-}
 
 function lookupAuth(
   manifest: IntegrationManifest,
@@ -119,7 +115,7 @@ async function loadManifestOrThrow(
  * row. `id` is included so the credentials resolver can write back to the
  * row when refreshing tokens.
  */
-export interface ActorConnectionRow {
+interface ActorConnectionRow {
   id: string;
   credentialsEncrypted: string;
   expiresAt: Date | null;
@@ -621,7 +617,7 @@ export async function persistCredentialBundle(
 
   if (target.kind === "insert") {
     await assertAppBelongsToOrg(target.scope);
-    const { userId, endUserId } = assertActorIdentity(target.actor);
+    const { userId, endUserId } = actorInsert(target.actor);
     if (!input.packageId || !input.authKey || input.accountId === undefined) {
       throw new Error("persistCredentialBundle(insert): packageId, authKey, accountId required");
     }
@@ -682,7 +678,7 @@ export async function persistCredentialBundle(
 
   if (target.kind === "update-owned") {
     await assertAppBelongsToOrg(target.scope);
-    const { userId, endUserId } = assertActorIdentity(target.actor);
+    const { userId, endUserId } = actorInsert(target.actor);
     const ownerPredicate = userId
       ? eq(integrationConnections.userId, userId)
       : eq(integrationConnections.endUserId, endUserId!);
@@ -786,7 +782,7 @@ export async function listIntegrationConnections(
   actor: Actor,
 ): Promise<IntegrationConnectionSummary[]> {
   await assertAppBelongsToOrg(scope);
-  const { userId, endUserId } = assertActorIdentity(actor);
+  const { userId, endUserId } = actorInsert(actor);
   const ownerPredicate = userId
     ? eq(integrationConnections.userId, userId)
     : eq(integrationConnections.endUserId, endUserId!);
@@ -812,7 +808,7 @@ export async function deleteIntegrationConnection(
   connectionId: string,
   actor: Actor,
 ): Promise<void> {
-  const { userId, endUserId } = assertActorIdentity(actor);
+  const { userId, endUserId } = actorInsert(actor);
   const ownerPredicate = userId
     ? eq(integrationConnections.userId, userId)
     : eq(integrationConnections.endUserId, endUserId!);
@@ -910,7 +906,7 @@ export async function getIntegrationAuthStatuses(
  * Surfaces the manifest's `auth` declaration verbatim — used by the
  * OAuth initiate handler to read endpoints + audience + scopes without
  * a second DB round-trip. Returns the full manifest too so callers that
- * need the wider catalog (e.g. `expandScopesGranted`) don't re-fetch.
+ * need the wider catalog don't re-fetch.
  */
 export async function readIntegrationAuth(
   scope: AppScope,

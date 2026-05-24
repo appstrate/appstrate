@@ -68,8 +68,6 @@ export interface CookieJarAdapter {
 export interface ProxyCallInput {
   /** Application that owns the credentials. */
   applicationId: string;
-  /** Organisation that owns the application (RBAC scope). */
-  orgId: string;
   /**
    * Actor whose `integration_connections` row is decrypted. End-user
    * impersonation (`Appstrate-User`) yields an `end_user` actor; dashboard
@@ -88,7 +86,7 @@ export interface ProxyCallInput {
 
   /** Upstream HTTP method. */
   method: string;
-  /** Upstream URL — validated against the provider's `authorizedUris`. */
+  /** Upstream URL — validated against the integration's `authorizedUris`. */
   target: string;
   /**
    * Headers forwarded to upstream. Placeholder substitution (`{{field}}`)
@@ -202,7 +200,6 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     const result = await resolveIntegrationProxyCredentials({
       integrationId: input.integrationId,
       applicationId: input.applicationId,
-      orgId: input.orgId,
       actor: input.actor,
       ...(input.connectionId ? { connectionId: input.connectionId } : {}),
     });
@@ -233,7 +230,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   // When `allowAllUris` is set we still block private/internal network
   // targets — mirror of the sidecar's SSRF safety net so the public
   // route can't be turned into an SSRF primitive by flipping a single
-  // flag on a provider manifest.
+  // flag on an integration manifest.
   if (!resolved.allowAllUris) {
     const allowlist = resolved.authorizedUris ?? [];
     const ok = allowlist.some((p) => matchesAuthorizedUriSpec(p, target));
@@ -324,7 +321,6 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
       const refreshedResult = await forceRefreshIntegrationProxyCredentials({
         integrationId: input.integrationId,
         applicationId: input.applicationId,
-        orgId: input.orgId,
         actor: input.actor,
         ...(input.connectionId ? { connectionId: input.connectionId } : {}),
       });
@@ -368,7 +364,6 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
       await forceRefreshIntegrationProxyCredentials({
         integrationId: input.integrationId,
         applicationId: input.applicationId,
-        orgId: input.orgId,
         actor: input.actor,
         ...(input.connectionId ? { connectionId: input.connectionId } : {}),
       });

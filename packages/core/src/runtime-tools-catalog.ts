@@ -30,15 +30,9 @@ export const SELECTABLE_RUNTIME_TOOLS = ["output", "log", "note", "pin", "report
 /** A tool the agent author may enable/disable. */
 export type SelectableRuntimeTool = (typeof SELECTABLE_RUNTIME_TOOLS)[number];
 
-/** Every runtime tool id. */
-export const ALL_RUNTIME_TOOLS = SELECTABLE_RUNTIME_TOOLS;
-
-/** Union of every runtime tool id. */
-export type RuntimeToolName = (typeof ALL_RUNTIME_TOOLS)[number];
-
 /** Catalog entry presented in the agent editor. */
 export interface RuntimeToolCatalogEntry {
-  readonly id: RuntimeToolName;
+  readonly id: SelectableRuntimeTool;
   readonly displayName: string;
   readonly description: string;
 }

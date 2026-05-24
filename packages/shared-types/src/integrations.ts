@@ -93,7 +93,9 @@ export interface IntegrationOAuthClient {
 /**
  * One connection an actor can pick from for a given (application,
  * integration): own + shared-with-org, with caller-facing display fields.
- * Wire shape for `GET /api/integrations/:packageId/accessible-connections`.
+ * Base wire shape for the annotated candidate list surfaced by
+ * `GET /api/integrations/:packageId/agent-resolution/:agentPackageId`
+ * (extended by `IntegrationCandidate`).
  */
 export interface AccessibleIntegrationConnection {
   id: string;

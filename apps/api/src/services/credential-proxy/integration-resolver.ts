@@ -65,7 +65,6 @@ export interface ResolveIntegrationProxyInput {
   /** Integration package id from `X-Integration` (`@scope/name`). */
   integrationId: string;
   applicationId: string;
-  orgId: string;
   actor: Actor;
   /** Optional connection id pin (from `X-Connection-Id`). */
   connectionId?: string;

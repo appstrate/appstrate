@@ -115,7 +115,6 @@ const expectedEndpoints = [
   "POST /api/integrations/{packageId}/auths/{authKey}/connect/fields",
   "POST /api/integrations/{packageId}/auths/{authKey}/connect/oauth2",
   "GET /api/integrations/{packageId}/connections",
-  "GET /api/integrations/{packageId}/accessible-connections",
   "GET /api/integrations/{packageId}/agent-resolution/{agentPackageId}",
   "GET /api/integrations/{packageId}/consuming-agents",
   "PATCH /api/integrations/{packageId}/connections/{connectionId}",

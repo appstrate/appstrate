@@ -253,7 +253,6 @@ export function createCredentialProxyRouter() {
         // authRefreshed is surfaced on the result instead.
         const result = await proxyCall({
           applicationId,
-          orgId,
           actor,
           ...(explicitConnectionId ? { connectionId: explicitConnectionId } : {}),
           integrationId,

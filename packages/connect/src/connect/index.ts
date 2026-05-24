@@ -7,12 +7,8 @@
 export type { CredentialBundle } from "./types.ts";
 export type { ConnectContext, BeginOptions, BeginResult } from "./strategy.ts";
 export { runLogin, LoginError } from "./login-engine.ts";
-export type {
-  LoginConfig,
-  LoginStep,
-  LoginRequest,
-  LoginExtractor,
-  LoginLimits,
-  LoginContext,
-  LoginResult,
-} from "./login-engine.ts";
+// Only `LoginConfig` is consumed across the package boundary (apps/api's
+// login-strategy passes a manifest's `connect` block as `LoginConfig`). The
+// engine's granular sub-types (LoginStep/Request/Extractor/Limits/Context/
+// Result) stay internal — callers rely on inference, not named imports.
+export type { LoginConfig } from "./login-engine.ts";
