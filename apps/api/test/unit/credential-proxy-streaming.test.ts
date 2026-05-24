@@ -341,31 +341,6 @@ describe("credential-proxy streaming — duplex forwarding (Phase 3)", () => {
   });
 });
 
-describe("credential-proxy streaming — authRefreshed flag (Phase 3)", () => {
-  // ── 5 & 6: proxyCall body type affects authRefreshed ─────────────────────
-  // These tests call proxyCall via a lightweight path that has the necessary
-  // DB rows seeded. Since we cannot use a real DB here, we instead verify
-  // the *type signature* allows authRefreshed and test the lower-level
-  // logic via the core module's exported constant.
-
-  it("ProxyCallResult interface accepts authRefreshed field", () => {
-    // Compile-time check: ensure the type extension is in place.
-    // If the type is wrong this test file won't compile.
-    type AssertHasAuthRefreshed = { authRefreshed?: boolean };
-    const result: AssertHasAuthRefreshed = { authRefreshed: true };
-    expect(result.authRefreshed).toBe(true);
-  });
-
-  it("ReadableStream body triggers the streaming code path in proxyCall", () => {
-    // Verify that ReadableStream is correctly detected as a stream body.
-    const stream = new ReadableStream<Uint8Array>();
-    expect(stream instanceof ReadableStream).toBe(true);
-    // Non-stream bodies should not trigger the streaming path.
-    expect(new Uint8Array([1]) instanceof ReadableStream).toBe(false);
-    expect(typeof "string" === "string").toBe(true);
-  });
-});
-
 // ─── Wave 1 — C1: Upload cap fires without Content-Length ───────────────────
 
 describe("credential-proxy streaming — C1: upload cap no Content-Length", () => {

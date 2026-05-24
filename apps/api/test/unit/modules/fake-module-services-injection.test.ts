@@ -46,21 +46,10 @@ describe("Module loader — ctx.services injection end-to-end", () => {
     expect(capturedCtx!.services).toBeDefined();
   });
 
-  it("exposes every PlatformServices namespace on ctx.services", () => {
-    expect(capturedServices).not.toBeNull();
-    const s = capturedServices!;
-    expect(s.logger).toBeDefined();
-    expect(s.orchestrator).toBeDefined();
-    expect(s.pubsub).toBeDefined();
-    expect(s.env).toBeDefined();
-    expect(s.models).toBeDefined();
-    expect(s.packages).toBeDefined();
-    expect(s.applications).toBeDefined();
-    expect(s.runs).toBeDefined();
-    expect(s.inline).toBeDefined();
-    expect(s.realtime).toBeDefined();
-    expect(s.modules).toBeDefined();
-  });
+  // Note: the exhaustive namespace+method-shape contract is asserted by
+  // `platform-services.test.ts` (the published PlatformServices regression
+  // net). This file deliberately covers only the loader → init → service-call
+  // path, so it doesn't duplicate that namespace-existence sweep.
 
   it("allows the module to invoke pure services that touch no infra", () => {
     // `env.hasRedis()` / `env.hasExternalDb()` are synchronous, side-effect
