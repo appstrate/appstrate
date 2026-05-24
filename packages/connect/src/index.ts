@@ -9,7 +9,6 @@ export {
   encryptCredentials,
   decryptCredentials,
   encryptCredentialEnvelope,
-  decryptCredentialEnvelope,
 } from "./encryption.ts";
 export type { CredentialEnvelope } from "./encryption.ts";
 

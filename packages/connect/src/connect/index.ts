@@ -6,7 +6,7 @@
 
 export type { CredentialBundle } from "./types.ts";
 export type { ConnectContext, BeginOptions, BeginResult } from "./strategy.ts";
-export { runLogin, LoginError, DEFAULT_LOGIN_LIMITS } from "./login-engine.ts";
+export { runLogin, LoginError } from "./login-engine.ts";
 export type {
   LoginConfig,
   LoginStep,
