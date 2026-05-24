@@ -162,11 +162,12 @@ export function planMitmAction(
   const stripped: string[] = [...universalStrip];
 
   if (plan) {
-    // The manifest's headerName is in scope of `allowServerOverride`.
-    // The universal pair stays stripped regardless — the spec is firm
-    // that the proxy must never forward a server-supplied Authorization
-    // header, even if the server claims override is allowed for its
-    // own configured header (confused-deputy boundary).
+    // By default the proxy strips a server-supplied header matching the
+    // injection target (confused-deputy boundary — integration code must not
+    // pre-empt the injected credential). The ONE exception is an explicit
+    // `allowServerOverride` on an Authorization-typed auth: the manifest author
+    // opted in, so the integration's own Authorization value is allowed to
+    // survive and we drop it from the universal strip list below.
     if (plan.allowServerOverride && looseEquals(plan.headerName, "Authorization")) {
       // Override allowed for Authorization → drop it from the strip list so
       // the caller's own value survives.

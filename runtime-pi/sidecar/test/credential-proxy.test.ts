@@ -497,9 +497,11 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
       deps,
     );
     expect(result.ok).toBe(true);
-    // Native fetch called once with redirect: "follow" (default).
+    // Streaming bodies can't be replayed across hops, so the path pins
+    // `redirect: "manual"` — native "follow" would leak the injected
+    // credential header into a cross-origin redirect (see #481 audit H1).
     const init = fetchFn.mock.calls[0]![1] as RequestInit;
-    expect(init.redirect).not.toBe("manual");
+    expect(init.redirect).toBe("manual");
     expect(deps.cookieJar.get("demo")).toEqual(["final=F"]);
   });
 
@@ -1067,12 +1069,11 @@ describe("executeApiCall — finalUrl exposure (#471)", () => {
     if (result.ok) expect(result.finalUrl).toBe("https://api.example.com/b");
   });
 
-  it("returns response.url on the streaming path (Bun native follow)", async () => {
-    // Streaming bodies use Bun's native redirect: "follow" which
-    // populates Response.url. The sidecar must surface it as finalUrl.
+  it("returns response.url on the streaming path", async () => {
+    // The streaming path uses `redirect: "manual"`; when the upstream
+    // responds without a redirect, `Response.url` carries the resolved
+    // URL. The sidecar must surface it as finalUrl.
     const fetchFn = mock(async (_url: string | URL, _init?: RequestInit) => {
-      // Simulate Bun's behaviour after following a redirect: the
-      // Response carries the post-follow URL.
       const res = new Response("uploaded", { status: 200 });
       Object.defineProperty(res, "url", {
         value: "https://api.example.com/uploaded?key=final",

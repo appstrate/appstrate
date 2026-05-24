@@ -234,21 +234,30 @@ export function encryptCredentialEnvelope(envelope: {
  * the entire blob as injectables, exactly as before.
  */
 export function decryptCredentialEnvelope(ciphertext: string): CredentialEnvelope {
-  const decoded = decryptCredentials<Record<string, unknown>>(ciphertext) ?? {};
+  const decoded = decryptCredentials<unknown>(ciphertext) ?? {};
   if (
-    decoded &&
-    typeof decoded === "object" &&
+    isPlainObject(decoded) &&
     decoded["v"] === STRUCTURED_ENVELOPE_VERSION &&
-    typeof decoded["outputs"] === "object" &&
-    decoded["outputs"] !== null
+    isPlainObject(decoded["outputs"])
   ) {
     const inputs = decoded["inputs"];
     return {
-      outputs: decoded["outputs"] as Record<string, unknown>,
-      inputs:
-        typeof inputs === "object" && inputs !== null ? (inputs as Record<string, unknown>) : {},
+      outputs: decoded["outputs"],
+      inputs: isPlainObject(inputs) ? inputs : {},
     };
   }
   // v1 flat blob — the whole map is injectable, nothing is a bootstrap secret.
-  return { outputs: decoded, inputs: {} };
+  // Guard against a hand-crafted blob that decrypts to a non-object (array /
+  // primitive): such a value carries no injectable fields, so treat it as empty.
+  return { outputs: isPlainObject(decoded) ? decoded : {}, inputs: {} };
+}
+
+/**
+ * Narrow to a non-null, non-array plain object. `typeof [] === "object"` and
+ * `typeof null === "object"`, so the bare `typeof` test both crypto-envelope
+ * detection and credential projection used to lean on would let an array
+ * through and mislabel it as a credential map.
+ */
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
 }

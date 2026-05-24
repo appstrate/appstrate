@@ -25,6 +25,11 @@ export function isBlockedHost(hostname: string): boolean {
     h = new URL(urlStr).hostname.toLowerCase();
     // Bun keeps brackets on IPv6 hostnames — strip them for uniform checks
     h = h.replace(/^\[|\]$/g, "");
+    // A trailing dot is a valid FQDN form that DNS resolves identically
+    // (`metadata.google.internal.`, `localhost.`, `127.0.0.1.`) but would
+    // slip past the exact-string host matches and the dotted-IP regex
+    // below. Normalize it away so the blocklist can't be bypassed.
+    h = h.replace(/\.$/, "");
   } catch {
     return true; // Unparseable hostname = blocked
   }

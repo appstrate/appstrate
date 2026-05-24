@@ -14,7 +14,9 @@
  * This is a manifest-author-driven HTTP request → an SSRF / exfil / DoS
  * surface. It is bounded by construction:
  *   - the request URL must match the integration's `authorizedUris` allowlist
- *     (unless `allowAllUris`);
+ *     (the author's explicit trust boundary); when `allowAllUris` waives the
+ *     allowlist, the SSRF blocklist (loopback/RFC1918/link-local/metadata)
+ *     applies instead so there is never an unbounded in-process fetch;
  *   - per-request timeout; capped response body;
  *   - regex patterns are length-capped (schema) and run against a size-capped
  *     body (true ReDoS needs RE2 — documented residual; the body cap bounds
@@ -33,6 +35,7 @@ import {
   matchesAuthorizedUriSpec,
 } from "../proxy-primitives.ts";
 import { decodeJwtPayload } from "@appstrate/core/jwt";
+import { isBlockedUrl } from "@appstrate/core/ssrf";
 
 export interface LoginLimits {
   stepTimeoutMs: number;
@@ -274,8 +277,20 @@ export async function runLogin(config: LoginConfig, ctx: LoginContext): Promise<
     );
   }
 
-  // URL allowlist (defence beyond the SSRF blocklist).
-  if (!ctx.allowAllUris) {
+  // URL gate. This engine runs in the platform process (not the
+  // credential-isolating sidecar), so the request URL is a manifest-authored
+  // SSRF surface. Two mutually-exclusive controls:
+  //   - allowlist present (`!allowAllUris`): the `authorizedUris` patterns are
+  //     the author's explicit, auditable trust boundary — honor them verbatim
+  //     (a self-hosted integration may legitimately scope to a LAN host).
+  //   - `allowAllUris` (no allowlist): there is no author-declared boundary, so
+  //     fall back to the SSRF blocklist to refuse loopback/RFC1918/link-local/
+  //     cloud-metadata targets the platform could otherwise be steered to.
+  if (ctx.allowAllUris) {
+    if (isBlockedUrl(url)) {
+      throw new LoginError("step 0: url targets a blocked/internal address", 0, "url_not_allowed");
+    }
+  } else {
     const allowed = (ctx.authorizedUris ?? []).some((spec) => matchesAuthorizedUriSpec(spec, url));
     if (!allowed) {
       throw new LoginError("step 0: url not in authorizedUris allowlist", 0, "url_not_allowed");
