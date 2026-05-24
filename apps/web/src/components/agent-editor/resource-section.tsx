@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { type ChangeEvent, useEffect, useMemo, useRef } from "react";
+import { type ChangeEvent, type ReactNode, useEffect, useMemo, useRef } from "react";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
@@ -34,6 +34,14 @@ interface ResourceSectionProps {
   emptyLabel: string;
   selectedEntries: ResourceEntry[];
   onChange: (updater: ResourceEntriesUpdater) => void;
+  /**
+   * Extra entries rendered at the top of the list, before the catalog
+   * items — same visual chrome, different data source. Used to surface
+   * the platform runtime tools as a system "integration" card in the
+   * Integrations section. When present, the empty state is suppressed
+   * (the list always renders so the leading items show).
+   */
+  leadingItems?: ReactNode;
 }
 
 export function VersionSelect({
@@ -93,6 +101,7 @@ export function ResourceSection({
   emptyLabel,
   selectedEntries,
   onChange,
+  leadingItems,
 }: ResourceSectionProps) {
   const { t } = useTranslation(["agents", "common"]);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -176,7 +185,7 @@ export function ResourceSection({
         <div className="text-muted-foreground flex items-center justify-center py-6">
           <Spinner />
         </div>
-      ) : (!items || items.length === 0) && inactiveDeclaredIds.length === 0 ? (
+      ) : (!items || items.length === 0) && inactiveDeclaredIds.length === 0 && !leadingItems ? (
         <>
           <p className="text-muted-foreground text-xs">{emptyLabel}</p>
           <p className="text-muted-foreground text-xs">
@@ -185,6 +194,7 @@ export function ResourceSection({
         </>
       ) : (
         <div className="flex flex-col gap-1">
+          {leadingItems}
           {(items ?? []).map((item) => {
             const isSelected = selectedMap.has(item.id);
             const isBuiltIn = item.source === "system";

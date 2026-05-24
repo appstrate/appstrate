@@ -16,7 +16,7 @@ import { UnsavedChangesModal } from "../components/unsaved-changes-modal";
 import { MetadataSection } from "../components/agent-editor/metadata-section";
 import { SchemaSection } from "../components/agent-editor/schema-section";
 import { ResourceSection } from "../components/agent-editor/resource-section";
-import { RuntimeToolsSection } from "../components/agent-editor/runtime-tools-section";
+import { RuntimeToolsGroup } from "../components/agent-editor/runtime-tools-group";
 import { PromptEditor } from "../components/agent-editor/prompt-editor";
 import { JsonEditor } from "../components/json-editor";
 import { ContentEditor } from "../components/package-editor/content-editor";
@@ -54,7 +54,6 @@ type GenericEditorTab =
   | "prompt"
   | "schema"
   | "skills"
-  | "runtimeTools"
   | "integrations"
   | "content"
   | "json";
@@ -155,7 +154,6 @@ function AgentEditorInner({
     { id: "prompt", label: t("editor.tabContent.agent") },
     { id: "schema", label: t("editor.tabSchema") },
     { id: "skills", label: t("editor.tabSkills") },
-    { id: "runtimeTools", label: t("editor.tabRuntimeTools") },
     { id: "integrations", label: t("editor.tabIntegrations") },
     { id: "json", label: t("editor.tabJson") },
   ];
@@ -226,18 +224,6 @@ function AgentEditorInner({
           }}
         />
       )}
-      {activeTab === "runtimeTools" && (
-        <RuntimeToolsSection
-          selected={getRuntimeTools(state.manifest)}
-          onChange={(next) => {
-            setState((s) => {
-              const m = { ...s.manifest };
-              setRuntimeTools(m, next);
-              return { ...s, manifest: m };
-            });
-          }}
-        />
-      )}
       {activeTab === "integrations" && (
         <ResourceSection
           type="integration"
@@ -253,6 +239,18 @@ function AgentEditorInner({
               return { ...s, manifest: m };
             });
           }}
+          leadingItems={
+            <RuntimeToolsGroup
+              selected={getRuntimeTools(state.manifest)}
+              onChange={(next) => {
+                setState((s) => {
+                  const m = { ...s.manifest };
+                  setRuntimeTools(m, next);
+                  return { ...s, manifest: m };
+                });
+              }}
+            />
+          }
         />
       )}
       {activeTab === "json" && (
