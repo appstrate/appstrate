@@ -1019,21 +1019,7 @@ export function IntegrationDetailPage() {
         }
         actionsRight={
           <>
-            {active ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  if (window.confirm(t("integrations.deactivate.confirm"))) {
-                    deactivate.mutate(packageId);
-                  }
-                }}
-                disabled={deactivate.isPending}
-                data-testid="detail-deactivate-btn"
-              >
-                {t("integrations.btn.deactivate")}
-              </Button>
-            ) : (
+            {!active && (
               <Button
                 size="sm"
                 onClick={onActivate}
@@ -1055,6 +1041,12 @@ export function IntegrationDetailPage() {
               downloadVersion={version}
               onDownload={downloadPackage}
               onFork={() => setForkOpen(true)}
+              canDeactivate={active}
+              onDeactivate={() => {
+                if (window.confirm(t("integrations.deactivate.confirm"))) {
+                  deactivate.mutate(packageId);
+                }
+              }}
               canDeletePackage={!!pkg && pkg.agents.length === 0}
               onDeletePackage={() => setConfirmDelete(true)}
             />
