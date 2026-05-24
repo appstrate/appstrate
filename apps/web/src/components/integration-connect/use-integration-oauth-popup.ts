@@ -96,6 +96,10 @@ export function useIntegrationOAuthPopup() {
           window.alert(t("integration.popup.blocked"));
           return;
         }
+        if (err instanceof Error && err.message === "oauth_timeout") {
+          window.alert(t("integration.popup.timeout"));
+          return;
+        }
         throw err;
       }
     },
