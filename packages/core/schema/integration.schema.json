@@ -364,189 +364,184 @@
           "connect": {
             "type": "object",
             "properties": {
-              "steps": {
-                "minItems": 1,
-                "maxItems": 1,
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "request": {
-                      "type": "object",
-                      "properties": {
-                        "method": {
-                          "type": "string",
-                          "enum": [
-                            "GET",
-                            "POST",
-                            "PUT",
-                            "PATCH",
-                            "DELETE"
-                          ]
-                        },
-                        "url": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "headers": {
-                          "type": "object",
-                          "propertyNames": {
-                            "type": "string"
-                          },
-                          "additionalProperties": {
-                            "type": "string"
-                          }
-                        },
-                        "body": {
+              "login": {
+                "type": "object",
+                "properties": {
+                  "request": {
+                    "type": "object",
+                    "properties": {
+                      "method": {
+                        "type": "string",
+                        "enum": [
+                          "GET",
+                          "POST",
+                          "PUT",
+                          "PATCH",
+                          "DELETE"
+                        ]
+                      },
+                      "url": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "headers": {
+                        "type": "object",
+                        "propertyNames": {
                           "type": "string"
                         },
-                        "contentType": {
-                          "type": "string",
-                          "enum": [
-                            "application/x-www-form-urlencoded",
-                            "application/json"
-                          ]
+                        "additionalProperties": {
+                          "type": "string"
                         }
                       },
-                      "required": [
-                        "method",
-                        "url"
-                      ],
-                      "additionalProperties": false
-                    },
-                    "okStatus": {
-                      "type": "array",
-                      "items": {
-                        "type": "integer",
-                        "minimum": 100,
-                        "maximum": 599
-                      }
-                    },
-                    "extract": {
-                      "type": "object",
-                      "propertyNames": {
+                      "body": {
                         "type": "string"
                       },
-                      "additionalProperties": {
-                        "oneOf": [
-                          {
-                            "type": "object",
-                            "properties": {
-                              "from": {
-                                "type": "string",
-                                "const": "json"
-                              },
-                              "path": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 256
-                              }
-                            },
-                            "required": [
-                              "from",
-                              "path"
-                            ],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "from": {
-                                "type": "string",
-                                "const": "jwt"
-                              },
-                              "token": {
-                                "type": "string",
-                                "minLength": 1
-                              },
-                              "path": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 256
-                              }
-                            },
-                            "required": [
-                              "from",
-                              "token",
-                              "path"
-                            ],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "from": {
-                                "type": "string",
-                                "const": "regex"
-                              },
-                              "pattern": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 256
-                              },
-                              "group": {
-                                "type": "integer",
-                                "minimum": 0,
-                                "maximum": 20
-                              }
-                            },
-                            "required": [
-                              "from",
-                              "pattern"
-                            ],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "from": {
-                                "type": "string",
-                                "const": "header"
-                              },
-                              "name": {
-                                "type": "string",
-                                "minLength": 1
-                              }
-                            },
-                            "required": [
-                              "from",
-                              "name"
-                            ],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "from": {
-                                "type": "string",
-                                "const": "cookie"
-                              },
-                              "name": {
-                                "type": "string",
-                                "minLength": 1
-                              }
-                            },
-                            "required": [
-                              "from",
-                              "name"
-                            ],
-                            "additionalProperties": false
-                          }
+                      "contentType": {
+                        "type": "string",
+                        "enum": [
+                          "application/x-www-form-urlencoded",
+                          "application/json"
                         ]
                       }
                     },
-                    "output": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
+                    "required": [
+                      "method",
+                      "url"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "okStatus": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "minimum": 100,
+                      "maximum": 599
                     }
                   },
-                  "required": [
-                    "request"
-                  ],
-                  "additionalProperties": false
-                }
+                  "extract": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "from": {
+                              "type": "string",
+                              "const": "json"
+                            },
+                            "path": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 256
+                            }
+                          },
+                          "required": [
+                            "from",
+                            "path"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "from": {
+                              "type": "string",
+                              "const": "jwt"
+                            },
+                            "token": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "path": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 256
+                            }
+                          },
+                          "required": [
+                            "from",
+                            "token",
+                            "path"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "from": {
+                              "type": "string",
+                              "const": "regex"
+                            },
+                            "pattern": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 256
+                            },
+                            "group": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 20
+                            }
+                          },
+                          "required": [
+                            "from",
+                            "pattern"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "from": {
+                              "type": "string",
+                              "const": "header"
+                            },
+                            "name": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": [
+                            "from",
+                            "name"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "from": {
+                              "type": "string",
+                              "const": "cookie"
+                            },
+                            "name": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": [
+                            "from",
+                            "name"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  },
+                  "output": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "request"
+                ],
+                "additionalProperties": false
               },
               "limits": {
                 "type": "object",

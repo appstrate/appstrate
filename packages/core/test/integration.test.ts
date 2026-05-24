@@ -1219,20 +1219,18 @@ describe("integrationManifestSchema — connect (Login)", () => {
     return baseManifest({ auths: { session: auth } });
   }
   const validConnect = {
-    steps: [
-      {
-        request: {
-          method: "POST",
-          url: "https://idp.example.com/token",
-          body: "grant_type=password&username={{email}}&password={{password}}",
-        },
-        extract: {
-          access_token: { from: "json", path: "$.access_token" },
-          expires_in: { from: "json", path: "$.expires_in" },
-        },
-        output: ["access_token", "expires_in"],
+    login: {
+      request: {
+        method: "POST",
+        url: "https://idp.example.com/token",
+        body: "grant_type=password&username={{email}}&password={{password}}",
       },
-    ],
+      extract: {
+        access_token: { from: "json", path: "$.access_token" },
+        expires_in: { from: "json", path: "$.expires_in" },
+      },
+      output: ["access_token", "expires_in"],
+    },
     expiresInOutput: "expires_in",
     identityOutputs: ["access_token"],
   };
@@ -1244,7 +1242,7 @@ describe("integrationManifestSchema — connect (Login)", () => {
     connect,
   });
 
-  it("accepts a valid custom + connect.steps auth", () => {
+  it("accepts a valid custom + connect.login auth", () => {
     const r = integrationManifestSchema.safeParse(withAuth(customAuth(validConnect)));
     expect(r.success).toBe(true);
   });
@@ -1266,13 +1264,11 @@ describe("integrationManifestSchema — connect (Login)", () => {
     const r = integrationManifestSchema.safeParse(
       withAuth(
         customAuth({
-          steps: [
-            {
-              request: { method: "POST", url: "https://idp.example.com/token" },
-              extract: { access_token: { from: "json", path: "$.access_token" } },
-              output: ["nonexistent"],
-            },
-          ],
+          login: {
+            request: { method: "POST", url: "https://idp.example.com/token" },
+            extract: { access_token: { from: "json", path: "$.access_token" } },
+            output: ["nonexistent"],
+          },
         }),
       ),
     );
@@ -1283,12 +1279,10 @@ describe("integrationManifestSchema — connect (Login)", () => {
     const r = integrationManifestSchema.safeParse(
       withAuth(
         customAuth({
-          steps: [
-            {
-              request: { method: "POST", url: "https://idp.example.com/token" },
-              extract: { access_token: { from: "json", path: "$.access_token" } },
-            },
-          ],
+          login: {
+            request: { method: "POST", url: "https://idp.example.com/token" },
+            extract: { access_token: { from: "json", path: "$.access_token" } },
+          },
         }),
       ),
     );
@@ -1299,13 +1293,11 @@ describe("integrationManifestSchema — connect (Login)", () => {
     const r = integrationManifestSchema.safeParse(
       withAuth(
         customAuth({
-          steps: [
-            {
-              request: { method: "POST", url: "https://idp.example.com/token" },
-              extract: { access_token: { from: "json", path: "$.access_token" } },
-              output: ["access_token"],
-            },
-          ],
+          login: {
+            request: { method: "POST", url: "https://idp.example.com/token" },
+            extract: { access_token: { from: "json", path: "$.access_token" } },
+            output: ["access_token"],
+          },
           expiresInOutput: "expires_in",
         }),
       ),
@@ -1346,20 +1338,18 @@ describe("integrationManifestSchema — connect.tool (Orchestrated) + delivery g
     expect(r.success).toBe(true);
   });
 
-  it("rejects declaring both steps and tool", () => {
+  it("rejects declaring both login and tool", () => {
     const r = integrationManifestSchema.safeParse(
       withAuth(
         orchestratedAuth({
           tool: "login",
           runAt: "run-start",
           produces: ["JSESSIONID"],
-          steps: [
-            {
-              request: { method: "POST", url: "https://saas.example.com/login" },
-              extract: { JSESSIONID: { from: "cookie", name: "JSESSIONID" } },
-              output: ["JSESSIONID"],
-            },
-          ],
+          login: {
+            request: { method: "POST", url: "https://saas.example.com/login" },
+            extract: { JSESSIONID: { from: "cookie", name: "JSESSIONID" } },
+            output: ["JSESSIONID"],
+          },
         }),
       ),
     );
@@ -1380,19 +1370,17 @@ describe("integrationManifestSchema — connect.tool (Orchestrated) + delivery g
     expect(r.success).toBe(false);
   });
 
-  it("rejects orchestrated-only fields on a steps connect", () => {
+  it("rejects orchestrated-only fields on a login connect", () => {
     const r = integrationManifestSchema.safeParse(
       withAuth(
         orchestratedAuth(
           {
             runAt: "link",
-            steps: [
-              {
-                request: { method: "POST", url: "https://saas.example.com/login" },
-                extract: { JSESSIONID: { from: "cookie", name: "JSESSIONID" } },
-                output: ["JSESSIONID"],
-              },
-            ],
+            login: {
+              request: { method: "POST", url: "https://saas.example.com/login" },
+              extract: { JSESSIONID: { from: "cookie", name: "JSESSIONID" } },
+              output: ["JSESSIONID"],
+            },
           },
           { http: { headerName: "Cookie", valueFrom: "JSESSIONID" } },
         ),

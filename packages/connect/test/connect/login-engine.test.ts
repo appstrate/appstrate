@@ -27,21 +27,19 @@ describe("runLogin — declarative login", () => {
       { status: 200, body: JSON.stringify({ access_token: "TOK-123", expires_in: 3600 }) },
     ]);
     const config: LoginConfig = {
-      steps: [
-        {
-          request: {
-            method: "POST",
-            url: "https://idp.example.com/token",
-            body: "grant_type=password&username={{email}}&password={{password}}",
-            contentType: "application/x-www-form-urlencoded",
-          },
-          extract: {
-            access_token: { from: "json", path: "$.access_token" },
-            expires_in: { from: "json", path: "$.expires_in" },
-          },
-          output: ["access_token", "expires_in"],
+      login: {
+        request: {
+          method: "POST",
+          url: "https://idp.example.com/token",
+          body: "grant_type=password&username={{email}}&password={{password}}",
+          contentType: "application/x-www-form-urlencoded",
         },
-      ],
+        extract: {
+          access_token: { from: "json", path: "$.access_token" },
+          expires_in: { from: "json", path: "$.expires_in" },
+        },
+        output: ["access_token", "expires_in"],
+      },
       expiresInOutput: "expires_in",
     };
 
@@ -63,13 +61,11 @@ describe("runLogin — declarative login", () => {
   it("non-leak: the bootstrap secret never lands in outputs", async () => {
     const { impl } = fakeFetch([{ status: 200, body: JSON.stringify({ access_token: "TOK" }) }]);
     const config: LoginConfig = {
-      steps: [
-        {
-          request: { method: "POST", url: "https://idp.example.com/token", body: "p={{password}}" },
-          extract: { access_token: { from: "json", path: "$.access_token" } },
-          output: ["access_token"],
-        },
-      ],
+      login: {
+        request: { method: "POST", url: "https://idp.example.com/token", body: "p={{password}}" },
+        extract: { access_token: { from: "json", path: "$.access_token" } },
+        output: ["access_token"],
+      },
     };
     const res = await runLogin(config, {
       inputs: { password: "s3cr3t" },
@@ -84,13 +80,11 @@ describe("runLogin — declarative login", () => {
   it("SSRF blocklist applies even under allowAllUris (runs in-process)", async () => {
     const { impl, calls } = fakeFetch([{ status: 200, body: "{}" }]);
     const config: LoginConfig = {
-      steps: [
-        {
-          request: { method: "GET", url: "http://169.254.169.254/latest/meta-data/" },
-          extract: { access_token: { from: "header", path: "x-token" } },
-          output: ["access_token"],
-        },
-      ],
+      login: {
+        request: { method: "GET", url: "http://169.254.169.254/latest/meta-data/" },
+        extract: { access_token: { from: "header", path: "x-token" } },
+        output: ["access_token"],
+      },
     };
     const run = runLogin(config, {
       inputs: {},
@@ -107,16 +101,14 @@ describe("runLogin — declarative login", () => {
     const jwt = `${b64url({ alg: "none" })}.${b64url({ AUTH: [{ personId: "P-42" }] })}.`;
     const { impl } = fakeFetch([{ status: 200, body: JSON.stringify({ access_token: jwt }) }]);
     const config: LoginConfig = {
-      steps: [
-        {
-          request: { method: "POST", url: "https://idp.example.com/token", body: "grant=pw" },
-          extract: {
-            access_token: { from: "json", path: "$.access_token" },
-            person_id: { from: "jwt", token: "access_token", path: "$.AUTH[0].personId" },
-          },
-          output: ["access_token", "person_id"],
+      login: {
+        request: { method: "POST", url: "https://idp.example.com/token", body: "grant=pw" },
+        extract: {
+          access_token: { from: "json", path: "$.access_token" },
+          person_id: { from: "jwt", token: "access_token", path: "$.AUTH[0].personId" },
         },
-      ],
+        output: ["access_token", "person_id"],
+      },
       identityOutputs: ["person_id"],
     };
     const res = await runLogin(config, {
@@ -133,19 +125,17 @@ describe("runLogin — declarative login", () => {
     const jwt = `${b64url({ alg: "none" })}.${b64url({ AUTH: [{ personId: "P-7" }] })}.`;
     const { impl } = fakeFetch([{ status: 200, body: JSON.stringify({ access_token: jwt }) }]);
     const config: LoginConfig = {
-      steps: [
-        {
-          request: { method: "POST", url: "https://idp.example.com/token", body: "grant=pw" },
-          // `person_id` (jwt) is declared BEFORE `access_token` it depends on —
-          // mimics a manifest reordered by JSONB persistence. The engine's
-          // two-pass extraction (non-jwt first) must still resolve it.
-          extract: {
-            person_id: { from: "jwt", token: "access_token", path: "$.AUTH[0].personId" },
-            access_token: { from: "json", path: "$.access_token" },
-          },
-          output: ["access_token", "person_id"],
+      login: {
+        request: { method: "POST", url: "https://idp.example.com/token", body: "grant=pw" },
+        // `person_id` (jwt) is declared BEFORE `access_token` it depends on —
+        // mimics a manifest reordered by JSONB persistence. The engine's
+        // two-pass extraction (non-jwt first) must still resolve it.
+        extract: {
+          person_id: { from: "jwt", token: "access_token", path: "$.AUTH[0].personId" },
+          access_token: { from: "json", path: "$.access_token" },
         },
-      ],
+        output: ["access_token", "person_id"],
+      },
     };
     const res = await runLogin(config, {
       inputs: {},
@@ -162,13 +152,11 @@ describe("runLogin — declarative login", () => {
     // silently persist `JSESSIONID=""`. Assert it fails closed instead.
     const { impl } = fakeFetch([{ status: 200, body: "ok" }]);
     const config: LoginConfig = {
-      steps: [
-        {
-          request: { method: "POST", url: "https://idp.example.com/login", body: "u=x" },
-          extract: { JSESSIONID: { from: "cookie", name: "JSESSIONID" } },
-          output: ["JSESSIONID"],
-        },
-      ],
+      login: {
+        request: { method: "POST", url: "https://idp.example.com/login", body: "u=x" },
+        extract: { JSESSIONID: { from: "cookie", name: "JSESSIONID" } },
+        output: ["JSESSIONID"],
+      },
     };
     const err = await runLogin(config, {
       inputs: {},
@@ -185,13 +173,11 @@ describe("runLogin — declarative login", () => {
       { status: 200, body: "ok", headers: { "set-cookie": "JSESSIONID=abc123; Path=/; HttpOnly" } },
     ]);
     const config: LoginConfig = {
-      steps: [
-        {
-          request: { method: "POST", url: "https://idp.example.com/login", body: "u=x" },
-          extract: { JSESSIONID: { from: "cookie", name: "JSESSIONID" } },
-          output: ["JSESSIONID"],
-        },
-      ],
+      login: {
+        request: { method: "POST", url: "https://idp.example.com/login", body: "u=x" },
+        extract: { JSESSIONID: { from: "cookie", name: "JSESSIONID" } },
+        output: ["JSESSIONID"],
+      },
     };
     const res = await runLogin(config, {
       inputs: {},
@@ -213,7 +199,7 @@ describe("runLogin — security limits", () => {
   it("rejects a URL outside the authorizedUris allowlist", async () => {
     const { impl } = fakeFetch([{ status: 200, body: "{}" }]);
     const config: LoginConfig = {
-      steps: [{ ...baseStep, request: { ...baseStep.request, url: "https://evil.example.com/x" } }],
+      login: { ...baseStep, request: { ...baseStep.request, url: "https://evil.example.com/x" } },
     };
     await expect(
       runLogin(config, {
@@ -228,7 +214,7 @@ describe("runLogin — security limits", () => {
   it("fails closed on an unresolved placeholder", async () => {
     const { impl } = fakeFetch([{ status: 200, body: "{}" }]);
     const config: LoginConfig = {
-      steps: [{ ...baseStep, request: { ...baseStep.request, body: "x={{missing}}" } }],
+      login: { ...baseStep, request: { ...baseStep.request, body: "x={{missing}}" } },
     };
     await expect(
       runLogin(config, {
@@ -242,7 +228,7 @@ describe("runLogin — security limits", () => {
 
   it("rejects a non-OK status without echoing the body", async () => {
     const { impl } = fakeFetch([{ status: 401, body: "secret-error-detail" }]);
-    const config: LoginConfig = { steps: [baseStep] };
+    const config: LoginConfig = { login: baseStep };
     const err = await runLogin(config, {
       inputs: {},
       authorizedUris: ALLOW,
@@ -256,7 +242,7 @@ describe("runLogin — security limits", () => {
 
   it("rejects an oversized response body", async () => {
     const { impl } = fakeFetch([{ status: 200, body: "x".repeat(2000) }]);
-    const config: LoginConfig = { steps: [baseStep], limits: { maxResponseBytes: 1000 } };
+    const config: LoginConfig = { login: baseStep, limits: { maxResponseBytes: 1000 } };
     await expect(
       runLogin(config, {
         inputs: {},
@@ -269,7 +255,7 @@ describe("runLogin — security limits", () => {
 
   it("classifies an aborted (timed-out) request as `timeout`", async () => {
     // A fetchImpl that never resolves on its own but rejects the moment the
-    // engine's per-step AbortController fires. With stepTimeoutMs=1 the
+    // engine's per-request AbortController fires. With stepTimeoutMs=1 the
     // setTimeout-driven abort lands almost immediately, exercising the
     // `ac.signal.aborted` branch (reason: "timeout") rather than the generic
     // request-failed branch.
@@ -284,7 +270,7 @@ describe("runLogin — security limits", () => {
       });
     }) as unknown as typeof fetch;
 
-    const config: LoginConfig = { steps: [baseStep], limits: { stepTimeoutMs: 1 } };
+    const config: LoginConfig = { login: baseStep, limits: { stepTimeoutMs: 1 } };
     const err = await runLogin(config, {
       inputs: {},
       authorizedUris: ALLOW,
@@ -299,7 +285,7 @@ describe("runLogin — security limits", () => {
     // 200 OK but the body isn't JSON — JSON.parse throws inside applyExtractor,
     // which the engine maps to reason: "extract_failed".
     const { impl } = fakeFetch([{ status: 200, body: "<html>not json</html>" }]);
-    const config: LoginConfig = { steps: [baseStep] };
+    const config: LoginConfig = { login: baseStep };
     const err = await runLogin(config, {
       inputs: {},
       authorizedUris: ALLOW,
@@ -315,16 +301,14 @@ describe("runLogin — security limits", () => {
     // produced a `missing` value — `scope[ex.token]` is undefined → fail closed.
     const { impl } = fakeFetch([{ status: 200, body: JSON.stringify({ access_token: "TOK" }) }]);
     const config: LoginConfig = {
-      steps: [
-        {
-          request: { method: "POST", url: "https://idp.example.com/token", body: "grant=pw" },
-          extract: {
-            access_token: { from: "json", path: "$.access_token" },
-            person_id: { from: "jwt", token: "missing", path: "$.sub" },
-          },
-          output: ["access_token", "person_id"],
+      login: {
+        request: { method: "POST", url: "https://idp.example.com/token", body: "grant=pw" },
+        extract: {
+          access_token: { from: "json", path: "$.access_token" },
+          person_id: { from: "jwt", token: "missing", path: "$.sub" },
         },
-      ],
+        output: ["access_token", "person_id"],
+      },
     };
     const err = await runLogin(config, {
       inputs: {},
@@ -344,16 +328,14 @@ describe("runLogin — security limits", () => {
       { status: 200, body: JSON.stringify({ access_token: "garbage" }) },
     ]);
     const config: LoginConfig = {
-      steps: [
-        {
-          request: { method: "POST", url: "https://idp.example.com/token", body: "grant=pw" },
-          extract: {
-            access_token: { from: "json", path: "$.access_token" },
-            person_id: { from: "jwt", token: "access_token", path: "$.sub" },
-          },
-          output: ["access_token", "person_id"],
+      login: {
+        request: { method: "POST", url: "https://idp.example.com/token", body: "grant=pw" },
+        extract: {
+          access_token: { from: "json", path: "$.access_token" },
+          person_id: { from: "jwt", token: "access_token", path: "$.sub" },
         },
-      ],
+        output: ["access_token", "person_id"],
+      },
     };
     const err = await runLogin(config, {
       inputs: {},

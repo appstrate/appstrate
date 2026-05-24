@@ -41,7 +41,7 @@ export class LoginStrategy implements IntegrationConnectStrategy {
       ctx.authKey,
     );
     if (!auth.connect) {
-      throw invalidRequest(`Auth '${ctx.authKey}' has no connect.steps declaration`);
+      throw invalidRequest(`Auth '${ctx.authKey}' has no connect.login declaration`);
     }
     requireNonEmptyCredentials(credentials);
 

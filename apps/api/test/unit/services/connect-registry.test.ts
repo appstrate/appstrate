@@ -35,8 +35,8 @@ describe("resolveStrategy", () => {
     }
   });
 
-  it("maps custom + connect.steps → LoginStrategy", () => {
-    const a = { type: "custom", connect: { steps: [{}] } } as unknown as AuthDef;
+  it("maps custom + connect.login → LoginStrategy", () => {
+    const a = { type: "custom", connect: { login: {} } } as unknown as AuthDef;
     expect(resolveStrategy(a)).toBeInstanceOf(LoginStrategy);
   });
 

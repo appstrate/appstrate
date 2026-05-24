@@ -15,7 +15,7 @@ selects and shows the minimal manifest for each.
 | `oauth2`            | —         | —               | OAuth2       | OAuth 2.0 + PKCE, auto-refresh                      |
 | `api_key` / `basic` | —         | —               | Fields       | paste-the-bag (user submits the credential)         |
 | `custom`            | _absent_  | —               | Fields       | paste-the-bag, free-form schema                     |
-| `custom`            | `steps`   | —               | Login        | one declarative login request                       |
+| `custom`            | `login`   | —               | Login        | one declarative login request                       |
 | `custom`            | `tool`    | `run-start`     | LoginSecret  | store the secret, mint the session at each run      |
 | `custom`            | `tool`    | `link`          | Orchestrated | run the login tool once in an ephemeral connect-run |
 
@@ -61,23 +61,21 @@ an arbitrary credential schema; `api_key` / `basic` use the canonical fields (`a
 Use `delivery.http` to control how the credential is injected on outbound calls (header name,
 prefix, source field). See the `@appstrate/connect` README for the per-type defaults.
 
-## 3. Declarative login (`custom` + `connect.steps`)
+## 3. Declarative login (`custom` + `connect.login`)
 
 For services where a **single** stateless HTTP request exchanges a user-supplied secret
 (password, API token) for a session credential — no redirect chain, no impersonation. Exactly
-**one** step. Extract the credential from the response with `extract`.
+**one** request. Extract the credential from the response with `extract`.
 
 ```jsonc
 "auths": {
   "session": {
     "type": "custom",
     "connect": {
-      "steps": [
-        {
-          "request": { "method": "POST", "url": "https://example.com/login" },
-          "extract": { "session_token": { "from": "body", "jsonPath": "$.token" } }
-        }
-      ],
+      "login": {
+        "request": { "method": "POST", "url": "https://example.com/login" },
+        "extract": { "session_token": { "from": "body", "jsonPath": "$.token" } }
+      },
       "limits": { "timeoutMs": 10000 }
     }
   }
@@ -137,6 +135,6 @@ run needs a fresh session from a stored secret.
 
 - The login secret travels in the run's `inputs` plane and is substituted **proxy-side** by the
   sidecar's MITM — the integration's tool code never reads it, and it is never logged.
-- `connect` is only valid on `type: "custom"`; declare **exactly one** of `steps` or `tool`.
-- Declarative `steps` are bounded by `limits` (timeout, body size); the orchestrated `tool`
+- `connect` is only valid on `type: "custom"`; declare **exactly one** of `login` or `tool`.
+- The declarative `login` request is bounded by `limits` (timeout, body size); the orchestrated `tool`
   runs in the sandboxed runner with the per-run CA and MITM envelope.

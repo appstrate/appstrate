@@ -303,7 +303,7 @@ const connectExtractorSchema = z.discriminatedUnion("from", [
   z.object({ from: z.literal("cookie"), name: z.string().min(1) }),
 ]);
 
-const connectStepSchema = z.object({
+const connectLoginSchema = z.object({
   request: z.object({
     method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]),
     // `{{...}}` placeholders are substituted (from credential inputs) by the
@@ -333,15 +333,14 @@ const connectSchema = z.object({
   // single-shot and stateless — no inter-step state, no cookie jar, no
   // redirect following. Anything stateful (multi-cookie sessions, TLS
   // impersonation, refresh, redirect chains) belongs on `tool` (Orchestrated).
-  // Modelled as a 1-element array for forward compatibility / shape stability.
-  steps: z.array(connectStepSchema).length(1).optional(),
+  login: connectLoginSchema.optional(),
   limits: connectLimitsSchema.optional(),
   // Output name holding seconds-to-expiry → computes expires_at.
   expiresInOutput: z.string().optional(),
   // Output names to also record as identity claims.
   identityOutputs: z.array(z.string()).optional(),
 
-  // ── Orchestrated (code) — mutually exclusive with `steps` (spec §4.3) ──
+  // ── Orchestrated (code) — mutually exclusive with `login` (spec §4.3) ──
   // Name of the MCP tool, exposed by the integration's bundled server, that
   // drives the login dance. Runs in the sidecar; the secret never reaches it
   // (substitution is proxy-side). Selecting `tool` makes this an
@@ -505,7 +504,7 @@ const authSchema = z
     }
     // `connect` is only meaningful for `custom` auths — oauth2 has its own
     // flow, api_key/basic are paste-the-bag. It is EITHER a declarative
-    // `steps` chain (Login) OR a code-orchestrated `tool` (Orchestrated) —
+    // `login` request (Login) OR a code-orchestrated `tool` (Orchestrated) —
     // never both (spec §4.2/§4.3).
     if (auth.connect) {
       const { connect } = auth;
@@ -516,43 +515,43 @@ const authSchema = z
           path: ["connect"],
         });
       }
-      const hasSteps = connect.steps !== undefined;
+      const hasLogin = connect.login !== undefined;
       const hasTool = connect.tool !== undefined;
-      if (hasSteps === hasTool) {
+      if (hasLogin === hasTool) {
         ctx.addIssue({
           code: "custom",
           message:
-            "auth.connect must declare exactly one of `steps` (declarative login) or `tool` (Orchestrated)",
+            "auth.connect must declare exactly one of `login` (declarative login) or `tool` (Orchestrated)",
           path: ["connect"],
         });
       }
 
       // The set of injectable outputs this auth declares — what `delivery.*`
-      // is allowed to reference (§4.6 gating). Declarative login: the step's
-      // `output` names. Orchestrated: the `produces` list.
+      // is allowed to reference (§4.6 gating). Declarative login: the login
+      // request's `output` names. Orchestrated: the `produces` list.
       const declaredOutputs = new Set<string>();
 
-      if (hasSteps) {
+      if (hasLogin) {
         // Each `output` must reference a name extracted in the same login
         // request, and the final outputs set must cover expiresInOutput /
         // identityOutputs.
-        connect.steps!.forEach((step, i) => {
-          const extractKeys = new Set(Object.keys(step.extract ?? {}));
-          for (const name of step.output ?? []) {
-            if (!extractKeys.has(name)) {
-              ctx.addIssue({
-                code: "custom",
-                message: `connect.steps[${i}].output '${name}' has no matching extractor in the same step`,
-                path: ["connect", "steps", i, "output"],
-              });
-            }
-            declaredOutputs.add(name);
+        const login = connect.login!;
+        const extractKeys = new Set(Object.keys(login.extract ?? {}));
+        for (const name of login.output ?? []) {
+          if (!extractKeys.has(name)) {
+            ctx.addIssue({
+              code: "custom",
+              message: `connect.login.output '${name}' has no matching extractor in the same request`,
+              path: ["connect", "login", "output"],
+            });
           }
-        });
+          declaredOutputs.add(name);
+        }
         if (declaredOutputs.size === 0) {
           ctx.addIssue({
             code: "custom",
-            message: "auth.connect must declare at least one step `output` (the injectable result)",
+            message:
+              "auth.connect must declare at least one login `output` (the injectable result)",
             path: ["connect"],
           });
         }
@@ -596,7 +595,7 @@ const authSchema = z
         }
         for (const name of connect.produces ?? []) declaredOutputs.add(name);
       } else {
-        // `steps` mode: orchestrated-only fields are meaningless.
+        // `login` mode: orchestrated-only fields are meaningless.
         for (const field of [
           "tool",
           "runAt",
@@ -607,7 +606,7 @@ const authSchema = z
           if (connect[field] !== undefined) {
             ctx.addIssue({
               code: "custom",
-              message: `connect.${field} is only valid with connect.tool (Orchestrated), not connect.steps`,
+              message: `connect.${field} is only valid with connect.tool (Orchestrated), not connect.login`,
               path: ["connect", field],
             });
           }

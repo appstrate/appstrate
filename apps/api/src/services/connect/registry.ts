@@ -5,7 +5,7 @@
  * acquisition strategy:
  *
  *   - `oauth2`                          → OAuth2Strategy
- *   - `custom` + `connect.steps`        → LoginStrategy (declarative)
+ *   - `custom` + `connect.login`        → LoginStrategy (declarative)
  *   - `custom` + `connect.tool`         → OrchestratedStrategy (code, needs executor)
  *   - `api_key` / `basic` / bare custom → FieldsStrategy (paste-the-bag)
  *
@@ -41,7 +41,7 @@ export function resolveStrategy(
       return new OAuth2Strategy();
     case "custom":
       // Declarative single login request → Login.
-      if (auth.connect?.steps) return new LoginStrategy();
+      if (auth.connect?.login) return new LoginStrategy();
       // connect.tool + runAt:"run-start" → store-the-secret only (P2). The
       // session is minted at each agent run by the sidecar's connect-login
       // primitive — no executor needed at dashboard connect.
