@@ -255,16 +255,6 @@ describe("planMitmAction — retry401 per auth type", () => {
     expect(planMitmAction(ctx, payload(a)).retry401).toBe(true);
   });
 
-  it("oauth1 → retry401: true", () => {
-    const a = auth("twitter", { authType: "oauth1" });
-    const ctx: MitmRequestContext = {
-      url: "https://api.twitter.com/x",
-      headerNames: [],
-      deliveryPlans: { twitter: PLAIN_BEARER },
-    };
-    expect(planMitmAction(ctx, payload(a)).retry401).toBe(true);
-  });
-
   for (const t of ["api_key", "basic", "custom"]) {
     it(`${t} → retry401: false`, () => {
       const a: ResolvedAuthCredentials = {

@@ -25,7 +25,6 @@ See `src/index.ts` for the authoritative export surface.
 - **api_key** — Single key stored in header
 - **basic** — Username/password Base64
 - **custom** — Multi-field credential schema rendered as dynamic form
-- **oauth1** — recognized as a manifest auth-type value, but this package ships **no** OAuth 1.0a / HMAC-SHA1 signing implementation
 
 ## OAuth error classification
 

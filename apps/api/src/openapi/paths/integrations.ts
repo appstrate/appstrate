@@ -156,7 +156,7 @@ const authStatusSchema = {
   required: ["authKey", "type", "required", "scopes", "audience", "connections", "hasOAuthClient"],
   properties: {
     authKey: { type: "string" },
-    type: { type: "string", enum: ["oauth2", "oauth1", "api_key", "basic", "custom"] },
+    type: { type: "string", enum: ["oauth2", "api_key", "basic", "custom"] },
     required: { type: "boolean" },
     scopes: { type: "array", items: { type: "string" } },
     audience: { type: ["string", "null"] },

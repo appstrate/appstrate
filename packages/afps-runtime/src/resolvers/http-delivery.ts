@@ -54,7 +54,6 @@ const AUTH_TYPE_HTTP_DEFAULTS: Readonly<
   Record<string, { headerName: string; headerPrefix: string; valueFrom: string }>
 > = {
   oauth2: { headerName: "Authorization", headerPrefix: "Bearer ", valueFrom: "access_token" },
-  oauth1: { headerName: "Authorization", headerPrefix: "", valueFrom: "access_token" },
   api_key: { headerName: "X-Api-Key", headerPrefix: "", valueFrom: "api_key" },
   basic: { headerName: "Authorization", headerPrefix: "Basic ", valueFrom: "" },
   custom: { headerName: "", headerPrefix: "", valueFrom: "" },

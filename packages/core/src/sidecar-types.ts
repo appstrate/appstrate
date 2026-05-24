@@ -133,7 +133,7 @@ export interface SidecarLaunchSpec {
  * proactive refresh scheduling).
  */
 export interface HttpDeliveryAuthSpec {
-  /** Auth type from the manifest (`oauth2` | `oauth1` | `api_key` | `basic` | `custom`). */
+  /** Auth type from the manifest (`oauth2` | `api_key` | `basic` | `custom`). */
   authType: string;
   /** Header name to inject (e.g. `Authorization`). */
   headerName: string;

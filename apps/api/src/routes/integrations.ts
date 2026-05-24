@@ -385,7 +385,7 @@ export function createIntegrationsRouter() {
       const body = parseBody(connectFieldsSchema, await c.req.json());
       try {
         const { auth } = await readIntegrationAuth(scope, packageId, authKey);
-        if (auth.type === "oauth2" || auth.type === "oauth1") {
+        if (auth.type === "oauth2") {
           throw invalidRequest(
             `Auth '${authKey}' is type '${auth.type}' — use the OAuth flow, not the fields flow`,
           );
