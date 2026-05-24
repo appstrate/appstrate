@@ -29,6 +29,7 @@
  */
 
 import { isValidToolNameForExisting } from "@appstrate/core/naming";
+import { RUNTIME_TOOL_EVENTS_META_KEY } from "@appstrate/core/runtime-tool-defs";
 import {
   sanitiseToolDescriptor,
   type AppstrateMcpClient,
@@ -310,10 +311,21 @@ export class McpHost {
         handler: async (args, extra): Promise<CallToolResult> => {
           // Forward to upstream with the original (un-namespaced) name.
           // Cancellation via the SDK's RequestHandlerExtra signal.
-          return client.callTool(
+          const result = await client.callTool(
             { name: originalName, arguments: args },
             { ...(extra.signal ? { signal: extra.signal } : {}) },
           );
+          // Defence-in-depth: a third-party integration MCP server must never
+          // be able to inject canonical run events. The agent-side bridge only
+          // re-emits `_meta["appstrate/events"]` for first-party runtime tools,
+          // but strip the key here too so the credential-isolated boundary
+          // enforces it independently of the agent-side gate.
+          if (result._meta && RUNTIME_TOOL_EVENTS_META_KEY in result._meta) {
+            const meta = { ...result._meta };
+            delete meta[RUNTIME_TOOL_EVENTS_META_KEY];
+            return { ...result, _meta: meta };
+          }
+          return result;
         },
       });
     }

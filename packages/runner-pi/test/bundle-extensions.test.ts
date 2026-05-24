@@ -74,11 +74,12 @@ describe("prepareBundleForPi — skills/ install", () => {
     // just does a task and finishes is valid.
     const root = makeBundlePackage("@acme/agent", "1.0.0", "agent", {});
     const bundle = makeTestBundle(root);
-    const { extensionFactories, cleanup } = await prepareBundleForPi(bundle, {
+    const prepared = await prepareBundleForPi(bundle, {
       workspaceDir: workspace,
     });
-    expect(extensionFactories).toHaveLength(0);
-    await cleanup();
+    // Skills-only: the helper wires no Pi extensions, only a cleanup hook.
+    expect(Object.keys(prepared)).toEqual(["cleanup"]);
+    await prepared.cleanup();
   });
 
   it("does NOT register runtime tools — they are MCP defs hosted elsewhere", async () => {
@@ -96,11 +97,12 @@ describe("prepareBundleForPi — skills/ install", () => {
       { runtimeTools: ["output", "log"] },
     );
     const bundle = makeTestBundle(root);
-    const { extensionFactories, cleanup } = await prepareBundleForPi(bundle, {
+    const prepared = await prepareBundleForPi(bundle, {
       workspaceDir: workspace,
     });
-    expect(extensionFactories).toHaveLength(0);
-    await cleanup();
+    // Even with a `runtimeTools` selection, the helper wires no Pi extensions.
+    expect(Object.keys(prepared)).toEqual(["cleanup"]);
+    await prepared.cleanup();
   });
 });
 

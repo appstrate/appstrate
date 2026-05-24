@@ -72,6 +72,21 @@ describe("output runtime tool — schema exposure", () => {
       "JSON object to return as the run output",
     );
   });
+
+  it("makes the tool optional when no output schema is declared", () => {
+    const description = outputDef().descriptor.description;
+    expect(description).toContain("Optional");
+    expect(description).not.toContain("Call exactly once");
+  });
+
+  it("makes the tool mandatory-shaped when an output schema is declared", () => {
+    const description = outputDef({
+      type: "object",
+      properties: { orderId: { type: "string" } },
+    }).descriptor.description;
+    expect(description).toContain("Call exactly once");
+    expect(description).not.toContain("Optional");
+  });
 });
 
 describe("output runtime tool — execute validation", () => {

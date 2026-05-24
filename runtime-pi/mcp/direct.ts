@@ -36,6 +36,7 @@ import {
   type RuntimeEventEmitter,
 } from "@appstrate/runner-pi";
 import { reEmitRuntimeToolEvents } from "@appstrate/core/runtime-tool-defs";
+import { isSelectableRuntimeTool } from "@appstrate/core/runtime-tools-catalog";
 import { buildApiUploadToolFactory, isApiUploadToolName } from "./api-upload-extension.ts";
 
 /**
@@ -100,13 +101,75 @@ export async function buildMcpDirectFactories(
       emit: opts.emit,
     }),
   );
+  // Platform runtime tools (output/log/note/pin/report) the sidecar hosts as
+  // MCP tools (`@appstrate/core/runtime-tool-defs`). They are FIRST-PARTY —
+  // served in-process by the credential-isolated sidecar — so re-emitting the
+  // canonical events they return under the result `_meta` key is safe. They
+  // are wired by a dedicated factory builder, deliberately separate from the
+  // integration-tool path below which must NEVER re-emit a third-party result.
+  factories.push(...buildRuntimeMcpToolFactories(tools, opts));
   // Phase 1.4 — integration tools. The sidecar's McpHost multiplexes
   // each spawned `type: integration` MCP server's tools as namespaced
   // entries (`{ns}__{tool}`). We mirror them as Pi tools that forward
-  // verbatim to the sidecar's MCP `tools/call`. Any name we already
-  // wired above (run_history / recall_memory) is skipped.
-  const claimedNames = new Set<string>(RUNTIME_INJECTED_TOOLS.map((t) => t.name));
+  // verbatim to the sidecar's MCP `tools/call`. Any name we already wired
+  // above (run_history / recall_memory / the runtime tools) is skipped.
+  const claimedNames = new Set<string>([
+    ...RUNTIME_INJECTED_TOOLS.map((t) => t.name),
+    ...tools.filter((t) => isSelectableRuntimeTool(t.name)).map((t) => t.name),
+  ]);
   factories.push(...buildIntegrationToolFactories(tools, claimedNames, opts));
+  return factories;
+}
+
+/**
+ * Wrap the sidecar-hosted platform runtime tools (output/log/note/pin/report)
+ * as Pi extensions that forward to `mcp.callTool` and re-emit the canonical
+ * run events they return under the result `_meta` key into the run's single
+ * sink. These tools are FIRST-PARTY (served in-process by the credential-
+ * isolated sidecar from `@appstrate/core/runtime-tool-defs`), so re-emitting
+ * their `_meta` events is safe — unlike third-party integration tools, whose
+ * results must never be trusted to inject run events (see
+ * {@link buildIntegrationToolFactories}, which deliberately does NOT re-emit).
+ */
+function buildRuntimeMcpToolFactories(
+  advertised: ReadonlyArray<{ name: string; description?: string; inputSchema?: unknown }>,
+  opts: BuildMcpDirectFactoriesOptions,
+): ExtensionFactory[] {
+  const factories: ExtensionFactory[] = [];
+  for (const tool of advertised) {
+    if (!isSelectableRuntimeTool(tool.name)) continue;
+    factories.push((pi) => {
+      pi.registerTool({
+        name: tool.name,
+        label: tool.name,
+        description: tool.description ?? `Runtime tool: ${tool.name}`,
+        parameters: Type.Unsafe<Record<string, unknown>>(
+          (tool.inputSchema as Record<string, unknown>) ?? { type: "object", properties: {} },
+        ),
+        async execute(_toolCallId, params, signal) {
+          const result = await opts.mcp.callTool(
+            { name: tool.name, arguments: (params as Record<string, unknown>) ?? {} },
+            { ...(signal ? { signal } : {}) },
+          );
+          // First-party runtime tool: re-emit its canonical events into the
+          // run's single sink (preserving one sequence source) so ingestion /
+          // the reducer / finalize behave exactly as the former baked-in Pi
+          // extensions did. Stamp `runId` + `timestamp`: every canonical
+          // RunEvent requires them (the reducer copies `timestamp` into
+          // `RunResult.logs[]`, which finalize validates as a number); the
+          // transport-neutral defs omit both.
+          reEmitRuntimeToolEvents(result._meta, (e) =>
+            opts.emit({
+              ...e,
+              runId: opts.runId,
+              timestamp: typeof e.timestamp === "number" ? e.timestamp : Date.now(),
+            }),
+          );
+          return callToolResultToPi(result);
+        },
+      });
+    });
+  }
   return factories;
 }
 
@@ -173,25 +236,13 @@ function buildIntegrationToolFactories(
             isError: result.isError === true,
             timestamp: Date.now(),
           });
-          // Platform runtime tools (output/log/note/pin/report) are hosted by
-          // the sidecar as MCP tools; their side effects travel back as
-          // canonical run events under the result `_meta` key. Re-emit them
-          // into the run's single sink (preserving one sequence source) so
-          // ingestion / the reducer / finalize behave exactly as before. A
-          // no-op for ordinary integration tools (no such meta key).
+          // NOTE: a third-party integration result's `_meta` is NEVER
+          // re-emitted as run events — that would let a compromised
+          // integration forge `output.emitted` / `pinned.set` / `memory.added`
+          // / `report.appended` / `log.written` events (persistent prompt
+          // injection, output tampering). Only the first-party runtime tools
+          // hosted by the sidecar re-emit, via buildRuntimeMcpToolFactories.
           //
-          // Stamp `runId` + `timestamp`: every canonical RunEvent requires
-          // them (the reducer copies `timestamp` into `RunResult.logs[]`,
-          // which finalize validates as a number). The tool defs are
-          // transport-neutral and omit both — same contract the integration
-          // telemetry events above satisfy by construction.
-          reEmitRuntimeToolEvents(result._meta, (e) =>
-            opts.emit({
-              ...e,
-              runId: opts.runId,
-              timestamp: typeof e.timestamp === "number" ? e.timestamp : Date.now(),
-            }),
-          );
           // Materialise MCP resources to workspace files before the adapter
           // flattens them, keeping file bytes out of the LLM context:
           //  - embedded `resource` blocks (GitHub MCP `get_file_contents`, …),

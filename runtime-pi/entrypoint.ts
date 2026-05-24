@@ -348,9 +348,7 @@ if (bundle) {
   try {
     const prepared = await prepareBundleForPi(bundle, {
       workspaceDir: WORKSPACE,
-      extensionWrapper: (factory, id) => wrapExtensionFactory(factory, id, appstrateCtxProvider),
     });
-    extensionFactories.push(...prepared.extensionFactories);
 
     // Fire-and-forget cleanup of the scratch tool dir + the original AFPS;
     // they are no longer needed once the Pi SDK is up.
@@ -507,7 +505,8 @@ if (sidecarUrl) {
   // selected are normally served by the sidecar over MCP; with no sidecar
   // we register the SAME tool definitions (`@appstrate/core/runtime-tool-defs`)
   // as Pi extensions in-process. Their canonical events are re-emitted into
-  // the run sink by the wrapper (default stdout-JSONL → the stdout bridge).
+  // the run sink via the explicit `emit` below (straight to `bridgedSink`, no
+  // stdout round-trip).
   const rootManifest = bundle
     ? (bundle.packages.get(bundle.root)?.manifest as { runtimeTools?: string[] } | undefined)
     : undefined;
