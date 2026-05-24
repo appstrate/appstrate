@@ -259,9 +259,13 @@ describe("handleIntegrationOAuthCallback", () => {
     expect(await store.get(state)).toBeNull();
   });
 
-  it("uses Basic auth when tokenAuthMethod=client_secret_basic", async () => {
+  it("threads tokenAuthMethod through to the token exchange", async () => {
+    // The exhaustive per-auth-method header/body shaping is covered by
+    // token-exchange.test.ts. Here we only assert the callback wrapper
+    // forwards `tokenAuthMethod` so the chosen scheme actually reaches the
+    // wire (Basic for client_secret_basic).
     const { state } = await seedState({ tokenAuthMethod: "client_secret_basic" });
-    let captured: { headers: Record<string, string>; body: string } | null = null;
+    let authHeader: string | undefined;
     const stub = (async (_input: unknown, init?: RequestInit) => {
       const headers: Record<string, string> = {};
       if (init?.headers instanceof Headers) {
@@ -269,7 +273,7 @@ describe("handleIntegrationOAuthCallback", () => {
       } else if (init?.headers) {
         Object.assign(headers, init.headers as Record<string, string>);
       }
-      captured = { headers, body: init?.body ? String(init.body) : "" };
+      authHeader = headers["Authorization"] ?? headers["authorization"];
       return new Response(
         JSON.stringify({ access_token: "AT", expires_in: 60, token_type: "Bearer" }),
         { status: 200, headers: { "Content-Type": "application/json" } },
@@ -277,29 +281,7 @@ describe("handleIntegrationOAuthCallback", () => {
     }) as unknown as typeof fetch;
 
     await withFetch(stub, () => handleIntegrationOAuthCallback(store, "CODE", state));
-    const authHeader = captured!.headers["Authorization"] ?? captured!.headers["authorization"];
     expect(authHeader?.startsWith("Basic ")).toBe(true);
-    const params = new URLSearchParams(captured!.body);
-    expect(params.get("client_id")).toBeNull();
-    expect(params.get("client_secret")).toBeNull();
-  });
-
-  it("omits client_secret and sends client_id in the body for public clients", async () => {
-    const { state } = await seedState({ tokenAuthMethod: "none", clientSecret: "" });
-    let body = "";
-    const stub = (async (_input: unknown, init?: RequestInit) => {
-      body = init?.body ? String(init.body) : "";
-      return new Response(
-        JSON.stringify({ access_token: "AT", expires_in: 60, token_type: "Bearer" }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
-    }) as unknown as typeof fetch;
-
-    await withFetch(stub, () => handleIntegrationOAuthCallback(store, "CODE", state));
-    const params = new URLSearchParams(body);
-    expect(params.get("client_id")).toBe("client-id");
-    expect(params.get("client_secret")).toBeNull();
-    expect(params.get("code_verifier")).toMatch(/^[A-Za-z0-9_-]+$/);
   });
 
   it("emits the RFC 8707 `resource` parameter on the token request when audience set", async () => {

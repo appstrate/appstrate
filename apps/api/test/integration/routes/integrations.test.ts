@@ -595,7 +595,7 @@ describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default conne
     expect(body.default.enforce).toBe(true);
   });
 
-  it("refuses a connection that is not sharedWithOrg (422)", async () => {
+  it("refuses a connection that is not sharedWithOrg (400)", async () => {
     const connId = await seedConn(false);
     const res = await app.request("/api/integrations/@myorg/gmail/default", {
       method: "PUT",

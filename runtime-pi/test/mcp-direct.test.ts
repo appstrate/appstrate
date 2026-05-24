@@ -19,7 +19,7 @@ import {
   type AppstrateToolDefinition,
 } from "@appstrate/mcp-transport";
 import { RUNTIME_TOOL_EVENTS_META_KEY } from "@appstrate/core/runtime-tool-defs";
-import { buildMcpDirectFactories, DIRECT_TOOL_PROMPT } from "../mcp/direct.ts";
+import { buildMcpDirectFactories } from "../mcp/direct.ts";
 
 interface CapturedTool {
   name: string;
@@ -76,13 +76,6 @@ async function makeMockServer(
   const mcp = wrapClient(pair.client, { close: () => Promise.resolve() });
   return { pair, mcp, calls };
 }
-
-describe("DIRECT_TOOL_PROMPT (D5.1)", () => {
-  it("is a 3-line capability prompt", () => {
-    expect(DIRECT_TOOL_PROMPT.split("\n")).toHaveLength(3);
-    expect(DIRECT_TOOL_PROMPT).toContain("MCP");
-  });
-});
 
 describe("buildMcpDirectFactories — runtime-injected tools", () => {
   it("registers run_history + recall_memory and no api_call", async () => {
