@@ -553,7 +553,9 @@ const model: Model<Api> = {
   id: modelId,
   name: modelId,
   api: api as Api,
-  provider: "", // PiRunner will derive this via deriveProviderFromApi
+  // Pi SDK AuthStorage key, derived from the api shape. The runner reads
+  // this field directly to register + resolve the API key.
+  provider: deriveProviderFromApi(api),
   baseUrl: env.modelBaseUrl ?? "",
   reasoning: env.modelReasoning,
   input: [...env.modelInput],
@@ -561,10 +563,6 @@ const model: Model<Api> = {
   contextWindow: env.modelContextWindow,
   maxTokens: env.modelMaxTokens,
 };
-
-// Derive provider via the same table PiRunner uses (PiRunner re-derives
-// this itself and throws on an unknown api — no need to re-validate here).
-model.provider = deriveProviderFromApi(api);
 
 // --- 4. Build ExecutionContext from env ---
 

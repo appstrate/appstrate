@@ -58,9 +58,8 @@ export interface PiRunnerOptions {
   /** LLM model configuration passed to the Pi SDK. Required. */
   model: PiModelConfig;
   /**
-   * LLM API key. Registered on a {@link AuthStorage} under the provider
-   * derived from `model.api`. Callers can also pass a pre-built
-   * `authStorage` to wire multi-provider auth.
+   * LLM API key. Registered on a {@link AuthStorage} under `model.provider`.
+   * Callers can also pass a pre-built `authStorage` to wire multi-provider auth.
    */
   apiKey?: string;
   /**
@@ -278,8 +277,9 @@ export class PiRunner implements Runner {
       this.opts.authStorage ??
       AuthStorage.create(this.opts.authStoragePath ?? "/tmp/pi-auth/auth.json");
     if (!this.opts.authStorage && apiKey) {
-      const provider = deriveProviderFromApi(model.api);
-      authStorage.setRuntimeApiKey(provider, apiKey);
+      // `model.provider` is the Pi SDK's AuthStorage key the SDK resolves
+      // credentials against; register the key under the same value.
+      authStorage.setRuntimeApiKey(model.provider, apiKey);
     }
 
     const modelRegistry = ModelRegistry.create(authStorage);
