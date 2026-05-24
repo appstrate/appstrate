@@ -626,6 +626,35 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     expect(persisted?.output).toEqual({ answer: 42 });
   });
 
+  // Regression (#run_300c5118): a cosmetic/non-essential field in the finalize
+  // body must NEVER fail an already-completed run. Before the fix, a `log`
+  // entry missing its `timestamp` (the built-in `log` tool over the
+  // sidecar/MCP path) made the strict `RunResultSchema` reject the whole POST
+  // with a 400, and the runner's HttpSink flipped a successful run to failed.
+  // The schema now degrades malformed cosmetic fields instead of rejecting.
+  it("tolerates malformed cosmetic fields — log without timestamp, degenerate usage/cost", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/final-agent", {
+      tokenUsage: { input_tokens: 10, output_tokens: 5 },
+    });
+
+    const res = await postFinalize(runId, {
+      status: "success",
+      output: { ok: true },
+      durationMs: 100,
+      // log line with NO timestamp — the exact shape the sidecar path emitted.
+      logs: [{ level: "info", message: "done" }],
+      // present-but-malformed billing fields degrade to "absent" rather than 400.
+      usage: { input_tokens: 7 },
+      cost: -1,
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("success");
+    expect(row?.error).toBeNull();
+    expect(row?.sinkClosedAt).not.toBeNull();
+  });
+
   it("idempotent — once the sink is closed, further finalize POSTs reject with 410", async () => {
     const runId = await seedRunWithSink(ctx, "@test/final-agent");
 

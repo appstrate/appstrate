@@ -35,17 +35,17 @@ describe("buildRuntimeToolDefs — event payloads", () => {
     const def = defsByName(["log"]).get("log")!;
     const result = await def.handler({ level: "info", message: "hello" });
     expect(eventsOf(result._meta)).toEqual([
-      { type: "log.written", level: "info", message: "hello" },
+      { type: "log.written", level: "info", message: "hello", timestamp: expect.any(Number) },
     ]);
   });
 
   it("note emits memory.added, including scope only when set", async () => {
     const def = defsByName(["note"]).get("note")!;
     expect(eventsOf((await def.handler({ content: "x" }))._meta)).toEqual([
-      { type: "memory.added", content: "x" },
+      { type: "memory.added", content: "x", timestamp: expect.any(Number) },
     ]);
     expect(eventsOf((await def.handler({ content: "y", scope: "shared" }))._meta)).toEqual([
-      { type: "memory.added", content: "y", scope: "shared" },
+      { type: "memory.added", content: "y", scope: "shared", timestamp: expect.any(Number) },
     ]);
   });
 
@@ -53,14 +53,42 @@ describe("buildRuntimeToolDefs — event payloads", () => {
     const def = defsByName(["pin"]).get("pin")!;
     const result = await def.handler({ key: "checkpoint", content: { step: 2 } });
     expect(eventsOf(result._meta)).toEqual([
-      { type: "pinned.set", key: "checkpoint", content: { step: 2 } },
+      {
+        type: "pinned.set",
+        key: "checkpoint",
+        content: { step: 2 },
+        timestamp: expect.any(Number),
+      },
     ]);
   });
 
   it("report emits report.appended", async () => {
     const def = defsByName(["report"]).get("report")!;
     const result = await def.handler({ content: "# Done" });
-    expect(eventsOf(result._meta)).toEqual([{ type: "report.appended", content: "# Done" }]);
+    expect(eventsOf(result._meta)).toEqual([
+      { type: "report.appended", content: "# Done", timestamp: expect.any(Number) },
+    ]);
+  });
+
+  // Regression (#run_300c5118): every emitted canonical event MUST carry a
+  // numeric `timestamp`. The reducer copies it into RunResult.logs, where the
+  // finalize endpoint requires a number — an undefined timestamp failed the
+  // whole run over the sidecar/MCP re-emit path.
+  it("stamps a numeric timestamp on every emitted event", async () => {
+    for (const name of ["log", "note", "pin", "report", "output"]) {
+      const def = defsByName([name]).get(name)!;
+      const args =
+        name === "pin"
+          ? { key: "k", content: 1 }
+          : name === "output"
+            ? { data: { ok: true } }
+            : name === "log"
+              ? { level: "info", message: "m" }
+              : { content: "c" };
+      const events = eventsOf((await def.handler(args))._meta);
+      expect(events.length).toBeGreaterThan(0);
+      for (const e of events) expect(typeof e.timestamp).toBe("number");
+    }
   });
 });
 

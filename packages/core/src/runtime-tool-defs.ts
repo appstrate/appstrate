@@ -88,9 +88,19 @@ export interface BuildRuntimeToolDefsOptions {
 const ajv = new Ajv({ allErrors: true, strict: false });
 
 function withEvents(text: string, events: RuntimeToolEvent[]): RuntimeToolResult {
+  // Stamp a production-time `timestamp` on every canonical event at the single
+  // point they are wrapped. Canonical run events (`log.written`, …) carry a
+  // required `timestamp` (consumed by the reducer → RunResult.logs), but the
+  // sidecar/MCP re-emit path (`reEmitRuntimeToolEvents` → bridged sink) does
+  // not stamp one — unlike the no-sidecar stdout path. An event left without a
+  // timestamp surfaced as `undefined` in the finalize RunResult and failed the
+  // whole run. Stamping here fixes both paths; an event that already carries
+  // its own timestamp keeps it.
+  const now = Date.now();
+  const stamped = events.map((e) => ({ timestamp: now, ...e }));
   return {
     content: [{ type: "text", text }],
-    _meta: { [RUNTIME_TOOL_EVENTS_META_KEY]: events },
+    _meta: { [RUNTIME_TOOL_EVENTS_META_KEY]: stamped },
   };
 }
 

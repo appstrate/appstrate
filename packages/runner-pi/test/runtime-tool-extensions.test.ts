@@ -32,7 +32,9 @@ describe("buildRuntimeToolExtensions", () => {
     const tool = registerOne(factory!);
     const result = await tool.execute("call-1", { level: "warn", message: "heads up" });
     expect(result.content[0].text).toContain("Logged [warn]");
-    expect(emitted).toEqual([{ type: "log.written", level: "warn", message: "heads up" }]);
+    expect(emitted).toEqual([
+      { type: "log.written", level: "warn", message: "heads up", timestamp: expect.any(Number) },
+    ]);
   });
 
   it("surfaces output validation errors without emitting", async () => {

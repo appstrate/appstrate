@@ -56,11 +56,26 @@ const CloudEventEnvelopeSchema = z
  * Terminal RunResult — the payload HttpSink sends to /finalize. Kept loose
  * (most fields optional) to match the runtime's own RunResult shape without
  * re-declaring its internals here.
+ *
+ * Robustness contract: finalize reports the outcome of an *already-completed*
+ * run — the agent loop is over, there is no LLM left to retry. A malformed
+ * **cosmetic / side-effect / billing** field (a log line missing its
+ * timestamp, a degenerate `usage` object, …) must therefore NEVER fail an
+ * otherwise-successful run. Those fields use `.catch(...)` so a present-but-
+ * invalid value degrades gracefully (defaulted or dropped) instead of
+ * rejecting the whole payload with a 400 that the runner can't recover from.
+ * Only the load-bearing outcome fields (`status`, `output`, `error`) stay
+ * strict — a genuinely broken outcome should still surface loudly.
  */
 const RunResultSchema = z
   .object({
     memories: z
-      .array(z.object({ content: z.string(), scope: z.enum(["actor", "shared"]).optional() }))
+      .array(
+        z.object({
+          content: z.string().catch(""),
+          scope: z.enum(["actor", "shared"]).optional().catch(undefined),
+        }),
+      )
       .optional()
       .default([]),
     pinned: z
@@ -68,7 +83,7 @@ const RunResultSchema = z
         z.string(),
         z.object({
           content: z.unknown(),
-          scope: z.enum(["actor", "shared"]).optional(),
+          scope: z.enum(["actor", "shared"]).optional().catch(undefined),
         }),
       )
       .optional(),
@@ -76,9 +91,12 @@ const RunResultSchema = z
     logs: z
       .array(
         z.object({
-          level: z.enum(["info", "warn", "error"]),
-          message: z.string(),
-          timestamp: z.number(),
+          // Cosmetic display fields — degrade rather than reject. A missing
+          // `timestamp` (built-in `log` tool over the sidecar/MCP path used to
+          // omit it) defaults to ingestion time instead of failing finalize.
+          level: z.enum(["info", "warn", "error"]).catch("info"),
+          message: z.string().catch(""),
+          timestamp: z.number().catch(() => Date.now()),
         }),
       )
       .optional()
@@ -90,18 +108,20 @@ const RunResultSchema = z
       })
       .optional(),
     status: z.enum(["success", "failed", "timeout", "cancelled"]).optional(),
-    durationMs: z.number().int().nonnegative().optional(),
+    durationMs: z.number().int().nonnegative().optional().catch(undefined),
     // Authoritative token usage. When present, finalize uses this as the
     // source of truth for both the zero-tokens heuristic and the
     // `runs.tokenUsage` column write — independent of whether the
-    // `appstrate.metric` event POST has landed yet.
-    usage: tokenUsageSchema.optional(),
+    // `appstrate.metric` event POST has landed yet. A malformed object
+    // degrades to "no authoritative usage" (the metric-event path still
+    // feeds the ledger) rather than failing the run.
+    usage: tokenUsageSchema.optional().catch(undefined),
     // Authoritative LLM cost in USD for the runner-source contribution.
     // When present, finalize synthesises a runner-source `llm_usage`
     // ledger row from this value if no metric event has landed yet, so
     // `runs.cost` is correct even when `process.exit()` aborts the
-    // metric POST.
-    cost: z.number().nonnegative().optional(),
+    // metric POST. Degrades to undefined on a bad value.
+    cost: z.number().nonnegative().optional().catch(undefined),
   })
   .passthrough();
 

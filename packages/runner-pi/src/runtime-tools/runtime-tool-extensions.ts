@@ -46,7 +46,10 @@ export interface BuildRuntimeToolExtensionsOptions {
 
 function defaultStdoutEmit(event: RuntimeToolEvent): void {
   const runId = process.env.AGENT_RUN_ID ?? "unknown";
-  process.stdout.write(JSON.stringify({ ...event, timestamp: Date.now(), runId }) + "\n");
+  // `withEvents` already stamps a production-time `timestamp` on every event;
+  // the spread order lets the event's own timestamp win, falling back to
+  // emit-time only if one is somehow absent.
+  process.stdout.write(JSON.stringify({ timestamp: Date.now(), runId, ...event }) + "\n");
 }
 
 /**
