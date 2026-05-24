@@ -21,7 +21,7 @@ export const mePaths = {
       description:
         "Returns every org the caller can access. Cookie sessions and OIDC dashboard JWTs see " +
         "every org the user is a member of. API keys see only their bound org. OIDC end-user " +
-        "JWTs see the single org owning their application's owning org. " +
+        "JWTs see the single org owning their application. " +
         "**Does NOT require `X-Org-Id`** — this endpoint is the prerequisite to setting it.",
       responses: {
         "200": {
@@ -220,10 +220,9 @@ export const mePaths = {
                     type: "array",
                     items: {
                       type: "object",
-                      required: ["integrationPackageId", "authKey", "connectionId"],
+                      required: ["integrationPackageId", "connectionId"],
                       properties: {
                         integrationPackageId: { type: "string" },
-                        authKey: { type: "string" },
                         connectionId: { type: "string", format: "uuid" },
                       },
                     },
@@ -256,11 +255,10 @@ export const mePaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["agentPackageId", "integrationPackageId", "authKey", "connectionId"],
+              required: ["agentPackageId", "integrationPackageId", "connectionId"],
               properties: {
                 agentPackageId: { type: "string" },
                 integrationPackageId: { type: "string" },
-                authKey: { type: "string" },
                 connectionId: { type: "string", format: "uuid" },
               },
             },
@@ -305,7 +303,7 @@ export const mePaths = {
     delete: {
       operationId: "deleteMyIntegrationPin",
       tags: ["Profile"],
-      summary: "Clear the caller's pin on a (agent, integration, authKey)",
+      summary: "Clear the caller's pin on a (agent, integration)",
       description:
         "Removes the caller's member pin so the resolver falls back to layer 5 " +
         "(accessible connections). Idempotent — 204 even when no row exists.",
@@ -324,7 +322,6 @@ export const mePaths = {
           required: true,
           schema: { type: "string" },
         },
-        { name: "authKey", in: "query", required: true, schema: { type: "string" } },
       ],
       responses: {
         "204": { description: "Pin cleared (or never existed)" },
