@@ -719,6 +719,8 @@
   "integration.tabs.versions": "Versions",
   "integration.auth.none": "Cette intégration ne déclare aucune authentification — rien à connecter.",
   "integration.section.oauthClient": "Client OAuth (admin)",
+  "integration.oauthClient.configured": "Configuré",
+  "integration.oauthClient.notConfigured": "À configurer",
   "integration.field.version": "Version",
   "integration.field.author": "Auteur",
   "integration.field.license": "Licence",

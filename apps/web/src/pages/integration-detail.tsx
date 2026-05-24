@@ -89,6 +89,9 @@ function OAuthClientForm({ packageId, authKey }: { packageId: string; authKey: s
   const [clientSecret, setClientSecret] = useState("");
   const [redirectUri, setRedirectUri] = useState("");
   const [publicClient, setPublicClient] = useState(false);
+  // Accordion: collapsed once a client is registered, open while it still
+  // needs configuring. `null` = follow that default; a boolean = user toggled.
+  const [open, setOpen] = useState<boolean | null>(null);
 
   if (isLoading) return <LoadingState />;
 
@@ -116,86 +119,111 @@ function OAuthClientForm({ packageId, authKey }: { packageId: string; authKey: s
     }
   };
 
+  const configured = !!client;
+  const isOpen = open === null ? !configured : open;
+
   return (
-    <div className="bg-muted/40 rounded-md border p-4">
-      <div className="mb-3 flex items-center gap-2">
+    <Collapsible
+      open={isOpen}
+      onOpenChange={setOpen}
+      className="bg-muted/40 rounded-md border"
+      data-testid={`oauth-client-${authKey}`}
+    >
+      <CollapsibleTrigger className="flex w-full items-center gap-2 p-4 text-left">
+        <ChevronRight
+          size={14}
+          className={`text-muted-foreground transition-transform ${isOpen ? "rotate-90" : ""}`}
+        />
         <Settings2 size={14} className="text-muted-foreground" />
         <h4 className="text-sm font-semibold">{t("integration.section.oauthClient")}</h4>
-      </div>
-      {client && (
-        <p className="text-muted-foreground mb-3 text-xs">
-          {t("integration.oauthClient.registered", { clientId: client.clientId })}
-        </p>
-      )}
-      <form className="grid gap-3 sm:grid-cols-2" onSubmit={submit}>
-        <div className="space-y-1">
-          <Label htmlFor={`cid-${authKey}`} className="text-xs">
-            {t("integration.oauthClient.clientId")}
-          </Label>
-          <Input
-            id={`cid-${authKey}`}
-            value={clientId}
-            onChange={(e) => setClientId(e.target.value)}
-            placeholder={client?.clientId ?? ""}
-            data-testid={`oauth-clientid-${authKey}`}
-          />
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor={`csecret-${authKey}`} className="text-xs">
-            {t("integration.oauthClient.clientSecret")}
-          </Label>
-          <Input
-            id={`csecret-${authKey}`}
-            type="password"
-            value={clientSecret}
-            onChange={(e) => setClientSecret(e.target.value)}
-            disabled={publicClient}
-            placeholder={client?.hasClientSecret ? "••••••••" : ""}
-            data-testid={`oauth-clientsecret-${authKey}`}
-          />
-        </div>
-        <div className="space-y-1 sm:col-span-2">
-          <Label htmlFor={`redir-${authKey}`} className="text-xs">
-            {t("integration.oauthClient.redirectUri")}
-          </Label>
-          <Input
-            id={`redir-${authKey}`}
-            type="url"
-            value={redirectUri}
-            onChange={(e) => setRedirectUri(e.target.value)}
-            placeholder={client?.redirectUri ?? ""}
-          />
-        </div>
-        <label className="flex items-center gap-2 text-sm sm:col-span-2">
-          <Checkbox checked={publicClient} onCheckedChange={(c) => setPublicClient(Boolean(c))} />
-          {t("integration.oauthClient.publicClient")}
-        </label>
-        <div className="flex items-center gap-2 sm:col-span-2">
-          <Button
-            type="submit"
-            size="sm"
-            disabled={upsert.isPending || clientId.trim() === ""}
-            data-testid={`oauth-client-save-${authKey}`}
-          >
-            {client
-              ? t("integration.oauthClient.btnRotate")
-              : t("integration.oauthClient.btnRegister")}
-          </Button>
-          {client && (
+        <span
+          className={
+            configured
+              ? "ml-auto rounded bg-emerald-500/10 px-1.5 py-0.5 text-[0.65rem] font-medium text-emerald-500"
+              : "bg-warning/10 text-warning ml-auto rounded px-1.5 py-0.5 text-[0.65rem] font-medium"
+          }
+        >
+          {configured
+            ? t("integration.oauthClient.configured")
+            : t("integration.oauthClient.notConfigured")}
+        </span>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="px-4 pb-4">
+        {client && (
+          <p className="text-muted-foreground mb-3 text-xs">
+            {t("integration.oauthClient.registered", { clientId: client.clientId })}
+          </p>
+        )}
+        <form className="grid gap-3 sm:grid-cols-2" onSubmit={submit}>
+          <div className="space-y-1">
+            <Label htmlFor={`cid-${authKey}`} className="text-xs">
+              {t("integration.oauthClient.clientId")}
+            </Label>
+            <Input
+              id={`cid-${authKey}`}
+              value={clientId}
+              onChange={(e) => setClientId(e.target.value)}
+              placeholder={client?.clientId ?? ""}
+              data-testid={`oauth-clientid-${authKey}`}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor={`csecret-${authKey}`} className="text-xs">
+              {t("integration.oauthClient.clientSecret")}
+            </Label>
+            <Input
+              id={`csecret-${authKey}`}
+              type="password"
+              value={clientSecret}
+              onChange={(e) => setClientSecret(e.target.value)}
+              disabled={publicClient}
+              placeholder={client?.hasClientSecret ? "••••••••" : ""}
+              data-testid={`oauth-clientsecret-${authKey}`}
+            />
+          </div>
+          <div className="space-y-1 sm:col-span-2">
+            <Label htmlFor={`redir-${authKey}`} className="text-xs">
+              {t("integration.oauthClient.redirectUri")}
+            </Label>
+            <Input
+              id={`redir-${authKey}`}
+              type="url"
+              value={redirectUri}
+              onChange={(e) => setRedirectUri(e.target.value)}
+              placeholder={client?.redirectUri ?? ""}
+            />
+          </div>
+          <label className="flex items-center gap-2 text-sm sm:col-span-2">
+            <Checkbox checked={publicClient} onCheckedChange={(c) => setPublicClient(Boolean(c))} />
+            {t("integration.oauthClient.publicClient")}
+          </label>
+          <div className="flex items-center gap-2 sm:col-span-2">
             <Button
-              type="button"
-              variant="ghost"
+              type="submit"
               size="sm"
-              onClick={onDelete}
-              disabled={del.isPending}
+              disabled={upsert.isPending || clientId.trim() === ""}
+              data-testid={`oauth-client-save-${authKey}`}
             >
-              <Trash2 size={14} className="text-destructive" />
-              {t("integration.oauthClient.btnDelete")}
+              {client
+                ? t("integration.oauthClient.btnRotate")
+                : t("integration.oauthClient.btnRegister")}
             </Button>
-          )}
-        </div>
-      </form>
-    </div>
+            {client && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={onDelete}
+                disabled={del.isPending}
+              >
+                <Trash2 size={14} className="text-destructive" />
+                {t("integration.oauthClient.btnDelete")}
+              </Button>
+            )}
+          </div>
+        </form>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 

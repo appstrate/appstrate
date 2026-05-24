@@ -719,6 +719,8 @@
   "integration.tabs.versions": "Versions",
   "integration.auth.none": "This integration declares no authentication — nothing to connect.",
   "integration.section.oauthClient": "OAuth client (admin)",
+  "integration.oauthClient.configured": "Configured",
+  "integration.oauthClient.notConfigured": "Not configured",
   "integration.field.version": "Version",
   "integration.field.author": "Author",
   "integration.field.license": "License",
