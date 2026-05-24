@@ -509,6 +509,30 @@ async function resolveDeliveries(
         authType: auth.type,
       });
     } else {
+      // A plan with a header name but an empty value is a silent-no-op trap:
+      // the MITM planner drops empty-value injections, so the credential header
+      // is never injected and upstream calls go out unauthenticated while the
+      // run still "succeeds". This happens when `delivery.http.valueFrom` names
+      // a credential field that is absent on the stored connection — typically a
+      // key-casing mismatch (e.g. `apiKey` stored vs `api_key` declared). Surface
+      // it loudly instead of letting it pass unnoticed. (`basic` builds its value
+      // from username:password, so an empty value there is the same defect.)
+      if (plan.headerName.length > 0 && plan.value.length === 0) {
+        logger.warn(
+          "delivery.http resolved an empty credential value — header will NOT be injected " +
+            "(credential field missing/empty on the connection; check for a key-casing mismatch " +
+            "against the manifest's credentials.schema)",
+          {
+            integrationId,
+            authKey: row.authKey,
+            authType: auth.type,
+            connectionId: row.id,
+            headerName: plan.headerName,
+            valueFrom: typeof httpDecl.valueFrom === "string" ? httpDecl.valueFrom : "<template>",
+            storedFieldKeys: Object.keys(fields),
+          },
+        );
+      }
       httpDeliveryAuths[row.authKey] = {
         ...plan,
         authType: auth.type,
