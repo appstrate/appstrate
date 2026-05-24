@@ -11,17 +11,15 @@
  * (`runtime-pi/sidecar/mcp.ts`); this descriptor is what the runtime
  * Pi-tool registration and the platform prompt builder consume.
  *
- * The sidecar advertises the same `description` so MCP-list output
- * matches the Pi-tool registration verbatim.
- *
- * The LLM-facing doc lives in the co-located `TOOL.md` and is resolved
- * by the platform via `loadRuntimeToolDoc(tool)` — mirroring how bundle
- * tools expose `TOOL.md` through `pkg.files.get("TOOL.md")`.
+ * The sidecar advertises the same `description` so MCP `tools/list`
+ * output matches the Pi-tool registration verbatim — that description is
+ * the LLM-facing doc (the agent learns the tool from `tools/list`; the
+ * prompt no longer carries a TOOL.md).
  */
 
 import { defineTool } from "../define.ts";
 
-export const recallMemoryTool = defineTool(import.meta, {
+export const recallMemoryTool = defineTool({
   id: "recall_memory",
   name: "recall_memory",
   description:

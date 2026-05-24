@@ -11,17 +11,13 @@
  * platform prompt builder consume.
  *
  * If the sidecar's parameter schema or behaviour changes, update both
- * this descriptor (and the co-located `TOOL.md`) and the sidecar in
- * lockstep.
- *
- * The LLM-facing doc lives in the co-located `TOOL.md` and is resolved
- * by the platform via `loadRuntimeToolDoc(tool)` — mirroring how bundle
- * tools expose `TOOL.md` through `pkg.files.get("TOOL.md")`.
+ * this descriptor and the sidecar in lockstep. The `description` is the
+ * LLM-facing doc — surfaced via MCP `tools/list`, never via the prompt.
  */
 
 import { defineTool } from "../define.ts";
 
-export const runHistoryTool = defineTool(import.meta, {
+export const runHistoryTool = defineTool({
   id: "run_history",
   name: "run_history",
   description:

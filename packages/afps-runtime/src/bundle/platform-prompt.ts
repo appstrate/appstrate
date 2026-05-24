@@ -77,12 +77,12 @@ export interface PlatformPromptOptions {
   /** Run timeout in seconds — surfaced in the `## System` section. */
   timeoutSeconds?: number;
 
-  /** Bundled tools catalogue + inline TOOL.md docs. */
-  availableTools?: ReadonlyArray<PlatformPromptTool>;
-  /** Bundled skills catalogue. */
+  /**
+   * Bundled skills catalogue. Skills are workspace file references, not
+   * MCP tools, so they keep a prompt section (tools are advertised via
+   * MCP `tools/list` and are deliberately NOT listed in the prompt).
+   */
   availableSkills?: ReadonlyArray<PlatformPromptTool>;
-  /** Raw TOOL.md contents appended after the tool list. */
-  toolDocs?: ReadonlyArray<{ id: string; content: string }>;
 
   /** Input schema — drives the `## User Input` section. */
   inputSchema?: PlatformPromptSchema;
@@ -116,7 +116,8 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
   // ─── Section model (#368) ─────────────────────────────────────────
   // The platform prompt owns SECTIONS — headers, intro prose, and data
   // dumps the runtime sources from DB/state. Tool USAGE prose lives in
-  // each tool's `TOOL.md` and flows in through `opts.toolDocs`.
+  // each tool's MCP `description` (surfaced via `tools/list`), never in
+  // the prompt.
   //
   // That means the Checkpoint / Pinned Slots / Memory sections render
   // their data block when data exists, with no tool-specific footers.

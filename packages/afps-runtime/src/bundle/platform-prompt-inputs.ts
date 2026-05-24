@@ -120,35 +120,21 @@ function toolFromPackage(pkg: BundlePackage): PlatformPromptTool {
 }
 
 /**
- * Walk all non-root packages once and classify by `manifest.type`.
- * Single pass — keeps the traversal cost predictable on large bundles.
+ * Walk all non-root packages once and collect the skill references.
+ * Tools are NOT collected: every agent tool (runtime, integration,
+ * first-party) is advertised to the model via MCP `tools/list`, so the
+ * prompt no longer lists them or their docs (see `renderPlatformPrompt`).
+ * Skills are not MCP tools — they are workspace files — so they keep
+ * their prompt section.
  */
-function walkDependencies(bundle: Bundle): {
-  tools: PlatformPromptTool[];
-  skills: PlatformPromptTool[];
-  toolDocs: Array<{ id: string; content: string }>;
-} {
-  const tools: PlatformPromptTool[] = [];
+function walkDependencies(bundle: Bundle): { skills: PlatformPromptTool[] } {
   const skills: PlatformPromptTool[] = [];
-  const toolDocs: Array<{ id: string; content: string }> = [];
-  const decoder = new TextDecoder();
-
   for (const [identity, pkg] of bundle.packages) {
     if (identity === bundle.root) continue;
     const type = (pkg.manifest as Record<string, unknown>)["type"];
-    if (type === "tool") {
-      tools.push(toolFromPackage(pkg));
-      const md = pkg.files.get("TOOL.md");
-      if (md) {
-        const parsed = parsePackageIdentity(identity);
-        if (parsed) toolDocs.push({ id: parsed.packageId, content: decoder.decode(md) });
-      }
-    } else if (type === "skill") {
-      skills.push(toolFromPackage(pkg));
-    }
+    if (type === "skill") skills.push(toolFromPackage(pkg));
   }
-
-  return { tools, skills, toolDocs };
+  return { skills };
 }
 
 export type BuildPlatformPromptInputsOverrides = Partial<Omit<PlatformPromptOptions, "context">>;
@@ -173,7 +159,7 @@ export function buildPlatformPromptInputs(
   const root = bundle.packages.get(bundle.root);
   const rootManifest = root?.manifest as Record<string, unknown> | undefined;
 
-  const { tools, skills, toolDocs } = walkDependencies(bundle);
+  const { skills } = walkDependencies(bundle);
 
   const inputSchema = asPromptSchema(readSchemaSection(rootManifest, "input"));
   const configSchema = asPromptSchema(readSchemaSection(rootManifest, "config"));
@@ -188,9 +174,7 @@ export function buildPlatformPromptInputs(
     ...(readTimeoutSeconds(bundle) !== undefined
       ? { timeoutSeconds: readTimeoutSeconds(bundle)! }
       : {}),
-    availableTools: tools,
     availableSkills: skills,
-    toolDocs,
     ...(inputSchema ? { inputSchema } : {}),
     ...(configSchema ? { configSchema } : {}),
     ...(outputSchema ? { outputSchema } : {}),

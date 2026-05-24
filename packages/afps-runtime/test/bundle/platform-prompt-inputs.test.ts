@@ -70,8 +70,9 @@ describe("buildPlatformPromptInputs", () => {
     });
   });
 
-  it("classifies dependencies by manifest.type (tool / skill)", () => {
+  it("collects skill dependencies (tools are advertised via MCP tools/list, not derived here)", () => {
     const root = pkg("@acme/agent@1.0.0", { type: "agent" }, { "prompt.md": "" });
+    // A `tool` package (legacy) must NOT surface — tools are not collected.
     const tool = pkg(
       "@acme/t1@1.0.0",
       { type: "tool", name: "tool-one", description: "First" },
@@ -79,44 +80,7 @@ describe("buildPlatformPromptInputs", () => {
     );
     const skill = pkg("@acme/s1@1.0.0", { type: "skill", name: "skill-one" });
     const inputs = buildPlatformPromptInputs(bundleOf(root, tool, skill), ctx());
-    expect(inputs.availableTools).toEqual([
-      { id: "@acme/t1", name: "tool-one", description: "First" },
-    ]);
     expect(inputs.availableSkills).toEqual([{ id: "@acme/s1", name: "skill-one" }]);
-    expect(inputs.toolDocs).toEqual([{ id: "@acme/t1", content: "# tool-one docs" }]);
-  });
-
-  it("prefers manifest.tool.name over manifest.name as the LLM-facing tool identifier", () => {
-    // AFPS 1.5+ tool packages declare the LLM-facing tool name under
-    // `manifest.tool.name` (e.g. @appstrate/pin → "pin"). The package's
-    // `name` is the display identifier. The runtime gating in
-    // `renderPlatformPrompt` (#368) keys off `availableTools[i].name`,
-    // so the LLM-facing name MUST win when both are present — otherwise
-    // gates like `t.name === "pin"` would never match real bundles.
-    const root = pkg("@acme/agent@1.0.0", { type: "agent" }, { "prompt.md": "" });
-    const pinTool = pkg("@appstrate/pin@1.0.0", {
-      name: "@appstrate/pin",
-      type: "tool",
-      description: "Upsert a pinned slot",
-      tool: { name: "pin" },
-    });
-    const inputs = buildPlatformPromptInputs(bundleOf(root, pinTool), ctx());
-    expect(inputs.availableTools).toEqual([
-      { id: "@appstrate/pin", name: "pin", description: "Upsert a pinned slot" },
-    ]);
-  });
-
-  it("falls back to manifest.name when manifest.tool.name is absent (legacy/non-tool-block packages)", () => {
-    const root = pkg("@acme/agent@1.0.0", { type: "agent" }, { "prompt.md": "" });
-    const legacy = pkg("@acme/legacy@1.0.0", {
-      name: "legacy-tool",
-      type: "tool",
-      description: "Legacy",
-    });
-    const inputs = buildPlatformPromptInputs(bundleOf(root, legacy), ctx());
-    expect(inputs.availableTools).toEqual([
-      { id: "@acme/legacy", name: "legacy-tool", description: "Legacy" },
-    ]);
   });
 
   it("applies scalar overrides verbatim (platformName, timeoutSeconds)", () => {
@@ -156,9 +120,7 @@ describe("buildPlatformPromptInputs", () => {
   it("omits section-driving fields when the bundle has none", () => {
     const root = pkg("@acme/agent@1.0.0", { type: "agent" }, { "prompt.md": "" });
     const inputs = buildPlatformPromptInputs(bundleOf(root), ctx());
-    expect(inputs.availableTools).toEqual([]);
     expect(inputs.availableSkills).toEqual([]);
-    expect(inputs.toolDocs).toEqual([]);
     expect(inputs.inputSchema).toBeUndefined();
     expect(inputs.outputSchema).toBeUndefined();
   });

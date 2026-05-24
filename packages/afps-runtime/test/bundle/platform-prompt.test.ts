@@ -30,11 +30,7 @@ describe("renderPlatformPrompt", () => {
   });
 
   it("renders the Communication section and no Tools section (tools come from tools/list)", () => {
-    const out = renderPlatformPrompt({
-      template: "T",
-      context: ctx(),
-      availableTools: [{ id: "@x/tool", name: "x-tool" }],
-    });
+    const out = renderPlatformPrompt({ template: "T", context: ctx() });
     expect(out.indexOf("### Communication")).toBeGreaterThan(-1);
     expect(out).not.toContain("### Tools");
   });
@@ -71,27 +67,15 @@ describe("renderPlatformPrompt", () => {
     expect(out).not.toContain("**Timeout**");
   });
 
-  it("lists skills but never tools (tools come from MCP tools/list)", () => {
+  it("lists skills (tools come from MCP tools/list, never the prompt)", () => {
     const out = renderPlatformPrompt({
       template: "T",
       context: ctx(),
-      availableTools: [{ id: "@x/tool", name: "x-tool", description: "Do X" }],
       availableSkills: [{ id: "@x/skill", name: "x-skill" }],
     });
     expect(out).not.toContain("### Tools");
-    expect(out).not.toContain("**x-tool**");
     expect(out).toContain("### Skills");
     expect(out).toContain("**x-skill**");
-  });
-
-  it("never renders toolDocs in the prompt (a tool's docs live in its MCP description)", () => {
-    const out = renderPlatformPrompt({
-      template: "T",
-      context: ctx(),
-      toolDocs: [{ id: "@x/tool", content: "## How to use x-tool\n\nBe careful." }],
-    });
-    expect(out).not.toContain("## How to use x-tool");
-    expect(out).not.toContain("Be careful");
   });
 
   it("never emits a Connected Providers section or provider_call instructions", () => {
@@ -350,7 +334,6 @@ describe("renderPlatformPrompt", () => {
         context: ctx({
           memories: [{ content: "carry-over fact", createdAt: 1_700_000_000_000 }],
         }),
-        availableTools: [],
       });
       expect(out).toContain("## Memory");
       expect(out).toContain("- carry-over fact");
@@ -365,12 +348,9 @@ describe("renderPlatformPrompt", () => {
       const out = renderPlatformPrompt({
         template: "T",
         context: ctx({ memories: [{ content: "x", createdAt: 1 }] }),
-        availableTools: [
-          { id: "recall_memory", name: "recall_memory", description: "Search archive." },
-        ],
-        toolDocs: [{ id: "recall_memory", content: recallDoc }],
       });
       expect(out).not.toContain(recallDoc);
+      expect(out).not.toContain("recall_memory");
     });
   });
 
@@ -387,14 +367,9 @@ describe("renderPlatformPrompt", () => {
   });
 
   it("does not surface run_history in a Tools section (it's a typed MCP tool)", () => {
-    const out = renderPlatformPrompt({
-      template: "T",
-      context: ctx(),
-      availableTools: [
-        { id: "run_history", name: "run_history", description: "Fetch prior run metadata." },
-      ],
-    });
+    const out = renderPlatformPrompt({ template: "T", context: ctx() });
     expect(out).not.toContain("### Tools");
+    expect(out).not.toContain("run_history");
     expect(out).not.toContain("$SIDECAR_URL");
   });
 
