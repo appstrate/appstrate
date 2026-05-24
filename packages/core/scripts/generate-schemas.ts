@@ -15,6 +15,7 @@ import {
   skillManifestSchema,
   afpsJsonSchemaOverride,
 } from "@afps-spec/schema";
+import { integrationManifestSchema } from "../src/integration.ts";
 
 // Bun-native pathing — `import.meta.dir` is the directory of this script.
 const OUTPUT_DIR = `${import.meta.dir}/../schema`;
@@ -37,15 +38,22 @@ const appstrateSchemas = [
     description: "Appstrate skill manifest — AFPS skill with no extensions.",
     schema: skillManifestSchema,
   },
+  {
+    filename: "integration.schema.json",
+    title: "Appstrate Integration Manifest",
+    description:
+      "Appstrate integration manifest — derived from the canonical Zod schema (packages/core/src/integration.ts). Cross-field rules (server || apiCall, per-auth delivery) are enforced by the Zod superRefines and are not representable in JSON Schema.",
+    schema: integrationManifestSchema,
+  },
 ];
 
 // ─────────────────────────────────────────────
 // Generate
 // ─────────────────────────────────────────────
 
-// Only delete files we own. `integration.schema.json` is hand-written
-// (Phase 1.0 — proposal §4.1.1; not yet upstreamed in @afps-spec/schema)
-// and must survive a regeneration.
+// All three schemas are generated from their canonical Zod source. The
+// integration schema lives locally (not yet upstreamed in @afps-spec/schema);
+// agent/skill come from @afps-spec/schema.
 await Bun.$`mkdir -p ${OUTPUT_DIR}`.quiet();
 for (const entry of appstrateSchemas) {
   await Bun.$`rm -f ${OUTPUT_DIR}/${entry.filename}`.quiet();

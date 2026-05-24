@@ -1943,7 +1943,7 @@
         "operationId": "validateInlineRun",
         "tags": ["Runs"],
         "summary": "Validate an inline manifest without firing a run",
-        "description": "Dry-run validator. Runs the same preflight as `POST /api/runs/inline` — manifest shape, config + input against manifest schemas, and provider readiness — but never inserts a shadow package, never fires the pipeline, and never consumes run credits. Returns `200 { ok: true }` on success, `400` problem+json otherwise. Lets developers iterate on a manifest without leaving run history behind.\n\n**Rate limit:** shares the same per-user bucket as `POST /api/runs/inline` (`INLINE_RUN_LIMITS.rate_per_min`). Iterative validation calls count against the same quota as actual runs — tight loops can trigger `429`.",
+        "description": "Dry-run validator. Runs the same preflight as `POST /api/runs/inline` — manifest shape, config + input against manifest schemas, and integration readiness — but never inserts a shadow package, never fires the pipeline, and never consumes run credits. Returns `200 { ok: true }` on success, `400` problem+json otherwise. Lets developers iterate on a manifest without leaving run history behind.\n\n**Rate limit:** shares the same per-user bucket as `POST /api/runs/inline` (`INLINE_RUN_LIMITS.rate_per_min`). Iterative validation calls count against the same quota as actual runs — tight loops can trigger `429`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -1991,7 +1991,7 @@
         },
         "responses": {
           "200": {
-            "description": "Manifest + inputs + provider readiness all pass",
+            "description": "Manifest + inputs + integration readiness all pass",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -2025,7 +2025,7 @@
             }
           },
           "400": {
-            "description": "Invalid manifest, schema mismatch, or missing provider readiness",
+            "description": "Invalid manifest, schema mismatch, or missing connection readiness",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4209,14 +4209,15 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["clientId"],
+                "required": ["clientId", "clientSecret"],
                 "properties": {
                   "clientId": {
                     "type": "string",
                     "minLength": 1
                   },
                   "clientSecret": {
-                    "type": "string"
+                    "type": "string",
+                    "default": ""
                   },
                   "redirectUri": {
                     "type": "string",
@@ -5641,7 +5642,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["connectionId"],
+                "required": ["connectionId", "enforce"],
                 "properties": {
                   "connectionId": {
                     "type": "string",
@@ -10205,77 +10206,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "required": ["auths", "deliveryPlans", "expiresAtEpochMs"],
-                  "properties": {
-                    "auths": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "required": ["authKey", "authType", "fields", "authorizedUris"],
-                        "properties": {
-                          "authKey": {
-                            "type": "string"
-                          },
-                          "authType": {
-                            "type": "string"
-                          },
-                          "fields": {
-                            "type": "object",
-                            "additionalProperties": {
-                              "type": "string"
-                            }
-                          },
-                          "authorizedUris": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          },
-                          "audience": {
-                            "type": "string"
-                          },
-                          "expiresAt": {
-                            "type": "string",
-                            "format": "date-time"
-                          },
-                          "scopesGranted": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          }
-                        }
-                      }
-                    },
-                    "deliveryPlans": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "type": "object",
-                        "required": ["headerName", "headerPrefix", "value", "allowServerOverride"],
-                        "properties": {
-                          "headerName": {
-                            "type": "string"
-                          },
-                          "headerPrefix": {
-                            "type": "string"
-                          },
-                          "value": {
-                            "type": "string"
-                          },
-                          "allowServerOverride": {
-                            "type": "boolean"
-                          }
-                        }
-                      }
-                    },
-                    "expiresAtEpochMs": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "type": ["integer", "null"]
-                      }
-                    }
-                  }
+                  "$ref": "#/components/schemas/IntegrationCredentialsResponse"
                 }
               }
             }
@@ -10283,8 +10214,11 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
-          "403": {
-            "description": "Refresh token revoked upstream — the integration connection has been flagged `needsReconnection` and the sidecar should surface this to the integration's MCP client as a 401.",
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "410": {
+            "description": "Refresh token revoked upstream — the integration connection has been flagged `needsReconnection` and the sidecar should surface this to the integration's MCP client as a 401. Matches the model-provider token endpoint's revoked semantics.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10292,9 +10226,6 @@
                 }
               }
             }
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
           },
           "502": {
             "description": "Transient OAuth refresh failure upstream (network error, IdP 5xx, malformed response). The cached credential may still be valid; the sidecar's listener cooldown will back off and retry on the next 401.",
@@ -10334,28 +10265,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "required": ["auths", "deliveryPlans", "expiresAtEpochMs"],
-                  "properties": {
-                    "auths": {
-                      "type": "array",
-                      "items": {
-                        "type": "object"
-                      }
-                    },
-                    "deliveryPlans": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "type": "object"
-                      }
-                    },
-                    "expiresAtEpochMs": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "type": ["integer", "null"]
-                      }
-                    }
-                  }
+                  "$ref": "#/components/schemas/IntegrationCredentialsResponse"
                 }
               }
             }
@@ -10363,7 +10273,10 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
-          "403": {
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "410": {
             "description": "Refresh token revoked upstream — same semantics as the GET endpoint.",
             "content": {
               "application/problem+json": {
@@ -10372,9 +10285,6 @@
                 }
               }
             }
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
           },
           "502": {
             "description": "Transient OAuth refresh failure upstream — same semantics as the GET endpoint.",
@@ -10921,7 +10831,7 @@
                     },
                     "type": {
                       "type": "string",
-                      "description": "Package type (agent/skill/provider)"
+                      "description": "Package type (agent/skill/integration)"
                     },
                     "version": {
                       "type": "string",
@@ -11065,7 +10975,7 @@
                     },
                     "type": {
                       "type": "string",
-                      "description": "Package type (agent/skill/provider)"
+                      "description": "Package type (agent/skill/integration)"
                     },
                     "version": {
                       "type": "string",
@@ -12186,7 +12096,7 @@
         "operationId": "getAgentPackage",
         "tags": ["Packages"],
         "summary": "Get agent detail",
-        "description": "Returns agent detail including providers, config, state, and skills.",
+        "description": "Returns agent detail including integrations, config, state, and skills.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -13153,7 +13063,7 @@
         "operationId": "getAgentPackageById",
         "tags": ["Packages"],
         "summary": "Get agent detail by ID",
-        "description": "Returns agent detail including providers, config, state, and skills by unscoped package ID.",
+        "description": "Returns agent detail including integrations, config, state, and skills by unscoped package ID.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -17225,6 +17135,80 @@
           "accountId": {
             "type": "string",
             "description": "Abstract account/tenant identifier surfaced by the provider's `extractTokenIdentity` hook. The sidecar's identity layer (keyed by providerId from the boot config) decides which routing header to echo it as."
+          }
+        }
+      },
+      "IntegrationCredentialsResponse": {
+        "type": "object",
+        "description": "Live credentials + per-auth HTTP delivery plans + per-auth expiries for an installed integration. Returned by both `GET /internal/integration-credentials/{scope}/{name}` and `POST .../refresh` (identical shape). Feeds the sidecar's MITM `MitmCredentialSource.current()` + `.deliveryPlans()`.",
+        "required": ["auths", "deliveryPlans", "expiresAtEpochMs"],
+        "properties": {
+          "auths": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["authKey", "authType", "fields", "authorizedUris"],
+              "properties": {
+                "authKey": {
+                  "type": "string"
+                },
+                "authType": {
+                  "type": "string"
+                },
+                "fields": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "authorizedUris": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "audience": {
+                  "type": "string"
+                },
+                "expiresAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "scopesGranted": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "deliveryPlans": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "required": ["headerName", "headerPrefix", "value", "allowServerOverride"],
+              "properties": {
+                "headerName": {
+                  "type": "string"
+                },
+                "headerPrefix": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                },
+                "allowServerOverride": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "expiresAtEpochMs": {
+            "type": "object",
+            "additionalProperties": {
+              "type": ["integer", "null"]
+            }
           }
         }
       },

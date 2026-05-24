@@ -231,7 +231,7 @@ export function createIntegrationCredentialsSource(
       });
       return false;
     }
-    if (res.status === 403) {
+    if (res.status === 410) {
       // Refresh token revoked — connection now flagged needsReconnection
       // on the platform. The integration's next call will return 401
       // again; we don't want to chase it forever.

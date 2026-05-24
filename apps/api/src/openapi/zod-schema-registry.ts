@@ -77,6 +77,17 @@ import {
   updatePackageSchema,
 } from "../routes/applications.ts";
 
+// --- Integration schemas (routes/integrations.ts) ---
+import {
+  connectFieldsSchema,
+  connectOAuthSchema,
+  updateSettingsSchema,
+  setPinSchema,
+  setOrgDefaultSchema,
+  oauthClientSchema,
+  updateConnectionSchema,
+} from "../routes/integrations.ts";
+
 // ---------------------------------------------------------------------------
 // Registry type and entries
 // ---------------------------------------------------------------------------
@@ -319,6 +330,50 @@ const coreSchemas: ZodSchemaEntry[] = [
     path: "/api/packages/{scope}/{name}/fork",
     jsonSchema: toJsonSchema(forkSchema),
     description: "Fork an agent",
+  },
+
+  // ─── Integrations ───────────────────────────────────────────────────────
+  {
+    method: "PUT",
+    path: "/api/integrations/{packageId}/oauth-clients/{authKey}",
+    jsonSchema: toJsonSchema(oauthClientSchema),
+    description: "Register/rotate integration OAuth client",
+  },
+  {
+    method: "POST",
+    path: "/api/integrations/{packageId}/auths/{authKey}/connect/fields",
+    jsonSchema: toJsonSchema(connectFieldsSchema),
+    description: "Connect integration via api_key/basic/custom fields",
+  },
+  {
+    method: "POST",
+    path: "/api/integrations/{packageId}/auths/{authKey}/connect/oauth2",
+    jsonSchema: toJsonSchema(connectOAuthSchema),
+    description: "Kick off integration OAuth2 connect",
+  },
+  {
+    method: "PATCH",
+    path: "/api/integrations/{packageId}/settings",
+    jsonSchema: toJsonSchema(updateSettingsSchema),
+    description: "Update integration settings (block user connections)",
+  },
+  {
+    method: "PUT",
+    path: "/api/integrations/{packageId}/pins/{agentPackageId}",
+    jsonSchema: toJsonSchema(setPinSchema),
+    description: "Upsert integration admin pin",
+  },
+  {
+    method: "PUT",
+    path: "/api/integrations/{packageId}/default",
+    jsonSchema: toJsonSchema(setOrgDefaultSchema),
+    description: "Set integration org default connection",
+  },
+  {
+    method: "PATCH",
+    path: "/api/integrations/{packageId}/connections/{connectionId}",
+    jsonSchema: toJsonSchema(updateConnectionSchema),
+    description: "Update integration connection metadata",
   },
 ];
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * INTEGRATIONS_PROPOSAL Phase 1.3 — marketplace REST surface.
+ * AFPS integration marketplace REST surface.
  *
  * Routes (all mounted under `/api/integrations`, app-scoped):
  *
@@ -81,32 +81,32 @@ import { oauthStateStore } from "../services/connection-manager/oauth-state-stor
 // Zod schemas
 // ─────────────────────────────────────────────
 
-const connectFieldsSchema = z.object({
+export const connectFieldsSchema = z.object({
   credentials: z.record(z.string(), z.string()).refine((c) => Object.keys(c).length > 0, {
     message: "credentials must contain at least one field",
   }),
 });
 
-const connectOAuthSchema = z.object({
+export const connectOAuthSchema = z.object({
   scopes: z.array(z.string()).optional(),
   forceAccountSelect: z.boolean().optional(),
   connectionId: z.uuid().optional(),
 });
 
-const updateSettingsSchema = z.object({
+export const updateSettingsSchema = z.object({
   blockUserConnections: z.boolean(),
 });
 
-const setPinSchema = z.object({
+export const setPinSchema = z.object({
   connectionId: z.uuid(),
 });
 
-const setOrgDefaultSchema = z.object({
+export const setOrgDefaultSchema = z.object({
   connectionId: z.uuid(),
   enforce: z.boolean().default(false),
 });
 
-const updateConnectionSchema = z
+export const updateConnectionSchema = z
   .object({
     label: z.string().max(80).nullable().optional(),
     sharedWithOrg: z.boolean().optional(),
@@ -115,7 +115,7 @@ const updateConnectionSchema = z
     message: "at least one of label, sharedWithOrg must be provided",
   });
 
-const oauthClientSchema = z.object({
+export const oauthClientSchema = z.object({
   clientId: z.string().min(1),
   clientSecret: z.string().default(""),
   redirectUri: z.url().optional(),

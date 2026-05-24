@@ -223,59 +223,21 @@ export const internalPaths = {
           description: "Live credentials + delivery plans + per-auth expiries.",
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                required: ["auths", "deliveryPlans", "expiresAtEpochMs"],
-                properties: {
-                  auths: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      required: ["authKey", "authType", "fields", "authorizedUris"],
-                      properties: {
-                        authKey: { type: "string" },
-                        authType: { type: "string" },
-                        fields: { type: "object", additionalProperties: { type: "string" } },
-                        authorizedUris: { type: "array", items: { type: "string" } },
-                        audience: { type: "string" },
-                        expiresAt: { type: "string", format: "date-time" },
-                        scopesGranted: { type: "array", items: { type: "string" } },
-                      },
-                    },
-                  },
-                  deliveryPlans: {
-                    type: "object",
-                    additionalProperties: {
-                      type: "object",
-                      required: ["headerName", "headerPrefix", "value", "allowServerOverride"],
-                      properties: {
-                        headerName: { type: "string" },
-                        headerPrefix: { type: "string" },
-                        value: { type: "string" },
-                        allowServerOverride: { type: "boolean" },
-                      },
-                    },
-                  },
-                  expiresAtEpochMs: {
-                    type: "object",
-                    additionalProperties: { type: ["integer", "null"] },
-                  },
-                },
-              },
+              schema: { $ref: "#/components/schemas/IntegrationCredentialsResponse" },
             },
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": {
+        "404": { $ref: "#/components/responses/NotFound" },
+        "410": {
           description:
-            "Refresh token revoked upstream — the integration connection has been flagged `needsReconnection` and the sidecar should surface this to the integration's MCP client as a 401.",
+            "Refresh token revoked upstream — the integration connection has been flagged `needsReconnection` and the sidecar should surface this to the integration's MCP client as a 401. Matches the model-provider token endpoint's revoked semantics.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
             },
           },
         },
-        "404": { $ref: "#/components/responses/NotFound" },
         "502": {
           description:
             "Transient OAuth refresh failure upstream (network error, IdP 5xx, malformed response). The cached credential may still be valid; the sidecar's listener cooldown will back off and retry on the next 401.",
@@ -305,23 +267,13 @@ export const internalPaths = {
           description: "Refreshed credentials + delivery plans + per-auth expiries.",
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                required: ["auths", "deliveryPlans", "expiresAtEpochMs"],
-                properties: {
-                  auths: { type: "array", items: { type: "object" } },
-                  deliveryPlans: { type: "object", additionalProperties: { type: "object" } },
-                  expiresAtEpochMs: {
-                    type: "object",
-                    additionalProperties: { type: ["integer", "null"] },
-                  },
-                },
-              },
+              schema: { $ref: "#/components/schemas/IntegrationCredentialsResponse" },
             },
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": {
+        "404": { $ref: "#/components/responses/NotFound" },
+        "410": {
           description: "Refresh token revoked upstream — same semantics as the GET endpoint.",
           content: {
             "application/problem+json": {
@@ -329,7 +281,6 @@ export const internalPaths = {
             },
           },
         },
-        "404": { $ref: "#/components/responses/NotFound" },
         "502": {
           description:
             "Transient OAuth refresh failure upstream — same semantics as the GET endpoint.",

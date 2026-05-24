@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * OpenAPI paths for the AFPS integration marketplace
- * (INTEGRATIONS_PROPOSAL Phase 1.3).
+ * OpenAPI paths for the AFPS integration marketplace.
  *
  * Endpoints are app-scoped — `X-Application-Id` is enforced by the
  * platform-level `requireAppContext()` middleware.
@@ -383,10 +382,10 @@ export const integrationsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["clientId"],
+              required: ["clientId", "clientSecret"],
               properties: {
                 clientId: { type: "string", minLength: 1 },
-                clientSecret: { type: "string" },
+                clientSecret: { type: "string", default: "" },
                 redirectUri: { type: "string", format: "uri" },
               },
             },
@@ -993,7 +992,7 @@ export const integrationsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["connectionId"],
+              required: ["connectionId", "enforce"],
               properties: {
                 connectionId: { type: "string", format: "uuid" },
                 enforce: { type: "boolean", default: false },

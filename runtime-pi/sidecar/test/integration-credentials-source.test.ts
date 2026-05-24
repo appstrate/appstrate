@@ -9,7 +9,7 @@
  *   - `refreshOnUnauthorized()` POSTs to the right URL with the right
  *     Authorization header, then swaps in the response payload so the
  *     listener sees the new credentials on the NEXT request.
- *   - 403 (refresh token revoked) yields `false` and arms the cooldown
+ *   - 410 (refresh token revoked) yields `false` and arms the cooldown
  *     so subsequent attempts back off.
  *   - 5xx / fetch failure yields `false` without crashing.
  *   - Cooldown suppresses bursts; in-flight dedup coalesces parallel
@@ -97,12 +97,12 @@ describe("createIntegrationCredentialsSource", () => {
     expect(source.deliveryPlans().primary?.value).toBe("tok-2");
   });
 
-  it("returns false on 403 (revoked) and arms the cooldown", async () => {
+  it("returns false on 410 (revoked) and arms the cooldown", async () => {
     const initial = makePayload("tok-1");
     let calls = 0;
     const fetchFn = (async () => {
       calls += 1;
-      return new Response("", { status: 403 });
+      return new Response("", { status: 410 });
     }) as unknown as typeof fetch;
 
     const source = createIntegrationCredentialsSource({
@@ -137,7 +137,7 @@ describe("createIntegrationCredentialsSource", () => {
     expect(source.current().auths[0]!.fields.apiKey).toBe("tok-1");
   });
 
-  it("returns false on non-OK non-403 status", async () => {
+  it("returns false on non-OK non-410 status", async () => {
     const initial = makePayload("tok-1");
     const fetchFn = (async () =>
       new Response("upstream broke", { status: 502 })) as unknown as typeof fetch;

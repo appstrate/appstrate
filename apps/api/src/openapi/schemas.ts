@@ -678,6 +678,47 @@ export const schemas = {
       },
     },
   },
+  IntegrationCredentialsResponse: {
+    type: "object",
+    description:
+      "Live credentials + per-auth HTTP delivery plans + per-auth expiries for an installed integration. Returned by both `GET /internal/integration-credentials/{scope}/{name}` and `POST .../refresh` (identical shape). Feeds the sidecar's MITM `MitmCredentialSource.current()` + `.deliveryPlans()`.",
+    required: ["auths", "deliveryPlans", "expiresAtEpochMs"],
+    properties: {
+      auths: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["authKey", "authType", "fields", "authorizedUris"],
+          properties: {
+            authKey: { type: "string" },
+            authType: { type: "string" },
+            fields: { type: "object", additionalProperties: { type: "string" } },
+            authorizedUris: { type: "array", items: { type: "string" } },
+            audience: { type: "string" },
+            expiresAt: { type: "string", format: "date-time" },
+            scopesGranted: { type: "array", items: { type: "string" } },
+          },
+        },
+      },
+      deliveryPlans: {
+        type: "object",
+        additionalProperties: {
+          type: "object",
+          required: ["headerName", "headerPrefix", "value", "allowServerOverride"],
+          properties: {
+            headerName: { type: "string" },
+            headerPrefix: { type: "string" },
+            value: { type: "string" },
+            allowServerOverride: { type: "boolean" },
+          },
+        },
+      },
+      expiresAtEpochMs: {
+        type: "object",
+        additionalProperties: { type: ["integer", "null"] },
+      },
+    },
+  },
   OrgProxy: {
     type: "object",
     required: ["id", "label", "enabled", "isDefault", "source", "createdAt", "updatedAt"],

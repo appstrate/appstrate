@@ -11,7 +11,7 @@
  *   2. If the auth is OAuth2 AND (forced OR within the lead window),
  *      call {@link forceRefreshIntegrationConnection}. RefreshError
  *      with `kind="revoked"` flips needsReconnection and bubbles a
- *      structured 403; transient failures bubble a 502.
+ *      structured 410; transient failures bubble a 502.
  *   3. Resolve the live HTTP delivery plan via `resolveHttpDelivery`.
  *   4. Build a `ResolvedAuthCredentials` entry + the matching plan.
  *
@@ -31,7 +31,7 @@ import { expandScopesGranted } from "@appstrate/core/integration";
 import { OAUTH_REFRESH_LEAD_MS } from "@appstrate/core/sidecar-types";
 
 import { logger } from "../lib/logger.ts";
-import { notFound, forbidden, internalError, badGateway } from "../lib/errors.ts";
+import { notFound, gone, internalError, badGateway } from "../lib/errors.ts";
 import type { Actor } from "../lib/actor.ts";
 import {
   buildIntegrationOAuthRefreshContext,
@@ -62,7 +62,7 @@ export interface ResolveLiveCredentialsOptions {
  * Throws ApiError on:
  *   - 404: integration not declared by the agent, not installed, or no
  *     connection for the actor.
- *   - 403: connection's refresh token was revoked upstream (sidecar
+ *   - 410: connection's refresh token was revoked upstream (sidecar
  *     should propagate as 401 to the integration so the LLM sees a
  *     clean "please re-connect" surface).
  *   - 502: transient OAuth refresh failure (network, upstream 5xx, etc).
@@ -211,16 +211,18 @@ export async function resolveLiveIntegrationCredentials(
         }
       } catch (err) {
         if (err instanceof RefreshError && err.kind === "revoked") {
-          // 403 here propagates to the sidecar, which translates back
+          // 410 here propagates to the sidecar, which translates back
           // to a 401 to the integration's MCP client. The
           // needsReconnection flag has already been set by the helper.
+          // Matches the model-provider token endpoint's revoked semantics.
           logger.warn("Integration token refresh revoked", {
             runId: context.runId,
             integrationId,
             authKey,
             status: err.status,
           });
-          throw forbidden(
+          throw gone(
+            "INTEGRATION_CONNECTION_NEEDS_RECONNECTION",
             `Integration '${integrationId}' auth '${authKey}' needs re-connection (refresh token revoked)`,
           );
         }
