@@ -41,14 +41,18 @@ export interface IntegrationConnection {
   authKey: string;
   /** Multi-account discriminator extracted at connect time. */
   accountId: string;
-  /** Identity claims surfaced for the UI (e.g. `account_email`). */
+  /** Identity claims extracted via `extractTokenIdentity` (e.g. `sub`, `email`). */
   identityClaims: Record<string, unknown> | null;
   scopesGranted: string[];
   needsReconnection: boolean;
   expiresAt: string | null;
   ownerType: "user" | "end_user";
   ownerId: string;
-  /** User-set display name ("Perso", "Boulot"). */
+  /**
+   * Display name, set at creation: the extracted identity (email/login) when
+   * available, else "Connexion N". Stable for the connection's lifetime and
+   * user-editable. The UI renders it verbatim.
+   */
   label?: string | null;
   /** Opt-in: makes this connection selectable by other members of the same app. */
   sharedWithOrg?: boolean;

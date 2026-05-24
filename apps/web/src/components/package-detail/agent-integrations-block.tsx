@@ -43,7 +43,7 @@ import {
 import { InlineConnectButton } from "../integration-connect/inline-connect-button";
 import { FieldsConnectModal } from "../integration-connect/fields-connect-modal";
 import { useIntegrationOAuthPopup } from "../integration-connect/use-integration-oauth-popup";
-import { connectionAccount } from "../integration-connect/connection-label";
+import { connectionDisplayLabel } from "../integration-connect/connection-label";
 import { pickDefaultAuth } from "../integration-connect/pick-default-auth";
 
 interface AgentIntegrationsBlockProps {
@@ -331,13 +331,9 @@ function buildReuseInfo(
   agentCount: number,
   t: (k: string, opts?: Record<string, unknown>) => string,
 ): string {
-  // connectionAccount centralises `accountEmail ?? account_email ?? <floor>`.
-  // Here the floor is `label ?? accountId` so the email always wins over the
-  // user-set label, which in turn wins over the bare account id.
-  const account = connectionAccount({
-    ...connection,
-    accountId: connection.label ?? connection.accountId,
-  });
+  // `label` is the connection's display name (identity or "Connexion N"),
+  // always set at creation.
+  const account = connectionDisplayLabel(connection);
   if (agentCount <= 1) {
     return t("detail.integrationReuseSingle", { account });
   }
@@ -419,7 +415,6 @@ function MemberConnectionPicker({
     canAddConnection,
   } = resolution;
 
-  const connName = (c: IntegrationCandidate) => c.label ?? c.accountId;
   const ownerLabel = (c: IntegrationCandidate): string =>
     c.isOwn
       ? t("detail.integrationMemberPicker.byYou")
@@ -432,7 +427,7 @@ function MemberConnectionPicker({
     adminPinnedConnectionId ?? (orgDefaultEnforced ? orgDefaultConnectionId : null);
   if (lockedConnectionId) {
     const pinned = candidates.find((c) => c.id === lockedConnectionId);
-    const label = pinned?.label ?? pinned?.accountId ?? lockedConnectionId;
+    const label = pinned ? connectionDisplayLabel(pinned) : lockedConnectionId;
     return (
       <div data-testid={`member-picker-${integrationPackageId}`}>
         <Button
@@ -469,7 +464,7 @@ function MemberConnectionPicker({
   };
 
   const triggerLabel = resolvedConn
-    ? connName(resolvedConn)
+    ? connectionDisplayLabel(resolvedConn)
     : status === "must_choose"
       ? t("detail.integrationMemberPicker.chooseLabel")
       : status === "stale"
@@ -556,7 +551,7 @@ function MemberConnectionPicker({
                 <Check className={`size-3.5 ${resolvedConnectionId === c.id ? "" : "opacity-0"}`} />
                 <div className="flex min-w-0 flex-col">
                   <div className="flex items-center gap-1.5">
-                    <span className="truncate font-medium">{connName(c)}</span>
+                    <span className="truncate font-medium">{connectionDisplayLabel(c)}</span>
                     {tl && (
                       <Badge variant="outline" className="text-[0.6rem]">
                         {tl}

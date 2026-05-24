@@ -13,9 +13,11 @@ import { useOAuthPopup } from "../../hooks/use-oauth-popup";
  * Wired against `/api/integrations/.../connect/oauth2` so the
  * inline connect button on agent surfaces (`AgentIntegrationsBlock`,
  * `MissingConnectionsModal`) can pass the agent's per-tool scope
- * inference into the kickoff. The backend resolver still unions the
- * caller scopes with `getCurrentScopesGranted(actor)` for incremental
- * consent, so re-running with fewer scopes never shrinks the grant.
+ * inference into the kickoff. On a reconnect/upgrade (a `connectionId`
+ * is supplied) the backend unions the caller scopes with that
+ * connection's already-granted set, so re-consent never shrinks the
+ * grant. A fresh connect carries no `connectionId` and gets the
+ * manifest defaults plus whatever scopes the caller forwards.
  */
 export function useIntegrationOAuthPopup() {
   const { t } = useTranslation("settings");

@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Spinner } from "./spinner";
 import { InlineConnectButton } from "./integration-connect/inline-connect-button";
 import { pickDefaultAuth } from "./integration-connect/pick-default-auth";
-import { connectionAccount } from "./integration-connect/connection-label";
+import { connectionDisplayLabel } from "./integration-connect/connection-label";
 import { useIntegrationDetail, useIntegrationConnections } from "../hooks/use-integrations";
 
 /**
@@ -221,7 +221,7 @@ function MissingRow({
           </p>
           <ul className="space-y-1">
             {candidates.map((c) => {
-              const accountLabel = connectionAccount(c);
+              const name = connectionDisplayLabel(c);
               const isPicked = c.id === pickedId;
               const clickable = !!onPick && !!authKey;
               return (
@@ -243,8 +243,7 @@ function MissingRow({
                     data-testid={`must-choose-candidate-${c.id}`}
                   >
                     {isPicked && <Check className="text-primary size-3 shrink-0" />}
-                    {c.label && <span className="truncate font-medium">{c.label}</span>}
-                    <span className="text-muted-foreground truncate">{accountLabel}</span>
+                    <span className="truncate font-medium">{name}</span>
                     {c.sharedWithOrg && (
                       <Badge variant="secondary" className="text-[0.6rem]">
                         {t("missingConnections.mustChoose.sharedBadge")}

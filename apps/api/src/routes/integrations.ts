@@ -57,10 +57,7 @@ import {
 } from "../services/integration-connections.ts";
 import { resolveStrategy } from "../services/connect/registry.ts";
 import { createConnectRunExecutor } from "../services/connect/connect-run-launcher.ts";
-import {
-  computeRequiredScopes,
-  getCurrentScopesGranted,
-} from "../services/integration-scope-resolver.ts";
+import { getCurrentScopesGranted } from "../services/integration-scope-resolver.ts";
 import { isUserConnectionCreationBlocked } from "../services/integration-connection-resolver.ts";
 import {
   deleteIntegrationPin,
@@ -263,6 +260,11 @@ export function createIntegrationsRouter() {
       logger.error("Integration OAuth callback persistence failed", {
         err: String(err),
       });
+      // Surface the actionable identity-mismatch message verbatim (reconnect
+      // authenticated a different account) instead of the generic fallback.
+      if (err instanceof ApiError && err.code === "identity_mismatch") {
+        return c.html(popupHtmlError(err.message));
+      }
       return c.html(popupHtmlError("Could not save the connection."));
     }
     return c.html(popupHtmlClose());
@@ -432,27 +434,32 @@ export function createIntegrationsRouter() {
           `Auth '${authKey}' is type '${auth.type}' — use the fields flow instead`,
         );
       }
-      // Niveau 2 — request the strict superset of:
-      //   - manifest defaults (`auth.scopes`)
-      //   - caller-supplied (`body.scopes`)
-      //   - inferred from agents installed in this app (`computeRequiredScopes`)
-      //   - currently granted across the actor's existing connections
-      //     (`getCurrentScopesGranted`) → incremental consent
-      // Granted is unioned so re-consent never silently shrinks the set the
-      // user already authorized. Endpoint validation + client lookup live in
-      // OAuth2Strategy.begin.
-      const [computed, granted] = await Promise.all([
-        computeRequiredScopes({ scope, integrationPackageId: packageId, authKey }),
-        getCurrentScopesGranted({ scope, integrationPackageId: packageId, authKey, actor }),
-      ]);
-      const scopes = [
-        ...new Set([
-          ...(auth.scopes ?? []),
-          ...(body.scopes ?? []),
-          ...computed.required,
-          ...granted,
-        ]),
-      ];
+      // Request exactly what the caller scopes the connect to:
+      //   - manifest defaults (`auth.scopes`) — always
+      //   - caller-supplied (`body.scopes`) — the agent surface forwards its
+      //     inferred required scopes here when it drives an upgrade; the
+      //     integration page passes none, so its "+ Add account" connects
+      //     with defaults only.
+      //   - already granted ON THE TARGET CONNECTION (`getCurrentScopesGranted`,
+      //     keyed by `connectionId`) → reconnect/upgrade never silently shrinks
+      //     what that account already authorized. Empty for a fresh connect
+      //     (no row yet), so fresh connects stay at the default scope set.
+      //
+      // The kickoff deliberately does NOT walk installed agents anymore — that
+      // would leak unrelated agents' scopes into a plain "connect" and made the
+      // integration page's connect request more than its defaults. Scope
+      // upgrades are an explicit, per-agent action on the agent's Connexions
+      // tab. Endpoint validation + client lookup live in OAuth2Strategy.begin.
+      const granted = body.connectionId
+        ? await getCurrentScopesGranted({
+            scope,
+            integrationPackageId: packageId,
+            authKey,
+            actor,
+            connectionId: body.connectionId,
+          })
+        : [];
+      const scopes = [...new Set([...(auth.scopes ?? []), ...(body.scopes ?? []), ...granted])];
       const strategy = resolveStrategy(auth);
       if (!strategy.begin) {
         throw internalError();
