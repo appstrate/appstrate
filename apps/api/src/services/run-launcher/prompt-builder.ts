@@ -26,7 +26,6 @@
 import type { AppstrateRunPlan } from "./types.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import { buildPlatformPromptInputs, renderPlatformPrompt } from "@appstrate/afps-runtime/bundle";
-import { RUNTIME_INJECTED_TOOLS, loadRuntimeToolDoc } from "@appstrate/runner-pi";
 import { sanitizeStorageKey } from "../file-storage.ts";
 
 export function buildPlatformSystemPrompt(
@@ -46,29 +45,14 @@ export function buildPlatformSystemPrompt(
     ...(uploads ? { uploads } : {}),
   });
 
-  // Inject runtime-wired tools (run_history, recall_memory) that are
-  // not bundle packages. Both `availableTools` and `toolDocs` are
-  // appended AFTER bundle-derived entries so user-shipped tools come
-  // first in the `### Tools` listing and have their TOOL.md rendered
-  // ahead of the runtime docs — same order they're discoverable via
-  // MCP `tools/list`.
-  //
-  // `TOOL.md` is resolved here via `loadRuntimeToolDoc`, mirroring how
-  // bundle tools expose their doc through `pkg.files.get("TOOL.md")`:
-  // the descriptor never carries the doc string — the platform is the
-  // single point that reads it.
-  inputs.availableTools = [
-    ...(inputs.availableTools ?? []),
-    ...RUNTIME_INJECTED_TOOLS.map((t) => ({
-      id: t.id,
-      name: t.name,
-      description: t.description,
-    })),
-  ];
-  inputs.toolDocs = [
-    ...(inputs.toolDocs ?? []),
-    ...RUNTIME_INJECTED_TOOLS.map((t) => ({ id: t.id, content: loadRuntimeToolDoc(t) })),
-  ];
-
+  // The agent's tools — runtime-wired (`run_history`, `recall_memory`),
+  // integration tools, and the platform runtime tools (output/log/note/
+  // pin/report) — are all advertised to the model via MCP `tools/list`
+  // (name + description + input schema), so the prompt no longer lists
+  // them. The Communication contract (rendered above) is the only
+  // tool-related instruction the model can't infer from `tools/list`, and
+  // it stays. This keeps a single source of truth for each tool's
+  // signature and avoids a stale/partial in-prompt list that would
+  // contradict the live tool set.
   return renderPlatformPrompt(inputs);
 }

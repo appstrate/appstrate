@@ -148,8 +148,9 @@ describe("cross-path prompt parity", () => {
     for (const prompt of [platformPrompt, externalRunPrompt, appstrateRunPrompt]) {
       expect(prompt).toContain("## System");
       expect(prompt).toContain("### Environment");
-      expect(prompt).toContain("### Tools");
-      expect(prompt).toContain("**search**: Search the web");
+      // Tools are advertised via MCP tools/list, never listed in the prompt.
+      expect(prompt).not.toContain("### Tools");
+      expect(prompt).not.toContain("**search**: Search the web");
       expect(prompt).toContain("### Skills");
       expect(prompt).toContain("**writing**: Write clear prose");
       expect(prompt).toContain("## User Input");

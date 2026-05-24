@@ -184,24 +184,13 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
       "the user — do not assume a final text message will be read.\n",
   );
 
-  if (opts.availableTools && opts.availableTools.length > 0) {
-    sections.push("### Tools");
-    sections.push(
-      "You have access to the following tools (in addition to standard coding capabilities):\n",
-    );
-    for (const tool of opts.availableTools) {
-      const desc = tool.description ? `: ${tool.description}` : "";
-      sections.push(`- **${tool.name || tool.id}**${desc}`);
-    }
-    sections.push("");
-  }
-
-  if (opts.toolDocs && opts.toolDocs.length > 0) {
-    for (const doc of opts.toolDocs) {
-      sections.push(doc.content);
-      sections.push("");
-    }
-  }
+  // Tools are advertised to the model via MCP `tools/list` (name +
+  // description + input schema). The prompt deliberately does NOT list
+  // them: a partial/stale in-prompt list would contradict the live tool
+  // set, and the Communication contract above already states the only
+  // platform invariant the model can't infer from `tools/list`. Skills
+  // (below) are NOT MCP tools — they're workspace files — so they keep
+  // their own section.
 
   if (opts.availableSkills && opts.availableSkills.length > 0) {
     sections.push("### Skills");

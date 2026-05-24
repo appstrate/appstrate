@@ -24,11 +24,13 @@ function makeTestBundle(opts: {
   tools?: ToolMeta[];
   skills?: ToolMeta[];
   toolDocs?: Array<{ id: string; content: string }>;
+  runtimeTools?: string[];
 }): Bundle {
   const rootManifest: Record<string, unknown> = {
     name: "@test/agent",
     version: "1.0.0",
     type: "agent",
+    ...(opts.runtimeTools ? { runtimeTools: opts.runtimeTools } : {}),
     ...(opts.schemaVersion ? { schemaVersion: opts.schemaVersion } : {}),
     ...(opts.timeout !== undefined ? { timeout: opts.timeout } : {}),
     ...(opts.schemas?.input ? { input: { schema: opts.schemas.input } } : {}),
@@ -96,6 +98,7 @@ interface PromptContext {
   availableTools?: ToolMeta[];
   availableSkills?: ToolMeta[];
   toolDocs?: Array<{ id: string; content: string }>;
+  runtimeTools?: string[];
 }
 
 function splitLegacy(ctx: PromptContext): {
@@ -120,6 +123,7 @@ function splitLegacy(ctx: PromptContext): {
     ...(ctx.availableTools ? { tools: ctx.availableTools } : {}),
     ...(ctx.availableSkills ? { skills: ctx.availableSkills } : {}),
     ...(ctx.toolDocs ? { toolDocs: ctx.toolDocs } : {}),
+    ...(ctx.runtimeTools ? { runtimeTools: ctx.runtimeTools } : {}),
   });
   const plan: AppstrateRunPlan = {
     bundle,
@@ -211,7 +215,7 @@ describe("buildEnrichedPrompt — core structure", () => {
 // ─── Tool documentation (TOOL.md) ──────────────────────────
 
 describe("buildEnrichedPrompt — tool documentation", () => {
-  it("includes TOOL.md content for available tools", () => {
+  it("never renders TOOL.md content in the prompt (tools are self-documented via MCP tools/list)", () => {
     const ctx = baseContext({
       availableTools: [
         { id: "@appstrate/log", name: "Log", description: "Send progress messages" },
@@ -219,39 +223,8 @@ describe("buildEnrichedPrompt — tool documentation", () => {
       toolDocs: [{ id: "@appstrate/log", content: "## User Communication\n\nUse the `log` tool." }],
     });
     const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("## User Communication");
-    expect(prompt).toContain("Use the `log` tool.");
-  });
-
-  it("includes multiple tool docs", () => {
-    const ctx = baseContext({
-      availableTools: [
-        {
-          id: "@appstrate/pin",
-          name: "Pin",
-          description: "Upsert a pinned slot",
-        },
-        { id: "@appstrate/note", name: "Note", description: "Append an archive memory" },
-      ],
-      toolDocs: [
-        {
-          id: "@appstrate/pin",
-          content: "## Checkpoint Persistence\n\nUse `pin({ key, content })`.",
-        },
-        { id: "@appstrate/note", content: "## Memory\n\nUse `note({ content })`." },
-      ],
-    });
-    const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("## Checkpoint Persistence");
-    expect(prompt).toContain("## Memory");
-  });
-
-  it("omits tool doc section when no toolDocs", () => {
-    const ctx = baseContext({ toolDocs: undefined });
-    const prompt = buildEnrichedPrompt(ctx);
-    // Should not contain any tool-specific documentation sections
     expect(prompt).not.toContain("## User Communication");
-    expect(prompt).not.toContain("## State Persistence");
+    expect(prompt).not.toContain("Use the `log` tool.");
   });
 });
 
@@ -404,23 +377,16 @@ describe("buildEnrichedPrompt — memories", () => {
     expect(prompt).toContain("2025-01-15");
   });
 
-  it("omits the Memory section with no memories — recall_memory is discoverable via toolDocs (#368)", () => {
-    // Post-#368: the platform prompt is data-driven. With no pinned
-    // memories the `## Memory` header is suppressed entirely. The LLM
-    // still discovers `recall_memory` because the runtime-injected
-    // tool-doc fragment lists the calling convention in the
-    // `### Tools` block + the dedicated `## recall_memory` doc.
+  it("omits the Memory section with no memories — recall_memory is discoverable via tools/list", () => {
+    // With no pinned memories the `## Memory` header is suppressed
+    // entirely. `recall_memory` is no longer named in the prompt at all:
+    // the agent discovers it (and its calling convention) from the MCP
+    // tool advertised via `tools/list`, not from any in-prompt listing.
     const ctx = contextWithSystemTools({ memories: [] });
     const prompt = buildEnrichedPrompt(ctx);
-    // `## Memory\n` (header followed by newline) must be absent. Use
-    // the trailing newline to avoid false positives from headers like
-    // `## recall_memory` which share the prefix.
     expect(prompt).not.toContain("## Memory\n");
     expect(prompt).not.toContain("No memories are currently pinned");
-    // recall_memory still surfaces — through the runtime-injected
-    // tool-doc flow, not the (now-deleted) hardcoded `## Memory` footer.
-    expect(prompt).toContain("recall_memory");
-    expect(prompt).toContain("## recall_memory");
+    expect(prompt).not.toContain("recall_memory");
   });
 
   it("includes memories regardless of available tools", () => {
@@ -500,31 +466,22 @@ describe("buildEnrichedPrompt — documents", () => {
 // ─── Tools and skills ───────────────────────────────────────
 
 describe("buildEnrichedPrompt — tools and skills", () => {
-  it("includes available tools", () => {
+  it("never renders a Tools section — tools are advertised via MCP tools/list", () => {
+    // The prompt no longer lists tools (a partial/stale in-prompt list
+    // would contradict the live tool set). The agent discovers every tool
+    // — bundle, integration, runtime (output/log/note/pin/report), and the
+    // platform-injected run_history/recall_memory — from `tools/list`.
     const ctx = baseContext({
       availableTools: [
         { id: "@org/scraper", name: "Web Scraper", description: "Scrapes web pages" },
-        { id: "@org/translator", name: "Translator", description: "Translates text" },
       ],
+      runtimeTools: ["report"],
     });
-
     const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("### Tools");
-    expect(prompt).toContain("Web Scraper");
-    expect(prompt).toContain("Scrapes web pages");
-    expect(prompt).toContain("Translator");
-  });
-
-  it("always surfaces the platform-injected runtime tools (run_history, recall_memory)", () => {
-    // The platform's prompt-builder appends `run_history` and
-    // `recall_memory` to availableTools because runtime-pi wires them
-    // unconditionally for every run (#368). Bundle-derived tools come
-    // first in the listing, then platform-injected ones.
-    const ctx = baseContext({ availableTools: [] });
-    const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("### Tools");
-    expect(prompt).toContain("run_history");
-    expect(prompt).toContain("recall_memory");
+    expect(prompt).not.toContain("### Tools");
+    expect(prompt).not.toContain("Web Scraper");
+    expect(prompt).not.toContain("run_history");
+    expect(prompt).not.toContain("report");
   });
 
   it("includes available skills", () => {

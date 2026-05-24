@@ -29,16 +29,14 @@ describe("renderPlatformPrompt", () => {
     expect(out).toContain("The only way to communicate with the user is by calling a tool.");
   });
 
-  it("renders the Communication section before the Tools section", () => {
+  it("renders the Communication section and no Tools section (tools come from tools/list)", () => {
     const out = renderPlatformPrompt({
       template: "T",
       context: ctx(),
       availableTools: [{ id: "@x/tool", name: "x-tool" }],
     });
-    const commIdx = out.indexOf("### Communication");
-    const toolsIdx = out.indexOf("### Tools");
-    expect(commIdx).toBeGreaterThan(-1);
-    expect(toolsIdx).toBeGreaterThan(commIdx);
+    expect(out.indexOf("### Communication")).toBeGreaterThan(-1);
+    expect(out).not.toContain("### Tools");
   });
 
   it("keeps the Communication section tool-agnostic (no opt-in tool names)", () => {
@@ -73,27 +71,27 @@ describe("renderPlatformPrompt", () => {
     expect(out).not.toContain("**Timeout**");
   });
 
-  it("lists tools + skills when provided", () => {
+  it("lists skills but never tools (tools come from MCP tools/list)", () => {
     const out = renderPlatformPrompt({
       template: "T",
       context: ctx(),
       availableTools: [{ id: "@x/tool", name: "x-tool", description: "Do X" }],
       availableSkills: [{ id: "@x/skill", name: "x-skill" }],
     });
-    expect(out).toContain("### Tools");
-    expect(out).toContain("**x-tool**: Do X");
+    expect(out).not.toContain("### Tools");
+    expect(out).not.toContain("**x-tool**");
     expect(out).toContain("### Skills");
     expect(out).toContain("**x-skill**");
   });
 
-  it("appends raw toolDocs verbatim after the Tools section", () => {
+  it("never renders toolDocs in the prompt (a tool's docs live in its MCP description)", () => {
     const out = renderPlatformPrompt({
       template: "T",
       context: ctx(),
       toolDocs: [{ id: "@x/tool", content: "## How to use x-tool\n\nBe careful." }],
     });
-    expect(out).toContain("## How to use x-tool");
-    expect(out).toContain("Be careful");
+    expect(out).not.toContain("## How to use x-tool");
+    expect(out).not.toContain("Be careful");
   });
 
   it("never emits a Connected Providers section or provider_call instructions", () => {
@@ -358,10 +356,10 @@ describe("renderPlatformPrompt", () => {
       expect(out).toContain("- carry-over fact");
     });
 
-    it("forwards toolDocs verbatim — the LLM learns archive APIs from TOOL.md", () => {
-      // Confirms the TOOL.md flow that replaces the old hardcoded
-      // footer: a runtime-injected `recall_memory` doc (or any bundle
-      // TOOL.md) flows in via `toolDocs` and reaches the LLM.
+    it("does not inject recall_memory docs into the prompt (the LLM learns it from tools/list)", () => {
+      // The archive API is documented on the `recall_memory` MCP tool's
+      // own description (surfaced via tools/list), never re-rendered in
+      // the prompt.
       const recallDoc =
         "## recall_memory\n\nUse `recall_memory({ q?, limit? })` to search the archive.";
       const out = renderPlatformPrompt({
@@ -372,7 +370,7 @@ describe("renderPlatformPrompt", () => {
         ],
         toolDocs: [{ id: "recall_memory", content: recallDoc }],
       });
-      expect(out).toContain(recallDoc);
+      expect(out).not.toContain(recallDoc);
     });
   });
 
@@ -388,7 +386,7 @@ describe("renderPlatformPrompt", () => {
     expect(out).not.toContain("$SIDECAR_URL");
   });
 
-  it("surfaces run_history in the Tools section when present in availableTools", () => {
+  it("does not surface run_history in a Tools section (it's a typed MCP tool)", () => {
     const out = renderPlatformPrompt({
       template: "T",
       context: ctx(),
@@ -396,9 +394,7 @@ describe("renderPlatformPrompt", () => {
         { id: "run_history", name: "run_history", description: "Fetch prior run metadata." },
       ],
     });
-    expect(out).toContain("### Tools");
-    expect(out).toContain("run_history");
-    expect(out).toContain("Fetch prior run metadata.");
+    expect(out).not.toContain("### Tools");
     expect(out).not.toContain("$SIDECAR_URL");
   });
 

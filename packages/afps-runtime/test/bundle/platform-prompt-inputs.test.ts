@@ -146,8 +146,9 @@ describe("buildPlatformPromptInputs", () => {
     );
     expect(prompt).toContain("running on the Test platform");
     expect(prompt).toContain("**Timeout**: You have 60 seconds");
-    expect(prompt).toContain("### Tools");
-    expect(prompt).toContain("**t**: d");
+    // Tools are advertised via MCP tools/list — not rendered in the prompt.
+    expect(prompt).not.toContain("### Tools");
+    expect(prompt).not.toContain("**t**: d");
     expect(prompt).toContain("## Output Format");
     expect(prompt).toContain("Do the thing.");
   });
