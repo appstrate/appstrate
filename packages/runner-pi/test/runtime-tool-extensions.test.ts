@@ -32,7 +32,12 @@ describe("buildRuntimeToolExtensions", () => {
     const tool = registerOne(factory!);
     const result = await tool.execute("call-1", { level: "warn", message: "heads up" });
     expect(result.content[0].text).toContain("Logged [warn]");
-    expect(emitted).toEqual([{ type: "log.written", level: "warn", message: "heads up" }]);
+    // Re-emitted events are stamped with runId + timestamp (required base
+    // fields of every canonical RunEvent — the finalize reducer needs them).
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0]).toMatchObject({ type: "log.written", level: "warn", message: "heads up" });
+    expect(typeof emitted[0]!.timestamp).toBe("number");
+    expect(typeof emitted[0]!.runId).toBe("string");
   });
 
   it("surfaces output validation errors without emitting", async () => {

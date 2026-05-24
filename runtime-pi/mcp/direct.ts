@@ -179,7 +179,19 @@ function buildIntegrationToolFactories(
           // into the run's single sink (preserving one sequence source) so
           // ingestion / the reducer / finalize behave exactly as before. A
           // no-op for ordinary integration tools (no such meta key).
-          reEmitRuntimeToolEvents(result._meta, opts.emit);
+          //
+          // Stamp `runId` + `timestamp`: every canonical RunEvent requires
+          // them (the reducer copies `timestamp` into `RunResult.logs[]`,
+          // which finalize validates as a number). The tool defs are
+          // transport-neutral and omit both — same contract the integration
+          // telemetry events above satisfy by construction.
+          reEmitRuntimeToolEvents(result._meta, (e) =>
+            opts.emit({
+              ...e,
+              runId: opts.runId,
+              timestamp: typeof e.timestamp === "number" ? e.timestamp : Date.now(),
+            }),
+          );
           // Materialise MCP resources to workspace files before the adapter
           // flattens them, keeping file bytes out of the LLM context:
           //  - embedded `resource` blocks (GitHub MCP `get_file_contents`, …),

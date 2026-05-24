@@ -58,6 +58,13 @@ export function buildRuntimeToolExtensions(
   opts: BuildRuntimeToolExtensionsOptions,
 ): ExtensionFactory[] {
   const emit = opts.emit ?? defaultStdoutEmit;
+  // Every canonical RunEvent requires `runId` + `timestamp` (the reducer
+  // copies `timestamp` into `RunResult.logs[]`, validated as a number at
+  // finalize). The transport-neutral tool defs omit both, so stamp them
+  // here before handing each event to the sink. The default stdout emitter
+  // re-stamps its own copy — harmless; an explicit sink emit (no-sidecar
+  // entrypoint) relies on this stamping.
+  const runId = process.env.AGENT_RUN_ID ?? "unknown";
   const defs = buildRuntimeToolDefs({
     ...(opts.runtimeTools !== undefined ? { runtimeTools: opts.runtimeTools } : {}),
     ...(opts.outputSchema !== undefined ? { outputSchema: opts.outputSchema } : {}),
@@ -71,7 +78,13 @@ export function buildRuntimeToolExtensions(
         parameters: Type.Unsafe<Record<string, unknown>>(def.descriptor.inputSchema),
         async execute(_toolCallId, params) {
           const result = await def.handler(params ?? {});
-          reEmitRuntimeToolEvents(result._meta, emit);
+          reEmitRuntimeToolEvents(result._meta, (e) =>
+            emit({
+              ...e,
+              runId: typeof e.runId === "string" ? e.runId : runId,
+              timestamp: typeof e.timestamp === "number" ? e.timestamp : Date.now(),
+            }),
+          );
           return {
             content: result.content.map((c) => ({ type: "text" as const, text: c.text })),
             details: undefined,
