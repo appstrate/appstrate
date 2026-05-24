@@ -190,8 +190,11 @@ async function fetchBundleBytes(
  * Extract a ZIP bundle (already-bytes) to a fresh directory under
  * `os.tmpdir()`. Path traversal is defended in depth: every entry is
  * normalised + the resolved path must remain under the extraction root.
+ *
+ * Exported for unit testing the zip-slip write guard in isolation; production
+ * callers reach it via {@link bootIntegrations}.
  */
-async function extractBundle(bytes: Uint8Array, namespace: string): Promise<string> {
+export async function extractBundle(bytes: Uint8Array, namespace: string): Promise<string> {
   // Namespace is the integration package id (e.g. `@scope/name`). Both `@`
   // and `/` are illegal in a mkdtemp template under macOS/Linux — collapse
   // to a path-safe slug. The directory is private to this run anyway.
@@ -580,11 +583,11 @@ async function spawnAndConnectLocalIntegration(params: {
 }
 
 /**
- * Spawn every integration in parallel, register the surviving ones on a
- * shared {@link McpHost}, and return the materialised tool list. The
- * function never throws — per-integration failures are captured in
- * `result.failed` so a single broken integration doesn't black-hole the
- * entire run.
+ * Spawn each integration sequentially, register the surviving ones on a
+ * shared {@link McpHost}, and return the materialised tool list. Per-integration
+ * failures are captured in `result.failed` so a single broken integration
+ * doesn't black-hole the entire run. The one fatal exception is runtime
+ * adapter selection (no adapter → nothing can spawn): that rethrows.
  */
 export async function bootIntegrations(
   specs: IntegrationSpawnSpec[],

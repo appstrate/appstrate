@@ -39,6 +39,7 @@ import { notFound, conflict, invalidRequest } from "../lib/errors.ts";
 import type { AppScope } from "../lib/scope.ts";
 import type { Actor } from "@appstrate/connect";
 import type { IntegrationManifest } from "@appstrate/core/integration";
+import type { IntegrationAuthStatus } from "@appstrate/shared-types";
 import { getIntegration } from "./integration-service.ts";
 
 // ─────────────────────────────────────────────
@@ -866,8 +867,6 @@ function rowToSummary(
 // ─────────────────────────────────────────────
 // Aggregate views for the marketplace UI
 // ─────────────────────────────────────────────
-
-import type { IntegrationAuthStatus } from "@appstrate/shared-types";
 
 /**
  * Marketplace "detail" view — manifest + per-auth status for the calling

@@ -23,7 +23,7 @@ import { isBlockedUrl } from "@appstrate/core/ssrf";
 import { initiateIntegrationOAuth } from "@appstrate/connect";
 import { forbidden, invalidRequest } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
-import { oauthStateStore } from "../connection-manager/oauth-state-store.ts";
+import { oauthStateStore } from "./oauth-state-store.ts";
 import {
   extractIdentity,
   getIntegrationOAuthClient,

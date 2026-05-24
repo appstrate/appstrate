@@ -75,7 +75,7 @@ import {
   upsertOrgDefault,
   deleteOrgDefault,
 } from "../services/integration-org-defaults-service.ts";
-import { oauthStateStore } from "../services/connection-manager/oauth-state-store.ts";
+import { oauthStateStore } from "../services/connect/oauth-state-store.ts";
 
 // ─────────────────────────────────────────────
 // Zod schemas
@@ -760,6 +760,14 @@ export function createIntegrationsRouter() {
   return router;
 }
 
+/**
+ * Defence-in-depth role gate paired with `requirePermission("integrations",
+ * "install")` on the OAuth-client + org-default write routes. The permission
+ * alone is owner/admin-only for cookie/role auth, but an API key minted by an
+ * admin can carry `integrations:install` without the key itself being trusted
+ * for full admin actions — this check refuses such keys on the admin-only
+ * mutations regardless of the granted scope.
+ */
 function assertOrgAdmin(c: import("hono").Context<AppEnv>): void {
   const role = c.get("orgRole");
   if (role !== "owner" && role !== "admin") {

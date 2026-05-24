@@ -9,7 +9,7 @@
  *
  * Responsibilities (runtime-pi only):
  *   1. Initialise a git repo + extract the injected agent package.
- *   2. Install TOOL.md / skills (including synthesised provider skills) into `.pi/` for on-disk lookup.
+ *   2. Install TOOL.md / skills into `.pi/` for on-disk lookup.
  *   3. Collect tool extension factories (from agent package + built-ins).
  *   4. Build an {@link ExecutionContext} from env vars.
  *   5. Build an {@link HttpSink} against the platform's signed-event API.
@@ -439,19 +439,13 @@ if (sidecarUrl) {
     });
     extensionFactories.push(...factories);
 
-    // Wire the tool-side runtime context (4th `execute` arg). The AFPS
-    // provider package type was retired — integrations now expose their
-    // own namespaced tools (including the generic `{ns}__api_call`)
-    // directly to the LLM. `readResource` stays: it resolves any MCP
-    // `resource_link` an integration tool may return for spilled blobs.
+    // Wire the tool-side runtime context (4th `execute` arg). Integrations
+    // expose their own namespaced tools (including the generic
+    // `{ns}__api_call`) directly to the LLM, so the only capability the ctx
+    // carries is `readResource` — it resolves any MCP `resource_link` an
+    // integration tool may return for spilled blobs.
     const mcp = mcpClient;
     appstrateRuntimeCtx = {
-      apiCall: async (integrationId) => {
-        throw new Error(
-          `Tool tried to call '${integrationId}' via the retired ctx.apiCall surface. ` +
-            `Use an integration tool ({ns}__api_call) instead.`,
-        );
-      },
       readResource: async (uri) => {
         const result = await mcp.readResource({ uri });
         return result as Awaited<ReturnType<AppstrateToolCtx["readResource"]>>;
@@ -525,16 +519,11 @@ if (sidecarUrl) {
     }),
   );
 
-  // No sidecar attached — wire a stub tool ctx that rejects any
-  // credentialed call. Integrations expose their own {ns}__api_call MCP
-  // tools when a sidecar is present; without one a misconfigured bundle
+  // No sidecar attached — wire a stub tool ctx whose only capability
+  // (`readResource`) rejects. Integrations expose their own {ns}__api_call
+  // MCP tools when a sidecar is present; without one a misconfigured bundle
   // still gets a clear error rather than a null-deref.
   appstrateRuntimeCtx = {
-    apiCall: async (integrationId) => {
-      throw new Error(
-        `Tool tried to call '${integrationId}' but this run was launched without a sidecar.`,
-      );
-    },
     readResource: async (uri) => {
       throw new Error(
         `Tool tried to read MCP resource '${uri}' but this run was launched without a sidecar.`,

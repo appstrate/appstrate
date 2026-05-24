@@ -129,9 +129,9 @@ export interface MergeRunConfigInputs {
  * `config`: deep-merged. `flagConfig` overrides `inherited.config` at
  * the leaf — siblings at every level are preserved.
  *
- *     inherited:  { providers: { gmail: { scopes: ["read"] } } }
- *     flagConfig: { providers: { slack: { token: "xyz" } } }
- *     result:     { providers: { gmail: { … }, slack: { … } } }
+ *     inherited:  { integrations: { gmail: { scopes: ["read"] } } }
+ *     flagConfig: { integrations: { slack: { token: "xyz" } } }
+ *     result:     { integrations: { gmail: { … }, slack: { … } } }
  *
  * A previous shallow merge silently dropped the `gmail` key in that
  * scenario, which had no UI-side equivalent — the dashboard's

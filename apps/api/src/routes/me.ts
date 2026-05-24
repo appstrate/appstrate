@@ -32,7 +32,7 @@ import { listOrgModels } from "../services/org-models.ts";
 import { db } from "@appstrate/db/client";
 import { integrationConnections } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
-import { listMeConnections } from "../services/connection-manager/me-connections.ts";
+import { listMeConnections } from "../services/me-connections.ts";
 import { getActor } from "../lib/actor.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { requireAppContext } from "../middleware/app-context.ts";

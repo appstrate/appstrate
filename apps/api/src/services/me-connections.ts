@@ -18,11 +18,11 @@ import {
   packages,
   applications,
 } from "@appstrate/db/schema";
-import type { Actor } from "../../lib/actor.ts";
+import type { Actor } from "../lib/actor.ts";
 import type { MeConnectionEntry, MeConnectionSourceGroup } from "@appstrate/shared-types";
 import { asRecord } from "@appstrate/core/safe-json";
-import { toISORequired } from "../../lib/date-helpers.ts";
-import { getPackageDisplayName } from "../../lib/package-helpers.ts";
+import { toISORequired } from "../lib/date-helpers.ts";
+import { getPackageDisplayName } from "../lib/package-helpers.ts";
 
 /**
  * Fetch every integration_connections row owned by the actor, joined with

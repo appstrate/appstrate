@@ -4,7 +4,7 @@ import { useEffect } from "react";
 
 /**
  * Auto-select an item when the stored selection is missing or stale.
- * Used by org, profile, and application selectors to ensure a valid selection.
+ * Used by org and application selectors to ensure a valid selection.
  */
 export function useAutoSelect<T extends { id: string }>(
   items: T[] | undefined,
