@@ -2,6 +2,7 @@
 
 import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
 import { useInitiateIntegrationOAuth } from "../../hooks/use-integrations";
 import { useOAuthPopup } from "../../hooks/use-oauth-popup";
 
@@ -18,6 +19,7 @@ import { useOAuthPopup } from "../../hooks/use-oauth-popup";
  */
 export function useIntegrationOAuthPopup() {
   const { t } = useTranslation("settings");
+  const qc = useQueryClient();
   const initiateOAuth = useInitiateIntegrationOAuth();
   const openOAuthPopup = useOAuthPopup("integration-oauth");
 
@@ -39,6 +41,15 @@ export function useIntegrationOAuthPopup() {
             ...(input.connectionId ? { connectionId: input.connectionId } : {}),
           }),
         );
+        // The popup resolves only on a successful connect. Invalidate the
+        // integration + user-connection caches so every consumer (status
+        // cards, pickers, the connectors page) reflects the new connection
+        // without waiting for a window-focus refetch. `useInitiateIntegrationOAuth`
+        // only kicks off the redirect — the connection is created in the popup.
+        await Promise.all([
+          qc.invalidateQueries({ queryKey: ["integrations"] }),
+          qc.invalidateQueries({ queryKey: ["me-connections"] }),
+        ]);
       } catch (err) {
         if (err instanceof Error && err.message === "popup_blocked") {
           window.alert(t("integration.popup.blocked"));
@@ -47,7 +58,7 @@ export function useIntegrationOAuthPopup() {
         throw err;
       }
     },
-    [initiateOAuth, openOAuthPopup, t],
+    [initiateOAuth, openOAuthPopup, qc, t],
   );
 
   return { openPopup, isPending: initiateOAuth.isPending };

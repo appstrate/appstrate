@@ -295,7 +295,7 @@ describe("integrationManifestSchema — server discrimination", () => {
 });
 
 describe("integrationManifestSchema — auth discrimination", () => {
-  it("rejects oauth2 with neither explicit endpoints nor discovery", () => {
+  it("rejects oauth2 without explicit authorizationUrl + tokenUrl", () => {
     const m = baseManifest({
       auths: {
         primary: {
@@ -309,15 +309,13 @@ describe("integrationManifestSchema — auth discrimination", () => {
     expect(r.success).toBe(false);
   });
 
-  it("accepts oauth2 with discovery alone (RFC 9728)", () => {
+  it("accepts oauth2 with explicit authorizationUrl + tokenUrl", () => {
     const m = baseManifest({
       auths: {
         primary: {
           type: "oauth2",
-          discovery: {
-            protectedResourceMetadataUrl:
-              "https://api.example.com/.well-known/oauth-protected-resource",
-          },
+          authorizationUrl: "https://example.com/oauth/authorize",
+          tokenUrl: "https://example.com/oauth/token",
           authorizedUris: ["https://api.example.com/*"],
           delivery: { http: { valueFrom: "accessToken" } },
         },

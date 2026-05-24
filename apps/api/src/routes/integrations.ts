@@ -84,8 +84,6 @@ import { oauthStateStore } from "../services/connection-manager/oauth-state-stor
 // Zod schemas
 // ─────────────────────────────────────────────
 
-const installSchema = z.object({}).optional();
-
 const connectFieldsSchema = z.object({
   credentials: z.record(z.string(), z.string()).refine((c) => Object.keys(c).length > 0, {
     message: "credentials must contain at least one field",
@@ -294,8 +292,6 @@ export function createIntegrationsRouter() {
       const packageId = c.req.param("packageId")!;
       const scope = getAppScope(c);
       await assertIsIntegration(scope, packageId);
-      const body = await c.req.json().catch(() => ({}));
-      installSchema.parse(body);
       const row = await installPackage(scope, packageId);
       await recordAuditFromContext(c, {
         action: "integration.activated",

@@ -36,6 +36,7 @@ import {
   type RuntimeEventEmitter,
 } from "@appstrate/runner-pi";
 import { reEmitRuntimeToolEvents } from "@appstrate/core/runtime-tool-defs";
+import { isSelectableRuntimeTool } from "@appstrate/core/runtime-tools-catalog";
 import { buildApiUploadToolFactory, isApiUploadToolName } from "./api-upload-extension.ts";
 
 /**
@@ -173,13 +174,17 @@ function buildIntegrationToolFactories(
             isError: result.isError === true,
             timestamp: Date.now(),
           });
-          // Platform runtime tools (output/log/note/pin/report) are hosted by
-          // the sidecar as MCP tools; their side effects travel back as
-          // canonical run events under the result `_meta` key. Re-emit them
-          // into the run's single sink (preserving one sequence source) so
-          // ingestion / the reducer / finalize behave exactly as before. A
-          // no-op for ordinary integration tools (no such meta key).
-          reEmitRuntimeToolEvents(result._meta, opts.emit);
+          // Trust boundary: re-emit canonical runtime-tool events ONLY for the
+          // first-party platform runtime tools (output/log/note/pin/report),
+          // which the sidecar hosts in-process and advertises under their bare
+          // names. Every third-party integration tool is namespaced
+          // `{ns}__{tool}` (so its name can never satisfy
+          // `isSelectableRuntimeTool`); forwarding its `_meta` would let a
+          // malicious/compromised integration forge run events
+          // (output.emitted, pinned.set, …). For those, the meta is ignored.
+          if (isSelectableRuntimeTool(tool.name)) {
+            reEmitRuntimeToolEvents(result._meta, opts.emit);
+          }
           // Materialise MCP resources to workspace files before the adapter
           // flattens them, keeping file bytes out of the LLM context:
           //  - embedded `resource` blocks (GitHub MCP `get_file_contents`, …),

@@ -9,11 +9,7 @@ export {
   type InternalSink,
 } from "./pi-runner.ts";
 
-export {
-  prepareBundleForPi,
-  type PrepareBundleOptions,
-  type PreparedBundle,
-} from "./bundle-extensions.ts";
+export { prepareBundleForPi, type PrepareBundleOptions } from "./bundle-extensions.ts";
 
 export {
   buildApiCallExtensionFactory,

@@ -19,6 +19,7 @@
 
 import { getEnv } from "@appstrate/env";
 import { decodeJwtPayload } from "@appstrate/core/jwt";
+import { isBlockedUrl } from "@appstrate/core/ssrf";
 import { initiateIntegrationOAuth } from "@appstrate/connect";
 import { forbidden, invalidRequest } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
@@ -42,11 +43,11 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
   async begin(ctx: ConnectContext, opts: BeginOptions): Promise<BeginResult> {
     const { auth } = await readIntegrationAuth(ctx.scope, ctx.integrationPackageId, ctx.authKey);
     if (!auth.authorizationUrl || !auth.tokenUrl) {
-      // Mode B (discovery) is implemented in `@appstrate/connect/oauth-discovery`
-      // but the user-facing flow needs resolved endpoints up front so the popup
-      // can navigate immediately.
+      // The manifest schema requires explicit authorizationUrl + tokenUrl for
+      // every oauth2 auth, so this is a defensive invariant (also narrows the
+      // optional types for the call below).
       throw invalidRequest(
-        "OAuth Mode B (RFC 9728 discovery) connection flow not yet wired — manifest must declare explicit authorizationUrl + tokenUrl for marketplace connect.",
+        "oauth2 auth must declare explicit authorizationUrl + tokenUrl for marketplace connect.",
       );
     }
     const client = await getIntegrationOAuthClient(
@@ -115,7 +116,16 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       }
     }
     const userinfoUrl = auth.userinfoUrl;
-    if (userinfoUrl) {
+    if (userinfoUrl && isBlockedUrl(userinfoUrl)) {
+      // SSRF guard: `userinfoUrl` is manifest-declared and fetched with the
+      // user's access token. Refuse loopback / RFC1918 / link-local / metadata
+      // targets so a malicious manifest can't exfiltrate the token to internal
+      // infra. Parity with the login engine's per-request guard.
+      logger.warn("Integration userinfo URL blocked by SSRF guard", {
+        packageId: result.packageId,
+        authKey: result.authKey,
+      });
+    } else if (userinfoUrl) {
       try {
         const res = await fetch(userinfoUrl, {
           headers: {
