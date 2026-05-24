@@ -333,8 +333,8 @@ function AuthSection({
         <p className="text-muted-foreground text-sm">{t("integration.auth.noConnection")}</p>
       ) : (
         <div className="space-y-2">
-          {status.connections.map((c) => (
-            <ConnectionRow key={c.id} connection={c} packageId={packageId} />
+          {status.connections.map((c, i) => (
+            <ConnectionRow key={c.id} connection={c} packageId={packageId} index={i} />
           ))}
         </div>
       )}
@@ -441,9 +441,11 @@ function OrgDefaultSection({ packageId }: { packageId: string }) {
 
   const shared = (connections ?? []).filter((c) => c.sharedWithOrg === true);
   const connectionDisplay = (id: string): string => {
-    const c = (connections ?? []).find((x) => x.id === id);
+    const list = connections ?? [];
+    const idx = list.findIndex((x) => x.id === id);
+    const c = idx >= 0 ? list[idx] : undefined;
     if (!c) return id;
-    return connectionDisplayLabel(c);
+    return connectionDisplayLabel(c, t("integration.connection.defaultLabel", { n: idx + 1 }));
   };
 
   const [connectionId, setConnectionId] = useState("");
@@ -550,9 +552,11 @@ function PinManagementSection({ packageId }: { packageId: string }) {
   const agentDisplayName = (id: string): string =>
     consumingAgents?.find((a) => a.packageId === id)?.displayName ?? id;
   const connectionDisplay = (id: string): string => {
-    const c = (connections ?? []).find((x) => x.id === id);
+    const list = connections ?? [];
+    const idx = list.findIndex((x) => x.id === id);
+    const c = idx >= 0 ? list[idx] : undefined;
     if (!c) return id;
-    return connectionDisplayLabel(c);
+    return connectionDisplayLabel(c, t("integration.connection.defaultLabel", { n: idx + 1 }));
   };
 
   const onSubmitNewPin = () => {
@@ -716,9 +720,11 @@ function PinManagementSection({ packageId }: { packageId: string }) {
 function ConnectionRow({
   connection,
   packageId,
+  index,
 }: {
   connection: IntegrationConnection;
   packageId: string;
+  index: number;
 }) {
   const { t } = useTranslation("settings");
   const updateConnection = useUpdateIntegrationConnection();
@@ -727,7 +733,10 @@ function ConnectionRow({
   const applicationId = useCurrentApplicationId();
   const [editing, setEditing] = useState(false);
   const [draftLabel, setDraftLabel] = useState(connection.label ?? "");
-  const accountLabel = connectionAccount(connection);
+  // Extracted identity (email/login) when extractTokenIdentity produced one,
+  // else null → fall back to an enumerated "Connexion N" rather than "default".
+  const account = connectionAccount(connection);
+  const fallbackName = t("integration.connection.defaultLabel", { n: index + 1 });
   const isShared = connection.sharedWithOrg === true;
   const startEdit = () => {
     setDraftLabel(connection.label ?? "");
@@ -803,18 +812,16 @@ function ConnectionRow({
               </>
             ) : (
               <>
-                {connection.label && (
-                  <span className="truncate font-medium">{connection.label}</span>
+                {connection.label ? (
+                  <>
+                    <span className="truncate font-medium">{connection.label}</span>
+                    {account && (
+                      <span className="text-muted-foreground truncate text-xs">{account}</span>
+                    )}
+                  </>
+                ) : (
+                  <span className="truncate font-medium">{account ?? fallbackName}</span>
                 )}
-                <span
-                  className={
-                    connection.label
-                      ? "text-muted-foreground truncate text-xs"
-                      : "truncate font-medium"
-                  }
-                >
-                  {accountLabel}
-                </span>
                 <Button
                   size="icon"
                   variant="ghost"

@@ -392,8 +392,11 @@ function IntegrationOverrideRow({
               data-testid={`schedule-conn-select-${integration.id}-${authKey}`}
             >
               <option value="">{t("schedule.connectionOverrides.inherit")}</option>
-              {candidates.map((c) => {
-                const display = connectionDisplayLabel(c);
+              {candidates.map((c, i) => {
+                const display = connectionDisplayLabel(
+                  c,
+                  t("integration.connection.defaultLabel", { n: i + 1, ns: "settings" }),
+                );
                 return (
                   <option key={c.id} value={c.id}>
                     {c.sharedWithOrg ? `${display} ⋯ shared` : display}

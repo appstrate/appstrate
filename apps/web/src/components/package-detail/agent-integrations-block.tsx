@@ -331,13 +331,13 @@ function buildReuseInfo(
   agentCount: number,
   t: (k: string, opts?: Record<string, unknown>) => string,
 ): string {
-  // connectionAccount centralises `accountEmail ?? account_email ?? <floor>`.
-  // Here the floor is `label ?? accountId` so the email always wins over the
-  // user-set label, which in turn wins over the bare account id.
-  const account = connectionAccount({
-    ...connection,
-    accountId: connection.label ?? connection.accountId,
-  });
+  // connectionAccount returns the extracted identity (email/login) or null.
+  // Fall back to the user label, then to a neutral "untitled" so the reuse
+  // sentence never renders the meaningless "default" floor.
+  const account =
+    connectionAccount(connection) ??
+    connection.label ??
+    t("integration.connection.untitled", { ns: "settings" });
   if (agentCount <= 1) {
     return t("detail.integrationReuseSingle", { account });
   }

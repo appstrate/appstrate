@@ -753,6 +753,8 @@
   "integration.admin.pin.upserted": "Connexion épinglée pour cet agent.",
   "integration.admin.pin.deleted": "Épinglage supprimé.",
   "integration.connection.sharedBadge": "Partagée avec l'org",
+  "integration.connection.defaultLabel": "Connexion {{n}}",
+  "integration.connection.untitled": "Connexion sans nom",
   "integration.connection.shareWithOrg.label": "Partager avec l'organisation",
   "integration.connection.shareWithOrg.help": "Les autres membres pourront utiliser cette connexion pour leurs runs.",
   "integration.connection.updated": "Connexion mise à jour.",
