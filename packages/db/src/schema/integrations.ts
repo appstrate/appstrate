@@ -78,6 +78,11 @@ export const integrationConnections = pgTable(
     // is opaque and shared across users. Nullable so existing rows stay
     // valid; the UI falls back to `identityClaims.accountEmail` /
     // `accountId` when absent.
+    // Display name, set at creation: the extracted identity (email/login) when
+    // available, else "Connexion N" (N = existing connection count + 1 in the
+    // same (app, integration, owner) group). Stable for the row's lifetime;
+    // user-editable. The UI shows it verbatim — a single source of truth, no
+    // render-time fallback gymnastics.
     label: text("label"),
     // Owner-set opt-in: when true, this connection is selectable by
     // any actor of the same application during the run-time fallback

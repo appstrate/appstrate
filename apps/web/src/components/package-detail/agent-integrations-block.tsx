@@ -43,7 +43,7 @@ import {
 import { InlineConnectButton } from "../integration-connect/inline-connect-button";
 import { FieldsConnectModal } from "../integration-connect/fields-connect-modal";
 import { useIntegrationOAuthPopup } from "../integration-connect/use-integration-oauth-popup";
-import { connectionAccount } from "../integration-connect/connection-label";
+import { connectionDisplayLabel } from "../integration-connect/connection-label";
 import { pickDefaultAuth } from "../integration-connect/pick-default-auth";
 
 interface AgentIntegrationsBlockProps {
@@ -331,13 +331,9 @@ function buildReuseInfo(
   agentCount: number,
   t: (k: string, opts?: Record<string, unknown>) => string,
 ): string {
-  // connectionAccount returns the extracted identity (email/login) or null.
-  // Fall back to the user label, then to a neutral "untitled" so the reuse
-  // sentence never renders the meaningless "default" floor.
-  const account =
-    connectionAccount(connection) ??
-    connection.label ??
-    t("integration.connection.untitled", { ns: "settings" });
+  // `label` is the connection's display name (identity or "Connexion N"),
+  // always set at creation.
+  const account = connectionDisplayLabel(connection);
   if (agentCount <= 1) {
     return t("detail.integrationReuseSingle", { account });
   }

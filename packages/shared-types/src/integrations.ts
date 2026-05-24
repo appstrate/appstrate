@@ -48,7 +48,11 @@ export interface IntegrationConnection {
   expiresAt: string | null;
   ownerType: "user" | "end_user";
   ownerId: string;
-  /** User-set display name ("Perso", "Boulot"). */
+  /**
+   * Display name, set at creation: the extracted identity (email/login) when
+   * available, else "Connexion N". Stable for the connection's lifetime and
+   * user-editable. The UI renders it verbatim.
+   */
   label?: string | null;
   /** Opt-in: makes this connection selectable by other members of the same app. */
   sharedWithOrg?: boolean;

@@ -753,8 +753,6 @@
   "integration.admin.pin.upserted": "Connection pinned for this agent.",
   "integration.admin.pin.deleted": "Pin removed.",
   "integration.connection.sharedBadge": "Shared with org",
-  "integration.connection.defaultLabel": "Connection {{n}}",
-  "integration.connection.untitled": "Untitled connection",
   "integration.connection.shareWithOrg.label": "Share with organization",
   "integration.connection.shareWithOrg.help": "Other members will be able to use this connection for their runs.",
   "integration.connection.updated": "Connection updated.",

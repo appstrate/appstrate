@@ -20,7 +20,7 @@
  * module is the write side that populates it.
  */
 
-import { and, eq, or, sql } from "drizzle-orm";
+import { and, eq, or, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   applicationPackages,
@@ -628,6 +628,22 @@ export async function persistCredentialBundle(
     // mix of declared auths (OAuth + PAT + custom). The runtime picks exactly
     // one per run via the resolver cascade; the member picker disambiguates
     // when >1 candidate is accessible.
+    //
+    // Display name, resolved once at creation and stable thereafter (refresh /
+    // update paths never touch `label`). The extracted identity (email/login)
+    // when extractTokenIdentity produced one, else "Connexion N" — N is the
+    // actor's existing connection count for this (app, integration) + 1,
+    // computed as a subquery in the INSERT so it's one statement. This is the
+    // single source of truth for the UI: no render-time fallback, the label is
+    // always set. User-editable afterwards.
+    const identityLabel =
+      (input.identityClaims?.accountEmail as string | undefined) ??
+      (input.identityClaims?.account_email as string | undefined) ??
+      (input.accountId && input.accountId !== "default" ? input.accountId : undefined);
+    const ownerFilter = userId ? sql`user_id = ${userId}` : sql`end_user_id = ${endUserId}`;
+    const labelValue: string | SQL =
+      identityLabel ??
+      sql<string>`'Connexion ' || ((SELECT COUNT(*) FROM integration_connections WHERE application_id = ${target.scope.applicationId} AND integration_package_id = ${input.packageId} AND ${ownerFilter}) + 1)`;
     const inserted = await db
       .insert(integrationConnections)
       .values({
@@ -642,6 +658,7 @@ export async function persistCredentialBundle(
         scopesGranted: input.scopesGranted ?? [],
         needsReconnection: input.needsReconnection ?? false,
         expiresAt: input.expiresAt ?? null,
+        label: labelValue,
         createdAt: now,
         updatedAt: now,
       })
