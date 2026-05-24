@@ -62,13 +62,24 @@ function formatErrors(validator: ValidateFunction): string {
 export const outputTool: ExtensionFactory = (pi: ExtensionAPI) => {
   const { schema, validator } = loadSchema();
 
+  // This tool is opt-in (the agent selects it via `runtimeTools`). When it
+  // IS present, whether the agent MUST call it depends on whether this run
+  // declares an output schema. With a schema, the run promises a typed
+  // result — calling `output` (once, valid) is required. Without a schema,
+  // the agent may simply perform its task and finish without emitting output
+  // (a side-effect-only run is a valid success).
+  const description = schema
+    ? "Call exactly once before finishing with the complete output object that satisfies " +
+      "the declared schema (all required fields must be provided). Calling again replaces " +
+      "the previous output."
+    : "Optional — call at most once to return a JSON object as the run result. " +
+      "If your task produces no result to return, finish without calling it. " +
+      "Calling again replaces the previous output.";
+
   pi.registerTool({
     name: "output",
     label: "Output",
-    description:
-      "MANDATORY — call exactly once before finishing with the complete output object. " +
-      "Calling again replaces the previous output. " +
-      "If a schema is defined, all required fields must be provided.",
+    description,
     parameters: Type.Object({
       data: buildDataSchema(schema),
     }),

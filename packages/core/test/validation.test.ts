@@ -145,6 +145,34 @@ describe("validateManifest", () => {
     expect(m.runtimeTools).toEqual(["log", "note"]);
   });
 
+  it("agent with no output schema is valid without the `output` runtime tool", () => {
+    // Side-effect-only run: do a task and finish, no result to return.
+    const result = validateManifest(validAgentManifest({ runtimeTools: ["log"] }));
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects an output schema when the `output` runtime tool is not selected", () => {
+    const result = validateManifest(
+      validAgentManifest({
+        output: { schema: { type: "object", properties: { x: { type: "string" } } } },
+        runtimeTools: ["log"],
+      }),
+    );
+    expect(result.valid).toBe(false);
+    // Error is surfaced on the runtimeTools field so the editor can render it.
+    expect(result.errors.some((e) => e.startsWith("runtimeTools:"))).toBe(true);
+  });
+
+  it("accepts an output schema when the `output` runtime tool is selected", () => {
+    const result = validateManifest(
+      validAgentManifest({
+        output: { schema: { type: "object", properties: { x: { type: "string" } } } },
+        runtimeTools: ["output", "log"],
+      }),
+    );
+    expect(result.valid).toBe(true);
+  });
+
   it("agent with integrations declared as bare version string (legacy)", () => {
     const result = validateManifest(
       validAgentManifest({

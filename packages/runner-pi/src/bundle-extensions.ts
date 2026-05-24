@@ -8,8 +8,9 @@
  *
  * Tools are no longer AFPS packages: the former `@appstrate/{output,log,
  * note,pin,report}` tool packages are baked into the runtime image
- * (`./runtime-tools/builtin/`). `output` is always injected; the rest are
- * opt-in via the agent manifest's `runtimeTools[]` field.
+ * (`./runtime-tools/builtin/`). All of them — `output` included — are
+ * opt-in via the agent manifest's `runtimeTools[]` field; none is injected
+ * unless the agent selects it.
  *
  * Used by:
  *   1. `runtime-pi/entrypoint.ts` — the in-container agent bootloader.
@@ -72,8 +73,8 @@ export async function prepareBundleForPi(
 
   // ─── Step 2: register selected built-in runtime tools ────────────
   // Tools (output/log/note/pin/report) are no longer AFPS packages —
-  // they are baked into the runtime image. `output` is always injected;
-  // the rest are opt-in via the agent manifest's `runtimeTools[]`.
+  // they are baked into the runtime image and all opt-in via the agent
+  // manifest's `runtimeTools[]`. None is injected unless selected.
   const rootPkg = bundle.packages.get(bundle.root);
   const rootManifest = (rootPkg?.manifest ?? {}) as { runtimeTools?: string[] };
 

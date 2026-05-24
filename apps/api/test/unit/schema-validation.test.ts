@@ -25,6 +25,9 @@ const VALID_MANIFEST = {
     skills: { "@appstrate/greeting-style": "*" },
     tools: { "@appstrate/web-search": "*" },
   },
+  // Declares an output schema below, so the `output` runtime tool must be
+  // enabled (enforced by agentManifestSchema's superRefine).
+  runtimeTools: ["output"],
   config: {
     schema: {
       type: "object",

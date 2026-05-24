@@ -9,15 +9,13 @@
  * `selectBuiltinRuntimeToolFactories(runtimeTools)` resolves an agent
  * manifest's `runtimeTools: string[]` selection into the concrete factory
  * set the runner registers with the Pi SDK:
- *   - `output` is MANDATORY — always included regardless of selection.
- *   - log/note/pin/report are opt-in via the selection.
+ *   - every tool is opt-in (output included) — nothing is auto-injected.
  *   - unknown ids are ignored (install-time validation rejects them upstream).
  */
 
 import { describe, it, expect } from "bun:test";
 import {
   BUILTIN_RUNTIME_TOOL_FACTORIES,
-  MANDATORY_RUNTIME_TOOLS,
   SELECTABLE_RUNTIME_TOOLS,
   selectBuiltinRuntimeToolFactories,
 } from "../src/runtime-tools/builtin/index.ts";
@@ -27,39 +25,37 @@ function selectedIds(runtimeTools: readonly string[] | undefined): string[] {
 }
 
 describe("selectBuiltinRuntimeToolFactories", () => {
-  it("yields only `output` when the selection is undefined", () => {
-    expect(selectedIds(undefined)).toEqual(["output"]);
+  it("yields nothing when the selection is undefined", () => {
+    expect(selectedIds(undefined)).toEqual([]);
   });
 
-  it("yields only `output` when the selection is empty", () => {
-    expect(selectedIds([])).toEqual(["output"]);
+  it("yields nothing when the selection is empty", () => {
+    expect(selectedIds([])).toEqual([]);
   });
 
-  it("always includes the mandatory `output` alongside the selection", () => {
-    const ids = selectedIds(["log", "note"]);
-    expect(ids).toContain("output");
-    expect(ids).toContain("log");
-    expect(ids).toContain("note");
+  it("includes `output` only when it is selected", () => {
+    expect(selectedIds(["output"])).toEqual(["output"]);
+    expect(selectedIds(["log", "note"])).not.toContain("output");
+  });
+
+  it("resolves exactly the selected tools", () => {
+    const ids = selectedIds(["output", "log", "note"]);
     expect(ids.sort()).toEqual(["log", "note", "output"]);
   });
 
-  it("never duplicates `output` even if the selection lists it", () => {
-    const ids = selectedIds(["output", "log"]);
+  it("never duplicates a tool even if the selection repeats it", () => {
+    const ids = selectedIds(["output", "output", "log"]);
     expect(ids.filter((id) => id === "output")).toHaveLength(1);
     expect(ids.sort()).toEqual(["log", "output"]);
   });
 
   it("ignores unknown ids (validation rejects them upstream)", () => {
-    expect(selectedIds(["log", "totally-unknown", "report"]).sort()).toEqual([
-      "log",
-      "output",
-      "report",
-    ]);
+    expect(selectedIds(["log", "totally-unknown", "report"]).sort()).toEqual(["log", "report"]);
   });
 
-  it("can resolve the full selectable set + mandatory", () => {
+  it("can resolve the full selectable set", () => {
     const ids = selectedIds([...SELECTABLE_RUNTIME_TOOLS]).sort();
-    expect(ids).toEqual([...MANDATORY_RUNTIME_TOOLS, ...SELECTABLE_RUNTIME_TOOLS].sort());
+    expect(ids).toEqual([...SELECTABLE_RUNTIME_TOOLS].sort());
   });
 
   it("returns a concrete factory function for every resolved entry", () => {
@@ -70,11 +66,8 @@ describe("selectBuiltinRuntimeToolFactories", () => {
 });
 
 describe("BUILTIN_RUNTIME_TOOL_FACTORIES", () => {
-  it("keys === [output, ...SELECTABLE_RUNTIME_TOOLS]", () => {
-    expect(Object.keys(BUILTIN_RUNTIME_TOOL_FACTORIES)).toEqual([
-      ...MANDATORY_RUNTIME_TOOLS,
-      ...SELECTABLE_RUNTIME_TOOLS,
-    ]);
+  it("keys === SELECTABLE_RUNTIME_TOOLS", () => {
+    expect(Object.keys(BUILTIN_RUNTIME_TOOL_FACTORIES)).toEqual([...SELECTABLE_RUNTIME_TOOLS]);
   });
 
   it("every value is a factory function", () => {
@@ -88,7 +81,6 @@ describe("BUILTIN_RUNTIME_TOOL_FACTORIES", () => {
     // `@appstrate/core/runtime-tools-catalog` so the published runner
     // package stays dependency-light. The core-side mirror test asserts
     // the same literal — keep both in sync.
-    expect([...SELECTABLE_RUNTIME_TOOLS]).toEqual(["log", "note", "pin", "report"]);
-    expect([...MANDATORY_RUNTIME_TOOLS]).toEqual(["output"]);
+    expect([...SELECTABLE_RUNTIME_TOOLS]).toEqual(["output", "log", "note", "pin", "report"]);
   });
 });

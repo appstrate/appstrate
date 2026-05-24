@@ -7,6 +7,7 @@
   "displayName": "Dice Game",
   "description": "Tiny end-to-end exercise of the Python MCP runner: rolls 3d20 and reports the total.",
   "timeout": 120,
+  "runtimeTools": ["output"],
   "dependencies": {
     "integrations": {
       "@appstrate/dice": "^1.0.0"

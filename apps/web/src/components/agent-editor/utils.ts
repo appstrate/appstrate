@@ -75,9 +75,9 @@ export const DEFAULT_SKILL_CONTENT = "---\nname: \ndescription: \n---\n\n";
 
 /**
  * Read the agent manifest's top-level `runtimeTools: string[]` — the
- * selectable built-in runtime tools the agent author opted into. The
- * mandatory `output` tool is never stored here. Tolerates a missing or
- * malformed field by returning an empty array.
+ * built-in runtime tools the agent author opted into (all opt-in,
+ * `output` included). Tolerates a missing or malformed field by
+ * returning an empty array.
  */
 export function getRuntimeTools(m: Record<string, unknown>): string[] {
   const raw = m.runtimeTools;

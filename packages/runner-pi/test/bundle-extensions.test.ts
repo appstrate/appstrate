@@ -68,11 +68,27 @@ describe("prepareBundleForPi — skills/ install", () => {
     ).toBe("nested");
   });
 
-  it("injects only the mandatory `output` built-in when bundle has no skills/providers/runtimeTools", async () => {
-    // No skill/provider deps means no `.pi/` materialisation, but the
-    // mandatory `output` built-in runtime tool is always injected (the
-    // former `@appstrate/output` tool package, now baked into the runner).
+  it("injects no built-in runtime tools when the bundle has no skills/providers/runtimeTools", async () => {
+    // Every runtime tool is opt-in (output included). With no `runtimeTools`
+    // selection there is nothing to inject — a side-effect-only agent that
+    // just does a task and finishes is valid.
     const root = makeBundlePackage("@acme/agent", "1.0.0", "agent", {});
+    const bundle = makeTestBundle(root);
+    const { extensionFactories, cleanup } = await prepareBundleForPi(bundle, {
+      workspaceDir: workspace,
+    });
+    expect(extensionFactories).toHaveLength(0);
+    await cleanup();
+  });
+
+  it("injects `output` when the agent manifest selects it", async () => {
+    const root = makeBundlePackage(
+      "@acme/agent",
+      "1.0.0",
+      "agent",
+      {},
+      { runtimeTools: ["output"] },
+    );
     const bundle = makeTestBundle(root);
     const { extensionFactories, cleanup } = await prepareBundleForPi(bundle, {
       workspaceDir: workspace,

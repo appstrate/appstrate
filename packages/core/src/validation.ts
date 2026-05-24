@@ -67,7 +67,7 @@ export type Manifest = z.infer<typeof manifestSchema>;
  * Zod schema for agent manifests — extends AFPS with relaxed optional metadata for local drafts
  * AND the Phase 1.0 `dependencies.integrations` map (proposal §4.2.3).
  */
-export const agentManifestSchema = afpsAgentManifestSchema.extend({
+const agentManifestObjectSchema = afpsAgentManifestSchema.extend({
   // All standard fields (name, version, schemaVersion, dependencies,
   // displayName, input/output/config, timeout) inherited from AFPS.
   // Override metadata fields with .catch(undefined) for tolerant local editing.
@@ -87,11 +87,12 @@ export const agentManifestSchema = afpsAgentManifestSchema.extend({
       integrations: z.record(z.string().regex(scopedNameRegex), z.string()).optional(),
     })
     .optional(),
-  // First-party runtime tools enabled for this agent. `output` is always
-  // injected (MANDATORY) and is NOT listed here; only the opt-in tools
-  // (log/note/pin/report) are selectable. Replaces the former
-  // `dependencies.tools` package references (the `tool` package type was
-  // removed — these tools are baked into the runtime image).
+  // First-party runtime tools enabled for this agent — all opt-in, none
+  // auto-injected (`output` included). `output` is required to be present
+  // only when an output schema is declared (enforced by the superRefine
+  // below). Replaces the former `dependencies.tools` package references
+  // (the `tool` package type was removed — these tools are baked into the
+  // runtime image).
   runtimeTools: z.array(z.enum(SELECTABLE_RUNTIME_TOOLS)).optional(),
   // Niveau 2 — per-integration runtime policy. Keys mirror
   // `dependencies.integrations[id]`. `tools[]` is the allowlist exposed
@@ -115,6 +116,35 @@ export const agentManifestSchema = afpsAgentManifestSchema.extend({
       }),
     )
     .optional(),
+});
+
+/**
+ * `output` is opt-in like every runtime tool (none is auto-injected). But an
+ * agent that declares an `output.schema` promises a typed result, so it MUST
+ * enable the `output` tool — otherwise it has no way to emit that result and
+ * the run would fail post-hoc output validation. Caught at save/install time
+ * here so the editor surfaces it on the `runtimeTools` field. Agents with no
+ * output schema may finish without ever calling output (side-effect-only run).
+ */
+export const agentManifestSchema = agentManifestObjectSchema.superRefine((m, ctx) => {
+  const outputSchema = (m as { output?: { schema?: unknown } }).output?.schema;
+  const hasOutputSchema =
+    outputSchema != null &&
+    typeof outputSchema === "object" &&
+    Object.keys(outputSchema as object).length > 0;
+  if (!hasOutputSchema) return;
+
+  const runtimeTools = (m as { runtimeTools?: unknown }).runtimeTools;
+  const selectsOutput = Array.isArray(runtimeTools) && runtimeTools.includes("output");
+  if (!selectsOutput) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["runtimeTools"],
+      message:
+        "The 'output' runtime tool must be enabled when an output schema is defined — " +
+        "an agent that declares an output schema must be able to return its result.",
+    });
+  }
 });
 
 /** Inferred type from the agent manifest schema. */
