@@ -22,6 +22,37 @@ describe("renderPlatformPrompt", () => {
     expect(out).toContain("Ephemeral container");
   });
 
+  it("emits a Communication section forbidding free-text replies to the user", () => {
+    const out = renderPlatformPrompt({ template: "TEMPLATE", context: ctx() });
+    expect(out).toContain("### Communication");
+    expect(out).toContain("never delivered to the user");
+    expect(out).toContain("The only way to communicate with the user is by calling a tool.");
+  });
+
+  it("renders the Communication section before the Tools section", () => {
+    const out = renderPlatformPrompt({
+      template: "T",
+      context: ctx(),
+      availableTools: [{ id: "@x/tool", name: "x-tool" }],
+    });
+    const commIdx = out.indexOf("### Communication");
+    const toolsIdx = out.indexOf("### Tools");
+    expect(commIdx).toBeGreaterThan(-1);
+    expect(toolsIdx).toBeGreaterThan(commIdx);
+  });
+
+  it("keeps the Communication section tool-agnostic (no opt-in tool names)", () => {
+    // Per the #368 contract, platform-owned section prose must not hardcode
+    // a specific tool's usage — that belongs in each tool's TOOL.md.
+    const out = renderPlatformPrompt({ template: "T", context: ctx() });
+    const start = out.indexOf("### Communication");
+    const end = out.indexOf("### Tools", start);
+    const slice = out.slice(start, end > -1 ? end : out.indexOf("\n---\n", start));
+    expect(slice).not.toContain("output(");
+    expect(slice).not.toContain("log(");
+    expect(slice).not.toContain("note(");
+  });
+
   it("uses the overridden platformName", () => {
     const out = renderPlatformPrompt({
       template: "T",

@@ -160,6 +160,30 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
       "You may use the filesystem for temporary processing during this run only.\n",
   );
 
+  // --- Communication contract ---
+  // The platform parses ONLY the typed events your tools emit. Plain
+  // assistant text (prose, reasoning, chat-style replies) is never wired
+  // to the user — it lives and dies inside this container. Weaker models
+  // default to "here are your results: …" free text, which silently
+  // reaches no one. State the invariant explicitly so every result,
+  // status update, question, or error is routed through a tool call.
+  // Kept tool-agnostic (no opt-in tool names) per the #368 section
+  // contract — which tool to use is taught by each tool's TOOL.md.
+  sections.push("### Communication");
+  sections.push(
+    "Anything you write as plain text — outside a tool call — is **never delivered to the user**. " +
+      "It stays inside this ephemeral container and is discarded when the run ends. " +
+      "The user does not see your prose, your reasoning, or any chat-style reply.\n",
+  );
+  sections.push(
+    "**The only way to communicate with the user is by calling a tool.** " +
+      "Every result, status update, intermediate finding, question, or error you want the user " +
+      "to receive MUST go through a tool that conveys it. If you would normally end a turn by " +
+      'writing a summary or "here are your results", call the appropriate tool instead. ' +
+      "If no available tool can carry a given piece of information, that information cannot reach " +
+      "the user — do not assume a final text message will be read.\n",
+  );
+
   if (opts.availableTools && opts.availableTools.length > 0) {
     sections.push("### Tools");
     sections.push(
