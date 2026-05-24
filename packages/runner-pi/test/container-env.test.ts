@@ -81,18 +81,6 @@ describe("buildRuntimePiEnv", () => {
     expect(env2.MODEL_REASONING).toBe("false");
   });
 
-  it("joins connectedProviders, skipping the key when the list is empty", () => {
-    const empty = buildRuntimePiEnv({ model, agentPrompt: "p", connectedProviders: [] });
-    expect(empty.CONNECTED_PROVIDERS).toBeUndefined();
-
-    const filled = buildRuntimePiEnv({
-      model,
-      agentPrompt: "p",
-      connectedProviders: ["@appstrate/gmail", "@appstrate/clickup"],
-    });
-    expect(filled.CONNECTED_PROVIDERS).toBe("@appstrate/gmail,@appstrate/clickup");
-  });
-
   it("serialises OUTPUT_SCHEMA when provided", () => {
     const schema = { type: "object", properties: { summary: { type: "string" } } };
     const env = buildRuntimePiEnv({ model, agentPrompt: "p", outputSchema: schema });

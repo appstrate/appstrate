@@ -269,7 +269,7 @@ async function loadAccessibleConnectionById(
  * precedence); call sites needing deterministic disambiguation go through
  * `resolveConnectionsForRun`.
  */
-export async function pickAnyAccessibleConnection(
+async function pickAnyAccessibleConnection(
   packageId: string,
   declaredAuthKeys: string[],
   context: { applicationId: string; actor: Actor },

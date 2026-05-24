@@ -188,21 +188,61 @@ export async function upsertIntegrationPin(
   integrationPackageId: string,
   input: SetPinInput,
 ): Promise<PinSummary> {
-  const conn = await validatePinTarget(scope, integrationPackageId, input.connectionId, {
-    requireShared: true,
+  return upsertPin({
+    scope,
+    agentPackageId: input.agentPackageId,
+    integrationPackageId,
+    connectionId: input.connectionId,
+    userIdValue: null,
+    validateOpts: { requireShared: true },
+    createdBy: input.createdBy,
+    updateCreatedBy: true,
   });
-  await assertAgentInstalled(scope, input.agentPackageId);
+}
+
+/**
+ * Shared upsert for admin (`userId IS NULL`) and member (`userId = actor`)
+ * pins. Both scopes select-then-update/insert on the same flat key
+ * `(application, agent, integration, scope)`, differing only by the userId
+ * predicate, the connection validation opts, and `createdBy`.
+ */
+async function upsertPin(args: {
+  scope: AppScope;
+  agentPackageId: string;
+  integrationPackageId: string;
+  connectionId: string;
+  userIdValue: string | null;
+  validateOpts: { requireShared?: boolean; allowOwnedBy?: string };
+  createdBy: string | null;
+  /**
+   * Whether to write `createdBy` on the UPDATE branch. Admin pins re-stamp
+   * the admin who last set the pin; member pins leave it untouched on
+   * update (the row's `createdBy` is the member, set once at insert).
+   */
+  updateCreatedBy: boolean;
+}): Promise<PinSummary> {
+  const { scope, agentPackageId, integrationPackageId, connectionId, userIdValue, createdBy } =
+    args;
+  const conn = await validatePinTarget(
+    scope,
+    integrationPackageId,
+    connectionId,
+    args.validateOpts,
+  );
+  await assertAgentInstalled(scope, agentPackageId);
 
   const now = new Date();
+  const userPredicate =
+    userIdValue === null ? isNull(integrationPins.userId) : eq(integrationPins.userId, userIdValue);
   const [existing] = await db
     .select({ id: integrationPins.id })
     .from(integrationPins)
     .where(
       and(
         eq(integrationPins.applicationId, scope.applicationId),
-        eq(integrationPins.packageId, input.agentPackageId),
+        eq(integrationPins.packageId, agentPackageId),
         eq(integrationPins.integrationPackageId, integrationPackageId),
-        isNull(integrationPins.userId),
+        userPredicate,
       ),
     )
     .limit(1);
@@ -210,26 +250,30 @@ export async function upsertIntegrationPin(
   if (existing) {
     await db
       .update(integrationPins)
-      .set({ connectionId: input.connectionId, createdBy: input.createdBy, updatedAt: now })
+      .set({
+        connectionId,
+        updatedAt: now,
+        ...(args.updateCreatedBy ? { createdBy } : {}),
+      })
       .where(eq(integrationPins.id, existing.id));
   } else {
     await db.insert(integrationPins).values({
       applicationId: scope.applicationId,
-      packageId: input.agentPackageId,
+      packageId: agentPackageId,
       integrationPackageId,
-      userId: null,
-      connectionId: input.connectionId,
-      createdBy: input.createdBy,
+      userId: userIdValue,
+      connectionId,
+      createdBy,
       createdAt: now,
       updatedAt: now,
     });
   }
 
   return {
-    packageId: input.agentPackageId,
+    packageId: agentPackageId,
     integrationPackageId,
     authKey: conn.authKey,
-    connectionId: input.connectionId,
+    connectionId,
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
   };
@@ -325,51 +369,16 @@ export async function upsertMemberPin(
   scope: AppScope,
   input: UpsertMemberPinInput,
 ): Promise<PinSummary> {
-  const conn = await validatePinTarget(scope, input.integrationPackageId, input.connectionId, {
-    allowOwnedBy: input.userId,
-  });
-  await assertAgentInstalled(scope, input.agentPackageId);
-
-  const now = new Date();
-  const [existing] = await db
-    .select({ id: integrationPins.id })
-    .from(integrationPins)
-    .where(
-      and(
-        eq(integrationPins.applicationId, scope.applicationId),
-        eq(integrationPins.packageId, input.agentPackageId),
-        eq(integrationPins.integrationPackageId, input.integrationPackageId),
-        eq(integrationPins.userId, input.userId),
-      ),
-    )
-    .limit(1);
-
-  if (existing) {
-    await db
-      .update(integrationPins)
-      .set({ connectionId: input.connectionId, updatedAt: now })
-      .where(eq(integrationPins.id, existing.id));
-  } else {
-    await db.insert(integrationPins).values({
-      applicationId: scope.applicationId,
-      packageId: input.agentPackageId,
-      integrationPackageId: input.integrationPackageId,
-      userId: input.userId,
-      connectionId: input.connectionId,
-      createdBy: input.userId,
-      createdAt: now,
-      updatedAt: now,
-    });
-  }
-
-  return {
-    packageId: input.agentPackageId,
+  return upsertPin({
+    scope,
+    agentPackageId: input.agentPackageId,
     integrationPackageId: input.integrationPackageId,
-    authKey: conn.authKey,
     connectionId: input.connectionId,
-    createdAt: now.toISOString(),
-    updatedAt: now.toISOString(),
-  };
+    userIdValue: input.userId,
+    validateOpts: { allowOwnedBy: input.userId },
+    createdBy: input.userId,
+    updateCreatedBy: false,
+  });
 }
 
 export async function deleteMemberPin(

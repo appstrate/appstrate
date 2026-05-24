@@ -159,7 +159,7 @@ export function derivePiCompactionSettings(
  * Convert a Pi `MODEL_API` string into the provider key the Pi SDK's
  * {@link AuthStorage} uses to look up API keys.
  */
-function deriveProviderFromApi(api: string): string {
+export function deriveProviderFromApi(api: string): string {
   const known: Record<string, string> = {
     "anthropic-messages": "anthropic",
     "openai-completions": "openai",

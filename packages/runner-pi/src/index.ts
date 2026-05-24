@@ -3,6 +3,7 @@
 export {
   PiRunner,
   installSessionBridge,
+  deriveProviderFromApi,
   type PiRunnerOptions,
   type PiModelConfig,
   type BridgeableSession,

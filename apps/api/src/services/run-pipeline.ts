@@ -176,12 +176,11 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     uploadedFiles,
     apiKeyId,
   } = params;
-  // --- Step 0: Shared preflight gates (rate, concurrency, timeout cap,
+  // --- Step 1: Shared preflight gates (rate, concurrency, timeout cap,
   //     beforeRun hook). Shared with the remote origin in run-creation.ts so
   //     drift across the two paths is impossible — one change surface.
   const gates = await runPreflightGates({
     orgId,
-    applicationId: params.applicationId,
     agent: params.agent,
   });
   if (!gates.ok) {
@@ -194,7 +193,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   }
   const { agent } = gates;
 
-  // --- Step 0.5: Connection resolution snapshot (#199) ---
+  // --- Step 2: Connection resolution snapshot (#199) ---
   //
   // Apply the 4-mechanism cascade once at kickoff so:
   //  - the spawn loader (env-builder) pins the same row admin/run intended,
@@ -228,7 +227,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     resolvedConnections = snapshot.resolved;
   }
 
-  // --- Step 1: Build run context ---
+  // --- Step 3: Build run context ---
   let context;
   let plan;
   let agentPackage: Buffer | null;
@@ -274,7 +273,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     throw err;
   }
 
-  // --- Step 5: Mint sink credentials ---
+  // --- Step 4: Mint sink credentials ---
   // Every run — platform and remote — uses the same signed-event
   // protocol. The container reads `APPSTRATE_SINK_URL` +
   // `APPSTRATE_SINK_SECRET` from its env and POSTs CloudEvents back;
@@ -293,7 +292,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     ttlSeconds: env.REMOTE_RUN_SINK_DEFAULT_TTL_SECONDS,
   });
 
-  // --- Step 6: Create run record (with sink state) ---
+  // --- Step 5: Create run record (with sink state) ---
   const agentDenorm = extractRunAgentDenorm(agent);
   await createRun(
     { orgId, applicationId },
@@ -324,7 +323,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     },
   );
 
-  // --- Step 7: Fire-and-forget execution ---
+  // --- Step 6: Fire-and-forget execution ---
   executeAgentInBackground({
     runId,
     orgId,

@@ -61,7 +61,7 @@ export interface UseEditorStateReturn<S extends EditorStateBase> {
 }
 
 /**
- * Shared form-state machinery for package editors (agent/skill/tool/provider).
+ * Shared form-state machinery for package editors (agent/skill).
  *
  * Owns: state snapshot, dirty detection, unsaved-changes blocker, error,
  * jsonEditorKey, draft save, and create/update submission. Editor-specific

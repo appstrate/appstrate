@@ -53,8 +53,6 @@ export interface RuntimePiEnvOptions {
    * providers and use a static API key.
    */
   noSidecar?: boolean;
-  /** IDs of the providers the agent may call. Serialised as a comma-separated list. */
-  connectedProviders?: ReadonlyArray<string>;
   /** Optional JSON Schema injected for constrained decoding. */
   outputSchema?: unknown;
   /** Forward-proxy URL reachable from the agent container. When set, HTTP(S)_PROXY + NO_PROXY are emitted. */
@@ -117,10 +115,6 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
 
   if (opts.runId) env.AGENT_RUN_ID = opts.runId;
   if (opts.agentInput !== undefined) env.AGENT_INPUT = JSON.stringify(opts.agentInput);
-
-  if (opts.connectedProviders && opts.connectedProviders.length > 0) {
-    env.CONNECTED_PROVIDERS = opts.connectedProviders.join(",");
-  }
 
   // MODEL_BASE_URL is only emitted when going through a proxy — Pi SDK
   // falls back to upstream defaults when unset, so emitting an empty

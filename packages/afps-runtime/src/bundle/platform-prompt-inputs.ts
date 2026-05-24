@@ -90,31 +90,23 @@ function asPromptSchema(
 }
 
 /**
- * Build `PlatformPromptTool` from a bundle package's manifest.
+ * Build `PlatformPromptTool` from a skill package's manifest.
  *
- * Name precedence: `manifest.tool.name` (the LLM-facing tool name per
- * AFPS 1.5+ tool packages) wins over `manifest.name` (the package
- * display name). Falls back to the parsed package id when neither is
- * present. Gating in `renderPlatformPrompt` matches `t.name` against
- * reserved AFPS tool names (`pin`, `note`, `recall_memory`), so this
- * field MUST carry the LLM-facing identifier when known — otherwise
- * the prompt instructs the agent to call tools that aren't registered.
+ * Skills are workspace files, not LLM-facing tools, so the package
+ * display `manifest.name`/`description` are the only inputs — there is
+ * no `tool` block to consult (the former tool-package path is gone).
+ * Falls back to the parsed package id when `name` is absent.
  */
-function toolFromPackage(pkg: BundlePackage): PlatformPromptTool {
+function skillFromPackage(pkg: BundlePackage): PlatformPromptTool {
   const manifest = pkg.manifest as Record<string, unknown>;
   const parsed = parsePackageIdentity(pkg.identity);
   const id = parsed ? parsed.packageId : pkg.identity;
   const out: PlatformPromptTool = { id };
-  const toolBlock = isPlainObject(manifest["tool"]) ? manifest["tool"] : undefined;
-  const llmName =
-    toolBlock && typeof toolBlock["name"] === "string" ? toolBlock["name"] : undefined;
-  if (typeof llmName === "string") {
-    out.name = llmName;
-  } else if (typeof manifest["name"] === "string") {
-    out.name = manifest["name"] as string;
+  if (typeof manifest["name"] === "string") {
+    out.name = manifest["name"];
   }
   if (typeof manifest["description"] === "string") {
-    out.description = manifest["description"] as string;
+    out.description = manifest["description"];
   }
   return out;
 }
@@ -132,7 +124,7 @@ function walkDependencies(bundle: Bundle): { skills: PlatformPromptTool[] } {
   for (const [identity, pkg] of bundle.packages) {
     if (identity === bundle.root) continue;
     const type = (pkg.manifest as Record<string, unknown>)["type"];
-    if (type === "skill") skills.push(toolFromPackage(pkg));
+    if (type === "skill") skills.push(skillFromPackage(pkg));
   }
   return { skills };
 }

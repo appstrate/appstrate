@@ -30,7 +30,7 @@ const enc = new TextEncoder();
 function makePackage(
   name: `@${string}/${string}`,
   version: string,
-  type: "agent" | "tool" | "skill" | "provider",
+  type: "agent" | "tool" | "skill",
   files: Record<string, string | Uint8Array>,
   extraManifest: Record<string, unknown> = {},
 ): BundlePackage {

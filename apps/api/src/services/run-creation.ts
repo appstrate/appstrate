@@ -199,7 +199,6 @@ async function createRemoteRun(input: CreateRunInput): Promise<CreateRunResult> 
   //     Single source of truth across platform / remote / scheduled origins.
   const gates = await runPreflightGates({
     orgId,
-    applicationId,
     agent: input.agent,
   });
   if (!gates.ok) return { ok: false, error: gates.error };

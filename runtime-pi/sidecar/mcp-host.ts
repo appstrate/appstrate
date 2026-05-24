@@ -164,9 +164,7 @@ export class McpHost {
         `McpHost: intoNamespace '${upstream.intoNamespace}' is not a registered namespace`,
       );
     }
-    const normalisedNs = merging
-      ? upstream.intoNamespace!
-      : this.allocateNamespace(baseNamespace, upstream.namespace);
+    const normalisedNs = merging ? upstream.intoNamespace! : this.allocateNamespace(baseNamespace);
     const effectiveUpstream: McpHostUpstream = { ...upstream, namespace: normalisedNs };
     this.clients.add(effectiveUpstream.client);
     if (!merging && normalisedNs !== baseNamespace) {
@@ -265,10 +263,9 @@ export class McpHost {
    * Find a free namespace slot. The base slug is tried first; if it is
    * already in use we suffix `_2`, `_3`, … until we find an unused slot.
    * The chosen slot is what every subsequent index ({@link toolToNamespace},
-   * {@link upstreams}) keys against, so the caller's preferred namespace
-   * is only used for the audit log.
+   * {@link upstreams}) keys against.
    */
-  private allocateNamespace(base: string, _requested: string): string {
+  private allocateNamespace(base: string): string {
     if (!this.upstreams.has(base)) return base;
     for (let suffix = 2; suffix < 1000; suffix += 1) {
       const candidate = `${base}_${suffix}`;

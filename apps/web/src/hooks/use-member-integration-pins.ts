@@ -17,15 +17,10 @@
  * we never see other users' pins client-side.
  */
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, apiList } from "../api";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { api } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
-
-export interface MemberIntegrationPin {
-  integrationPackageId: string;
-  connectionId: string;
-}
 
 const KEY = (
   orgId: string | null | undefined,
@@ -33,19 +28,6 @@ const KEY = (
   agentPackageId: string | undefined,
 ) =>
   ["me-integration-pins", orgId ?? undefined, applicationId ?? undefined, agentPackageId] as const;
-
-export function useMemberIntegrationPins(agentPackageId: string | undefined) {
-  const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
-  return useQuery({
-    queryKey: KEY(orgId, applicationId, agentPackageId),
-    enabled: Boolean(orgId && applicationId && agentPackageId),
-    queryFn: () =>
-      apiList<MemberIntegrationPin>(
-        `/me/integration-pins?agentPackageId=${encodeURIComponent(agentPackageId!)}`,
-      ),
-  });
-}
 
 export interface UpsertMemberPinInput {
   agentPackageId: string;

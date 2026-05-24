@@ -3,22 +3,16 @@
 import { type ReactNode, useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ImportModal } from "../components/import-modal";
-import type { PackageType } from "@appstrate/core/validation";
+import { usePackageList } from "../hooks/use-packages";
 import { type CardItem, PackageTab } from "./package-list";
-import type { ItemTabConfig } from "./item-tab-configs";
 import { packageNewPath } from "../lib/package-paths";
 
-const emojiMap: Record<PackageType, string> = {
-  agent: "⚡",
-  skill: "🧠",
-  // Phase 1.0 — see use-packages.ts comment.
-  integration: "🧩",
-};
+const SKILL_EMOJI = "🧠";
 
 export function ItemTab({
-  config,
   badgeMap,
   actionsMap,
   iconMap,
@@ -28,7 +22,6 @@ export function ItemTab({
   emptyExtraActions,
   title: externalTitle,
 }: {
-  config: ItemTabConfig;
   badgeMap?: Map<string, ReactNode>;
   actionsMap?: Map<string, ReactNode>;
   iconMap?: Map<string, string>;
@@ -39,17 +32,17 @@ export function ItemTab({
   title?: string;
 }) {
   const { t } = useTranslation(["settings", "agents", "common"]);
-  const { data: rawItems, isLoading } = config.useData();
+  const { data: rawItems, isLoading } = usePackageList("skill");
   const [importOpen, setImportOpen] = useState(false);
 
-  const typeLabel = t(`packages.type.${config.type}`);
-  const title = externalTitle ?? t(`packages.type.${config.type}s`);
+  const typeLabel = t("packages.type.skill");
+  const title = externalTitle ?? t("packages.type.skills");
   const filtered = filterIds ? rawItems?.filter((item) => filterIds.has(item.id)) : rawItems;
   const items: CardItem[] | undefined = filtered?.map((item) => ({
     id: item.id,
     displayName: item.name || item.id,
     description: item.description,
-    type: config.type,
+    type: "skill",
     source: item.source,
     usedByAgents: item.usedByAgents,
     statusBadge: badgeMap?.get(item.id),
@@ -63,17 +56,17 @@ export function ItemTab({
       <PackageTab
         items={items}
         isLoading={isLoading}
-        emoji={emojiMap[config.type]}
-        emptyMessage={t(config.emptyMessageKey, { type: typeLabel })}
-        emptyHint={t(config.emptyHintKey, { type: typeLabel })}
-        emptyIcon={config.emptyIcon}
+        emoji={SKILL_EMOJI}
+        emptyMessage={t("packages.emptyItems", { type: typeLabel })}
+        emptyHint={t("packages.emptyItemsHint", { type: typeLabel })}
+        emptyIcon={Wrench}
         extraActions={
           <>
             {externalActions}
             <Button variant="outline" onClick={() => setImportOpen(true)}>
               {t("nav.import", { ns: "common" })}
             </Button>
-            <Link to={packageNewPath(config.type)}>
+            <Link to={packageNewPath("skill")}>
               <Button>{t("list.createItem", { ns: "agents", type: typeLabel })}</Button>
             </Link>
           </>

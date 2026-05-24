@@ -39,6 +39,7 @@ import {
   PiRunner,
   prepareBundleForPi,
   buildRuntimeToolExtensions,
+  deriveProviderFromApi,
   emitRuntimeReady,
   emitBootProgress,
   startSinkHeartbeat,
@@ -561,20 +562,9 @@ const model: Model<Api> = {
   maxTokens: env.modelMaxTokens,
 };
 
-// Derive provider (matching PiRunner's table)
-const PROVIDER_BY_API: Record<string, string> = {
-  "anthropic-messages": "anthropic",
-  "openai-completions": "openai",
-  "openai-responses": "openai",
-  "openai-codex-responses": "openai",
-  "mistral-conversations": "mistral",
-  "google-generative-ai": "google",
-  "google-vertex": "google-vertex",
-  "azure-openai-responses": "azure-openai-responses",
-  "bedrock-converse-stream": "amazon-bedrock",
-};
-model.provider = PROVIDER_BY_API[api] ?? "";
-if (!model.provider) await die(`Unknown MODEL_API: "${api}"`);
+// Derive provider via the same table PiRunner uses (PiRunner re-derives
+// this itself and throws on an unknown api — no need to re-validate here).
+model.provider = deriveProviderFromApi(api);
 
 // --- 4. Build ExecutionContext from env ---
 

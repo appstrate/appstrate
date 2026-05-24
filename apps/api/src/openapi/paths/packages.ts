@@ -148,7 +148,7 @@ export const packagesPaths = {
                   packageId: { type: "string", description: "The imported package ID" },
                   type: {
                     type: "string",
-                    description: "Package type (agent/skill/provider)",
+                    description: "Package type (agent/skill/integration)",
                   },
                   version: {
                     type: "string",
@@ -255,7 +255,7 @@ export const packagesPaths = {
                   packageId: { type: "string", description: "The imported package ID" },
                   type: {
                     type: "string",
-                    description: "Package type (agent/skill/provider)",
+                    description: "Package type (agent/skill/integration)",
                   },
                   version: {
                     type: "string",
@@ -1015,7 +1015,7 @@ export const packagesPaths = {
       operationId: "getAgentPackage",
       tags: ["Packages"],
       summary: "Get agent detail",
-      description: "Returns agent detail including providers, config, state, and skills.",
+      description: "Returns agent detail including integrations, config, state, and skills.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -1644,7 +1644,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Get agent detail by ID",
       description:
-        "Returns agent detail including providers, config, state, and skills by unscoped package ID.",
+        "Returns agent detail including integrations, config, state, and skills by unscoped package ID.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },

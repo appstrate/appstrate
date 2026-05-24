@@ -27,7 +27,6 @@ export type PreflightGateError = { code: string; message: string; status?: numbe
 
 export interface PreflightGatesInput {
   orgId: string;
-  applicationId: string;
   agent: LoadedPackage;
 }
 

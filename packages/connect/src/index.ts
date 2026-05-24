@@ -52,11 +52,7 @@ export type { ProxyCredentialsPayload } from "./proxy-primitives.ts";
 
 // ─── AFPS integration manifest (Phase 1.1) ─────────────────────────────
 // Multi-auth credential resolver + delivery planners.
-export {
-  resolveHttpDelivery,
-  buildProxyCredentialsPayload,
-  PROXY_INJECTED_FIELD,
-} from "./integration-credentials.ts";
+export { resolveHttpDelivery, buildProxyCredentialsPayload } from "./integration-credentials.ts";
 // Credential-envelope decryptors — split out so they (and `encryption.ts` →
 // `@appstrate/env`) stay off the sidecar's import graph. Platform-only.
 export {

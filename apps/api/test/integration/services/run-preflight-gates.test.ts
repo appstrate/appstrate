@@ -46,7 +46,6 @@ describe("runPreflightGates", () => {
     const agent = loadedPackage("@gates/agent", 60);
     const res = await runPreflightGates({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
       agent,
     });
     expect(res.ok).toBe(true);
@@ -58,7 +57,6 @@ describe("runPreflightGates", () => {
     const agent = loadedPackage("@gates/agent", limits.timeout_ceiling_seconds + 60);
     const res = await runPreflightGates({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
       agent,
     });
     expect(res.ok).toBe(true);

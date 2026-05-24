@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Integration package CRUD service — INTEGRATIONS_PROPOSAL Phase 1.0.
+ * Integration package read-side service.
  *
- * Scope (deliberately narrow): read-side queries + a thin install helper.
- * Mutations (publish, install, connect) and runtime side (proxy, MCP
- * Router, OAuth flows) come in Phases 1.05, 1.1, 1.2a.
- *
- * Read-side queries for the integration package list UI.
+ * Scope (deliberately narrow): read-side queries for the integration package
+ * list/detail UI + a thin install helper. Mutations (connect, OAuth flows)
+ * and the runtime credential/spawn path live in their own services.
  */
 
 import { and, eq } from "drizzle-orm";

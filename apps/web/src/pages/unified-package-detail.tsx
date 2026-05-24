@@ -23,7 +23,6 @@ import { useCurrentApplicationId } from "../hooks/use-current-application";
 import { LoadingState } from "../components/page-states";
 import { getVersionRedirect, hasActualChanges } from "../lib/version-helpers";
 import { packageDetailPath } from "../lib/package-paths";
-import { useAgentDetailUI } from "../stores/agent-detail-ui-store";
 import { AlertTriangle } from "lucide-react";
 
 // Shared components
@@ -150,12 +149,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const { isOwned } = usePackageOwnership(packageId);
   const { isAdmin } = usePermissions();
   const isVersionView = !!versionParam;
-  const resetUI = useAgentDetailUI((s) => s.reset);
-
-  // Reset modal state when leaving the page or switching packages
-  useEffect(() => {
-    return () => resetUI();
-  }, [packageId, resetUI]);
 
   // ── Data loading (unified) ──
   const { data: detail, isLoading, error } = usePackageDetail(type, packageId);

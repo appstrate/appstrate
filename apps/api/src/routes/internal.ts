@@ -272,7 +272,7 @@ export function createInternalRouter() {
   /**
    * Pin: the running agent must declare this integration in
    * `dependencies.integrations` AND it must be installed in the run's
-   * application. Same guard used by /integration-bundle and the Phase 1.5
+   * application. Same guard used by /integration-bundle and the
    * /integration-credentials endpoints to keep a leaked run token from
    * enumerating integration secrets across the org.
    */
@@ -308,7 +308,7 @@ export function createInternalRouter() {
     }
   }
 
-  // GET /internal/integration-credentials/:scope/:name — Phase 1.5
+  // GET /internal/integration-credentials/:scope/:name
   // Sidecar-only. Returns the LIVE credential payload + per-auth HTTP
   // delivery plans for an integration the running agent depends on.
   // OAuth tokens are refreshed proactively if within the lead window;
@@ -335,7 +335,7 @@ export function createInternalRouter() {
     return c.json(result);
   });
 
-  // POST /internal/integration-credentials/:scope/:name/refresh — Phase 1.5
+  // POST /internal/integration-credentials/:scope/:name/refresh
   // Sidecar-only. Force-refresh every OAuth2 auth on this integration,
   // then return the freshly-resolved payload. Called by the MITM
   // listener's `refreshOnUnauthorized` hook when upstream returns 401.
@@ -364,7 +364,7 @@ export function createInternalRouter() {
     return c.json(result);
   });
 
-  // GET /internal/integration-bundle/:scope/:name — Phase 1.4
+  // GET /internal/integration-bundle/:scope/:name
   // Returns the integration's .afps bundle bytes. Authorised by the same
   // Bearer run-token as the credentials surface; additionally verifies
   // the run's agent declares this integration as a dependency so a
