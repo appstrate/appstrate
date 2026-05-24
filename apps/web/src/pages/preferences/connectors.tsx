@@ -37,7 +37,7 @@ function statusBadge(t: ReturnType<typeof useTranslation>["t"], conn: MeConnecti
 }
 
 // ─────────────────────────────────────────────
-// Inline label edit (integration only)
+// Inline label edit
 // ─────────────────────────────────────────────
 
 function LabelEditor({
@@ -148,7 +148,7 @@ function ConnectionRow({
     ),
   });
 
-  // Reuse hint (integration only) — tells the user this connection is
+  // Reuse hint — tells the user this connection is
   // shared across N agents in the application, killing the "do I need
   // one connection per agent?" confusion.
   if (typeof conn.reusedByAgents === "number") {
@@ -205,7 +205,7 @@ function ConnectionRow({
           ))}
         </div>
 
-        {/* Share toggle (integration only) */}
+        {/* Share toggle */}
         {onToggleShare && (
           <label className="text-muted-foreground inline-flex items-center gap-2 text-xs">
             <input

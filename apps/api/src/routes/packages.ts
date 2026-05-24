@@ -300,7 +300,7 @@ async function createVersionSafe(params: {
 
 interface PackageRouteConfig {
   cfg: PackageTypeConfig;
-  /** URL path segment used for routing (e.g. "skills", "providers"). */
+  /** URL path segment used for routing (e.g. "skills", "integrations"). */
   path: string;
   parseOpts: {
     requiredFile: string | null;
@@ -468,7 +468,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
         validatedManifest as Record<string, unknown>,
       );
 
-      // After-create hook (e.g. auto-enable provider)
+      // After-create hook (optional per-type post-create side-effect)
       if (rcfg.afterCreate) {
         await rcfg.afterCreate({
           packageId,

@@ -28,7 +28,7 @@ function validManifest() {
     type: "agent",
     description: "Inline run",
     schemaVersion: "1.0",
-    dependencies: { skills: {}, providers: {} },
+    dependencies: { skills: {} },
   };
 }
 
@@ -41,7 +41,6 @@ function manifestWithDeps(
     ...validManifest(),
     dependencies: {
       skills: deps.skills ?? {},
-      providers: {},
     },
   };
 }

@@ -827,7 +827,7 @@ async function buildResolverInputs(
     if (!opts.credsFile) {
       throw new ResolverConfigError(
         "--providers=local requires --creds-file <path>",
-        "Pass a JSON file with { version: 1, integrations: {…} } (and/or { providers: {…} })",
+        "Pass a JSON file with { version: 1, integrations: {…} }",
       );
     }
     return { credsFilePath: path.resolve(opts.credsFile) };

@@ -6,7 +6,7 @@
  *
  * Validates that a raw `.afps` carrying an integration manifest can be
  * read, validated, and persisted through the same pipeline used by
- * agents/skills/tools/providers — `handleImportBundle` → `parsePackageZip`
+ * agents/skills/integrations — `handleImportBundle` → `parsePackageZip`
  * → `postInstallPackage` → `packageVersions`.
  */
 

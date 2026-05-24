@@ -43,15 +43,15 @@ export function findUnresolvedPlaceholders(input: string): string[] {
 export { matchesAuthorizedUriSpec } from "@appstrate/afps-runtime/resolvers";
 
 /**
- * Payload returned by `resolveCredentialsForProxy` /
- * `forceRefreshCredentials` (platform, DB-backed) and by the sidecar's
- * `/internal/integration-credentials` HTTP fetch (container, HTTP-backed).
- * Single type definition — both entrypoints import it from here, so the
- * wire format cannot drift between platform and sidecar.
+ * Payload produced by the platform's DB-backed integration credential
+ * resolver (`apps/api/src/services/integration-credentials-resolver.ts`) and
+ * by the sidecar's `/internal/integration-credentials` HTTP fetch (container,
+ * HTTP-backed). Single type definition — both entrypoints import it from here,
+ * so the wire format cannot drift between platform and sidecar.
  *
- * Lives in `proxy-primitives.ts` rather than `credentials.ts` so the
- * sidecar (which must not pull @appstrate/db) can consume it via the
- * `@appstrate/connect/proxy-primitives` subpath.
+ * Lives in `proxy-primitives.ts` (not a `@appstrate/db`-importing module) so
+ * the sidecar can consume it via the `@appstrate/connect/proxy-primitives`
+ * subpath without pulling in the DB layer.
  */
 export interface ProxyCredentialsPayload {
   /** Credential fields keyed by name (e.g. `access_token`, `api_key`, `subdomain`, ...). */

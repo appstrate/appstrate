@@ -97,7 +97,7 @@ export function buildIntegrationResolver(
       if (!local?.credsFilePath) {
         throw new ResolverConfigError(
           "--providers=local requires --creds-file <path>",
-          "Pass a JSON file with { version: 1, integrations: {…} } (and/or { providers: {…} })",
+          "Pass a JSON file with { version: 1, integrations: {…} }",
         );
       }
       return new LocalIntegrationResolver({ creds: local.credsFilePath });

@@ -477,7 +477,7 @@ export function createRunsRouter() {
   );
 
   // POST /api/runs/inline/validate — dry-run validator for inline manifests.
-  // Runs the full preflight (manifest + config + input + provider readiness)
+  // Runs the full preflight (manifest + config + input + agent readiness)
   // WITHOUT inserting a shadow package or firing a pipeline. Lets developers
   // iterate on a manifest without creating phantom runs or burning credits.
   // Shares 100% of its validation with POST /api/runs/inline via
@@ -485,7 +485,7 @@ export function createRunsRouter() {
   //
   // NOTE: intentionally shares the SAME rate-limit bucket as /runs/inline
   // (method+path+identity → different key, same rate_per_min cap). Validation
-  // exercises the same provider-resolution / AJV machinery as an actual run,
+  // exercises the same readiness / AJV machinery as an actual run,
   // so guarding against tight validation loops matters. Documented in the
   // OpenAPI description.
   router.post(

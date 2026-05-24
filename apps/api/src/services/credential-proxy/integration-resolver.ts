@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Credential-proxy integration resolver — re-platforms the public
- * `/api/credential-proxy/proxy` endpoint onto `integration_connections`.
+ * Credential-proxy integration resolver — backs the public
+ * `/api/credential-proxy/proxy` endpoint on `integration_connections`.
  *
- * The public proxy used to read the now-removed provider tables via
- * `@appstrate/connect`'s `getProviderCredentialId` / `resolveCredentialsForProxy`.
- * It now resolves credentials from the same integration credential
+ * Resolves credentials from the same integration credential
  * machinery that backs the sidecar's `/internal/integration-credentials/*`
  * surface — `integration_connections` rows + the manifest's `delivery.http`
  * plan — and synthesises a {@link ProxyCredentialsPayload} that

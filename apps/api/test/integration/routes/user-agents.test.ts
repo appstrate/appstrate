@@ -71,7 +71,7 @@ describe("User Agents API", () => {
           version: "0.1.0",
           type: "agent",
           description: "Agent",
-          dependencies: { providers: { "@appstrate/gmail": "*" } },
+          dependencies: { integrations: { "@appstrate/gmail": "*" } },
         },
       });
 
@@ -92,7 +92,7 @@ describe("User Agents API", () => {
       const deps = asRecord(m.dependencies);
       expect(deps.skills).toEqual({ "@myorg/skill-a": "^1.0.0" });
       // Other dependency buckets should be preserved (left untouched by the skills PUT)
-      expect(deps.providers).toEqual({ "@appstrate/gmail": "*" });
+      expect(deps.integrations).toEqual({ "@appstrate/gmail": "*" });
     });
 
     it("clears skills when empty array", async () => {

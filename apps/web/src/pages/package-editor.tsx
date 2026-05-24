@@ -460,7 +460,7 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
     return <Navigate to="/" replace />;
   }
 
-  // Skill editor (agent/provider/integration returned early above — pkgQuery is always OrgPackageItemDetail here)
+  // Skill editor (agent/integration returned early above — pkgQuery is always OrgPackageItemDetail here)
   const pkgDetail = pkgQuery.data as OrgPackageItemDetail | undefined;
 
   const initialState: PackageEditorState =

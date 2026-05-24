@@ -223,10 +223,7 @@ const TITLE_BY_CODE: Record<ConnectionResolutionError["code"], string> = {
  * the contract of `validateAgentReadiness` so existing error mapping handles
  * it without special cases. No-op when the manifest declares no config schema.
  */
-export function validateMergedConfigOrThrow(
-  agent: LoadedPackage,
-  config: Record<string, unknown>,
-): void {
+function validateMergedConfigOrThrow(agent: LoadedPackage, config: Record<string, unknown>): void {
   const { config: configSchema } = extractManifestSchemas(agent.manifest);
   if (!configSchema) return;
   const result = validateConfig(config, configSchema);
@@ -244,7 +241,7 @@ export function validateMergedConfigOrThrow(
  * Apply a per-run config override on top of the persisted config and re-validate
  * against the manifest schema. No-op when `override` is null/undefined — returns
  * `persisted` verbatim. Throws `ApiError(400, "invalid_config")` if the merged
- * result violates the manifest schema (mirrors `validateMergedConfigOrThrow`).
+ * result violates the manifest schema (via `validateMergedConfigOrThrow`).
  *
  * Single source of truth for the merge+validate sequence shared by `POST /run`
  * and the scheduler — every per-run invocation reaches an identical resolved

@@ -37,7 +37,7 @@ export type Actor = { type: "user"; id: string } | { type: "end_user"; id: strin
 // ---------------------------------------------------------------------------
 
 /**
- * A skill or tool referenced by a package's manifest, hydrated against the
+ * A skill or integration referenced by a package's manifest, hydrated against the
  * org/system catalog. Optional fields mirror what was resolvable at load
  * time — modules use them to render dependency lists without re-querying.
  */

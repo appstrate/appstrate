@@ -13,23 +13,18 @@
  * exchange) function for the integration OAuth flow.
  *
  * What this covers (Phase 1.3 ship scope):
- *   - **Mode A** explicit endpoints — `authorizationUrl`, `tokenUrl` come
- *     directly from `manifest.auths.{key}`.
+ *   - Explicit endpoints — `authorizationUrl`, `tokenUrl` come directly
+ *     from `manifest.auths.{key}`.
  *   - PKCE S256 mandatory for public clients (`tokenAuthMethod=none`);
  *     opt-out impossible in this code path because the spec mandates it.
  *   - RFC 8707 `resource` parameter when the auth declares `audience`.
  *   - `client_secret_post` / `client_secret_basic` / `none` token endpoint
  *     auth methods — verified at the call site, defaults to `post`.
- *   - Scope shortfall / creep classification mirrored from the legacy
- *     OAuth handler.
+ *   - Scope shortfall / creep classification via the shared
+ *     `parseTokenResponse` helper (`./token-utils.ts`).
  *
- * What lives elsewhere:
- *   - **Mode B** RFC 9728 discovery → `./oauth-discovery.ts` (resolves
- *     endpoints; caller plumbs result into `initiateIntegrationOAuth`).
- *   - DCR (RFC 7591) → `./dynamic-client-registration.ts` (caller may use
- *     it to obtain `clientId`/`clientSecret` before initiating).
- *   - Refresh → `./token-refresh.ts` (`performRefreshTokenExchange`; the
- *     `integration_connections` write-back wraps it in apps/api).
+ * Refresh lives in `./token-refresh.ts` (`performRefreshTokenExchange`; the
+ * `integration_connections` write-back wraps it in apps/api).
  */
 
 import type { Actor, OAuthStateRecord, OAuthStateStore } from "./types.ts";

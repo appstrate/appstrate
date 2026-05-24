@@ -69,7 +69,7 @@ export type Manifest = z.infer<typeof manifestSchema>;
  */
 export const agentManifestSchema = afpsAgentManifestSchema.extend({
   // All standard fields (name, version, schemaVersion, dependencies,
-  // displayName, providersConfiguration, input/output/config, timeout) inherited from AFPS.
+  // displayName, input/output/config, timeout) inherited from AFPS.
   // Override metadata fields with .catch(undefined) for tolerant local editing.
   // AFPS requires author (MUST) for publication; core relaxes it for local drafts.
   author: z.string().optional(),
@@ -282,7 +282,7 @@ export function isPromptEmpty(prompt: string): boolean {
 
 /**
  * Find IDs declared in `required` but missing from `installed`.
- * Works for both skills and tools.
+ * Works for both skills and integrations.
  */
 export function findMissingDependencies(
   required: Record<string, string>,

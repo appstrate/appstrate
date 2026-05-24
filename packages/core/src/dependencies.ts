@@ -21,7 +21,7 @@ export interface Dependencies {
 export interface DepEntry {
   /** Scope with `@` prefix (e.g. "@myorg"). */
   depScope: string;
-  /** Package name without scope (e.g. "my-tool"). */
+  /** Package name without scope (e.g. "my-skill"). */
   depName: string;
   /** The dependency category. */
   depType: "skill" | "integration";

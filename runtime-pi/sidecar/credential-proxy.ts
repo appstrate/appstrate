@@ -9,12 +9,12 @@
  *
  *   1. Fetch credentials from the platform (per-run Bearer token).
  *   2. Substitute `{{vars}}` into URL / headers / body.
- *   3. Validate the resolved URL against the provider's
+ *   3. Validate the resolved URL against the integration's
  *      `authorizedUris` allowlist + the SSRF blocklist.
  *   4. Inject the credential header server-side.
  *   5. Forward the request to the upstream API.
  *   6. Retry once on 401 with a refreshed token.
- *   7. Log persistent auth failures locally (once per provider per run).
+ *   7. Log persistent auth failures locally (once per integration per run).
  *
  * The MCP `api_call` tool handler in `runtime-pi/sidecar/mcp.ts`
  * takes typed JSON-RPC arguments and calls this helper directly, then
@@ -125,7 +125,7 @@ interface RedirectFollowOptions {
 
 /**
  * Manually follow 3xx redirects so we can capture `Set-Cookie` from
- * **every** hop into the per-provider jar — Bun's native fetch only
+ * **every** hop into the per-integration jar — Bun's native fetch only
  * surfaces the final hop's `Set-Cookie`, which breaks multi-step
  * OAuth/CAS flows where the session cookie lands on an intermediate
  * 302 (see #473).
@@ -136,7 +136,7 @@ interface RedirectFollowOptions {
  *     against `isBlockedUrl` (loopback, RFC1918, link-local, cloud
  *     metadata) regardless of `allowAllUris`. A compromised upstream
  *     can no longer pivot the proxy to `http://169.254.169.254/...`.
- *   - **Per-hop allowlist** — when the provider declared
+ *   - **Per-hop allowlist** — when the integration declared
  *     `authorizedUris`, every hop must match. Off-allowlist redirects
  *     are refused with a structured 403 rather than silently followed
  *     into attacker-controlled hosts.
@@ -348,16 +348,16 @@ export interface ApiCallDeps {
   fetchCredentials: (integrationId: string) => Promise<CredentialsResponse>;
   refreshCredentials?: (integrationId: string) => Promise<CredentialsResponse>;
   /**
-   * Set tracking which providers already had a persistent auth
+   * Set tracking which integrations already had a persistent auth
    * failure logged in this run. Mutated by the function — shared
-   * across calls so a flapping provider only logs once and so the
+   * across calls so a flapping integration only logs once and so the
    * 401-retry path skips the refresh after the first failure.
    */
   reportedAuthFailures: Set<string>;
 }
 
 /**
- * Execute a provider call end-to-end: fetch credentials, validate
+ * Execute an integration call end-to-end: fetch credentials, validate
  * the URL, substitute placeholders, inject the credential header
  * server-side, send the request, retry once on 401, capture cookies,
  * log persistent auth failures. Returns the raw upstream `Response`
@@ -495,7 +495,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     // Server-side credential injection (Authorization, X-Api-Key, …).
     applyInjectedCredentialHeader(resolvedHeaders, activeCreds);
     normalizeAuthScheme(resolvedHeaders);
-    // Re-inject sticky cookies for the provider.
+    // Re-inject sticky cookies for the integration.
     const storedCookies = cookieJar.get(integrationId);
     if (storedCookies && storedCookies.length) {
       const existing = resolvedHeaders["cookie"] || "";
@@ -598,10 +598,10 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   //    (final hop only — bodies can't be replayed).
   mergeSetCookieIntoJar(upstream.headers.getSetCookie(), cookieJar, integrationId);
 
-  // 9. Log persistent auth failures locally (once per provider per
+  // 9. Log persistent auth failures locally (once per integration per
   //    run, only if the retry above did NOT fix it). The Set also
   //    gates the 401-retry path above so a dead credential triggers
-  //    at most one refresh attempt per provider.
+  //    at most one refresh attempt per integration.
   if (upstream.status === 401 && !reportedAuthFailures.has(integrationId)) {
     reportedAuthFailures.add(integrationId);
     logger.warn("Upstream returned 401 after retry", { integrationId });

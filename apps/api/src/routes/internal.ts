@@ -38,31 +38,6 @@ import {
 import { resolveLiveIntegrationCredentials } from "../services/integration-credentials-resolver.ts";
 
 /**
- * Safety margin used when deciding whether a stored access token is still
- * "fresh enough" that a forced refresh would be wasteful. The sidecar calls
- * the refresh endpoint on any upstream 401; if the stored token has more
- * than this much lifetime remaining, the 401 cannot be an expiry issue and
- * must come from the agent's request itself (wrong header, wrong endpoint,
- * missing scope) — so we skip the refresh entirely. Keeping a full minute
- * absorbs reasonable clock skew between this server and the OAuth provider.
- */
-const REFRESH_FRESHNESS_THRESHOLD_MS = 60_000;
-
-/**
- * Returns true when the stored access token still has enough lifetime left
- * that refreshing it would be pointless. Null / missing / unparseable
- * `expiresAt` (providers without `expires_in`, legacy connections, non-OAuth2
- * auth modes) returns false — we fall back to the existing refresh behavior
- * in that case.
- */
-export function isTokenFresh(expiresAt: string | Date | null | undefined): boolean {
-  if (!expiresAt) return false;
-  const ts = expiresAt instanceof Date ? expiresAt.getTime() : Date.parse(expiresAt);
-  if (Number.isNaN(ts)) return false;
-  return ts - Date.now() > REFRESH_FRESHNESS_THRESHOLD_MS;
-}
-
-/**
  * Verify the run token from the Authorization header.
  * Returns the run data or throws an ApiError.
  */

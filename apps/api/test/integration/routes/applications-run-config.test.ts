@@ -32,7 +32,7 @@ describe("GET /api/applications/:applicationId/packages/:scope/:name/run-config"
         name: "@testorg/agent",
         version: "1.0.0",
         type: "agent",
-        dependencies: { providers: { "@afps/gmail": "^1.0.0" } },
+        dependencies: { integrations: { "@afps/gmail": "^1.0.0" } },
       },
     });
     const version = await seedPackageVersion({
