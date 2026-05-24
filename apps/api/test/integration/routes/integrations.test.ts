@@ -288,6 +288,58 @@ describe("api_key connection flow", () => {
   });
 });
 
+describe("api_key credentials schema validation (delivery.http silent-no-op guard)", () => {
+  let ctx: TestContext;
+
+  // A manifest whose api_key auth declares `required: ["api_key"]` — the shape
+  // the silent-no-op bug needs to be caught (key-casing mismatch leaves the
+  // required field absent, so `delivery.http` injection resolves to "").
+  function strictManifest(name = "@myorg/strict"): IntegrationManifest {
+    const m = gmailManifest(name);
+    m.auths!.api!.credentials = {
+      schema: {
+        type: "object",
+        required: ["api_key"],
+        properties: { api_key: { type: "string" } },
+      },
+    };
+    return m;
+  }
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "myorg" });
+    await seedIntegration(ctx.orgId, strictManifest("@myorg/strict"));
+  });
+
+  it("rejects a wrong-cased credential key that misses the required field (400)", async () => {
+    const res = await app.request("/api/integrations/@myorg/strict/auths/api/connect/fields", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      // `apiKey` (camelCase) instead of the declared `api_key` (snake_case):
+      // would otherwise persist a healthy-looking connection whose injection
+      // silently no-ops at runtime.
+      body: JSON.stringify({ credentials: { apiKey: "AKIA-SECRET" } }),
+    });
+    expect(res.status).toBe(400);
+    // Nothing persisted.
+    const rows = await db
+      .select()
+      .from(integrationConnections)
+      .where(eq(integrationConnections.integrationPackageId, "@myorg/strict"));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("accepts the correctly-cased credential key (200)", async () => {
+    const res = await app.request("/api/integrations/@myorg/strict/auths/api/connect/fields", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ credentials: { api_key: "AKIA-SECRET" } }),
+    });
+    expect(res.status).toBe(200);
+  });
+});
+
 describe("OAuth client CRUD", () => {
   let ctx: TestContext;
   beforeEach(async () => {
