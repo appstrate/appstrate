@@ -92,3 +92,31 @@ describe("buildLogEntries — report extraction (`@appstrate/report` tool)", () 
     expect(report).toBe("real one");
   });
 });
+
+describe("buildLogEntries — progress entry coalescing", () => {
+  it("coalesces consecutive data-less progress lines into one entry (agent stdout)", () => {
+    // Freeform stdout lines arrive as data-less progress events; folding them
+    // into one block keeps the viewer readable instead of N micro-rows.
+    const logs: RawLog[] = [
+      { type: "progress", level: "debug", message: "line one" },
+      { type: "progress", level: "debug", message: "line two" },
+      { type: "progress", level: "debug", message: "line three" },
+    ];
+    const { entries } = buildLogEntries(logs);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.message).toBe("line one\nline two\nline three");
+  });
+
+  it("keeps data-bearing progress events as distinct entries (boot breadcrumbs)", () => {
+    // The runtime-pi boot breadcrumbs carry `data` (at least `{ boot: true }`)
+    // precisely so each phase marker stays its own log line rather than being
+    // folded into the previous one.
+    const logs: RawLog[] = [
+      { type: "progress", level: "info", message: "connecting to sidecar", data: { boot: true } },
+      { type: "progress", level: "info", message: "MCP connected", data: { boot: true } },
+    ];
+    const { entries } = buildLogEntries(logs);
+    expect(entries).toHaveLength(2);
+    expect(entries.map((e) => e.message)).toEqual(["connecting to sidecar", "MCP connected"]);
+  });
+});

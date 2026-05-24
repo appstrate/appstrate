@@ -431,3 +431,41 @@ export interface OAuthTokenResponse {
  * when the token expires.
  */
 export const OAUTH_REFRESH_LEAD_MS = 5 * 60_000;
+
+/**
+ * One ordered, human-readable line in the integration boot trail. The sidecar
+ * (which owns the per-phase timings) formats the message; the agent relays it
+ * verbatim into the run-event pipeline as an `appstrate.progress` breadcrumb so
+ * it lands in `run_logs` for dashboard observability. `data` carries the same
+ * facts in structured form for machine consumers.
+ */
+export interface IntegrationBootBreadcrumb {
+  /** e.g. `"@appstrate/bun-toolkit: spawn 120ms · connect 70ms · ready"`. */
+  message: string;
+  /** Maps to the `run_logs` level on the emitted `appstrate.progress` event. */
+  level: "info" | "warn" | "error";
+  /** Structured fields (integrationId, durationMs, …) — persisted on the log row. */
+  data?: Record<string, unknown>;
+}
+
+/**
+ * Result of the sidecar's integration boot pass, fetched by the agent from
+ * `GET /integrations/boot-report` after the MCP handshake. The agent emits the
+ * {@link IntegrationBootBreadcrumb}s for observability and, when `ok` is false,
+ * fails the run — the platform principle "an integration that didn't launch as
+ * declared aborts the run, every tier".
+ */
+export interface IntegrationBootReport {
+  /** False when any declared integration failed to boot — the agent aborts the run. */
+  ok: boolean;
+  /** Count of integrations declared via `INTEGRATIONS_TO_SPAWN_JSON`. */
+  declared: number;
+  /** Runtime adapter that ran the integrations (`"process"` | `"docker"` | `"none"`). */
+  adapter: string;
+  /** Per-integration success — namespace + count of tools surfaced to the agent. */
+  spawned: Array<{ integrationId: string; namespace: string; toolCount: number }>;
+  /** Per-integration failure — the error that prevented spawn/connect/register. */
+  failed: Array<{ integrationId: string; error: string }>;
+  /** Ordered per-phase breadcrumbs for the run-log boot trail. */
+  breadcrumbs: IntegrationBootBreadcrumb[];
+}

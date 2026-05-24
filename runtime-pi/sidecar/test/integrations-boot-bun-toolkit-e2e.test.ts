@@ -96,6 +96,18 @@ describe("@appstrate/bun-toolkit — complex bun integration (e2e)", () => {
       expect(boot.failed).toEqual([]);
       expect(boot.spawned.length).toBe(1);
 
+      // Boot report: healthy (ok), one declared integration, and a per-phase
+      // trail the agent relays into the run log — the runtime-adapter line
+      // plus this integration's spawn/connect breadcrumb.
+      expect(boot.report.ok).toBe(true);
+      expect(boot.report.declared).toBe(1);
+      expect(boot.report.adapter).toBe("process");
+      const messages = boot.report.breadcrumbs.map((b) => b.message);
+      expect(messages.some((m) => m.startsWith("runtime adapter: process"))).toBe(true);
+      expect(messages.some((m) => m.includes(spec().integrationId) && m.includes("ready"))).toBe(
+        true,
+      );
+
       // The allowlisted native tools are exposed (and only those).
       const names = boot.tools.map((t) => t.descriptor.name).filter((n) => n.startsWith(NAMESPACE));
       expect(names).toContain(`${NAMESPACE}__kv_set`);

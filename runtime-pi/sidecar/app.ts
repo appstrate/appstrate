@@ -6,6 +6,7 @@ import { mountMcp } from "./mcp.ts";
 import type { ApiCallDeps } from "./credential-proxy.ts";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import { BlobStore } from "./blob-store.ts";
+import type { IntegrationBootReport } from "@appstrate/core/sidecar-types";
 import {
   DEFAULT_API_CALL_CONCURRENCY,
   LLM_PROXY_TIMEOUT_MS,
@@ -89,6 +90,14 @@ export interface AppDeps {
    * tools even though the sidecar's HTTP listener came up first.
    */
   integrationBootPromise?: Promise<void>;
+  /**
+   * Returns the integration boot report once {@link integrationBootPromise}
+   * has resolved. Served by `GET /integrations/boot-report`, which the agent
+   * polls after the MCP handshake to (a) emit the per-phase boot breadcrumbs
+   * into the run log and (b) abort the run when `ok` is false. Omitted by
+   * tests / sidecars launched without integrations.
+   */
+  integrationBootReportProvider?: () => IntegrationBootReport;
 }
 
 /**
@@ -378,6 +387,33 @@ export function createApp(deps: AppDeps): Hono {
       return c.json({ status: "degraded", proxy: "not ready" }, 503);
     }
     return c.json({ status: "ok" });
+  });
+
+  // Integration boot report. The agent's bootloader polls this after the MCP
+  // handshake to relay the per-phase breadcrumbs into the run log and to abort
+  // the run when any declared integration failed to boot (`ok: false`). We
+  // await the boot promise so the report is final before answering.
+  //
+  // No inbound auth — same posture as `/mcp`. The agent container holds NO
+  // run token (zero-knowledge boundary: only the sidecar can call back to the
+  // platform), so a bearer check would lock the agent out. The security
+  // boundary is the per-run Docker network; the payload carries integration
+  // ids + diagnostic errors but never credentials.
+  app.get("/integrations/boot-report", async (c) => {
+    if (!deps.integrationBootReportProvider) {
+      // No integrations were wired into this sidecar — nothing to fail on.
+      return c.json({
+        ok: true,
+        declared: 0,
+        adapter: "none",
+        spawned: [],
+        failed: [],
+        breadcrumbs: [],
+      } satisfies IntegrationBootReport);
+    }
+    // Block until the initial boot pass settles so the report is authoritative.
+    await deps.integrationBootPromise;
+    return c.json(deps.integrationBootReportProvider());
   });
 
   // LLM reverse proxy. Two modes:

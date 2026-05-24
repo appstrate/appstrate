@@ -86,6 +86,11 @@ import "./integration-runtime-adapter-process.ts";
  */
 export type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 
+import type {
+  IntegrationBootBreadcrumb,
+  IntegrationBootReport,
+} from "@appstrate/core/sidecar-types";
+
 /**
  * Where the sidecar fetches integration bundles from. The platform
  * surface is `GET /internal/integration-bundle/:scope/:name` with
@@ -109,8 +114,14 @@ export interface BootIntegrationsResult {
   tools: AppstrateToolDefinition[];
   /** Per-integration spawn outcome — useful for run-event observability. */
   spawned: Array<{ integrationId: string; namespace: string; toolCount: number }>;
-  /** Per-integration failures — emitted as warnings but do not abort boot. */
+  /** Per-integration failures — captured here; the agent aborts the run on any. */
   failed: Array<{ integrationId: string; error: string }>;
+  /**
+   * Structured boot report fetched by the agent via `GET /integrations/boot-report`.
+   * Carries the ordered per-phase breadcrumbs (run-log observability) and the
+   * `ok` flag that tells the agent whether to fail the run.
+   */
+  report: IntegrationBootReport;
   /** Idempotent teardown — closes every upstream MCP client + runtime adapter. */
   shutdown: () => Promise<void>;
 }
@@ -423,6 +434,10 @@ interface SpawnAndConnectResult {
   toolCount: number;
   /** Adapter diagnostic id (e.g. container id), when the adapter reports one. */
   diagnosticId?: string;
+  /** Wall-clock ms spent in `adapter.spawn` (process fork / `docker create`+`cp`+`start`). */
+  spawnMs: number;
+  /** Wall-clock ms spent on the MCP `initialize` handshake. */
+  connectMs: number;
 }
 
 /**
@@ -513,6 +528,7 @@ async function spawnAndConnectLocalIntegration(params: {
   const bytes = await fetchBundleBytes(spec.integrationId, bundleFetchOpts);
   const root = await extractBundle(bytes, spec.namespace);
 
+  const spawnStart = performance.now();
   const spawnedIntegration = await adapter.spawn({
     runId,
     spec,
@@ -523,6 +539,9 @@ async function spawnAndConnectLocalIntegration(params: {
     },
   });
 
+  const spawnMs = performance.now() - spawnStart;
+
+  const connectStart = performance.now();
   const client = new Client({ name: "appstrate-sidecar-integration-host", version: "0.1.0" });
   const connectPromise = client.connect(spawnedIntegration.transport);
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -535,6 +554,7 @@ async function spawnAndConnectLocalIntegration(params: {
   } finally {
     if (timeoutId !== undefined) clearTimeout(timeoutId);
   }
+  const connectMs = performance.now() - connectStart;
   const wrapped = wrapClient(client, spawnedIntegration.transport);
   params.clients.push(wrapped);
 
@@ -553,6 +573,8 @@ async function spawnAndConnectLocalIntegration(params: {
     allocatedNs,
     mitmSource,
     toolCount,
+    spawnMs,
+    connectMs,
     ...(spawnedIntegration.diagnosticId ? { diagnosticId: spawnedIntegration.diagnosticId } : {}),
   };
 }
@@ -585,6 +607,7 @@ export async function bootIntegrations(
   });
   const spawned: BootIntegrationsResult["spawned"] = [];
   const failed: BootIntegrationsResult["failed"] = [];
+  const breadcrumbs: IntegrationBootBreadcrumb[] = [];
   const clients: AppstrateMcpClient[] = [];
   const mitmListeners: MitmListenerHandle[] = [];
 
@@ -598,10 +621,10 @@ export async function bootIntegrations(
   // isn't available — orphan-cleanup is best-effort either way.
   const runId = process.env.RUN_ID ?? `nosrunid-${randomUUID().slice(0, 8)}`;
 
-  // Pick the runtime backend (docker if reachable, otherwise the
-  // in-process fallback). The selection logic is in
-  // {@link selectIntegrationRuntimeAdapter}; adding a new backend
-  // (firecracker, podman) means dropping a new
+  // Pick the runtime backend deterministically from `INTEGRATION_RUNTIME_ADAPTER`
+  // (the launching orchestrator pins it to mirror `RUN_ADAPTER` — no probing).
+  // The selection logic is in {@link selectIntegrationRuntimeAdapter}; adding a
+  // new backend (firecracker, podman) means dropping a new
   // `integration-runtime-adapter-*.ts` module that calls
   // `registerIntegrationRuntimeAdapter()`.
   let adapter: IntegrationRuntimeAdapter;
@@ -614,11 +637,18 @@ export async function bootIntegrations(
     });
     throw err;
   }
+  const adapterPrepareStart = performance.now();
   const adapterCtx = await adapter.prepare(runId);
+  const adapterPrepareMs = performance.now() - adapterPrepareStart;
   logger.info("integration runtime selected", {
     adapter: adapter.id,
     listenerBindHost: adapterCtx.listenerBindHost,
     integrations: specs.length,
+  });
+  breadcrumbs.push({
+    message: `runtime adapter: ${adapter.id}`,
+    level: "info",
+    data: { adapter: adapter.id, prepareMs: Math.round(adapterPrepareMs) },
   });
 
   // ─── Phase 1.5 — MITM bring-up (run-CA + cert minter), only when needed ───
@@ -631,42 +661,53 @@ export async function bootIntegrations(
   ).length;
   let runCa: RunCaMaterials | null = null;
   if (mitmIntegrationCount > 0) {
+    const caStart = performance.now();
     try {
       runCa = await prepareRunCa(runId, "afps-ca-");
+      const caMs = Math.round(performance.now() - caStart);
       logger.info("integration MITM CA minted", {
         runId,
         integrations: mitmIntegrationCount,
         caCertPath: runCa.certHostPath,
         notAfter: runCa.bundle.notAfter,
       });
+      breadcrumbs.push({
+        message: `MITM CA minted (${mitmIntegrationCount} integration${mitmIntegrationCount === 1 ? "" : "s"}, ${caMs}ms)`,
+        level: "info",
+        data: { integrations: mitmIntegrationCount, durationMs: caMs },
+      });
     } catch (err) {
       // CA bring-up failed — every MITM integration will fail to register
-      // below; non-MITM integrations stay on the env-delivery-only path.
-      // We don't abort: the env-only path is still useful in dev / when
-      // openssl is missing from the sidecar image.
+      // below and land in `failed`, which aborts the run. We log + breadcrumb
+      // the root cause here so the per-integration failures downstream are
+      // attributable (typically openssl missing from the sidecar image).
+      const msg = err instanceof Error ? err.message : String(err);
       logger.warn("integration MITM CA bring-up failed; HTTP-delivery integrations will skip", {
         runId,
-        error: err instanceof Error ? err.message : String(err),
+        error: msg,
+      });
+      breadcrumbs.push({
+        message: `MITM CA bring-up failed: ${msg}`,
+        level: "warn",
+        data: { error: msg },
       });
     }
   }
 
   for (const spec of specs) {
+    const specStart = performance.now();
     try {
       // ─── generic api_call tool ───
       // Independent of how (or whether) the integration spawns a server:
       // build the credential adapter from a dedicated credentials source,
       // then host the generic `api_call` (+ optional `api_upload`) tools as
-      // a TRUSTED in-process MCP server registered on the same McpHost as
-      // every spawned/remote integration. One pipeline → McpHost owns the
-      // namespacing (`{ns}__api_call`) + name validation. A pure-proxy
-      // integration (an `apiCall` block, no `spec.manifest.server`) does
-      // ONLY this and skips spawn.
-      // Attach the in-process generic `api_call` tool.
-      // Hosted on the McpHost OUTSIDE any spawned container, so
-      // the server code never sees the credential. Two modes:
-      //  - serverless (`apiCall` block, no `spec.manifest.server`):
-      //    api_call is the namespace's PRIMARY client (`intoNamespace` omitted).
+      // a TRUSTED in-process MCP server on the same McpHost as every
+      // spawned/remote integration — OUTSIDE any spawned container, so the
+      // server code never sees the credential. One pipeline → McpHost owns
+      // the namespacing (`{ns}__api_call`) + name validation. Two modes:
+      //  - serverless (`apiCall` block, no `spec.manifest.server`): api_call
+      //    is the namespace's PRIMARY client (`intoNamespace` omitted) and the
+      //    integration does ONLY this, skipping spawn.
       //  - attachable (additive on a spawned/remote server): pass the server's
       //    ALLOCATED namespace so `{ns}__api_call` sits next to the native
       //    tools under one namespace; the spawned server stays primary.
@@ -741,6 +782,17 @@ export async function bootIntegrations(
           namespace: spec.namespace,
           toolCount: apiCallToolCount,
         });
+        const ms = Math.round(performance.now() - specStart);
+        breadcrumbs.push({
+          message: `${spec.integrationId}: api_call ready (${ms}ms, ${apiCallToolCount} tool${apiCallToolCount === 1 ? "" : "s"})`,
+          level: "info",
+          data: {
+            integrationId: spec.integrationId,
+            kind: "serverless",
+            durationMs: ms,
+            toolCount: apiCallToolCount,
+          },
+        });
         continue;
       }
       const server = spec.manifest.server;
@@ -779,6 +831,17 @@ export async function bootIntegrations(
           authKey,
           toolCount: added + apiCallAdded,
         });
+        const ms = Math.round(performance.now() - specStart);
+        breadcrumbs.push({
+          message: `${spec.integrationId}: remote-http connect ${ms}ms · ready`,
+          level: "info",
+          data: {
+            integrationId: spec.integrationId,
+            kind: "remote-http",
+            durationMs: ms,
+            toolCount: added + apiCallAdded,
+          },
+        });
         continue;
       }
 
@@ -794,6 +857,8 @@ export async function bootIntegrations(
         mitmSource,
         toolCount: added,
         diagnosticId,
+        spawnMs,
+        connectMs,
       } = await spawnAndConnectLocalIntegration({
         spec,
         runId,
@@ -842,22 +907,56 @@ export async function bootIntegrations(
         ...(diagnosticId ? { diagnosticId } : {}),
         toolCount: added + apiCallAdded,
       });
+      const loginPart = spec.connectLogin ? " · login" : "";
+      breadcrumbs.push({
+        message: `${spec.integrationId}: spawn ${Math.round(spawnMs)}ms · connect ${Math.round(connectMs)}ms${loginPart} · ready`,
+        level: "info",
+        data: {
+          integrationId: spec.integrationId,
+          kind: "local",
+          adapter: adapter.id,
+          spawnMs: Math.round(spawnMs),
+          connectMs: Math.round(connectMs),
+          durationMs: Math.round(performance.now() - specStart),
+          toolCount: added + apiCallAdded,
+          ...(diagnosticId ? { diagnosticId } : {}),
+        },
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      const ms = Math.round(performance.now() - specStart);
       failed.push({ integrationId: spec.integrationId, error: msg });
       logger.warn("integration spawn failed", {
         integrationId: spec.integrationId,
         error: msg,
       });
+      breadcrumbs.push({
+        message: `${spec.integrationId}: failed after ${ms}ms — ${msg}`,
+        level: "error",
+        data: { integrationId: spec.integrationId, durationMs: ms, error: msg },
+      });
     }
   }
 
   const tools = host.buildTools();
+  // Every spec exits the loop via exactly one path: success (→ spawned) or the
+  // catch (→ failed), so `spawned.length + failed.length === specs.length`. The
+  // run is healthy only when nothing failed — the agent reads `ok` to decide
+  // whether to abort.
+  const report: IntegrationBootReport = {
+    ok: failed.length === 0,
+    declared: specs.length,
+    adapter: adapter.id,
+    spawned,
+    failed,
+    breadcrumbs,
+  };
   return {
     host,
     tools,
     spawned,
     failed,
+    report,
     shutdown: async () => {
       await host.dispose().catch((err) => {
         logger.debug("integration host dispose failed", {

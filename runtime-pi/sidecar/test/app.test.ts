@@ -92,6 +92,72 @@ describe("GET /health", () => {
   });
 });
 
+// --- GET /integrations/boot-report ---
+//
+// The agent's bootloader polls this after the MCP handshake to relay the
+// per-phase boot breadcrumbs into the run log and to abort the run when any
+// declared integration failed. No inbound auth (same as `/mcp`): the agent
+// container holds no run token by design, so the per-run network is the only
+// boundary.
+
+describe("GET /integrations/boot-report", () => {
+  const sampleReport = {
+    ok: false,
+    declared: 2,
+    adapter: "process",
+    spawned: [{ integrationId: "@scope/a", namespace: "a", toolCount: 3 }],
+    failed: [{ integrationId: "@scope/b", error: "spawn python3 ENOENT" }],
+    breadcrumbs: [
+      { message: "runtime adapter: process", level: "info" as const },
+      { message: "@scope/b: failed after 12ms — spawn python3 ENOENT", level: "error" as const },
+    ],
+  };
+
+  it("awaits the boot promise then returns the provider's report", async () => {
+    let resolveBoot!: () => void;
+    const integrationBootPromise = new Promise<void>((r) => {
+      resolveBoot = r;
+    });
+    const app = createApp(
+      makeDeps({
+        integrationBootPromise,
+        integrationBootReportProvider: () => sampleReport,
+      }),
+    );
+    // Resolve the boot promise on the next tick — the handler must await it.
+    queueMicrotask(() => resolveBoot());
+    const res = await app.request("/integrations/boot-report");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(sampleReport);
+  });
+
+  it("needs no auth — the agent container has no run token (network-isolation boundary)", async () => {
+    const app = createApp(
+      makeDeps({
+        integrationBootPromise: Promise.resolve(),
+        integrationBootReportProvider: () => sampleReport,
+      }),
+    );
+    const res = await app.request("/integrations/boot-report");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(sampleReport);
+  });
+
+  it("returns a synthetic ok report when no integrations were wired", async () => {
+    const app = createApp(makeDeps()); // no provider
+    const res = await app.request("/integrations/boot-report");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      ok: true,
+      declared: 0,
+      adapter: "none",
+      spawned: [],
+      failed: [],
+      breadcrumbs: [],
+    });
+  });
+});
+
 // --- ALL /llm/* — LLM reverse proxy ---
 //
 // The Pi SDK in the agent container makes HTTP calls to

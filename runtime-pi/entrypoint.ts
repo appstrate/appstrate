@@ -39,11 +39,13 @@ import {
   PiRunner,
   prepareBundleForPi,
   emitRuntimeReady,
+  emitBootProgress,
   startSinkHeartbeat,
   type AppstrateToolCtx,
   type AppstrateCtxProvider,
 } from "@appstrate/runner-pi";
 import { getErrorMessage } from "@appstrate/core/errors";
+import type { IntegrationBootReport } from "@appstrate/core/sidecar-types";
 import {
   BUNDLE_FORMAT_VERSION,
   bundleIntegrity,
@@ -168,8 +170,8 @@ async function emitError(message: string, data?: Record<string, unknown>): Promi
  * finalize the run as `failed`, and exits. `finalize` is best-effort —
  * server-side synthesis covers the case where even finalize POST fails.
  */
-async function die(message: string): Promise<never> {
-  await emitError(message);
+async function die(message: string, data?: Record<string, unknown>): Promise<never> {
+  await emitError(message, data);
   try {
     const failureResult = emptyRunResult();
     failureResult.error = { message };
@@ -179,6 +181,73 @@ async function die(message: string): Promise<never> {
     // fall through
   }
   process.exit(1);
+}
+
+/**
+ * Emit a boot breadcrumb into the run log — best-effort. Observability must
+ * never abort a run, so sink hiccups are swallowed here (unlike `emitError`,
+ * whose failures the bootstrap path escalates). The FIRST breadcrumb doubles
+ * as the run's `pending → running` transition (the platform flips on any first
+ * event), so emitting one as early as the sink allows closes the otherwise
+ * silent gap between container start and the first tool call.
+ *
+ * Always carries `data` (at minimum `{ boot: true }`): the log viewer
+ * coalesces consecutive *data-less* `progress` events into one block (to fold
+ * an agent's freeform stdout lines together). These are discrete phase markers,
+ * not stdout — the `data` marker keeps each on its own log entry.
+ */
+async function progress(message: string, data?: Record<string, unknown>): Promise<void> {
+  await emitBootProgress(bridgedSink, AGENT_RUN_ID!, message, {
+    data: { boot: true, ...data },
+  }).catch(() => {});
+}
+
+/**
+ * Cap on how long we wait for the sidecar's boot report. Generous: it
+ * exceeds the sidecar's per-integration MCP connect deadline (30 s) plus
+ * headroom for a few sequential integrations, so a report that never
+ * arrives means an integration boot genuinely hung — which we treat as a
+ * fatal "did not start as declared", not a transient blip.
+ */
+const BOOT_REPORT_DEADLINE_MS = 60_000;
+
+/**
+ * Fetch the sidecar's integration boot report — the authoritative spawn/
+ * connect outcome for every declared integration, plus the per-phase
+ * breadcrumbs the dashboard renders. The endpoint awaits the sidecar's boot
+ * pass before answering, so a successful response is final.
+ *
+ * Reachable on the same per-run network the MCP client just handshook over;
+ * a connection-level failure here is almost always a momentary race, so we
+ * retry briefly. We do NOT swallow a definitive failure: the run must abort
+ * when integration health can't be confirmed (the platform contract — an
+ * integration that didn't launch as declared fails the run, every tier).
+ *
+ * No auth header: the agent container holds no run token by design (the
+ * sidecar is the only party that can call back to the platform), so the
+ * endpoint mirrors `/mcp`'s network-isolation posture.
+ */
+async function fetchIntegrationBootReport(
+  sidecarUrl: string,
+): Promise<{ report: IntegrationBootReport } | { error: string }> {
+  const url = `${sidecarUrl.replace(/\/$/, "")}/integrations/boot-report`;
+  let lastError = "unknown error";
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), BOOT_REPORT_DEADLINE_MS);
+    try {
+      const res = await fetch(url, { signal: ac.signal });
+      if (res.ok) return { report: (await res.json()) as IntegrationBootReport };
+      lastError = `HTTP ${res.status}`;
+    } catch (err) {
+      lastError = getErrorMessage(err);
+    } finally {
+      clearTimeout(timer);
+    }
+    process.stderr.write(`[boot-report] ${lastError} (attempt ${attempt}/3)\n`);
+    if (attempt < 3) await new Promise((r) => setTimeout(r, 250 * attempt));
+  }
+  return { error: lastError };
 }
 
 const exists = (p: string) =>
@@ -254,6 +323,14 @@ async function loadExtensionsFromDir(dir: string, label: string) {
 
 // --- 2a. Phase A: git init + load AFPS bundle in parallel ---
 
+// Earliest possible event: the sink is live and the heavy ESM imports + Bun
+// cold start are behind us. `performance.now()` is measured from process entry
+// (timeOrigin), so it quantifies the cold-start gap the dashboard otherwise
+// shows as dead air before the run goes `running`.
+await progress(`runtime starting (${Math.round(performance.now())}ms cold start)`, {
+  coldStartMs: Math.round(performance.now()),
+});
+
 const packagePath = path.join(WORKSPACE, "agent-package.afps");
 const hasPackage = await exists(packagePath);
 
@@ -261,6 +338,8 @@ const [, bundle] = await Promise.all([
   initGitWorkspace(),
   hasPackage ? readBundleFromFile(packagePath) : Promise.resolve(null),
 ]);
+
+await progress(hasPackage ? "workspace initialized · agent package read" : "workspace initialized");
 
 // --- 2b. Phase B: materialise .pi/ layout + dynamic-import tools ---
 
@@ -283,6 +362,11 @@ if (bundle) {
 
 await loadExtensionsFromDir("/runtime/extensions", "runtime");
 
+await progress(
+  `bundle loaded (${extensionFactories.length} extension${extensionFactories.length === 1 ? "" : "s"})`,
+  { bundleLoaded: bundle !== null, extensions: extensionFactories.length },
+);
+
 // --- 2c. Phase C: wire sidecar-backed tools via MCP ---
 // Every sidecar-backed capability is surfaced as a typed Pi tool whose
 // implementation forwards to the sidecar's MCP `tools/call` endpoint:
@@ -301,6 +385,7 @@ const sidecarUrl = env.sidecarUrl;
 // the agent's bundle tools + runtime extensions.
 let mcpClient: AppstrateMcpClient | undefined;
 if (sidecarUrl) {
+  await progress("connecting to sidecar");
   try {
     // Retry the initial MCP handshake — the platform now starts the agent
     // in parallel with sidecar boot (issue #406), so the sidecar's /mcp
@@ -341,6 +426,8 @@ if (sidecarUrl) {
     process.exit(1);
   }
 
+  await progress("MCP connected");
+
   try {
     // `buildMcpDirectFactories` registers `run_history` and
     // `recall_memory`, plus one forwarding factory per namespaced
@@ -376,6 +463,34 @@ if (sidecarUrl) {
   } catch (err) {
     await emitError(`Failed to wire MCP-backed tools: ${getErrorMessage(err)}`);
     process.exit(1);
+  }
+
+  // --- 2c-bis. Integration boot gate + per-phase observability ---
+  // The sidecar booted each declared integration in parallel with this
+  // container. Fetch its authoritative boot report (uses the captured
+  // `sidecarUrl` const — the env var is deleted just below), relay every
+  // per-phase breadcrumb into the run log, and ABORT the run if any declared
+  // integration failed to start — the platform contract, every tier. A run
+  // that can't even confirm integration health aborts too.
+  const bootResult = await fetchIntegrationBootReport(sidecarUrl);
+  if ("error" in bootResult) {
+    await die(`Could not verify integration boot status: ${bootResult.error}`);
+  } else {
+    const bootReport = bootResult.report;
+    for (const crumb of bootReport.breadcrumbs) {
+      await emitBootProgress(bridgedSink, AGENT_RUN_ID!, crumb.message, {
+        level: crumb.level,
+        ...(crumb.data ? { data: crumb.data } : {}),
+      }).catch(() => {});
+    }
+    if (!bootReport.ok) {
+      const summary = bootReport.failed.map((f) => `${f.integrationId} (${f.error})`).join("; ");
+      await die(
+        `Integration boot failed — ${bootReport.failed.length} of ${bootReport.declared} ` +
+          `integration(s) did not start: ${summary}`,
+        { failed: bootReport.failed },
+      );
+    }
   }
 
   // --- 2d. Zero-knowledge enforcement ---

@@ -11,7 +11,7 @@ import {
   runConnectOnce,
 } from "./integrations-boot.ts";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
-import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
+import type { IntegrationSpawnSpec, IntegrationBootReport } from "@appstrate/core/sidecar-types";
 
 function readLlmConfigFromEnv(): LlmProxyConfig | undefined {
   // OAuth credentials ship as a single JSON env var carrying the full
@@ -147,6 +147,18 @@ const runtimeDeps = buildSidecarRuntimeDeps({
 
 let integrationTools: AppstrateToolDefinition[] = [];
 const specs = readIntegrationSpecsFromEnv();
+const declaredIntegrations = specs?.length ?? 0;
+// Boot report fetched by the agent via `GET /integrations/boot-report`. Starts
+// as a synthetic empty-OK report (covers the no-integrations run); the boot
+// `.then`/`.catch` below overwrite it with the real outcome.
+let integrationBootReport: IntegrationBootReport = {
+  ok: true,
+  declared: declaredIntegrations,
+  adapter: "none",
+  spawned: [],
+  failed: [],
+  breadcrumbs: [],
+};
 const integrationBootPromise =
   specs && specs.length > 0
     ? bootIntegrations(
@@ -159,6 +171,7 @@ const integrationBootPromise =
       )
         .then((result) => {
           integrationTools = result.tools;
+          integrationBootReport = result.report;
           logger.info("Integrations bootstrapped", {
             spawned: result.spawned,
             failed: result.failed,
@@ -166,9 +179,21 @@ const integrationBootPromise =
           });
         })
         .catch((err) => {
-          logger.error("Integration boot raised; continuing without them", {
-            error: err instanceof Error ? err.message : String(err),
-          });
+          // A throw here (vs. a per-integration failure) means the whole boot
+          // pass blew up — surface it as a non-OK report so the agent aborts
+          // the run rather than running with a silently empty toolset.
+          const error = err instanceof Error ? err.message : String(err);
+          logger.error("Integration boot raised", { error });
+          integrationBootReport = {
+            ok: false,
+            declared: declaredIntegrations,
+            adapter: "unknown",
+            spawned: [],
+            failed: [{ integrationId: "*", error }],
+            breadcrumbs: [
+              { message: `integration boot raised: ${error}`, level: "error", data: { error } },
+            ],
+          };
         })
     : Promise.resolve();
 
@@ -182,6 +207,7 @@ const app = createApp({
   oauthTokenCache,
   additionalMcpToolsProvider: () => integrationTools,
   integrationBootPromise,
+  integrationBootReportProvider: () => integrationBootReport,
 });
 
 logger.info("Sidecar proxy listening", { port, integrationsDeclared: specs?.length ?? 0 });

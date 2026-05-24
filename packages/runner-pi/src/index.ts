@@ -32,8 +32,10 @@ export {
 
 export {
   emitRuntimeReady,
+  emitBootProgress,
   CURRENT_RUNTIME_PROTOCOL_VERSION,
   type RuntimeReadyPayload,
+  type BootProgressOptions,
 } from "./runtime-ready.ts";
 
 export {
