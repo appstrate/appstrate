@@ -235,10 +235,28 @@ export async function extractBundle(bytes: Uint8Array, namespace: string): Promi
  * an MCP client without authentication (every public hosted MCP today
  * gates `tools/call` behind some credential).
  */
-async function connectRemoteHttpIntegration(
+/**
+ * Dependency seam for {@link connectRemoteHttpIntegration} — production
+ * callers omit it (defaults wire the real platform-fetch + credentials
+ * source + Streamable HTTP client). Unit tests inject stubs to exercise
+ * the per-request Bearer injection + 401-refresh-retry closure without
+ * standing up the platform endpoints. See CLAUDE.md "Mocking Policy".
+ */
+export interface ConnectRemoteHttpDeps {
+  fetchInitial?: typeof fetchInitialIntegrationCredentials;
+  createSource?: typeof createIntegrationCredentialsSource;
+  createClient?: typeof createMcpHttpClient;
+}
+
+export async function connectRemoteHttpIntegration(
   spec: IntegrationSpawnSpec,
   bundleFetchOpts: BundleFetchOptions,
+  deps: ConnectRemoteHttpDeps = {},
 ): Promise<{ client: AppstrateMcpClient; authKey: string }> {
+  const fetchInitial = deps.fetchInitial ?? fetchInitialIntegrationCredentials;
+  const createSource = deps.createSource ?? createIntegrationCredentialsSource;
+  const createClient = deps.createClient ?? createMcpHttpClient;
+
   const serverUrl = spec.manifest.server?.url;
   if (!serverUrl) {
     throw new Error(
@@ -246,7 +264,7 @@ async function connectRemoteHttpIntegration(
     );
   }
 
-  const initial = await fetchInitialIntegrationCredentials(spec.integrationId, bundleFetchOpts);
+  const initial = await fetchInitial(spec.integrationId, bundleFetchOpts);
 
   // Pick the auth whose header we'll inject. OAuth2 wins (refresh-aware);
   // otherwise the first auth with a resolved plan. The credentials
@@ -267,7 +285,7 @@ async function connectRemoteHttpIntegration(
   }
   const authKey = pickedAuth.authKey;
 
-  const source = createIntegrationCredentialsSource({
+  const source = createSource({
     integrationId: spec.integrationId,
     platformApiUrl: bundleFetchOpts.platformApiUrl,
     runToken: bundleFetchOpts.runToken,
@@ -299,7 +317,7 @@ async function connectRemoteHttpIntegration(
     return res;
   };
 
-  const client = await createMcpHttpClient(serverUrl, {
+  const client = await createClient(serverUrl, {
     fetch: customFetch,
     clientInfo: { name: "appstrate-sidecar-remote-integration", version: "0.1.0" },
     retry: { deadlineMs: 30_000 },

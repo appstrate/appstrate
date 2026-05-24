@@ -67,7 +67,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   runtime as a workspace dependency and drives the same `PiRunner`
   code path — plus profile / credential-proxy / HMAC sink wiring the
   runtime CLI never had.
-  Migration: `appstrate run <bundle> --providers=none --report=false
+  Migration: `appstrate run <bundle> --integrations=none --report=false
 --model-source=env --model-api=<api> --model=<id> --llm-api-key=<key>
 --snapshot <path> --input <json>` matches the previous `afps run`
   surface without requiring an Appstrate instance.
