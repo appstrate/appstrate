@@ -687,17 +687,32 @@ export async function persistCredentialBundle(
     const ownerPredicate = userId
       ? eq(integrationConnections.userId, userId)
       : eq(integrationConnections.endUserId, endUserId!);
-    const updated = await db
-      .update(integrationConnections)
-      .set(set)
-      .where(
-        and(
-          eq(integrationConnections.id, target.connectionId),
-          eq(integrationConnections.applicationId, target.scope.applicationId),
-          ownerPredicate,
-        ),
-      )
-      .returning();
+    const ownerScope = and(
+      eq(integrationConnections.id, target.connectionId),
+      eq(integrationConnections.applicationId, target.scope.applicationId),
+      ownerPredicate,
+    );
+    // Identity guard: a reconnect / scope-upgrade must stay on the SAME
+    // upstream account. If the re-consent authenticated a different identity
+    // (e.g. the user picked another Google account on the consent screen),
+    // refuse — silently rebinding a connection (possibly shared or pinned to
+    // agents under the assumption it's account A) to a different account is a
+    // data-integrity and access surprise. Only enforced between two real
+    // identities; "default" (identity-less) never blocks an upgrade.
+    if (input.accountId !== undefined && input.accountId !== "default") {
+      const [existing] = await db
+        .select({ accountId: integrationConnections.accountId })
+        .from(integrationConnections)
+        .where(ownerScope)
+        .limit(1);
+      if (existing && existing.accountId !== "default" && existing.accountId !== input.accountId) {
+        throw conflict(
+          "identity_mismatch",
+          `This connection is linked to a different account (${existing.accountId}). Reconnect with the same account, or create a new connection.`,
+        );
+      }
+    }
+    const updated = await db.update(integrationConnections).set(set).where(ownerScope).returning();
     const row = updated[0];
     if (!row) {
       throw notFound(`Connection '${target.connectionId}' not found or not owned by caller`);

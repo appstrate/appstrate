@@ -263,6 +263,11 @@ export function createIntegrationsRouter() {
       logger.error("Integration OAuth callback persistence failed", {
         err: String(err),
       });
+      // Surface the actionable identity-mismatch message verbatim (reconnect
+      // authenticated a different account) instead of the generic fallback.
+      if (err instanceof ApiError && err.code === "identity_mismatch") {
+        return c.html(popupHtmlError(err.message));
+      }
       return c.html(popupHtmlError("Could not save the connection."));
     }
     return c.html(popupHtmlClose());
