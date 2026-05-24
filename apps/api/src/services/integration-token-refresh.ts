@@ -246,11 +246,11 @@ export function decryptIntegrationConnectionFields(
 /**
  * Build the OAuth2 {@link IntegrationRefreshContext} for an integration
  * auth from its per-application `integration_oauth_clients` row. Returns
- * `null` (the auth is not refreshable) for: non-oauth2 auths, discovery-only
- * flows without a `tokenUrl`, missing per-app OAuth client, undecryptable
- * client secret, and public clients (`tokenAuthMethod: "none"`, not modelled
- * by the shared refresh helper). Single source of truth shared by both
- * integration credential resolvers.
+ * `null` (the auth is not refreshable) for: non-oauth2 auths, auths without a
+ * `tokenUrl`, missing per-app OAuth client, undecryptable client secret, and
+ * public clients (`tokenAuthMethod: "none"`, not modelled by the shared
+ * refresh helper). Single source of truth shared by both integration
+ * credential resolvers.
  */
 export async function buildIntegrationOAuthRefreshContext(
   packageId: string,
@@ -260,10 +260,9 @@ export async function buildIntegrationOAuthRefreshContext(
 ): Promise<IntegrationRefreshContext | null> {
   if (authDef.type !== "oauth2") return null;
   if (!authDef.tokenUrl) {
-    // Discovery-only flows (`discovery: "auto"` or `discovery: {…}`) need
-    // a one-shot RFC 9728 resolution before they can refresh. Not wired in
-    // this first cut — the agent sees the stale token until the next spawn.
-    logger.info("Integration auth refresh skipped — discovery-only flow", { packageId, authKey });
+    // The manifest schema requires a tokenUrl for oauth2, so this is a
+    // defensive guard (and narrows the optional type for the refresh below).
+    logger.info("Integration auth refresh skipped — no tokenUrl", { packageId, authKey });
     return null;
   }
   const [client] = await db

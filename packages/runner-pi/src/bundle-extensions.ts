@@ -10,8 +10,7 @@
  * sidecar (served over `/mcp`) or — on the no-sidecar path — registered as
  * Pi extensions via {@link buildRuntimeToolExtensions} at the call site
  * (`runtime-pi/entrypoint.ts` skip-sidecar branch + the `appstrate run`
- * CLI). This helper is now skills-only; `extensionFactories` is always
- * empty (kept for API stability).
+ * CLI). This helper is now skills-only.
  *
  * Used by:
  *   1. `runtime-pi/entrypoint.ts` — the in-container agent bootloader.
@@ -25,7 +24,6 @@
 
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
-import type { ExtensionFactory } from "@mariozechner/pi-coding-agent";
 import type { Bundle, BundlePackage } from "@appstrate/afps-runtime/bundle";
 import { parsePackageIdentity } from "@appstrate/afps-runtime/bundle";
 
@@ -35,32 +33,19 @@ export interface PrepareBundleOptions {
    *   - `{workspaceDir}/.pi/skills/<packageId>/**`  (for Pi SDK skill discovery)
    */
   workspaceDir: string;
-  /**
-   * Wrap each factory — e.g. {@link wrapExtensionFactory} from
-   * runtime-pi which catches tool execute() errors. Return the input
-   * untouched to disable wrapping.
-   */
-  extensionWrapper?: (factory: ExtensionFactory, extensionId: string) => ExtensionFactory;
-}
-
-export interface PreparedBundle {
-  /** Factories ready to pass to `PiRunner({ extensionFactories })`. */
-  extensionFactories: ExtensionFactory[];
-  /**
-   * Teardown hook. Retained for API stability (built-in runtime tools
-   * need no scratch dir, so this is currently a no-op). Does NOT touch
-   * `.pi/` — that subtree is part of the workspace contract.
-   */
-  cleanup: () => Promise<void>;
 }
 
 export async function prepareBundleForPi(
   bundle: Bundle,
   opts: PrepareBundleOptions,
-): Promise<PreparedBundle> {
+): Promise<void> {
   const piDir = path.join(opts.workspaceDir, ".pi");
 
-  // ─── Step 1: materialise each skill dep package under its .pi/ subtree ─
+  // Materialise each skill dep package under its .pi/ subtree. Runtime tools
+  // (output/log/note/pin/report) are NOT handled here — they are MCP tool
+  // definitions (`@appstrate/core/runtime-tool-defs`) hosted by the sidecar or
+  // registered as Pi extensions by the no-sidecar call site via
+  // `buildRuntimeToolExtensions`. This helper is skills-only.
   for (const [identity, pkg] of bundle.packages) {
     if (identity === bundle.root) continue;
     const parsed = parsePackageIdentity(identity);
@@ -70,18 +55,6 @@ export async function prepareBundleForPi(
       await materialisePackage(pkg, path.join(piDir, "skills", parsed.packageId));
     }
   }
-
-  // Runtime tools (output/log/note/pin/report) are NOT registered here —
-  // they are MCP tool definitions (`@appstrate/core/runtime-tool-defs`)
-  // hosted by the sidecar or registered as Pi extensions by the no-sidecar
-  // call site via `buildRuntimeToolExtensions`. This helper is skills-only.
-  void opts.extensionWrapper;
-  const factories: ExtensionFactory[] = [];
-
-  return {
-    extensionFactories: factories,
-    cleanup: async () => {},
-  };
 }
 
 // ---------------------------------------------------------------------------

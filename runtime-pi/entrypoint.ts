@@ -346,15 +346,10 @@ await progress(hasPackage ? "workspace initialized · agent package read" : "wor
 
 if (bundle) {
   try {
-    const prepared = await prepareBundleForPi(bundle, {
-      workspaceDir: WORKSPACE,
-      extensionWrapper: (factory, id) => wrapExtensionFactory(factory, id, appstrateCtxProvider),
-    });
-    extensionFactories.push(...prepared.extensionFactories);
+    await prepareBundleForPi(bundle, { workspaceDir: WORKSPACE });
 
-    // Fire-and-forget cleanup of the scratch tool dir + the original AFPS;
-    // they are no longer needed once the Pi SDK is up.
-    void prepared.cleanup().catch(() => {});
+    // Fire-and-forget cleanup of the original AFPS; no longer needed once the
+    // Pi SDK is up. (prepareBundleForPi is skills-only — no scratch dir.)
     void fs.unlink(packagePath).catch(() => {});
   } catch (err) {
     await emitError(`Failed to prepare agent package: ${getErrorMessage(err)}`);

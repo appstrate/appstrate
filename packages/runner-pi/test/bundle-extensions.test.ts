@@ -45,8 +45,7 @@ describe("prepareBundleForPi — skills/ install", () => {
       "deeper/nested/file.md": "nested",
     });
     const bundle = makeTestBundle(root, [skillPkg]);
-    const { cleanup } = await prepareBundleForPi(bundle, { workspaceDir: workspace });
-    await cleanup();
+    await prepareBundleForPi(bundle, { workspaceDir: workspace });
 
     expect(
       await fs.readFile(
@@ -68,26 +67,13 @@ describe("prepareBundleForPi — skills/ install", () => {
     ).toBe("nested");
   });
 
-  it("injects no built-in runtime tools when the bundle has no skills/providers/runtimeTools", async () => {
-    // Every runtime tool is opt-in (output included). With no `runtimeTools`
-    // selection there is nothing to inject — a side-effect-only agent that
-    // just does a task and finishes is valid.
-    const root = makeBundlePackage("@acme/agent", "1.0.0", "agent", {});
-    const bundle = makeTestBundle(root);
-    const { extensionFactories, cleanup } = await prepareBundleForPi(bundle, {
-      workspaceDir: workspace,
-    });
-    expect(extensionFactories).toHaveLength(0);
-    await cleanup();
-  });
-
-  it("does NOT register runtime tools — they are MCP defs hosted elsewhere", async () => {
+  it("registers no runtime tools — they are MCP defs hosted elsewhere", async () => {
     // Runtime tools (output/log/note/pin/report) are no longer Pi extensions
     // built here: they are transport-neutral MCP defs
     // (`@appstrate/core/runtime-tool-defs`) served by the sidecar or
     // registered by the no-sidecar call site via `buildRuntimeToolExtensions`.
-    // `prepareBundleForPi` is skills-only, so even a `runtimeTools` selection
-    // yields no factories.
+    // `prepareBundleForPi` is skills-only and returns nothing — even a
+    // `runtimeTools` selection produces no side effect here.
     const root = makeBundlePackage(
       "@acme/agent",
       "1.0.0",
@@ -96,19 +82,13 @@ describe("prepareBundleForPi — skills/ install", () => {
       { runtimeTools: ["output", "log"] },
     );
     const bundle = makeTestBundle(root);
-    const { extensionFactories, cleanup } = await prepareBundleForPi(bundle, {
-      workspaceDir: workspace,
-    });
-    expect(extensionFactories).toHaveLength(0);
-    await cleanup();
+    const result = await prepareBundleForPi(bundle, { workspaceDir: workspace });
+    expect(result).toBeUndefined();
   });
 });
 
-describe("prepareBundleForPi — cleanup", () => {
-  it("cleanup preserves the materialised .pi/ subtree (no-op teardown)", async () => {
-    // The `tool` package type was removed — built-in runtime tools need no
-    // scratch dir, so `cleanup` is a no-op retained for API stability. It
-    // must NOT touch `.pi/`, which is part of the workspace contract.
+describe("prepareBundleForPi — workspace contract", () => {
+  it("is idempotent and preserves the materialised .pi/ subtree", async () => {
     const root = makeBundlePackage(
       "@acme/agent",
       "1.0.0",
@@ -123,31 +103,15 @@ describe("prepareBundleForPi — cleanup", () => {
     const skillPkg = makeBundlePackage("@acme/s", "1.0.0", "skill", { "SKILL.md": "# s" });
     const bundle = makeTestBundle(root, [skillPkg]);
 
-    const { cleanup } = await prepareBundleForPi(bundle, {
-      workspaceDir: workspace,
-    });
+    // Calling twice against the same workspace overwrites files in place.
+    await prepareBundleForPi(bundle, { workspaceDir: workspace });
+    await prepareBundleForPi(bundle, { workspaceDir: workspace });
 
     const piSkillPath = path.join(workspace, ".pi", "skills", "@acme", "s", "SKILL.md");
-    const beforeExists = await fs
-      .stat(piSkillPath)
-      .then(() => true)
-      .catch(() => false);
-    expect(beforeExists).toBe(true);
-
-    await cleanup();
-
     const piSkillExists = await fs
       .stat(piSkillPath)
       .then(() => true)
       .catch(() => false);
     expect(piSkillExists).toBe(true);
-  });
-
-  it("cleanup is idempotent", async () => {
-    const root = makeBundlePackage("@acme/agent", "1.0.0", "agent", {});
-    const bundle = makeTestBundle(root);
-    const { cleanup } = await prepareBundleForPi(bundle, { workspaceDir: workspace });
-    await cleanup();
-    await cleanup();
   });
 });

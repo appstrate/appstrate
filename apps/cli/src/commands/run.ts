@@ -294,12 +294,10 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   }
 
   // ─── 6. ExecutionContext + prompt inputs ──────────────────────────
-  // Derive the full platform prompt (tools / skills / providers /
-  // schemas / output) from the bundle BEFORE prepareBundleForPi — the
-  // bundled `@appstrate/output` tool reads `process.env.OUTPUT_SCHEMA`
-  // at import time and must see the schema to expose it as constrained
-  // decoding to the LLM. Matches the platform container's wiring via
-  // `buildRuntimePiEnv`.
+  // Derive the full platform prompt (tools / skills / schemas / output)
+  // from the bundle. The runtime `output` tool receives the output schema as
+  // a parameter (`buildRuntimeToolExtensions({ outputSchema })` below), not
+  // via the environment.
   //
   // `--snapshot` seeds `memories` / `history` / `state` onto the
   // context so dev-loop replays (previously served by `afps run`) keep
@@ -318,15 +316,6 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   });
   const systemPrompt = renderPlatformPrompt(promptInputs);
 
-  const priorOutputSchema = process.env.OUTPUT_SCHEMA;
-  if (promptInputs.outputSchema !== undefined) {
-    process.env.OUTPUT_SCHEMA = JSON.stringify(promptInputs.outputSchema);
-  }
-  const restoreOutputSchema = (): void => {
-    if (priorOutputSchema === undefined) delete process.env.OUTPUT_SCHEMA;
-    else process.env.OUTPUT_SCHEMA = priorOutputSchema;
-  };
-
   // System tools (`@appstrate/output`, `@appstrate/report`, …) read
   // `AGENT_RUN_ID` from the env when stamping their stdout-JSONL events.
   // The stdout bridge installed below re-stamps events with the canonical
@@ -341,9 +330,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
 
   // ─── 7. Temp workspace + extension prep ────────────────────────────
   const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "appstrate-run-"));
-  const prepared = await prepareBundleForPi(bundle, {
-    workspaceDir,
-  });
+  await prepareBundleForPi(bundle, { workspaceDir });
 
   // ─── 7a. Integration api_call tools — one {ns}__api_call per integration ──
   // PiRunner takes pre-built Pi extension factories; the integration
@@ -516,9 +503,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
       // back to the original — required for tests; production processes
       // exit immediately after cleanup but the symmetry costs nothing.
       bridge.restore();
-      restoreOutputSchema();
       restoreAgentRunId();
-      await prepared.cleanup().catch(() => {});
       await fs.rm(workspaceDir, { recursive: true, force: true }).catch(() => {});
     })();
     return cleanupPromise;
@@ -533,11 +518,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
       systemPrompt,
       cwd: workspaceDir,
       agentDir: path.join(workspaceDir, ".pi-agent"),
-      extensionFactories: [
-        ...prepared.extensionFactories,
-        ...apiCallFactories,
-        ...runtimeToolFactories,
-      ],
+      extensionFactories: [...apiCallFactories, ...runtimeToolFactories],
       authStoragePath: path.join(workspaceDir, ".pi-auth.json"),
     });
 
@@ -557,8 +538,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     // phase entirely because ES module imports are evaluated before any
     // top-level statement runs.
     const emittedRunId = reportSession?.runId ?? runId;
-    const extensionsCount =
-      prepared.extensionFactories.length + apiCallFactories.length + runtimeToolFactories.length;
+    const extensionsCount = apiCallFactories.length + runtimeToolFactories.length;
     await emitRuntimeReady(sink, emittedRunId, {
       bundleLoaded: true,
       extensions: extensionsCount,

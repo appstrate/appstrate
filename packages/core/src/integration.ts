@@ -105,27 +105,12 @@ const packageRefSchema = z.discriminatedUnion("registryType", [
   pypiPackageRefSchema,
 ]);
 
-const mcpConfigSchema = z.object({
-  command: z.string().min(1).optional(),
-  args: z.array(z.string()).optional(),
-  env: z.record(z.string(), z.string()).optional(),
-});
-
-const serverVariableSchema = z.object({
-  isRequired: z.boolean().optional(),
-  description: z.string().optional(),
-  default: z.string().optional(),
-});
-
 const serverSchema = z
   .object({
     type: integrationServerTypeEnum,
     entryPoint: z.string().min(1).optional(),
     package: packageRefSchema.optional(),
     url: z.string().optional(),
-    variables: z.record(z.string(), serverVariableSchema).optional(),
-    mcpConfig: mcpConfigSchema.optional(),
-    toolsDynamic: z.boolean().optional(),
   })
   .superRefine((server, ctx) => {
     // Exactly one of {entryPoint, package, url} per type
@@ -249,14 +234,6 @@ const serverSchema = z
       }
     }
   });
-
-// ─────────────────────────────────────────────
-// OAuth2 discovery (used by `auths.{key}.discovery`)
-// ─────────────────────────────────────────────
-
-const discoveryExplicitSchema = z.object({
-  protectedResourceMetadataUrl: z.string().min(1),
-});
 
 // ─────────────────────────────────────────────
 // Auths — upstream API credentials (multi)
@@ -422,7 +399,6 @@ const authSchema = z
     authorizationUrl: z.string().optional(),
     tokenUrl: z.string().optional(),
     refreshUrl: z.string().optional(),
-    revokeUrl: z.string().optional(),
     // Optional Bearer-protected endpoint returning a JSON object with
     // identity claims about the freshly-authorised account. Called by the
     // OAuth callback after a successful token exchange and merged into the
@@ -432,9 +408,6 @@ const authSchema = z
     // — without it `accountId` falls back to the literal "default" and
     // every connection collapses onto the same row.
     userinfoUrl: z.string().optional(),
-
-    // Endpoints — Mode B (RFC 9728 discovery)
-    discovery: discoveryExplicitSchema.optional(),
 
     audience: z.string().optional(),
     scopes: z.array(z.string()).optional(),
@@ -512,12 +485,10 @@ const authSchema = z
     }
     if (auth.type === "oauth2") {
       const hasExplicit = auth.authorizationUrl && auth.tokenUrl;
-      const hasDiscovery = auth.discovery !== undefined;
-      if (!hasExplicit && !hasDiscovery) {
+      if (!hasExplicit) {
         ctx.addIssue({
           code: "custom",
-          message:
-            "oauth2 auth requires either (authorizationUrl + tokenUrl) or discovery.protectedResourceMetadataUrl",
+          message: "oauth2 auth requires explicit authorizationUrl + tokenUrl",
           path: ["authorizationUrl"],
         });
       }

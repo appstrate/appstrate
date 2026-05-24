@@ -47,9 +47,28 @@ import { SELECTABLE_RUNTIME_TOOLS, type SelectableRuntimeTool } from "./runtime-
  */
 export const RUNTIME_TOOL_EVENTS_META_KEY = "appstrate/events";
 
+/**
+ * The closed set of canonical run-event types a runtime tool may emit. Used
+ * as a trust-boundary allowlist by {@link reEmitRuntimeToolEvents}: only the
+ * platform's own first-party runtime tools legitimately produce these, so any
+ * event under {@link RUNTIME_TOOL_EVENTS_META_KEY} whose `type` is not in this
+ * set is dropped rather than forwarded into the run's event sink.
+ */
+export const CANONICAL_RUNTIME_TOOL_EVENT_TYPES = [
+  "output.emitted",
+  "log.written",
+  "memory.added",
+  "pinned.set",
+  "report.appended",
+] as const;
+
+const CANONICAL_RUNTIME_TOOL_EVENT_TYPE_SET: ReadonlySet<string> = new Set(
+  CANONICAL_RUNTIME_TOOL_EVENT_TYPES,
+);
+
 /** A canonical run event carried back from a runtime tool call. */
 export interface RuntimeToolEvent {
-  type: string;
+  type: (typeof CANONICAL_RUNTIME_TOOL_EVENT_TYPES)[number];
   [k: string]: unknown;
 }
 
@@ -344,7 +363,15 @@ export function reEmitRuntimeToolEvents(
   const raw = meta?.[RUNTIME_TOOL_EVENTS_META_KEY];
   if (!Array.isArray(raw)) return;
   for (const ev of raw) {
-    if (ev && typeof ev === "object" && typeof (ev as { type?: unknown }).type === "string") {
+    if (
+      ev &&
+      typeof ev === "object" &&
+      typeof (ev as { type?: unknown }).type === "string" &&
+      // Trust boundary: only forward the closed set of canonical run-event
+      // types. A non-canonical `type` is dropped — it can only come from an
+      // untrusted upstream attempting to forge a run event.
+      CANONICAL_RUNTIME_TOOL_EVENT_TYPE_SET.has((ev as { type: string }).type)
+    ) {
       emit(ev as RuntimeToolEvent);
     }
   }

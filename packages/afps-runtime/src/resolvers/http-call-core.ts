@@ -867,7 +867,7 @@ export interface ResolveBodyStreamOptions {
 }
 
 /**
- * Result of {@link resolveBodyStream} when streaming is enabled. Two
+ * Result of {@link resolveBodyForFetch} when streaming is enabled. Two
  * cases:
  *  - `bytes`: small payloads (or string bodies) — pass to fetch as-is.
  *  - `stream`: large `{ fromFile }` references — pass to fetch with
