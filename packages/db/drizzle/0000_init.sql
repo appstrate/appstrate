@@ -265,7 +265,7 @@ CREATE TABLE "credential_proxy_usage" (
 	"user_id" text,
 	"run_id" text,
 	"application_id" text,
-	"provider_id" text NOT NULL,
+	"integration_id" text NOT NULL,
 	"target_host" text,
 	"http_status" integer,
 	"duration_ms" integer,

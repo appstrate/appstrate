@@ -37,9 +37,9 @@
       "credentials": {
         "schema": {
           "type": "object",
-          "required": ["apiKey"],
+          "required": ["api_key"],
           "properties": {
-            "apiKey": {
+            "api_key": {
               "type": "string",
               "description": "Any non-empty string. The integration never reads this value; the sidecar's MITM proxy injects it as the `X-Toolkit-Token` header on every upstream call from the `fetch_echo` tool and the generic `api_call` tool."
             }
@@ -50,7 +50,7 @@
         "http": {
           "headerName": "X-Toolkit-Token",
           "headerPrefix": "",
-          "valueFrom": "apiKey"
+          "valueFrom": "api_key"
         }
       }
     }

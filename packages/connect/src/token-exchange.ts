@@ -28,7 +28,6 @@ import { extractErrorMessage } from "./utils.ts";
 /**
  * Superset of `OAuthTokenAuthMethod` from `@appstrate/core/validation`:
  * adds `"none"` for public-client integration auths (no client_secret).
- * Legacy providers never opt into `"none"`, so this is strictly additive.
  */
 export type TokenExchangeAuthMethod = "client_secret_basic" | "client_secret_post" | "none";
 
@@ -47,8 +46,8 @@ export interface ExchangeAuthorizationCodeInput {
   /** Body content type — defaults to `application/x-www-form-urlencoded`. */
   tokenContentType?: OAuthTokenContentType;
   /**
-   * PKCE `code_verifier`. Provider flows may omit this when PKCE is
-   * disabled; integration flows always supply it.
+   * PKCE `code_verifier`. Optional so the helper stays usable for a
+   * PKCE-disabled exchange; the integration OAuth flow always supplies it.
    */
   codeVerifier?: string;
   /** Redirect URI that was used in the authorize call. */

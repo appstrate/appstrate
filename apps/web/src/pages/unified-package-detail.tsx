@@ -95,7 +95,7 @@ function AgentRunButtonInline({
   if (!detail) return null;
 
   const { hasRequiredConfig, hasModel, hasPrompt, hasRequiredSkills } = readiness;
-  // Provider connection checks are handled by the ConnectionSummaryModal
+  // Integration connection gaps surface at run-kickoff (412 → MissingConnectionsModal)
   const runDisabled = !hasPrompt || !hasRequiredSkills || !hasRequiredConfig || !hasModel;
   const runDisabledTitle = !hasPrompt
     ? t("detail.titleEmptyPrompt")

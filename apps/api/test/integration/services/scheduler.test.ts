@@ -142,7 +142,7 @@ describe("scheduler service", () => {
         actor,
         {
           cronExpression: "0 9 * * *",
-          configOverride: { providers: { gmail: { scopes: ["read"] } } },
+          configOverride: { integrations: { gmail: { scopes: ["read"] } } },
           modelIdOverride: "model_abc",
           proxyIdOverride: "prx_xyz",
           versionOverride: "1.2.3",
@@ -150,7 +150,7 @@ describe("scheduler service", () => {
       );
 
       expect(schedule.configOverride).toEqual({
-        providers: { gmail: { scopes: ["read"] } },
+        integrations: { gmail: { scopes: ["read"] } },
       });
       expect(schedule.modelIdOverride).toBe("model_abc");
       expect(schedule.proxyIdOverride).toBe("prx_xyz");

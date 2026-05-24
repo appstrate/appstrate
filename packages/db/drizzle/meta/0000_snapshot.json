@@ -2457,8 +2457,8 @@
           "primaryKey": false,
           "notNull": false
         },
-        "provider_id": {
-          "name": "provider_id",
+        "integration_id": {
+          "name": "integration_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true

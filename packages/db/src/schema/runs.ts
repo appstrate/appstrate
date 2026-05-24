@@ -476,9 +476,9 @@ export const credentialProxyUsage = pgTable(
     applicationId: text("application_id").references(() => applications.id, {
       onDelete: "set null",
     }),
-    // Provider id the call hit (e.g. "gmail", "clickup"). Matches the
-    // credential-proxy route path parameter.
-    providerId: text("provider_id").notNull(),
+    // Integration id the call hit (e.g. "@appstrate/gmail"). Matches the
+    // credential-proxy `X-Integration` request header.
+    integrationId: text("integration_id").notNull(),
     // Upstream host for audit (no path/query — avoid logging secrets).
     targetHost: text("target_host"),
     httpStatus: integer("http_status"),

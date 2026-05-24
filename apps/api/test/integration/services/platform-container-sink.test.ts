@@ -204,8 +204,6 @@ function buildAgent(id: string): LoadedPackage {
     manifest: { name: id, version: "1.0.0", type: "agent" },
     prompt: "Do the thing.",
     skills: [],
-    tools: [],
-    providers: [],
   } as unknown as LoadedPackage;
 }
 

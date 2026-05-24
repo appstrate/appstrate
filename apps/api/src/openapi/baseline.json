@@ -1606,7 +1606,7 @@
             }
           },
           "400": {
-            "description": "Agent readiness validation failed (empty prompt, missing skill/tool, provider not connected, or incomplete config)",
+            "description": "Agent readiness validation failed (empty prompt, missing skill, integration not connected, or incomplete config)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3275,12 +3275,9 @@
                   },
                   "connectionOverrides": {
                     "type": "object",
-                    "description": "Per-(integration, authKey) connection picks frozen on the schedule row (flat-connections mechanism #3). Shape: `{ \"@scope/integration\": { \"<authKey>\": \"<connection_id>\" } }`. Loses to admin pins (#1), beats actor-fallback (#4). Stored on `package_schedules.connection_overrides` and replayed on every fire.",
+                    "description": "Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Shape: `{ \"@scope/integration\": \"<connection_id>\" }`. Loses to admin pins (#1), beats actor-fallback (#4). Stored on `package_schedules.connection_overrides` and replayed on every fire.",
                     "additionalProperties": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "type": "string"
-                      }
+                      "type": "string"
                     }
                   }
                 }
@@ -3472,12 +3469,9 @@
                   },
                   "connectionOverrides": {
                     "type": ["object", "null"],
-                    "description": "Per-(integration, authKey) connection picks frozen on the schedule. Pass `null` to clear.",
+                    "description": "Per-integration connection picks frozen on the schedule. Pass `null` to clear.",
                     "additionalProperties": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "type": "string"
-                      }
+                      "type": "string"
                     }
                   }
                 }
@@ -10075,180 +10069,6 @@
         }
       }
     },
-    "/internal/credentials/{scope}/{name}": {
-      "get": {
-        "operationId": "getProviderCredentials",
-        "tags": ["Internal"],
-        "summary": "Fetch provider credentials",
-        "description": "Container-to-host only. Auth via Bearer run token.",
-        "security": [
-          {
-            "bearerExecToken": []
-          }
-        ],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/PackageScope"
-          },
-          {
-            "$ref": "#/components/parameters/PackageName"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Credentials, authorized URIs, and transport metadata",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "credentials",
-                    "authorizedUris",
-                    "allowAllUris",
-                    "credentialFieldName"
-                  ],
-                  "properties": {
-                    "credentials": {
-                      "type": "object",
-                      "description": "Credential fields keyed by name. Consumed server-side by the sidecar / credential-proxy when injecting the upstream auth header.",
-                      "additionalProperties": {
-                        "type": "string"
-                      }
-                    },
-                    "authorizedUris": {
-                      "type": ["array", "null"],
-                      "items": {
-                        "type": "string"
-                      }
-                    },
-                    "allowAllUris": {
-                      "type": "boolean"
-                    },
-                    "credentialHeaderName": {
-                      "type": "string",
-                      "description": "Header name the upstream expects the credential under. When present, the sidecar / credential-proxy writes this header server-side from `credentials[credentialFieldName]`."
-                    },
-                    "credentialHeaderPrefix": {
-                      "type": "string",
-                      "description": "Optional prefix prepended to the credential value (e.g. `Bearer`)."
-                    },
-                    "credentialFieldName": {
-                      "type": "string",
-                      "description": "Name of the field in `credentials` that holds the secret. Defaults to `access_token` for OAuth flows and `api_key` for API-key flows unless the manifest overrides via `definition.credentials.fieldName`."
-                    }
-                  }
-                },
-                "example": {
-                  "credentials": {
-                    "access_token": "ya29.a0AfH6SM..."
-                  },
-                  "authorizedUris": ["https://gmail.googleapis.com/**"],
-                  "allowAllUris": false,
-                  "credentialHeaderName": "Authorization",
-                  "credentialHeaderPrefix": "Bearer",
-                  "credentialFieldName": "access_token"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "description": "Run not running",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                },
-                "example": {
-                  "type": "about:blank",
-                  "title": "Forbidden",
-                  "status": 403,
-                  "detail": "Run is not in running state",
-                  "code": "forbidden",
-                  "requestId": "req_jkl012"
-                }
-              }
-            }
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      }
-    },
-    "/internal/credentials/{scope}/{name}/refresh": {
-      "post": {
-        "operationId": "refreshProviderCredentials",
-        "tags": ["Internal"],
-        "summary": "Force-refresh provider credentials",
-        "description": "Called by sidecar on upstream 401 to force an OAuth2 token refresh before retrying. If the provider is not OAuth2 or has no refresh token, returns current credentials unchanged. If the refresh itself fails, flags the connection as needs_reconnection and returns 401. Container-to-host only. Auth via Bearer run token.",
-        "security": [
-          {
-            "bearerExecToken": []
-          }
-        ],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/PackageScope"
-          },
-          {
-            "$ref": "#/components/parameters/PackageName"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Refreshed credentials, authorized URIs, and transport metadata",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "credentials",
-                    "authorizedUris",
-                    "allowAllUris",
-                    "credentialFieldName"
-                  ],
-                  "properties": {
-                    "credentials": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "type": "string"
-                      }
-                    },
-                    "authorizedUris": {
-                      "type": ["array", "null"],
-                      "items": {
-                        "type": "string"
-                      }
-                    },
-                    "allowAllUris": {
-                      "type": "boolean"
-                    },
-                    "credentialHeaderName": {
-                      "type": "string"
-                    },
-                    "credentialHeaderPrefix": {
-                      "type": "string"
-                    },
-                    "credentialFieldName": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      }
-    },
     "/internal/oauth-token/{credentialId}": {
       "get": {
         "operationId": "getOAuthModelProviderToken",
@@ -11042,7 +10862,7 @@
         "operationId": "importPackage",
         "tags": ["Packages"],
         "summary": "Import a package from ZIP",
-        "description": "Import a package (agent, skill, or provider) from a ZIP file. The ZIP must contain a valid manifest.json. The package scope does not need to match your organization — cross-org packages are imported read-only (fork to modify). Rate-limited to 10 requests/minute. Returns 409 if the target package has unpublished draft changes — re-submit with ?force=true to overwrite.",
+        "description": "Import a package (agent, skill, or integration) from a ZIP file. The ZIP must contain a valid manifest.json. The package scope does not need to match your organization — cross-org packages are imported read-only (fork to modify). Rate-limited to 10 requests/minute. Returns 409 if the target package has unpublished draft changes — re-submit with ?force=true to overwrite.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -11196,7 +11016,7 @@
         "operationId": "importPackageFromGithub",
         "tags": ["Packages"],
         "summary": "Import a package from a GitHub URL",
-        "description": "Import a package (agent, skill, or provider) from a public GitHub repository URL. The URL must point to a directory containing a valid manifest.json. The package scope does not need to match your organization — cross-org packages are imported read-only (fork to modify). Rate-limited to 10 requests/minute.",
+        "description": "Import a package (agent, skill, or integration) from a public GitHub repository URL. The URL must point to a directory containing a valid manifest.json. The package scope does not need to match your organization — cross-org packages are imported read-only (fork to modify). Rate-limited to 10 requests/minute.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -14880,8 +14700,8 @@
       "get": {
         "operationId": "credentialProxyGet",
         "tags": ["Credential Proxy"],
-        "summary": "Proxy a GET request to a provider with server-side credential injection",
-        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the provider after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection profile (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the provider's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).",
+        "summary": "Proxy a GET request to an integration with server-side credential injection",
+        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection profile (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).",
         "security": [
           {
             "bearerApiKey": []
@@ -14942,7 +14762,7 @@
             "name": "Appstrate-User",
             "in": "header",
             "required": false,
-            "description": "Impersonation header — scopes the call to this end-user's connection profile.",
+            "description": "Impersonation header — scopes the call to this end-user's connection.",
             "schema": {
               "type": "string",
               "pattern": "^eu_"
@@ -15010,7 +14830,7 @@
             "description": "Forbidden — principal lacks `credential-proxy:call`, target not in `authorizedUris`, session bound to a different principal, or cookie session used."
           },
           "404": {
-            "description": "No credentials or connection profile for the requested provider."
+            "description": "No credentials or connection for the requested integration."
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
@@ -15020,8 +14840,8 @@
       "post": {
         "operationId": "credentialProxyPost",
         "tags": ["Credential Proxy"],
-        "summary": "Proxy a POST request to a provider with server-side credential injection",
-        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the provider after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection profile (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the provider's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).",
+        "summary": "Proxy a POST request to an integration with server-side credential injection",
+        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection profile (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).",
         "security": [
           {
             "bearerApiKey": []
@@ -15082,7 +14902,7 @@
             "name": "Appstrate-User",
             "in": "header",
             "required": false,
-            "description": "Impersonation header — scopes the call to this end-user's connection profile.",
+            "description": "Impersonation header — scopes the call to this end-user's connection.",
             "schema": {
               "type": "string",
               "pattern": "^eu_"
@@ -15150,7 +14970,7 @@
             "description": "Forbidden — principal lacks `credential-proxy:call`, target not in `authorizedUris`, session bound to a different principal, or cookie session used."
           },
           "404": {
-            "description": "No credentials or connection profile for the requested provider."
+            "description": "No credentials or connection for the requested integration."
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
@@ -15167,8 +14987,8 @@
       "put": {
         "operationId": "credentialProxyPut",
         "tags": ["Credential Proxy"],
-        "summary": "Proxy a PUT request to a provider with server-side credential injection",
-        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the provider after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection profile (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the provider's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).",
+        "summary": "Proxy a PUT request to an integration with server-side credential injection",
+        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection profile (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).",
         "security": [
           {
             "bearerApiKey": []
@@ -15229,7 +15049,7 @@
             "name": "Appstrate-User",
             "in": "header",
             "required": false,
-            "description": "Impersonation header — scopes the call to this end-user's connection profile.",
+            "description": "Impersonation header — scopes the call to this end-user's connection.",
             "schema": {
               "type": "string",
               "pattern": "^eu_"
@@ -15297,7 +15117,7 @@
             "description": "Forbidden — principal lacks `credential-proxy:call`, target not in `authorizedUris`, session bound to a different principal, or cookie session used."
           },
           "404": {
-            "description": "No credentials or connection profile for the requested provider."
+            "description": "No credentials or connection for the requested integration."
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
@@ -15314,8 +15134,8 @@
       "patch": {
         "operationId": "credentialProxyPatch",
         "tags": ["Credential Proxy"],
-        "summary": "Proxy a PATCH request to a provider with server-side credential injection",
-        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the provider after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection profile (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the provider's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).",
+        "summary": "Proxy a PATCH request to an integration with server-side credential injection",
+        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection profile (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).",
         "security": [
           {
             "bearerApiKey": []
@@ -15376,7 +15196,7 @@
             "name": "Appstrate-User",
             "in": "header",
             "required": false,
-            "description": "Impersonation header — scopes the call to this end-user's connection profile.",
+            "description": "Impersonation header — scopes the call to this end-user's connection.",
             "schema": {
               "type": "string",
               "pattern": "^eu_"
@@ -15444,7 +15264,7 @@
             "description": "Forbidden — principal lacks `credential-proxy:call`, target not in `authorizedUris`, session bound to a different principal, or cookie session used."
           },
           "404": {
-            "description": "No credentials or connection profile for the requested provider."
+            "description": "No credentials or connection for the requested integration."
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
@@ -15461,8 +15281,8 @@
       "delete": {
         "operationId": "credentialProxyDelete",
         "tags": ["Credential Proxy"],
-        "summary": "Proxy a DELETE request to a provider with server-side credential injection",
-        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the provider after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection profile (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the provider's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).",
+        "summary": "Proxy a DELETE request to an integration with server-side credential injection",
+        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection profile (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: true` to run the same substitution on the request body (verbs that carry one).",
         "security": [
           {
             "bearerApiKey": []
@@ -15523,7 +15343,7 @@
             "name": "Appstrate-User",
             "in": "header",
             "required": false,
-            "description": "Impersonation header — scopes the call to this end-user's connection profile.",
+            "description": "Impersonation header — scopes the call to this end-user's connection.",
             "schema": {
               "type": "string",
               "pattern": "^eu_"
@@ -15591,7 +15411,7 @@
             "description": "Forbidden — principal lacks `credential-proxy:call`, target not in `authorizedUris`, session bound to a different principal, or cookie session used."
           },
           "404": {
-            "description": "No credentials or connection profile for the requested provider."
+            "description": "No credentials or connection for the requested integration."
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
@@ -15911,7 +15731,7 @@
         "operationId": "getLibrary",
         "tags": ["Library"],
         "summary": "List all packages visible to the org with per-app install state",
-        "description": "Returns every package available to the caller's organization (org-owned + system) grouped by type (`agent`, `skill`, `tool`, `provider`). Each package carries an `installedIn` array of application ids — the applications belonging to the caller's org where the package is currently installed. Ephemeral packages are excluded.\n\nThe response also includes the org's applications (id, name, isDefault) so the UI can render a single grid keyed by app without an additional `/api/applications` call.",
+        "description": "Returns every package available to the caller's organization (org-owned + system) grouped by type (`agent`, `skill`, `integration`). Each package carries an `installedIn` array of application ids — the applications belonging to the caller's org where the package is currently installed. Ephemeral packages are excluded.\n\nThe response also includes the org's applications (id, name, isDefault) so the UI can render a single grid keyed by app without an additional `/api/applications` call.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"

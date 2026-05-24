@@ -299,7 +299,7 @@ export function createCredentialProxyRouter() {
           userId: apiKeyId ? null : userId,
           runId,
           applicationId,
-          providerId: integrationId,
+          integrationId,
           targetHost: safeTargetHost(target),
           httpStatus: result.status,
           durationMs,

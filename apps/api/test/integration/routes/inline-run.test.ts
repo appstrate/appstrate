@@ -35,7 +35,6 @@ function validManifest() {
     schemaVersion: "1.0",
     dependencies: {
       skills: {},
-      providers: {},
     },
   };
 }
@@ -49,7 +48,6 @@ function manifestWithDeps(
     ...validManifest(),
     dependencies: {
       skills: deps.skills ?? {},
-      providers: {},
     },
   };
 }

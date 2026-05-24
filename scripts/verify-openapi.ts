@@ -237,8 +237,6 @@ const expectedEndpoints = [
   // Internal
   "GET /internal/run-history",
   "GET /internal/memories",
-  "GET /internal/credentials/{scope}/{name}",
-  "POST /internal/credentials/{scope}/{name}/refresh",
   "GET /internal/oauth-token/{credentialId}",
   "POST /internal/oauth-token/{credentialId}/refresh",
   "GET /internal/integration-bundle/{scope}/{name}",
@@ -924,7 +922,7 @@ const SKIP_FILES = new Set<string>([
   "routes/llm-proxy",
   // packages.ts iterates ROUTE_CONFIGS with template-literal paths
   // (router.get(`/${path}/...`, …) where `path` ∈ {skills, agents,
-  // providers}). All concrete paths are already enumerated in
+  // integrations}). All concrete paths are already enumerated in
   // expectedEndpoints, so check #1 catches drift on this file.
   "routes/packages",
 ]);

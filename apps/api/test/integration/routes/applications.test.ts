@@ -215,19 +215,6 @@ describe("Applications API", () => {
       expect(res.status).toBe(403);
     });
 
-    it("PUT /api/applications/:otherAppId/providers/:p/credentials returns 403", async () => {
-      const { otherAppId, bearer } = await setupTwoAppKey();
-      const res = await app.request(
-        `/api/applications/${otherAppId}/providers/@scope/prov/credentials`,
-        {
-          method: "PUT",
-          headers: { ...bearer, "Content-Type": "application/json" },
-          body: JSON.stringify({ credentials: { apiKey: "secret" } }),
-        },
-      );
-      expect(res.status).toBe(403);
-    });
-
     it("DELETE /api/applications/:keyAppId is allowed (own scope)", async () => {
       const { ctx, bearer } = await setupTwoAppKey();
       // Just confirm the guard does not block — actual delete may 4xx for
