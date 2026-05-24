@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Phase 2 — integration scope-resolver. Exercises the dynamic scope
- * union the OAuth kickoff requests for an integration auth:
+ * Phase 2 — integration scope-resolver:
  *
  *   - `computeRequiredScopes` walks installed agents, infers scopes from
- *     tool selections + explicit agent scopes, unions everything.
- *   - `getCurrentScopesGranted` reads the high-water-mark across the
- *     actor's existing connections (drives incremental consent).
+ *     tool selections + explicit agent scopes, unions everything. Consumed
+ *     at refresh time to detect IdP-side scope shrink (not by the kickoff).
+ *   - `getCurrentScopesGranted` reads the `scopesGranted` of the single
+ *     connection being reconnected (keyed by `connectionId`, actor-filtered)
+ *     so the kickoff keeps re-consent a superset of that account's grant.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";

@@ -630,16 +630,14 @@ export async function persistCredentialBundle(
     // when >1 candidate is accessible.
     //
     // Display name, resolved once at creation and stable thereafter (refresh /
-    // update paths never touch `label`). The extracted identity (email/login)
-    // when extractTokenIdentity produced one, else "Connexion N" — N is the
-    // actor's existing connection count for this (app, integration) + 1,
-    // computed as a subquery in the INSERT so it's one statement. This is the
-    // single source of truth for the UI: no render-time fallback, the label is
-    // always set. User-editable afterwards.
+    // update paths never touch `label`). The extracted identity (`accountId`,
+    // which `extractTokenIdentity` maps to the upstream email/login) when one
+    // was produced, else "Connexion N" — N is the actor's existing connection
+    // count for this (app, integration) + 1, computed as a subquery in the
+    // INSERT so it's one statement. This is the single source of truth for the
+    // UI: no render-time fallback, the label is always set. User-editable after.
     const identityLabel =
-      (input.identityClaims?.accountEmail as string | undefined) ??
-      (input.identityClaims?.account_email as string | undefined) ??
-      (input.accountId && input.accountId !== "default" ? input.accountId : undefined);
+      input.accountId && input.accountId !== "default" ? input.accountId : undefined;
     const ownerFilter = userId ? sql`user_id = ${userId}` : sql`end_user_id = ${endUserId}`;
     const labelValue: string | SQL =
       identityLabel ??

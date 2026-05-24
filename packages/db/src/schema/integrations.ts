@@ -64,7 +64,7 @@ export const integrationConnections = pgTable(
     endUserId: text("end_user_id").references(() => endUsers.id, { onDelete: "cascade" }),
     /** v1 envelope ciphertext (AES-GCM, keyring-encrypted). */
     credentialsEncrypted: text("credentials_encrypted").notNull(),
-    /** Identity claims extracted via `extractTokenIdentity` — `accountEmail`, …. */
+    /** Identity claims extracted via `extractTokenIdentity` — `sub`, `email`, … */
     identityClaims: jsonb("identity_claims"),
     /** Granted OAuth scopes — surfaced in the UI for re-consent prompts. */
     scopesGranted: text("scopes_granted")
@@ -73,16 +73,11 @@ export const integrationConnections = pgTable(
       .default(sql`'{}'::text[]`),
     needsReconnection: boolean("needs_reconnection").notNull().default(false),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
-    // User-facing display name ("Perso", "Boulot"). Distinct from
-    // `accountId` (the upstream identifier — `sub` claim, email) which
-    // is opaque and shared across users. Nullable so existing rows stay
-    // valid; the UI falls back to `identityClaims.accountEmail` /
-    // `accountId` when absent.
-    // Display name, set at creation: the extracted identity (email/login) when
-    // available, else "Connexion N" (N = existing connection count + 1 in the
-    // same (app, integration, owner) group). Stable for the row's lifetime;
-    // user-editable. The UI shows it verbatim — a single source of truth, no
-    // render-time fallback gymnastics.
+    // User-facing display name, set at creation: the extracted identity
+    // (email/login) when available, else "Connexion N" (N = existing connection
+    // count + 1 in the same (app, integration, owner) group). Stable for the
+    // row's lifetime; user-editable. The UI shows it verbatim — a single source
+    // of truth, no render-time fallback gymnastics.
     label: text("label"),
     // Owner-set opt-in: when true, this connection is selectable by
     // any actor of the same application during the run-time fallback

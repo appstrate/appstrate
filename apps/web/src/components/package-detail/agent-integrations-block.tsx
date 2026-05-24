@@ -415,7 +415,6 @@ function MemberConnectionPicker({
     canAddConnection,
   } = resolution;
 
-  const connName = (c: IntegrationCandidate) => c.label ?? c.accountId;
   const ownerLabel = (c: IntegrationCandidate): string =>
     c.isOwn
       ? t("detail.integrationMemberPicker.byYou")
@@ -428,7 +427,7 @@ function MemberConnectionPicker({
     adminPinnedConnectionId ?? (orgDefaultEnforced ? orgDefaultConnectionId : null);
   if (lockedConnectionId) {
     const pinned = candidates.find((c) => c.id === lockedConnectionId);
-    const label = pinned?.label ?? pinned?.accountId ?? lockedConnectionId;
+    const label = pinned ? connectionDisplayLabel(pinned) : lockedConnectionId;
     return (
       <div data-testid={`member-picker-${integrationPackageId}`}>
         <Button
@@ -465,7 +464,7 @@ function MemberConnectionPicker({
   };
 
   const triggerLabel = resolvedConn
-    ? connName(resolvedConn)
+    ? connectionDisplayLabel(resolvedConn)
     : status === "must_choose"
       ? t("detail.integrationMemberPicker.chooseLabel")
       : status === "stale"
@@ -552,7 +551,7 @@ function MemberConnectionPicker({
                 <Check className={`size-3.5 ${resolvedConnectionId === c.id ? "" : "opacity-0"}`} />
                 <div className="flex min-w-0 flex-col">
                   <div className="flex items-center gap-1.5">
-                    <span className="truncate font-medium">{connName(c)}</span>
+                    <span className="truncate font-medium">{connectionDisplayLabel(c)}</span>
                     {tl && (
                       <Badge variant="outline" className="text-[0.6rem]">
                         {tl}

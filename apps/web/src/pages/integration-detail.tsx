@@ -89,6 +89,7 @@ function OAuthClientForm({ packageId, authKey }: { packageId: string; authKey: s
   // Accordion: collapsed once a client is registered, open while it still
   // needs configuring. `null` = follow that default; a boolean = user toggled.
   const [open, setOpen] = useState<boolean | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   if (isLoading) return <LoadingState />;
 
@@ -110,117 +111,126 @@ function OAuthClientForm({ packageId, authKey }: { packageId: string; authKey: s
     );
   };
 
-  const onDelete = () => {
-    if (window.confirm(t("integration.oauthClient.delete.confirm"))) {
-      del.mutate({ packageId, authKey });
-    }
-  };
-
   const configured = !!client;
   const isOpen = open === null ? !configured : open;
 
   return (
-    <Collapsible
-      open={isOpen}
-      onOpenChange={setOpen}
-      className="bg-muted/40 rounded-md border"
-      data-testid={`oauth-client-${authKey}`}
-    >
-      <CollapsibleTrigger className="flex w-full items-center gap-2 p-4 text-left">
-        <ChevronRight
-          size={14}
-          className={`text-muted-foreground transition-transform ${isOpen ? "rotate-90" : ""}`}
-        />
-        <Settings2 size={14} className="text-muted-foreground" />
-        <h4 className="text-sm font-semibold">{t("integration.section.oauthClient")}</h4>
-        <span
-          className={
-            configured
-              ? "ml-auto rounded bg-emerald-500/10 px-1.5 py-0.5 text-[0.65rem] font-medium text-emerald-500"
-              : "bg-warning/10 text-warning ml-auto rounded px-1.5 py-0.5 text-[0.65rem] font-medium"
-          }
-        >
-          {configured
-            ? t("integration.oauthClient.configured")
-            : t("integration.oauthClient.notConfigured")}
-        </span>
-      </CollapsibleTrigger>
-      <CollapsibleContent className="px-4 pb-4">
-        {client && (
-          <p className="text-muted-foreground mb-3 text-xs">
-            {t("integration.oauthClient.registered", { clientId: client.clientId })}
-          </p>
-        )}
-        <form className="grid gap-3 sm:grid-cols-2" onSubmit={submit}>
-          <div className="space-y-1">
-            <Label htmlFor={`cid-${authKey}`} className="text-xs">
-              {t("integration.oauthClient.clientId")}
-            </Label>
-            <Input
-              id={`cid-${authKey}`}
-              value={clientId}
-              onChange={(e) => setClientId(e.target.value)}
-              placeholder={client?.clientId ?? ""}
-              data-testid={`oauth-clientid-${authKey}`}
-            />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor={`csecret-${authKey}`} className="text-xs">
-              {t("integration.oauthClient.clientSecret")}
-            </Label>
-            <Input
-              id={`csecret-${authKey}`}
-              type="password"
-              value={clientSecret}
-              onChange={(e) => setClientSecret(e.target.value)}
-              disabled={publicClient}
-              placeholder={client?.hasClientSecret ? "••••••••" : ""}
-              data-testid={`oauth-clientsecret-${authKey}`}
-            />
-          </div>
-          <div className="space-y-1 sm:col-span-2">
-            <Label htmlFor={`redir-${authKey}`} className="text-xs">
-              {t("integration.oauthClient.redirectUri")}
-            </Label>
-            <Input
-              id={`redir-${authKey}`}
-              type="url"
-              value={redirectUri}
-              onChange={(e) => setRedirectUri(e.target.value)}
-              placeholder={client?.redirectUri ?? ""}
-            />
-          </div>
-          <label className="flex items-center gap-2 text-sm sm:col-span-2">
-            <Checkbox checked={publicClient} onCheckedChange={(c) => setPublicClient(Boolean(c))} />
-            {t("integration.oauthClient.publicClient")}
-          </label>
-          <div className="flex items-center gap-2 sm:col-span-2">
-            <Button
-              type="submit"
-              size="sm"
-              disabled={upsert.isPending || clientId.trim() === ""}
-              data-testid={`oauth-client-save-${authKey}`}
-            >
-              {client
-                ? t("integration.oauthClient.btnRotate")
-                : t("integration.oauthClient.btnRegister")}
-            </Button>
-            {client && (
+    <>
+      <Collapsible
+        open={isOpen}
+        onOpenChange={setOpen}
+        className="bg-muted/40 rounded-md border"
+        data-testid={`oauth-client-${authKey}`}
+      >
+        <CollapsibleTrigger className="flex w-full items-center gap-2 p-4 text-left">
+          <ChevronRight
+            size={14}
+            className={`text-muted-foreground transition-transform ${isOpen ? "rotate-90" : ""}`}
+          />
+          <Settings2 size={14} className="text-muted-foreground" />
+          <h4 className="text-sm font-semibold">{t("integration.section.oauthClient")}</h4>
+          <span
+            className={
+              configured
+                ? "ml-auto rounded bg-emerald-500/10 px-1.5 py-0.5 text-[0.65rem] font-medium text-emerald-500"
+                : "bg-warning/10 text-warning ml-auto rounded px-1.5 py-0.5 text-[0.65rem] font-medium"
+            }
+          >
+            {configured
+              ? t("integration.oauthClient.configured")
+              : t("integration.oauthClient.notConfigured")}
+          </span>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="px-4 pb-4">
+          {client && (
+            <p className="text-muted-foreground mb-3 text-xs">
+              {t("integration.oauthClient.registered", { clientId: client.clientId })}
+            </p>
+          )}
+          <form className="grid gap-3 sm:grid-cols-2" onSubmit={submit}>
+            <div className="space-y-1">
+              <Label htmlFor={`cid-${authKey}`} className="text-xs">
+                {t("integration.oauthClient.clientId")}
+              </Label>
+              <Input
+                id={`cid-${authKey}`}
+                value={clientId}
+                onChange={(e) => setClientId(e.target.value)}
+                placeholder={client?.clientId ?? ""}
+                data-testid={`oauth-clientid-${authKey}`}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor={`csecret-${authKey}`} className="text-xs">
+                {t("integration.oauthClient.clientSecret")}
+              </Label>
+              <Input
+                id={`csecret-${authKey}`}
+                type="password"
+                value={clientSecret}
+                onChange={(e) => setClientSecret(e.target.value)}
+                disabled={publicClient}
+                placeholder={client?.hasClientSecret ? "••••••••" : ""}
+                data-testid={`oauth-clientsecret-${authKey}`}
+              />
+            </div>
+            <div className="space-y-1 sm:col-span-2">
+              <Label htmlFor={`redir-${authKey}`} className="text-xs">
+                {t("integration.oauthClient.redirectUri")}
+              </Label>
+              <Input
+                id={`redir-${authKey}`}
+                type="url"
+                value={redirectUri}
+                onChange={(e) => setRedirectUri(e.target.value)}
+                placeholder={client?.redirectUri ?? ""}
+              />
+            </div>
+            <label className="flex items-center gap-2 text-sm sm:col-span-2">
+              <Checkbox
+                checked={publicClient}
+                onCheckedChange={(c) => setPublicClient(Boolean(c))}
+              />
+              {t("integration.oauthClient.publicClient")}
+            </label>
+            <div className="flex items-center gap-2 sm:col-span-2">
               <Button
-                type="button"
-                variant="ghost"
+                type="submit"
                 size="sm"
-                onClick={onDelete}
-                disabled={del.isPending}
+                disabled={upsert.isPending || clientId.trim() === ""}
+                data-testid={`oauth-client-save-${authKey}`}
               >
-                <Trash2 size={14} className="text-destructive" />
-                {t("integration.oauthClient.btnDelete")}
+                {client
+                  ? t("integration.oauthClient.btnRotate")
+                  : t("integration.oauthClient.btnRegister")}
               </Button>
-            )}
-          </div>
-        </form>
-      </CollapsibleContent>
-    </Collapsible>
+              {client && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setConfirmDelete(true)}
+                  disabled={del.isPending}
+                >
+                  <Trash2 size={14} className="text-destructive" />
+                  {t("integration.oauthClient.btnDelete")}
+                </Button>
+              )}
+            </div>
+          </form>
+        </CollapsibleContent>
+      </Collapsible>
+      <ConfirmModal
+        open={confirmDelete}
+        onClose={() => setConfirmDelete(false)}
+        title={t("btn.confirm", { ns: "common" })}
+        description={t("integration.oauthClient.delete.confirm")}
+        isPending={del.isPending}
+        onConfirm={() =>
+          del.mutate({ packageId, authKey }, { onSuccess: () => setConfirmDelete(false) })
+        }
+      />
+    </>
   );
 }
 
@@ -724,6 +734,7 @@ function ConnectionRow({
   const applicationId = useCurrentApplicationId();
   const [editing, setEditing] = useState(false);
   const [draftLabel, setDraftLabel] = useState(connection.label ?? "");
+  const [confirmDelete, setConfirmDelete] = useState(false);
   // `label` is the single source of truth (set at creation to the identity or
   // "Connexion N"); render it verbatim.
   const name = connectionDisplayLabel(connection);
@@ -753,124 +764,138 @@ function ConnectionRow({
   };
   const onDelete = () => {
     if (!orgId || !applicationId) return;
-    if (!window.confirm(t("integration.connection.deleteConfirm"))) return;
-    disconnect.mutate({ connectionId: connection.id });
+    setConfirmDelete(true);
   };
   return (
-    <div
-      className="bg-muted/30 flex flex-col gap-2 rounded-md border px-3 py-2 text-sm"
-      data-testid={`connection-row-${connection.id}`}
-    >
-      <div className="flex items-center gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            {editing ? (
-              <>
-                <Input
-                  value={draftLabel}
-                  onChange={(e) => setDraftLabel(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") submitLabel();
-                    if (e.key === "Escape") cancelEdit();
-                  }}
-                  placeholder={t("integration.connection.labelPlaceholder")}
-                  className="h-7 max-w-xs text-sm"
-                  autoFocus
-                  data-testid={`label-input-${connection.id}`}
-                />
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="size-7"
-                  onClick={submitLabel}
-                  disabled={updateConnection.isPending}
-                  title={t("integration.connection.labelSave")}
-                  data-testid={`label-save-${connection.id}`}
-                >
-                  <Check className="size-3.5" />
-                </Button>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="size-7"
-                  onClick={cancelEdit}
-                  disabled={updateConnection.isPending}
-                  title={t("integration.connection.labelCancel")}
-                >
-                  <X className="size-3.5" />
-                </Button>
-              </>
-            ) : (
-              <>
-                <span className="truncate font-medium">{name}</span>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="size-6"
-                  onClick={startEdit}
-                  title={t("integration.connection.labelEdit")}
-                  data-testid={`label-edit-${connection.id}`}
-                >
-                  <Pencil className="size-3" />
-                </Button>
-              </>
+    <>
+      <div
+        className="bg-muted/30 flex flex-col gap-2 rounded-md border px-3 py-2 text-sm"
+        data-testid={`connection-row-${connection.id}`}
+      >
+        <div className="flex items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              {editing ? (
+                <>
+                  <Input
+                    value={draftLabel}
+                    onChange={(e) => setDraftLabel(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") submitLabel();
+                      if (e.key === "Escape") cancelEdit();
+                    }}
+                    placeholder={t("integration.connection.labelPlaceholder")}
+                    className="h-7 max-w-xs text-sm"
+                    autoFocus
+                    data-testid={`label-input-${connection.id}`}
+                  />
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="size-7"
+                    onClick={submitLabel}
+                    disabled={updateConnection.isPending}
+                    title={t("integration.connection.labelSave")}
+                    data-testid={`label-save-${connection.id}`}
+                  >
+                    <Check className="size-3.5" />
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="size-7"
+                    onClick={cancelEdit}
+                    disabled={updateConnection.isPending}
+                    title={t("integration.connection.labelCancel")}
+                  >
+                    <X className="size-3.5" />
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <span className="truncate font-medium">{name}</span>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="size-6"
+                    onClick={startEdit}
+                    title={t("integration.connection.labelEdit")}
+                    data-testid={`label-edit-${connection.id}`}
+                  >
+                    <Pencil className="size-3" />
+                  </Button>
+                </>
+              )}
+              {isShared && (
+                <Badge variant="secondary" data-testid={`shared-badge-${connection.id}`}>
+                  {t("integration.connection.sharedBadge")}
+                </Badge>
+              )}
+              {connection.needsReconnection && (
+                <Badge variant="destructive">{t("integration.auth.needsReconnection")}</Badge>
+              )}
+            </div>
+            {connection.scopesGranted.length > 0 && (
+              <p className="text-muted-foreground truncate font-mono text-[0.65rem]">
+                {connection.scopesGranted.join(" ")}
+              </p>
             )}
-            {isShared && (
-              <Badge variant="secondary" data-testid={`shared-badge-${connection.id}`}>
-                {t("integration.connection.sharedBadge")}
-              </Badge>
-            )}
-            {connection.needsReconnection && (
-              <Badge variant="destructive">{t("integration.auth.needsReconnection")}</Badge>
+            {connection.expiresAt && (
+              <p className="text-muted-foreground text-[0.65rem]">
+                {t("integration.auth.expiresAt", {
+                  date: new Date(connection.expiresAt).toLocaleDateString(),
+                })}
+              </p>
             )}
           </div>
-          {connection.scopesGranted.length > 0 && (
-            <p className="text-muted-foreground truncate font-mono text-[0.65rem]">
-              {connection.scopesGranted.join(" ")}
-            </p>
-          )}
-          {connection.expiresAt && (
-            <p className="text-muted-foreground text-[0.65rem]">
-              {t("integration.auth.expiresAt", {
-                date: new Date(connection.expiresAt).toLocaleDateString(),
-              })}
-            </p>
-          )}
+        </div>
+        <div className="flex items-center gap-2 pt-1">
+          <label className="flex items-center gap-1.5 text-xs">
+            <input
+              type="checkbox"
+              checked={isShared}
+              disabled={updateConnection.isPending}
+              onChange={(e) =>
+                updateConnection.mutate({
+                  packageId,
+                  connectionId: connection.id,
+                  sharedWithOrg: e.target.checked,
+                })
+              }
+              data-testid={`share-toggle-${connection.id}`}
+            />
+            {t("integration.connection.shareWithOrg.label")}
+          </label>
+          <span className="text-muted-foreground text-[0.65rem]">
+            {t("integration.connection.shareWithOrg.help")}
+          </span>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="ml-auto size-7"
+            onClick={onDelete}
+            disabled={disconnect.isPending}
+            title={t("integration.connection.delete")}
+            data-testid={`connection-delete-${connection.id}`}
+          >
+            <Trash2 className="text-destructive size-3.5" />
+          </Button>
         </div>
       </div>
-      <div className="flex items-center gap-2 pt-1">
-        <label className="flex items-center gap-1.5 text-xs">
-          <input
-            type="checkbox"
-            checked={isShared}
-            disabled={updateConnection.isPending}
-            onChange={(e) =>
-              updateConnection.mutate({
-                packageId,
-                connectionId: connection.id,
-                sharedWithOrg: e.target.checked,
-              })
-            }
-            data-testid={`share-toggle-${connection.id}`}
-          />
-          {t("integration.connection.shareWithOrg.label")}
-        </label>
-        <span className="text-muted-foreground text-[0.65rem]">
-          {t("integration.connection.shareWithOrg.help")}
-        </span>
-        <Button
-          size="icon"
-          variant="ghost"
-          className="ml-auto size-7"
-          onClick={onDelete}
-          disabled={disconnect.isPending}
-          title={t("integration.connection.delete")}
-          data-testid={`connection-delete-${connection.id}`}
-        >
-          <Trash2 className="text-destructive size-3.5" />
-        </Button>
-      </div>
-    </div>
+      <ConfirmModal
+        open={confirmDelete}
+        onClose={() => setConfirmDelete(false)}
+        title={t("btn.confirm", { ns: "common" })}
+        description={t("integration.connection.deleteConfirm")}
+        isPending={disconnect.isPending}
+        onConfirm={() =>
+          disconnect.mutate(
+            { connectionId: connection.id },
+            { onSuccess: () => setConfirmDelete(false) },
+          )
+        }
+      />
+    </>
   );
 }
 
@@ -967,10 +992,11 @@ export function IntegrationDetailPage() {
   const [tab, setTab] = useState("connections");
   const [forkOpen, setForkOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmDeactivate, setConfirmDeactivate] = useState(false);
 
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={String(error)} />;
-  if (!detail) return <ErrorState message="Integration not found" />;
+  if (!detail) return <ErrorState message={t("packages.detailNotFound")} />;
 
   const summary = integrations?.find((i) => i.id === packageId);
   const active = Boolean(summary?.active);
@@ -1028,11 +1054,8 @@ export function IntegrationDetailPage() {
               onDownload={downloadPackage}
               onFork={() => setForkOpen(true)}
               canDeactivate={active}
-              onDeactivate={() => {
-                if (window.confirm(t("integrations.deactivate.confirm"))) {
-                  deactivate.mutate(packageId);
-                }
-              }}
+              onDeactivate={() => setConfirmDeactivate(true)}
+              deactivatePending={deactivate.isPending}
               canDeletePackage={!!pkg && pkg.agents.length === 0}
               onDeletePackage={() => setConfirmDelete(true)}
             />
@@ -1133,6 +1156,18 @@ export function IntegrationDetailPage() {
         packageId={packageId}
         defaultName={name ?? ""}
         type="integration"
+      />
+
+      <ConfirmModal
+        open={confirmDeactivate}
+        onClose={() => setConfirmDeactivate(false)}
+        title={t("btn.confirm", { ns: "common" })}
+        description={t("integrations.deactivate.confirm")}
+        variant="default"
+        isPending={deactivate.isPending}
+        onConfirm={() =>
+          deactivate.mutate(packageId, { onSuccess: () => setConfirmDeactivate(false) })
+        }
       />
 
       <ConfirmModal

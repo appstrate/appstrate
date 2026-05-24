@@ -41,7 +41,7 @@ export interface IntegrationConnection {
   authKey: string;
   /** Multi-account discriminator extracted at connect time. */
   accountId: string;
-  /** Identity claims surfaced for the UI (e.g. `account_email`). */
+  /** Identity claims extracted via `extractTokenIdentity` (e.g. `sub`, `email`). */
   identityClaims: Record<string, unknown> | null;
   scopesGranted: string[];
   needsReconnection: boolean;

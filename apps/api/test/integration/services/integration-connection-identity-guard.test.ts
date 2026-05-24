@@ -38,7 +38,7 @@ describe("integration connection — identity guard on reconnect/upgrade", () =>
       authKey: "oauth",
       accountId,
       credentials: { access_token: "tok" },
-      identityClaims: { accountEmail: accountId },
+      identityClaims: { email: accountId },
       actor,
       ...(connectionId ? { connectionId } : {}),
     });
@@ -46,9 +46,13 @@ describe("integration connection — identity guard on reconnect/upgrade", () =>
 
   it("allows a same-account reconnect (scope upgrade)", async () => {
     const created = await connect("alice@example.com");
+    // Label is set at creation to the extracted identity (accountId).
+    expect(created.label).toBe("alice@example.com");
     const updated = await connect("alice@example.com", created.id);
     expect(updated.id).toBe(created.id);
     expect(updated.accountId).toBe("alice@example.com");
+    // Reconnect never rewrites the label.
+    expect(updated.label).toBe("alice@example.com");
   });
 
   it("refuses a reconnect that authenticated a different account", async () => {
@@ -69,7 +73,11 @@ describe("integration connection — identity guard on reconnect/upgrade", () =>
       credentials: { access_token: "tok" },
       actor,
     });
+    // Identity-less connect falls back to the "Connexion N" label.
+    expect(created.label).toBe("Connexion 1");
     const upgraded = await connect("alice@example.com", created.id);
     expect(upgraded.accountId).toBe("alice@example.com");
+    // The label is fixed at creation — the upgrade doesn't rewrite it.
+    expect(upgraded.label).toBe("Connexion 1");
   });
 });

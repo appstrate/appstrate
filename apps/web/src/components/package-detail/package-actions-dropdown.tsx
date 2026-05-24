@@ -70,6 +70,7 @@ interface PackageActionsDropdownProps {
   // removes the application_packages row, keeps connections).
   canDeactivate?: boolean;
   onDeactivate?: () => void;
+  deactivatePending?: boolean;
 }
 
 export function PackageActionsDropdown({
@@ -101,6 +102,7 @@ export function PackageActionsDropdown({
   onUninstall,
   canDeactivate,
   onDeactivate,
+  deactivatePending,
 }: PackageActionsDropdownProps) {
   const { t } = useTranslation(["agents", "common", "settings"]);
   const navigate = useNavigate();
@@ -226,7 +228,7 @@ export function PackageActionsDropdown({
               <>
                 <DropdownMenuSeparator />
                 {canDeactivate && onDeactivate && (
-                  <DropdownMenuItem onSelect={onDeactivate}>
+                  <DropdownMenuItem onSelect={onDeactivate} disabled={deactivatePending}>
                     <PowerOff size={14} />
                     {t("integrations.btn.deactivate", { ns: "settings" })}
                   </DropdownMenuItem>

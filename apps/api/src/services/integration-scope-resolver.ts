@@ -153,5 +153,5 @@ export async function getCurrentScopesGranted(input: {
         }),
       ),
     );
-  return [...new Set(rows.flatMap((r) => r.scopesGranted ?? []))];
+  return rows[0]?.scopesGranted ?? [];
 }
