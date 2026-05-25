@@ -264,9 +264,22 @@ export function mcpServerManifest(opts: {
   version?: string;
   serverType?: "node" | "python" | "binary" | "uv";
   entryPoint?: string;
+  /**
+   * Appstrate runtime override → `_meta["dev.appstrate/mcp-server"].runtime`.
+   * MCPB has no `bun` server.type, so a bun-native server keeps an MCPB-valid
+   * `serverType` and declares the real runtime here. Server-side only — never
+   * belongs on the integration manifest.
+   */
+  appstrateRuntime?: string;
 }): Record<string, unknown> {
   const type = opts.serverType ?? "node";
   const entryPoint = opts.entryPoint ?? "main.js";
+  const meta: Record<string, unknown> = {
+    "dev.afps/mcp-server": { name: opts.afpsName ?? opts.name, type: "mcp-server" },
+  };
+  if (opts.appstrateRuntime) {
+    meta["dev.appstrate/mcp-server"] = { runtime: opts.appstrateRuntime };
+  }
   return {
     manifest_version: "0.3",
     name: opts.name,
@@ -277,6 +290,6 @@ export function mcpServerManifest(opts: {
       entry_point: entryPoint,
       mcp_config: { command: type === "node" ? "node" : "python3", args: [entryPoint] },
     },
-    _meta: { "dev.afps/mcp-server": { name: opts.afpsName ?? opts.name, type: "mcp-server" } },
+    _meta: meta,
   };
 }

@@ -44,6 +44,7 @@ import type {
 } from "@appstrate/core/integration";
 // ResolvedConnectionMap is consumed via input prop (`resolvedConnections`) below.
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
+import { getMcpServerRuntime } from "@appstrate/core/mcp-server";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 
 import { logger } from "../lib/logger.ts";
@@ -249,7 +250,12 @@ async function resolveOne(
       });
       return null;
     }
-    serverSpec = { type: run.type, entryPoint: run.entry_point, serverPackageId: ref.name };
+    // The Appstrate runtime override (`_meta["dev.appstrate/mcp-server"].runtime`)
+    // wins over the MCPB `server.type`. MCPB has no `bun` type, so a bun-native
+    // server stays MCPB-conformant (e.g. `server.type: "node"`) and declares
+    // `bun` in _meta; the runner then picks the bun interpreter/image.
+    const effectiveType = getMcpServerRuntime(mcpServer) ?? run.type;
+    serverSpec = { type: effectiveType, entryPoint: run.entry_point, serverPackageId: ref.name };
   }
   // sourceKind === "api" (or unknown) → serverless, serverSpec stays undefined.
 

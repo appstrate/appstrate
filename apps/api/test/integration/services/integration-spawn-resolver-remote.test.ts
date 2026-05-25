@@ -19,6 +19,7 @@ import {
   remoteIntegrationManifest,
   localIntegrationManifest,
   httpHeaderDelivery,
+  mcpServerManifest,
 } from "../../helpers/integration-manifests.ts";
 
 const INTEG = "@orga/remote-mcp";
@@ -197,5 +198,46 @@ describe("resolveIntegrationSpawns — local source error guards", () => {
       agentManifest: localAgent(),
     });
     expect(specs.length).toBe(0);
+  });
+
+  it("applies the mcp-server _meta runtime override to the spawn spec server type", async () => {
+    const SERVER = "@orga/bun-server";
+    await seedPackage({
+      id: LOCAL,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: localManifest(SERVER),
+    });
+    // The mcp-server stays MCPB-conformant (server.type "node") and declares the
+    // real runtime under _meta — the resolver must surface `bun`, not `node`.
+    await seedPackage({
+      id: SERVER,
+      orgId: ctx.orgId,
+      type: "mcp-server",
+      source: "local",
+      draftManifest: mcpServerManifest({
+        name: "bun-server",
+        afpsName: SERVER,
+        version: "0.1.0",
+        serverType: "node",
+        entryPoint: "./server.ts",
+        appstrateRuntime: "bun",
+      }),
+    });
+    await seedInstalledPackage(ctx.defaultAppId, LOCAL);
+    await seedConnection();
+
+    const specs = await resolveIntegrationSpawns({
+      applicationId: ctx.defaultAppId,
+      actor: { type: "user", id: ctx.user.id },
+      agentManifest: localAgent(),
+    });
+    expect(specs.length).toBe(1);
+    expect(specs[0]!.manifest.server).toEqual({
+      type: "bun",
+      entryPoint: "./server.ts",
+      serverPackageId: SERVER,
+    });
   });
 });
