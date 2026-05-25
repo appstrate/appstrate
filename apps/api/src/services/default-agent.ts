@@ -13,8 +13,8 @@ import { asRecord } from "@appstrate/core/safe-json";
 const HELLO_WORLD_MANIFEST = {
   version: "1.0.0",
   type: "agent",
-  schemaVersion: "1.1",
-  displayName: "Hello World",
+  schema_version: "2.0",
+  display_name: "Hello World",
   author: "Appstrate",
   description: "Un agent de démonstration pour découvrir les capacités de la plateforme Appstrate.",
   keywords: ["demo", "example", "getting-started"],

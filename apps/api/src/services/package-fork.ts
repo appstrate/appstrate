@@ -126,7 +126,7 @@ async function forkWithConfig(
     {
       id: targetId,
       name:
-        typeof versionManifest.displayName === "string" ? versionManifest.displayName : undefined,
+        typeof versionManifest.display_name === "string" ? versionManifest.display_name : undefined,
       description:
         typeof versionManifest.description === "string" ? versionManifest.description : undefined,
       content,

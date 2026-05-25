@@ -171,7 +171,7 @@ interface CreateRunParams {
   apiKeyId?: string;
   /** Snapshot of the agent's @scope (e.g. "@acme") at run creation. */
   agentScope?: string | null;
-  /** Snapshot of the agent's display name (manifest.displayName ?? name). */
+  /** Snapshot of the agent's display name (manifest.display_name ?? name). */
   agentName?: string | null;
   /** Snapshot of the effective agent config (merged overrides) at run creation. */
   config?: Record<string, unknown> | null;

@@ -70,7 +70,7 @@ export function createLibraryRouter() {
           id: row.id,
           type: row.type,
           source: row.source,
-          name: typeof m.displayName === "string" ? m.displayName : row.id,
+          name: typeof m.display_name === "string" ? m.display_name : row.id,
           description: typeof m.description === "string" ? m.description : "",
           installedIn: [],
         };

@@ -59,7 +59,7 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
 
   return c.json({
     id: agent.id,
-    displayName: m.displayName,
+    displayName: m.display_name,
     description: m.description,
     source: agent.source,
     scope: parsed?.scope ?? null,

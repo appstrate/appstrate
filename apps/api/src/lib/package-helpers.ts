@@ -20,8 +20,8 @@ export function notEphemeralFilter() {
   return ne(packages.ephemeral, true);
 }
 
-/** Extract displayName from a package's draftManifest JSONB, falling back to the package ID. */
+/** Extract display_name from a package's draftManifest JSONB, falling back to the package ID. */
 export function getPackageDisplayName(pkg: { id: string; draftManifest: unknown }): string {
   const m = asRecord(pkg.draftManifest);
-  return typeof m.displayName === "string" ? m.displayName : pkg.id;
+  return typeof m.display_name === "string" ? m.display_name : pkg.id;
 }

@@ -93,12 +93,7 @@ async function listAllActorIntegrationConnections(
     const manifest = asRecord(pkg.draftManifest);
     packageInfo.set(pkg.id, {
       displayName: getPackageDisplayName(pkg),
-      logo:
-        typeof manifest.iconUrl === "string"
-          ? manifest.iconUrl
-          : typeof manifest.icon === "string"
-            ? manifest.icon
-            : "",
+      logo: typeof manifest.icon === "string" ? manifest.icon : "",
     });
   }
 

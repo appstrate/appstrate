@@ -210,7 +210,7 @@ async function parsePackageUpload(
       manifest = parseManifestBytesSafe(manifestBytes);
       if (manifest) {
         // Extract display fields as fallbacks (not for manifest storage)
-        if (!name && typeof manifest.displayName === "string") name = manifest.displayName;
+        if (!name && typeof manifest.display_name === "string") name = manifest.display_name;
         if (!description && typeof manifest.description === "string")
           description = manifest.description;
       }

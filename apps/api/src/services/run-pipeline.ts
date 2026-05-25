@@ -37,8 +37,8 @@ export function extractRunAgentDenorm(pkg: LoadedPackage): {
 } {
   const parsed = parseScopedName(pkg.id);
   const manifestName =
-    typeof pkg.manifest.displayName === "string"
-      ? pkg.manifest.displayName
+    typeof pkg.manifest.display_name === "string"
+      ? pkg.manifest.display_name
       : typeof pkg.manifest.name === "string"
         ? pkg.manifest.name
         : null;
