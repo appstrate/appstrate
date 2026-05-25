@@ -59,7 +59,7 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
 
   return c.json({
     id: agent.id,
-    displayName: m.display_name,
+    display_name: m.display_name,
     description: m.description,
     source: agent.source,
     scope: parsed?.scope ?? null,
@@ -95,7 +95,7 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
       : null,
     versionCount,
     hasUnarchivedChanges,
-    forkedFrom: rawItem?.forkedFrom ?? null,
+    forked_from: rawItem?.forked_from ?? null,
     ...(agent.source !== "system" && rawItem
       ? {
           manifest: agent.manifest,

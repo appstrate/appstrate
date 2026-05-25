@@ -43,9 +43,9 @@ export const agentsPaths = {
                 data: [
                   {
                     id: "@acme/email-sorter",
-                    displayName: "Email Sorter",
+                    display_name: "Email Sorter",
                     description: "Automatically sorts and labels incoming emails",
-                    schemaVersion: "2.0",
+                    schema_version: "2.0",
                     author: "Acme Corp",
                     keywords: ["email", "automation"],
                     source: "local",
@@ -59,9 +59,9 @@ export const agentsPaths = {
                   },
                   {
                     id: "@appstrate/code-reviewer",
-                    displayName: "Code Reviewer",
+                    display_name: "Code Reviewer",
                     description: "Reviews pull requests and suggests improvements",
-                    schemaVersion: "2.0",
+                    schema_version: "2.0",
                     author: "Appstrate",
                     keywords: ["code", "review", "github"],
                     source: "system",

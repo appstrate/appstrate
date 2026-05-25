@@ -149,7 +149,7 @@ function ScheduleParams({
   const { t } = useTranslation(["agents"]);
   const { data: agents } = useAgents();
   const agentDisplayName =
-    agents?.find((f) => f.id === schedule.packageId)?.displayName ?? schedule.packageId;
+    agents?.find((f) => f.id === schedule.packageId)?.display_name ?? schedule.packageId;
   const input = schedule.input as Record<string, unknown> | null;
 
   return (
@@ -229,7 +229,7 @@ function ScheduleHistory({
   const { t } = useTranslation(["agents"]);
   const { data: agents } = useAgents();
   const agentName =
-    agents?.find((f) => f.id === schedule.packageId)?.displayName ?? schedule.packageId;
+    agents?.find((f) => f.id === schedule.packageId)?.display_name ?? schedule.packageId;
 
   const isActive = schedule.enabled;
 

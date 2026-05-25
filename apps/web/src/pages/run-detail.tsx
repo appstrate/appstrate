@@ -163,7 +163,7 @@ export function RunDetailPage() {
           ? `${enrichedRun.agentName} (${t("runs.inlineBadge").toLowerCase()})`
           : t("runs.inlineBadge"),
       }
-    : { label: agent?.displayName || packageId || "", href: `/agents/${packageId}` };
+    : { label: agent?.display_name || packageId || "", href: `/agents/${packageId}` };
 
   const runCrumbLabel = runNumber
     ? t("exec.breadcrumb", { number: runNumber })

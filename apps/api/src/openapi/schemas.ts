@@ -156,9 +156,9 @@ export const schemas = {
     required: ["id", "source", "type"],
     properties: {
       id: { type: "string" },
-      displayName: { type: "string" },
+      display_name: { type: "string" },
       description: { type: "string" },
-      schemaVersion: { type: "string" },
+      schema_version: { type: "string" },
       author: { type: "string" },
       keywords: { type: "array", items: { type: "string" } },
       source: { type: "string", enum: ["system", "local"] },
@@ -186,7 +186,7 @@ export const schemas = {
     required: ["id", "source"],
     properties: {
       id: { type: "string" },
-      displayName: { type: "string" },
+      display_name: { type: "string" },
       description: { type: "string" },
       source: { type: "string", enum: ["system", "local"] },
       scope: { type: ["string", "null"], description: "Scope from manifest name" },
@@ -288,7 +288,7 @@ export const schemas = {
         type: "integer",
         description: "Number of published versions (0 for built-in agents)",
       },
-      forkedFrom: { type: ["string", "null"], description: "Source package ID if forked" },
+      forked_from: { type: ["string", "null"], description: "Source package ID if forked" },
       hasUnarchivedChanges: {
         type: "boolean",
         description: "Whether the active version has changes not yet archived as a version",
@@ -524,7 +524,7 @@ export const schemas = {
       usedByAgents: { type: "integer" },
       version: { type: ["string", "null"], description: "Manifest version (semver)" },
       autoInstalled: { type: "boolean" },
-      forkedFrom: { type: ["string", "null"], description: "Source package ID if forked" },
+      forked_from: { type: ["string", "null"], description: "Source package ID if forked" },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
     },
@@ -557,14 +557,14 @@ export const schemas = {
         type: "boolean",
         description: "Whether the active version has changes not yet archived as a version",
       },
-      forkedFrom: { type: ["string", "null"], description: "Source package ID if forked" },
+      forked_from: { type: ["string", "null"], description: "Source package ID if forked" },
       agents: {
         type: "array",
         items: {
           type: "object",
           properties: {
             id: { type: "string" },
-            displayName: { type: "string" },
+            display_name: { type: "string" },
           },
         },
       },

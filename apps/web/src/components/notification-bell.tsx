@@ -130,7 +130,7 @@ export function NotificationBell() {
 
   const agentNameMap = new Map<string, string>();
   if (agents) {
-    for (const f of agents) agentNameMap.set(f.id, f.displayName);
+    for (const f of agents) agentNameMap.set(f.id, f.display_name);
   }
 
   const unreadRuns = runsData?.data.filter((e) => e.notifiedAt != null && e.readAt == null) ?? [];

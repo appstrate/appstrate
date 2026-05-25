@@ -114,10 +114,10 @@ export function AgentActions({
             label:
               installedAppNames.length > 0
                 ? t("detail.deleteConfirmWithApps", {
-                    name: detail.displayName,
+                    name: detail.display_name,
                     apps: installedAppNames.join(", "),
                   })
-                : t("detail.deleteConfirm", { name: detail.displayName }),
+                : t("detail.deleteConfirm", { name: detail.display_name }),
           })
         }
         canUninstall={isInstalledInCurrentApp && detail.source !== "system"}
@@ -125,7 +125,7 @@ export function AgentActions({
           setConfirmState({
             type: "uninstallAgent",
             label: t("packages.uninstallConfirm", {
-              name: detail.displayName,
+              name: detail.display_name,
               ns: "settings",
             }),
           })

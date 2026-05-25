@@ -566,9 +566,9 @@
                   "data": [
                     {
                       "id": "@acme/email-sorter",
-                      "displayName": "Email Sorter",
+                      "display_name": "Email Sorter",
                       "description": "Automatically sorts and labels incoming emails",
-                      "schemaVersion": "1.1",
+                      "schema_version": "2.0",
                       "author": "Acme Corp",
                       "keywords": ["email", "automation"],
                       "source": "local",
@@ -582,9 +582,9 @@
                     },
                     {
                       "id": "@appstrate/code-reviewer",
-                      "displayName": "Code Reviewer",
+                      "display_name": "Code Reviewer",
                       "description": "Reviews pull requests and suggests improvements",
-                      "schemaVersion": "1.1",
+                      "schema_version": "2.0",
                       "author": "Appstrate",
                       "keywords": ["code", "review", "github"],
                       "source": "system",
@@ -1852,12 +1852,12 @@
               },
               "example": {
                 "manifest": {
-                  "$schema": "https://afps.appstrate.dev/packages/schema/v1/agent.schema.json",
+                  "$schema": "https://afps.appstrate.dev/packages/schema/v2/agent.schema.json",
                   "name": "@inline/one-shot",
-                  "displayName": "One-shot summary",
+                  "display_name": "One-shot summary",
                   "version": "0.0.0",
                   "type": "agent",
-                  "schemaVersion": "1.1",
+                  "schema_version": "2.0",
                   "dependencies": {}
                 },
                 "prompt": "Summarize the attached document in three bullet points.",
@@ -3814,7 +3814,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["manifest", "auths"],
+                  "required": ["manifest", "auths", "toolCatalog"],
                   "properties": {
                     "manifest": {
                       "type": "object",
@@ -3928,6 +3928,53 @@
                           },
                           "hasOAuthClient": {
                             "type": "boolean"
+                          }
+                        }
+                      }
+                    },
+                    "toolCatalog": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["name"],
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "policy": {
+                            "type": "object",
+                            "properties": {
+                              "requiredScopes": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "requiredAuthKey": {
+                                "type": "string"
+                              },
+                              "urlPatterns": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "required": ["pattern"],
+                                  "properties": {
+                                    "pattern": {
+                                      "type": "string"
+                                    },
+                                    "methods": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
                           }
                         }
                       }
@@ -10704,7 +10751,7 @@
                     },
                     "type": {
                       "type": "string",
-                      "description": "Package type (agent/skill/integration)"
+                      "description": "Package type (agent/skill/mcp-server/integration)"
                     },
                     "version": {
                       "type": "string",
@@ -10848,7 +10895,7 @@
                     },
                     "type": {
                       "type": "string",
-                      "description": "Package type (agent/skill/integration)"
+                      "description": "Package type (agent/skill/mcp-server/integration)"
                     },
                     "version": {
                       "type": "string",
@@ -11805,7 +11852,7 @@
                           "id": {
                             "type": "string"
                           },
-                          "displayName": {
+                          "display_name": {
                             "type": "string"
                           }
                         }
@@ -11820,7 +11867,7 @@
                           "id": {
                             "type": "string"
                           },
-                          "displayName": {
+                          "display_name": {
                             "type": "string"
                           }
                         }
@@ -12610,7 +12657,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["packageId", "type", "forkedFrom"],
+                  "required": ["packageId", "type", "forked_from"],
                   "properties": {
                     "packageId": {
                       "type": "string",
@@ -12618,9 +12665,9 @@
                     },
                     "type": {
                       "type": "string",
-                      "enum": ["agent", "skill", "integration"]
+                      "enum": ["agent", "skill", "mcp-server", "integration"]
                     },
-                    "forkedFrom": {
+                    "forked_from": {
                       "type": "string",
                       "description": "Source package ID"
                     }
@@ -12901,7 +12948,7 @@
                           "id": {
                             "type": "string"
                           },
-                          "displayName": {
+                          "display_name": {
                             "type": "string"
                           }
                         }
@@ -12916,7 +12963,7 @@
                           "id": {
                             "type": "string"
                           },
-                          "displayName": {
+                          "display_name": {
                             "type": "string"
                           }
                         }
@@ -13478,7 +13525,7 @@
             "required": false,
             "schema": {
               "type": "string",
-              "enum": ["agent", "skill", "integration"]
+              "enum": ["agent", "skill", "mcp-server", "integration"]
             },
             "description": "Filter by package type"
           }
@@ -15925,7 +15972,7 @@
           },
           "packageType": {
             "type": "string",
-            "enum": ["agent", "skill", "integration"]
+            "enum": ["agent", "skill", "mcp-server", "integration"]
           },
           "packageSource": {
             "type": "string",
@@ -16088,13 +16135,13 @@
           "id": {
             "type": "string"
           },
-          "displayName": {
+          "display_name": {
             "type": "string"
           },
           "description": {
             "type": "string"
           },
-          "schemaVersion": {
+          "schema_version": {
             "type": "string"
           },
           "author": {
@@ -16121,7 +16168,7 @@
           "type": {
             "type": "string",
             "description": "Package type from manifest",
-            "enum": ["agent", "skill", "integration"]
+            "enum": ["agent", "skill", "mcp-server", "integration"]
           },
           "runningRuns": {
             "type": "integer"
@@ -16146,7 +16193,7 @@
           "id": {
             "type": "string"
           },
-          "displayName": {
+          "display_name": {
             "type": "string"
           },
           "description": {
@@ -16197,13 +16244,13 @@
                 "type": "object",
                 "description": "Current configuration values"
               },
-              "fileConstraints": {
+              "file_constraints": {
                 "$ref": "#/components/schemas/FileConstraintsMap"
               },
-              "uiHints": {
+              "ui_hints": {
                 "$ref": "#/components/schemas/UIHintsMap"
               },
-              "propertyOrder": {
+              "property_order": {
                 "type": "array",
                 "items": {
                   "type": "string"
@@ -16220,13 +16267,13 @@
                 "type": "object",
                 "description": "Pure JSON Schema 2020-12 object"
               },
-              "fileConstraints": {
+              "file_constraints": {
                 "$ref": "#/components/schemas/FileConstraintsMap"
               },
-              "uiHints": {
+              "ui_hints": {
                 "$ref": "#/components/schemas/UIHintsMap"
               },
-              "propertyOrder": {
+              "property_order": {
                 "type": "array",
                 "items": {
                   "type": "string"
@@ -16243,7 +16290,7 @@
                 "type": "object",
                 "description": "Pure JSON Schema 2020-12 object"
               },
-              "propertyOrder": {
+              "property_order": {
                 "type": "array",
                 "items": {
                   "type": "string"
@@ -16318,7 +16365,7 @@
             "type": "integer",
             "description": "Number of published versions (0 for built-in agents)"
           },
-          "forkedFrom": {
+          "forked_from": {
             "type": ["string", "null"],
             "description": "Source package ID if forked"
           },
@@ -16726,7 +16773,7 @@
           "autoInstalled": {
             "type": "boolean"
           },
-          "forkedFrom": {
+          "forked_from": {
             "type": ["string", "null"],
             "description": "Source package ID if forked"
           },
@@ -16797,7 +16844,7 @@
             "type": "boolean",
             "description": "Whether the active version has changes not yet archived as a version"
           },
-          "forkedFrom": {
+          "forked_from": {
             "type": ["string", "null"],
             "description": "Source package ID if forked"
           },
@@ -16809,7 +16856,7 @@
                 "id": {
                   "type": "string"
                 },
-                "displayName": {
+                "display_name": {
                   "type": "string"
                 }
               }
@@ -17230,13 +17277,13 @@
         "description": "AFPS Agent manifest extended with Appstrate platform fields. Standard fields are defined by the AFPS Agent schema; extension fields use the x- prefix per AFPS §10.",
         "allOf": [
           {
-            "$ref": "https://afps.appstrate.dev/packages/schema/v1/agent.schema.json"
+            "$ref": "https://afps.appstrate.dev/packages/schema/v2/agent.schema.json"
           }
         ]
       },
       "SkillManifest": {
         "description": "AFPS Skill manifest. See https://afps.appstrate.dev for field reference.",
-        "$ref": "https://afps.appstrate.dev/packages/schema/v1/skill.schema.json"
+        "$ref": "https://afps.appstrate.dev/packages/schema/v2/skill.schema.json"
       },
       "FileConstraintsMap": {
         "type": "object",
@@ -17248,7 +17295,7 @@
               "type": "string",
               "description": "Comma-separated accepted file extensions (e.g. .pdf,.docx)"
             },
-            "maxSize": {
+            "max_size": {
               "type": "number",
               "description": "Maximum file size in bytes"
             }
@@ -17281,7 +17328,7 @@
             },
             "type": {
               "type": "string",
-              "enum": ["agent", "skill", "integration"]
+              "enum": ["agent", "skill", "mcp-server", "integration"]
             },
             "source": {
               "type": "string",
@@ -17289,7 +17336,7 @@
             },
             "name": {
               "type": "string",
-              "description": "Display name from the package draft manifest (`displayName`); falls back to the package id."
+              "description": "Display name from the package draft manifest (`manifest.display_name`); falls back to the package id."
             },
             "description": {
               "type": "string",

@@ -84,9 +84,9 @@ export function createAgentsRouter() {
       const parsed = parseScopedName(manifest.name);
       return {
         id: row.id,
-        displayName: manifest.display_name,
+        display_name: manifest.display_name,
         description: manifest.description,
-        schemaVersion: manifest.schema_version,
+        schema_version: manifest.schema_version,
         author: manifest.author,
         keywords: manifest.keywords ?? [],
         dependencies: {

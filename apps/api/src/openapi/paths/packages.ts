@@ -902,7 +902,7 @@ export const packagesPaths = {
                     type: "array",
                     items: {
                       type: "object",
-                      properties: { id: { type: "string" }, displayName: { type: "string" } },
+                      properties: { id: { type: "string" }, display_name: { type: "string" } },
                     },
                     description: "Agents referencing this skill (for IN_USE)",
                   },
@@ -910,7 +910,7 @@ export const packagesPaths = {
                     type: "array",
                     items: {
                       type: "object",
-                      properties: { id: { type: "string" }, displayName: { type: "string" } },
+                      properties: { id: { type: "string" }, display_name: { type: "string" } },
                     },
                     description: "Packages depending on this skill (for DEPENDED_ON)",
                   },
@@ -1410,14 +1410,14 @@ export const packagesPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["packageId", "type", "forkedFrom"],
+                required: ["packageId", "type", "forked_from"],
                 properties: {
                   packageId: { type: "string", description: "New package ID under org scope" },
                   type: {
                     type: "string",
                     enum: ["agent", "skill", "mcp-server", "integration"],
                   },
-                  forkedFrom: { type: "string", description: "Source package ID" },
+                  forked_from: { type: "string", description: "Source package ID" },
                 },
               },
             },
@@ -1618,7 +1618,7 @@ export const packagesPaths = {
                     type: "array",
                     items: {
                       type: "object",
-                      properties: { id: { type: "string" }, displayName: { type: "string" } },
+                      properties: { id: { type: "string" }, display_name: { type: "string" } },
                     },
                     description: "Agents referencing this skill (for IN_USE)",
                   },
@@ -1626,7 +1626,7 @@ export const packagesPaths = {
                     type: "array",
                     items: {
                       type: "object",
-                      properties: { id: { type: "string" }, displayName: { type: "string" } },
+                      properties: { id: { type: "string" }, display_name: { type: "string" } },
                     },
                     description: "Packages depending on this skill (for DEPENDED_ON)",
                   },

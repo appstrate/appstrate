@@ -166,11 +166,11 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const agentDetail = type === "agent" ? (detail as AgentDetail | undefined) : undefined;
   const pkgDetail = type !== "agent" ? (detail as OrgPackageItemDetail | undefined) : undefined;
 
-  const displayName = agentDetail?.displayName ?? pkgDetail?.name ?? pkgDetail?.id ?? "";
+  const displayName = agentDetail?.display_name ?? pkgDetail?.name ?? pkgDetail?.id ?? "";
   const source = agentDetail?.source ?? pkgDetail?.source;
   const version = agentDetail?.version ?? pkgDetail?.version;
   const hasUnarchivedChanges = agentDetail?.hasUnarchivedChanges ?? pkgDetail?.hasUnarchivedChanges;
-  const forkedFrom = agentDetail?.forkedFrom ?? pkgDetail?.forkedFrom ?? null;
+  const forkedFrom = agentDetail?.forked_from ?? pkgDetail?.forked_from ?? null;
 
   const { data: versionDetail, isLoading: versionLoading } = useVersionDetail(
     type,
@@ -532,7 +532,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                 <PackageCard
                   key={agent.id}
                   id={agent.id}
-                  displayName={agent.displayName}
+                  displayName={agent.display_name}
                   description={agent.description}
                   type="agent"
                   source={agent.source}

@@ -248,12 +248,12 @@ export interface BasePackageListItem {
   source: "system" | "local";
   scope: string | null;
   version: string | null;
-  forkedFrom: string | null;
+  forked_from: string | null;
 }
 
 export interface AgentListItem extends BasePackageListItem {
-  displayName: string;
-  schemaVersion: string;
+  display_name: string;
+  schema_version: string;
   author: string;
   keywords: string[];
   dependencies: {
@@ -269,7 +269,7 @@ export interface AgentListItem extends BasePackageListItem {
 
 export interface AgentDetail {
   id: string;
-  displayName: string;
+  display_name: string;
   description: string;
   source: "system" | "local";
   dependencies: {
@@ -301,7 +301,7 @@ export interface AgentDetail {
   callbackUrl?: string;
   versionCount?: number;
   hasUnarchivedChanges?: boolean;
-  forkedFrom: string | null;
+  forked_from: string | null;
 }
 
 // --- Organization Package Types ---
@@ -321,7 +321,7 @@ export interface OrgPackageItemDetail extends OrgPackageItem {
   content: string;
   /** Secondary source file content (e.g. .ts for tools). */
   sourceCode?: string | null;
-  agents: { id: string; displayName: string }[];
+  agents: { id: string; display_name: string }[];
   manifest?: Record<string, unknown>;
   manifestName?: string | null;
   lockVersion?: number;
