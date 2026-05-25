@@ -1272,8 +1272,7 @@ export function createPackagesRouter() {
   ) {
     const user = c.get("user");
     const orgId = c.get("orgId");
-    const { manifest, content, files, type: packageType } = parsed;
-    const packageId = manifest.name as string;
+    const { manifest, content, files, type: packageType, packageId } = parsed;
 
     // System packages are immutable
     if (isSystemPackage(packageId)) {

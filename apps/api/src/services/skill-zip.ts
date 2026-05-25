@@ -62,6 +62,6 @@ export async function tryParseSkillOnlyZip(
 
   return {
     ok: true,
-    parsed: { manifest: validatedManifest, content: skillMd, files, type: "skill" },
+    parsed: { manifest: validatedManifest, content: skillMd, files, type: "skill", packageId },
   };
 }

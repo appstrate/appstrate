@@ -45,7 +45,17 @@ function enc(s: string): Uint8Array {
  * sufficient to exercise the import path.
  */
 function buildMcpServerAfps(id: string): Uint8Array {
-  const manifest = mcpServerManifest({ name: id, version: "1.0.0", entryPoint: "main.js" });
+  // Model a real MCPB manifest: unscoped top-level `name` (the leaf), scoped
+  // AFPS identity in `_meta` (= the package id). Exercises the canonical-id
+  // derivation — a manifest whose top-level `name` alone would violate the
+  // scoped `packages.id` format.
+  const mcpbName = id.includes("/") ? id.slice(id.indexOf("/") + 1) : id;
+  const manifest = mcpServerManifest({
+    name: mcpbName,
+    afpsName: id,
+    version: "1.0.0",
+    entryPoint: "main.js",
+  });
   const entries: Record<string, Uint8Array> = {
     "manifest.json": enc(JSON.stringify(manifest, null, 2)),
     "main.js": enc("// mcp server entry stub\n"),

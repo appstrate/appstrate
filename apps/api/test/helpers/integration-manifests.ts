@@ -253,7 +253,14 @@ export function connectLoginBlock(opts: {
 
 /** Build a minimal AFPS 2.0 mcp-server (MCPB) manifest for the local-source path. */
 export function mcpServerManifest(opts: {
+  /** Verbatim MCPB top-level `name` (unscoped by convention). */
   name: string;
+  /**
+   * Scoped AFPS identity for `_meta["dev.afps/mcp-server"].name`. Real MCPB
+   * manifests keep the top-level `name` unscoped and carry the scoped id here;
+   * the platform derives the package id from this. Defaults to `name`.
+   */
+  afpsName?: string;
   version?: string;
   serverType?: "node" | "python" | "binary" | "uv";
   entryPoint?: string;
@@ -270,6 +277,6 @@ export function mcpServerManifest(opts: {
       entry_point: entryPoint,
       mcp_config: { command: type === "node" ? "node" : "python3", args: [entryPoint] },
     },
-    _meta: { "dev.afps/mcp-server": { name: opts.name, type: "mcp-server" } },
+    _meta: { "dev.afps/mcp-server": { name: opts.afpsName ?? opts.name, type: "mcp-server" } },
   };
 }

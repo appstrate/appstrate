@@ -11,6 +11,7 @@ import {
   type IntegrationManifest,
   type McpServerManifest,
 } from "./validation.ts";
+import { getMcpServerAfpsName } from "./mcp-server.ts";
 
 export type { Zippable };
 
@@ -173,6 +174,15 @@ export interface ParsedPackageZip {
   files: Record<string, Uint8Array>;
   /** The detected package type. */
   type: PackageType;
+  /**
+   * Canonical package id. For agent/skill/integration this is the manifest
+   * `name`. For mcp-server it is the scoped AFPS identity
+   * (`_meta["dev.afps/mcp-server"].name`) — a verbatim MCPB manifest's
+   * top-level `name` is unscoped, but the package id must be scoped (it is what
+   * an integration's `source.server.name` references and what the scoped
+   * `packages.id` format requires).
+   */
+  packageId: string;
 }
 
 /** Error thrown during package ZIP parsing with a machine-readable error code. */
@@ -323,5 +333,13 @@ export function parsePackageZip(zipBuffer: Uint8Array, maxSize?: number): Parsed
       throw new PackageZipError("INVALID_MANIFEST", `Unsupported package type: "${type}"`);
   }
 
-  return { manifest, content, files, type: type as PackageType };
+  // Canonical AFPS identity, type-agnostic: the `_meta` package name takes
+  // precedence over the top-level `name`. Only mcp-server packages carry a
+  // `_meta["dev.afps/mcp-server"].name` (they are verbatim MCPB manifests whose
+  // top-level `name` is unscoped), so for every other type this falls through
+  // to `name` — no per-type branching.
+  const packageId =
+    getMcpServerAfpsName(manifest as McpServerManifest) ?? (manifest as { name: string }).name;
+
+  return { manifest, content, files, type: type as PackageType, packageId };
 }
