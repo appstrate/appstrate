@@ -146,18 +146,18 @@ await sink.finalize(result);
 
 ### Package subpath exports
 
-| Subpath                               | What                                                               |
-| ------------------------------------- | ------------------------------------------------------------------ |
-| `@appstrate/afps-runtime`             | Everything — re-exports all modules                                |
-| `@appstrate/afps-runtime/bundle`      | Loader, validator, hash, signing, prompt rendering                 |
-| `@appstrate/afps-runtime/runner`      | `Runner`, `RunOptions`, `reduceEvents`, `RunResult`                |
-| `@appstrate/afps-runtime/interfaces`  | `EventSink` contract                                               |
-| `@appstrate/afps-runtime/sinks`       | `ConsoleSink`, `FileSink`, `HttpSink`, `CompositeSink`             |
-| `@appstrate/afps-runtime/resolvers`   | `ProviderResolver`, `ToolResolver`, `SkillResolver`, `ToolContext` |
-| `@appstrate/afps-runtime/events`      | CloudEvents envelope + Standard Webhooks signing                   |
-| `@appstrate/afps-runtime/template`    | Logic-less Mustache with JSON sanitisation                         |
-| `@appstrate/afps-runtime/conformance` | Adapter interface + built-in cases + report runner                 |
-| `@appstrate/afps-runtime/types`       | `RunEvent`, `ExecutionContext`, `RunResult`, `LogLevel`, …         |
+| Subpath                               | What                                                                                                            |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `@appstrate/afps-runtime`             | Everything — re-exports all modules                                                                             |
+| `@appstrate/afps-runtime/bundle`      | Loader, validator, hash, signing, prompt rendering                                                              |
+| `@appstrate/afps-runtime/runner`      | `Runner`, `RunOptions`, `reduceEvents`, `RunResult`                                                             |
+| `@appstrate/afps-runtime/interfaces`  | `EventSink` contract                                                                                            |
+| `@appstrate/afps-runtime/sinks`       | `ConsoleSink`, `FileSink`, `HttpSink`, `CompositeSink`                                                          |
+| `@appstrate/afps-runtime/resolvers`   | `SkillResolver`, `LocalIntegrationResolver`, `RemoteAppstrateIntegrationResolver`, `IntegrationApiCallResolver` |
+| `@appstrate/afps-runtime/events`      | CloudEvents envelope + Standard Webhooks signing                                                                |
+| `@appstrate/afps-runtime/template`    | Logic-less Mustache with JSON sanitisation                                                                      |
+| `@appstrate/afps-runtime/conformance` | Adapter interface + built-in cases + report runner                                                              |
+| `@appstrate/afps-runtime/types`       | `RunEvent`, `ExecutionContext`, `RunResult`, `LogLevel`, …                                                      |
 
 ## Conformance
 

@@ -239,6 +239,9 @@ async function resolveOne(
       return null;
     }
     const run = (mcpServer as { server?: { type?: string; entry_point?: string } }).server;
+    // Defensive: mcpServerManifestSchema makes `server.{type,entry_point}`
+    // required, so a manifest that parsed (non-null above) always has them.
+    // Kept as a fail-closed guard against a future schema relaxation.
     if (!run?.type || !run.entry_point) {
       logger.warn("referenced mcp-server has no runnable server config; skipping", {
         integrationId,

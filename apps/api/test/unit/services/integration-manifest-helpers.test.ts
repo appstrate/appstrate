@@ -2,8 +2,8 @@
 
 /**
  * Unit tests for the pure AFPS 2.0 integration-manifest accessors — the
- * `source` discriminant narrowing (`local` | `remote` | `api`), per-auth
- * narrowing, the orchestrated-connect `_meta` extension reader, and the
+ * `source` discriminant narrowing (`local` | `remote` | `api`), the
+ * orchestrated-connect `_meta` extension reader, and the
  * `{$credential.<field>}` value-template renderer. Pure functions, no DB.
  */
 
@@ -14,7 +14,6 @@ import {
   getIntegrationSourceKind,
   getLocalServerRef,
   getRemoteSource,
-  getManifestAuth,
   getAppstrateConnectMeta,
   type AfpsManifestConnect,
 } from "../../../src/services/integration-manifest-helpers.ts";
@@ -106,19 +105,6 @@ describe("getRemoteSource", () => {
       getRemoteSource(manifest({ kind: "remote", remote: { url: 1, transport: "http" } })),
     ).toBeNull();
     expect(getRemoteSource(manifest({ kind: "remote" }))).toBeNull();
-  });
-});
-
-describe("getManifestAuth", () => {
-  it("narrows the named auth to the typed view", () => {
-    const m = manifest({ kind: "api", api: {} }, { primary: { type: "api_key", delivery: {} } });
-    const auth = getManifestAuth(m, "primary");
-    expect(auth?.type).toBe("api_key");
-  });
-
-  it("returns undefined for an unknown auth key", () => {
-    const m = manifest({ kind: "api", api: {} }, { primary: { type: "api_key", delivery: {} } });
-    expect(getManifestAuth(m, "nope")).toBeUndefined();
   });
 });
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * PiRunner — AFPS 1.3 {@link Runner} implementation backed by the
+ * PiRunner — AFPS {@link Runner} implementation backed by the
  * {@link https://www.npmjs.com/package/@mariozechner/pi-coding-agent | Pi Coding Agent SDK}.
  *
  * The same class runs inside an Appstrate agent container (via

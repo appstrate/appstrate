@@ -161,16 +161,6 @@ export function getRemoteSource(
   return { url, transport };
 }
 
-/** Narrow a manifest's `auths.{key}` to the typed accessor view. */
-export function getManifestAuth(
-  manifest: IntegrationManifest,
-  authKey: string,
-): AfpsManifestAuth | undefined {
-  const auths = (manifest as { auths?: Record<string, unknown> }).auths;
-  const auth = auths?.[authKey];
-  return auth ? (auth as unknown as AfpsManifestAuth) : undefined;
-}
-
 /** Read the Appstrate orchestrated-tool extension off a connect block. */
 export function getAppstrateConnectMeta(
   connect: AfpsManifestConnect | undefined,
