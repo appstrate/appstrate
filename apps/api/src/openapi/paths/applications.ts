@@ -256,7 +256,7 @@ export const applicationsPaths = {
           name: "type",
           in: "query",
           required: false,
-          schema: { type: "string", enum: ["agent", "skill", "integration"] },
+          schema: { type: "string", enum: ["agent", "skill", "mcp-server", "integration"] },
           description: "Filter by package type",
         },
       ],

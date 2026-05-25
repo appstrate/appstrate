@@ -100,6 +100,10 @@ const OWNER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "runs:read",
   "runs:cancel",
   "runs:delete",
+  // MCP servers (AFPS 2.0 §3.4 — browse/import/delete, no editor)
+  "mcp-servers:read",
+  "mcp-servers:write",
+  "mcp-servers:delete",
   // Schedules
   "schedules:read",
   "schedules:write",
@@ -154,6 +158,8 @@ const MEMBER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "agents:run",
   // Skills (read only)
   "skills:read",
+  // MCP servers (read only — import/delete is admin)
+  "mcp-servers:read",
   // Runs (read + cancel own)
   "runs:read",
   "runs:cancel",
@@ -183,6 +189,7 @@ const VIEWER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "members:read",
   "agents:read",
   "skills:read",
+  "mcp-servers:read",
   "runs:read",
   "schedules:read",
   "persistence:read",
@@ -224,6 +231,10 @@ export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permissio
   "skills:read",
   "skills:write",
   "skills:delete",
+  // MCP servers (AFPS 2.0 §3.4 — import/delete via API key for headless flows)
+  "mcp-servers:read",
+  "mcp-servers:write",
+  "mcp-servers:delete",
   // Runs
   "runs:read",
   "runs:cancel",

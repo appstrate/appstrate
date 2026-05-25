@@ -40,6 +40,7 @@ import { OrgSettingsAppOauthPage } from "./pages/org-settings/app/oauth";
 import { ApiKeysPage } from "./pages/api-keys-page";
 import { EndUsersPage } from "./pages/end-users-page";
 import { SkillsPage } from "./pages/skills-page";
+import { McpServersPage } from "./pages/mcp-servers-page";
 import { IntegrationsPage } from "./pages/integrations-page";
 import { IntegrationDetailPage } from "./pages/integration-detail";
 import { ScheduleDetailPage } from "./pages/schedule-detail";
@@ -387,6 +388,15 @@ export function App() {
             <Route
               path="/skills/:scope/:name/:version"
               element={<UnifiedPackageDetailPage type="skill" />}
+            />
+            <Route path="/mcp-servers" element={<McpServersPage />} />
+            <Route
+              path="/mcp-servers/:scope/:name"
+              element={<UnifiedPackageDetailPage type="mcp-server" />}
+            />
+            <Route
+              path="/mcp-servers/:scope/:name/:version"
+              element={<UnifiedPackageDetailPage type="mcp-server" />}
             />
             <Route path="/library" element={<LibraryPage />} />
             <Route

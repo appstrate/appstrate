@@ -62,7 +62,7 @@ export const schemas = {
       enabled: { type: "boolean" },
       installedAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
-      packageType: { type: "string", enum: ["agent", "skill", "integration"] },
+      packageType: { type: "string", enum: ["agent", "skill", "mcp-server", "integration"] },
       packageSource: { type: "string", enum: ["system", "local"] },
     },
   },
@@ -170,7 +170,7 @@ export const schemas = {
       type: {
         type: "string",
         description: "Package type from manifest",
-        enum: ["agent", "skill", "integration"],
+        enum: ["agent", "skill", "mcp-server", "integration"],
       },
       runningRuns: { type: "integer" },
       dependencies: {
@@ -831,7 +831,7 @@ export const schemas = {
       required: ["id", "type", "source", "name", "description", "installedIn"],
       properties: {
         id: { type: "string", description: "Package id (`pkg_…`)." },
-        type: { type: "string", enum: ["agent", "skill", "integration"] },
+        type: { type: "string", enum: ["agent", "skill", "mcp-server", "integration"] },
         source: {
           type: "string",
           description:

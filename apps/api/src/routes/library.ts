@@ -86,6 +86,7 @@ export function createLibraryRouter() {
     const grouped: Record<string, Entry[]> = {
       agent: [],
       skill: [],
+      "mcp-server": [],
       integration: [],
     };
     for (const pkg of pkgMap.values()) {

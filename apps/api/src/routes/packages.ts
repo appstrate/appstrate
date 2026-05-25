@@ -335,11 +335,10 @@ interface PackageRouteConfig {
   getHandler?: (c: Context<AppEnv>) => Promise<Response>;
 }
 
-// Not every package type exposes user-facing CRUD routes. `mcp-server`
-// packages (AFPS 2.0 §3.4) land exclusively via the bundle-import pipeline
-// alongside the integration that references them — they have no standalone
-// editor surface — so they are intentionally absent here. `Partial` lets the
-// map omit them; the `ROUTE_CONFIGS[type]?.` lookups already tolerate misses.
+// Every AFPS 2.0 package type exposes user-facing routes. `Partial` is kept so
+// the `ROUTE_CONFIGS[type]?.` lookups stay null-tolerant, but all four types are
+// wired. `agent`/`skill` have JSON-body editors; `integration`/`mcp-server` are
+// import-only (no editor — both are authored externally and land via ZIP).
 const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
   skill: {
     cfg: CONFIG_BY_TYPE.skill,
@@ -366,6 +365,17 @@ const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
   integration: {
     cfg: CONFIG_BY_TYPE.integration,
     path: "integrations",
+    parseOpts: { requiredFile: null, contentFileExt: null },
+    storageFileName: () => "manifest.json",
+    jsonBodyCreate: false,
+  },
+  // AFPS 2.0 §3.4 — standalone MCP Bundle (MCPB) packages. Import-only like
+  // integrations (no editor): authored externally, the manifest is a verbatim
+  // MCPB manifest. Listable, viewable, and importable as `.afps` like the
+  // other types. Referenced by an integration's `source.kind: "local"`.
+  "mcp-server": {
+    cfg: CONFIG_BY_TYPE["mcp-server"],
+    path: "mcp-servers",
     parseOpts: { requiredFile: null, contentFileExt: null },
     storageFileName: () => "manifest.json",
     jsonBodyCreate: false,

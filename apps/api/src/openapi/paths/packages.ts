@@ -148,7 +148,7 @@ export const packagesPaths = {
                   packageId: { type: "string", description: "The imported package ID" },
                   type: {
                     type: "string",
-                    description: "Package type (agent/skill/integration)",
+                    description: "Package type (agent/skill/mcp-server/integration)",
                   },
                   version: {
                     type: "string",
@@ -255,7 +255,7 @@ export const packagesPaths = {
                   packageId: { type: "string", description: "The imported package ID" },
                   type: {
                     type: "string",
-                    description: "Package type (agent/skill/integration)",
+                    description: "Package type (agent/skill/mcp-server/integration)",
                   },
                   version: {
                     type: "string",
@@ -1415,7 +1415,7 @@ export const packagesPaths = {
                   packageId: { type: "string", description: "New package ID under org scope" },
                   type: {
                     type: "string",
-                    enum: ["agent", "skill", "integration"],
+                    enum: ["agent", "skill", "mcp-server", "integration"],
                   },
                   forkedFrom: { type: "string", description: "Source package ID" },
                 },
