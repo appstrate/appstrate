@@ -144,8 +144,7 @@ export async function listAgentsConsumingIntegration(
 ): Promise<ConsumingAgentSummary[]> {
   const rows = await db.execute(sql`
     SELECT p.id AS package_id,
-           p.draft_manifest->>'displayName' AS display_name_alt,
-           p.draft_manifest->'definition'->>'displayName' AS display_name_def
+           p.draft_manifest->>'display_name' AS display_name
     FROM ${applicationPackages} ap
     INNER JOIN ${packages} p ON p.id = ap.package_id
     WHERE ap.application_id = ${scope.applicationId}
@@ -156,12 +155,11 @@ export async function listAgentsConsumingIntegration(
   return (
     rows as unknown as {
       package_id: string;
-      display_name_alt: string | null;
-      display_name_def: string | null;
+      display_name: string | null;
     }[]
   ).map((r) => ({
     packageId: r.package_id,
-    displayName: r.display_name_def ?? r.display_name_alt ?? r.package_id,
+    displayName: r.display_name ?? r.package_id,
   }));
 }
 

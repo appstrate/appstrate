@@ -264,12 +264,12 @@ export const runsPaths = {
             },
             example: {
               manifest: {
-                $schema: "https://afps.appstrate.dev/packages/schema/v1/agent.schema.json",
+                $schema: "https://afps.appstrate.dev/packages/schema/v2/agent.schema.json",
                 name: "@inline/one-shot",
-                displayName: "One-shot summary",
+                display_name: "One-shot summary",
                 version: "0.0.0",
                 type: "agent",
-                schemaVersion: "1.1",
+                schema_version: "2.0",
                 dependencies: {},
               },
               prompt: "Summarize the attached document in three bullet points.",

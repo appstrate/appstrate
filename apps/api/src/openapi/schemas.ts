@@ -780,11 +780,11 @@ export const schemas = {
     description:
       "AFPS Agent manifest extended with Appstrate platform fields. " +
       "Standard fields are defined by the AFPS Agent schema; extension fields use the x- prefix per AFPS §10.",
-    allOf: [{ $ref: "https://afps.appstrate.dev/packages/schema/v1/agent.schema.json" }],
+    allOf: [{ $ref: "https://afps.appstrate.dev/packages/schema/v2/agent.schema.json" }],
   },
   SkillManifest: {
     description: "AFPS Skill manifest. See https://afps.appstrate.dev for field reference.",
-    $ref: "https://afps.appstrate.dev/packages/schema/v1/skill.schema.json",
+    $ref: "https://afps.appstrate.dev/packages/schema/v2/skill.schema.json",
   },
   FileConstraintsMap: {
     type: "object",
@@ -840,7 +840,7 @@ export const schemas = {
         name: {
           type: "string",
           description:
-            "Display name from the package draft manifest (`displayName`); falls back to the package id.",
+            "Display name from the package draft manifest (`manifest.display_name`); falls back to the package id.",
         },
         description: {
           type: "string",
