@@ -94,7 +94,7 @@ export interface RuntimeToolDef {
 }
 
 export interface BuildRuntimeToolDefsOptions {
-  /** Agent-selected runtime tools (`manifest.runtimeTools`). */
+  /** Agent-selected runtime tools (`manifest.runtime_tools`). */
   runtimeTools?: readonly string[];
   /**
    * Output JSON Schema. When set, `output`'s `data` argument is constrained

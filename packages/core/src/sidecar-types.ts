@@ -81,7 +81,7 @@ export interface SidecarLaunchSpec {
    */
   integrations?: ReadonlyArray<IntegrationSpawnSpec>;
   /**
-   * Platform runtime tools the agent selected (`manifest.runtimeTools`):
+   * Platform runtime tools the agent selected (`manifest.runtime_tools`):
    * any of `output` / `log` / `note` / `pin` / `report`. The sidecar hosts
    * the selected ones as in-process MCP tools on the agent-facing `/mcp`
    * surface (`@appstrate/core/runtime-tool-defs`), so they are unified with

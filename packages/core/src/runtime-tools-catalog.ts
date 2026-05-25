@@ -21,7 +21,7 @@
  */
 
 /**
- * Opt-in tools selectable per agent via `manifest.runtimeTools`. `output`
+ * Opt-in tools selectable per agent via `manifest.runtime_tools`. `output`
  * leads the list (it materialises the run result) but is not auto-injected;
  * validation requires it only when an output schema is declared.
  */
