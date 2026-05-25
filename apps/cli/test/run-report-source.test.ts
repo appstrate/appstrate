@@ -50,7 +50,8 @@ function makeBundle(): Bundle {
     name: "@scope/agent",
     version: "1.0.0",
     type: "agent",
-    schemaVersion: "1.0",
+    schema_version: "2.0",
+    display_name: "Test Agent",
     dependencies: { skills: {}, integrations: {} },
   };
   const files = new Map<string, Uint8Array>([["prompt.md", new TextEncoder().encode("Hello.")]]);

@@ -19,11 +19,11 @@ import type { AgentManifest } from "../../../src/types/index.ts";
 
 const inlineManifest = {
   name: "@inline/r-test",
-  displayName: "Inline",
+  display_name: "Inline",
   version: "0.0.0",
   type: "agent",
   description: "Inline",
-  schemaVersion: "1.0.0",
+  schema_version: "2.0",
 } as unknown as AgentManifest;
 
 describe("listGlobalRuns", () => {
