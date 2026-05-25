@@ -73,9 +73,29 @@ export interface IntegrationAuthStatus {
   hasOAuthClient: boolean;
 }
 
+/**
+ * One entry in the agent-facing tool catalog the picker consumes. Resolved
+ * server-side by `resolveIntegrationToolCatalog` from the referenced
+ * mcp-server's MCPB `tools[]` minus `hidden_tools` and auto-hidden
+ * connect.tool primitives. Falls back to the integration's sparse `tools{}`
+ * keys when the mcp-server is unavailable. Per-tool `policy` is attached
+ * verbatim from `integration.tools[name]` when declared.
+ */
+export interface IntegrationToolCatalogEntry {
+  name: string;
+  description?: string;
+  policy?: {
+    requiredScopes?: readonly string[];
+    requiredAuthKey?: string;
+    urlPatterns?: ReadonlyArray<{ pattern: string; methods?: readonly string[] }>;
+  };
+}
+
 export interface IntegrationDetail {
   manifest: IntegrationManifestView;
   auths: IntegrationAuthStatus[];
+  /** Effective agent-facing tool catalog — the picker's source of truth. */
+  toolCatalog: IntegrationToolCatalogEntry[];
 }
 
 export interface IntegrationOAuthClient {

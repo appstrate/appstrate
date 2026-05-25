@@ -124,7 +124,7 @@ describe("GET /api/integrations/:packageId", () => {
     ctx = await createTestContext({ orgSlug: "myorg" });
   });
 
-  it("returns the manifest + per-auth status (zero connections, no OAuth client)", async () => {
+  it("returns the manifest + per-auth status + tool catalog", async () => {
     await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
     const res = await app.request("/api/integrations/@myorg/gmail", {
       headers: authHeaders(ctx),
@@ -138,6 +138,7 @@ describe("GET /api/integrations/:packageId", () => {
         connections: unknown[];
         hasOAuthClient: boolean;
       }>;
+      toolCatalog: Array<{ name: string; description?: string; policy?: unknown }>;
     };
     expect(body.manifest.name).toBe("@myorg/gmail");
     expect(body.auths).toHaveLength(2);
@@ -148,6 +149,10 @@ describe("GET /api/integrations/:packageId", () => {
     expect(api?.hasOAuthClient).toBe(false);
     expect(google?.type).toBe("oauth2");
     expect(google?.hasOAuthClient).toBe(false);
+    // The gmail fixture has no referenced mcp-server seeded → resolver
+    // falls back to the integration's `tools` keys. Shape assertion keeps
+    // the contract present without coupling to fixture catalog edits.
+    expect(Array.isArray(body.toolCatalog)).toBe(true);
   });
 
   it("returns 404 for non-existent integration", async () => {

@@ -164,12 +164,44 @@ const authStatusSchema = {
   },
 } as const;
 
+const toolCatalogEntrySchema = {
+  type: "object",
+  required: ["name"],
+  properties: {
+    name: { type: "string" },
+    description: { type: "string" },
+    policy: {
+      type: "object",
+      properties: {
+        requiredScopes: { type: "array", items: { type: "string" } },
+        requiredAuthKey: { type: "string" },
+        urlPatterns: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["pattern"],
+            properties: {
+              pattern: { type: "string" },
+              methods: { type: "array", items: { type: "string" } },
+            },
+          },
+        },
+      },
+    },
+  },
+} as const;
+
 const integrationDetailSchema = {
   type: "object",
-  required: ["manifest", "auths"],
+  required: ["manifest", "auths", "toolCatalog"],
   properties: {
     manifest: { type: "object", additionalProperties: true },
     auths: { type: "array", items: authStatusSchema },
+    // Effective agent-facing tool catalog. Resolved server-side from the
+    // referenced mcp-server's MCPB `tools[]` (local source) minus
+    // `hidden_tools` and auto-hidden connect.tool primitives. Falls back
+    // to `manifest.tools` keys when the mcp-server is absent.
+    toolCatalog: { type: "array", items: toolCatalogEntrySchema },
   },
 } as const;
 

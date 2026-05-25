@@ -608,6 +608,12 @@
         "additionalProperties": {}
       }
     },
+    "hidden_tools": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "setup_guide": {
       "type": "object",
       "properties": {

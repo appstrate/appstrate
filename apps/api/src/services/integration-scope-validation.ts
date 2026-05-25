@@ -32,7 +32,8 @@ import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { validateAgentIntegrationScopes } from "@appstrate/core/integration";
 import type { ValidationFieldError } from "@appstrate/core/api-errors";
 
-import { getIntegration } from "./integration-service.ts";
+import { getIntegration, fetchMcpServerManifest } from "./integration-service.ts";
+import { getLocalServerRef } from "./integration-manifest-helpers.ts";
 
 export interface ValidateAgentIntegrationSelectionsInput {
   /** Raw agent manifest (already shape-validated by `validateManifest`). */
@@ -79,9 +80,29 @@ export async function validateAgentIntegrationSelections(
       // about scopes against a non-existent catalog.
       continue;
     }
+    // For local-source integrations the catalog comes from the referenced
+    // mcp-server's MCPB tools. Fetch it best-effort — the validator falls
+    // back to `integration.tools` keys when undefined (mirrors the picker).
+    let mcpServerTools: ReadonlyArray<{ name: string; description?: string }> | undefined;
+    const localRef = getLocalServerRef(integration.manifest);
+    if (localRef) {
+      const mcpServer = await fetchMcpServerManifest(localRef.name);
+      if (mcpServer) {
+        const t = (mcpServer as { tools?: Array<{ name?: unknown; description?: unknown }> }).tools;
+        if (Array.isArray(t)) {
+          mcpServerTools = t
+            .filter((e): e is { name: string; description?: string } => typeof e?.name === "string")
+            .map((e) => ({
+              name: e.name,
+              description: typeof e.description === "string" ? e.description : undefined,
+            }));
+        }
+      }
+    }
     const issues = validateAgentIntegrationScopes(
       { id: entry.id, tools: entry.tools, scopes: entry.scopes },
       integration.manifest,
+      mcpServerTools,
     );
     for (const issue of issues) {
       errors.push({

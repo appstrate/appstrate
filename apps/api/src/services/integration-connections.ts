@@ -39,7 +39,13 @@ import { notFound, conflict, invalidRequest } from "../lib/errors.ts";
 import type { AppScope } from "../lib/scope.ts";
 import { actorInsert } from "../lib/actor.ts";
 import type { Actor } from "@appstrate/connect";
-import type { IntegrationManifest } from "@appstrate/core/integration";
+import {
+  resolveIntegrationToolCatalog,
+  type IntegrationManifest,
+  type IntegrationToolCatalogEntry,
+} from "@appstrate/core/integration";
+import { getLocalServerRef } from "./integration-manifest-helpers.ts";
+import { fetchMcpServerManifest } from "./integration-service.ts";
 import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
 import type { IntegrationAuthStatus } from "@appstrate/shared-types";
 import { getIntegration } from "./integration-service.ts";
@@ -875,10 +881,43 @@ export async function getIntegrationAuthStatuses(
   scope: AppScope,
   packageId: string,
   actor: Actor,
-): Promise<{ manifest: IntegrationManifest; auths: IntegrationAuthStatus[] }> {
+): Promise<{
+  manifest: IntegrationManifest;
+  auths: IntegrationAuthStatus[];
+  /**
+   * Effective agent-facing tool catalog — what the agent editor's picker
+   * should display. Resolved server-side via
+   * {@link resolveIntegrationToolCatalog} so the UI doesn't need a second
+   * fetch for the referenced mcp-server's MCPB tool advertisement.
+   */
+  toolCatalog: IntegrationToolCatalogEntry[];
+}> {
   await assertAppBelongsToOrg(scope);
   const manifest = await loadManifestOrThrow(scope, packageId);
   const authsMap = manifest.auths ?? {};
+
+  // For local-source integrations the catalog comes from the referenced
+  // mcp-server's MCPB `tools[]`. Fetch it best-effort: if the mcp-server
+  // package is missing the resolver still falls back to the integration's
+  // sparse `tools{}` keys (legacy behaviour, no regression for the picker).
+  const localRef = getLocalServerRef(manifest);
+  let mcpServerTools: ReadonlyArray<{ name: string; description?: string }> | undefined;
+  if (localRef) {
+    const mcpServer = await fetchMcpServerManifest(localRef.name);
+    if (mcpServer) {
+      const t = (mcpServer as { tools?: Array<{ name?: unknown; description?: unknown }> }).tools;
+      if (Array.isArray(t)) {
+        mcpServerTools = t
+          .filter((e): e is { name: string; description?: string } => typeof e?.name === "string")
+          .map((e) => ({
+            name: e.name,
+            description: typeof e.description === "string" ? e.description : undefined,
+          }));
+      }
+    }
+  }
+  const toolCatalog = resolveIntegrationToolCatalog({ integration: manifest, mcpServerTools });
+
   const allConnections = await listIntegrationConnections(scope, packageId, actor);
   const oauthClients = await db
     .select({ authKey: integrationOauthClients.authKey })
@@ -910,7 +949,7 @@ export async function getIntegrationAuthStatuses(
     };
   });
 
-  return { manifest, auths };
+  return { manifest, auths, toolCatalog };
 }
 
 /**

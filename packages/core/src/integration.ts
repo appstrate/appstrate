@@ -269,11 +269,117 @@ function collectDeliveryCredentialRefs(delivery: DeliveryView | undefined): stri
 export const API_CALL_TOOL_NAME = "api_call";
 
 /**
- * Names of MCP tools the integration declares in its top-level `tools`
- * record. Empty when the integration didn't opt into per-tool metadata.
+ * Names of MCP tools the integration declares POLICY for in its top-level
+ * `tools` record. Empty when the integration didn't opt into per-tool
+ * metadata. This is NOT the catalog of exposed tools — `tools` is a sparse
+ * policy table. The catalog comes from
+ * {@link resolveIntegrationToolCatalog}.
  */
 export function getDeclaredToolNames(manifest: IntegrationManifest): string[] {
   return manifest.tools ? Object.keys(manifest.tools) : [];
+}
+
+/** The `_meta` key carrying Appstrate's connect-tool extension on an auth's connect block. */
+export const APPSTRATE_CONNECT_META_KEY = "dev.appstrate/connect";
+
+/**
+ * Tool names referenced as a run-start `connect.tool` across all auths.
+ * Auto-hidden from the agent surface — these are credential-acquisition
+ * primitives the platform invokes at boot, not agent capabilities.
+ */
+export function getConnectToolNames(manifest: IntegrationManifest): string[] {
+  const names: string[] = [];
+  for (const auth of Object.values(manifest.auths ?? {})) {
+    const connect = (auth as { connect?: { _meta?: Record<string, { tool?: unknown }> } }).connect;
+    const meta = connect?._meta?.[APPSTRATE_CONNECT_META_KEY];
+    const t = meta?.tool;
+    if (typeof t === "string" && t.length > 0) names.push(t);
+  }
+  return names;
+}
+
+/** Effective per-tool policy as carried in `integration.tools[name]`. */
+export interface IntegrationToolPolicy {
+  requiredScopes?: readonly string[];
+  requiredAuthKey?: string;
+  urlPatterns?: ReadonlyArray<{ pattern: string; methods?: readonly string[] }>;
+}
+
+/** One entry in the resolved agent-facing tool catalog. */
+export interface IntegrationToolCatalogEntry {
+  name: string;
+  description?: string;
+  /** Present iff `integration.tools[name]` declared metadata for this tool. */
+  policy?: IntegrationToolPolicy;
+}
+
+export interface ResolveIntegrationToolCatalogInput {
+  integration: IntegrationManifest;
+  /**
+   * Verbatim MCPB `tools[]` from the referenced mcp-server (local source
+   * only). Pass `undefined` for remote/api sources or when the mcp-server
+   * manifest is unavailable — the resolver then falls back to
+   * `integration.tools` keys.
+   */
+  mcpServerTools?: ReadonlyArray<{ name: string; description?: string }>;
+}
+
+/**
+ * Single source of truth for what the agent's picker sees and what
+ * `tools/list` exposes at runtime. Resolution:
+ *
+ *   1. Base catalog
+ *      - api source        → synthetic `[api_call]`
+ *      - local + mcpServerTools provided → MCPB-canonical entries
+ *      - otherwise          → `integration.tools` keys (sparse fallback)
+ *   2. Subtract `integration.hidden_tools` (explicit opt-out)
+ *   3. Subtract `getConnectToolNames` (auto-hide run-start primitives)
+ *   4. Attach policy from `integration.tools[name]` when present
+ */
+export function resolveIntegrationToolCatalog(
+  input: ResolveIntegrationToolCatalogInput,
+): IntegrationToolCatalogEntry[] {
+  const { integration, mcpServerTools } = input;
+  const apiCallCfg = getApiCallConfig(integration);
+
+  // Step 1 — base catalog
+  let base: IntegrationToolCatalogEntry[];
+  if (apiCallCfg !== null) {
+    base = [{ name: API_CALL_TOOL_NAME }];
+  } else if (mcpServerTools && mcpServerTools.length > 0) {
+    base = mcpServerTools.map((t) => ({ name: t.name, description: t.description }));
+  } else {
+    base = getDeclaredToolNames(integration).map((name) => ({ name }));
+  }
+
+  // Step 2+3 — hide set (explicit + auto)
+  const hidden = new Set<string>([
+    ...(integration.hidden_tools ?? []),
+    ...getConnectToolNames(integration),
+  ]);
+
+  // Step 4 — attach policy from the sparse `tools{}` table
+  const policyTable = integration.tools ?? {};
+  const out: IntegrationToolCatalogEntry[] = [];
+  for (const entry of base) {
+    if (hidden.has(entry.name)) continue;
+    const raw = policyTable[entry.name] as
+      | { required_scopes?: string[]; required_auth_key?: string; url_patterns?: unknown[] }
+      | undefined;
+    if (!raw) {
+      out.push(entry);
+      continue;
+    }
+    out.push({
+      ...entry,
+      policy: {
+        requiredScopes: raw.required_scopes,
+        requiredAuthKey: raw.required_auth_key,
+        urlPatterns: raw.url_patterns as IntegrationToolPolicy["urlPatterns"],
+      },
+    });
+  }
+  return out;
 }
 
 /**
@@ -486,32 +592,43 @@ export interface AgentIntegrationScopeError {
 }
 
 /**
- * Validate an agent's tool/scope selection against the integration manifest's
- * catalog. Returns an array of structured errors — empty means install-valid.
+ * Validate an agent's tool/scope selection against the integration's
+ * effective tool catalog and scope_catalog. Returns an array of structured
+ * errors — empty means install-valid.
  *
- * Default semantics: no `tools` block → any tool accepted; no `scope_catalog`
- * on any auth → any scope accepted (the IdP is the ultimate authority at
- * consent time).
+ * Tool validation uses {@link resolveIntegrationToolCatalog} so it sees the
+ * MCPB-canonical mcp-server tools (when `mcpServerTools` is passed) rather
+ * than the sparse `integration.tools` policy table. Pass `mcpServerTools`
+ * for local-source integrations; omit it for remote/api sources or when
+ * the mcp-server manifest is unavailable (the resolver falls back to
+ * `integration.tools` keys).
+ *
+ * Default semantics:
+ *   - Empty resolved catalog → no tool validation (caller is responsible
+ *     for surfacing "no exposable tools").
+ *   - No `scope_catalog` on any auth → any scope accepted (the IdP is the
+ *     ultimate authority at consent time).
  */
 export function validateAgentIntegrationScopes(
   selection: Pick<ManifestIntegrationEntry, "id" | "tools" | "scopes">,
   integrationManifest: IntegrationManifest,
+  mcpServerTools?: ResolveIntegrationToolCatalogInput["mcpServerTools"],
 ): AgentIntegrationScopeError[] {
   const errors: AgentIntegrationScopeError[] = [];
 
   if (selection.tools && selection.tools.length > 0) {
-    const declared = new Set(getDeclaredToolNames(integrationManifest));
-    // The generic `api_call` tool is SYNTHETIC — exposed in-process for an
-    // api-source integration, never listed in `tools`.
-    const apiCallAllowed = getApiCallConfig(integrationManifest) !== null;
-    if (declared.size > 0) {
+    const catalog = resolveIntegrationToolCatalog({
+      integration: integrationManifest,
+      mcpServerTools,
+    });
+    if (catalog.length > 0) {
+      const allowed = new Set(catalog.map((e) => e.name));
       for (const tool of selection.tools) {
-        if (declared.has(tool)) continue;
-        if (apiCallAllowed && tool === API_CALL_TOOL_NAME) continue;
+        if (allowed.has(tool)) continue;
         errors.push({
           field: `integrations.${selection.id}.tools`,
           code: "unknown_tool",
-          message: `Tool "${tool}" is not declared by integration ${selection.id}`,
+          message: `Tool "${tool}" is not exposed by integration ${selection.id}`,
         });
       }
     }
