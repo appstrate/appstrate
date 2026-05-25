@@ -30,7 +30,7 @@ export interface ResolvedAuthCredentials {
    * — the same convention manifest `delivery`/`{{var}}` refs must use.
    */
   fields: Readonly<Record<string, string>>;
-  /** URL allowlist from the manifest (AFPS authorizedUris glob format). */
+  /** URL allowlist from the manifest (AFPS `authorized_uris` glob format). */
   authorizedUris: readonly string[];
   /** Audience value if declared (RFC 8707 binding token). */
   audience?: string;

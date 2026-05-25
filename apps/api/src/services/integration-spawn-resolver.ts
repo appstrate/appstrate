@@ -167,11 +167,11 @@ async function resolveOne(
   // encoding a typical (multi-MB) integration bundle blows past Linux's
   // env var size limit.
   //
-  // A serverless integration declares an
-  // `apiCall` block and no `server`: no runner to spawn, just the generic
+  // A serverless integration declares
+  // `source.kind: "api"` and no `server`: no runner to spawn, just the generic
   // credential-injecting tool. Exposed when the agent selected it
   // (least-privilege: the catch-all tool is never auto-granted).
-  // `authorizedUris` come from the auth the api_call config resolved to.
+  // `authorized_uris` come from the auth the api source resolved to.
   const apiCallCfg = getApiCallConfig(manifest);
   const exposeApiCall =
     apiCallCfg !== null && (agentToolSelection ?? []).includes(API_CALL_TOOL_NAME);
@@ -259,7 +259,7 @@ async function resolveOne(
   }
   // sourceKind === "api" (or unknown) → serverless, serverSpec stays undefined.
 
-  // Phase 4 — narrow the MITM URL envelope to the union of urlPatterns
+  // Phase 4 — narrow the MITM URL envelope to the union of `url_patterns`
   // declared on the agent-selected tools (skipped for remote HTTP MCP).
   const toolUrlEnvelope = isRemoteHttp
     ? undefined
@@ -338,14 +338,14 @@ async function resolveOne(
 
 /**
  * Build the {@link IntegrationSpawnSpec.toolUrlEnvelope} from the agent's
- * tool selection × the integration manifest's `tools.{name}.urlPatterns`.
+ * tool selection × the integration manifest's `tools.{name}.url_patterns`.
  *
  * Returns `undefined` (no extra MITM URL enforcement) when:
  *  - The agent didn't restrict tools (`agentToolSelection === undefined`).
  *  - The agent restricted to an empty set (handled by toolAllowlist alone).
- *  - ANY selected tool lacks a `urlPatterns` declaration — we can't
+ *  - ANY selected tool lacks a `url_patterns` declaration — we can't
  *    safely narrow the envelope without blocking that tool's legitimate
- *    traffic, so we fall back to per-auth `authorizedUris`.
+ *    traffic, so we fall back to per-auth `authorized_uris`.
  *
  * When every selected tool declares patterns, returns the deduplicated
  * union. Methods are unioned per pattern (a pattern declared twice with

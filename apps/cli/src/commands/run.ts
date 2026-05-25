@@ -356,7 +356,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   }
 
   // ─── 7b. Platform runtime tools (output/log/note/pin/report) ──────────
-  // Selected via `manifest.runtimeTools`. With no sidecar (the CLI always
+  // Selected via `manifest.runtime_tools`. With no sidecar (the CLI always
   // runs in-process), register the shared MCP tool definitions
   // (`@appstrate/core/runtime-tool-defs`) as Pi extensions. The default
   // emitter writes the canonical events as stdout-JSONL, harvested by the

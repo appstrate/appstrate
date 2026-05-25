@@ -9,7 +9,7 @@
  * surface — `integration_connections` rows + the manifest's `delivery.http`
  * plan — and synthesises a {@link ProxyCredentialsPayload} that
  * {@link proxyCall} consumes verbatim (header injection +
- * `{{var}}` substitution + `authorizedUris` allowlist).
+ * `{{var}}` substitution + `authorized_uris` allowlist).
  *
  * `X-Integration` carries the integration package id (`@scope/name`). The
  * actor (dashboard user, CLI/JWT user, or impersonated end-user) selects

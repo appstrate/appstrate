@@ -146,7 +146,7 @@ export interface HttpDeliveryAuthSpec {
   allowServerOverride: boolean;
   /**
    * URI patterns this auth is authorised for — glob-style strings copied verbatim
-   * from `manifest.auths.{key}.authorizedUris`. The sidecar's planner uses these
+   * from `manifest.auths.{key}.authorized_uris`. The sidecar's planner uses these
    * to decide which auth (if any) applies to each upstream request.
    */
   authorizedUris: readonly string[];
@@ -168,7 +168,7 @@ export interface IntegrationSpawnSpec {
     version: string;
     /**
      * MCP server to spawn/connect. Optional on the spawn spec: the
-     * resolver omits it for serverless integrations (an `apiCall` block and
+     * resolver omits it for serverless integrations (`source.kind: "api"`,
      * no `server`), which expose only the generic `api_call` tool. The
      * sidecar skips spawn entirely for such specs.
      */
@@ -195,7 +195,7 @@ export interface IntegrationSpawnSpec {
   };
   /**
    * Generic credential-injecting HTTP tool. Set when the manifest declares
-   * `apiCall` AND the agent
+   * `source.kind: "api"` AND the agent
    * selected the `api_call` tool. The sidecar registers a
    * `{namespace}__api_call` tool that proxies an arbitrary upstream
    * request bounded by {@link authorizedUris}, injecting the resolved
@@ -206,13 +206,13 @@ export interface IntegrationSpawnSpec {
    * HTTP) so a leaked env var can't surface a live token.
    */
   apiCall?: {
-    /** Which declared auth supplies credentials + authorizedUris. */
+    /** Which declared auth supplies credentials + authorized_uris. */
     authKey: string;
-    /** URI allowlist (verbatim from `auths.{authKey}.authorizedUris`). */
+    /** URI allowlist (verbatim from `auths.{authKey}.authorized_uris`). */
     authorizedUris: readonly string[];
     /**
-     * Skip the `authorizedUris` allowlist (SSRF blocklist still applies).
-     * From `auths.{authKey}.allowAllUris` — for user-supplied base URLs.
+     * Skip the `authorized_uris` allowlist (SSRF blocklist still applies).
+     * From `auths.{authKey}.allow_all_uris` — for user-supplied base URLs.
      */
     allowAllUris?: boolean;
     /** Resumable-upload protocols the tool advertises (may be empty). */
@@ -258,16 +258,16 @@ export interface IntegrationSpawnSpec {
    * the integration to talk to an unrelated endpoint), the MITM refuses
    * the request before the credential is injected upstream.
    *
-   * Resolved by the platform as `⋃ manifest.tools[t].urlPatterns` for
+   * Resolved by the platform as `⋃ manifest.tools[t].url_patterns` for
    * every `t` in {@link toolAllowlist}. Only emitted when EVERY tool in
-   * the allowlist declares non-empty `urlPatterns` — a single tool
+   * the allowlist declares non-empty `url_patterns` — a single tool
    * without patterns means we can't safely enforce (we'd block legit
    * traffic), so the field is left `undefined` (no extra enforcement).
    *
    * `undefined` preserves the historical behaviour where only the
-   * per-auth `authorizedUris` allowlist gates outbound traffic. The
-   * envelope is narrower than `authorizedUris` and is checked first;
-   * `authorizedUris` still applies (via {@link httpDeliveryAuths}) for
+   * per-auth `authorized_uris` allowlist gates outbound traffic. The
+   * envelope is narrower than `authorized_uris` and is checked first;
+   * `authorized_uris` still applies (via {@link httpDeliveryAuths}) for
    * deciding which credential to inject.
    *
    * `methods` (when present) constrains the HTTP verb; omitted means
@@ -308,10 +308,11 @@ export interface IntegrationSpawnSpec {
     inputs: Record<string, string>;
     /**
      * Upstream status codes that trigger a mid-run re-login (from
-     * `auths.{key}.connect.reauthOn`). When an upstream returns one of these
-     * for a request using the captured session, the sidecar re-runs the login
-     * tool to mint a fresh session and retries the request once. Omitted when
-     * the manifest didn't declare `reauthOn` — the sidecar defaults to `[401]`.
+     * `auths.{key}._meta["dev.appstrate/connect"].reauth_on`). When an upstream
+     * returns one of these for a request using the captured session, the
+     * sidecar re-runs the login tool to mint a fresh session and retries the
+     * request once. Omitted when the manifest didn't declare `reauth_on` —
+     * the sidecar defaults to `[401]`.
      */
     reauthOn?: number[];
   };

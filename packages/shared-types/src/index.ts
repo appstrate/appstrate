@@ -257,8 +257,9 @@ export interface AgentListItem extends BasePackageListItem {
   author: string;
   keywords: string[];
   dependencies: {
-    skills: Record<string, string>;
-    tools: Record<string, string>;
+    skills?: Record<string, string>;
+    mcp_servers?: Record<string, string>;
+    integrations?: Record<string, string>;
   };
   runningRuns: number;
   type: PackageType;

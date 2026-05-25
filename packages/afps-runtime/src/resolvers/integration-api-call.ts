@@ -14,7 +14,7 @@
  * inject credentials locally — no sidecar, no container.
  *
  * The reusable HTTP core lives in {@link makeApiCallTool} / {@link ApiCallFn}
- * (body streaming, redirect handling, `authorizedUris` matching, response
+ * (body streaming, redirect handling, `authorized_uris` matching, response
  * serialisation). This module is credential-source-specific:
  *
  *   - {@link LocalIntegrationResolver} reads a JSON creds file keyed by
@@ -25,7 +25,7 @@
  *     the integration id as the `X-Integration` scope marker. Credentials never
  *     leave the platform.
  *
- * Tool surface: one AFPS `Tool` per apiCall integration, named
+ * Tool surface: one AFPS `Tool` per api-source integration, named
  * `{ns}__api_call` to match the platform's namespacing — NOT a single
  * `api_call` dispatcher keyed by a providerId enum.
  */
@@ -60,8 +60,8 @@ export interface IntegrationRef {
 }
 
 /**
- * Flat runtime view of an integration's `apiCall` surface, projected from
- * the integration manifest. Carries everything the resolver needs to build
+ * Flat runtime view of an integration's `source.kind: "api"` surface, projected
+ * from the integration manifest. Carries everything the resolver needs to build
  * a credential-injecting tool: the auth's URL allowlist, the auth type, and
  * the auth's `delivery.http` config (if any).
  */
@@ -73,7 +73,11 @@ export interface ApiCallIntegrationMeta {
    * Defaults to the slugified package id (matches the platform).
    */
   namespace: string;
-  /** Auth key supplying credentials (`apiCall.authKey` or the single auth). */
+  /**
+   * Auth key supplying credentials. For AFPS 2.0 `source.kind: "api"` integrations,
+   * resolved from `_meta["dev.appstrate/api"].auth_key`, or the single declared
+   * auth when only one exists.
+   */
   authKey: string;
   /** Auth type (`oauth2` | `api_key` | `basic` | `custom`). */
   authType: string;
@@ -324,7 +328,7 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
           description:
             `Make an authenticated request through the "${meta.name}" integration's ` +
             "credential-injecting proxy. Supply method, target URL, optional headers/body, " +
-            "and responseMode. The target must match the integration auth's authorizedUris.",
+            "and responseMode. The target must match the integration auth's authorized_uris.",
         }),
       );
     }
@@ -452,7 +456,7 @@ export interface RemoteAppstrateIntegrationResolverOptions {
  * credential injection server-side; the local agent never sees credentials.
  *
  * The credential-proxy route is provider/integration-agnostic — it gates on
- * the resolved connection's `authorizedUris` and injects the configured
+ * the resolved connection's `authorized_uris` and injects the configured
  * header, identically across every `{ns}__api_call` surface.
  */
 export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallResolver {
@@ -485,7 +489,7 @@ export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallRes
     for (const ref of refs) {
       const meta = readApiCallIntegrationMeta(bundle, ref);
       if (!meta) continue;
-      // The platform enforces `authorizedUris` server-side — allow all
+      // The platform enforces `authorized_uris` server-side — allow all
       // locally so the tool dispatches and lets the proxy gate.
       const remoteMeta: ApiCallMeta = { name: meta.name, allowAllUris: true };
       tools.push(
@@ -494,7 +498,7 @@ export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallRes
           description:
             `Make an authenticated request through the "${meta.name}" integration's ` +
             "credential-injecting proxy. Supply method, target URL, optional headers/body, " +
-            "and responseMode. The target must match the integration auth's authorizedUris.",
+            "and responseMode. The target must match the integration auth's authorized_uris.",
         }),
       );
     }
@@ -598,5 +602,5 @@ export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallRes
   }
 }
 
-// Re-export the URL matcher so callers can reason about authorizedUris.
+// Re-export the URL matcher so callers can reason about authorized_uris.
 export { matchesAuthorizedUriSpec };
