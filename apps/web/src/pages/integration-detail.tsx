@@ -14,6 +14,10 @@
  *     (a missing client locks the connection list right below it). A collapsed
  *     admin "Règles d'accès" section at the bottom holds the org-wide policy
  *     (block member connections, default connection, per-agent pin exceptions).
+ *   - Outils — read-only catalog of tools the integration exposes (resolved
+ *     server-side via `resolveIntegrationToolCatalog`: MCPB-canonical from
+ *     the referenced mcp-server minus `hidden_tools` and connect.tool
+ *     primitives). Per-tool description + required scopes + URL patterns.
  *   - À propos — metadata (version, author, license, repo, …), privacy policy,
  *     keywords.
  *   - Versions — read-only release history (non-system packages only).
@@ -1057,6 +1061,14 @@ export function IntegrationDetailPage() {
           <TabsTrigger value="connections" data-testid="tab-connections">
             {t("integration.tabs.connections")}
           </TabsTrigger>
+          <TabsTrigger value="tools" data-testid="tab-tools">
+            {t("integration.tabs.tools")}
+            {detail.toolCatalog && detail.toolCatalog.length > 0 && (
+              <Badge variant="outline" className="ml-1.5 text-[0.65rem]">
+                {detail.toolCatalog.length}
+              </Badge>
+            )}
+          </TabsTrigger>
           <TabsTrigger value="about" data-testid="tab-about">
             {t("integration.tabs.about")}
           </TabsTrigger>
@@ -1098,6 +1110,71 @@ export function IntegrationDetailPage() {
               )}
             </>
           )}
+        </TabsContent>
+
+        {/* ─── Outils (effective tool catalog — read-only) ─── */}
+        <TabsContent value="tools" className="mt-4">
+          <div className="max-w-2xl space-y-3">
+            <p className="text-muted-foreground text-xs">{t("integration.tools.intro")}</p>
+            {(detail.toolCatalog ?? []).length === 0 ? (
+              <p className="text-muted-foreground text-sm">{t("integration.tools.none")}</p>
+            ) : (
+              <div className="grid gap-2">
+                {(detail.toolCatalog ?? []).map((tool) => {
+                  const scopes = tool.policy?.requiredScopes ?? [];
+                  const patterns = tool.policy?.urlPatterns ?? [];
+                  return (
+                    <div
+                      key={tool.name}
+                      className="bg-muted/30 rounded-md border p-3 text-xs"
+                      data-testid={`integration-tool-${tool.name}`}
+                    >
+                      <div className="flex flex-wrap items-baseline gap-2">
+                        <span className="font-mono text-sm font-semibold">{tool.name}</span>
+                        {tool.policy?.requiredAuthKey && (
+                          <Badge variant="outline" className="text-[0.65rem]">
+                            auth: {tool.policy.requiredAuthKey}
+                          </Badge>
+                        )}
+                      </div>
+                      {tool.description && (
+                        <p className="text-muted-foreground mt-1">{tool.description}</p>
+                      )}
+                      {scopes.length > 0 && (
+                        <p className="text-muted-foreground mt-2">
+                          {t("integration.tools.requires")}{" "}
+                          {scopes.map((s) => (
+                            <Badge
+                              key={s}
+                              variant="secondary"
+                              className="mr-1 font-mono text-[0.65rem]"
+                            >
+                              {s}
+                            </Badge>
+                          ))}
+                        </p>
+                      )}
+                      {patterns.length > 0 && (
+                        <details className="mt-2">
+                          <summary className="text-muted-foreground cursor-pointer text-[11px]">
+                            {t("integration.tools.urlPatterns", { count: patterns.length })}
+                          </summary>
+                          <ul className="text-muted-foreground mt-1 ml-3 list-disc font-mono text-[11px]">
+                            {patterns.map((p, i) => (
+                              <li key={i}>
+                                {p.methods?.length ? `${p.methods.join("|")} ` : ""}
+                                {p.pattern}
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </TabsContent>
 
         {/* ─── À propos (metadata) ─── */}
