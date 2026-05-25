@@ -363,8 +363,8 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   // `attachStdoutBridge` wired below into the run sink — same wire contract
   // the former built-in tools used.
   const rootRuntimeTools = (
-    bundle.packages.get(bundle.root)?.manifest as { runtimeTools?: string[] } | undefined
-  )?.runtimeTools;
+    bundle.packages.get(bundle.root)?.manifest as { runtime_tools?: string[] } | undefined
+  )?.runtime_tools;
   const runtimeToolFactories = buildRuntimeToolExtensions({
     ...(rootRuntimeTools ? { runtimeTools: rootRuntimeTools } : {}),
     outputSchema: (promptInputs.outputSchema ?? null) as Record<string, unknown> | null,

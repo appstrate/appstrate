@@ -500,7 +500,7 @@ if (sidecarUrl) {
   // as Pi extensions in-process. Their canonical events are re-emitted into
   // the run sink by the wrapper (default stdout-JSONL → the stdout bridge).
   const rootManifest = bundle
-    ? (bundle.packages.get(bundle.root)?.manifest as { runtimeTools?: string[] } | undefined)
+    ? (bundle.packages.get(bundle.root)?.manifest as { runtime_tools?: string[] } | undefined)
     : undefined;
   let outputSchema: Record<string, unknown> | null = null;
   if (process.env.OUTPUT_SCHEMA) {
@@ -512,7 +512,7 @@ if (sidecarUrl) {
   }
   extensionFactories.push(
     ...buildRuntimeToolExtensions({
-      ...(rootManifest?.runtimeTools ? { runtimeTools: rootManifest.runtimeTools } : {}),
+      ...(rootManifest?.runtime_tools ? { runtimeTools: rootManifest.runtime_tools } : {}),
       outputSchema,
       emit: (event) => {
         void bridgedSink.handle(event as RunEvent);
