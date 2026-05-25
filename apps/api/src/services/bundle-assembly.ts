@@ -51,7 +51,7 @@ export async function buildBundleFromDb(
   metadata?: BundleMetadata,
 ): Promise<Bundle> {
   const catalog = new DbPackageCatalog({ orgId: scope.orgId });
-  return buildBundleFromCatalog(root, catalog, { metadata });
+  return buildBundleFromCatalog(root, catalog, { metadata, depTypes: ["skills"] });
 }
 
 /**
@@ -68,7 +68,7 @@ export async function buildBundleFromInlinePayload(
   const inline = new InMemoryPackageCatalog(inlinePackages);
   const db = new DbPackageCatalog({ orgId: scope.orgId });
   const composed: PackageCatalog = composeCatalogs(inline, db);
-  return buildBundleFromCatalog(root, composed, { metadata });
+  return buildBundleFromCatalog(root, composed, { metadata, depTypes: ["skills"] });
 }
 
 /**
@@ -218,5 +218,6 @@ export async function buildBundleFromAgentDraft(
   };
   return buildBundleFromCatalog(root, new DraftPackageCatalog({ orgId: scope.orgId }), {
     metadata,
+    depTypes: ["skills"],
   });
 }

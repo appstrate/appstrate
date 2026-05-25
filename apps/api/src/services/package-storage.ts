@@ -151,6 +151,9 @@ export async function buildAgentPackage(
   };
 
   const bundle = await buildBundleFromCatalog(root, new DraftPackageCatalog({ orgId }), {
+    // Run bundle = agent + skills. Integrations/mcp-servers are spawned and
+    // fetched separately by the sidecar, not bundled into the agent.
+    depTypes: ["skills"],
     onWarn: (message) => {
       logger.warn("buildAgentPackage: bundle builder warning", { agentId: agent.id, message });
     },

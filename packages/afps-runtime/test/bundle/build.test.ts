@@ -116,6 +116,34 @@ describe("buildBundleFromCatalog", () => {
     expect(bundle.packages.get("@me/integ-y@1.0.0" as PackageIdentity)).toBeDefined();
   });
 
+  it("depTypes: ['skills'] walks only skills (run-bundle: integrations/mcp-servers are spawned separately)", async () => {
+    const rootManifest = {
+      ...ROOT,
+      dependencies: {
+        skills: { "@me/skill-a": "^1.0.0" },
+        mcp_servers: { "@me/mcp-x": "1.2.3" },
+        integrations: { "@me/integ-y": "^1.0.0" },
+      },
+    };
+    const root = makePkg("@me/root@1.0.0" as PackageIdentity, rootManifest, {
+      "prompt.md": enc("p"),
+    });
+    const skill = makePkg(
+      "@me/skill-a@1.3.0" as PackageIdentity,
+      { name: "@me/skill-a", version: "1.3.0", type: "skill", schema_version: "2.0" },
+      { "SKILL.md": enc("s") },
+    );
+    // Only the skill is in the catalog: an integration/mcp_server dep must not
+    // be resolved or fetched, so its absence here must not surface as missing.
+    const cat = new InMemoryPackageCatalog([skill]);
+
+    const bundle = await buildBundleFromCatalog(root, cat, { depTypes: ["skills"] });
+    expect(bundle.packages.size).toBe(2); // root + skill
+    expect(bundle.packages.get("@me/skill-a@1.3.0" as PackageIdentity)).toBeDefined();
+    expect(bundle.packages.get("@me/mcp-x@1.2.3" as PackageIdentity)).toBeUndefined();
+    expect(bundle.packages.get("@me/integ-y@1.0.0" as PackageIdentity)).toBeUndefined();
+  });
+
   it("walks transitive deps", async () => {
     const root = makePkg(
       "@me/root@1.0.0" as PackageIdentity,

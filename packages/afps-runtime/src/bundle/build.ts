@@ -45,6 +45,14 @@ export interface BuildBundleOptions {
   limits?: Partial<BundleLimits>;
   /** Called with a human-readable message for non-fatal conditions (cycles). */
   onWarn?: (msg: string) => void;
+  /**
+   * Which `dependencies.*` sections to walk into the bundle graph. Defaults to
+   * all bundleable sections. Run-bundle builders pass `["skills"]`: an agent's
+   * integrations and mcp-servers are not bundle members — they are spawned /
+   * fetched separately by the sidecar at runtime — so they must not be walked
+   * into (and fetched for) the agent bundle.
+   */
+  depTypes?: DepRequest["type"][];
 }
 
 /**
@@ -63,6 +71,7 @@ export async function buildBundleFromCatalog(
 ): Promise<Bundle> {
   const limits = resolveBundleLimits(opts.limits);
   const onWarn = opts.onWarn ?? (() => {});
+  const depTypes = opts.depTypes ?? ["skills", "mcp_servers", "integrations"];
   const packages = new Map<PackageIdentity, BundlePackage>();
   const visiting = new Set<PackageIdentity>();
   const missing: Array<{ from: PackageIdentity; name: string; versionSpec: string }> = [];
@@ -89,7 +98,7 @@ export async function buildBundleFromCatalog(
       );
     }
 
-    const deps = extractDependencies(pkg.manifest);
+    const deps = extractDependencies(pkg.manifest, depTypes);
     for (const { name, versionSpec } of deps) {
       const resolved = await catalog.resolve(name, versionSpec);
       if (!resolved) {
@@ -266,13 +275,13 @@ interface DepRequest {
   type: "skills" | "mcp_servers" | "integrations";
 }
 
-function extractDependencies(manifest: AfpsManifest): DepRequest[] {
+function extractDependencies(manifest: AfpsManifest, depTypes: DepRequest["type"][]): DepRequest[] {
   const out: DepRequest[] = [];
   const deps = manifest.dependencies;
   if (!deps || typeof deps !== "object") return out;
   const depsObj = deps as Record<string, unknown>;
 
-  for (const type of ["skills", "mcp_servers", "integrations"] as const) {
+  for (const type of depTypes) {
     const section = depsObj[type];
     if (!section || typeof section !== "object" || Array.isArray(section)) continue;
     for (const [name, spec] of Object.entries(section as Record<string, unknown>)) {
