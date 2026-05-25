@@ -9,6 +9,7 @@ import {
   type AgentManifest,
   type PackageType,
   type IntegrationManifest,
+  type McpServerManifest,
 } from "./validation.ts";
 
 export type { Zippable };
@@ -165,8 +166,8 @@ export function stripWrapperPrefix(
 /** Result of parsing an AFPS package ZIP file. */
 export interface ParsedPackageZip {
   /** The validated manifest from manifest.json. */
-  manifest: Manifest | AgentManifest | IntegrationManifest;
-  /** The primary content (prompt.md for agents, SKILL.md for skills, manifest.json for integrations). */
+  manifest: Manifest | AgentManifest | IntegrationManifest | McpServerManifest;
+  /** The primary content (prompt.md for agents, SKILL.md for skills, manifest.json for integrations/mcp-servers). */
   content: string;
   /** All files in the ZIP archive (path to content). */
   files: Record<string, Uint8Array>;
@@ -261,7 +262,16 @@ export function parsePackageZip(zipBuffer: Uint8Array, maxSize?: number): Parsed
 
   const manifest = validation.manifest!;
 
-  const type = manifest.type;
+  // An mcp-server manifest is a verbatim MCPB manifest with no top-level
+  // AFPS `type` — it declares `type: "mcp-server"` under
+  // `_meta["dev.afps/mcp-server"]` (AFPS §3.4). Derive the package type
+  // accordingly so the switch below dispatches correctly.
+  const metaForType = (manifest as { _meta?: Record<string, unknown> })._meta;
+  const afpsMcpForType = metaForType?.["dev.afps/mcp-server"] as { type?: unknown } | undefined;
+  const type: PackageType | undefined =
+    afpsMcpForType?.type === "mcp-server"
+      ? "mcp-server"
+      : (manifest as { type?: PackageType }).type;
 
   // Extract primary content based on type
   let content: string;
@@ -300,6 +310,13 @@ export function parsePackageZip(zipBuffer: Uint8Array, maxSize?: number): Parsed
       // runtime resolver (Phase 1.2a) consumes it directly.
       const integrationRaw = files["INTEGRATION.md"];
       content = integrationRaw ? new TextDecoder().decode(integrationRaw) : manifestText;
+      break;
+    }
+    case "mcp-server": {
+      // mcp-server packages (AFPS §3.4) are MCPB bundles — manifest.json is
+      // authoritative; the server payload under `server.entry_point` is left
+      // untouched for the runtime to consume directly.
+      content = manifestText;
       break;
     }
     default:

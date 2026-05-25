@@ -1,31 +1,25 @@
 {
-  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
-  "manifestVersion": "1.1",
-  "type": "integration",
   "name": "@appstrate/discord",
   "version": "1.0.0",
-  "displayName": "Discord (API)",
+  "type": "integration",
+  "schema_version": "2.0",
+  "display_name": "Discord (API)",
   "description": "Communication platform for communities and teams",
-  "license": "Apache-2.0",
-  "author": "Appstrate",
-  "icon": "discord",
   "keywords": ["social-media", "messaging", "community"],
-  "apiCall": {
-    "authKey": "primary"
+  "license": "Apache-2.0",
+  "icon": "discord",
+  "source": {
+    "kind": "api",
+    "api": {}
   },
   "auths": {
     "primary": {
       "type": "oauth2",
-      "required": true,
-      "authorizedUris": ["https://discord.com/api/**"],
-      "authorizationUrl": "https://discord.com/oauth2/authorize",
-      "tokenUrl": "https://discord.com/api/v10/oauth2/token",
-      "refreshUrl": "https://discord.com/api/v10/oauth2/token",
-      "scopes": ["identify"],
-      "scopeSeparator": " ",
-      "pkceEnabled": false,
-      "tokenAuthMethod": "client_secret_basic",
-      "availableScopes": [
+      "authorization_endpoint": "https://discord.com/oauth2/authorize",
+      "token_endpoint": "https://discord.com/api/v10/oauth2/token",
+      "default_scopes": ["identify"],
+      "token_endpoint_auth_method": "client_secret_basic",
+      "scope_catalog": [
         {
           "value": "identify",
           "label": "Read user profile (id, username, avatar)"
@@ -67,13 +61,31 @@
           "label": "Read messages in channels"
         }
       ],
+      "authorized_uris": ["https://discord.com/api/**"],
       "delivery": {
         "http": {
-          "headerName": "Authorization",
-          "headerPrefix": "Bearer",
-          "valueFrom": "access_token"
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": " "
+        },
+        "dev.appstrate/auth": {
+          "required": true
         }
       }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/api": {
+      "auth_key": "primary"
     }
   }
 }

@@ -24,12 +24,16 @@ export interface OAuthStateRecord {
   integration?: {
     packageId: string;
     authKey: string;
-    /** Explicit token URL — Mode A endpoints come from the manifest. */
-    tokenUrl: string;
-    /** Optional RFC 8707 `resource` parameter for the token exchange. */
-    audience?: string;
-    /** OAuth2 token endpoint client auth method declared on the auth. */
-    tokenAuthMethod?: "client_secret_post" | "client_secret_basic" | "none";
+    /**
+     * Resolved token endpoint (`auths.{key}.token_endpoint`, possibly filled
+     * by issuer discovery at initiate time). Carried so the callback never
+     * re-resolves.
+     */
+    tokenEndpoint: string;
+    /** Optional RFC 8707 `resource` parameter (`auths.{key}.resource`) for the token exchange. */
+    resource?: string;
+    /** OAuth2 token endpoint client auth method (`token_endpoint_auth_method`) declared on the auth. */
+    tokenEndpointAuthMethod?: "client_secret_post" | "client_secret_basic" | "none";
     /** Optional explicit client_id (DCR or user-supplied). */
     clientId?: string;
     /** Optional explicit client_secret (omitted for `none`). */

@@ -199,15 +199,15 @@ describe("afps sign + verify — round trip", () => {
   it("fails verify when the bundle's manifest is invalid", async () => {
     const bundlePath = join(dir, "agent.afps");
     // Scoped name (required by the Bundle reader) but invalid
-    // schemaVersion pattern — validateBundle surfaces this as
-    // MANIFEST_SCHEMA.
+    // schema_version MAJOR — the v2 afps-spec schema constrains it to /^2\./,
+    // so validateBundle surfaces this as MANIFEST_SCHEMA.
     await writeBundleFile(bundlePath, {
       manifest: {
         name: "@acme/bad",
         version: "1.0.0",
         type: "agent",
-        schemaVersion: "9.0",
-        displayName: "Bad",
+        schema_version: "9.0",
+        display_name: "Bad",
         author: "tester",
       },
     });

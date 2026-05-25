@@ -24,6 +24,10 @@ import {
 } from "@appstrate/db/schema";
 import { encryptCredentials } from "@appstrate/connect";
 import type { IntegrationManifest } from "@appstrate/core/integration";
+import {
+  localIntegrationManifest,
+  httpHeaderDelivery,
+} from "../../helpers/integration-manifests.ts";
 
 const mockServer: MockOAuthServer = createMockOAuthServer();
 
@@ -32,27 +36,25 @@ afterAll(() => {
 });
 
 function oauthManifest(name: string): IntegrationManifest {
-  return {
-    manifestVersion: "1.0",
-    type: "integration",
+  return localIntegrationManifest({
     name,
-    version: "1.0.0",
     displayName: "Gmail",
     description: "Gmail integration",
-    server: { type: "node", entryPoint: "main.js" },
     auths: {
       google: {
         type: "oauth2",
-        authorizationUrl: `${mockServer.url}/authorize`,
-        tokenUrl: `${mockServer.url}/token`,
-        scopes: ["openid", "email"],
+        authorizationEndpoint: `${mockServer.url}/authorize`,
+        tokenEndpoint: `${mockServer.url}/token`,
+        defaultScopes: ["openid", "email"],
         authorizedUris: ["https://gmail.googleapis.com/**"],
-        delivery: {
-          http: { headerName: "Authorization", headerPrefix: "Bearer ", valueFrom: "access_token" },
-        },
+        delivery: httpHeaderDelivery({
+          name: "Authorization",
+          prefix: "Bearer ",
+          field: "access_token",
+        }),
       },
     },
-  };
+  });
 }
 
 async function setup(

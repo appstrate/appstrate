@@ -11,10 +11,11 @@
  * hand-maintained. This test fails if the committed file falls out of sync,
  * i.e. someone changed the Zod schema and forgot to re-run `generate:schemas`.
  *
- * Cross-field rules (`server || apiCall`, per-auth `delivery`, scope-catalog
- * checks) live in the Zod `superRefine`s and are intentionally absent from the
- * JSON Schema — `toJSONSchema` cannot represent refinements. That is expected
- * and is why the JSON Schema is a looser (structural) projection.
+ * Cross-field rules (≥1 auth, oauth2 discovery, per-auth `delivery`,
+ * scope-catalog subset, per-tool auth-key) live in the Zod `superRefine`s and
+ * are intentionally absent from the JSON Schema — `toJSONSchema` cannot
+ * represent refinements. That is expected and is why the JSON Schema is a
+ * looser (structural) projection.
  *
  * To fix a failure: `cd packages/core && bun run generate:schemas`.
  */
@@ -40,7 +41,7 @@ const generated = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
   title: "Appstrate Integration Manifest",
   description:
-    "Appstrate integration manifest — derived from the canonical Zod schema (packages/core/src/integration.ts). Cross-field rules (server || apiCall, per-auth delivery) are enforced by the Zod superRefines and are not representable in JSON Schema.",
+    "Appstrate integration manifest — AFPS 2.0 (packages/core/src/integration.ts). Cross-field rules (≥1 auth, oauth2 discovery, delivery, scope-catalog subset, per-tool auth-key) are enforced by the Zod superRefines and are not representable in JSON Schema.",
   ...jsonSchema,
 };
 

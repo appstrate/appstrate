@@ -13,8 +13,8 @@ function validAgentManifest(overrides?: Record<string, unknown>) {
     name: "@test/my-agent",
     version: "1.0.0",
     type: "agent",
-    schemaVersion: "1.0",
-    displayName: "My Agent",
+    schema_version: "2.0",
+    display_name: "My Agent",
     author: "test",
     ...overrides,
   };
@@ -109,10 +109,10 @@ describe("validateManifest", () => {
       name: "@test/minimal",
       version: "1.0.0",
       type: "agent",
-      schemaVersion: "1.0",
-      displayName: "Minimal Agent",
+      schema_version: "2.0",
+      display_name: "Minimal Agent",
       author: "test",
-      // dependencies, timeout, providersConfiguration intentionally omitted
+      // dependencies, timeout, integrations_configuration intentionally omitted
     };
 
     const result = validateManifest(manifest);
@@ -122,32 +122,34 @@ describe("validateManifest", () => {
     const m = result.manifest as Record<string, unknown>;
     expect(m.dependencies).toBeUndefined();
     expect(m.timeout).toBeUndefined();
-    expect(m.providersConfiguration).toBeUndefined();
+    expect(m.integrations_configuration).toBeUndefined();
   });
 
-  it("agent with dependencies (skills/providers) + runtimeTools", () => {
+  it("agent with dependencies (skills/mcp_servers/integrations) + runtime_tools", () => {
     const result = validateManifest(
       validAgentManifest({
         dependencies: {
-          providers: { "@test/google": "^1.0.0" },
+          integrations: { "@test/gmail": "^1.0.0" },
+          mcp_servers: { "@test/fetch": "^1.0.0" },
           skills: { "@test/skill": "^1.0.0", "@test/other": "~2.3.0" },
         },
-        runtimeTools: ["log", "note"],
+        runtime_tools: ["log", "note"],
       }),
     );
     expect(result.valid).toBe(true);
     const m = result.manifest as Record<string, unknown>;
     const deps = m.dependencies as Record<string, unknown>;
     expect(deps.skills).toEqual({ "@test/skill": "^1.0.0", "@test/other": "~2.3.0" });
-    expect(deps.providers).toEqual({ "@test/google": "^1.0.0" });
-    // The former `dependencies.tools` package map is gone; selectable runtime
-    // tools are declared via the top-level `runtimeTools` field instead.
-    expect(m.runtimeTools).toEqual(["log", "note"]);
+    expect(deps.integrations).toEqual({ "@test/gmail": "^1.0.0" });
+    expect(deps.mcp_servers).toEqual({ "@test/fetch": "^1.0.0" });
+    // The former `dependencies.tools` map → `dependencies.mcp_servers`;
+    // selectable runtime tools are the top-level snake_case `runtime_tools`.
+    expect(m.runtime_tools).toEqual(["log", "note"]);
   });
 
   it("agent with no output schema is valid without the `output` runtime tool", () => {
     // Side-effect-only run: do a task and finish, no result to return.
-    const result = validateManifest(validAgentManifest({ runtimeTools: ["log"] }));
+    const result = validateManifest(validAgentManifest({ runtime_tools: ["log"] }));
     expect(result.valid).toBe(true);
   });
 
@@ -155,19 +157,19 @@ describe("validateManifest", () => {
     const result = validateManifest(
       validAgentManifest({
         output: { schema: { type: "object", properties: { x: { type: "string" } } } },
-        runtimeTools: ["log"],
+        runtime_tools: ["log"],
       }),
     );
     expect(result.valid).toBe(false);
-    // Error is surfaced on the runtimeTools field so the editor can render it.
-    expect(result.errors.some((e) => e.startsWith("runtimeTools:"))).toBe(true);
+    // Error is surfaced on the runtime_tools field so the editor can render it.
+    expect(result.errors.some((e) => e.startsWith("runtime_tools:"))).toBe(true);
   });
 
   it("accepts an output schema when the `output` runtime tool is selected", () => {
     const result = validateManifest(
       validAgentManifest({
         output: { schema: { type: "object", properties: { x: { type: "string" } } } },
-        runtimeTools: ["output", "log"],
+        runtime_tools: ["output", "log"],
       }),
     );
     expect(result.valid).toBe(true);
@@ -184,11 +186,11 @@ describe("validateManifest", () => {
     expect(result.valid).toBe(true);
   });
 
-  it("agent with integrations selection in the top-level `integrations` block", () => {
+  it("agent with integrations selection folded into integrations_configuration", () => {
     const result = validateManifest(
       validAgentManifest({
         dependencies: { integrations: { "@test/gmail-mcp": "^1.0.0" } },
-        integrations: {
+        integrations_configuration: {
           "@test/gmail-mcp": {
             tools: ["list_messages", "get_message"],
             scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
@@ -214,7 +216,7 @@ describe("validateManifest", () => {
     const result = validateManifest(
       validAgentManifest({
         dependencies: { integrations: { "@test/gmail-mcp": "^1.0.0" } },
-        integrations: {
+        integrations_configuration: {
           "@test/gmail-mcp": { tools: ["List-Messages"] },
         },
       }),
@@ -244,33 +246,33 @@ describe("validateManifest", () => {
     expect(result.valid).toBe(false);
   });
 
-  // ─── schemaVersion format validation ───
+  // ─── schema_version format validation (AFPS 2.0) ───
 
-  it("rejects schemaVersion with patch segment (1.0.0)", () => {
-    const result = validateManifest(validAgentManifest({ schemaVersion: "1.0.0" }));
+  it("rejects schema_version with patch segment (2.0.0)", () => {
+    const result = validateManifest(validAgentManifest({ schema_version: "2.0.0" }));
     expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes("schemaVersion"))).toBe(true);
+    expect(result.errors.some((e) => e.includes("schema_version"))).toBe(true);
   });
 
-  it("rejects schemaVersion without minor segment (1)", () => {
-    const result = validateManifest(validAgentManifest({ schemaVersion: "1" }));
+  it("rejects schema_version without minor segment (2)", () => {
+    const result = validateManifest(validAgentManifest({ schema_version: "2" }));
     expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes("schemaVersion"))).toBe(true);
+    expect(result.errors.some((e) => e.includes("schema_version"))).toBe(true);
   });
 
-  it("rejects schemaVersion with v prefix (v1.0)", () => {
-    const result = validateManifest(validAgentManifest({ schemaVersion: "v1.0" }));
+  it("rejects schema_version with v prefix (v2.0)", () => {
+    const result = validateManifest(validAgentManifest({ schema_version: "v2.0" }));
     expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes("schemaVersion"))).toBe(true);
+    expect(result.errors.some((e) => e.includes("schema_version"))).toBe(true);
   });
 
-  it("rejects schemaVersion with wrong major (2.0)", () => {
-    const result = validateManifest(validAgentManifest({ schemaVersion: "2.0" }));
+  it("rejects schema_version with wrong major (1.0)", () => {
+    const result = validateManifest(validAgentManifest({ schema_version: "1.0" }));
     expect(result.valid).toBe(false);
   });
 
-  it("accepts schemaVersion with higher minor (1.99)", () => {
-    const result = validateManifest(validAgentManifest({ schemaVersion: "1.99" }));
+  it("accepts schema_version with higher minor (2.99)", () => {
+    const result = validateManifest(validAgentManifest({ schema_version: "2.99" }));
     expect(result.valid).toBe(true);
   });
 
@@ -282,8 +284,8 @@ describe("validateManifest", () => {
       name: "@test-org/hello-world",
       version: "1.0.0",
       type: "agent",
-      schemaVersion: "1.0",
-      displayName: "Hello World",
+      schema_version: "2.0",
+      display_name: "Hello World",
       author: "Appstrate",
       description: "A demo agent",
       keywords: ["demo", "example", "getting-started"],
@@ -300,11 +302,11 @@ describe("validateManifest", () => {
       name: "@test-org/fallback-agent",
       version: "0.0.0",
       type: "agent",
-      schemaVersion: "1.0",
-      displayName: "Fallback",
+      schema_version: "2.0",
+      display_name: "Fallback",
       author: "",
       description: "",
-      dependencies: { providers: {} },
+      dependencies: { integrations: {} },
     };
     const result = validateManifest(manifest);
     expect(result.valid).toBe(true);
@@ -323,11 +325,11 @@ describe("validateManifest", () => {
       name: "@test-org/my-agent",
       version: "1.0.0",
       type: "agent",
-      schemaVersion: "1.0",
-      displayName: "My Agent",
+      schema_version: "2.0",
+      display_name: "My Agent",
       description: "An agent",
       author: "user@example.com",
-      dependencies: { providers: {} },
+      dependencies: { integrations: {} },
     };
     const result = validateManifest(manifest);
     expect(result.valid).toBe(true);
@@ -340,7 +342,7 @@ describe("validateManifest", () => {
       name: "@test-org/my-skill",
       version: "1.0.0",
       type: "skill",
-      schemaVersion: "1.0",
+      schema_version: "2.0",
     };
     const result = validateManifest(manifest);
     expect(result.valid).toBe(true);
@@ -353,12 +355,12 @@ describe("validateManifest", () => {
       customTopLevel: "preserved",
       timeout: 300,
       dependencies: {
-        providers: { "@test/google": "^1.0.0" },
+        integrations: { "@test/google": "^1.0.0" },
         skills: {},
-        tools: {},
+        mcp_servers: {},
         customDepsField: "preserved",
       },
-      providersConfiguration: {
+      integrations_configuration: {
         "@test/google": {
           scopes: ["gmail.readonly"],
           customConfigField: true,
@@ -375,8 +377,80 @@ describe("validateManifest", () => {
     const deps = m.dependencies as Record<string, unknown>;
     expect(deps.customDepsField).toBe("preserved");
 
-    const cfg = m.providersConfiguration as Record<string, Record<string, unknown>>;
+    const cfg = m.integrations_configuration as Record<string, Record<string, unknown>>;
     expect(cfg["@test/google"]!.customConfigField).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────
+// validateManifest — all four AFPS 2.0 package types
+// ─────────────────────────────────────────────
+
+describe("validateManifest — package-type dispatch", () => {
+  it("dispatches an integration manifest", () => {
+    const r = validateManifest({
+      name: "@test/gmail",
+      version: "1.0.0",
+      type: "integration",
+      schema_version: "2.0",
+      display_name: "Gmail",
+      source: { kind: "remote", remote: { url: "https://x/mcp", transport: "streamable-http" } },
+      auths: {
+        oauth: {
+          type: "oauth2",
+          issuer: "https://idp",
+          authorized_uris: ["https://api/**"],
+          delivery: {
+            http: { in: "header", name: "Authorization", value: "{$credential.access_token}" },
+          },
+        },
+      },
+    });
+    expect(r.valid).toBe(true);
+  });
+
+  it("dispatches an mcp-server manifest via _meta identity (no top-level type)", () => {
+    const r = validateManifest({
+      manifest_version: "0.3",
+      name: "fetch-json",
+      version: "1.0.0",
+      display_name: "Fetch JSON",
+      server: {
+        type: "node",
+        entry_point: "server/index.js",
+        mcp_config: { command: "node", args: ["server/index.js"] },
+      },
+      _meta: { "dev.afps/mcp-server": { name: "@test/fetch-json", type: "mcp-server" } },
+    });
+    expect(r.valid).toBe(true);
+  });
+
+  it("rejects an mcp-server manifest missing the AFPS _meta identity", () => {
+    const r = validateManifest({
+      manifest_version: "0.3",
+      name: "fetch-json",
+      version: "1.0.0",
+      type: "mcp-server",
+      server: {
+        type: "node",
+        entry_point: "server/index.js",
+        mcp_config: { command: "node" },
+      },
+      _meta: {},
+    });
+    expect(r.valid).toBe(false);
+  });
+
+  it("rejects an mcp-server with uv server type on manifest_version 0.3", () => {
+    const r = validateManifest({
+      manifest_version: "0.3",
+      name: "uv-srv",
+      version: "1.0.0",
+      type: "mcp-server",
+      server: { type: "uv", entry_point: "main.py", mcp_config: { command: "uv" } },
+      _meta: { "dev.afps/mcp-server": { name: "@test/uv-srv", type: "mcp-server" } },
+    });
+    expect(r.valid).toBe(false);
   });
 });
 
@@ -402,12 +476,12 @@ describe("extractManifestMetadata", () => {
     expect(metadata.repositoryUrl).toBe("https://github.com/test/repo");
   });
 
-  it("displayName — extracted when present", () => {
+  it("display_name — extracted (mapped to displayName column) when present", () => {
     const manifest = {
       name: "@test/my-agent",
       version: "1.0.0",
       type: "agent" as const,
-      displayName: "My Custom Agent",
+      display_name: "My Custom Agent",
     } as Partial<Manifest>;
     const metadata = extractManifestMetadata(manifest);
     expect(metadata.displayName).toBe("My Custom Agent");

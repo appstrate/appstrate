@@ -2,16 +2,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `bundleIntegration` — high-level orchestrator for the AFPS
- * integration bundler (Phase 1.05).
+ * `bundleMcpServer` — high-level orchestrator for the AFPS mcp-server
+ * bundler.
+ *
+ * In AFPS 2.0, the runnable MCP server lives in a separate `mcp-server`
+ * (MCPB) package; an integration whose `source.kind: "local"` references it
+ * via `source.server`. This bundler operates on the mcp-server manifest.
  *
  * Pipeline:
  *
- *   1. Validate the source manifest with `integrationManifestSchema`.
- *   2. If `server.package` is set, run the matching resolver
- *      (npm → `vendorNpmPackage`, pypi → `vendorPypiPackage`). Else
- *      the manifest is already self-contained (`entryPoint` set or
- *      `type: docker | http`) and we skip vendoring.
+ *   1. Validate the source manifest with `mcpServerManifestSchema`.
+ *   2. If `_meta["dev.appstrate/vendor"]` declares an npm/pypi source, run
+ *      the matching resolver (npm → `vendorNpmPackage`, pypi →
+ *      `vendorPypiPackage`). Else the manifest is already self-contained
+ *      (`server.entry_point` points at in-bundle code) and we skip vendoring.
  *   3. Optionally run the Bun compat probe.
  *   4. Stitch the rewritten manifest + vendored files + caller files
  *      into a deterministic ZIP.
@@ -20,22 +24,28 @@
  * is unit-testable without npm/pypi/Bun.
  */
 
-import { integrationManifestSchema, type IntegrationManifest } from "../integration.ts";
+import { mcpServerManifestSchema, type McpServerManifest } from "../mcp-server.ts";
 import { vendorNpmPackage, type NpmVendorDeps, BundlerError } from "./npm-vendor.ts";
 import { vendorPypiPackage, type PypiVendorDeps } from "./pypi-vendor.ts";
 import { rewriteManifestForDistribution, suggestBundleFileName } from "./manifest-rewriter.ts";
 import { packDeterministicZip } from "./packager.ts";
 import { probeBunCompat, type BunProbeOptions } from "./bun-probe.ts";
-import type { BundleIntegrationResult, BunCompatProbeResult, VendorResult } from "./types.ts";
+import {
+  VENDOR_META_KEY,
+  type BundleMcpServerResult,
+  type BunCompatProbeResult,
+  type VendorResult,
+  type VendorSource,
+} from "./types.ts";
 
-export interface BundleIntegrationInput {
-  /** Source manifest (already parsed JSON). */
+export interface BundleMcpServerInput {
+  /** Source mcp-server (MCPB) manifest (already parsed JSON). */
   manifest: unknown;
 
   /**
    * Optional extra files to embed in the bundle (paths are
-   * POSIX-style relative to the bundle root, e.g. `"INTEGRATION.md"`,
-   * `"tools.lock.json"`). Conflicts with vendored files throw.
+   * POSIX-style relative to the bundle root, e.g. `"SERVER.md"`).
+   * Conflicts with vendored files throw.
    */
   extraFiles?: Record<string, Uint8Array>;
 
@@ -54,15 +64,45 @@ export interface BundleIntegrationInput {
   jsonIndent?: 0 | 2 | 4;
 }
 
-export async function bundleIntegration(
-  input: BundleIntegrationInput,
-): Promise<BundleIntegrationResult> {
-  const parseRes = integrationManifestSchema.safeParse(input.manifest);
+/**
+ * Read the author-sugar vendoring source from
+ * `_meta["dev.appstrate/vendor"]`. Returns `null` when absent (the manifest
+ * is self-contained — `server.entry_point` already points at in-bundle code).
+ */
+export function readVendorSource(manifest: McpServerManifest): VendorSource | null {
+  const meta = (manifest as { _meta?: Record<string, unknown> })._meta;
+  const raw = meta?.[VENDOR_META_KEY] as Partial<VendorSource> | undefined;
+  if (!raw || typeof raw !== "object") return null;
+  if (raw.source !== "npm" && raw.source !== "pypi") {
+    throw new BundlerError(
+      `_meta["${VENDOR_META_KEY}"].source must be "npm" or "pypi"`,
+      "MANIFEST_INVALID",
+    );
+  }
+  if (typeof raw.identifier !== "string" || raw.identifier.length === 0) {
+    throw new BundlerError(
+      `_meta["${VENDOR_META_KEY}"].identifier is required`,
+      "MANIFEST_INVALID",
+    );
+  }
+  if (typeof raw.version !== "string" || raw.version.length === 0) {
+    throw new BundlerError(`_meta["${VENDOR_META_KEY}"].version is required`, "MANIFEST_INVALID");
+  }
+  return {
+    source: raw.source,
+    identifier: raw.identifier,
+    version: raw.version,
+    ...(typeof raw.registryBaseUrl === "string" ? { registryBaseUrl: raw.registryBaseUrl } : {}),
+  };
+}
+
+export async function bundleMcpServer(input: BundleMcpServerInput): Promise<BundleMcpServerResult> {
+  const parseRes = mcpServerManifestSchema.safeParse(input.manifest);
   if (!parseRes.success) {
     const detail = parseRes.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
-    throw new BundlerError(`integration manifest is invalid: ${detail}`, "MANIFEST_INVALID");
+    throw new BundlerError(`mcp-server manifest is invalid: ${detail}`, "MANIFEST_INVALID");
   }
-  const source = parseRes.data;
+  const source = parseRes.data as McpServerManifest;
 
   const vendorResult = await runVendor(source, input);
 
@@ -129,61 +169,30 @@ export async function bundleIntegration(
 }
 
 async function runVendor(
-  manifest: IntegrationManifest,
-  input: BundleIntegrationInput,
+  manifest: McpServerManifest,
+  input: BundleMcpServerInput,
 ): Promise<VendorResult | null> {
-  const server = manifest.server;
-  // Serverless integrations (apiCall-only) have nothing to vendor.
-  if (!server) return null;
-  if (server.type !== "npx" && server.type !== "uvx") return null;
-  if (!server.package) {
-    // Already-vendored author input (entryPoint set, no package): no
-    // network step, but we still need to "promote" the runtime type
-    // to node/uv so the distributed manifest is runnable (D31).
-    if (!server.entryPoint) {
-      throw new BundlerError(
-        `server.type "${server.type}" with no package requires entryPoint`,
-        "MANIFEST_INVALID",
-      );
-    }
-    const now = (input.npmDeps?.now ?? input.pypiDeps?.now ?? (() => new Date()))();
-    return {
-      files: {},
-      rewrittenServerType: server.type === "npx" ? "node" : "uv",
-      rewrittenEntryPoint: server.entryPoint,
-      resolution: {
-        registryType: server.type === "npx" ? "npm" : "pypi",
-        identifier: manifest.name,
-        versionRequested: "(prebuilt)",
-        versionResolved: manifest.version,
-        integrity: "(prebuilt)",
-        resolvedAt: now.toISOString(),
-      },
-    };
-  }
-  if (server.package.registryType === "npm") {
+  const vendor = readVendorSource(manifest);
+  // Self-contained mcp-server (entry_point points at in-bundle code) — nothing
+  // to vendor.
+  if (!vendor) return null;
+  if (vendor.source === "npm") {
     return vendorNpmPackage(
       {
-        identifier: server.package.identifier,
-        versionRange: server.package.version,
-        registryBaseUrl: server.package.registryBaseUrl,
+        identifier: vendor.identifier,
+        versionRange: vendor.version,
+        ...(vendor.registryBaseUrl ? { registryBaseUrl: vendor.registryBaseUrl } : {}),
       },
       input.npmDeps,
     );
   }
-  if (server.package.registryType === "pypi") {
-    return vendorPypiPackage(
-      {
-        identifier: server.package.identifier,
-        versionRange: server.package.version,
-        registryBaseUrl: server.package.registryBaseUrl,
-      },
-      input.pypiDeps,
-    );
-  }
-  throw new BundlerError(
-    `server.package.registryType "${(server.package as { registryType: string }).registryType}" is not supported by the bundler`,
-    "UNSUPPORTED_REGISTRY",
+  return vendorPypiPackage(
+    {
+      identifier: vendor.identifier,
+      versionRange: vendor.version,
+      ...(vendor.registryBaseUrl ? { registryBaseUrl: vendor.registryBaseUrl } : {}),
+    },
+    input.pypiDeps,
   );
 }
 

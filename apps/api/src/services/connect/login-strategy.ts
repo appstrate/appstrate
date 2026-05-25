@@ -47,8 +47,8 @@ export class LoginStrategy implements IntegrationConnectStrategy {
 
     const { outputs, identityClaims, expiresAt } = await runLogin(auth.connect as LoginConfig, {
       inputs: credentials,
-      authorizedUris: auth.authorizedUris ?? null,
-      allowAllUris: auth.allowAllUris ?? false,
+      authorizedUris: (auth.authorized_uris as string[] | undefined) ?? null,
+      allowAllUris: (auth.allow_all_uris as boolean | undefined) ?? false,
     });
 
     // Identity source = injectable outputs + engine-promoted identity claims,

@@ -4,9 +4,10 @@
 /**
  * AFPS integration `api_call` resolver.
  *
- * A serverless integration — one that declares `apiCall` and no `server`,
- * backed by a single auth whose `delivery.http` describes how to inject the
- * credential — exposes a generic credential-injecting HTTP tool. On the
+ * An api-source integration — `source.kind: "api"` (or one associating an
+ * auth via `_meta["dev.appstrate/api"].auth_key`), backed by a single auth
+ * whose `delivery.http` describes how to inject the credential — exposes a
+ * generic credential-injecting HTTP tool. On the
  * platform this surfaces as the sidecar's `{ns}__api_call` MCP tool
  * (`runtime-pi/sidecar/mcp.ts` + `api-call-credentials.ts`). This module is
  * the portable equivalent that the standalone `appstrate run` CLI uses to
@@ -128,32 +129,83 @@ export function readApiCallIntegrationMeta(
   return projectApiCallMeta(ref.name, parsed);
 }
 
+/** A single `{$credential.<field>}` reference, lowered to a bare field name. */
+const SINGLE_CREDENTIAL_REF = /^\{\$credential\.([A-Za-z0-9_]+)\}$/;
+
+/** AFPS 2.0 `delivery.http` block (snake_case). */
+interface AfpsDeliveryHttp {
+  name?: string;
+  prefix?: string;
+  value?: string;
+  encoding?: "base64";
+  allow_server_override?: boolean;
+}
+
+/**
+ * Project an AFPS 2.0 `delivery.http` block (snake_case) onto the internal
+ * {@link HttpDeliveryConfig} the `resolveHttpDelivery` plan layer consumes.
+ * Mirrors the sidecar's `toHttpDeliveryConfig` — a single `{$credential.field}`
+ * value lowers to a bare `valueFrom` field name; anything richer is rewritten
+ * to the resolver's `{{field}}` template syntax.
+ */
+function toHttpDeliveryConfig(http: AfpsDeliveryHttp | undefined): HttpDeliveryConfig | undefined {
+  if (!http) return undefined;
+  const cfg: HttpDeliveryConfig = {};
+  if (typeof http.name === "string") cfg.headerName = http.name;
+  if (typeof http.prefix === "string") cfg.headerPrefix = http.prefix;
+  if (typeof http.allow_server_override === "boolean") {
+    cfg.allowServerOverride = http.allow_server_override;
+  }
+  const value = typeof http.value === "string" ? http.value : undefined;
+  if (value !== undefined) {
+    const single = value.match(SINGLE_CREDENTIAL_REF);
+    if (single && http.encoding === undefined) {
+      cfg.valueFrom = single[1]!;
+    } else {
+      const template = value.replace(
+        /\{\$credential\.([A-Za-z0-9_]+)\}/g,
+        (_m, field: string) => `{{${field}}}`,
+      );
+      cfg.valueFrom = http.encoding === "base64" ? { template, encoding: "base64" } : { template };
+    }
+  }
+  return cfg;
+}
+
 function projectApiCallMeta(name: string, parsed: unknown): ApiCallIntegrationMeta | null {
   if (!parsed || typeof parsed !== "object") return null;
   const m = parsed as {
-    apiCall?: { authKey?: string };
+    source?: { kind?: string };
+    _meta?: Record<string, { auth_key?: string }>;
     auths?: Record<
       string,
       {
         type?: string;
-        authorizedUris?: unknown;
-        allowAllUris?: unknown;
-        delivery?: { http?: HttpDeliveryConfig };
+        authorized_uris?: unknown;
+        allow_all_uris?: unknown;
+        delivery?: { http?: AfpsDeliveryHttp };
       }
     >;
   };
-  // Only integrations declaring an `apiCall` block expose the generic tool.
-  if (!m.apiCall?.authKey) return null;
+  // AFPS 2.0: the generic api_call surface is the api-source credential plane.
+  // The auth it draws from is declared under `_meta["dev.appstrate/api"].auth_key`
+  // (the platform's `getApiCallConfig` convention); fall back to the single
+  // declared auth. Integrations without an api-call association expose no
+  // generic tool — the caller skips them.
   const auths = m.auths ?? {};
-  const authKey = m.apiCall.authKey;
+  const authKeys = Object.keys(auths);
+  const declaredAuthKey = m._meta?.["dev.appstrate/api"]?.auth_key;
+  const authKey =
+    declaredAuthKey ?? (m.source?.kind === "api" && authKeys.length > 0 ? authKeys[0] : undefined);
+  if (!authKey) return null;
   const auth = auths[authKey];
   if (!auth) return null;
 
-  const authorizedUris = Array.isArray(auth.authorizedUris)
-    ? auth.authorizedUris.filter((u): u is string => typeof u === "string")
+  const authorizedUris = Array.isArray(auth.authorized_uris)
+    ? auth.authorized_uris.filter((u): u is string => typeof u === "string")
     : [];
-  const allowAllUris = auth.allowAllUris === true;
-  const http = auth.delivery?.http;
+  const allowAllUris = auth.allow_all_uris === true;
+  const http = toHttpDeliveryConfig(auth.delivery?.http);
 
   return {
     name,

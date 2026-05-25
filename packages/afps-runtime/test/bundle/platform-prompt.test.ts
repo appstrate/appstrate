@@ -37,7 +37,8 @@ describe("renderPlatformPrompt", () => {
 
   it("keeps the Communication section tool-agnostic (no opt-in tool names)", () => {
     // Per the #368 contract, platform-owned section prose must not hardcode
-    // a specific tool's usage — that belongs in each tool's TOOL.md.
+    // a specific tool's usage — that belongs on each tool's MCP descriptor
+    // `description` (surfaced via `tools/list`).
     const out = renderPlatformPrompt({ template: "T", context: ctx() });
     const start = out.indexOf("### Communication");
     const end = out.indexOf("### Tools", start);
@@ -163,11 +164,12 @@ describe("renderPlatformPrompt", () => {
       expect(out).toContain("resume work");
     });
 
-    it("does NOT mention specific tool names — usage prose belongs to TOOL.md (#368)", () => {
+    it("does NOT mention specific tool names — usage prose lives on the MCP descriptor (#368)", () => {
       // Post-#368 contract: the platform owns the data shell, tools own
       // their usage prose. The Checkpoint section must not name any
-      // tool — instructions for updating the checkpoint flow in via
-      // `@appstrate/pin`'s TOOL.md when that tool is loaded.
+      // tool — instructions for updating the checkpoint flow in via the
+      // `pin` tool's MCP descriptor `description` (surfaced through
+      // `tools/list`) when that tool is loaded.
       const out = renderPlatformPrompt({
         template: "T",
         context: ctx({ checkpoint: { cursor: "abc" } }),
@@ -248,10 +250,11 @@ describe("renderPlatformPrompt", () => {
       expect(out).toContain('"secondary"');
     });
 
-    it("does NOT mention specific tool names — usage prose belongs to TOOL.md (#368)", () => {
+    it("does NOT mention specific tool names — usage prose lives on the MCP descriptor (#368)", () => {
       // Post-#368 contract: data block only. The `pin` instructions
-      // for updating slots come from `@appstrate/pin`'s TOOL.md when
-      // that package is in the bundle's dependency tree.
+      // for updating slots come from the `pin` tool's MCP descriptor
+      // `description` (surfaced via `tools/list`) when that tool is in
+      // the bundle's dependency tree.
       const out = renderPlatformPrompt({
         template: "T",
         context: ctx({ pinnedSlots: { persona: "anything" } }),
@@ -305,10 +308,10 @@ describe("renderPlatformPrompt", () => {
       expect(out).not.toContain("No memories are currently pinned");
     });
 
-    it("does NOT mention specific tool names — archive APIs belong to TOOL.md", () => {
+    it("does NOT mention specific tool names — archive APIs live on the MCP descriptor", () => {
       // Post-#368 contract: data block only. Instructions for `note`,
-      // `recall_memory`, `pin` come from each tool's TOOL.md / runtime-
-      // injected doc when the tool is wired.
+      // `recall_memory`, `pin` come from each tool's MCP descriptor
+      // `description` (surfaced via `tools/list`) when the tool is wired.
       const out = renderPlatformPrompt({
         template: "T",
         context: ctx({
@@ -324,10 +327,10 @@ describe("renderPlatformPrompt", () => {
     });
 
     it("renders memories regardless of which tools are wired — data is data", () => {
-      // The v1→v2 dep-removal scenario: agent v1 shipped `@appstrate/note`
+      // The v1→v2 dep-removal scenario: agent v1 shipped the `note` tool
       // and accumulated memories; v2 dropped the dep. The platform
       // still surfaces the carry-over memory list (it's informative
-      // context); the absence of a `note` TOOL.md in the prompt is
+      // context); the absence of the `note` tool from `tools/list` is
       // what tells the LLM it cannot write new ones.
       const out = renderPlatformPrompt({
         template: "T",

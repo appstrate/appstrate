@@ -335,7 +335,12 @@ interface PackageRouteConfig {
   getHandler?: (c: Context<AppEnv>) => Promise<Response>;
 }
 
-const ROUTE_CONFIGS: Record<PackageType, PackageRouteConfig> = {
+// Not every package type exposes user-facing CRUD routes. `mcp-server`
+// packages (AFPS 2.0 §3.4) land exclusively via the bundle-import pipeline
+// alongside the integration that references them — they have no standalone
+// editor surface — so they are intentionally absent here. `Partial` lets the
+// map omit them; the `ROUTE_CONFIGS[type]?.` lookups already tolerate misses.
+const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
   skill: {
     cfg: CONFIG_BY_TYPE.skill,
     path: "skills",
@@ -1111,6 +1116,7 @@ export function createPackagesRouter() {
 
   // --- Package CRUD routes (skills, agents, integrations) ---
   for (const rcfg of Object.values(ROUTE_CONFIGS)) {
+    if (!rcfg) continue;
     const { path } = rcfg;
     // Permission resource matches the route path (e.g. "skills", "agents", "integrations")
     const resource = path as import("../lib/permissions.ts").Resource;

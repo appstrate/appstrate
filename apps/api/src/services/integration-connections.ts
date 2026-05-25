@@ -40,6 +40,7 @@ import type { AppScope } from "../lib/scope.ts";
 import { actorInsert } from "../lib/actor.ts";
 import type { Actor } from "@appstrate/connect";
 import type { IntegrationManifest } from "@appstrate/core/integration";
+import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
 import type { IntegrationAuthStatus } from "@appstrate/shared-types";
 import { getIntegration } from "./integration-service.ts";
 
@@ -487,8 +488,9 @@ export function extractIdentity(
   authKey: string,
   source: Record<string, unknown>,
 ): { accountId: string; identityClaims: Record<string, unknown> } {
-  const auth = lookupAuth(manifest, authKey);
-  const mapping = auth.extractTokenIdentity ?? {};
+  const auth = lookupAuth(manifest, authKey) as AfpsManifestAuth;
+  // AFPS 2.0 (Appendix D): `extractTokenIdentity` → `identity_claims`.
+  const mapping = auth.identity_claims ?? {};
   const claims: Record<string, unknown> = {};
   for (const [outKey, accessor] of Object.entries(mapping)) {
     claims[outKey] = readPath(source, accessor);
@@ -889,15 +891,24 @@ export async function getIntegrationAuthStatuses(
     );
   const oauthClientKeys = new Set(oauthClients.map((r) => r.authKey));
 
-  const auths: IntegrationAuthStatus[] = Object.entries(authsMap).map(([key, auth]) => ({
-    authKey: key,
-    type: auth.type,
-    required: auth.required ?? true,
-    scopes: auth.scopes ?? [],
-    audience: auth.audience ?? null,
-    connections: allConnections.filter((c) => c.authKey === key),
-    hasOAuthClient: oauthClientKeys.has(key),
-  }));
+  const auths: IntegrationAuthStatus[] = Object.entries(authsMap).map(([key, rawAuth]) => {
+    // AFPS 2.0 (Appendix D): `scopes` → `default_scopes`, `audience` →
+    // `resource`; the Appstrate run-policy `required` flag moved under
+    // `_meta["dev.appstrate/auth"].required`.
+    const auth = rawAuth as AfpsManifestAuth;
+    const authMeta = (auth._meta?.["dev.appstrate/auth"] ?? undefined) as
+      | { required?: boolean }
+      | undefined;
+    return {
+      authKey: key,
+      type: auth.type,
+      required: authMeta?.required ?? true,
+      scopes: auth.default_scopes ?? [],
+      audience: auth.resource ?? null,
+      connections: allConnections.filter((c) => c.authKey === key),
+      hasOAuthClient: oauthClientKeys.has(key),
+    };
+  });
 
   return { manifest, auths };
 }

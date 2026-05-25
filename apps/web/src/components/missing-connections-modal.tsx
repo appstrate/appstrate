@@ -169,7 +169,7 @@ function MissingRow({
   // field is integration-level — fall back to the first oauth2 / first
   // declared (mirrors the AgentIntegrationsBlock heuristic).
   const targetAuthKey = authKey ?? pickDefaultAuth(detail?.manifest.auths);
-  const displayName = detail?.manifest.displayName ?? packageId;
+  const displayName = detail?.manifest.display_name ?? packageId;
   const candidateIds = err.candidateConnectionIds ?? [];
   const candidates = (connections ?? []).filter((c) => candidateIds.includes(c.id));
   const pickedId = isMustChoose && authKey ? pickFor(packageId, authKey) : undefined;

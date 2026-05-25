@@ -82,14 +82,23 @@ function apiKeyIntegrationManifest(
 ) {
   return {
     integration: {
-      apiCall: { authKey: "main" },
+      schema_version: "2.0",
+      type: "integration",
+      source: { kind: "api", api: {} },
+      _meta: { "dev.appstrate/api": { auth_key: "main" } },
       auths: {
         main: {
           type: "api_key",
-          authorizedUris: opts.authorizedUris ?? ["https://api.acme.com/**"],
-          ...(opts.allowAllUris ? { allowAllUris: true } : {}),
+          authorized_uris: opts.authorizedUris ?? ["https://api.acme.com/**"],
+          ...(opts.allowAllUris ? { allow_all_uris: true } : {}),
           credentials: { schema: {} },
-          delivery: { http: { headerName: opts.headerName ?? "X-Api-Key" } },
+          delivery: {
+            http: {
+              in: "header",
+              name: opts.headerName ?? "X-Api-Key",
+              value: "{$credential.api_key}",
+            },
+          },
         },
       },
     },
@@ -142,9 +151,22 @@ describe("readApiCallIntegrationMeta", () => {
     const root = makePackage("@acme/agent", "1.0.0", "agent", {});
     const integ = makePackage("@acme/mcp", "1.0.0", "integration", {
       "integration.json": JSON.stringify({
-        server: { type: "node", entryPoint: "index.js" },
+        schema_version: "2.0",
+        type: "integration",
+        source: { kind: "local", server: { name: "@acme/mcp-server", version: "^1.0.0" } },
         auths: {
-          main: { type: "oauth2", authorizedUris: ["https://x/**"], delivery: { http: {} } },
+          main: {
+            type: "oauth2",
+            authorized_uris: ["https://x/**"],
+            delivery: {
+              http: {
+                in: "header",
+                name: "Authorization",
+                prefix: "Bearer ",
+                value: "{$credential.access_token}",
+              },
+            },
+          },
         },
       }),
     });
@@ -156,12 +178,17 @@ describe("readApiCallIntegrationMeta", () => {
     const root = makePackage("@acme/agent", "1.0.0", "agent", {});
     const integ = makePackage("@acme/api", "1.0.0", "integration", {
       "integration.json": JSON.stringify({
-        apiCall: { authKey: "only" },
+        schema_version: "2.0",
+        type: "integration",
+        source: { kind: "api", api: {} },
+        _meta: { "dev.appstrate/api": { auth_key: "only" } },
         auths: {
           only: {
             type: "api_key",
-            authorizedUris: ["https://api.acme.com/**"],
-            delivery: { http: {} },
+            authorized_uris: ["https://api.acme.com/**"],
+            delivery: {
+              http: { in: "header", name: "X-Api-Key", value: "{$credential.api_key}" },
+            },
           },
         },
       }),
@@ -201,14 +228,24 @@ describe("LocalIntegrationResolver", () => {
     const root = makePackage("@acme/agent", "1.0.0", "agent", {});
     const integ = makePackage("@acme/oauth", "1.0.0", "integration", {
       "integration.json": JSON.stringify({
-        apiCall: { authKey: "main" },
+        schema_version: "2.0",
+        type: "integration",
+        source: { kind: "api", api: {} },
+        _meta: { "dev.appstrate/api": { auth_key: "main" } },
         auths: {
           main: {
             type: "oauth2",
-            authorizationUrl: "https://x/auth",
-            tokenUrl: "https://x/token",
-            authorizedUris: ["https://{{subdomain}}.acme.com/**", "https://eu.acme.com/**"],
-            delivery: { http: {} },
+            authorization_endpoint: "https://x/auth",
+            token_endpoint: "https://x/token",
+            authorized_uris: ["https://{{subdomain}}.acme.com/**", "https://eu.acme.com/**"],
+            delivery: {
+              http: {
+                in: "header",
+                name: "Authorization",
+                prefix: "Bearer ",
+                value: "{$credential.access_token}",
+              },
+            },
           },
         },
       }),

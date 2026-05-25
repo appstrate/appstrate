@@ -15,7 +15,6 @@ import {
 } from "../src/errors.ts";
 import { BundleError } from "../src/bundle/errors.ts";
 import { BundleSignaturePolicyError } from "../src/bundle/signature-policy.ts";
-import { AfpsEntrypointError } from "../src/bundle/tool-entrypoint.ts";
 
 describe("AfpsRuntimeError taxonomy", () => {
   it("each typed error exposes a stable code + name", () => {
@@ -74,7 +73,6 @@ describe("isAfpsError marker", () => {
     expect(isAfpsError(new CredentialResolutionError("x"))).toBe(true);
     expect(isAfpsError(new BundleError("INTEGRITY_MISMATCH", "x"))).toBe(true);
     expect(isAfpsError(new BundleSignaturePolicyError("signature_invalid", "x"))).toBe(true);
-    expect(isAfpsError(new AfpsEntrypointError("MISSING", "x"))).toBe(true);
   });
 
   it("is false for plain Error / non-Error values", () => {

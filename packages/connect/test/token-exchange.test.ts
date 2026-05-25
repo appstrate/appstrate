@@ -70,10 +70,10 @@ function baseInput(
   overrides: Partial<Parameters<typeof exchangeAuthorizationCode>[0]> = {},
 ): Parameters<typeof exchangeAuthorizationCode>[0] {
   return {
-    tokenUrl: "https://idp.example.com/token",
+    tokenEndpoint: "https://idp.example.com/token",
     clientId: "client-id",
     clientSecret: "client-secret",
-    tokenAuthMethod: "client_secret_post",
+    tokenEndpointAuthMethod: "client_secret_post",
     codeVerifier: "verifier-123",
     redirectUri: "http://localhost:3000/cb",
     code: "AUTH_CODE",
@@ -90,7 +90,9 @@ describe("exchangeAuthorizationCode — client auth method", () => {
     const store = memoryStore();
     const { fetch: stub, captured } = recordingFetch(jsonResponse({ access_token: "AT" }));
     await withFetch(stub, () =>
-      exchangeAuthorizationCode(baseInput(store, { tokenAuthMethod: "client_secret_post" })),
+      exchangeAuthorizationCode(
+        baseInput(store, { tokenEndpointAuthMethod: "client_secret_post" }),
+      ),
     );
     const params = new URLSearchParams(captured.value!.body);
     expect(params.get("client_id")).toBe("client-id");
@@ -104,7 +106,9 @@ describe("exchangeAuthorizationCode — client auth method", () => {
     const store = memoryStore();
     const { fetch: stub, captured } = recordingFetch(jsonResponse({ access_token: "AT" }));
     await withFetch(stub, () =>
-      exchangeAuthorizationCode(baseInput(store, { tokenAuthMethod: "client_secret_basic" })),
+      exchangeAuthorizationCode(
+        baseInput(store, { tokenEndpointAuthMethod: "client_secret_basic" }),
+      ),
     );
     const authHeader =
       captured.value!.headers["Authorization"] ?? captured.value!.headers["authorization"];
@@ -116,11 +120,13 @@ describe("exchangeAuthorizationCode — client auth method", () => {
     expect(params.get("client_secret")).toBeNull();
   });
 
-  it("tokenAuthMethod=none (public client) omits the secret entirely", async () => {
+  it("tokenEndpointAuthMethod=none (public client) omits the secret entirely", async () => {
     const store = memoryStore();
     const { fetch: stub, captured } = recordingFetch(jsonResponse({ access_token: "AT" }));
     await withFetch(stub, () =>
-      exchangeAuthorizationCode(baseInput(store, { tokenAuthMethod: "none", clientSecret: "" })),
+      exchangeAuthorizationCode(
+        baseInput(store, { tokenEndpointAuthMethod: "none", clientSecret: "" }),
+      ),
     );
     const authHeader =
       captured.value!.headers["Authorization"] ?? captured.value!.headers["authorization"];

@@ -66,13 +66,13 @@
     "fixtures:build": "bun run scripts/build-fixtures.ts"
   },
   "dependencies": {
-    "@afps-spec/schema": "^1.5.0",
+    "@afps-spec/schema": "link:@afps-spec/schema",
     "@afps-spec/types": "^1.0.0",
     "file-type": "^22.0.1",
     "fflate": "^0.8.2",
     "mustache": "^4.2.0",
     "semver": "^7.7.1",
-    "zod": "^4.3.6"
+    "zod": "^4.4.3"
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "^0.70.6",

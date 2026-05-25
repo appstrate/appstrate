@@ -37,7 +37,7 @@ Commands:
   verify <bundle>     Validate manifest + template, verify signature
   inspect <bundle>    Print manifest, files, signature summary
   render <bundle>     Render the prompt template against a context
-  bundle <manifest>   Vendor an integration's deps into a runnable .afps
+  bundle <manifest>   Vendor an mcp-server's deps into a runnable .afps
   conformance         Run the AFPS conformance suite (L1–L4)
 
 Live LLM execution is handled by 'appstrate run' — see apps/cli.

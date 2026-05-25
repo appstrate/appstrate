@@ -73,7 +73,7 @@ interface AgentIntegrationsBlockProps {
  *   ⚠️ needs_reconnection    — connection flagged for re-consent
  *   ✅ ok
  *
- * Per-tool scope inference (required = ⋃ tools.{t}.requiredScopes for selected
+ * Per-tool scope inference (required = ⋃ tools.{t}.required_scopes for selected
  * tools, filtered by requiredAuthKey) is recomputed client-side so the badge
  * never lags the agent's editor state. The exact same logic powers the 412
  * server-side; the modal (Phase C) is the recovery path when this block is
@@ -127,7 +127,7 @@ function IntegrationConnectionCard({
 }: IntegrationConnectionCardProps) {
   const { t } = useTranslation(["agents"]);
   const { data: detail, isPending: detailPending } = useIntegrationDetail(packageId);
-  const displayName = detail?.manifest.displayName ?? packageId;
+  const displayName = detail?.manifest.display_name ?? packageId;
 
   if (detailPending || !detail) {
     return (

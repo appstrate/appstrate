@@ -26,8 +26,8 @@ function validAgentManifest() {
     name: "@test/my-agent",
     version: "1.0.0",
     type: "agent",
-    schemaVersion: "1.0",
-    displayName: "My Agent",
+    schema_version: "2.0",
+    display_name: "My Agent",
     author: "test",
   });
 }
@@ -48,14 +48,19 @@ description: A test skill
 
 function validIntegrationManifest() {
   return JSON.stringify({
-    manifestVersion: "1.1",
     type: "integration",
     name: "@test/my-integration",
     version: "1.0.0",
-    displayName: "My Integration",
-    server: {
-      type: "node",
-      entryPoint: "./server/index.js",
+    schema_version: "2.0",
+    display_name: "My Integration",
+    source: { kind: "local", server: { name: "@test/my-integration-server", version: "^1.0.0" } },
+    auths: {
+      key: {
+        type: "api_key",
+        credentials: { schema: { type: "object", properties: { token: { type: "string" } } } },
+        authorized_uris: ["https://api.example.com/**"],
+        delivery: { env: { TOKEN: { value: "{$credential.token}", sensitive: true } } },
+      },
     },
   });
 }
@@ -112,11 +117,12 @@ describe("parsePackageZip", () => {
 
   it("rejects an integration manifest missing required fields", () => {
     const incomplete = JSON.stringify({
-      manifestVersion: "1.1",
       type: "integration",
       name: "@test/broken",
       version: "1.0.0",
-      // missing displayName + server
+      schema_version: "2.0",
+      display_name: "Broken",
+      // missing source + auths
     });
     const zip = makeZip({ "manifest.json": incomplete });
     expect(() => parsePackageZip(zip)).toThrow(PackageZipError);
@@ -196,8 +202,8 @@ describe("parsePackageZip", () => {
       name: "@test/raw-roundtrip",
       version: "1.0.0",
       type: "agent" as const,
-      schemaVersion: "1.0",
-      displayName: "Raw Roundtrip Test",
+      schema_version: "2.0",
+      display_name: "Raw Roundtrip Test",
       author: "test",
       // dependencies and timeout intentionally omitted
       customField: "must-survive",
@@ -216,7 +222,7 @@ describe("parsePackageZip", () => {
     expect(result.manifest).toEqual(manifest);
 
     expect(agentManifest.dependencies).toBeUndefined();
-    expect(agentManifest.providersConfiguration).toBeUndefined();
+    expect(agentManifest.integrations_configuration).toBeUndefined();
 
     // Custom field preserved
     expect(agentManifest.customField).toBe("must-survive");

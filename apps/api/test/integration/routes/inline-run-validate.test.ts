@@ -23,11 +23,11 @@ const app = getTestApp();
 function validManifest() {
   return {
     name: "@inline/r-ignored",
-    displayName: "Ad-hoc Agent",
+    display_name: "Ad-hoc Agent",
     version: "0.0.0",
     type: "agent",
     description: "Inline run",
-    schemaVersion: "1.0",
+    schema_version: "2.0",
     dependencies: { skills: {} },
   };
 }
@@ -194,7 +194,7 @@ describe("POST /api/runs/inline/validate", () => {
       // `type` intentionally omitted to trigger base-schema aggregation
       name: "@inline/broken",
       version: "0.0.0",
-      schemaVersion: "1.0",
+      schema_version: "2.0",
       dependencies: { skills },
     };
 

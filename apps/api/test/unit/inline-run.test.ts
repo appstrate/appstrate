@@ -61,11 +61,12 @@ describe("inline-run helpers", () => {
   describe("buildShadowLoadedPackage", () => {
     const manifest: AgentManifest = {
       name: "@inline/r-test",
-      displayName: "Shadow",
+      display_name: "Shadow",
       version: "0.0.0",
       type: "agent",
       description: "Inline agent",
-      schemaVersion: "1.0.0",
+      schema_version: "2.0",
+      author: "test",
     } as AgentManifest;
 
     it("wraps manifest + prompt into a LoadedPackage with empty skills", () => {

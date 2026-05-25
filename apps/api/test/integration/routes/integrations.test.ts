@@ -33,34 +33,45 @@ const app = getTestApp();
 
 function gmailManifest(name = "@official/gmail"): IntegrationManifest {
   return {
-    manifestVersion: "1.0",
     type: "integration",
+    schema_version: "2.0",
     name,
     version: "0.1.0",
-    displayName: "Gmail",
+    display_name: "Gmail",
     description: "Gmail integration",
-    server: { type: "node", entryPoint: "main.js" },
+    // AFPS 2.0: local server → mcp-server reference (separate package).
+    source: { kind: "local", server: { name, version: "^0.1.0" } },
     auths: {
       api: {
         type: "api_key",
-        authorizedUris: ["https://gmail.googleapis.com/**"],
+        authorized_uris: ["https://gmail.googleapis.com/**"],
         credentials: { schema: { type: "object", properties: { api_key: { type: "string" } } } },
         delivery: {
-          http: { headerName: "Authorization", headerPrefix: "Bearer", valueFrom: "api_key" },
+          http: {
+            in: "header",
+            name: "Authorization",
+            prefix: "Bearer",
+            value: "{$credential.api_key}",
+          },
         },
       },
       google: {
         type: "oauth2",
-        authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth",
-        tokenUrl: "https://oauth2.googleapis.com/token",
-        scopes: ["openid", "email"],
-        authorizedUris: ["https://www.googleapis.com/**"],
+        authorization_endpoint: "https://accounts.google.com/o/oauth2/v2/auth",
+        token_endpoint: "https://oauth2.googleapis.com/token",
+        default_scopes: ["openid", "email"],
+        authorized_uris: ["https://www.googleapis.com/**"],
         delivery: {
-          http: { headerName: "Authorization", headerPrefix: "Bearer", valueFrom: "access_token" },
+          http: {
+            in: "header",
+            name: "Authorization",
+            prefix: "Bearer",
+            value: "{$credential.access_token}",
+          },
         },
       },
     },
-  };
+  } as unknown as IntegrationManifest;
 }
 
 async function seedIntegration(orgId: string, manifest: IntegrationManifest) {

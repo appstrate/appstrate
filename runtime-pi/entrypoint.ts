@@ -9,7 +9,8 @@
  *
  * Responsibilities (runtime-pi only):
  *   1. Initialise a git repo + extract the injected agent package.
- *   2. Install TOOL.md / skills into `.pi/` for on-disk lookup.
+ *   2. Install skills into `.pi/` for on-disk lookup (tool docs live on
+ *      the MCP tool descriptors, not on disk).
  *   3. Collect tool extension factories (from agent package + built-ins).
  *   4. Build an {@link ExecutionContext} from env vars.
  *   5. Build an {@link HttpSink} against the platform's signed-event API.

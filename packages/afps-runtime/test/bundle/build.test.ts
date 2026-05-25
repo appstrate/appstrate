@@ -46,8 +46,8 @@ const ROOT = {
   name: "@me/root",
   version: "1.0.0",
   type: "agent",
-  schemaVersion: "1.1",
-  displayName: "Root",
+  schema_version: "2.0",
+  display_name: "Root",
   author: "tester",
 };
 
@@ -59,12 +59,13 @@ describe("buildBundleFromCatalog", () => {
     expect(bundle.root).toBe("@me/root@1.0.0");
   });
 
-  it("walks skill + provider deps", async () => {
+  it("walks skill + mcp_server + integration deps (AFPS 2.0 sections)", async () => {
     const rootManifest = {
       ...ROOT,
       dependencies: {
         skills: { "@me/skill-a": "^1.0.0" },
-        providers: { "@me/prov-x": "1.2.3" },
+        mcp_servers: { "@me/mcp-x": "1.2.3" },
+        integrations: { "@me/integ-y": "^1.0.0" },
       },
     };
     const root = makePkg("@me/root@1.0.0" as PackageIdentity, rootManifest, {
@@ -72,20 +73,47 @@ describe("buildBundleFromCatalog", () => {
     });
     const skill = makePkg(
       "@me/skill-a@1.3.0" as PackageIdentity,
-      { name: "@me/skill-a", version: "1.3.0", type: "skill", schemaVersion: "1.1" },
+      { name: "@me/skill-a", version: "1.3.0", type: "skill", schema_version: "2.0" },
       { "SKILL.md": enc("s") },
     );
-    const prov = makePkg(
-      "@me/prov-x@1.2.3" as PackageIdentity,
-      { name: "@me/prov-x", version: "1.2.3", type: "provider", schemaVersion: "1.1" },
-      { "PROVIDER.md": enc("pr") },
+    // An mcp-server bundle is an MCPB manifest: top-level `name` is the MCPB
+    // server slug; the scoped AFPS identity lives under _meta.
+    const mcp = makePkg(
+      "@me/mcp-x@1.2.3" as PackageIdentity,
+      {
+        manifest_version: "0.3",
+        name: "mcp-x-server",
+        version: "1.2.3",
+        server: {
+          type: "node",
+          entry_point: "server/index.js",
+          mcp_config: { command: "node", args: ["server/index.js"] },
+        },
+        _meta: { "dev.afps/mcp-server": { name: "@me/mcp-x", type: "mcp-server" } },
+      },
+      { "server/index.js": enc("//") },
     );
-    const cat = new InMemoryPackageCatalog([skill, prov]);
+    const integ = makePkg("@me/integ-y@1.0.0" as PackageIdentity, {
+      name: "@me/integ-y",
+      version: "1.0.0",
+      type: "integration",
+      schema_version: "2.0",
+      source: { kind: "api", api: {} },
+      auths: {
+        key: {
+          type: "api_key",
+          credentials: { schema: { type: "object", properties: {} } },
+          delivery: { env: { TOKEN: { value: "{$credential.token}" } } },
+        },
+      },
+    });
+    const cat = new InMemoryPackageCatalog([skill, mcp, integ]);
 
     const bundle = await buildBundleFromCatalog(root, cat);
-    expect(bundle.packages.size).toBe(3);
+    expect(bundle.packages.size).toBe(4);
     expect(bundle.packages.get("@me/skill-a@1.3.0" as PackageIdentity)).toBeDefined();
-    expect(bundle.packages.get("@me/prov-x@1.2.3" as PackageIdentity)).toBeDefined();
+    expect(bundle.packages.get("@me/mcp-x@1.2.3" as PackageIdentity)).toBeDefined();
+    expect(bundle.packages.get("@me/integ-y@1.0.0" as PackageIdentity)).toBeDefined();
   });
 
   it("walks transitive deps", async () => {
@@ -100,14 +128,14 @@ describe("buildBundleFromCatalog", () => {
         name: "@me/a",
         version: "1.0.0",
         type: "skill",
-        schemaVersion: "1.1",
+        schema_version: "2.0",
         dependencies: { skills: { "@me/b": "^1" } },
       },
       { "SKILL.md": enc("a") },
     );
     const b = makePkg(
       "@me/b@1.5.0" as PackageIdentity,
-      { name: "@me/b", version: "1.5.0", type: "skill", schemaVersion: "1.1" },
+      { name: "@me/b", version: "1.5.0", type: "skill", schema_version: "2.0" },
       { "SKILL.md": enc("b") },
     );
     const cat = new InMemoryPackageCatalog([a, b]);
@@ -131,7 +159,7 @@ describe("buildBundleFromCatalog", () => {
         name: "@me/a",
         version: "1.0.0",
         type: "skill",
-        schemaVersion: "1.1",
+        schema_version: "2.0",
         dependencies: { skills: { "@me/shared": "^1" } },
       },
       { "SKILL.md": enc("a") },
@@ -142,14 +170,14 @@ describe("buildBundleFromCatalog", () => {
         name: "@me/b",
         version: "1.0.0",
         type: "skill",
-        schemaVersion: "1.1",
+        schema_version: "2.0",
         dependencies: { skills: { "@me/shared": "^1" } },
       },
       { "SKILL.md": enc("b") },
     );
     const shared = makePkg(
       "@me/shared@1.0.0" as PackageIdentity,
-      { name: "@me/shared", version: "1.0.0", type: "skill", schemaVersion: "1.1" },
+      { name: "@me/shared", version: "1.0.0", type: "skill", schema_version: "2.0" },
       { "SKILL.md": enc("s") },
     );
     const cat = new InMemoryPackageCatalog([a, b, shared]);
@@ -170,7 +198,7 @@ describe("buildBundleFromCatalog", () => {
         name: "@me/a",
         version: "1.0.0",
         type: "skill",
-        schemaVersion: "1.1",
+        schema_version: "2.0",
         dependencies: { skills: { "@me/b": "^1" } },
       },
       { "SKILL.md": enc("a") },
@@ -181,7 +209,7 @@ describe("buildBundleFromCatalog", () => {
         name: "@me/b",
         version: "1.0.0",
         type: "skill",
-        schemaVersion: "1.1",
+        schema_version: "2.0",
         dependencies: { skills: { "@me/a": "^1" } }, // cycle back to a
       },
       { "SKILL.md": enc("b") },
@@ -224,13 +252,40 @@ describe("buildBundleFromCatalog", () => {
     );
     const a = makePkg(
       "@me/a@1.0.0" as PackageIdentity,
-      { name: "@me/a", version: "1.0.0", type: "skill", schemaVersion: "1.1" },
+      { name: "@me/a", version: "1.0.0", type: "skill", schema_version: "2.0" },
       { "SKILL.md": enc("a") },
     );
     const cat = new InMemoryPackageCatalog([a]);
     await expect(buildBundleFromCatalog(root, cat, { limits: { maxPackages: 1 } })).rejects.toThrow(
       /more than/,
     );
+  });
+
+  it("rejects a catalog whose fetch returns a different identity than resolve", async () => {
+    // A malformed/lying catalog: resolve points at @me/a@1.0.0 but fetch
+    // hands back a package with a different identity. The builder must refuse
+    // rather than silently embed the wrong package.
+    const root = makePkg(
+      "@me/root@1.0.0" as PackageIdentity,
+      { ...ROOT, dependencies: { skills: { "@me/a": "^1" } } },
+      { "prompt.md": enc("p") },
+    );
+    const wrong = makePkg(
+      "@me/wrong@9.9.9" as PackageIdentity,
+      { name: "@me/wrong", version: "9.9.9", type: "skill", schema_version: "2.0" },
+      { "SKILL.md": enc("w") },
+    );
+    const lyingCatalog = {
+      resolve: async () => ({ identity: "@me/a@1.0.0" as PackageIdentity }),
+      fetch: async () => wrong,
+    };
+    const err = await buildBundleFromCatalog(root, lyingCatalog).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(BundleError);
+    expect((err as BundleError).code).toBe("BUNDLE_JSON_INVALID");
+    expect((err as BundleError).message).toMatch(/catalog\.fetch returned identity/);
   });
 
   it("composes in-memory + fallback for inline-run-style ingestion", async () => {
@@ -250,7 +305,7 @@ describe("buildBundleFromCatalog", () => {
         name: "@me/pre-registered",
         version: "1.0.0",
         type: "skill",
-        schemaVersion: "1.1",
+        schema_version: "2.0",
       },
       { "SKILL.md": enc("s") },
     );
@@ -300,5 +355,86 @@ describe("extractRootFromAfps / buildBundleFromAfps", () => {
     const bundle = await buildBundleFromAfps(zip, emptyPackageCatalog);
     expect(bundle.packages.size).toBe(1);
     expect(bundle.root).toBe("@me/root@1.0.0");
+  });
+
+  it("rejects a manifest missing version (BUNDLE_JSON_INVALID)", () => {
+    const { version: _omit, ...noVersion } = ROOT;
+    const zip = zipSync({
+      "manifest.json": enc(JSON.stringify(noVersion)),
+      "prompt.md": enc("p"),
+    });
+    const err = (() => {
+      try {
+        extractRootFromAfps(zip);
+      } catch (e) {
+        return e;
+      }
+    })();
+    expect(err).toBeInstanceOf(BundleError);
+    expect((err as BundleError).code).toBe("BUNDLE_JSON_INVALID");
+    expect((err as BundleError).message).toMatch(/name \+ version/);
+  });
+
+  it("rejects an .afps archive with no manifest.json at root", () => {
+    const zip = zipSync({ "prompt.md": enc("p") });
+    const err = (() => {
+      try {
+        extractRootFromAfps(zip);
+      } catch (e) {
+        return e;
+      }
+    })();
+    expect(err).toBeInstanceOf(BundleError);
+    expect((err as BundleError).code).toBe("BUNDLE_JSON_INVALID");
+    expect((err as BundleError).message).toMatch(/missing manifest\.json/);
+  });
+
+  it("rejects a corrupt (non-ZIP) archive with ARCHIVE_INVALID", () => {
+    const garbage = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
+    const err = (() => {
+      try {
+        extractRootFromAfps(garbage);
+      } catch (e) {
+        return e;
+      }
+    })();
+    expect(err).toBeInstanceOf(BundleError);
+    expect((err as BundleError).code).toBe("ARCHIVE_INVALID");
+  });
+
+  it("enforces the compressed-bytes limit", () => {
+    const zip = zipSync({
+      "manifest.json": enc(JSON.stringify(ROOT)),
+      "prompt.md": enc("p"),
+    });
+    const err = (() => {
+      try {
+        extractRootFromAfps(zip, { maxCompressedBytes: 1 });
+      } catch (e) {
+        return e;
+      }
+    })();
+    expect(err).toBeInstanceOf(BundleError);
+    expect((err as BundleError).code).toBe("LIMITS_EXCEEDED");
+    expect((err as BundleError).message).toMatch(/compressed/);
+  });
+
+  it("enforces the decompressed-bytes limit", () => {
+    const zip = zipSync({
+      "manifest.json": enc(JSON.stringify(ROOT)),
+      "prompt.md": enc("x".repeat(1000)),
+    });
+    const err = (() => {
+      try {
+        // Compressed limit generous, decompressed limit tiny → trips the
+        // post-inflation guard rather than the pre-inflation one.
+        extractRootFromAfps(zip, { maxCompressedBytes: 1_000_000, maxDecompressedBytes: 10 });
+      } catch (e) {
+        return e;
+      }
+    })();
+    expect(err).toBeInstanceOf(BundleError);
+    expect((err as BundleError).code).toBe("LIMITS_EXCEEDED");
+    expect((err as BundleError).message).toMatch(/decompressed/);
   });
 });

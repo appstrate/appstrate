@@ -1,31 +1,26 @@
 {
-  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
-  "manifestVersion": "1.1",
-  "type": "integration",
   "name": "@appstrate/onedrive",
   "version": "1.0.0",
-  "displayName": "OneDrive (API)",
+  "type": "integration",
+  "schema_version": "2.0",
+  "display_name": "OneDrive (API)",
   "description": "Cloud file storage and sharing by Microsoft",
-  "license": "Apache-2.0",
-  "author": "Appstrate",
-  "icon": "microsoftonedrive",
   "keywords": ["storage", "productivity"],
-  "apiCall": {
-    "authKey": "primary"
+  "license": "Apache-2.0",
+  "icon": "microsoftonedrive",
+  "source": {
+    "kind": "api",
+    "api": {}
   },
   "auths": {
     "primary": {
       "type": "oauth2",
-      "required": true,
-      "authorizedUris": ["https://graph.microsoft.com/**"],
-      "authorizationUrl": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
-      "tokenUrl": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
-      "refreshUrl": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
-      "scopes": ["Files.Read", "User.Read", "offline_access"],
-      "scopeSeparator": " ",
-      "pkceEnabled": true,
-      "tokenAuthMethod": "client_secret_post",
-      "availableScopes": [
+      "authorization_endpoint": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+      "token_endpoint": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+      "default_scopes": ["Files.Read", "User.Read", "offline_access"],
+      "token_endpoint_auth_method": "client_secret_post",
+      "code_challenge_methods_supported": ["S256"],
+      "scope_catalog": [
         {
           "value": "Files.Read",
           "label": "Read user files"
@@ -59,13 +54,31 @@
           "label": "Maintain access (refresh tokens)"
         }
       ],
+      "authorized_uris": ["https://graph.microsoft.com/**"],
       "delivery": {
         "http": {
-          "headerName": "Authorization",
-          "headerPrefix": "Bearer",
-          "valueFrom": "access_token"
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": " "
+        },
+        "dev.appstrate/auth": {
+          "required": true
         }
       }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/api": {
+      "auth_key": "primary"
     }
   }
 }

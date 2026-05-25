@@ -120,9 +120,10 @@ export interface SidecarLaunchSpec {
  * per installed-and-connected integration.
  *
  * Bundle bytes are NOT inlined — they would blow past the Linux env
- * size limit (~1 MB) on real-world integrations (the Gmail MCP server
- * + its npm deps is ~5 MB). The sidecar fetches them at boot from
- * `GET /internal/integration-bundle/:scope/:name` using the same
+ * size limit (~1 MB) on real-world servers (the Gmail MCP server
+ * + its npm deps is ~5 MB). For local-source integrations the sidecar
+ * fetches the referenced mcp-server package's bundle at boot from
+ * `GET /internal/mcp-server-bundle/:scope/:name` using the same
  * Bearer run-token as the credentials surface.
  */
 /**
@@ -174,6 +175,15 @@ export interface IntegrationSpawnSpec {
     server?: {
       type: string;
       entryPoint?: string;
+      /**
+       * AFPS 2.0 — the SEPARATE `mcp-server` package id this integration's
+       * `source.kind: "local"` references (`source.server.name`). The sidecar
+       * fetches THIS package's `.afps` bundle (the runnable server code) from
+       * `GET /internal/mcp-server-bundle/:scope/:name`, NOT the integration's
+       * own bundle. Set for local sources; omitted for remote (`http`) and
+       * serverless (`api`) integrations.
+       */
+      serverPackageId?: string;
       /**
        * Phase 7 — remote MCP endpoint URL. Required when `server.type` is
        * `"http"`. The sidecar opens a Streamable HTTP MCP client against

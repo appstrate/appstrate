@@ -1,0 +1,201 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * Spawn resolver — `source.kind: "remote"` (Phase 7 Streamable HTTP MCP) and
+ * the source-discriminant error guards. A remote integration emits a server
+ * spec of `{ type: "http", url }` and deliberately drops `httpDeliveryAuths`
+ * (the sidecar injects the token directly, no MITM listener). A remote source
+ * missing its `source.remote` block yields no spawn.
+ */
+
+import { describe, it, expect, beforeEach } from "bun:test";
+import { integrationConnections } from "@appstrate/db/schema";
+import { encryptCredentials } from "@appstrate/connect";
+import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
+import { truncateAll, db } from "../../helpers/db.ts";
+import { createTestContext, type TestContext } from "../../helpers/auth.ts";
+import { seedPackage, seedInstalledPackage } from "../../helpers/seed.ts";
+import {
+  remoteIntegrationManifest,
+  localIntegrationManifest,
+  httpHeaderDelivery,
+} from "../../helpers/integration-manifests.ts";
+
+const INTEG = "@orga/remote-mcp";
+
+function manifest(withRemote = true) {
+  return remoteIntegrationManifest({
+    name: INTEG,
+    version: "0.1.0",
+    withRemote,
+    url: "https://mcp.example.com/mcp/v1",
+    auths: {
+      primary: {
+        type: "api_key",
+        authorizedUris: ["https://mcp.example.com/**"],
+        credentialFields: ["api_key"],
+        delivery: httpHeaderDelivery({
+          name: "Authorization",
+          prefix: "Bearer ",
+          field: "api_key",
+        }),
+      },
+    },
+    tools: { search: {} },
+  });
+}
+
+function agentManifest(): Record<string, unknown> {
+  return {
+    schema_version: "2.0",
+    type: "agent",
+    name: "@orga/agent",
+    version: "0.1.0",
+    display_name: "Agent",
+    dependencies: { integrations: { [INTEG]: "^0.1.0" } },
+    integrations: { [INTEG]: { tools: ["search"] } },
+  };
+}
+
+describe("resolveIntegrationSpawns — remote source", () => {
+  let ctx: TestContext;
+
+  async function seed(withRemote: boolean) {
+    await seedPackage({
+      id: INTEG,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: manifest(withRemote),
+    });
+    await seedInstalledPackage(ctx.defaultAppId, INTEG);
+    // An api_key connection so resolveDeliveries finds a row and the resolver
+    // proceeds to the source-discriminant block.
+    await db.insert(integrationConnections).values({
+      integrationPackageId: INTEG,
+      authKey: "primary",
+      accountId: "default",
+      applicationId: ctx.defaultAppId,
+      userId: ctx.user.id,
+      endUserId: null,
+      credentialsEncrypted: encryptCredentials({ api_key: "k-123" }),
+      identityClaims: {},
+      scopesGranted: [],
+      needsReconnection: false,
+      expiresAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+  }
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "orga" });
+  });
+
+  it("emits a { type: http, url } server spec and drops httpDeliveryAuths", async () => {
+    await seed(true);
+    const specs = await resolveIntegrationSpawns({
+      applicationId: ctx.defaultAppId,
+      actor: { type: "user", id: ctx.user.id },
+      agentManifest: agentManifest(),
+    });
+    expect(specs.length).toBe(1);
+    const spec = specs[0]!;
+    expect(spec.manifest.server).toEqual({ type: "http", url: "https://mcp.example.com/mcp/v1" });
+    // Remote HTTP MCP bypasses the per-integration MITM listener.
+    expect(spec.httpDeliveryAuths).toBeUndefined();
+    expect(spec.toolUrlEnvelope).toBeUndefined();
+  });
+
+  it("yields no spawn when a remote source omits source.remote.url", async () => {
+    await seed(false);
+    const specs = await resolveIntegrationSpawns({
+      applicationId: ctx.defaultAppId,
+      actor: { type: "user", id: ctx.user.id },
+      agentManifest: agentManifest(),
+    });
+    expect(specs.length).toBe(0);
+  });
+});
+
+describe("resolveIntegrationSpawns — local source error guards", () => {
+  const LOCAL = "@orga/local-integ";
+  const MISSING_SERVER = "@orga/no-such-server";
+  let ctx: TestContext;
+
+  function localManifest(serverName: string) {
+    return localIntegrationManifest({
+      name: LOCAL,
+      serverName,
+      version: "0.1.0",
+      auths: {
+        primary: {
+          type: "api_key",
+          authorizedUris: ["https://api.example.com/**"],
+          credentialFields: ["api_key"],
+          delivery: httpHeaderDelivery({
+            name: "Authorization",
+            prefix: "Bearer ",
+            field: "api_key",
+          }),
+        },
+      },
+      tools: { search: {} },
+    });
+  }
+
+  function localAgent(): Record<string, unknown> {
+    return {
+      schema_version: "2.0",
+      type: "agent",
+      name: "@orga/agent",
+      version: "0.1.0",
+      display_name: "Agent",
+      dependencies: { integrations: { [LOCAL]: "^0.1.0" } },
+      integrations: { [LOCAL]: { tools: ["search"] } },
+    };
+  }
+
+  async function seedConnection() {
+    await db.insert(integrationConnections).values({
+      integrationPackageId: LOCAL,
+      authKey: "primary",
+      accountId: "default",
+      applicationId: ctx.defaultAppId,
+      userId: ctx.user.id,
+      endUserId: null,
+      credentialsEncrypted: encryptCredentials({ api_key: "k-123" }),
+      identityClaims: {},
+      scopesGranted: [],
+      needsReconnection: false,
+      expiresAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+  }
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "orga" });
+  });
+
+  it("yields no spawn when the referenced mcp-server package does not exist", async () => {
+    await seedPackage({
+      id: LOCAL,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: localManifest(MISSING_SERVER),
+    });
+    await seedInstalledPackage(ctx.defaultAppId, LOCAL);
+    await seedConnection();
+
+    const specs = await resolveIntegrationSpawns({
+      applicationId: ctx.defaultAppId,
+      actor: { type: "user", id: ctx.user.id },
+      agentManifest: localAgent(),
+    });
+    expect(specs.length).toBe(0);
+  });
+});

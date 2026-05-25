@@ -24,8 +24,8 @@ function agentManifest(name: string, version = "1.0.0") {
     name,
     version,
     type: "agent",
-    schemaVersion: "1.0",
-    displayName: "Test Agent",
+    schema_version: "2.0",
+    display_name: "Test Agent",
     author: "test",
   });
 }
@@ -40,14 +40,19 @@ function skillManifest(name: string, version = "1.0.0") {
 
 function integrationManifest(name: string, version = "1.0.0") {
   return JSON.stringify({
-    manifestVersion: "1.1",
     type: "integration",
     name,
     version,
-    displayName: "Test Integration",
-    server: {
-      type: "node",
-      entryPoint: "./server/index.js",
+    schema_version: "2.0",
+    display_name: "Test Integration",
+    source: { kind: "local", server: { name: `${name}-server`, version: "^1.0.0" } },
+    auths: {
+      key: {
+        type: "api_key",
+        credentials: { schema: { type: "object", properties: { token: { type: "string" } } } },
+        authorized_uris: ["https://api.example.com/**"],
+        delivery: { env: { TOKEN: { value: "{$credential.token}", sensitive: true } } },
+      },
     },
   });
 }

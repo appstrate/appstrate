@@ -19,41 +19,41 @@ import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedInstalledPackage } from "../../helpers/seed.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
+import {
+  localIntegrationManifest,
+  httpHeaderDelivery,
+  connectToolBlock,
+  mcpServerManifest,
+} from "../../helpers/integration-manifests.ts";
 
 const INTEG = "@orga/wajax-spawn";
+const MCP_SERVER = "@orga/wajax-server";
 
 function runStartManifest(name = INTEG): IntegrationManifest {
-  return {
-    manifestVersion: "1.0",
-    type: "integration",
+  return localIntegrationManifest({
     name,
+    serverName: MCP_SERVER,
     version: "0.1.0",
     displayName: "OrgaBusiness",
     description: "Form-login integration (run-start)",
-    server: { type: "node", entryPoint: "main.js" },
     auths: {
       session: {
         type: "custom",
         authorizedUris: ["https://saas.example.com/**"],
-        credentials: {
-          schema: {
-            type: "object",
-            properties: { identifiant: { type: "string" }, mot_de_passe: { type: "string" } },
-          },
-        },
-        delivery: { http: { headerName: "Cookie", valueFrom: "JSESSIONID" } },
-        connect: {
+        credentialFields: ["identifiant", "mot_de_passe"],
+        delivery: httpHeaderDelivery({ name: "Cookie", field: "JSESSIONID" }),
+        connect: connectToolBlock({
           tool: "login",
           runAt: "run-start",
           persistLoginSecret: true,
           produces: ["JSESSIONID"],
-        },
+        }),
       },
     },
     // The agent may pick `fetch_invoices`; the login tool itself must never
     // surface to the agent regardless of selection.
     tools: { fetch_invoices: {}, login: {} },
-  } as unknown as IntegrationManifest;
+  });
 }
 
 /**
@@ -62,10 +62,11 @@ function runStartManifest(name = INTEG): IntegrationManifest {
  */
 function agentManifest(): Record<string, unknown> {
   return {
-    manifestVersion: "1.0",
+    schema_version: "2.0",
     type: "agent",
     name: "@orga/agent",
     version: "0.1.0",
+    display_name: "Orga Agent",
     dependencies: { integrations: { [INTEG]: "^0.1.0" } },
     integrations: { [INTEG]: { tools: ["fetch_invoices", "login"] } },
   };
@@ -82,6 +83,15 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
       type: "integration",
       source: "local",
       draftManifest: runStartManifest(),
+    });
+    // The integration's `source.kind: "local"` references a separate mcp-server
+    // package; the spawn resolver looks it up for the runnable server config.
+    await seedPackage({
+      id: MCP_SERVER,
+      orgId: ctx.orgId,
+      type: "mcp-server",
+      source: "local",
+      draftManifest: mcpServerManifest({ name: MCP_SERVER, version: "0.1.0", serverType: "node" }),
     });
     await seedInstalledPackage(ctx.defaultAppId, INTEG);
   });
@@ -119,8 +129,9 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
     expect(spec.connectLogin!.produces).toEqual(["JSESSIONID"]);
     expect(spec.connectLogin!.authorizedUris).toEqual(["https://saas.example.com/**"]);
     expect(spec.connectLogin!.deliveryHttp).toEqual({
-      headerName: "Cookie",
-      valueFrom: "JSESSIONID",
+      in: "header",
+      name: "Cookie",
+      value: "{$credential.JSESSIONID}",
     });
     expect(spec.connectLogin!.inputs).toEqual({ identifiant: "user1", mot_de_passe: "s3cr3t" });
     // The manifest omitted `reauthOn` → field absent (sidecar defaults to [401]).
@@ -172,19 +183,46 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
     expect(specs.length).toBe(0);
   });
 
-  it("copies manifest auth.connect.reauthOn into connectLogin", async () => {
-    // Re-seed the integration with a manifest that declares reauthOn.
+  it("copies manifest auth.connect reauth_on into connectLogin", async () => {
+    // Re-seed the integration with a manifest that declares reauth_on (AFPS 2.0:
+    // under connect._meta["dev.appstrate/connect"].reauth_on).
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "orga" });
-    const manifest = runStartManifest();
-    const sessionAuth = manifest.auths!.session!;
-    (sessionAuth.connect as { reauthOn?: number[] }).reauthOn = [401, 419];
+    const manifest = localIntegrationManifest({
+      name: INTEG,
+      serverName: MCP_SERVER,
+      version: "0.1.0",
+      displayName: "OrgaBusiness",
+      auths: {
+        session: {
+          type: "custom",
+          authorizedUris: ["https://saas.example.com/**"],
+          credentialFields: ["identifiant", "mot_de_passe"],
+          delivery: httpHeaderDelivery({ name: "Cookie", field: "JSESSIONID" }),
+          connect: connectToolBlock({
+            tool: "login",
+            runAt: "run-start",
+            persistLoginSecret: true,
+            produces: ["JSESSIONID"],
+            reauthOn: [401, 419],
+          }),
+        },
+      },
+      tools: { fetch_invoices: {}, login: {} },
+    });
     await seedPackage({
       id: INTEG,
       orgId: ctx.orgId,
       type: "integration",
       source: "local",
       draftManifest: manifest,
+    });
+    await seedPackage({
+      id: MCP_SERVER,
+      orgId: ctx.orgId,
+      type: "mcp-server",
+      source: "local",
+      draftManifest: mcpServerManifest({ name: MCP_SERVER, version: "0.1.0", serverType: "node" }),
     });
     await seedInstalledPackage(ctx.defaultAppId, INTEG);
     await new LoginSecretStrategy().complete(connectCtx(), {

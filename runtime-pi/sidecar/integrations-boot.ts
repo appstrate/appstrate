@@ -93,7 +93,7 @@ import type {
 
 /**
  * Where the sidecar fetches integration bundles from. The platform
- * surface is `GET /internal/integration-bundle/:scope/:name` with
+ * surface is `GET /internal/mcp-server-bundle/:scope/:name` with
  * Bearer-token auth (same run-token as the credentials endpoint).
  */
 export interface BundleFetchOptions {
@@ -158,16 +158,18 @@ export function readIntegrationSpecsFromEnv(env = process.env): IntegrationSpawn
 }
 
 /**
- * Fetch one integration's bundle from the platform's internal surface.
- * The endpoint authorises with the same Bearer run-token as the
- * credentials surface and verifies that the run's agent actually
- * declares this integration as a dependency.
+ * Fetch a referenced mcp-server package's bundle from the platform's internal
+ * surface. AFPS 2.0: a local-source integration references a SEPARATE
+ * mcp-server package (`source.server.name`); its bundle carries the runnable
+ * server code. The endpoint authorises with the same Bearer run-token as the
+ * credentials surface and verifies that the run's agent declares an installed
+ * integration referencing this mcp-server.
  */
 async function fetchBundleBytes(
-  integrationId: string,
+  mcpServerId: string,
   opts: BundleFetchOptions,
 ): Promise<Uint8Array> {
-  const url = `${opts.platformApiUrl}/internal/integration-bundle/${integrationId}`;
+  const url = `${opts.platformApiUrl}/internal/mcp-server-bundle/${mcpServerId}`;
   const f = opts.fetchFn ?? fetch;
   const res = await f(url, { headers: { Authorization: `Bearer ${opts.runToken}` } });
   if (!res.ok) {
@@ -179,7 +181,7 @@ async function fetchBundleBytes(
       // ignore
     }
     throw new Error(
-      detail || `Failed to fetch integration bundle for ${integrationId}: HTTP ${res.status}`,
+      detail || `Failed to fetch mcp-server bundle for ${mcpServerId}: HTTP ${res.status}`,
     );
   }
   const ab = await res.arrayBuffer();
@@ -490,7 +492,7 @@ async function spawnAndConnectLocalIntegration(params: {
   /** Phase 4 tool-URL envelope to enforce; omitted for connect-run. */
   toolUrlEnvelope?: IntegrationSpawnSpec["toolUrlEnvelope"];
   /** Allowlist for `host.register`. `[]` exposes nothing (connect-run). */
-  allowedTools: string[] | undefined;
+  allowedTools: readonly string[] | undefined;
   /** Log-message prefix: `"integration"` (agent-run) | `"connect-run"`. */
   logLabel: string;
   /** Caller-owned teardown collectors — appended to as resources are built. */
@@ -546,7 +548,12 @@ async function spawnAndConnectLocalIntegration(params: {
     });
   }
 
-  const bytes = await fetchBundleBytes(spec.integrationId, bundleFetchOpts);
+  // AFPS 2.0 — fetch the referenced mcp-server package's bundle (the runnable
+  // server code), NOT the integration's own bundle. Local-source integrations
+  // always carry `server.serverPackageId`; fall back to the integration id only
+  // if a spec somehow omits it (defensive).
+  const serverPackageId = spec.manifest.server?.serverPackageId ?? spec.integrationId;
+  const bytes = await fetchBundleBytes(serverPackageId, bundleFetchOpts);
   const root = await extractBundle(bytes, spec.namespace);
 
   const spawnStart = performance.now();

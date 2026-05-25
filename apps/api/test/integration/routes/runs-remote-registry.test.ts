@@ -31,13 +31,14 @@ const PROMPT = "You are a helpful agent.";
 function publishedManifest(version = "1.2.3") {
   return {
     name: "@acme/briefing",
-    displayName: "Briefing Agent",
+    display_name: "Briefing Agent",
     version,
     type: "agent",
     description: "Test agent",
-    schemaVersion: "1.0",
+    schema_version: "2.0",
+    author: "tester",
     timeout: 300,
-    dependencies: { skills: {}, tools: {}, providers: {} },
+    dependencies: { skills: {}, mcp_servers: {}, integrations: {} },
   } as const;
 }
 
@@ -142,11 +143,12 @@ describe("POST /api/runs/remote — kind: registry", () => {
       type: "agent",
       draftManifest: {
         name: "@acme/draft-only",
-        displayName: "Draft-only Agent",
+        display_name: "Draft-only Agent",
         version: "0.0.1",
         type: "agent",
-        schemaVersion: "1.0",
-        dependencies: { skills: {}, tools: {}, providers: {} },
+        schema_version: "2.0",
+        author: "tester",
+        dependencies: { skills: {}, mcp_servers: {}, integrations: {} },
       } as unknown as Record<string, unknown>,
       draftContent: "draft prompt",
     });
@@ -179,7 +181,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
         version: "0.0.1",
         type: "agent",
         // displayName + schemaVersion intentionally omitted
-        dependencies: { skills: {}, tools: {}, providers: {} },
+        dependencies: { skills: {}, mcp_servers: {}, integrations: {} },
       } as unknown as Record<string, unknown>,
       draftContent: "draft prompt",
     });

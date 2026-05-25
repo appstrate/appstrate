@@ -44,7 +44,7 @@ function makeFixtureBundle(): Bundle {
       name: "@fixture/agent",
       version: "1.0.0",
       type: "agent",
-      schemaVersion: "1.3",
+      schema_version: "2.0",
       timeout: 120,
       input: {
         schema: {
@@ -66,10 +66,15 @@ function makeFixtureBundle(): Bundle {
     },
     { "prompt.md": "Answer the user's question." },
   );
-  const tool = pkg(
+  const mcp = pkg(
     "@fixture/search@1.0.0",
-    { name: "search", type: "tool", description: "Search the web" },
-    { "TOOL.md": "# search\nUse it wisely." },
+    {
+      manifest_version: "0.3",
+      name: "search-server",
+      version: "1.0.0",
+      _meta: { "dev.afps/mcp-server": { name: "@fixture/search", type: "mcp-server" } },
+    },
+    { "server/index.js": "//" },
   );
   const skill = pkg("@fixture/writing@1.0.0", {
     name: "writing",
@@ -78,7 +83,7 @@ function makeFixtureBundle(): Bundle {
   });
 
   const packages = new Map<PackageIdentity, BundlePackage>();
-  for (const p of [root, tool, skill]) packages.set(p.identity, p);
+  for (const p of [root, mcp, skill]) packages.set(p.identity, p);
   return {
     bundleFormatVersion: "1.0",
     root: root.identity,

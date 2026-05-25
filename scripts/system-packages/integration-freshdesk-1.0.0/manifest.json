@@ -1,23 +1,21 @@
 {
-  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
-  "manifestVersion": "1.1",
-  "type": "integration",
   "name": "@appstrate/freshdesk",
   "version": "1.0.0",
-  "displayName": "Freshdesk (API)",
+  "type": "integration",
+  "schema_version": "2.0",
+  "display_name": "Freshdesk (API)",
   "description": "Customer support and helpdesk ticketing platform",
-  "license": "Apache-2.0",
-  "author": "Appstrate",
-  "icon": "https://www.google.com/s2/favicons?domain=freshdesk.com&sz=128",
   "keywords": ["crm", "support", "customer-service"],
-  "apiCall": {
-    "authKey": "primary"
+  "license": "Apache-2.0",
+  "icon": "https://www.google.com/s2/favicons?domain=freshdesk.com&sz=128",
+  "source": {
+    "kind": "api",
+    "api": {}
   },
   "auths": {
     "primary": {
       "type": "api_key",
-      "required": true,
-      "authorizedUris": ["https://*.freshdesk.com/**"],
+      "authorized_uris": ["https://*.freshdesk.com/**"],
       "credentials": {
         "schema": {
           "type": "object",
@@ -36,14 +34,26 @@
       },
       "delivery": {
         "http": {
-          "headerName": "Authorization",
-          "headerPrefix": "Basic",
-          "valueFrom": {
-            "template": "{{api_key}}:X",
-            "encoding": "base64"
-          }
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Basic",
+          "value": "{{api_key}}:X",
+          "encoding": "base64"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/auth": {
+          "required": true
         }
       }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/api": {
+      "auth_key": "primary"
     }
   }
 }

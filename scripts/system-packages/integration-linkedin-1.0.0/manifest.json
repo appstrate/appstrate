@@ -1,31 +1,26 @@
 {
-  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
-  "manifestVersion": "1.1",
-  "type": "integration",
   "name": "@appstrate/linkedin",
   "version": "1.0.0",
-  "displayName": "LinkedIn (API)",
+  "type": "integration",
+  "schema_version": "2.0",
+  "display_name": "LinkedIn (API)",
   "description": "Professional networking and B2B marketing platform",
-  "license": "Apache-2.0",
-  "author": "Appstrate",
-  "icon": "linkedin",
   "keywords": ["social-media", "marketing", "crm"],
-  "apiCall": {
-    "authKey": "primary"
+  "license": "Apache-2.0",
+  "icon": "linkedin",
+  "source": {
+    "kind": "api",
+    "api": {}
   },
   "auths": {
     "primary": {
       "type": "oauth2",
-      "required": true,
-      "authorizedUris": ["https://api.linkedin.com/**"],
-      "authorizationUrl": "https://www.linkedin.com/oauth/v2/authorization",
-      "tokenUrl": "https://www.linkedin.com/oauth/v2/accessToken",
-      "refreshUrl": "https://www.linkedin.com/oauth/v2/accessToken",
-      "scopes": ["openid", "profile", "email"],
-      "scopeSeparator": " ",
-      "pkceEnabled": true,
-      "tokenAuthMethod": "client_secret_post",
-      "availableScopes": [
+      "authorization_endpoint": "https://www.linkedin.com/oauth/v2/authorization",
+      "token_endpoint": "https://www.linkedin.com/oauth/v2/accessToken",
+      "default_scopes": ["openid", "profile", "email"],
+      "token_endpoint_auth_method": "client_secret_post",
+      "code_challenge_methods_supported": ["S256"],
+      "scope_catalog": [
         {
           "value": "openid",
           "label": "OpenID Connect (required)"
@@ -75,13 +70,31 @@
           "label": "Read basic profile (name, photo)"
         }
       ],
+      "authorized_uris": ["https://api.linkedin.com/**"],
       "delivery": {
         "http": {
-          "headerName": "Authorization",
-          "headerPrefix": "Bearer",
-          "valueFrom": "access_token"
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": " "
+        },
+        "dev.appstrate/auth": {
+          "required": true
         }
       }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/api": {
+      "auth_key": "primary"
     }
   }
 }

@@ -294,12 +294,13 @@ function AuthSection({
               <span className="font-mono">{status.audience}</span>
             </p>
           )}
-          {authDecl.authorizedUris.length > 0 && (
+          {(authDecl.authorized_uris?.length ?? 0) > 0 && (
             <p className="truncate">
               <span className="font-semibold">{t("integration.auth.authorizedUris")}:</span>{" "}
               <span className="font-mono text-[0.7rem]">
-                {authDecl.authorizedUris.slice(0, 3).join(", ")}
-                {authDecl.authorizedUris.length > 3 && ` (+${authDecl.authorizedUris.length - 3})`}
+                {authDecl.authorized_uris!.slice(0, 3).join(", ")}
+                {authDecl.authorized_uris!.length > 3 &&
+                  ` (+${authDecl.authorized_uris!.length - 3})`}
               </span>
             </p>
           )}
@@ -905,12 +906,13 @@ function ConnectionRow({
 
 function MetadataBlock({ manifest }: { manifest: IntegrationManifestView }) {
   const { t } = useTranslation("settings");
-  const author =
-    typeof manifest.author === "string" ? manifest.author : (manifest.author?.name ?? "");
-  const repo =
-    typeof manifest.repository === "string"
-      ? manifest.repository
-      : (manifest.repository?.url ?? "");
+  // AFPS 2.0: author moved under `_meta["dev.appstrate/package"].author`,
+  // repository is now a top-level string, and the old `server`/`compatibility`
+  // fields are gone — server type is expressed by the `source.kind` discriminant.
+  const pkgMeta = manifest._meta?.["dev.appstrate/package"] as { author?: unknown } | undefined;
+  const author = typeof pkgMeta?.author === "string" ? pkgMeta.author : "";
+  const repo = typeof manifest.repository === "string" ? manifest.repository : "";
+  const sourceKind = manifest.source?.kind ?? "api";
   const rows: Array<[string, React.ReactNode]> = [
     [t("integration.field.version"), <span className="font-mono">{manifest.version}</span>],
     [t("integration.field.author"), author || "—"],
@@ -925,20 +927,7 @@ function MetadataBlock({ manifest }: { manifest: IntegrationManifestView }) {
         "—"
       ),
     ],
-    [
-      t("integration.field.serverType"),
-      <span className="font-mono">{manifest.server?.type ?? "api_call"}</span>,
-    ],
-    [
-      t("integration.field.compatibility"),
-      manifest.compatibility ? (
-        <span className="font-mono">
-          afps:{manifest.compatibility.afps ?? "—"} mcp:{manifest.compatibility.mcp ?? "—"}
-        </span>
-      ) : (
-        "—"
-      ),
-    ],
+    [t("integration.field.serverType"), <span className="font-mono">{sourceKind}</span>],
   ];
   return (
     <dl className="grid grid-cols-1 gap-y-2 text-sm sm:grid-cols-[max-content_1fr] sm:gap-x-4">
@@ -1012,7 +1001,7 @@ export function IntegrationDetailPage() {
       <SharedHeader
         detail={{
           id: packageId,
-          displayName: m.displayName,
+          displayName: m.display_name ?? packageId,
           description: m.description ?? "",
           source,
           type: "integration",
@@ -1115,21 +1104,6 @@ export function IntegrationDetailPage() {
         <TabsContent value="about" className="mt-4">
           <div className="max-w-2xl space-y-4">
             <MetadataBlock manifest={m} />
-            {m.privacyPolicy && (
-              <p className="text-xs">
-                <span className="text-muted-foreground">
-                  {t("integration.field.privacyPolicy")}:
-                </span>{" "}
-                <a
-                  href={m.privacyPolicy}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary break-all underline"
-                >
-                  {m.privacyPolicy}
-                </a>
-              </p>
-            )}
             {m.keywords && m.keywords.length > 0 && (
               <div className="flex flex-wrap gap-1">
                 {m.keywords.map((k) => (
@@ -1176,7 +1150,7 @@ export function IntegrationDetailPage() {
         title={t("btn.confirm", { ns: "common" })}
         description={t("packages.deleteConfirm", {
           type: t("packages.type.integration"),
-          name: m.displayName,
+          name: m.display_name ?? packageId,
         })}
         isPending={deletePkg.isPending}
         onConfirm={() =>

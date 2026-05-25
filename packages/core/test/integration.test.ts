@@ -1,1516 +1,944 @@
+// Copyright 2025-2026 Appstrate
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for the AFPS integration manifest schema (Phase 1.0,
- * INTEGRATIONS_PROPOSAL §4.1.1). Exercises the runtime-discriminated
- * cases (entryPoint vs package vs url), D31/D32 enforcement, multi-auth
- * delivery, and dispatch through `validateManifest`.
+ * AFPS 2.0 integration manifest schema + install-time helper tests.
+ *
+ * Covers: source kinds (local/remote/api); oauth2 discovery + manual; api_key
+ * / basic / custom + credentials; delivery http/env/files; connect.login
+ * outputs + §7.7 gating; tools metadata; the Appstrate cross-field
+ * superRefine rules; validateManifest dispatch; and every exported helper.
  */
 
-import { describe, expect, it } from "bun:test";
+import { describe, it, expect } from "bun:test";
 import {
-  expandScopesGranted,
-  missingScopesForConnection,
   integrationManifestSchema,
-  integrationServerTypeEnum,
-  getAvailableScopes,
+  type IntegrationManifest,
+  API_CALL_TOOL_NAME,
   getDeclaredToolNames,
   getApiCallConfig,
-  API_CALL_TOOL_NAME,
-  validateAgentIntegrationScopes,
+  getToolUrlPatterns,
+  getAvailableScopes,
   requiredAuthKeysForAgent,
   requiredScopesForAgent,
-  type IntegrationManifest,
+  scopesContributedByTools,
+  expandScopesGranted,
+  missingScopesForConnection,
+  validateAgentIntegrationScopes,
+  integrationUploadProtocolEnum,
 } from "../src/integration.ts";
 import { validateManifest } from "../src/validation.ts";
 
+// ─────────────────────────────────────────────
+// Fixture helpers
+// ─────────────────────────────────────────────
+
+/** A minimal valid AFPS 2.0 integration with a single oauth2 auth + http delivery. */
 function baseManifest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    manifestVersion: "1.1",
-    type: "integration",
     name: "@official/gmail",
     version: "1.0.0",
-    displayName: "Gmail",
-    server: {
-      type: "node",
-      entryPoint: "./server/index.js",
+    type: "integration",
+    schema_version: "2.0",
+    display_name: "Gmail",
+    source: { kind: "remote", remote: { url: "https://gmail/mcp", transport: "streamable-http" } },
+    auths: {
+      oauth: {
+        type: "oauth2",
+        issuer: "https://accounts.google.com",
+        authorization_endpoint: "https://accounts.google.com/o/oauth2/v2/auth",
+        token_endpoint: "https://oauth2.googleapis.com/token",
+        authorized_uris: ["https://gmail.googleapis.com/**"],
+        delivery: {
+          http: {
+            in: "header",
+            name: "Authorization",
+            prefix: "Bearer ",
+            value: "{$credential.access_token}",
+          },
+        },
+      },
     },
     ...overrides,
   };
 }
 
-describe("integrationServerTypeEnum", () => {
-  it("accepts every runtime + author sugar", () => {
-    for (const t of ["node", "bun", "python", "uv", "binary", "docker", "http", "npx", "uvx"]) {
-      expect(integrationServerTypeEnum.parse(t)).toBe(t as never);
-    }
-  });
+function parse(raw: Record<string, unknown>): IntegrationManifest {
+  return integrationManifestSchema.parse(raw);
+}
 
-  it("rejects unknown runtimes", () => {
-    expect(() => integrationServerTypeEnum.parse("deno")).toThrow();
-  });
-});
-
-describe("integrationManifestSchema — happy paths", () => {
-  it("accepts the minimal node manifest", () => {
-    const parsed = integrationManifestSchema.parse(baseManifest());
-    expect(parsed.type).toBe("integration");
-    expect(parsed.server!.type).toBe("node");
-    expect(parsed.server!.entryPoint).toBe("./server/index.js");
-  });
-
-  it("accepts a docker manifest with digest", () => {
-    const m = baseManifest({
-      server: {
-        type: "docker",
-        package: {
-          registryType: "oci",
-          identifier: "ghcr.io/vendor/mcp-server",
-          digest: "sha256:" + "a".repeat(64),
-        },
-      },
-    });
-    const parsed = integrationManifestSchema.parse(m);
-    expect(parsed.server!.type).toBe("docker");
-    const pkg = parsed.server!.package;
-    expect(pkg).toBeDefined();
-    if (pkg?.registryType === "oci") {
-      expect(pkg.digest).toMatch(/^sha256:/);
-    } else {
-      throw new Error("expected oci registryType");
-    }
-  });
-
-  it("accepts a remote http manifest", () => {
-    const m = baseManifest({
-      server: { type: "http", url: "https://api.example.com/mcp/{tenantId}" },
-    });
-    expect(() => integrationManifestSchema.parse(m)).not.toThrow();
-  });
-
-  it("accepts a minimal binary manifest", () => {
-    const m = baseManifest({
-      server: { type: "binary", entryPoint: "./bin/foo" },
-    });
-    expect(() => integrationManifestSchema.parse(m)).not.toThrow();
-  });
-
-  it("accepts a manifest with one oauth2 auth + http delivery", () => {
-    const m = baseManifest({
-      auths: {
-        primary: {
-          type: "oauth2",
-          authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth",
-          tokenUrl: "https://oauth2.googleapis.com/token",
-          audience: "https://gmail.googleapis.com",
-          scopes: ["gmail.send"],
-          authorizedUris: ["https://gmail.googleapis.com/*"],
-          delivery: {
-            http: {
-              headerName: "Authorization",
-              headerPrefix: "Bearer ",
-              valueFrom: "accessToken",
-            },
-          },
-        },
-      },
-    });
-    const parsed = integrationManifestSchema.parse(m);
-    expect(parsed.auths?.primary?.type).toBe("oauth2");
-    expect(parsed.auths?.primary?.delivery.http?.headerName).toBe("Authorization");
-  });
-
-  it("accepts multi-auth (github + linear)", () => {
-    const m = baseManifest({
-      auths: {
-        github: {
-          type: "oauth2",
-          authorizationUrl: "https://github.com/login/oauth/authorize",
-          tokenUrl: "https://github.com/login/oauth/access_token",
-          authorizedUris: ["https://api.github.com/*"],
-          delivery: { http: { valueFrom: "accessToken" } },
-        },
-        linear: {
-          type: "oauth2",
-          authorizationUrl: "https://linear.app/oauth/authorize",
-          tokenUrl: "https://api.linear.app/oauth/token",
-          authorizedUris: ["https://api.linear.app/*"],
-          delivery: { http: { valueFrom: "accessToken" } },
-        },
-      },
-    });
-    expect(() => integrationManifestSchema.parse(m)).not.toThrow();
-  });
-
-  it("accepts an api_key auth with credentials.schema + env delivery", () => {
-    const m = baseManifest({
-      auths: {
-        primary: {
-          type: "api_key",
-          authorizedUris: ["https://api.example.com/*"],
-          credentials: {
-            schema: {
-              type: "object",
-              properties: { api_key: { type: "string" } },
-              required: ["api_key"],
-            },
-          },
-          delivery: {
-            env: {
-              EXAMPLE_API_KEY: { from: "api_key", sensitive: true },
-            },
-          },
-        },
-      },
-    });
-    expect(() => integrationManifestSchema.parse(m)).not.toThrow();
-  });
-});
-
-describe("integrationManifestSchema — author sugars (npx/uvx)", () => {
-  it("accepts npx with package(npm) — bundler input", () => {
-    const m = baseManifest({
-      server: {
-        type: "npx",
-        package: {
-          registryType: "npm",
-          identifier: "@modelcontextprotocol/server-filesystem",
-          version: "^1.0.0",
-        },
-      },
-    });
-    const parsed = integrationManifestSchema.parse(m);
-    expect(parsed.server!.type).toBe("npx");
-    expect(parsed.server!.package?.registryType).toBe("npm");
-  });
-
-  it("accepts npx with entryPoint — bundler output (intermediate)", () => {
-    const m = baseManifest({
-      server: { type: "npx", entryPoint: "./server/dist/index.js" },
-    });
-    expect(() => integrationManifestSchema.parse(m)).not.toThrow();
-  });
-
-  it("rejects npx with both entryPoint and package", () => {
-    const m = baseManifest({
-      server: {
-        type: "npx",
-        entryPoint: "./server/x.js",
-        package: { registryType: "npm", identifier: "x", version: "1.0.0" },
-      },
-    });
-    const r = integrationManifestSchema.safeParse(m);
-    expect(r.success).toBe(false);
-  });
-
-  it("rejects npx with neither entryPoint nor package", () => {
-    const m = baseManifest({ server: { type: "npx" } });
-    const r = integrationManifestSchema.safeParse(m);
-    expect(r.success).toBe(false);
-  });
-
-  it("rejects npx with a pypi package", () => {
-    const m = baseManifest({
-      server: {
-        type: "npx",
-        package: { registryType: "pypi", identifier: "x", version: "1.0.0" },
-      },
-    });
-    const r = integrationManifestSchema.safeParse(m);
-    expect(r.success).toBe(false);
-  });
-
-  it("accepts uvx with package(pypi)", () => {
-    const m = baseManifest({
-      server: {
-        type: "uvx",
-        package: { registryType: "pypi", identifier: "mcp-server-git", version: "0.6.2" },
-      },
-    });
-    expect(() => integrationManifestSchema.parse(m)).not.toThrow();
-  });
-
-  it("rejects uvx with an npm package", () => {
-    const m = baseManifest({
-      server: {
-        type: "uvx",
-        package: { registryType: "npm", identifier: "x", version: "1.0.0" },
-      },
-    });
-    const r = integrationManifestSchema.safeParse(m);
-    expect(r.success).toBe(false);
-  });
-
-  it("rejects docker with an npm package", () => {
-    const m = baseManifest({
-      server: {
-        type: "docker",
-        package: { registryType: "npm", identifier: "x", version: "1.0.0" },
-      },
-    });
-    const r = integrationManifestSchema.safeParse(m);
-    expect(r.success).toBe(false);
-  });
-});
-
-describe("integrationManifestSchema — server discrimination", () => {
-  it("rejects entryPoint when type is docker", () => {
-    const m = baseManifest({
-      server: {
-        type: "docker",
-        entryPoint: "./oops.js",
-        package: {
-          registryType: "oci",
-          identifier: "x",
-          digest: "sha256:" + "a".repeat(64),
-        },
-      },
-    });
-    const r = integrationManifestSchema.safeParse(m);
-    expect(r.success).toBe(false);
-  });
-
-  it("rejects docker without a digest", () => {
-    const m = baseManifest({
-      server: {
-        type: "docker",
-        package: { registryType: "oci", identifier: "x", digest: "latest" },
-      },
-    });
-    const r = integrationManifestSchema.safeParse(m);
-    expect(r.success).toBe(false);
-  });
-
-  it("rejects http without a url", () => {
-    const m = baseManifest({ server: { type: "http" } });
-    const r = integrationManifestSchema.safeParse(m);
-    expect(r.success).toBe(false);
-  });
-
-  it("rejects node without an entryPoint", () => {
-    const m = baseManifest({ server: { type: "node" } });
-    const r = integrationManifestSchema.safeParse(m);
-    expect(r.success).toBe(false);
-  });
-});
-
-describe("integrationManifestSchema — auth discrimination", () => {
-  it("rejects oauth2 without explicit authorizationUrl + tokenUrl", () => {
-    const m = baseManifest({
-      auths: {
-        primary: {
-          type: "oauth2",
-          authorizedUris: ["https://api.example.com/*"],
-          delivery: { http: { valueFrom: "accessToken" } },
-        },
-      },
-    });
-    const r = integrationManifestSchema.safeParse(m);
-    expect(r.success).toBe(false);
-  });
-
-  it("accepts oauth2 with explicit authorizationUrl + tokenUrl", () => {
-    const m = baseManifest({
-      auths: {
-        primary: {
-          type: "oauth2",
-          authorizationUrl: "https://example.com/oauth/authorize",
-          tokenUrl: "https://example.com/oauth/token",
-          authorizedUris: ["https://api.example.com/*"],
-          delivery: { http: { valueFrom: "accessToken" } },
-        },
-      },
-    });
-    expect(() => integrationManifestSchema.parse(m)).not.toThrow();
-  });
-
-  it("rejects api_key without credentials.schema", () => {
-    const m = baseManifest({
-      auths: {
-        primary: {
-          type: "api_key",
-          authorizedUris: ["https://api.example.com/*"],
-          delivery: { env: { TOKEN: { from: "api_key" } } },
-        },
-      },
-    });
-    const r = integrationManifestSchema.safeParse(m);
-    expect(r.success).toBe(false);
-  });
-
-  it("rejects an auth with empty delivery", () => {
-    const m = baseManifest({
-      auths: {
-        primary: {
-          type: "oauth2",
-          authorizationUrl: "https://x/a",
-          tokenUrl: "https://x/t",
-          authorizedUris: ["https://api.example.com/*"],
-          delivery: {},
-        },
-      },
-    });
-    const r = integrationManifestSchema.safeParse(m);
-    expect(r.success).toBe(false);
-  });
-
-  it("rejects an auth with empty authorizedUris", () => {
-    const m = baseManifest({
-      auths: {
-        primary: {
-          type: "oauth2",
-          authorizationUrl: "https://x/a",
-          tokenUrl: "https://x/t",
-          authorizedUris: [],
-          delivery: { http: { valueFrom: "accessToken" } },
-        },
-      },
-    });
-    const r = integrationManifestSchema.safeParse(m);
-    expect(r.success).toBe(false);
-  });
-
-  it("rejects auth keys that don't match the required pattern", () => {
-    const m = baseManifest({
-      auths: {
-        "Primary-Key": {
-          type: "oauth2",
-          authorizationUrl: "https://x/a",
-          tokenUrl: "https://x/t",
-          authorizedUris: ["https://api.example.com/*"],
-          delivery: { http: { valueFrom: "accessToken" } },
-        },
-      },
-    });
-    const r = integrationManifestSchema.safeParse(m);
-    expect(r.success).toBe(false);
-  });
-});
-
-describe("integrationManifestSchema — naming + required fields", () => {
-  it("rejects a non-scoped name", () => {
-    const m = baseManifest({ name: "just-a-name" });
-    const r = integrationManifestSchema.safeParse(m);
-    expect(r.success).toBe(false);
-  });
-
-  it("rejects an invalid manifestVersion", () => {
-    const m = baseManifest({ manifestVersion: "2.0" });
-    const r = integrationManifestSchema.safeParse(m);
-    expect(r.success).toBe(false);
-  });
-
-  it("rejects a manifest missing displayName", () => {
-    const { displayName: _drop, ...rest } = baseManifest();
-    const r = integrationManifestSchema.safeParse(rest);
-    expect(r.success).toBe(false);
-  });
-
-  it("rejects a manifest with wrong type", () => {
-    const m = baseManifest({ type: "agent" });
-    const r = integrationManifestSchema.safeParse(m);
-    expect(r.success).toBe(false);
-  });
-});
-
-describe("validateManifest — dispatch to integration schema", () => {
-  it("routes a valid integration manifest through the integration schema", () => {
-    const res = validateManifest(baseManifest());
-    expect(res.valid).toBe(true);
-    if (res.valid) {
-      expect(res.manifest.type).toBe("integration");
-    }
-  });
-
-  it("surfaces integration-specific errors when validation fails", () => {
-    const res = validateManifest(baseManifest({ server: { type: "node" } }));
-    expect(res.valid).toBe(false);
-    if (!res.valid) {
-      const joined = res.errors.join("|");
-      expect(joined).toMatch(/entryPoint/);
-    }
-  });
-});
-
-describe("integrationManifestSchema — author/repository union", () => {
-  it("accepts author as plain string or object", () => {
-    expect(() => integrationManifestSchema.parse(baseManifest({ author: "Pierre" }))).not.toThrow();
-    expect(() =>
-      integrationManifestSchema.parse(
-        baseManifest({ author: { name: "Pierre", email: "p@x.io" } }),
-      ),
-    ).not.toThrow();
-  });
-
-  it("accepts repository as plain string or {type, url}", () => {
-    expect(() =>
-      integrationManifestSchema.parse(baseManifest({ repository: "https://x.io/r" })),
-    ).not.toThrow();
-    expect(() =>
-      integrationManifestSchema.parse(
-        baseManifest({ repository: { type: "git", url: "https://x.io/r" } }),
-      ),
-    ).not.toThrow();
-  });
-});
+function errorPaths(raw: Record<string, unknown>): string[] {
+  const r = integrationManifestSchema.safeParse(raw);
+  if (r.success) return [];
+  return r.error.issues.map((i) => i.path.join("."));
+}
 
 // ─────────────────────────────────────────────
-// Niveau 2 scope model — auths.{k}.availableScopes catalog
-// + top-level tools.{name} metadata
+// Happy paths — source kinds
 // ─────────────────────────────────────────────
 
-describe("integrationManifestSchema — availableScopes catalog", () => {
-  function oauthBase(authOverrides: Record<string, unknown> = {}): Record<string, unknown> {
-    return baseManifest({
-      auths: {
-        primary: {
-          type: "oauth2",
-          authorizationUrl: "https://idp/a",
-          tokenUrl: "https://idp/t",
-          authorizedUris: ["https://api.example.com/*"],
-          delivery: { http: { valueFrom: "accessToken" } },
-          ...authOverrides,
-        },
-      },
-    });
-  }
+describe("integrationManifestSchema — source kinds", () => {
+  it("accepts a remote source", () => {
+    const r = integrationManifestSchema.safeParse(baseManifest());
+    expect(r.success).toBe(true);
+  });
 
-  it("accepts a manifest with availableScopes catalog", () => {
-    const m = oauthBase({
-      availableScopes: [
-        { value: "read", label: "Read", description: "Read everything" },
-        { value: "write", label: "Write" },
-      ],
-    });
-    const parsed = integrationManifestSchema.parse(m);
+  it("accepts a local source referencing an mcp-server", () => {
+    const r = integrationManifestSchema.safeParse(
+      baseManifest({
+        source: { kind: "local", server: { name: "@official/gmail-server", version: "^1.2.0" } },
+      }),
+    );
+    expect(r.success).toBe(true);
+  });
+
+  it("accepts a local source with vendored:true", () => {
+    const r = integrationManifestSchema.safeParse(
+      baseManifest({
+        source: {
+          kind: "local",
+          server: { name: "@official/gmail-server", version: "^1.0.0", vendored: true },
+        },
+      }),
+    );
+    expect(r.success).toBe(true);
+  });
+
+  it("accepts an api source with upload_protocols", () => {
+    const r = integrationManifestSchema.safeParse(
+      baseManifest({ source: { kind: "api", api: { upload_protocols: ["google-resumable"] } } }),
+    );
+    expect(r.success).toBe(true);
+  });
+
+  it("accepts an api source with no upload_protocols", () => {
+    const r = integrationManifestSchema.safeParse(
+      baseManifest({ source: { kind: "api", api: {} } }),
+    );
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects an unknown source kind", () => {
+    const r = integrationManifestSchema.safeParse(baseManifest({ source: { kind: "ftp" } }));
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects a missing source", () => {
+    const m = baseManifest();
+    delete m.source;
+    expect(errorPaths(m)).toContain("source");
+  });
+
+  it("rejects duplicate upload_protocols", () => {
     expect(
-      parsed.auths?.primary && "availableScopes" in parsed.auths.primary
-        ? parsed.auths.primary.availableScopes?.length
-        : 0,
-    ).toBe(2);
+      errorPaths(
+        baseManifest({
+          source: { kind: "api", api: { upload_protocols: ["tus", "tus"] } },
+        }),
+      ).length,
+    ).toBeGreaterThan(0);
   });
 
-  it("rejects availableScopes items missing value", () => {
-    const m = oauthBase({
-      availableScopes: [{ label: "Read" }],
-    });
+  it("rejects an upload protocol outside the closed enum", () => {
+    const r = integrationManifestSchema.safeParse(
+      baseManifest({ source: { kind: "api", api: { upload_protocols: ["bogus"] } } }),
+    );
+    expect(r.success).toBe(false);
+  });
+});
+
+// ─────────────────────────────────────────────
+// OAuth2 — discovery + manual
+// ─────────────────────────────────────────────
+
+describe("integrationManifestSchema — oauth2 discovery + manual", () => {
+  it("accepts oauth2 with issuer only (discovery-first)", () => {
+    const m = baseManifest();
+    const auths = m.auths as Record<string, Record<string, unknown>>;
+    delete auths.oauth!.authorization_endpoint;
+    delete auths.oauth!.token_endpoint;
+    auths.oauth!.issuer = "https://accounts.google.com";
+    expect(integrationManifestSchema.safeParse(m).success).toBe(true);
+  });
+
+  it("accepts oauth2 with manual endpoints and no issuer", () => {
+    const m = baseManifest();
+    const auths = m.auths as Record<string, Record<string, unknown>>;
+    delete auths.oauth!.issuer;
+    expect(integrationManifestSchema.safeParse(m).success).toBe(true);
+  });
+
+  it("rejects oauth2 with neither issuer nor endpoints", () => {
+    const m = baseManifest();
+    const auths = m.auths as Record<string, Record<string, unknown>>;
+    delete auths.oauth!.issuer;
+    delete auths.oauth!.authorization_endpoint;
+    delete auths.oauth!.token_endpoint;
     expect(integrationManifestSchema.safeParse(m).success).toBe(false);
   });
 
-  it("rejects default scopes outside the catalog", () => {
-    const m = oauthBase({
-      scopes: ["delete"],
-      availableScopes: [{ value: "read", label: "Read" }],
-    });
-    const r = integrationManifestSchema.safeParse(m);
-    expect(r.success).toBe(false);
-    if (!r.success) {
-      const joined = r.error.issues.map((i) => i.message).join("|");
-      expect(joined).toMatch(/availableScopes/);
-    }
+  it("accepts RFC 8414 fields: resource, code_challenge_methods_supported, authorization_params", () => {
+    const m = baseManifest();
+    const auths = m.auths as Record<string, Record<string, unknown>>;
+    auths.oauth!.resource = "https://gmail.googleapis.com";
+    auths.oauth!.code_challenge_methods_supported = ["S256"];
+    auths.oauth!.authorization_params = { access_type: "offline" };
+    auths.oauth!.token_endpoint_auth_method = "client_secret_post";
+    auths.oauth!.identity_claims = { account_id: "sub", email: "email" };
+    auths.oauth!.required_identity_claims = ["sub"];
+    expect(integrationManifestSchema.safeParse(m).success).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────
+// Auth types — api_key / basic / custom + credentials
+// ─────────────────────────────────────────────
+
+const credSchema = {
+  schema: { type: "object", properties: { api_key: { type: "string" } }, required: ["api_key"] },
+};
+
+describe("integrationManifestSchema — api_key/basic/custom credentials", () => {
+  it("accepts api_key with credentials.schema + env delivery", () => {
+    const r = integrationManifestSchema.safeParse(
+      baseManifest({
+        source: { kind: "api", api: {} },
+        auths: {
+          key: {
+            type: "api_key",
+            credentials: credSchema,
+            authorized_uris: ["https://api.example.com/**"],
+            delivery: { env: { API_KEY: { value: "{$credential.api_key}", sensitive: true } } },
+          },
+        },
+      }),
+    );
+    expect(r.success).toBe(true);
   });
 
-  it("accepts default scopes that are a subset of the catalog", () => {
-    const m = oauthBase({
-      scopes: ["read"],
-      availableScopes: [
+  it("rejects api_key without credentials.schema", () => {
+    const r = integrationManifestSchema.safeParse(
+      baseManifest({
+        auths: {
+          key: {
+            type: "api_key",
+            authorized_uris: ["https://api.example.com/**"],
+            delivery: { env: { API_KEY: { value: "{$credential.api_key}" } } },
+          },
+        },
+      }),
+    );
+    expect(r.success).toBe(false);
+  });
+
+  it("accepts basic auth with credentials + files delivery (octal mode)", () => {
+    const r = integrationManifestSchema.safeParse(
+      baseManifest({
+        auths: {
+          basic: {
+            type: "basic",
+            credentials: {
+              schema: { type: "object", properties: { user: { type: "string" } } },
+            },
+            authorized_uris: ["https://api.example.com/**"],
+            delivery: {
+              files: { "/run/creds/token": { value: "{$credential.user}", mode: "0400" } },
+            },
+          },
+        },
+      }),
+    );
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects a file mode that is not octal", () => {
+    const r = integrationManifestSchema.safeParse(
+      baseManifest({
+        auths: {
+          basic: {
+            type: "basic",
+            credentials: { schema: { type: "object", properties: {} } },
+            authorized_uris: ["https://api.example.com/**"],
+            delivery: { files: { "/run/x": { value: "{$credential.user}", mode: "999" } } },
+          },
+        },
+      }),
+    );
+    expect(r.success).toBe(false);
+  });
+});
+
+// ─────────────────────────────────────────────
+// Delivery — exclusivity + at-least-one
+// ─────────────────────────────────────────────
+
+describe("integrationManifestSchema — delivery rules", () => {
+  it("rejects a delivery with no channel", () => {
+    const m = baseManifest();
+    const auths = m.auths as Record<string, Record<string, unknown>>;
+    auths.oauth!.delivery = {};
+    expect(integrationManifestSchema.safeParse(m).success).toBe(false);
+  });
+
+  it("rejects http mixed with env (mutually exclusive)", () => {
+    const m = baseManifest();
+    const auths = m.auths as Record<string, Record<string, unknown>>;
+    auths.oauth!.delivery = {
+      http: { in: "header", name: "Authorization", value: "{$credential.access_token}" },
+      env: { TOKEN: { value: "{$credential.access_token}" } },
+    };
+    expect(integrationManifestSchema.safeParse(m).success).toBe(false);
+  });
+
+  it("accepts http with base64 encoding (HTTP Basic vendor pattern)", () => {
+    const r = integrationManifestSchema.safeParse(
+      baseManifest({
+        auths: {
+          basic: {
+            type: "basic",
+            credentials: { schema: { type: "object", properties: {} } },
+            authorized_uris: ["https://api.example.com/**"],
+            delivery: {
+              http: {
+                in: "header",
+                name: "Authorization",
+                prefix: "Basic ",
+                value: "{$credential.email}/token:{$credential.api_key}",
+                encoding: "base64",
+              },
+            },
+          },
+        },
+      }),
+    );
+    expect(r.success).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────
+// URI restrictions (Appstrate cross-field rule)
+// ─────────────────────────────────────────────
+
+describe("integrationManifestSchema — authorized_uris", () => {
+  it("rejects empty authorized_uris unless allow_all_uris", () => {
+    const m = baseManifest();
+    const auths = m.auths as Record<string, Record<string, unknown>>;
+    auths.oauth!.authorized_uris = [];
+    expect(errorPaths(m)).toContain("auths.oauth.authorized_uris");
+  });
+
+  it("accepts empty authorized_uris when allow_all_uris is true", () => {
+    const m = baseManifest();
+    const auths = m.auths as Record<string, Record<string, unknown>>;
+    auths.oauth!.authorized_uris = [];
+    auths.oauth!.allow_all_uris = true;
+    expect(integrationManifestSchema.safeParse(m).success).toBe(true);
+  });
+
+  it("accepts a missing authorized_uris when allow_all_uris is true", () => {
+    const m = baseManifest();
+    const auths = m.auths as Record<string, Record<string, unknown>>;
+    delete auths.oauth!.authorized_uris;
+    auths.oauth!.allow_all_uris = true;
+    expect(integrationManifestSchema.safeParse(m).success).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────
+// connect.login — outputs + §7.7 gating
+// ─────────────────────────────────────────────
+
+function customWithConnect(connect: Record<string, unknown>, delivery?: Record<string, unknown>) {
+  return baseManifest({
+    source: { kind: "api", api: {} },
+    auths: {
+      session: {
+        type: "custom",
+        credentials: { schema: { type: "object", properties: { email: { type: "string" } } } },
+        authorized_uris: ["https://api.example.com/**"],
+        connect,
+        delivery: delivery ?? { env: { TOKEN: { value: "{$credential.token}" } } },
+      },
+    },
+  });
+}
+
+describe("integrationManifestSchema — connect.login", () => {
+  it("accepts a custom auth with a declarative login + outputs", () => {
+    const r = integrationManifestSchema.safeParse(
+      customWithConnect({
+        login: {
+          request: { method: "POST", url: "https://api.example.com/login" },
+          success_criteria: [{ condition: "$statusCode == 200" }],
+          outputs: { token: "$response.body#/access_token" },
+        },
+      }),
+    );
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects connect on a non-custom auth", () => {
+    const m = baseManifest();
+    const auths = m.auths as Record<string, Record<string, unknown>>;
+    auths.oauth!.connect = {
+      login: { request: { method: "POST", url: "https://x" }, outputs: { t: "$response.body#/t" } },
+    };
+    expect(integrationManifestSchema.safeParse(m).success).toBe(false);
+  });
+
+  it("rejects connect declaring both login and tool", () => {
+    const r = integrationManifestSchema.safeParse(
+      customWithConnect({
+        login: {
+          request: { method: "POST", url: "https://x" },
+          outputs: { t: "$response.body#/t" },
+        },
+        tool: {},
+      }),
+    );
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects a login with no outputs", () => {
+    expect(
+      errorPaths(
+        customWithConnect({
+          login: { request: { method: "POST", url: "https://api.example.com/login" } },
+        }),
+      ),
+    ).toContain("auths.session.connect.login.outputs");
+  });
+
+  it("rejects expires_in_output that is not a declared output", () => {
+    expect(
+      errorPaths(
+        customWithConnect({
+          login: {
+            request: { method: "POST", url: "https://x" },
+            outputs: { token: "$response.body#/token" },
+            expires_in_output: "exp",
+          },
+        }),
+      ),
+    ).toContain("auths.session.connect.login.expires_in_output");
+  });
+
+  it("rejects identity_outputs that are not declared outputs", () => {
+    expect(
+      errorPaths(
+        customWithConnect({
+          login: {
+            request: { method: "POST", url: "https://x" },
+            outputs: { token: "$response.body#/token" },
+            identity_outputs: ["sub"],
+          },
+        }),
+      ),
+    ).toContain("auths.session.connect.login.identity_outputs");
+  });
+
+  it("§7.7 gating: rejects delivery referencing a non-output credential field", () => {
+    expect(
+      errorPaths(
+        customWithConnect(
+          {
+            login: {
+              request: { method: "POST", url: "https://x" },
+              outputs: { token: "$response.body#/token" },
+            },
+          },
+          { env: { TOKEN: { value: "{$credential.secret_login_password}" } } },
+        ),
+      ),
+    ).toContain("auths.session.delivery");
+  });
+
+  it("§7.7 gating: accepts delivery referencing a declared output", () => {
+    const r = integrationManifestSchema.safeParse(
+      customWithConnect(
+        {
+          login: {
+            request: { method: "POST", url: "https://x" },
+            outputs: { token: "$response.body#/token" },
+          },
+        },
+        { env: { TOKEN: { value: "{$credential.token}" } } },
+      ),
+    );
+    expect(r.success).toBe(true);
+  });
+
+  it("accepts an orchestrated connect.tool", () => {
+    const r = integrationManifestSchema.safeParse(
+      customWithConnect({ tool: {} }, { env: { TOKEN: { value: "{$credential.token}" } } }),
+    );
+    expect(r.success).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────
+// scope_catalog cross-field rules
+// ─────────────────────────────────────────────
+
+describe("integrationManifestSchema — scope_catalog", () => {
+  function withCatalog(extra: Record<string, unknown>): Record<string, unknown> {
+    const m = baseManifest();
+    const auths = m.auths as Record<string, Record<string, unknown>>;
+    Object.assign(auths.oauth!, extra);
+    return m;
+  }
+
+  it("accepts a scope_catalog and default_scopes subset", () => {
+    const m = withCatalog({
+      scope_catalog: [
         { value: "read", label: "Read" },
         { value: "write", label: "Write" },
       ],
+      default_scopes: ["read"],
     });
     expect(integrationManifestSchema.safeParse(m).success).toBe(true);
   });
 
-  it("skips catalog validation when availableScopes is omitted", () => {
-    const m = oauthBase({ scopes: ["any-scope-string"] });
-    expect(integrationManifestSchema.safeParse(m).success).toBe(true);
+  it("rejects default_scopes outside the catalog", () => {
+    const m = withCatalog({
+      scope_catalog: [{ value: "read", label: "Read" }],
+      default_scopes: ["write"],
+    });
+    expect(errorPaths(m)).toContain("auths.oauth.default_scopes");
   });
 
-  it("accepts implies referencing other catalog values", () => {
-    const m = oauthBase({
-      availableScopes: [
+  it("accepts implies referencing another catalog value", () => {
+    const m = withCatalog({
+      scope_catalog: [
+        { value: "admin", label: "Admin", implies: ["read"] },
         { value: "read", label: "Read" },
-        { value: "write", label: "Write", implies: ["read"] },
-        { value: "admin", label: "Admin", implies: ["write", "read"] },
       ],
     });
     expect(integrationManifestSchema.safeParse(m).success).toBe(true);
   });
 
   it("rejects implies referencing a value not in the catalog", () => {
-    const m = oauthBase({
-      availableScopes: [
-        { value: "read", label: "Read" },
-        { value: "write", label: "Write", implies: ["ghost"] },
-      ],
+    const m = withCatalog({
+      scope_catalog: [{ value: "admin", label: "Admin", implies: ["read"] }],
     });
-    const r = integrationManifestSchema.safeParse(m);
-    expect(r.success).toBe(false);
-    if (!r.success) {
-      expect(r.error.issues.map((i) => i.message).join("|")).toMatch(/ghost/);
-    }
+    expect(errorPaths(m)).toContain("auths.oauth.scope_catalog");
   });
 
   it("rejects self-imply", () => {
-    const m = oauthBase({
-      availableScopes: [{ value: "read", label: "Read", implies: ["read"] }],
+    const m = withCatalog({
+      scope_catalog: [{ value: "read", label: "Read", implies: ["read"] }],
     });
-    const r = integrationManifestSchema.safeParse(m);
-    expect(r.success).toBe(false);
-    if (!r.success) {
-      expect(r.error.issues.map((i) => i.message).join("|")).toMatch(/cannot imply itself/);
-    }
+    expect(errorPaths(m)).toContain("auths.oauth.scope_catalog");
+  });
+
+  it("skips catalog validation when scope_catalog is omitted", () => {
+    const m = withCatalog({ default_scopes: ["anything"] });
+    expect(integrationManifestSchema.safeParse(m).success).toBe(true);
   });
 });
 
-describe("expandScopesGranted", () => {
-  function manifestWithImplies(): IntegrationManifest {
-    return integrationManifestSchema.parse({
-      manifestVersion: "1.1",
-      type: "integration",
-      name: "@official/github",
-      version: "1.0.0",
-      displayName: "GitHub",
-      server: { type: "node", entryPoint: "./server/index.js" },
-      auths: {
-        oauth: {
-          type: "oauth2",
-          authorizationUrl: "https://github.com/login/oauth/authorize",
-          tokenUrl: "https://github.com/login/oauth/access_token",
-          authorizedUris: ["https://api.github.com/*"],
-          delivery: { http: { valueFrom: "accessToken" } },
-          availableScopes: [
-            { value: "read:org", label: "Read orgs" },
-            { value: "write:org", label: "Write orgs", implies: ["read:org"] },
-            { value: "admin:org", label: "Admin orgs", implies: ["write:org", "read:org"] },
-            { value: "public_repo", label: "Public repos" },
-            { value: "repo", label: "All repos", implies: ["public_repo"] },
-          ],
+// ─────────────────────────────────────────────
+// tools.{name} metadata cross-field
+// ─────────────────────────────────────────────
+
+function multiAuthManifest(tools: Record<string, unknown>): Record<string, unknown> {
+  return baseManifest({
+    source: { kind: "remote", remote: { url: "https://x/mcp", transport: "sse" } },
+    auths: {
+      oauth: {
+        type: "oauth2",
+        issuer: "https://idp",
+        authorized_uris: ["https://api/**"],
+        delivery: {
+          http: { in: "header", name: "Authorization", value: "{$credential.access_token}" },
+        },
+        scope_catalog: [
+          { value: "repo", label: "Repo" },
+          { value: "read:org", label: "Read org" },
+        ],
+      },
+      pat: {
+        type: "api_key",
+        credentials: { schema: { type: "object", properties: { token: { type: "string" } } } },
+        authorized_uris: ["https://api/**"],
+        delivery: { env: { TOKEN: { value: "{$credential.token}" } } },
+      },
+    },
+    tools,
+  });
+}
+
+describe("integrationManifestSchema — tools metadata", () => {
+  it("accepts a tool with required_scopes + url_patterns (single auth)", () => {
+    const m = baseManifest({
+      tools: {
+        list_messages: {
+          required_scopes: ["read"],
+          url_patterns: [{ pattern: "https://gmail.googleapis.com/**", methods: ["GET"] }],
         },
       },
     });
+    const auths = m.auths as Record<string, Record<string, unknown>>;
+    auths.oauth!.scope_catalog = [{ value: "read", label: "Read" }];
+    expect(integrationManifestSchema.safeParse(m).success).toBe(true);
+  });
+
+  it("rejects required_scopes not in the targeted auth catalog", () => {
+    expect(
+      errorPaths(
+        multiAuthManifest({
+          list_issues: { required_scopes: ["bogus"], required_auth_key: "oauth" },
+        }),
+      ),
+    ).toContain("tools.list_issues.required_scopes");
+  });
+
+  it("rejects required_scopes on a multi-auth integration without required_auth_key", () => {
+    expect(errorPaths(multiAuthManifest({ list_issues: { required_scopes: ["repo"] } }))).toContain(
+      "tools.list_issues.required_auth_key",
+    );
+  });
+
+  it("rejects a required_auth_key that matches no auth", () => {
+    expect(
+      errorPaths(
+        multiAuthManifest({
+          list_issues: { required_scopes: ["repo"], required_auth_key: "nope" },
+        }),
+      ),
+    ).toContain("tools.list_issues.required_auth_key");
+  });
+
+  it("accepts a well-formed multi-auth tool", () => {
+    const r = integrationManifestSchema.safeParse(
+      multiAuthManifest({ list_issues: { required_scopes: ["repo"], required_auth_key: "oauth" } }),
+    );
+    expect(r.success).toBe(true);
+  });
+
+  it("accepts a tool without required_scopes (default behaviour)", () => {
+    const r = integrationManifestSchema.safeParse(
+      baseManifest({ tools: { list_messages: { url_patterns: [{ pattern: "https://x/**" }] } } }),
+    );
+    expect(r.success).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────
+// validateManifest dispatch
+// ─────────────────────────────────────────────
+
+describe("validateManifest — integration dispatch", () => {
+  it("routes a valid integration manifest through the integration schema", () => {
+    const r = validateManifest(baseManifest());
+    expect(r.valid).toBe(true);
+  });
+
+  it("surfaces integration-specific errors on failure", () => {
+    const m = baseManifest();
+    delete m.source;
+    const r = validateManifest(m);
+    expect(r.valid).toBe(false);
+    expect(r.errors.some((e) => e.includes("source"))).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────
+// upload protocol enum re-export
+// ─────────────────────────────────────────────
+
+describe("integrationUploadProtocolEnum", () => {
+  it("matches the AFPS closed enum", () => {
+    expect([...integrationUploadProtocolEnum.options].sort()).toEqual([
+      "google-resumable",
+      "ms-resumable",
+      "s3-multipart",
+      "tus",
+    ]);
+  });
+});
+
+// ─────────────────────────────────────────────
+// Helpers — getApiCallConfig / getDeclaredToolNames / getAvailableScopes
+// ─────────────────────────────────────────────
+
+describe("getApiCallConfig", () => {
+  it("returns the api-source config with upload protocols", () => {
+    const m = parse(
+      baseManifest({
+        source: { kind: "api", api: { upload_protocols: ["tus"] } },
+        auths: {
+          key: {
+            type: "api_key",
+            credentials: { schema: { type: "object", properties: {} } },
+            authorized_uris: ["https://api/**"],
+            delivery: { env: { K: { value: "{$credential.k}" } } },
+          },
+        },
+      }),
+    );
+    expect(getApiCallConfig(m)).toEqual({ authKey: "key", uploadProtocols: ["tus"] });
+  });
+
+  it("returns null for a non-api source", () => {
+    expect(getApiCallConfig(parse(baseManifest()))).toBeNull();
+  });
+});
+
+describe("getDeclaredToolNames / getAvailableScopes / getToolUrlPatterns", () => {
+  function withTools(): IntegrationManifest {
+    const m = baseManifest({
+      tools: {
+        list_messages: { required_scopes: ["read"], url_patterns: [{ pattern: "https://x/**" }] },
+        send_message: { required_scopes: ["write"] },
+      },
+    });
+    const auths = m.auths as Record<string, Record<string, unknown>>;
+    auths.oauth!.scope_catalog = [
+      { value: "read", label: "Read" },
+      { value: "write", label: "Write" },
+    ];
+    return parse(m);
   }
 
-  it("returns granted verbatim (deduplicated) when the auth has no catalog", () => {
-    const m = integrationManifestSchema.parse({
-      manifestVersion: "1.1",
-      type: "integration",
-      name: "@official/x",
-      version: "1.0.0",
-      displayName: "X",
-      server: { type: "node", entryPoint: "./server/index.js" },
-      auths: {
-        oauth: {
-          type: "oauth2",
-          authorizationUrl: "https://i/a",
-          tokenUrl: "https://i/t",
-          authorizedUris: ["https://api.example.com/*"],
-          delivery: { http: { valueFrom: "accessToken" } },
-        },
-      },
-    });
-    expect(expandScopesGranted(["x", "y", "x"], m, "oauth").sort()).toEqual(["x", "y"]);
+  it("getDeclaredToolNames returns the tool record keys", () => {
+    expect(getDeclaredToolNames(withTools()).sort()).toEqual(["list_messages", "send_message"]);
   });
 
-  it("expands one-hop implications", () => {
-    const m = manifestWithImplies();
-    expect(expandScopesGranted(["repo"], m, "oauth").sort()).toEqual(["public_repo", "repo"]);
+  it("getDeclaredToolNames returns [] when no tools block", () => {
+    expect(getDeclaredToolNames(parse(baseManifest()))).toEqual([]);
   });
 
+  it("getAvailableScopes returns the union of catalog values", () => {
+    expect([...getAvailableScopes(withTools())].sort()).toEqual(["read", "write"]);
+  });
+
+  it("getAvailableScopes returns [] with no catalog", () => {
+    expect(getAvailableScopes(parse(baseManifest()))).toEqual([]);
+  });
+
+  it("getToolUrlPatterns returns declared patterns / undefined", () => {
+    const m = withTools();
+    expect(getToolUrlPatterns(m, "list_messages")).toEqual([{ pattern: "https://x/**" }]);
+    expect(getToolUrlPatterns(m, "send_message")).toBeUndefined();
+    expect(getToolUrlPatterns(m, "absent")).toBeUndefined();
+  });
+});
+
+// ─────────────────────────────────────────────
+// scope expansion + missing scopes
+// ─────────────────────────────────────────────
+
+function scopedManifest(): IntegrationManifest {
+  const m = baseManifest({
+    tools: {
+      read_tool: { required_scopes: ["read:org"], required_auth_key: "oauth" },
+      admin_tool: { required_scopes: ["admin:org"], required_auth_key: "oauth" },
+    },
+  });
+  const auths = m.auths as Record<string, Record<string, unknown>>;
+  auths.oauth!.scope_catalog = [
+    { value: "admin:org", label: "Admin", implies: ["write:org"] },
+    { value: "write:org", label: "Write", implies: ["read:org"] },
+    { value: "read:org", label: "Read" },
+  ];
+  return parse(m);
+}
+
+describe("expandScopesGranted", () => {
   it("expands transitively (admin:org → write:org → read:org)", () => {
-    const m = manifestWithImplies();
-    expect(expandScopesGranted(["admin:org"], m, "oauth").sort()).toEqual([
-      "admin:org",
-      "read:org",
-      "write:org",
+    expect(expandScopesGranted(["admin:org"], scopedManifest(), "oauth").sort()).toEqual(
+      ["admin:org", "read:org", "write:org"].sort(),
+    );
+  });
+
+  it("returns granted deduplicated when no catalog", () => {
+    expect(expandScopesGranted(["a", "a", "b"], parse(baseManifest()), "oauth").sort()).toEqual([
+      "a",
+      "b",
     ]);
   });
 
-  it("returns granted unchanged when no implies declared", () => {
-    const m = manifestWithImplies();
-    expect(expandScopesGranted(["read:org"], m, "oauth").sort()).toEqual(["read:org"]);
+  it("returns granted unchanged for an unknown auth key", () => {
+    expect(expandScopesGranted(["x"], scopedManifest(), "nope")).toEqual(["x"]);
+  });
+});
+
+describe("scopesContributedByTools / requiredScopesForAgent", () => {
+  const m = scopedManifest();
+
+  it("unions required_scopes across the selected tools", () => {
+    expect(
+      scopesContributedByTools({
+        manifest: m,
+        authKey: "oauth",
+        agentTools: ["read_tool", "admin_tool"],
+      }).sort(),
+    ).toEqual(["admin:org", "read:org"].sort());
   });
 
-  it("returns granted verbatim for an unknown auth key", () => {
-    const m = manifestWithImplies();
-    expect(expandScopesGranted(["whatever"], m, "ghost-auth")).toEqual(["whatever"]);
+  it("returns [] with no tools selected", () => {
+    expect(scopesContributedByTools({ manifest: m, authKey: "oauth", agentTools: [] })).toEqual([]);
+  });
+
+  it("requiredScopesForAgent unions tool-inferred + explicit scopes", () => {
+    expect(
+      requiredScopesForAgent({
+        manifest: m,
+        authKey: "oauth",
+        agentTools: ["read_tool"],
+        agentScopes: ["extra"],
+      }).sort(),
+    ).toEqual(["extra", "read:org"].sort());
   });
 });
 
 describe("missingScopesForConnection", () => {
-  // One integration, two auths: an oauth2 auth that carries a scope catalog
-  // and an api_key auth that does not. Scopes only apply to the oauth2 side.
-  function dualAuthManifest(): IntegrationManifest {
-    return integrationManifestSchema.parse({
-      manifestVersion: "1.1",
-      type: "integration",
-      name: "@official/github",
-      version: "1.0.0",
-      displayName: "GitHub",
-      server: { type: "node", entryPoint: "./server/index.js" },
-      auths: {
-        oauth: {
-          type: "oauth2",
-          authorizationUrl: "https://github.com/login/oauth/authorize",
-          tokenUrl: "https://github.com/login/oauth/access_token",
-          authorizedUris: ["https://api.github.com/*"],
-          delivery: { http: { valueFrom: "accessToken" } },
-          availableScopes: [
-            { value: "read:org", label: "Read orgs" },
-            { value: "write:org", label: "Write orgs", implies: ["read:org"] },
-          ],
-        },
-        token: {
-          type: "api_key",
-          authorizedUris: ["https://api.github.com/*"],
-          credentials: {
-            schema: {
-              type: "object",
-              properties: { api_key: { type: "string" } },
-              required: ["api_key"],
-            },
-          },
-          delivery: { env: { GITHUB_TOKEN: { from: "api_key", sensitive: true } } },
-        },
-      },
-    });
-  }
+  const m = scopedManifest();
 
-  it("reports scopes the oauth2 connection's grant lacks", () => {
-    const m = dualAuthManifest();
-    expect(
-      missingScopesForConnection({
-        manifest: m,
-        authKey: "oauth",
-        granted: ["read:org"],
-        agentTools: undefined,
-        agentScopes: ["read:org", "write:org"],
-      }),
-    ).toEqual(["write:org"]);
-  });
-
-  it("returns [] for an oauth2 connection that already covers the required scopes", () => {
-    const m = dualAuthManifest();
-    // `write:org` implies `read:org`, so a grant of write:org covers both.
+  it("reports scopes the grant lacks (after implies expansion)", () => {
     expect(
       missingScopesForConnection({
         manifest: m,
         authKey: "oauth",
         granted: ["write:org"],
-        agentTools: undefined,
-        agentScopes: ["read:org", "write:org"],
+        agentTools: ["read_tool", "admin_tool"],
+        agentScopes: undefined,
       }),
-    ).toEqual([]);
+    ).toEqual(["admin:org"]);
   });
 
-  it("returns [] for a non-oauth2 (api_key) connection even when the agent declares scopes", () => {
-    const m = dualAuthManifest();
-    // api_key auths grant access wholesale — scopes are an OAuth2 concept and
-    // never apply, so the agent's declared scopes are never "missing" here.
+  it("returns [] when the grant covers everything", () => {
     expect(
       missingScopesForConnection({
         manifest: m,
-        authKey: "token",
-        granted: [],
-        agentTools: undefined,
-        agentScopes: ["read:org", "write:org"],
-      }),
-    ).toEqual([]);
-  });
-});
-
-describe("integrationManifestSchema — tools.{name} metadata", () => {
-  function gmailLike(toolsOverride: Record<string, unknown>): Record<string, unknown> {
-    return baseManifest({
-      auths: {
-        primary: {
-          type: "oauth2",
-          authorizationUrl: "https://idp/a",
-          tokenUrl: "https://idp/t",
-          authorizedUris: ["https://api.example.com/*"],
-          delivery: { http: {} },
-          availableScopes: [
-            { value: "read", label: "Read" },
-            { value: "send", label: "Send" },
-          ],
-        },
-      },
-      tools: toolsOverride,
-    });
-  }
-
-  it("accepts well-formed tools with requiredScopes + urlPatterns", () => {
-    const m = gmailLike({
-      list_messages: {
-        requiredScopes: ["read"],
-        urlPatterns: [{ pattern: "https://api.example.com/list", methods: ["GET"] }],
-      },
-    });
-    expect(integrationManifestSchema.safeParse(m).success).toBe(true);
-  });
-
-  it("rejects tool names that violate the snake_case pattern", () => {
-    const m = gmailLike({ "List-Messages": { requiredScopes: ["read"] } });
-    expect(integrationManifestSchema.safeParse(m).success).toBe(false);
-  });
-
-  it("rejects requiredScopes not in the targeted auth catalog", () => {
-    const m = gmailLike({ list_messages: { requiredScopes: ["delete"] } });
-    const r = integrationManifestSchema.safeParse(m);
-    expect(r.success).toBe(false);
-    if (!r.success) {
-      const joined = r.error.issues.map((i) => i.message).join("|");
-      expect(joined).toMatch(/availableScopes/);
-    }
-  });
-
-  it("rejects requiredScopes when multi-auth and requiredAuthKey is missing", () => {
-    const m = baseManifest({
-      auths: {
-        primary: {
-          type: "oauth2",
-          authorizationUrl: "https://idp/a",
-          tokenUrl: "https://idp/t",
-          authorizedUris: ["https://api/*"],
-          delivery: { http: {} },
-        },
-        secondary: {
-          type: "oauth2",
-          authorizationUrl: "https://idp2/a",
-          tokenUrl: "https://idp2/t",
-          authorizedUris: ["https://api2/*"],
-          delivery: { http: {} },
-        },
-      },
-      tools: { do_thing: { requiredScopes: ["x"] } },
-    });
-    const r = integrationManifestSchema.safeParse(m);
-    expect(r.success).toBe(false);
-    if (!r.success) {
-      const joined = r.error.issues.map((i) => i.message).join("|");
-      expect(joined).toMatch(/requiredAuthKey/);
-    }
-  });
-
-  it("rejects a requiredAuthKey that doesn't match any auths.{key}", () => {
-    const m = gmailLike({
-      list_messages: { requiredAuthKey: "doesnotexist", requiredScopes: ["read"] },
-    });
-    expect(integrationManifestSchema.safeParse(m).success).toBe(false);
-  });
-
-  it("rejects an invalid HTTP method in urlPatterns", () => {
-    const m = gmailLike({
-      list_messages: {
-        requiredScopes: ["read"],
-        urlPatterns: [{ pattern: "https://api/x", methods: ["TRACE"] }],
-      },
-    });
-    expect(integrationManifestSchema.safeParse(m).success).toBe(false);
-  });
-
-  it("accepts tools without requiredScopes (legacy default behaviour)", () => {
-    const m = gmailLike({ list_messages: {} });
-    expect(integrationManifestSchema.safeParse(m).success).toBe(true);
-  });
-});
-
-describe("integrationManifestSchema — system package gmail-mcp manifest", () => {
-  it("validates the live integration-gmail-mcp manifest with catalog + tools", async () => {
-    const path = new URL(
-      "../../../scripts/system-packages/integration-gmail-mcp-2.0.0/manifest.json",
-      import.meta.url,
-    );
-    const raw = JSON.parse(await Bun.file(path).text()) as Record<string, unknown>;
-    const r = integrationManifestSchema.safeParse(raw);
-    if (!r.success) {
-      throw new Error(
-        "gmail-mcp manifest failed validation:\n" +
-          r.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("\n"),
-      );
-    }
-    expect(r.success).toBe(true);
-  });
-});
-
-// ─────────────────────────────────────────────
-// Niveau 2 Phase 1 — install-time validation helpers
-// (pure functions consumed by the apps/api scope-validation service)
-// ─────────────────────────────────────────────
-
-describe("getAvailableScopes / getDeclaredToolNames", () => {
-  function gmailManifest(): IntegrationManifest {
-    return integrationManifestSchema.parse(
-      baseManifest({
-        auths: {
-          primary: {
-            type: "oauth2",
-            authorizationUrl: "https://idp/a",
-            tokenUrl: "https://idp/t",
-            authorizedUris: ["https://api/*"],
-            delivery: { http: {} },
-            availableScopes: [
-              { value: "read", label: "Read" },
-              { value: "write", label: "Write" },
-            ],
-          },
-        },
-        tools: {
-          list_messages: { requiredScopes: ["read"] },
-          send_message: { requiredScopes: ["write"] },
-          ping: {},
-        },
-      }),
-    );
-  }
-
-  it("getAvailableScopes returns the union of catalog values across auths", () => {
-    const m = gmailManifest();
-    expect([...getAvailableScopes(m)].sort()).toEqual(["read", "write"]);
-  });
-
-  it("getAvailableScopes returns [] when no auth declares a catalog", () => {
-    const m = integrationManifestSchema.parse(baseManifest()); // no auths
-    expect(getAvailableScopes(m)).toEqual([]);
-  });
-
-  it("getDeclaredToolNames returns the keys of the top-level tools record", () => {
-    const m = gmailManifest();
-    expect([...getDeclaredToolNames(m)].sort()).toEqual(["list_messages", "ping", "send_message"]);
-  });
-
-  it("getDeclaredToolNames returns [] for manifests without a tools block", () => {
-    const m = integrationManifestSchema.parse(baseManifest());
-    expect(getDeclaredToolNames(m)).toEqual([]);
-  });
-});
-
-describe("validateAgentIntegrationScopes", () => {
-  function catalogedManifest(): IntegrationManifest {
-    return integrationManifestSchema.parse(
-      baseManifest({
-        auths: {
-          primary: {
-            type: "oauth2",
-            authorizationUrl: "https://idp/a",
-            tokenUrl: "https://idp/t",
-            authorizedUris: ["https://api/*"],
-            delivery: { http: {} },
-            availableScopes: [
-              { value: "read", label: "Read" },
-              { value: "write", label: "Write" },
-            ],
-          },
-        },
-        tools: {
-          list_messages: { requiredScopes: ["read"] },
-          send_message: { requiredScopes: ["write"] },
-        },
-      }),
-    );
-  }
-
-  it("returns no errors when selection is empty (legacy bare-version-string case)", () => {
-    expect(validateAgentIntegrationScopes({ id: "@a/i" }, catalogedManifest())).toEqual([]);
-  });
-
-  it("accepts a subset selection of declared tools and catalog scopes", () => {
-    const errors = validateAgentIntegrationScopes(
-      { id: "@a/i", tools: ["list_messages"], scopes: ["read"] },
-      catalogedManifest(),
-    );
-    expect(errors).toEqual([]);
-  });
-
-  it("flags an unknown tool selected by the agent", () => {
-    const errors = validateAgentIntegrationScopes(
-      { id: "@a/i", tools: ["list_messages", "delete_message"] },
-      catalogedManifest(),
-    );
-    expect(errors).toHaveLength(1);
-    expect(errors[0]!.code).toBe("unknown_tool");
-    expect(errors[0]!.field).toBe("integrations.@a/i.tools");
-    expect(errors[0]!.message).toContain("delete_message");
-  });
-
-  it("flags every scope outside the catalog (accumulates errors)", () => {
-    const errors = validateAgentIntegrationScopes(
-      { id: "@a/i", scopes: ["read", "admin", "root"] },
-      catalogedManifest(),
-    );
-    expect(errors).toHaveLength(2);
-    expect(errors.every((e) => e.code === "scope_not_in_catalog")).toBe(true);
-    expect(errors.map((e) => e.message).join(" ")).toMatch(/admin/);
-    expect(errors.map((e) => e.message).join(" ")).toMatch(/root/);
-  });
-
-  it("skips tool subset check when the integration declares no tools block", () => {
-    const noTools = integrationManifestSchema.parse(
-      baseManifest({
-        auths: {
-          primary: {
-            type: "oauth2",
-            authorizationUrl: "https://idp/a",
-            tokenUrl: "https://idp/t",
-            authorizedUris: ["https://api/*"],
-            delivery: { http: {} },
-            availableScopes: [{ value: "read", label: "Read" }],
-          },
-        },
-      }),
-    );
-    const errors = validateAgentIntegrationScopes(
-      { id: "@a/i", tools: ["anything_goes"] },
-      noTools,
-    );
-    expect(errors).toEqual([]);
-  });
-
-  it("skips scope subset check when no auth declares a catalog", () => {
-    const noCatalog = integrationManifestSchema.parse(
-      baseManifest({
-        auths: {
-          primary: {
-            type: "oauth2",
-            authorizationUrl: "https://idp/a",
-            tokenUrl: "https://idp/t",
-            authorizedUris: ["https://api/*"],
-            delivery: { http: {} },
-          },
-        },
-      }),
-    );
-    const errors = validateAgentIntegrationScopes(
-      { id: "@a/i", scopes: ["anything-the-idp-accepts"] },
-      noCatalog,
-    );
-    expect(errors).toEqual([]);
-  });
-
-  it("accepts the synthetic api_call tool alongside native tools (attachable apiCall)", () => {
-    const m = integrationManifestSchema.parse(
-      baseManifest({
-        server: { type: "node", entryPoint: "./server.js" },
-        auths: {
-          session: {
-            type: "custom",
-            authorizedUris: ["https://api.example.com/**"],
-            credentials: { schema: { type: "object", required: ["token"] } },
-            delivery: { http: { headerName: "Authorization", valueFrom: "accessToken" } },
-          },
-        },
-        tools: { whoami: { requiredAuthKey: "session" } },
-        apiCall: { authKey: "session" },
-      }),
-    );
-    // api_call is synthetic (not in `tools`) but valid because the manifest
-    // declares an apiCall capability; whoami is a native tool.
-    expect(
-      validateAgentIntegrationScopes({ id: "@a/kijiji", tools: ["whoami", "api_call"] }, m),
-    ).toEqual([]);
-  });
-
-  it("still flags api_call when the integration declares no apiCall capability", () => {
-    const errors = validateAgentIntegrationScopes(
-      { id: "@a/i", tools: ["api_call"] },
-      catalogedManifest(),
-    );
-    expect(errors).toHaveLength(1);
-    expect(errors[0]!.code).toBe("unknown_tool");
-  });
-});
-
-describe("integrationManifestSchema — apiCall capability (generic credential-injecting tool)", () => {
-  const oauthAuth = {
-    type: "oauth2" as const,
-    authorizationUrl: "https://idp/a",
-    tokenUrl: "https://idp/t",
-    authorizedUris: ["https://api.example.com/*"],
-    delivery: { http: {} },
-  };
-
-  it("accepts a serverless apiCall integration (migrated-provider shape)", () => {
-    const m = baseManifest({
-      server: undefined,
-      apiCall: { authKey: "primary" },
-      auths: { primary: oauthAuth },
-    });
-    const parsed = integrationManifestSchema.parse(m);
-    expect(parsed.server).toBeUndefined();
-    expect(getApiCallConfig(parsed)).not.toBeNull();
-  });
-
-  it("accepts apiCall alongside a spawned server (attachable shape)", () => {
-    const m = baseManifest({
-      apiCall: { authKey: "primary" },
-      auths: { primary: oauthAuth },
-    });
-    const parsed = integrationManifestSchema.parse(m);
-    expect(parsed.server!.type).toBe("node");
-    expect(getApiCallConfig(parsed)?.authKey).toBe("primary");
-  });
-
-  it("an MCP server integration with no apiCall block does not expose api_call", () => {
-    const m = baseManifest({ auths: { primary: oauthAuth } });
-    const parsed = integrationManifestSchema.parse(m);
-    expect(parsed.server!.type).toBe("node");
-    expect(getApiCallConfig(parsed)).toBeNull();
-  });
-
-  it("rejects an integration with neither server nor apiCall", () => {
-    const r = integrationManifestSchema.safeParse(baseManifest({ server: undefined }));
-    expect(r.success).toBe(false);
-  });
-
-  it("rejects an apiCall block whose authKey matches no declared auth", () => {
-    const r = integrationManifestSchema.safeParse(
-      baseManifest({ server: undefined, apiCall: { authKey: "primary" } }),
-    );
-    expect(r.success).toBe(false);
-  });
-
-  it("rejects apiCall.authKey that matches no auth", () => {
-    const r = integrationManifestSchema.safeParse(
-      baseManifest({
-        server: undefined,
-        apiCall: { authKey: "ghost" },
-        auths: { primary: oauthAuth },
-      }),
-    );
-    expect(r.success).toBe(false);
-  });
-
-  it("names the auth explicitly when multiple auths are declared", () => {
-    const r = integrationManifestSchema.safeParse(
-      baseManifest({
-        server: undefined,
-        apiCall: { authKey: "secondary" },
-        auths: { primary: oauthAuth, secondary: oauthAuth },
-      }),
-    );
-    expect(r.success).toBe(true);
-    if (r.success) expect(getApiCallConfig(r.data)?.authKey).toBe("secondary");
-  });
-
-  it("accepts apiCall.uploadProtocols and surfaces them via getApiCallConfig", () => {
-    const m = baseManifest({
-      server: undefined,
-      apiCall: { authKey: "primary", uploadProtocols: ["google-resumable"] },
-      auths: { primary: oauthAuth },
-    });
-    const parsed = integrationManifestSchema.parse(m);
-    const cfg = getApiCallConfig(parsed);
-    expect(cfg).toEqual({ authKey: "primary", uploadProtocols: ["google-resumable"] });
-  });
-
-  it("getApiCallConfig returns the block authKey and null when no apiCall", () => {
-    const withCall = integrationManifestSchema.parse(
-      baseManifest({ server: undefined, apiCall: { authKey: "only" }, auths: { only: oauthAuth } }),
-    );
-    expect(getApiCallConfig(withCall)?.authKey).toBe("only");
-    const noCall = integrationManifestSchema.parse(baseManifest());
-    expect(getApiCallConfig(noCall)).toBeNull();
-  });
-
-  it("exposes a stable generic tool name", () => {
-    expect(API_CALL_TOOL_NAME).toBe("api_call");
-  });
-});
-
-describe("integrationManifestSchema — allowAllUris (migrated provider parity)", () => {
-  it("accepts an auth with empty authorizedUris when allowAllUris is set", () => {
-    const m = baseManifest({
-      server: undefined,
-      apiCall: { authKey: "primary" },
-      auths: {
-        primary: {
-          type: "custom",
-          authorizedUris: [],
-          allowAllUris: true,
-          credentials: { schema: { type: "object", properties: { token: { type: "string" } } } },
-          delivery: { env: { TOKEN: { from: "token" } } },
-        },
-      },
-    });
-    expect(() => integrationManifestSchema.parse(m)).not.toThrow();
-  });
-
-  it("rejects an auth with empty authorizedUris and no allowAllUris", () => {
-    const m = baseManifest({
-      auths: {
-        primary: {
-          type: "oauth2",
-          authorizationUrl: "https://idp/a",
-          tokenUrl: "https://idp/t",
-          authorizedUris: [],
-          delivery: { http: {} },
-        },
-      },
-    });
-    expect(integrationManifestSchema.safeParse(m).success).toBe(false);
-  });
-});
-
-describe("requiredAuthKeysForAgent / requiredScopesForAgent — apiCall scope-only", () => {
-  // apiCall integrations expose no `tools` — the agent's
-  // selected oauth `scopes` are the only "active usage" signal. The gate must
-  // treat scope selection like tool selection or these integrations become
-  // structurally unconnectable.
-  const apiCallManifest = (): IntegrationManifest =>
-    ({
-      manifestVersion: "1.1",
-      type: "integration",
-      name: "@official/github",
-      version: "1.0.0",
-      displayName: "GitHub",
-      apiCall: { authKey: "primary" },
-      auths: {
-        primary: {
-          type: "oauth2",
-          required: true,
-          authorizationUrl: "https://github.com/login/oauth/authorize",
-          tokenUrl: "https://github.com/login/oauth/access_token",
-          authorizedUris: [],
-          availableScopes: [
-            { value: "repo", label: "Repo" },
-            { value: "read:org", label: "Read org" },
-          ],
-        },
-      },
-    }) as unknown as IntegrationManifest;
-
-  it("treats scope selection as active (no tools)", () => {
-    const m = apiCallManifest();
-    expect(requiredAuthKeysForAgent(m, [], ["repo"])).toEqual(["primary"]);
-    expect(requiredAuthKeysForAgent(m, undefined, ["repo"])).toEqual(["primary"]);
-  });
-
-  it("stays inert when neither tools nor scopes are selected", () => {
-    expect(requiredAuthKeysForAgent(apiCallManifest(), [], [])).toEqual([]);
-    expect(requiredAuthKeysForAgent(apiCallManifest(), undefined, undefined)).toEqual([]);
-  });
-
-  it("requiredScopesForAgent surfaces explicitly-selected scopes for tool-less integrations", () => {
-    const m = apiCallManifest();
-    expect(
-      requiredScopesForAgent({
-        manifest: m,
-        authKey: "primary",
-        agentTools: [],
-        agentScopes: ["repo", "read:org"],
-      }),
-    ).toEqual(["repo", "read:org"]);
-  });
-
-  it("requiredScopesForAgent returns [] when nothing selected", () => {
-    expect(
-      requiredScopesForAgent({
-        manifest: apiCallManifest(),
-        authKey: "primary",
-        agentTools: undefined,
+        authKey: "oauth",
+        granted: ["admin:org"],
+        agentTools: ["read_tool", "admin_tool"],
         agentScopes: undefined,
       }),
     ).toEqual([]);
   });
-});
 
-describe("integrationManifestSchema — connect (Login)", () => {
-  function withAuth(auth: Record<string, unknown>): Record<string, unknown> {
-    return baseManifest({ auths: { session: auth } });
-  }
-  const validConnect = {
-    login: {
-      request: {
-        method: "POST",
-        url: "https://idp.example.com/token",
-        body: "grant_type=password&username={{email}}&password={{password}}",
-      },
-      extract: {
-        access_token: { from: "json", path: "$.access_token" },
-        expires_in: { from: "json", path: "$.expires_in" },
-      },
-      output: ["access_token", "expires_in"],
-    },
-    expiresInOutput: "expires_in",
-    identityOutputs: ["access_token"],
-  };
-  const customAuth = (connect: unknown): Record<string, unknown> => ({
-    type: "custom",
-    credentials: { schema: { type: "object" } },
-    authorizedUris: ["https://idp.example.com/**"],
-    delivery: { http: { headerName: "Authorization", valueFrom: "access_token" } },
-    connect,
-  });
-
-  it("accepts a valid custom + connect.login auth", () => {
-    const r = integrationManifestSchema.safeParse(withAuth(customAuth(validConnect)));
-    expect(r.success).toBe(true);
-  });
-
-  it("rejects connect on a non-custom auth", () => {
-    const r = integrationManifestSchema.safeParse(
-      withAuth({
-        type: "api_key",
-        credentials: { schema: { type: "object" } },
-        authorizedUris: ["https://idp.example.com/**"],
-        delivery: { http: { headerName: "X-Key", valueFrom: "api_key" } },
-        connect: validConnect,
-      }),
-    );
-    expect(r.success).toBe(false);
-  });
-
-  it("rejects output referencing an undeclared extractor", () => {
-    const r = integrationManifestSchema.safeParse(
-      withAuth(
-        customAuth({
-          login: {
-            request: { method: "POST", url: "https://idp.example.com/token" },
-            extract: { access_token: { from: "json", path: "$.access_token" } },
-            output: ["nonexistent"],
-          },
-        }),
-      ),
-    );
-    expect(r.success).toBe(false);
-  });
-
-  it("rejects connect with no declared outputs", () => {
-    const r = integrationManifestSchema.safeParse(
-      withAuth(
-        customAuth({
-          login: {
-            request: { method: "POST", url: "https://idp.example.com/token" },
-            extract: { access_token: { from: "json", path: "$.access_token" } },
-          },
-        }),
-      ),
-    );
-    expect(r.success).toBe(false);
-  });
-
-  it("rejects expiresInOutput that is not a declared output", () => {
-    const r = integrationManifestSchema.safeParse(
-      withAuth(
-        customAuth({
-          login: {
-            request: { method: "POST", url: "https://idp.example.com/token" },
-            extract: { access_token: { from: "json", path: "$.access_token" } },
-            output: ["access_token"],
-          },
-          expiresInOutput: "expires_in",
-        }),
-      ),
-    );
-    expect(r.success).toBe(false);
-  });
-});
-
-describe("integrationManifestSchema — connect.tool (Orchestrated) + delivery gating (§4.6)", () => {
-  function withAuth(auth: Record<string, unknown>): Record<string, unknown> {
-    return baseManifest({ auths: { session: auth } });
-  }
-  const orchestratedAuth = (
-    connect: Record<string, unknown>,
-    delivery: Record<string, unknown> = {
-      http: { headerName: "Cookie", valueFrom: "JSESSIONID" },
-    },
-  ): Record<string, unknown> => ({
-    type: "custom",
-    credentials: { schema: { type: "object" } },
-    authorizedUris: ["https://saas.example.com/**"],
-    delivery,
-    connect,
-  });
-
-  it("accepts a valid custom + connect.tool auth", () => {
-    const r = integrationManifestSchema.safeParse(
-      withAuth(
-        orchestratedAuth({
-          tool: "login",
-          runAt: "run-start",
-          reauthOn: [401],
-          persistLoginSecret: true,
-          produces: ["JSESSIONID", "AWSALB"],
-        }),
-      ),
-    );
-    expect(r.success).toBe(true);
-  });
-
-  it("rejects declaring both login and tool", () => {
-    const r = integrationManifestSchema.safeParse(
-      withAuth(
-        orchestratedAuth({
-          tool: "login",
-          runAt: "run-start",
-          produces: ["JSESSIONID"],
-          login: {
-            request: { method: "POST", url: "https://saas.example.com/login" },
-            extract: { JSESSIONID: { from: "cookie", name: "JSESSIONID" } },
-            output: ["JSESSIONID"],
-          },
-        }),
-      ),
-    );
-    expect(r.success).toBe(false);
-  });
-
-  it("rejects connect.tool without runAt", () => {
-    const r = integrationManifestSchema.safeParse(
-      withAuth(orchestratedAuth({ tool: "login", produces: ["JSESSIONID"] })),
-    );
-    expect(r.success).toBe(false);
-  });
-
-  it("requires produces when persistLoginSecret is set", () => {
-    const r = integrationManifestSchema.safeParse(
-      withAuth(orchestratedAuth({ tool: "login", runAt: "run-start", persistLoginSecret: true })),
-    );
-    expect(r.success).toBe(false);
-  });
-
-  it("rejects orchestrated-only fields on a login connect", () => {
-    const r = integrationManifestSchema.safeParse(
-      withAuth(
-        orchestratedAuth(
-          {
-            runAt: "link",
-            login: {
-              request: { method: "POST", url: "https://saas.example.com/login" },
-              extract: { JSESSIONID: { from: "cookie", name: "JSESSIONID" } },
-              output: ["JSESSIONID"],
-            },
-          },
-          { http: { headerName: "Cookie", valueFrom: "JSESSIONID" } },
-        ),
-      ),
-    );
-    expect(r.success).toBe(false);
-  });
-
-  it("GATING: rejects delivery referencing a field that is not a declared output", () => {
-    // `mot_de_passe` is a bootstrap input (login secret), never an injectable.
-    const r = integrationManifestSchema.safeParse(
-      withAuth(
-        orchestratedAuth(
-          { tool: "login", runAt: "run-start", produces: ["JSESSIONID"] },
-          { http: { headerName: "Cookie", valueFrom: "mot_de_passe" } },
-        ),
-      ),
-    );
-    expect(r.success).toBe(false);
-    if (!r.success) {
-      expect(JSON.stringify(r.error.issues)).toContain("not a declared connect output");
-    }
-  });
-
-  it("GATING: rejects a delivery template token that is not a declared output", () => {
-    const r = integrationManifestSchema.safeParse(
-      withAuth(
-        orchestratedAuth(
-          { tool: "login", runAt: "run-start", produces: ["JSESSIONID"] },
-          { http: { headerName: "Cookie", valueFrom: { template: "sid={{secret_pwd}}" } } },
-        ),
-      ),
-    );
-    expect(r.success).toBe(false);
-  });
-
-  it("GATING: accepts delivery referencing only declared outputs", () => {
-    const r = integrationManifestSchema.safeParse(
-      withAuth(
-        orchestratedAuth(
-          { tool: "login", runAt: "run-start", produces: ["JSESSIONID", "AWSALB"] },
-          {
-            http: {
-              headerName: "Cookie",
-              valueFrom: { template: "JSESSIONID={{JSESSIONID}}; AWSALB={{AWSALB}}" },
-            },
-          },
-        ),
-      ),
-    );
-    expect(r.success).toBe(true);
-  });
-});
-
-describe("integrationManifestSchema — attachable apiCall capability", () => {
-  // A node MCP server with a custom session auth + the additive `apiCall` block.
-  function nodeWithApiCall(overrides: Record<string, unknown> = {}) {
-    return baseManifest({
-      server: { type: "node", entryPoint: "./server.js" },
-      auths: {
-        session: {
-          type: "custom",
-          authorizedUris: ["https://api.example.com/**"],
-          credentials: { schema: { type: "object", required: ["token"] } },
-          delivery: { http: { headerName: "Authorization", valueFrom: "accessToken" } },
-        },
-      },
-      apiCall: { authKey: "session" },
-      ...overrides,
-    });
-  }
-
-  it("accepts a node server with an attachable apiCall block", () => {
-    const r = integrationManifestSchema.safeParse(nodeWithApiCall());
-    expect(r.success).toBe(true);
-  });
-
-  it("getApiCallConfig resolves the block alongside a spawned server", () => {
-    const m = integrationManifestSchema.parse(
-      nodeWithApiCall({ apiCall: { authKey: "session", uploadProtocols: ["tus"] } }),
-    );
-    expect(getApiCallConfig(m)).toEqual({ authKey: "session", uploadProtocols: ["tus"] });
-  });
-
-  it("getApiCallConfig resolves a serverless apiCall block (no server)", () => {
-    const m = integrationManifestSchema.parse(
+  it("returns [] for a non-oauth2 auth even with declared scopes", () => {
+    const api = parse(
       baseManifest({
-        server: undefined,
-        apiCall: { authKey: "session" },
+        source: { kind: "api", api: {} },
         auths: {
-          session: {
-            type: "custom",
-            authorizedUris: ["https://api.example.com/**"],
-            credentials: { schema: { type: "object", required: ["token"] } },
-            delivery: { http: { headerName: "Authorization", valueFrom: "accessToken" } },
-          },
-        },
-      }),
-    );
-    expect(getApiCallConfig(m)).toEqual({ authKey: "session", uploadProtocols: [] });
-  });
-
-  it("rejects an apiCall block whose authKey matches no auth", () => {
-    const r = integrationManifestSchema.safeParse(
-      nodeWithApiCall({ apiCall: { authKey: "ghost" } }),
-    );
-    expect(r.success).toBe(false);
-  });
-
-  it("requiredAuthKeysForAgent pins the apiCall auth when api_call is selected (multi-auth)", () => {
-    const m = integrationManifestSchema.parse(
-      baseManifest({
-        server: { type: "node", entryPoint: "./server.js" },
-        auths: {
-          session: {
-            type: "custom",
-            authorizedUris: ["https://api.example.com/**"],
-            credentials: { schema: { type: "object", required: ["token"] } },
-            delivery: { http: { headerName: "Authorization", valueFrom: "accessToken" } },
-          },
-          other: {
+          key: {
             type: "api_key",
-            authorizedUris: ["https://other.example.com/**"],
-            credentials: { schema: { type: "object", required: ["key"] } },
-            delivery: { env: { TOKEN: { from: "api_key" } } },
+            credentials: { schema: { type: "object", properties: {} } },
+            authorized_uris: ["https://api/**"],
+            delivery: { env: { K: { value: "{$credential.k}" } } },
           },
         },
-        apiCall: { authKey: "session" },
       }),
     );
-    expect(requiredAuthKeysForAgent(m, ["api_call"])).toEqual(["session"]);
+    expect(
+      missingScopesForConnection({
+        manifest: api,
+        authKey: "key",
+        granted: [],
+        agentTools: undefined,
+        agentScopes: ["whatever"],
+      }),
+    ).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────
+// requiredAuthKeysForAgent
+// ─────────────────────────────────────────────
+
+describe("requiredAuthKeysForAgent", () => {
+  it("returns [] when the agent picked nothing", () => {
+    expect(requiredAuthKeysForAgent(scopedManifest(), undefined, undefined)).toEqual([]);
+    expect(requiredAuthKeysForAgent(scopedManifest(), [], [])).toEqual([]);
+  });
+
+  it("single-auth integration: every selection routes to the lone auth", () => {
+    expect(requiredAuthKeysForAgent(scopedManifest(), ["read_tool"], undefined)).toEqual(["oauth"]);
+  });
+
+  it("multi-auth: routes a tool to its required_auth_key", () => {
+    const m = parse(
+      multiAuthManifest({ list_issues: { required_scopes: ["repo"], required_auth_key: "oauth" } }),
+    );
+    expect(requiredAuthKeysForAgent(m, ["list_issues"], undefined)).toEqual(["oauth"]);
+  });
+
+  it("api_call selection pins the api-source auth", () => {
+    const m = parse(
+      baseManifest({
+        source: { kind: "api", api: {} },
+        auths: {
+          key: {
+            type: "api_key",
+            credentials: { schema: { type: "object", properties: {} } },
+            authorized_uris: ["https://api/**"],
+            delivery: { env: { K: { value: "{$credential.k}" } } },
+          },
+        },
+      }),
+    );
+    expect(requiredAuthKeysForAgent(m, [API_CALL_TOOL_NAME], undefined)).toEqual(["key"]);
+  });
+
+  it("scope-only selection maps scopes to their catalog auth (multi-auth)", () => {
+    const m = parse(multiAuthManifest({}));
+    expect(requiredAuthKeysForAgent(m, undefined, ["repo"])).toEqual(["oauth"]);
+  });
+});
+
+// ─────────────────────────────────────────────
+// validateAgentIntegrationScopes
+// ─────────────────────────────────────────────
+
+describe("validateAgentIntegrationScopes", () => {
+  const m = scopedManifest();
+
+  it("returns no errors for an empty selection", () => {
+    expect(validateAgentIntegrationScopes({ id: "@official/gmail" }, m)).toEqual([]);
+  });
+
+  it("accepts a subset selection of declared tools and catalog scopes", () => {
+    expect(
+      validateAgentIntegrationScopes(
+        { id: "@official/gmail", tools: ["read_tool"], scopes: ["read:org"] },
+        m,
+      ),
+    ).toEqual([]);
+  });
+
+  it("flags an unknown tool", () => {
+    const errs = validateAgentIntegrationScopes({ id: "@official/gmail", tools: ["nope"] }, m);
+    expect(errs).toHaveLength(1);
+    expect(errs[0]!.code).toBe("unknown_tool");
+  });
+
+  it("flags a scope outside the catalog", () => {
+    const errs = validateAgentIntegrationScopes({ id: "@official/gmail", scopes: ["bogus"] }, m);
+    expect(errs).toHaveLength(1);
+    expect(errs[0]!.code).toBe("scope_not_in_catalog");
+  });
+
+  it("accepts the synthetic api_call tool on an api-source integration", () => {
+    const api = parse(
+      baseManifest({
+        source: { kind: "api", api: {} },
+        auths: {
+          key: {
+            type: "api_key",
+            credentials: { schema: { type: "object", properties: {} } },
+            authorized_uris: ["https://api/**"],
+            delivery: { env: { K: { value: "{$credential.k}" } } },
+          },
+        },
+        tools: { real_tool: { required_scopes: [] } },
+      }),
+    );
+    expect(
+      validateAgentIntegrationScopes({ id: "@official/gmail", tools: [API_CALL_TOOL_NAME] }, api),
+    ).toEqual([]);
   });
 });

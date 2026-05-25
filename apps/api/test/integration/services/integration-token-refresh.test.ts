@@ -81,12 +81,28 @@ describe("forceRefreshIntegrationConnection — Phase 6 scope-shrink awareness",
       type: "integration",
       source: "local",
       draftManifest: {
-        manifestVersion: "1.1",
+        schema_version: "2.0",
         type: "integration",
         name: PACKAGE_ID,
         version: "1.0.0",
-        displayName: "Gmail",
-        server: { type: "python", entryPoint: "./server.py" },
+        display_name: "Gmail",
+        source: { kind: "local", server: { name: "@official/gmail-server", version: "^1.0.0" } },
+        auths: {
+          primary: {
+            type: "oauth2",
+            authorization_endpoint: "https://idp/a",
+            token_endpoint: "https://idp/token",
+            authorized_uris: ["https://api/*"],
+            delivery: {
+              http: {
+                in: "header",
+                name: "Authorization",
+                prefix: "Bearer ",
+                value: "{$credential.access_token}",
+              },
+            },
+          },
+        },
       },
     });
     token = startTokenServer();
@@ -128,7 +144,7 @@ describe("forceRefreshIntegrationConnection — Phase 6 scope-shrink awareness",
       "primary",
       (await fetchEncrypted(connId))!,
       {
-        tokenUrl: token.url,
+        tokenEndpoint: token.url,
         clientId: "cid",
         clientSecret: "csec",
       },
@@ -158,7 +174,7 @@ describe("forceRefreshIntegrationConnection — Phase 6 scope-shrink awareness",
       PACKAGE_ID,
       "primary",
       (await fetchEncrypted(connId))!,
-      { tokenUrl: token.url, clientId: "cid", clientSecret: "csec" },
+      { tokenEndpoint: token.url, clientId: "cid", clientSecret: "csec" },
     );
 
     expect(result.scopesGranted?.sort()).toEqual(["read", "send"]);
@@ -179,7 +195,7 @@ describe("forceRefreshIntegrationConnection — Phase 6 scope-shrink awareness",
       PACKAGE_ID,
       "primary",
       (await fetchEncrypted(connId))!,
-      { tokenUrl: token.url, clientId: "cid", clientSecret: "csec" },
+      { tokenEndpoint: token.url, clientId: "cid", clientSecret: "csec" },
     );
 
     expect(result.shrinkDetected).toBe(true);
@@ -205,7 +221,7 @@ describe("forceRefreshIntegrationConnection — Phase 6 scope-shrink awareness",
       PACKAGE_ID,
       "primary",
       (await fetchEncrypted(connId))!,
-      { tokenUrl: token.url, clientId: "cid", clientSecret: "csec" },
+      { tokenEndpoint: token.url, clientId: "cid", clientSecret: "csec" },
     );
 
     expect(result.shrinkDetected).toBe(false);

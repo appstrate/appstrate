@@ -1,24 +1,22 @@
 {
-  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
-  "manifestVersion": "1.1",
-  "type": "integration",
   "name": "@appstrate/wordpress",
   "version": "1.0.0",
-  "displayName": "WordPress (API)",
-  "description": "Content management system \u2014 manage posts, pages, media, and users via the REST API",
-  "license": "Apache-2.0",
-  "author": "Appstrate",
-  "icon": "wordpress",
+  "type": "integration",
+  "schema_version": "2.0",
+  "display_name": "WordPress (API)",
+  "description": "Content management system — manage posts, pages, media, and users via the REST API",
   "keywords": ["cms", "content"],
-  "apiCall": {
-    "authKey": "primary"
+  "license": "Apache-2.0",
+  "icon": "wordpress",
+  "source": {
+    "kind": "api",
+    "api": {}
   },
   "auths": {
     "primary": {
       "type": "custom",
-      "required": true,
-      "authorizedUris": [],
-      "allowAllUris": true,
+      "authorized_uris": [],
+      "allow_all_uris": true,
       "credentials": {
         "schema": {
           "type": "object",
@@ -33,15 +31,34 @@
             },
             "application_password": {
               "type": "string",
-              "description": "Application Password (generated in Users \u2192 Profile \u2192 Application Passwords)"
+              "description": "Application Password (generated in Users → Profile → Application Passwords)"
             }
           },
           "required": ["site_url", "username", "application_password"]
         }
       },
       "delivery": {
-        "http": {}
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Basic",
+          "value": "{{username}}:{{application_password}}",
+          "encoding": "base64"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/auth": {
+          "required": true
+        }
       }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/api": {
+      "auth_key": "primary"
     }
   }
 }

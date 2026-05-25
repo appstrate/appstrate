@@ -1,31 +1,26 @@
 {
-  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
-  "manifestVersion": "1.1",
-  "type": "integration",
   "name": "@appstrate/x",
   "version": "1.0.0",
-  "displayName": "X (Twitter) (API)",
+  "type": "integration",
+  "schema_version": "2.0",
+  "display_name": "X (Twitter) (API)",
   "description": "Social media platform for microblogging and real-time engagement",
-  "license": "Apache-2.0",
-  "author": "Appstrate",
-  "icon": "x",
   "keywords": ["social-media", "marketing"],
-  "apiCall": {
-    "authKey": "primary"
+  "license": "Apache-2.0",
+  "icon": "x",
+  "source": {
+    "kind": "api",
+    "api": {}
   },
   "auths": {
     "primary": {
       "type": "oauth2",
-      "required": true,
-      "authorizedUris": ["https://api.x.com/**"],
-      "authorizationUrl": "https://x.com/i/oauth2/authorize",
-      "tokenUrl": "https://api.x.com/2/oauth2/token",
-      "refreshUrl": "https://api.x.com/2/oauth2/token",
-      "scopes": ["tweet.read", "users.read", "offline.access"],
-      "scopeSeparator": " ",
-      "pkceEnabled": true,
-      "tokenAuthMethod": "client_secret_basic",
-      "availableScopes": [
+      "authorization_endpoint": "https://x.com/i/oauth2/authorize",
+      "token_endpoint": "https://api.x.com/2/oauth2/token",
+      "default_scopes": ["tweet.read", "users.read", "offline.access"],
+      "token_endpoint_auth_method": "client_secret_basic",
+      "code_challenge_methods_supported": ["S256"],
+      "scope_catalog": [
         {
           "value": "tweet.read",
           "label": "Read tweets"
@@ -91,13 +86,31 @@
           "label": "Refresh token (long-lived access)"
         }
       ],
+      "authorized_uris": ["https://api.x.com/**"],
       "delivery": {
         "http": {
-          "headerName": "Authorization",
-          "headerPrefix": "Bearer",
-          "valueFrom": "access_token"
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": " "
+        },
+        "dev.appstrate/auth": {
+          "required": true
         }
       }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/api": {
+      "auth_key": "primary"
     }
   }
 }

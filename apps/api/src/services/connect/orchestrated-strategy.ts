@@ -26,6 +26,10 @@
 
 import { invalidRequest } from "../../lib/errors.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
+import {
+  getAppstrateConnectMeta,
+  type AfpsManifestConnect,
+} from "../integration-manifest-helpers.ts";
 import type { AppScope } from "../../lib/scope.ts";
 import type { Actor } from "@appstrate/connect";
 import {
@@ -86,8 +90,13 @@ export class OrchestratedStrategy implements IntegrationConnectStrategy {
       ctx.integrationPackageId,
       ctx.authKey,
     );
-    const tool = auth.connect?.tool;
-    if (!tool) {
+    // AFPS 2.0: `connect.tool` is the marker object `{}`; the orchestrated-tool
+    // name + run policy (`tool`, `run_at`, `produces`, `persist_login_secret`)
+    // live under `connect._meta["dev.appstrate/connect"]`.
+    const connect = auth.connect as AfpsManifestConnect | undefined;
+    const connectMeta = getAppstrateConnectMeta(connect);
+    const tool = connectMeta?.tool;
+    if (connect?.tool === undefined || !tool) {
       throw invalidRequest(`Auth '${ctx.authKey}' has no connect.tool declaration`);
     }
     requireNonEmptyCredentials(credentials);
@@ -99,7 +108,7 @@ export class OrchestratedStrategy implements IntegrationConnectStrategy {
       authKey: ctx.authKey,
       manifest,
       toolName: tool,
-      produces: auth.connect?.produces,
+      produces: connectMeta?.produces,
       inputs: credentials,
       inputFields: Object.keys(credentials),
     });
@@ -111,7 +120,7 @@ export class OrchestratedStrategy implements IntegrationConnectStrategy {
 
     // persistLoginSecret → persist the bootstrap bag in the NON-injectable
     // `inputs` plane (v2 envelope), so a later re-bootstrap can re-run the tool.
-    const persistInputs = auth.connect?.persistLoginSecret ? credentials : undefined;
+    const persistInputs = connectMeta?.persist_login_secret ? credentials : undefined;
 
     const target = connectionTarget(ctx);
 

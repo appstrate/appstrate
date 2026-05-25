@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Phase 1.2d — pure decision layer for the per-integration HTTPS MITM
- * listener (proposal §4.1.4 + §4.1.6.1).
+ * Pure decision layer for the per-integration HTTPS MITM listener
+ * (proposal §4.1.4 + §4.1.6.1).
  *
  * Given the resolved {@link IntegrationCredentialsPayload} for a single
  * integration plus the descriptor of an outbound HTTPS request the MCP
@@ -158,7 +158,7 @@ export function planMitmAction(
     };
   }
 
-  const plan = ctx.deliveryPlans[matched.authKey];
+  const plan: HttpDeliveryPlan | undefined = ctx.deliveryPlans[matched.authKey];
   const stripped: string[] = [...universalStrip];
 
   if (plan) {

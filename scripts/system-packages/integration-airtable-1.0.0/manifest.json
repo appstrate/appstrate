@@ -1,31 +1,26 @@
 {
-  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
-  "manifestVersion": "1.1",
-  "type": "integration",
   "name": "@appstrate/airtable",
   "version": "1.0.0",
-  "displayName": "Airtable (API)",
+  "type": "integration",
+  "schema_version": "2.0",
+  "display_name": "Airtable (API)",
   "description": "Low-code platform for building collaborative databases and apps",
-  "license": "Apache-2.0",
-  "author": "Appstrate",
-  "icon": "airtable",
   "keywords": ["project-management", "database", "collaboration"],
-  "apiCall": {
-    "authKey": "primary"
+  "license": "Apache-2.0",
+  "icon": "airtable",
+  "source": {
+    "kind": "api",
+    "api": {}
   },
   "auths": {
     "primary": {
       "type": "oauth2",
-      "required": true,
-      "authorizedUris": ["https://api.airtable.com/**"],
-      "authorizationUrl": "https://airtable.com/oauth2/v1/authorize",
-      "tokenUrl": "https://airtable.com/oauth2/v1/token",
-      "refreshUrl": "https://airtable.com/oauth2/v1/token",
-      "scopes": ["data.records:read", "schema.bases:read"],
-      "scopeSeparator": " ",
-      "pkceEnabled": true,
-      "tokenAuthMethod": "client_secret_post",
-      "availableScopes": [
+      "authorization_endpoint": "https://airtable.com/oauth2/v1/authorize",
+      "token_endpoint": "https://airtable.com/oauth2/v1/token",
+      "default_scopes": ["data.records:read", "schema.bases:read"],
+      "token_endpoint_auth_method": "client_secret_post",
+      "code_challenge_methods_supported": ["S256"],
+      "scope_catalog": [
         {
           "value": "data.records:read",
           "label": "Read records"
@@ -63,13 +58,31 @@
           "label": "Read user email"
         }
       ],
+      "authorized_uris": ["https://api.airtable.com/**"],
       "delivery": {
         "http": {
-          "headerName": "Authorization",
-          "headerPrefix": "Bearer",
-          "valueFrom": "access_token"
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": " "
+        },
+        "dev.appstrate/auth": {
+          "required": true
         }
       }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/api": {
+      "auth_key": "primary"
     }
   }
 }

@@ -15,7 +15,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { probeBunCompat } from "../src/integration-bundle/index.ts";
+import { probeBunCompat } from "../src/mcp-server-bundle/index.ts";
 
 const ENC = new TextEncoder();
 

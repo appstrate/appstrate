@@ -1,22 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Bun Toolkit reference integration — REAL spawned bun MCP server e2e.
+ * Bun Toolkit reference mcp-server — REAL spawned bun MCP server e2e.
  *
- * Boots the `@appstrate/bun-toolkit` dev fixture (a complex, multi-tool,
+ * Boots the `@appstrate/bun-toolkit-server` dev fixture (a complex, multi-tool,
  * zero-dependency Bun MCP server, a versioned test fixture under
- * `./fixtures/bun-toolkit/`) through the full
- * `bootIntegrations` loop and exercises its Bun-native tools. Proves a
- * `server.type: "bun"` integration runs end-to-end — including that the
- * spawned process is long-lived (bun:sqlite state survives across separate
- * tool calls) and that it genuinely runs on Bun (system_info).
+ * `./fixtures/bun-toolkit/`) through the full `bootIntegrations` loop and
+ * exercises its Bun-native tools. Proves a local-source integration whose
+ * referenced mcp-server runs end-to-end — including that the spawned process is
+ * long-lived (bun:sqlite state survives across separate tool calls) and that it
+ * genuinely runs on Bun (system_info).
  *
- * Runs under `INTEGRATION_RUNTIME_ADAPTER=process`: bun integrations spawn as
- * host subprocesses via the process adapter (`HOST_INTERPRETER_BY_TYPE["bun"]`),
- * no Docker. In docker mode they'd instead use the `appstrate-mcp-runner-bun`
- * container — same MCP wire, validated by the docker adapter's own tests. The
- * spec is built directly (server-only: no api_call deps, no MITM) so the test
- * needs neither a platform DB nor openssl.
+ * Runs under `INTEGRATION_RUNTIME_ADAPTER=process`: bun servers spawn as host
+ * subprocesses via the process adapter (`HOST_INTERPRETER_BY_TYPE["bun"]`), no
+ * Docker. The spec is built directly (server-only: no api_call deps, no MITM) so
+ * the test needs neither a platform DB nor openssl.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -24,16 +22,21 @@ import * as path from "node:path";
 import { readFileSync } from "node:fs";
 import { zipArtifact } from "@appstrate/core/zip";
 import { validateManifest } from "@appstrate/core/validation";
+import { mcpServerManifestSchema } from "@appstrate/core/mcp-server";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import { bootIntegrations } from "../integrations-boot.ts";
 
 const FIXTURE_DIR = path.join(import.meta.dir, "fixtures/bun-toolkit");
 const INTEG_ID = "@appstrate/bun-toolkit";
+const SERVER_ID = "@appstrate/bun-toolkit-server";
 const NAMESPACE = "buntoolkit";
 
-function fixtureBundleBytes(): Uint8Array {
+/** The mcp-server bundle the sidecar fetches + spawns (server code + MCPB manifest). */
+function serverBundleBytes(): Uint8Array {
   return zipArtifact({
-    "manifest.json": new Uint8Array(readFileSync(path.join(FIXTURE_DIR, "manifest.json"))),
+    "manifest.json": new Uint8Array(
+      readFileSync(path.join(FIXTURE_DIR, "mcp-server.manifest.json")),
+    ),
     "server.ts": new Uint8Array(readFileSync(path.join(FIXTURE_DIR, "server.ts"))),
   });
 }
@@ -45,7 +48,10 @@ function spec(): IntegrationSpawnSpec {
     manifest: {
       name: INTEG_ID,
       version: "1.0.0",
-      server: { type: "bun", entryPoint: "./server.ts" },
+      // The process adapter runs `.ts` under bun (`HOST_INTERPRETER_BY_TYPE["bun"]`).
+      // The MCPB manifest declares `node` (a valid MCPB type), but this synthetic
+      // spec pins `bun` so the host subprocess runs the TypeScript entry directly.
+      server: { type: "bun", entryPoint: "./server.ts", serverPackageId: SERVER_ID },
     },
     spawnEnv: {},
     // Native-tool subset under test (api_call / fetch_echo need creds + MITM).
@@ -54,10 +60,10 @@ function spec(): IntegrationSpawnSpec {
 }
 
 function makePlatformFetch(): typeof fetch {
-  const bundle = fixtureBundleBytes();
+  const bundle = serverBundleBytes();
   return (async (input: string | URL | Request) => {
     const url = typeof input === "string" ? input : input.toString();
-    if (url.includes("/internal/integration-bundle/")) {
+    if (url.includes("/internal/mcp-server-bundle/")) {
       return new Response(bundle, { status: 200 });
     }
     return new Response(JSON.stringify({ detail: `unexpected platform call: ${url}` }), {
@@ -140,23 +146,42 @@ describe("@appstrate/bun-toolkit — complex bun integration (e2e)", () => {
   }, 30_000);
 });
 
-describe("@appstrate/bun-toolkit manifest", () => {
-  it("validates as a server.type=bun integration with auth + apiCall + tool metadata", () => {
+describe("@appstrate/bun-toolkit fixtures", () => {
+  it("the integration manifest is a native AFPS 2.0 local-source integration", () => {
     const raw = readFileSync(path.join(FIXTURE_DIR, "manifest.json"), "utf-8");
     const result = validateManifest(JSON.parse(raw));
     expect(result.valid).toBe(true);
     if (!result.valid) throw new Error(result.errors.join(", "));
 
     const m = result.manifest as unknown as {
-      server: { type: string; entryPoint: string };
-      apiCall: { authKey: string };
-      auths: Record<string, { type: string; delivery: { http: { headerName: string } } }>;
-      tools: Record<string, { requiredScopes?: string[] }>;
+      source: { kind: string; server?: { name: string } };
+      _meta?: Record<string, { auth_key?: string }>;
+      auths: Record<
+        string,
+        { type: string; delivery: { http: { in: string; name: string; value: string } } }
+      >;
+      tools: Record<string, { required_scopes?: string[] }>;
     };
-    expect(m.server.type).toBe("bun");
-    expect(m.apiCall.authKey).toBe("primary");
-    expect(m.auths.primary.type).toBe("api_key");
-    expect(m.auths.primary.delivery.http.headerName).toBe("X-Toolkit-Token");
-    expect(m.tools.fetch_echo.requiredScopes).toEqual(["read"]);
+    expect(m.source.kind).toBe("local");
+    expect(m.source.server?.name).toBe(SERVER_ID);
+    expect(m._meta?.["dev.appstrate/api"]?.auth_key).toBe("primary");
+    expect(m.auths.primary!.type).toBe("api_key");
+    expect(m.auths.primary!.delivery.http.name).toBe("X-Toolkit-Token");
+    expect(m.auths.primary!.delivery.http.value).toBe("{$credential.api_key}");
+    expect(m.tools.fetch_echo!.required_scopes).toEqual(["read"]);
+  });
+
+  it("the mcp-server manifest is a valid MCPB manifest referencing the server code", () => {
+    const raw = readFileSync(path.join(FIXTURE_DIR, "mcp-server.manifest.json"), "utf-8");
+    const parsed = mcpServerManifestSchema.safeParse(JSON.parse(raw));
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) throw new Error(JSON.stringify(parsed.error.issues));
+    const mcp = parsed.data as unknown as {
+      server: { type: string; entry_point: string };
+      _meta: Record<string, { name?: string; type?: string }>;
+    };
+    expect(mcp.server.type).toBe("node");
+    expect(mcp.server.entry_point).toBe("./server.ts");
+    expect(mcp._meta["dev.afps/mcp-server"]?.name).toBe(SERVER_ID);
   });
 });

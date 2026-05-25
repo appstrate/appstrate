@@ -349,7 +349,7 @@ function IntegrationOverrideRow({
   const { t } = useTranslation(["agents"]);
   const { data: detail } = useIntegrationDetail(integration.id);
   const { data: connections } = useIntegrationConnections(integration.id);
-  const displayName = detail?.manifest.displayName ?? integration.id;
+  const displayName = detail?.manifest.display_name ?? integration.id;
   const requiredAuthKeys = detail
     ? requiredAuthKeysForAgent(detail.manifest, integration.tools)
     : [];

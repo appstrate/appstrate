@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * pypi vendoring resolver — turns `server.type: "uvx" +
- * server.package(pypi)` into a self-contained `./server/` tree.
+ * pypi vendoring resolver — resolves an `_meta["dev.appstrate/vendor"]` pypi
+ * source into a self-contained `./server/` tree runnable as a `binary`.
  *
  * Mirrors the structure of `npm-vendor.ts` — see that file's header
  * for the design rationale (injected I/O, BundlerError surface, etc.).
@@ -249,7 +249,7 @@ export async function vendorPypiPackage(
 
     return {
       files,
-      rewrittenServerType: "uv",
+      rewrittenServerType: "binary",
       rewrittenEntryPoint: `./server/bin/${scriptName}`,
       resolution,
     };

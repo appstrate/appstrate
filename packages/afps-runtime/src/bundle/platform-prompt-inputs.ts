@@ -6,9 +6,10 @@
  *
  * The bundle is self-describing — its root package holds the prompt
  * template + input/config/output schemas, and every non-root package
- * declares its own `type` (tool / skill) in its manifest. That is
- * enough to compute every section of the platform preamble that does
- * not require live platform state (DB, sidecar, credentials).
+ * declares its own `type` (skill / mcp-server / integration) in its
+ * manifest. That is enough to compute every section of the platform
+ * preamble that does not require live platform state (DB, sidecar,
+ * credentials).
  *
  * Callers pass an {@link ExecutionContext} for state/memories/history
  * and an {@link overrides} bag for platform-specific fields:
@@ -43,10 +44,14 @@ function readRootPromptTemplate(bundle: Bundle): string {
   return bytes ? new TextDecoder().decode(bytes) : "";
 }
 
-/** Read `manifest.schemaVersion` from the root package if declared. */
+/**
+ * Read the root agent's AFPS 2.0 `schema_version` (snake_case) if declared.
+ * AFPS 2.0 only — there is no camelCase fallback.
+ */
 function readSchemaVersion(bundle: Bundle): string | undefined {
   const root = bundle.packages.get(bundle.root);
-  const v = (root?.manifest as Record<string, unknown> | undefined)?.["schemaVersion"];
+  const manifest = root?.manifest as Record<string, unknown> | undefined;
+  const v = manifest?.["schema_version"];
   return typeof v === "string" ? v : undefined;
 }
 
@@ -93,9 +98,8 @@ function asPromptSchema(
  * Build `PlatformPromptTool` from a skill package's manifest.
  *
  * Skills are workspace files, not LLM-facing tools, so the package
- * display `manifest.name`/`description` are the only inputs — there is
- * no `tool` block to consult (the former tool-package path is gone).
- * Falls back to the parsed package id when `name` is absent.
+ * display `manifest.name`/`description` are the only inputs. Falls back
+ * to the parsed package id when `name` is absent.
  */
 function skillFromPackage(pkg: BundlePackage): PlatformPromptTool {
   const manifest = pkg.manifest as Record<string, unknown>;

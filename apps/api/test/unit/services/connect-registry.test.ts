@@ -11,6 +11,7 @@ import {
   type ConnectToolExecutor,
 } from "../../../src/services/connect/orchestrated-strategy.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
+import { connectToolBlock } from "../../helpers/integration-manifests.ts";
 
 type AuthDef = NonNullable<IntegrationManifest["auths"]>[string];
 
@@ -43,7 +44,7 @@ describe("resolveStrategy", () => {
   it("maps custom + connect.tool + run-start → LoginSecretStrategy (no executor needed)", () => {
     const a = {
       type: "custom",
-      connect: { tool: "login", runAt: "run-start" },
+      connect: connectToolBlock({ tool: "login", runAt: "run-start" }),
     } as unknown as AuthDef;
     // No executor supplied — run-start stores only the secret, so it must
     // resolve without one (the session is minted at run-start by the sidecar).
@@ -51,13 +52,19 @@ describe("resolveStrategy", () => {
   });
 
   it("maps custom + connect.tool + link → OrchestratedStrategy when an executor is supplied", () => {
-    const a = { type: "custom", connect: { tool: "login", runAt: "link" } } as unknown as AuthDef;
+    const a = {
+      type: "custom",
+      connect: connectToolBlock({ tool: "login", runAt: "link" }),
+    } as unknown as AuthDef;
     const s = resolveStrategy(a, { connectToolExecutor: fakeExecutor });
     expect(s).toBeInstanceOf(OrchestratedStrategy);
   });
 
   it("throws for custom + connect.tool + link with no executor (no silent half-acquisition)", () => {
-    const a = { type: "custom", connect: { tool: "login", runAt: "link" } } as unknown as AuthDef;
+    const a = {
+      type: "custom",
+      connect: connectToolBlock({ tool: "login", runAt: "link" }),
+    } as unknown as AuthDef;
     expect(() => resolveStrategy(a)).toThrow(/connect-run substrate/);
   });
 

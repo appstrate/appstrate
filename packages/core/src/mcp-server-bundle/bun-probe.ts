@@ -55,12 +55,9 @@ export async function probeBunCompat(
 
   const workDir = await mkdtemp(join(workRoot, "afps-bundle-probe-"));
   try {
-    // Materialise the relevant subset on disk.
+    // Materialise the relevant subset on disk (Bun.write creates parent dirs).
     for (const [rel, bytes] of Object.entries(files)) {
-      const abs = join(workDir, rel);
-      const parent = abs.slice(0, abs.lastIndexOf("/"));
-      await Bun.write(abs, bytes);
-      void parent;
+      await Bun.write(join(workDir, rel), bytes);
     }
     const cleanEntry = entryPoint.replace(/^\.\//, "");
     const entryAbs = join(workDir, cleanEntry);

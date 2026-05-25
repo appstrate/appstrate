@@ -30,9 +30,9 @@ export interface AppstrateRunPlan {
   // --- Bundle-derived (needed for prompt building + validation) ---
   /**
    * Parsed multi-package bundle. Single source of truth for the prompt
-   * builder — tools, skills, input/config/output schemas, and tool docs
-   * are all derived from this by `buildPlatformPromptInputs` at
-   * prompt-build time.
+   * builder — skills, integrations, input/config/output schemas, and
+   * dependency doc companions are all derived from this by
+   * `buildPlatformPromptInputs` at prompt-build time.
    */
   bundle: Bundle;
   /** Raw Mustache prompt from the bundle. */

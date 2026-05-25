@@ -6,6 +6,13 @@
  * Sources:  scripts/system-packages/{type}-{name}-{version}/
  * Output:   system-packages/{type}-{name}-{version}.afps
  *
+ * Discovers every package source directory regardless of type — both
+ * `integration-*` (AFPS 2.0 integration manifests) and `mcp-server-*` (MCPB
+ * manifests carrying `_meta["dev.afps/mcp-server"]`, produced when an
+ * integration's inline local server is split into its own package).
+ * `validateManifest` dispatches by type (`agent`/`skill`/`integration`/
+ * `mcp-server`), so the loop below is type-agnostic.
+ *
  * Each source directory must contain a manifest.json. All files in the
  * directory are bundled into the archive.
  *
@@ -28,6 +35,7 @@ async function main() {
   const dirs = entries.filter((e) => !e.startsWith(".") && e !== "node_modules");
   const existingAfps = await readdir(OUTPUT_DIR);
   let count = 0;
+  const byType: Record<string, number> = {};
 
   // Compute the set of archive names that should exist, based on source
   // dirs. Used below to detect orphan `.afps` files (source removed but
@@ -72,7 +80,12 @@ async function main() {
     }
 
     const manifest = result.manifest;
-    const type = manifest.type as string;
+    // An mcp-server manifest is a verbatim MCPB manifest with no top-level
+    // AFPS `type` — its identity lives under `_meta["dev.afps/mcp-server"]`.
+    const meta = (manifest as { _meta?: Record<string, unknown> })._meta;
+    const afpsMcp = meta?.["dev.afps/mcp-server"] as { type?: string } | undefined;
+    const type = (manifest.type as string | undefined) ?? afpsMcp?.type ?? "unknown";
+    byType[type] = (byType[type] ?? 0) + 1;
 
     // Collect all files — bundled into the archive.
     const files = await readdir(dirPath);
@@ -109,7 +122,13 @@ async function main() {
     count++;
   }
 
-  console.log(`\n${count} system packages ${checkOnly ? "validated" : "built"}`);
+  const breakdown = Object.entries(byType)
+    .sort()
+    .map(([t, n]) => `${n} ${t}`)
+    .join(", ");
+  console.log(
+    `\n${count} system packages ${checkOnly ? "validated" : "built"}${breakdown ? ` (${breakdown})` : ""}`,
+  );
 }
 
 main().catch((err) => {

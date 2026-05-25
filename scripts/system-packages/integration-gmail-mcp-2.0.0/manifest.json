@@ -1,47 +1,39 @@
 {
-  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
-  "manifestVersion": "1.1",
-  "type": "integration",
   "name": "@appstrate/gmail-mcp",
   "version": "2.0.0",
-  "displayName": "Gmail",
+  "type": "integration",
+  "schema_version": "2.0",
+  "display_name": "Gmail",
   "description": "Gmail integration backed by Google's official remote MCP server (gmailmcp.googleapis.com/mcp/v1). The sidecar opens a Streamable HTTP MCP client and injects the actor's OAuth2 access token as `Authorization: Bearer …` on every request — the user authorises Appstrate once, Google handles tool execution. Niveau 2 enforcement: install-time scope validation (Phase 1), OAuth scope union (Phase 2), agent-author tool/scope allowlist (Phase 3/5b), refresh-time scope-shrink awareness (Phase 6). Phase 4 (per-tool URL envelope) is N/A — every tool transits the same /mcp/v1 endpoint, the upstream's RBAC is the only URL gate.",
   "license": "Apache-2.0",
-  "author": "Appstrate",
-  "iconUrl": "gmail",
-  "categories": ["email", "productivity"],
-  "server": {
-    "type": "http",
-    "url": "https://gmailmcp.googleapis.com/mcp/v1"
-  },
-  "transport": {
-    "type": "streamable-http"
+  "source": {
+    "kind": "remote",
+    "remote": {
+      "url": "https://gmailmcp.googleapis.com/mcp/v1",
+      "transport": "streamable-http"
+    }
   },
   "auths": {
     "primary": {
       "type": "oauth2",
-      "required": true,
-      "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth",
-      "tokenUrl": "https://oauth2.googleapis.com/token",
-      "refreshUrl": "https://oauth2.googleapis.com/token",
-      "userinfoUrl": "https://openidconnect.googleapis.com/v1/userinfo",
-      "extractTokenIdentity": {
+      "authorization_endpoint": "https://accounts.google.com/o/oauth2/v2/auth",
+      "token_endpoint": "https://oauth2.googleapis.com/token",
+      "userinfo_endpoint": "https://openidconnect.googleapis.com/v1/userinfo",
+      "default_scopes": [
+        "openid",
+        "email",
+        "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/gmail.compose"
+      ],
+      "token_endpoint_auth_method": "client_secret_post",
+      "identity_claims": {
         "accountId": "$.email",
         "sub": "$.sub",
         "email": "$.email",
         "name": "$.name",
         "picture": "$.picture"
       },
-      "scopes": [
-        "openid",
-        "email",
-        "https://www.googleapis.com/auth/gmail.readonly",
-        "https://www.googleapis.com/auth/gmail.compose"
-      ],
-      "scopeSeparator": " ",
-      "tokenAuthMethod": "client_secret_post",
-      "authorizedUris": ["https://gmailmcp.googleapis.com/**"],
-      "availableScopes": [
+      "scope_catalog": [
         {
           "value": "openid",
           "label": "Identity (OpenID)",
@@ -73,41 +65,60 @@
           "description": "Apply/remove labels on messages and threads (no permanent deletion)."
         }
       ],
+      "authorized_uris": ["https://gmailmcp.googleapis.com/**"],
       "delivery": {
-        "http": {}
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer ",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": " "
+        },
+        "dev.appstrate/auth": {
+          "required": true
+        }
       }
     }
   },
   "tools": {
     "search_threads": {
-      "requiredScopes": ["https://www.googleapis.com/auth/gmail.readonly"]
+      "required_scopes": ["https://www.googleapis.com/auth/gmail.readonly"]
     },
     "get_thread": {
-      "requiredScopes": ["https://www.googleapis.com/auth/gmail.readonly"]
+      "required_scopes": ["https://www.googleapis.com/auth/gmail.readonly"]
     },
     "list_drafts": {
-      "requiredScopes": ["https://www.googleapis.com/auth/gmail.readonly"]
+      "required_scopes": ["https://www.googleapis.com/auth/gmail.readonly"]
     },
     "list_labels": {
-      "requiredScopes": ["https://www.googleapis.com/auth/gmail.readonly"]
+      "required_scopes": ["https://www.googleapis.com/auth/gmail.readonly"]
     },
     "create_draft": {
-      "requiredScopes": ["https://www.googleapis.com/auth/gmail.compose"]
+      "required_scopes": ["https://www.googleapis.com/auth/gmail.compose"]
     },
     "create_label": {
-      "requiredScopes": ["https://www.googleapis.com/auth/gmail.labels"]
+      "required_scopes": ["https://www.googleapis.com/auth/gmail.labels"]
     },
     "label_message": {
-      "requiredScopes": ["https://www.googleapis.com/auth/gmail.modify"]
+      "required_scopes": ["https://www.googleapis.com/auth/gmail.modify"]
     },
     "unlabel_message": {
-      "requiredScopes": ["https://www.googleapis.com/auth/gmail.modify"]
+      "required_scopes": ["https://www.googleapis.com/auth/gmail.modify"]
     },
     "label_thread": {
-      "requiredScopes": ["https://www.googleapis.com/auth/gmail.modify"]
+      "required_scopes": ["https://www.googleapis.com/auth/gmail.modify"]
     },
     "unlabel_thread": {
-      "requiredScopes": ["https://www.googleapis.com/auth/gmail.modify"]
+      "required_scopes": ["https://www.googleapis.com/auth/gmail.modify"]
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
     }
   }
 }

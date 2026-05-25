@@ -37,8 +37,14 @@ import { randomBytes } from "node:crypto";
 import { logger } from "../../lib/logger.ts";
 import { signRunToken } from "../../lib/run-token.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import type { IntegrationManifest } from "@appstrate/core/integration";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
+import { fetchMcpServerManifest } from "../integration-service.ts";
+import {
+  getIntegrationSourceKind,
+  getLocalServerRef,
+  getAppstrateConnectMeta,
+  type AfpsManifestAuth,
+} from "../integration-manifest-helpers.ts";
 import {
   getOrchestrator,
   type ContainerOrchestrator,
@@ -59,6 +65,11 @@ export interface ConnectRunExecutorOptions {
   orchestrator?: ContainerOrchestrator;
   /** Override the connect-run timeout (ms). Defaults to 60s. */
   timeoutMs?: number;
+  /**
+   * Injectable mcp-server resolver (local-source server lookup). Production
+   * defaults to the package-store lookup; unit tests supply a fixture.
+   */
+  resolveMcpServer?: McpServerResolver;
 }
 
 /**
@@ -68,11 +79,21 @@ export interface ConnectRunExecutorOptions {
  * path. Throws (mapped onto a structured strategy error) when the manifest
  * auth is mis-declared (missing auth or `delivery.http`).
  */
-export function buildConnectLoginSpec(execution: ConnectToolExecution): IntegrationSpawnSpec {
-  const auths = execution.manifest.auths ?? {};
-  const auth = auths[execution.authKey] as
-    | NonNullable<IntegrationManifest["auths"]>[string]
-    | undefined;
+/**
+ * Resolver for the mcp-server MCPB manifest a local-source integration
+ * references (`source.server.name`). Injectable so unit tests can supply a
+ * fixture without a DB; production defaults to the package-store lookup.
+ */
+export type McpServerResolver = (
+  packageId: string,
+) => Promise<{ server?: { type?: string; entry_point?: string } } | null>;
+
+export async function buildConnectLoginSpec(
+  execution: ConnectToolExecution,
+  resolveMcpServer: McpServerResolver = fetchMcpServerManifest,
+): Promise<IntegrationSpawnSpec> {
+  const auths = (execution.manifest.auths ?? {}) as Record<string, AfpsManifestAuth>;
+  const auth = auths[execution.authKey];
   if (!auth) {
     throw new Error(
       `connect-run: auth '${execution.authKey}' not declared on '${execution.integrationPackageId}'`,
@@ -84,14 +105,34 @@ export function buildConnectLoginSpec(execution: ConnectToolExecution): Integrat
       `connect-run: auth '${execution.authKey}' has no delivery.http — nothing to inject the captured session into`,
     );
   }
-  const server = execution.manifest.server;
-  if (!server || server.type === "http") {
+
+  // AFPS 2.0: resolve the spawnable server from the `source` discriminant.
+  // connect.tool requires a LOCAL runner — `remote`/`api` sources have no
+  // spawnable server. For a local source the runnable server config lives on
+  // the SEPARATE mcp-server package referenced by `source.server.name`.
+  const sourceKind = getIntegrationSourceKind(execution.manifest);
+  if (sourceKind !== "local") {
     throw new Error(
-      `connect-run: integration '${execution.integrationPackageId}' has no spawnable server (connect.tool requires a node|python|binary runner)`,
+      `connect-run: integration '${execution.integrationPackageId}' has no spawnable server (connect.tool requires a local node|python|binary|uv runner)`,
+    );
+  }
+  const ref = getLocalServerRef(execution.manifest);
+  if (!ref) {
+    throw new Error(
+      `connect-run: integration '${execution.integrationPackageId}' local source is missing source.server`,
+    );
+  }
+  const mcpServer = await resolveMcpServer(ref.name);
+  const run = mcpServer?.server;
+  if (!mcpServer || !run?.type || !run.entry_point) {
+    throw new Error(
+      `connect-run: referenced mcp-server '${ref.name}' could not be resolved (missing or invalid)`,
     );
   }
 
-  const reauthOn = auth.connect?.reauthOn;
+  const connectMeta = getAppstrateConnectMeta(auth.connect);
+  const reauthOn = connectMeta?.reauth_on;
+  const authorizedUris = auth.authorized_uris ?? [];
 
   return {
     integrationId: execution.integrationPackageId,
@@ -102,8 +143,8 @@ export function buildConnectLoginSpec(execution: ConnectToolExecution): Integrat
       name: execution.manifest.name,
       version: execution.manifest.version,
       server: {
-        type: server.type,
-        ...(server.entryPoint ? { entryPoint: server.entryPoint } : {}),
+        type: run.type,
+        entryPoint: run.entry_point,
       },
     },
     spawnEnv: {},
@@ -116,7 +157,7 @@ export function buildConnectLoginSpec(execution: ConnectToolExecution): Integrat
         headerPrefix: "",
         value: "",
         allowServerOverride: false,
-        authorizedUris: [...auth.authorizedUris],
+        authorizedUris: [...authorizedUris],
         expiresAtEpochMs: null,
       },
     },
@@ -127,7 +168,7 @@ export function buildConnectLoginSpec(execution: ConnectToolExecution): Integrat
       ...(execution.produces ? { produces: execution.produces } : {}),
       authKey: execution.authKey,
       authType: auth.type,
-      authorizedUris: [...auth.authorizedUris],
+      authorizedUris: [...authorizedUris],
       deliveryHttp,
       inputs: execution.inputs,
       ...(reauthOn ? { reauthOn: [...reauthOn] } : {}),
@@ -176,10 +217,12 @@ export function parseConnectResult(lines: readonly string[]): CredentialBundle {
 class ConnectRunExecutor implements ConnectToolExecutor {
   private readonly orchestrator: ContainerOrchestrator | undefined;
   private readonly timeoutMs: number;
+  private readonly resolveMcpServer: McpServerResolver;
 
   constructor(opts: ConnectRunExecutorOptions = {}) {
     this.orchestrator = opts.orchestrator;
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
+    this.resolveMcpServer = opts.resolveMcpServer ?? fetchMcpServerManifest;
   }
 
   async run(execution: ConnectToolExecution): Promise<CredentialBundle> {
@@ -187,7 +230,7 @@ class ConnectRunExecutor implements ConnectToolExecutor {
     const connectId = `connect_${randomBytes(12).toString("hex")}`;
     const runToken = signRunToken(connectId);
 
-    const spec = buildConnectLoginSpec(execution);
+    const spec = await buildConnectLoginSpec(execution, this.resolveMcpServer);
 
     let boundary: IsolationBoundary | undefined;
     let sidecar: WorkloadHandle | undefined;

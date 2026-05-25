@@ -206,9 +206,9 @@ describe("apiCallRequestSchema — valid inputs", () => {
   // Regression: `substituteBody` must be declared on the schema so
   // `safeParse` does NOT silently strip it before the resolver sees it.
   // Without this declaration, the `username/password` body-substitution
-  // path documented in PROVIDER.md files is dead — the sidecar receives
-  // no opt-in flag and forwards `{{email}}` / `{{password}}` placeholders
-  // verbatim to upstream.
+  // path is dead — the sidecar receives no opt-in flag and forwards
+  // `{{email}}` / `{{password}}` placeholders verbatim to upstream
+  // instead of resolving them.
   it("preserves substituteBody=true through safeParse", () => {
     const result = apiCallRequestSchema.safeParse({
       method: "POST",

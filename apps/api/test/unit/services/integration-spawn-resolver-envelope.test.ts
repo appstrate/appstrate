@@ -20,14 +20,20 @@ import type { IntegrationManifest } from "@appstrate/core/integration";
 function manifest(
   tools: Record<string, { urlPatterns?: { pattern: string; methods?: string[] }[] }>,
 ): IntegrationManifest {
+  // AFPS 2.0: per-tool patterns live under `tools.{name}.url_patterns`.
+  const afpsTools: Record<string, { url_patterns?: { pattern: string; methods?: string[] }[] }> =
+    {};
+  for (const [name, t] of Object.entries(tools)) {
+    afpsTools[name] = t.urlPatterns ? { url_patterns: t.urlPatterns } : {};
+  }
   return {
-    manifestVersion: "1.0",
     type: "integration",
+    schema_version: "2.0",
     name: "@vendor/test",
     version: "1.0.0",
-    displayName: "Test",
-    server: { type: "node", entryPoint: "index.js" },
-    tools,
+    display_name: "Test",
+    source: { kind: "local", server: { name: "@vendor/test-server", version: "^1.0.0" } },
+    tools: afpsTools,
   } as unknown as IntegrationManifest;
 }
 

@@ -1,35 +1,26 @@
 {
-  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
-  "manifestVersion": "1.1",
-  "type": "integration",
   "name": "@appstrate/salesforce",
   "version": "1.0.0",
-  "displayName": "Salesforce (API)",
+  "type": "integration",
+  "schema_version": "2.0",
+  "display_name": "Salesforce (API)",
   "description": "Cloud-based CRM platform for sales, service, and marketing",
-  "license": "Apache-2.0",
-  "author": "Appstrate",
-  "icon": "salesforce",
   "keywords": ["crm", "sales", "marketing"],
-  "apiCall": {
-    "authKey": "primary"
+  "license": "Apache-2.0",
+  "icon": "salesforce",
+  "source": {
+    "kind": "api",
+    "api": {}
   },
   "auths": {
     "primary": {
       "type": "oauth2",
-      "required": true,
-      "authorizedUris": [
-        "https://*.salesforce.com/**",
-        "https://*.force.com/**",
-        "https://*.my.salesforce.com/**"
-      ],
-      "authorizationUrl": "https://login.salesforce.com/services/oauth2/authorize",
-      "tokenUrl": "https://login.salesforce.com/services/oauth2/token",
-      "refreshUrl": "https://login.salesforce.com/services/oauth2/token",
-      "scopes": ["api", "refresh_token", "offline_access"],
-      "scopeSeparator": " ",
-      "pkceEnabled": true,
-      "tokenAuthMethod": "client_secret_post",
-      "availableScopes": [
+      "authorization_endpoint": "https://login.salesforce.com/services/oauth2/authorize",
+      "token_endpoint": "https://login.salesforce.com/services/oauth2/token",
+      "default_scopes": ["api", "refresh_token", "offline_access"],
+      "token_endpoint_auth_method": "client_secret_post",
+      "code_challenge_methods_supported": ["S256"],
+      "scope_catalog": [
         {
           "value": "api",
           "label": "Access REST API"
@@ -71,13 +62,35 @@
           "label": "Read user email"
         }
       ],
+      "authorized_uris": [
+        "https://*.salesforce.com/**",
+        "https://*.force.com/**",
+        "https://*.my.salesforce.com/**"
+      ],
       "delivery": {
         "http": {
-          "headerName": "Authorization",
-          "headerPrefix": "Bearer",
-          "valueFrom": "access_token"
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": " "
+        },
+        "dev.appstrate/auth": {
+          "required": true
         }
       }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/api": {
+      "auth_key": "primary"
     }
   }
 }

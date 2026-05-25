@@ -106,25 +106,25 @@ interface AgentPackageResult {
   zip: Buffer;
   /**
    * Parsed in-memory bundle — shared with `prompt-builder.ts` so the
-   * platform system prompt derives tools / skills / providers /
-   * schemas from the SAME source the runner-pi container will load.
+   * platform system prompt derives skills, integrations, and schemas
+   * from the SAME source the runner-pi container will load.
    */
   bundle: Bundle;
 }
 
 /**
- * Build a multi-package `.afps-bundle` for the run hot path and
- * extract TOOL.md docs in a single pass.
+ * Build a multi-package `.afps-bundle` for the run hot path.
  *
  * The returned ZIP is the canonical bundle format (bundle.json root +
  * per-package dirs under `packages/@scope/name/version/`). The
  * container-side loader (`readBundleFromFile` in runtime-pi) parses
- * it directly into a {@link Bundle} the PiRunner + resolvers consume.
+ * it directly into a {@link Bundle} the PiRunner + resolvers consume —
+ * including each dependency's doc companion (`SKILL.md` for skills,
+ * `INTEGRATION.md` for integrations, `README.md` for mcp-servers).
  *
  * Dependency resolution uses {@link DraftPackageCatalog}, which reads
  * draft manifests + the `package-items` storage bucket — NOT published
- * versions. This preserves the legacy "edit tool → next run sees it"
- * behaviour on the dev loop.
+ * versions — so edits to a dependency are picked up on the next run.
  */
 export async function buildAgentPackage(
   agent: LoadedPackage,

@@ -26,7 +26,7 @@ describe("afps inspect", () => {
     expect(code).toBe(0);
     const text = io.stdoutText();
     expect(text).toContain("name:          @acme/hello");
-    expect(text).toContain("schemaVersion: 1.1");
+    expect(text).toContain("schema_version: 2.0");
     expect(text).toContain("signature:     <none>");
     expect(text).toContain("Prompt");
   });

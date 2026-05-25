@@ -1,38 +1,25 @@
 {
-  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
-  "manifestVersion": "1.1",
-  "type": "integration",
   "name": "@appstrate/zoho-crm",
   "version": "1.0.0",
-  "displayName": "Zoho CRM (API)",
+  "type": "integration",
+  "schema_version": "2.0",
+  "display_name": "Zoho CRM (API)",
   "description": "Customer relationship management platform for sales and marketing",
-  "license": "Apache-2.0",
-  "author": "Appstrate",
-  "icon": "zoho",
   "keywords": ["crm", "sales", "marketing"],
-  "apiCall": {
-    "authKey": "primary"
+  "license": "Apache-2.0",
+  "icon": "zoho",
+  "source": {
+    "kind": "api",
+    "api": {}
   },
   "auths": {
     "primary": {
       "type": "oauth2",
-      "required": true,
-      "authorizedUris": [
-        "https://www.zohoapis.com/**",
-        "https://www.zohoapis.eu/**",
-        "https://www.zohoapis.in/**",
-        "https://www.zohoapis.com.au/**",
-        "https://www.zohoapis.jp/**",
-        "https://www.zohoapis.com.cn/**"
-      ],
-      "authorizationUrl": "https://accounts.zoho.com/oauth/v2/auth",
-      "tokenUrl": "https://accounts.zoho.com/oauth/v2/token",
-      "refreshUrl": "https://accounts.zoho.com/oauth/v2/token",
-      "scopes": ["ZohoCRM.modules.READ", "ZohoCRM.users.READ"],
-      "scopeSeparator": ",",
-      "pkceEnabled": false,
-      "tokenAuthMethod": "client_secret_post",
-      "availableScopes": [
+      "authorization_endpoint": "https://accounts.zoho.com/oauth/v2/auth",
+      "token_endpoint": "https://accounts.zoho.com/oauth/v2/token",
+      "default_scopes": ["ZohoCRM.modules.READ", "ZohoCRM.users.READ"],
+      "token_endpoint_auth_method": "client_secret_post",
+      "scope_catalog": [
         {
           "value": "ZohoCRM.modules.READ",
           "label": "Read CRM module data"
@@ -82,13 +69,38 @@
           "label": "Create bulk operations"
         }
       ],
+      "authorized_uris": [
+        "https://www.zohoapis.com/**",
+        "https://www.zohoapis.eu/**",
+        "https://www.zohoapis.in/**",
+        "https://www.zohoapis.com.au/**",
+        "https://www.zohoapis.jp/**",
+        "https://www.zohoapis.com.cn/**"
+      ],
       "delivery": {
         "http": {
-          "headerName": "Authorization",
-          "headerPrefix": "Zoho-oauthtoken",
-          "valueFrom": "access_token"
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Zoho-oauthtoken",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": ","
+        },
+        "dev.appstrate/auth": {
+          "required": true
         }
       }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/api": {
+      "auth_key": "primary"
     }
   }
 }

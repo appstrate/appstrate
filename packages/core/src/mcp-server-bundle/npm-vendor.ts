@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * npm vendoring resolver — turns `server.type: "npx" +
- * server.package(npm)` into a self-contained `./server/` tree.
+ * npm vendoring resolver — resolves an `_meta["dev.appstrate/vendor"]` npm
+ * source into a self-contained `./server/` tree runnable under `node`.
  *
  * The resolver is the only piece of the bundler that talks to the
  * network and to the filesystem at the same time. We isolate both
@@ -205,8 +205,8 @@ export function pickNpmEntryPoint(pkg: NpmRegistryVersion): string {
 
 /**
  * Walk a directory and return every file as `{ relativePosixPath: bytes }`.
- * Skips hidden directories (`.bin/`, `.cache/`) but keeps everything
- * else so vendored packages remain runnable.
+ * Skips the `.cache/` directory (build noise) but keeps everything else so
+ * vendored packages remain runnable.
  */
 async function collectFiles(rootDir: string): Promise<Record<string, Uint8Array>> {
   const out: Record<string, Uint8Array> = {};
@@ -219,7 +219,7 @@ async function collectFiles(rootDir: string): Promise<Record<string, Uint8Array>
       const st = await stat(abs);
       if (st.isDirectory()) {
         // Skip noise that bloats the bundle without affecting runtime.
-        if (entry === ".cache" || entry === ".package-lock.json") continue;
+        if (entry === ".cache") continue;
         stack.push(abs);
         continue;
       }

@@ -1,31 +1,25 @@
 {
-  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
-  "manifestVersion": "1.1",
-  "type": "integration",
   "name": "@appstrate/pinterest",
   "version": "1.0.0",
-  "displayName": "Pinterest (API)",
+  "type": "integration",
+  "schema_version": "2.0",
+  "display_name": "Pinterest (API)",
   "description": "Visual discovery and bookmarking platform",
-  "license": "Apache-2.0",
-  "author": "Appstrate",
-  "icon": "pinterest",
   "keywords": ["social-media", "marketing"],
-  "apiCall": {
-    "authKey": "primary"
+  "license": "Apache-2.0",
+  "icon": "pinterest",
+  "source": {
+    "kind": "api",
+    "api": {}
   },
   "auths": {
     "primary": {
       "type": "oauth2",
-      "required": true,
-      "authorizedUris": ["https://api.pinterest.com/**"],
-      "authorizationUrl": "https://www.pinterest.com/oauth/",
-      "tokenUrl": "https://api.pinterest.com/v5/oauth/token",
-      "refreshUrl": "https://api.pinterest.com/v5/oauth/token",
-      "scopes": ["user_accounts:read"],
-      "scopeSeparator": ",",
-      "pkceEnabled": false,
-      "tokenAuthMethod": "client_secret_basic",
-      "availableScopes": [
+      "authorization_endpoint": "https://www.pinterest.com/oauth/",
+      "token_endpoint": "https://api.pinterest.com/v5/oauth/token",
+      "default_scopes": ["user_accounts:read"],
+      "token_endpoint_auth_method": "client_secret_basic",
+      "scope_catalog": [
         {
           "value": "boards:read",
           "label": "Read boards"
@@ -63,13 +57,31 @@
           "label": "Manage product catalogs"
         }
       ],
+      "authorized_uris": ["https://api.pinterest.com/**"],
       "delivery": {
         "http": {
-          "headerName": "Authorization",
-          "headerPrefix": "Bearer",
-          "valueFrom": "access_token"
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": ","
+        },
+        "dev.appstrate/auth": {
+          "required": true
         }
       }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/api": {
+      "auth_key": "primary"
     }
   }
 }

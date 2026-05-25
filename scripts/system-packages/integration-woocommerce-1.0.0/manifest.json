@@ -1,24 +1,22 @@
 {
-  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
-  "manifestVersion": "1.1",
-  "type": "integration",
   "name": "@appstrate/woocommerce",
   "version": "1.0.0",
-  "displayName": "WooCommerce (API)",
-  "description": "E-commerce plugin for WordPress \u2014 manage products, orders, customers, and coupons",
-  "license": "Apache-2.0",
-  "author": "Appstrate",
-  "icon": "woo",
+  "type": "integration",
+  "schema_version": "2.0",
+  "display_name": "WooCommerce (API)",
+  "description": "E-commerce plugin for WordPress — manage products, orders, customers, and coupons",
   "keywords": ["e-commerce", "retail"],
-  "apiCall": {
-    "authKey": "primary"
+  "license": "Apache-2.0",
+  "icon": "woo",
+  "source": {
+    "kind": "api",
+    "api": {}
   },
   "auths": {
     "primary": {
       "type": "custom",
-      "required": true,
-      "authorizedUris": [],
-      "allowAllUris": true,
+      "authorized_uris": [],
+      "allow_all_uris": true,
       "credentials": {
         "schema": {
           "type": "object",
@@ -40,8 +38,27 @@
         }
       },
       "delivery": {
-        "http": {}
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Basic",
+          "value": "{{consumer_key}}:{{consumer_secret}}",
+          "encoding": "base64"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/auth": {
+          "required": true
+        }
       }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/api": {
+      "auth_key": "primary"
     }
   }
 }

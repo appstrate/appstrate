@@ -1,36 +1,48 @@
 {
-  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
-  "manifestVersion": "1.1",
-  "type": "integration",
   "name": "@appstrate/basecamp",
   "version": "1.0.0",
-  "displayName": "Basecamp (API)",
+  "type": "integration",
+  "schema_version": "2.0",
+  "display_name": "Basecamp (API)",
   "description": "Project management and team communication platform",
-  "license": "Apache-2.0",
-  "author": "Appstrate",
-  "icon": "basecamp",
   "keywords": ["project-management", "collaboration"],
-  "apiCall": {
-    "authKey": "primary"
+  "license": "Apache-2.0",
+  "icon": "basecamp",
+  "source": {
+    "kind": "api",
+    "api": {}
   },
   "auths": {
     "primary": {
       "type": "oauth2",
-      "required": true,
-      "authorizedUris": ["https://3.basecampapi.com/**", "https://launchpad.37signals.com/**"],
-      "authorizationUrl": "https://launchpad.37signals.com/authorization/new",
-      "tokenUrl": "https://launchpad.37signals.com/authorization/token",
-      "refreshUrl": "https://launchpad.37signals.com/authorization/token",
-      "scopeSeparator": " ",
-      "pkceEnabled": false,
-      "tokenAuthMethod": "client_secret_post",
+      "authorization_endpoint": "https://launchpad.37signals.com/authorization/new",
+      "token_endpoint": "https://launchpad.37signals.com/authorization/token",
+      "token_endpoint_auth_method": "client_secret_post",
+      "authorized_uris": ["https://3.basecampapi.com/**", "https://launchpad.37signals.com/**"],
       "delivery": {
         "http": {
-          "headerName": "Authorization",
-          "headerPrefix": "Bearer",
-          "valueFrom": "access_token"
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": " "
+        },
+        "dev.appstrate/auth": {
+          "required": true
         }
       }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/api": {
+      "auth_key": "primary"
     }
   }
 }

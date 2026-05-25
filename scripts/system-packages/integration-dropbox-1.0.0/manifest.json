@@ -1,31 +1,26 @@
 {
-  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
-  "manifestVersion": "1.1",
-  "type": "integration",
   "name": "@appstrate/dropbox",
   "version": "1.0.0",
-  "displayName": "Dropbox (API)",
+  "type": "integration",
+  "schema_version": "2.0",
+  "display_name": "Dropbox (API)",
   "description": "Cloud file storage, sync, and sharing platform",
-  "license": "Apache-2.0",
-  "author": "Appstrate",
-  "icon": "dropbox",
   "keywords": ["storage", "productivity"],
-  "apiCall": {
-    "authKey": "primary"
+  "license": "Apache-2.0",
+  "icon": "dropbox",
+  "source": {
+    "kind": "api",
+    "api": {}
   },
   "auths": {
     "primary": {
       "type": "oauth2",
-      "required": true,
-      "authorizedUris": ["https://api.dropboxapi.com/**", "https://content.dropboxapi.com/**"],
-      "authorizationUrl": "https://www.dropbox.com/oauth2/authorize",
-      "tokenUrl": "https://api.dropboxapi.com/oauth2/token",
-      "refreshUrl": "https://api.dropboxapi.com/oauth2/token",
-      "scopes": ["account_info.read", "files.metadata.read", "files.content.read"],
-      "scopeSeparator": " ",
-      "pkceEnabled": true,
-      "tokenAuthMethod": "client_secret_post",
-      "availableScopes": [
+      "authorization_endpoint": "https://www.dropbox.com/oauth2/authorize",
+      "token_endpoint": "https://api.dropboxapi.com/oauth2/token",
+      "default_scopes": ["account_info.read", "files.metadata.read", "files.content.read"],
+      "token_endpoint_auth_method": "client_secret_post",
+      "code_challenge_methods_supported": ["S256"],
+      "scope_catalog": [
         {
           "value": "account_info.read",
           "label": "Read account info"
@@ -63,13 +58,31 @@
           "label": "Manage file requests"
         }
       ],
+      "authorized_uris": ["https://api.dropboxapi.com/**", "https://content.dropboxapi.com/**"],
       "delivery": {
         "http": {
-          "headerName": "Authorization",
-          "headerPrefix": "Bearer",
-          "valueFrom": "access_token"
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": " "
+        },
+        "dev.appstrate/auth": {
+          "required": true
         }
       }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/api": {
+      "auth_key": "primary"
     }
   }
 }

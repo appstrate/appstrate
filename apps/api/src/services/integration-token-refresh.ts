@@ -27,7 +27,7 @@ import type {
   RefreshContext as IntegrationRefreshContext,
   RefreshExchangeResult,
 } from "@appstrate/connect";
-import type { IntegrationManifest } from "@appstrate/core/integration";
+import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import {
   persistCredentialBundle,
@@ -35,8 +35,6 @@ import {
 } from "./integration-connections.ts";
 
 export type { IntegrationRefreshContext };
-
-type IntegrationAuthDef = NonNullable<IntegrationManifest["auths"]>[string];
 
 export interface IntegrationRefreshResult {
   /** Decrypted credentials (snake_case + camelCase aliases). */
@@ -255,14 +253,17 @@ export function decryptIntegrationConnectionFields(
 export async function buildIntegrationOAuthRefreshContext(
   packageId: string,
   authKey: string,
-  authDef: IntegrationAuthDef,
+  authDef: AfpsManifestAuth,
   applicationId: string,
 ): Promise<IntegrationRefreshContext | null> {
   if (authDef.type !== "oauth2") return null;
-  if (!authDef.tokenUrl) {
-    // The manifest schema requires a tokenUrl for oauth2, so this is a
-    // defensive guard (and narrows the optional type for the refresh below).
-    logger.info("Integration auth refresh skipped — no tokenUrl", { packageId, authKey });
+  // AFPS 2.0 §7.3: refresh POSTs to `token_endpoint` (the old `tokenUrl` /
+  // `refreshUrl` split is gone). The endpoint may be filled by discovery from
+  // `issuer` — but the refresh path needs a concrete URL, so require it here.
+  const afpsAuth = authDef;
+  const tokenEndpoint = afpsAuth.token_endpoint;
+  if (!tokenEndpoint) {
+    logger.info("Integration auth refresh skipped — no token_endpoint", { packageId, authKey });
     return null;
   }
   const [client] = await db
@@ -301,21 +302,29 @@ export async function buildIntegrationOAuthRefreshContext(
     });
     return null;
   }
-  // `tokenAuthMethod: "none"` (public clients) needs `client_id` in the body
-  // with NO `client_secret`. The shared refresh helper doesn't model that —
-  // skip rather than send a malformed request the upstream would reject.
-  if (authDef.tokenAuthMethod === "none") {
-    logger.info("Integration auth refresh skipped — public client (tokenAuthMethod=none)", {
-      packageId,
-      authKey,
-    });
+  // `token_endpoint_auth_method: "none"` (public clients) needs `client_id` in
+  // the body with NO `client_secret`. The shared refresh helper doesn't model
+  // that — skip rather than send a malformed request the upstream would reject.
+  const tokenEndpointAuthMethod = afpsAuth.token_endpoint_auth_method;
+  if (tokenEndpointAuthMethod === "none") {
+    logger.info(
+      "Integration auth refresh skipped — public client (token_endpoint_auth_method=none)",
+      {
+        packageId,
+        authKey,
+      },
+    );
     return null;
   }
+  // AFPS 2.0: `scope_separator` moved under `_meta["dev.appstrate/oauth"]`.
+  const oauthMeta = (afpsAuth._meta?.["dev.appstrate/oauth"] ?? undefined) as
+    | { scope_separator?: string }
+    | undefined;
   return {
-    tokenUrl: authDef.tokenUrl,
+    tokenEndpoint,
     clientId: client.clientId,
     clientSecret,
-    ...(authDef.tokenAuthMethod ? { tokenAuthMethod: authDef.tokenAuthMethod } : {}),
-    ...(authDef.scopeSeparator ? { scopeSeparator: authDef.scopeSeparator } : {}),
+    ...(tokenEndpointAuthMethod ? { tokenEndpointAuthMethod } : {}),
+    ...(oauthMeta?.scope_separator ? { scopeSeparator: oauthMeta.scope_separator } : {}),
   };
 }

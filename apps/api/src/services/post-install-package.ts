@@ -56,10 +56,10 @@ export async function postInstallPackage(params: {
   const { packageType, packageId, orgId, userId, content, files, zipBuffer } = params;
 
   const manifest = parseManifestFromFiles(files);
-  const manifestVersion = manifest.version as string | undefined;
+  const declaredVersion = manifest.version as string | undefined;
 
   // Determine version: explicit override > manifest version > error
-  const rawVersion = params.version ?? manifestVersion;
+  const rawVersion = params.version ?? declaredVersion;
   if (!rawVersion || !isValidVersion(rawVersion)) {
     throw new Error(`Package ${packageId}: missing or invalid version in manifest`);
   }

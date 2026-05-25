@@ -36,6 +36,8 @@ import {
   resolveOAuthTokenForSidecar,
 } from "../services/model-providers/token-resolver.ts";
 import { resolveLiveIntegrationCredentials } from "../services/integration-credentials-resolver.ts";
+import { fetchIntegrationManifest } from "../services/integration-service.ts";
+import { getLocalServerRef } from "../services/integration-manifest-helpers.ts";
 
 /**
  * Verify the run token from the Authorization header.
@@ -272,7 +274,7 @@ export function createInternalRouter() {
   /**
    * Pin: the running agent must declare this integration in
    * `dependencies.integrations` AND it must be installed in the run's
-   * application. Same guard used by /integration-bundle and the
+   * application. Same guard used by /mcp-server-bundle and the
    * /integration-credentials endpoints to keep a leaked run token from
    * enumerating integration secrets across the org.
    */
@@ -364,22 +366,25 @@ export function createInternalRouter() {
     return c.json(result);
   });
 
-  // GET /internal/integration-bundle/:scope/:name
-  // Returns the integration's .afps bundle bytes. Authorised by the same
-  // Bearer run-token as the credentials surface; additionally verifies
-  // the run's agent declares this integration as a dependency so a
-  // leaked run token can't enumerate arbitrary integration source.
-  router.get("/integration-bundle/:scope{@[^/]+}/:name", async (c) => {
+  // GET /internal/mcp-server-bundle/:scope/:name
+  // Returns the mcp-server package's .afps bundle bytes (the runnable MCP
+  // server code). In AFPS 2.0 a local-source integration references a SEPARATE
+  // mcp-server package via `source.server.name`; the sidecar fetches that
+  // package's bundle here before spawning a runner. Authorised by the same
+  // Bearer run-token as the credentials surface; additionally verifies the
+  // run's agent declares an installed integration that references this
+  // mcp-server, so a leaked run token can't enumerate arbitrary server source.
+  router.get("/mcp-server-bundle/:scope{@[^/]+}/:name", async (c) => {
     const { runId, run } = await verifyRunToken(c);
-    const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
-    await assertAgentDeclaresIntegration(packageId, run, runId);
+    const mcpServerId = `${c.req.param("scope")}/${c.req.param("name")}`;
+    await assertAgentReferencesMcpServer(mcpServerId, run, runId);
 
     // Resolve bytes: system package from in-memory map, local from S3
-    const sys = getSystemPackages().get(packageId);
+    const sys = getSystemPackages().get(mcpServerId);
     if (sys?.zipBuffer) {
-      logger.info("Integration bundle delivered (system)", {
+      logger.info("mcp-server bundle delivered (system)", {
         runId,
-        packageId,
+        mcpServerId,
         bytes: sys.zipBuffer.length,
       });
       return new Response(Buffer.from(sys.zipBuffer), {
@@ -390,20 +395,63 @@ export function createInternalRouter() {
     const [latest] = await db
       .select({ version: packageVersions.version, integrity: packageVersions.integrity })
       .from(packageVersions)
-      .where(and(eq(packageVersions.packageId, packageId), sql`${packageVersions.yanked} = false`))
+      .where(
+        and(eq(packageVersions.packageId, mcpServerId), sql`${packageVersions.yanked} = false`),
+      )
       .orderBy(sql`${packageVersions.createdAt} DESC`)
       .limit(1);
-    if (!latest) throw notFound(`No published version for '${packageId}'`);
-    const bytes = await downloadVersionZip(packageId, latest.version, latest.integrity);
-    if (!bytes) throw notFound(`Bundle bytes unavailable for '${packageId}'`);
-    logger.info("Integration bundle delivered (storage)", {
+    if (!latest) throw notFound(`No published version for '${mcpServerId}'`);
+    const bytes = await downloadVersionZip(mcpServerId, latest.version, latest.integrity);
+    if (!bytes) throw notFound(`Bundle bytes unavailable for '${mcpServerId}'`);
+    logger.info("mcp-server bundle delivered (storage)", {
       runId,
-      packageId,
+      mcpServerId,
       version: latest.version,
       bytes: bytes.length,
     });
     return new Response(bytes, { status: 200, headers: { "Content-Type": "application/zip" } });
   });
+
+  /**
+   * Authorise an mcp-server bundle fetch: the running agent must declare at
+   * least one integration (in `dependencies.integrations`) that (a) is
+   * installed in the run's application AND (b) references this mcp-server via
+   * `source.server.name`. This keeps a leaked run token from enumerating
+   * arbitrary server source across the org.
+   */
+  async function assertAgentReferencesMcpServer(
+    mcpServerId: string,
+    run: { packageId: string; orgId: string; applicationId: string },
+    runId: string,
+  ): Promise<void> {
+    const agent = await getPackage(run.packageId, run.orgId, { includeEphemeral: true });
+    if (!agent) throw notFound("Agent not found");
+    const deps = asRecord(asRecord(agent.manifest).dependencies);
+    const integrations = asRecord(deps.integrations);
+    for (const integrationId of Object.keys(integrations)) {
+      const [installRow] = await db
+        .select({ packageId: applicationPackages.packageId })
+        .from(applicationPackages)
+        .where(
+          and(
+            eq(applicationPackages.applicationId, run.applicationId),
+            eq(applicationPackages.packageId, integrationId),
+          ),
+        )
+        .limit(1);
+      if (!installRow) continue;
+      const res = await fetchIntegrationManifest(integrationId);
+      if (!res.ok) continue;
+      const ref = getLocalServerRef(res.manifest);
+      if (ref?.name === mcpServerId) return;
+    }
+    logger.warn("mcp-server bundle request rejected — not referenced by agent", {
+      runId,
+      mcpServerId,
+      agentId: agent.id,
+    });
+    throw notFound(`mcp-server '${mcpServerId}' is not referenced by the running agent`);
+  }
 
   return router;
 }

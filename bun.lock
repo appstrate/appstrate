@@ -5,7 +5,7 @@
     "": {
       "name": "appstrate",
       "dependencies": {
-        "@afps-spec/schema": "^1.5.0",
+        "@afps-spec/schema": "link:@afps-spec/schema",
         "@appstrate/core": "workspace:*",
         "@electric-sql/pglite": "^0.4.5",
         "ajv": "^8.20.0",
@@ -66,7 +66,7 @@
         "nodemailer": "^8.0.7",
         "rate-limiter-flexible": "^11.0.1",
         "semver": "^7.7.1",
-        "zod": "^4.3.6",
+        "zod": "^4.4.3",
       },
       "devDependencies": {
         "@mariozechner/pi-coding-agent": "^0.70.6",
@@ -154,7 +154,7 @@
         "remark-gfm": "^4.0.1",
         "sonner": "^2.0.7",
         "tailwind-merge": "^3.5.0",
-        "zod": "^4.3.6",
+        "zod": "^4.4.3",
         "zustand": "^5.0.11",
       },
       "devDependencies": {
@@ -184,13 +184,13 @@
         "afps": "./bin/afps.ts",
       },
       "dependencies": {
-        "@afps-spec/schema": "^1.5.0",
+        "@afps-spec/schema": "link:@afps-spec/schema",
         "@afps-spec/types": "^1.0.0",
         "fflate": "^0.8.2",
         "file-type": "^22.0.1",
         "mustache": "^4.2.0",
         "semver": "^7.7.1",
-        "zod": "^4.3.6",
+        "zod": "^4.4.3",
       },
       "devDependencies": {
         "@mariozechner/pi-ai": "^0.70.6",
@@ -223,13 +223,13 @@
       "name": "@appstrate/core",
       "version": "2.20.0",
       "dependencies": {
-        "@afps-spec/schema": "^1.5.0",
+        "@afps-spec/schema": "link:@afps-spec/schema",
         "ajv": "^8.20.0",
         "ajv-formats": "^3.0.1",
         "fflate": "^0.8.0",
         "pino": "^10.3.1",
         "semver": "^7.7.1",
-        "zod": "^4.3.6",
+        "zod": "^4.4.3",
       },
       "peerDependencies": {
         "@aws-sdk/client-s3": "^3",
@@ -257,7 +257,7 @@
         "drizzle-orm": "^0.45.2",
         "nodemailer": "^8.0.7",
         "postgres": "^3.4.9",
-        "zod": "^4.3.6",
+        "zod": "^4.4.3",
       },
       "devDependencies": {
         "@types/nodemailer": "^8.0.0",
@@ -276,7 +276,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@appstrate/core": "workspace:*",
-        "zod": "^4.3.6",
+        "zod": "^4.4.3",
       },
     },
     "packages/mcp-transport": {
@@ -325,7 +325,7 @@
       "dependencies": {
         "@appstrate/core": "workspace:*",
         "@appstrate/db": "workspace:*",
-        "zod": "^4.3.6",
+        "zod": "^4.4.3",
       },
     },
     "packages/ui": {
@@ -389,8 +389,11 @@
       },
     },
   },
+  "overrides": {
+    "zod": "4.4.3",
+  },
   "packages": {
-    "@afps-spec/schema": ["@afps-spec/schema@1.5.0", "", { "dependencies": { "ajv": "^8.17.1", "semver": "^7.7.4", "zod": "^4.3.6" } }, "sha512-800ItINCO2cOpVTM9QjCsG3gFXfXP4ldPVKbBmn9dic7P1sONeaSAQ7WtGy6W+JncgX5GFz2jyYJ+z+4gEqNzA=="],
+    "@afps-spec/schema": ["@afps-spec/schema@link:@afps-spec/schema", {}],
 
     "@afps-spec/types": ["@afps-spec/types@1.0.0", "", {}, "sha512-IeR4qT89cxr9FJ1IajByrRInkJ3HdK8yWxgI1/rJQtMBhc5A4mCATmiAJT6IG5fOLF2VZXHgI4UNCnnN/hoqPQ=="],
 
@@ -2424,7 +2427,7 @@
 
     "yoctocolors": ["yoctocolors@2.1.2", "", {}, "sha512-CzhO+pFNo8ajLM2d2IW/R93ipy99LWjtwblvC1RsoSUMZgyLbYFr221TnSNT7GjGdYui6P459mw9JH/g/zW2ug=="],
 
-    "zod": ["zod@4.3.6", "", {}, "sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg=="],
+    "zod": ["zod@4.4.3", "", {}, "sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ=="],
 
     "zod-to-json-schema": ["zod-to-json-schema@3.25.2", "", { "peerDependencies": { "zod": "^3.25.28 || ^4" } }, "sha512-O/PgfnpT1xKSDeQYSCfRI5Gy3hPf91mKVDuYLUHZJMiDFptvP41MSnWofm8dnCm0256ZNfZIM7DSzuSMAFnjHA=="],
 

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Phase 1.3 — OAuth2 authorization-code + PKCE flow for AFPS integration
- * `auths.{key}` of type `oauth2` (proposal §4.1.1, §4.1.4).
+ * OAuth2 authorization-code + PKCE flow for AFPS integration `auths.{key}` of
+ * type `oauth2` (AFPS 2.0 §7.3).
  *
  * Pure module: takes pre-resolved endpoints + client credentials + an
  * {@link OAuthStateStore}, returns either an authorization URL (initiate)
@@ -12,25 +12,25 @@
  * us. Exposes an initiate (authorization URL) and a callback (token
  * exchange) function for the integration OAuth flow.
  *
- * What this covers (Phase 1.3 ship scope):
- *   - Explicit endpoints — `authorizationUrl`, `tokenUrl` come directly
- *     from `manifest.auths.{key}`.
- *   - PKCE S256 mandatory for public clients (`tokenAuthMethod=none`);
- *     opt-out impossible in this code path because the spec mandates it.
- *   - RFC 8707 `resource` parameter when the auth declares `audience`.
- *   - `client_secret_post` / `client_secret_basic` / `none` token endpoint
- *     auth methods — verified at the call site, defaults to `post`.
- *   - Scope shortfall / creep classification via the shared
- *     `parseTokenResponse` helper (`./token-utils.ts`).
+ * Notable AFPS 2.0 inputs:
+ *   - `resource` (RFC 8707) is sent on both the authorize URL and the token
+ *     request — some IdPs only honour it on one of the two.
+ *   - `code_challenge_methods_supported`: `["S256"]` ⇒ PKCE-S256; absent/empty
+ *     ⇒ no PKCE.
+ *   - `issuer` (optional) enables discovery-first endpoint resolution
+ *     (RFC 8414 / OIDC). Discovery is best-effort; explicit endpoints always
+ *     override the discovered ones.
  *
  * Refresh lives in `./token-refresh.ts` (`performRefreshTokenExchange`; the
- * `integration_connections` write-back wraps it in apps/api).
+ * `integration_connections` write-back wraps it in apps/api). A refresh POSTs
+ * `grant_type=refresh_token` to the same `token_endpoint` (RFC 6749 §6).
  */
 
 import type { Actor, OAuthStateRecord, OAuthStateStore } from "./types.ts";
 import { OAuthCallbackError } from "./oauth.ts";
 import { randomBase64Url, sha256Base64Url } from "./pkce.ts";
 import { exchangeAuthorizationCode } from "./token-exchange.ts";
+import { resolveOAuthEndpoints, type OAuthEndpointResolution } from "./oauth-discovery.ts";
 
 const OAUTH_STATE_TTL_SECONDS = 10 * 60;
 
@@ -44,33 +44,57 @@ function integrationProviderIdSentinel(packageId: string, authKey: string): stri
   return `__integration__:${packageId}:${authKey}`;
 }
 
+/** PKCE-S256 marker as it appears in `code_challenge_methods_supported`. */
+const PKCE_S256 = "S256";
+
 export interface InitiateIntegrationOAuthInput {
   /** Integration package id (e.g. `@official/gmail`). */
   packageId: string;
   /** Auth key as declared in `manifest.auths.{key}`. */
   authKey: string;
-  /** Authorization endpoint from the manifest. */
-  authorizationUrl: string;
-  /** Token endpoint from the manifest (carried into the state for the callback). */
-  tokenUrl: string;
+  /**
+   * Authorization endpoint (`auths.{key}.authorization_endpoint`). Optional
+   * when `issuer` is supplied for discovery — discovery then fills it in,
+   * but an explicit value always wins.
+   */
+  authorizationEndpoint?: string;
+  /**
+   * Token endpoint (`auths.{key}.token_endpoint`). Carried into the state for
+   * the callback. Optional when `issuer` is supplied for discovery.
+   */
+  tokenEndpoint?: string;
+  /**
+   * Issuer (`auths.{key}.issuer`) for discovery-first endpoint resolution
+   * (RFC 8414 / OIDC `/.well-known/openid-configuration`). Best-effort — when
+   * discovery fails, the manifest's explicit endpoints (if any) are used.
+   */
+  issuer?: string;
   /** OAuth2 client id registered by the admin. */
   clientId: string;
   /**
    * OAuth2 client secret — empty string for public clients
-   * (`tokenAuthMethod=none`). Carried into state for the callback.
+   * (`token_endpoint_auth_method=none`). Carried into state for the callback.
    */
   clientSecret: string;
-  /** Token endpoint client-auth method. Defaults to `client_secret_post`. */
-  tokenAuthMethod?: "client_secret_post" | "client_secret_basic" | "none";
+  /** Token endpoint client-auth method (`token_endpoint_auth_method`). Defaults to `client_secret_post`. */
+  tokenEndpointAuthMethod?: "client_secret_post" | "client_secret_basic" | "none";
   /** Scopes requested in the authorize URL (joined per `scopeSeparator`). */
   scopes?: string[];
-  /** Scope joiner — defaults to single space (OAuth2 standard). */
+  /** Scope joiner (`_meta["dev.appstrate/oauth"].scope_separator`) — defaults to single space (OAuth2 standard). */
   scopeSeparator?: string;
-  /** RFC 8707 `resource` parameter when the auth declares `audience`. */
-  audience?: string;
+  /** RFC 8707 `resource` parameter (`auths.{key}.resource`). */
+  resource?: string;
+  /**
+   * Endpoint methods the IdP advertises for PKCE (`code_challenge_methods_supported`).
+   * When the array includes `"S256"`, PKCE-S256 is performed; otherwise PKCE is
+   * skipped. Defaults to `["S256"]` so the secure path is the default for the
+   * integration OAuth surface (MCP authorization-spec parity + public-client
+   * code-binding).
+   */
+  codeChallengeMethodsSupported?: string[];
   /**
    * Extra static query params merged verbatim into the authorize URL
-   * (from `manifest.auths.{key}.authorizationParams`). Used by IdPs that
+   * (from `manifest.auths.{key}.authorization_params`). Used by IdPs that
    * gate refresh-token issuance on an authorize-time flag (e.g. Google's
    * `access_type=offline` + `prompt=consent`). Merged last so a manifest
    * can override the dynamic `prompt`.
@@ -96,6 +120,11 @@ export interface InitiateIntegrationOAuthInput {
    * Absent on fresh connects.
    */
   connectionId?: string;
+  /**
+   * Optional discovery hook injection (testing seam). Production callers omit
+   * it; the default fetches `${issuer}/.well-known/openid-configuration`.
+   */
+  discover?: typeof resolveOAuthEndpoints;
 }
 
 export interface InitiateIntegrationOAuthResult {
@@ -106,21 +135,50 @@ export interface InitiateIntegrationOAuthResult {
 /**
  * Build the PKCE-protected authorize URL and persist the matching state
  * record. The state record carries every field the callback will need —
- * endpoints, client credentials, audience — so the callback handler
+ * endpoints, client credentials, resource — so the callback handler
  * never needs to re-fetch the manifest.
  */
 export async function initiateIntegrationOAuth(
   store: OAuthStateStore,
   input: InitiateIntegrationOAuthInput,
 ): Promise<InitiateIntegrationOAuthResult> {
-  const tokenAuthMethod = input.tokenAuthMethod ?? "client_secret_post";
+  const tokenAuthMethod = input.tokenEndpointAuthMethod ?? "client_secret_post";
   const scopeSeparator = input.scopeSeparator ?? " ";
   const uniqueScopes = [...new Set(input.scopes ?? [])];
   const scopeString = uniqueScopes.join(scopeSeparator);
 
+  // Discovery-first endpoint resolution (RFC 8414 / OIDC). Manual endpoints
+  // always override the discovered ones; discovery is best-effort and only
+  // attempted when an `issuer` is declared and an endpoint is missing.
+  const endpoints: OAuthEndpointResolution = await (input.discover ?? resolveOAuthEndpoints)({
+    issuer: input.issuer,
+    authorizationEndpoint: input.authorizationEndpoint,
+    tokenEndpoint: input.tokenEndpoint,
+  });
+  if (!endpoints.authorizationEndpoint) {
+    throw new OAuthCallbackError(
+      "No authorization_endpoint resolved (declare it on the auth or supply a discoverable issuer)",
+      "transient",
+      integrationProviderIdSentinel(input.packageId, input.authKey),
+    );
+  }
+  if (!endpoints.tokenEndpoint) {
+    throw new OAuthCallbackError(
+      "No token_endpoint resolved (declare it on the auth or supply a discoverable issuer)",
+      "transient",
+      integrationProviderIdSentinel(input.packageId, input.authKey),
+    );
+  }
+
+  // PKCE-S256 is gated on `code_challenge_methods_supported`. The integration
+  // OAuth surface defaults to S256-on (spec §7.3 parity with the MCP
+  // authorization spec, plus public-client code-binding for `none` clients).
+  const pkceMethods = input.codeChallengeMethodsSupported ?? [PKCE_S256];
+  const usePkce = pkceMethods.includes(PKCE_S256);
+
   const state = crypto.randomUUID();
-  const codeVerifier = randomBase64Url(32);
-  const codeChallenge = sha256Base64Url(codeVerifier);
+  const codeVerifier = usePkce ? randomBase64Url(32) : "";
+  const codeChallenge = usePkce ? sha256Base64Url(codeVerifier) : "";
 
   const now = new Date();
   const record: OAuthStateRecord = {
@@ -138,9 +196,9 @@ export async function initiateIntegrationOAuth(
     integration: {
       packageId: input.packageId,
       authKey: input.authKey,
-      tokenUrl: input.tokenUrl,
-      audience: input.audience,
-      tokenAuthMethod,
+      tokenEndpoint: endpoints.tokenEndpoint,
+      resource: input.resource,
+      tokenEndpointAuthMethod: tokenAuthMethod,
       clientId: input.clientId,
       clientSecret: input.clientSecret,
       ...(input.connectionId ? { connectionId: input.connectionId } : {}),
@@ -148,30 +206,25 @@ export async function initiateIntegrationOAuth(
   };
   await store.set(state, record, OAUTH_STATE_TTL_SECONDS);
 
-  // PKCE S256 is mandatory for the integration OAuth path — spec §4.1.5
-  // ties this to MCP authorization spec parity, plus public-client
-  // security (some integrations declare `tokenAuthMethod=none` and rely
-  // entirely on PKCE for code-binding).
   const params = new URLSearchParams({
     client_id: input.clientId,
     redirect_uri: input.redirectUri,
     response_type: "code",
     state,
-    code_challenge: codeChallenge,
-    code_challenge_method: "S256",
+    ...(usePkce ? { code_challenge: codeChallenge, code_challenge_method: PKCE_S256 } : {}),
     ...(scopeString ? { scope: scopeString } : {}),
     // RFC 8707 — bind the resulting token to a specific resource server.
     // Some IdPs require this on the authorize URL too (not just on the
     // token request); harmless when accepted-but-ignored.
-    ...(input.audience ? { resource: input.audience } : {}),
+    ...(input.resource ? { resource: input.resource } : {}),
     ...(input.forceAccountSelect ? { prompt: "select_account" } : {}),
-    // Merged last: a manifest's authorizationParams (e.g. Google's
+    // Merged last: a manifest's authorization_params (e.g. Google's
     // access_type=offline + prompt=consent) wins over the dynamic prompt
     // so refresh-token issuance is never silently suppressed.
     ...(input.authorizationParams ?? {}),
   });
 
-  const authUrl = `${input.authorizationUrl}${input.authorizationUrl.includes("?") ? "&" : "?"}${params.toString()}`;
+  const authUrl = `${endpoints.authorizationEndpoint}${endpoints.authorizationEndpoint.includes("?") ? "&" : "?"}${params.toString()}`;
   return { authUrl, state };
 }
 
@@ -190,7 +243,7 @@ export interface IntegrationOAuthCallbackResult {
   /**
    * Raw token-response JSON for callers that need extra claims
    * (`id_token`, custom IdP fields, …). The platform layer's identity
-   * extraction (`extractTokenIdentity` JSONPaths) reads from here.
+   * extraction (`identity_claims` JSONPaths) reads from here.
    */
   tokenResponse: Record<string, unknown>;
   /**
@@ -235,17 +288,17 @@ export async function handleIntegrationOAuthCallback(
   const sentinel = integrationProviderIdSentinel(integration.packageId, integration.authKey);
 
   const { parsed, raw: tokenData } = await exchangeAuthorizationCode({
-    tokenUrl: integration.tokenUrl,
+    tokenEndpoint: integration.tokenEndpoint,
     clientId: integration.clientId ?? "",
     clientSecret: integration.clientSecret ?? "",
-    tokenAuthMethod: integration.tokenAuthMethod ?? "client_secret_post",
-    codeVerifier: stateRow.codeVerifier,
+    tokenEndpointAuthMethod: integration.tokenEndpointAuthMethod ?? "client_secret_post",
+    codeVerifier: stateRow.codeVerifier || undefined,
     redirectUri: stateRow.redirectUri,
     code,
     scopesRequested: stateRow.scopesRequested,
     // RFC 8707 — re-bind on the token request even if we sent it on the
     // authorize URL; some IdPs only honour it here.
-    ...(integration.audience ? { extraTokenParams: { resource: integration.audience } } : {}),
+    ...(integration.resource ? { extraTokenParams: { resource: integration.resource } } : {}),
     errorLabel: sentinel,
     state,
     store,

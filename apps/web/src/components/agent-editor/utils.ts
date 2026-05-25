@@ -41,7 +41,7 @@ export function defaultEditorState(orgSlug?: string, userEmail?: string): AgentE
       type: "agent",
       name: orgSlug ? `@${orgSlug}/` : "",
       version: "1.0.0",
-      displayName: "",
+      display_name: "",
       description: "",
       author: userEmail ?? "",
       timeout: 300,
@@ -63,7 +63,7 @@ export function defaultSkillManifest(
     type: "skill",
     name: orgSlug ? `@${orgSlug}/` : "",
     version: "1.0.0",
-    displayName: "",
+    display_name: "",
     description: "",
     author: userEmail ?? "",
   };
@@ -71,16 +71,16 @@ export function defaultSkillManifest(
 
 export const DEFAULT_SKILL_CONTENT = "---\nname: \ndescription: \n---\n\n";
 
-// ─── Runtime tools (manifest.runtimeTools) ──────────────────
+// ─── Runtime tools (manifest.runtime_tools) ──────────────────
 
 /**
- * Read the agent manifest's top-level `runtimeTools: string[]` — the
- * built-in runtime tools the agent author opted into (all opt-in,
- * `output` included). Tolerates a missing or malformed field by
- * returning an empty array.
+ * Read the agent manifest's top-level `runtime_tools: string[]` (AFPS 2.0;
+ * was 1.x `runtimeTools`) — the built-in runtime tools the agent author opted
+ * into (all opt-in, `output` included). Tolerates a missing or malformed field
+ * by returning an empty array.
  */
 export function getRuntimeTools(m: Record<string, unknown>): string[] {
-  const raw = m.runtimeTools;
+  const raw = m.runtime_tools;
   return Array.isArray(raw) ? raw.filter((v): v is string => typeof v === "string") : [];
 }
 
@@ -90,9 +90,9 @@ export function getRuntimeTools(m: Record<string, unknown>): string[] {
  */
 export function setRuntimeTools(m: Record<string, unknown>, tools: string[]): void {
   if (tools.length > 0) {
-    m.runtimeTools = tools;
+    m.runtime_tools = tools;
   } else {
-    delete m.runtimeTools;
+    delete m.runtime_tools;
   }
 }
 
@@ -111,7 +111,7 @@ export function manifestToMetadata(m: Record<string, unknown>): MetadataState {
     id,
     scope,
     version: (m.version as string) ?? "1.0.0",
-    displayName: (m.displayName as string) ?? "",
+    displayName: (m.display_name as string) ?? "",
     description: (m.description as string) ?? "",
     author: (m.author as string) ?? "",
     keywords: Array.isArray(m.keywords) ? (m.keywords as string[]) : [],
@@ -124,7 +124,7 @@ export function metadataToManifestPatch(m: MetadataState): Record<string, unknow
   return {
     name: m.scope ? `@${m.scope}/${m.id}` : m.id,
     version: m.version,
-    displayName: m.displayName,
+    display_name: m.displayName,
     description: m.description,
     author: m.author,
     keywords: m.keywords,

@@ -17,9 +17,9 @@ import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { pickNpmEntryPoint, BundlerError } from "../src/integration-bundle/npm-vendor.ts";
-import type { NpmRegistryVersion } from "../src/integration-bundle/npm-vendor.ts";
-import { pickPypiEntryPoint } from "../src/integration-bundle/pypi-vendor.ts";
+import { pickNpmEntryPoint, BundlerError } from "../src/mcp-server-bundle/npm-vendor.ts";
+import type { NpmRegistryVersion } from "../src/mcp-server-bundle/npm-vendor.ts";
+import { pickPypiEntryPoint } from "../src/mcp-server-bundle/pypi-vendor.ts";
 
 describe("pickNpmEntryPoint", () => {
   // Each row exercises one precedence rung of the resolver:

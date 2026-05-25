@@ -35,39 +35,39 @@ import { seedPackage, seedApiKey, seedApplication } from "../../helpers/seed.ts"
 import { eq } from "drizzle-orm";
 import { integrationConnections, applicationPackages } from "@appstrate/db/schema";
 import type { IntegrationManifest } from "@appstrate/core/integration";
+import {
+  localIntegrationManifest,
+  httpHeaderDelivery,
+} from "../../helpers/integration-manifests.ts";
 
 const app = getTestApp();
 
 function gmailManifest(name = "@myorg/gmail"): IntegrationManifest {
-  return {
-    manifestVersion: "1.0",
-    type: "integration",
+  return localIntegrationManifest({
     name,
     version: "0.1.0",
     displayName: "Gmail",
     description: "Gmail integration",
-    server: { type: "node", entryPoint: "main.js" },
     auths: {
       api: {
         type: "api_key",
         authorizedUris: ["https://gmail.googleapis.com/**"],
-        credentials: { schema: { type: "object", properties: { api_key: { type: "string" } } } },
-        delivery: {
-          http: { headerName: "Authorization", headerPrefix: "Bearer", valueFrom: "api_key" },
-        },
+        delivery: httpHeaderDelivery({ name: "Authorization", prefix: "Bearer", field: "api_key" }),
       },
       google: {
         type: "oauth2",
-        authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth",
-        tokenUrl: "https://oauth2.googleapis.com/token",
-        scopes: ["openid", "email"],
+        authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",
+        tokenEndpoint: "https://oauth2.googleapis.com/token",
+        defaultScopes: ["openid", "email"],
         authorizedUris: ["https://www.googleapis.com/**"],
-        delivery: {
-          http: { headerName: "Authorization", headerPrefix: "Bearer", valueFrom: "access_token" },
-        },
+        delivery: httpHeaderDelivery({
+          name: "Authorization",
+          prefix: "Bearer",
+          field: "access_token",
+        }),
       },
     },
-  };
+  });
 }
 
 async function seedIntegration(orgId: string, manifest: IntegrationManifest) {

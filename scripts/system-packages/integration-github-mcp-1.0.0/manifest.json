@@ -1,31 +1,27 @@
 {
-  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
-  "manifestVersion": "1.1",
-  "type": "integration",
   "name": "@appstrate/github-mcp",
   "version": "1.0.0",
-  "displayName": "GitHub",
+  "type": "integration",
+  "schema_version": "2.0",
+  "display_name": "GitHub",
   "description": "GitHub integration backed by GitHub's official remote MCP server (api.githubcopilot.com/mcp/). Full ~80-tool catalog spanning every documented toolset (context, repos, issues, pull_requests, actions, code_security, secret_protection, dependabot, notifications, users, orgs, projects, gists, discussions, copilot, copilot_spaces, git, labels, stargazers, security_advisories, github_support_docs_search). Two interchangeable auth paths: (1) OAuth — full OAuth App flow with per-tool scope inference; (2) PAT — Personal Access Token Bearer. GitHub MCP does not support Dynamic Client Registration: OAuth requires an OAuth App registered in the user's GitHub account. The selected access token is Bearer-injected on every MCP request by the sidecar.",
   "license": "Apache-2.0",
-  "author": "Appstrate",
-  "iconUrl": "github",
-  "categories": ["development", "code", "issue-tracking", "ci-cd"],
-  "server": {
-    "type": "http",
-    "url": "https://api.githubcopilot.com/mcp/"
-  },
-  "transport": {
-    "type": "streamable-http"
+  "source": {
+    "kind": "remote",
+    "remote": {
+      "url": "https://api.githubcopilot.com/mcp/",
+      "transport": "streamable-http"
+    }
   },
   "auths": {
     "oauth": {
       "type": "oauth2",
-      "required": false,
-      "authorizationUrl": "https://github.com/login/oauth/authorize",
-      "tokenUrl": "https://github.com/login/oauth/access_token",
-      "refreshUrl": "https://github.com/login/oauth/access_token",
-      "userinfoUrl": "https://api.github.com/user",
-      "extractTokenIdentity": {
+      "authorization_endpoint": "https://github.com/login/oauth/authorize",
+      "token_endpoint": "https://github.com/login/oauth/access_token",
+      "userinfo_endpoint": "https://api.github.com/user",
+      "default_scopes": ["read:user", "repo"],
+      "token_endpoint_auth_method": "client_secret_post",
+      "identity_claims": {
         "accountId": "$.login",
         "sub": "$.id",
         "login": "$.login",
@@ -33,11 +29,7 @@
         "email": "$.email",
         "avatarUrl": "$.avatar_url"
       },
-      "scopes": ["read:user", "repo"],
-      "scopeSeparator": " ",
-      "tokenAuthMethod": "client_secret_post",
-      "authorizedUris": ["https://api.githubcopilot.com/**", "https://api.github.com/**"],
-      "availableScopes": [
+      "scope_catalog": [
         {
           "value": "read:user",
           "label": "Read profile",
@@ -86,7 +78,11 @@
           "description": "Full admin access to organizations (rarely needed).",
           "implies": ["write:org", "read:org"]
         },
-        { "value": "gist", "label": "Gists", "description": "Create and manage gists." },
+        {
+          "value": "gist",
+          "label": "Gists",
+          "description": "Create and manage gists."
+        },
         {
           "value": "notifications",
           "label": "Notifications",
@@ -141,12 +137,27 @@
           "implies": ["read:packages"]
         }
       ],
-      "delivery": { "http": {} }
+      "authorized_uris": ["https://api.githubcopilot.com/**", "https://api.github.com/**"],
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer ",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": " "
+        },
+        "dev.appstrate/auth": {
+          "required": false
+        }
+      }
     },
     "pat": {
       "type": "api_key",
-      "required": false,
-      "authorizedUris": ["https://api.githubcopilot.com/**", "https://api.github.com/**"],
+      "authorized_uris": ["https://api.githubcopilot.com/**", "https://api.github.com/**"],
       "credentials": {
         "schema": {
           "type": "object",
@@ -161,154 +172,364 @@
       },
       "delivery": {
         "http": {
-          "headerName": "Authorization",
-          "headerPrefix": "Bearer ",
-          "valueFrom": "personal_access_token"
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer ",
+          "value": "{$credential.personal_access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/auth": {
+          "required": false
         }
       }
     }
   },
   "tools": {
-    "get_me": { "requiredAuthKey": "oauth", "requiredScopes": ["read:user"] },
-    "get_teams": { "requiredAuthKey": "oauth", "requiredScopes": ["read:org"] },
-    "get_team_members": { "requiredAuthKey": "oauth", "requiredScopes": ["read:org"] },
-
-    "search_repositories": { "requiredAuthKey": "oauth", "requiredScopes": ["public_repo"] },
-    "search_code": { "requiredAuthKey": "oauth", "requiredScopes": ["public_repo"] },
-    "list_branches": { "requiredAuthKey": "oauth", "requiredScopes": ["public_repo"] },
-    "list_commits": { "requiredAuthKey": "oauth", "requiredScopes": ["public_repo"] },
-    "get_commit": { "requiredAuthKey": "oauth", "requiredScopes": ["public_repo"] },
-    "list_tags": { "requiredAuthKey": "oauth", "requiredScopes": ["public_repo"] },
-    "get_tag": { "requiredAuthKey": "oauth", "requiredScopes": ["public_repo"] },
-    "get_file_contents": { "requiredAuthKey": "oauth", "requiredScopes": ["public_repo"] },
-    "list_releases": { "requiredAuthKey": "oauth", "requiredScopes": ["public_repo"] },
-    "get_latest_release": { "requiredAuthKey": "oauth", "requiredScopes": ["public_repo"] },
-    "get_release_by_tag": { "requiredAuthKey": "oauth", "requiredScopes": ["public_repo"] },
-    "list_repository_collaborators": { "requiredAuthKey": "oauth", "requiredScopes": ["repo"] },
-    "create_branch": { "requiredAuthKey": "oauth", "requiredScopes": ["repo"] },
-    "create_or_update_file": { "requiredAuthKey": "oauth", "requiredScopes": ["repo"] },
-    "create_repository": { "requiredAuthKey": "oauth", "requiredScopes": ["repo"] },
-    "delete_file": { "requiredAuthKey": "oauth", "requiredScopes": ["repo"] },
-    "fork_repository": { "requiredAuthKey": "oauth", "requiredScopes": ["public_repo"] },
-    "push_files": { "requiredAuthKey": "oauth", "requiredScopes": ["repo"] },
-
-    "search_issues": { "requiredAuthKey": "oauth", "requiredScopes": ["public_repo"] },
-    "list_issues": { "requiredAuthKey": "oauth", "requiredScopes": ["public_repo"] },
-    "issue_read": { "requiredAuthKey": "oauth", "requiredScopes": ["public_repo"] },
-    "list_issue_types": { "requiredAuthKey": "oauth", "requiredScopes": ["public_repo"] },
-    "issue_write": { "requiredAuthKey": "oauth", "requiredScopes": ["repo"] },
-    "add_issue_comment": { "requiredAuthKey": "oauth", "requiredScopes": ["repo"] },
-    "sub_issue_write": { "requiredAuthKey": "oauth", "requiredScopes": ["repo"] },
-
-    "search_pull_requests": { "requiredAuthKey": "oauth", "requiredScopes": ["public_repo"] },
-    "list_pull_requests": { "requiredAuthKey": "oauth", "requiredScopes": ["public_repo"] },
-    "pull_request_read": { "requiredAuthKey": "oauth", "requiredScopes": ["public_repo"] },
-    "create_pull_request": { "requiredAuthKey": "oauth", "requiredScopes": ["repo"] },
-    "update_pull_request": { "requiredAuthKey": "oauth", "requiredScopes": ["repo"] },
-    "update_pull_request_branch": { "requiredAuthKey": "oauth", "requiredScopes": ["repo"] },
-    "merge_pull_request": { "requiredAuthKey": "oauth", "requiredScopes": ["repo"] },
-    "pull_request_review_write": { "requiredAuthKey": "oauth", "requiredScopes": ["repo"] },
-    "add_comment_to_pending_review": { "requiredAuthKey": "oauth", "requiredScopes": ["repo"] },
-    "add_reply_to_pull_request_comment": { "requiredAuthKey": "oauth", "requiredScopes": ["repo"] },
-
-    "actions_list": { "requiredAuthKey": "oauth", "requiredScopes": ["workflow"] },
-    "actions_get": { "requiredAuthKey": "oauth", "requiredScopes": ["workflow"] },
-    "get_job_logs": { "requiredAuthKey": "oauth", "requiredScopes": ["workflow"] },
-    "actions_run_trigger": { "requiredAuthKey": "oauth", "requiredScopes": ["workflow"] },
-
+    "get_me": {
+      "required_scopes": ["read:user"],
+      "required_auth_key": "oauth"
+    },
+    "get_teams": {
+      "required_scopes": ["read:org"],
+      "required_auth_key": "oauth"
+    },
+    "get_team_members": {
+      "required_scopes": ["read:org"],
+      "required_auth_key": "oauth"
+    },
+    "search_repositories": {
+      "required_scopes": ["public_repo"],
+      "required_auth_key": "oauth"
+    },
+    "search_code": {
+      "required_scopes": ["public_repo"],
+      "required_auth_key": "oauth"
+    },
+    "list_branches": {
+      "required_scopes": ["public_repo"],
+      "required_auth_key": "oauth"
+    },
+    "list_commits": {
+      "required_scopes": ["public_repo"],
+      "required_auth_key": "oauth"
+    },
+    "get_commit": {
+      "required_scopes": ["public_repo"],
+      "required_auth_key": "oauth"
+    },
+    "list_tags": {
+      "required_scopes": ["public_repo"],
+      "required_auth_key": "oauth"
+    },
+    "get_tag": {
+      "required_scopes": ["public_repo"],
+      "required_auth_key": "oauth"
+    },
+    "get_file_contents": {
+      "required_scopes": ["public_repo"],
+      "required_auth_key": "oauth"
+    },
+    "list_releases": {
+      "required_scopes": ["public_repo"],
+      "required_auth_key": "oauth"
+    },
+    "get_latest_release": {
+      "required_scopes": ["public_repo"],
+      "required_auth_key": "oauth"
+    },
+    "get_release_by_tag": {
+      "required_scopes": ["public_repo"],
+      "required_auth_key": "oauth"
+    },
+    "list_repository_collaborators": {
+      "required_scopes": ["repo"],
+      "required_auth_key": "oauth"
+    },
+    "create_branch": {
+      "required_scopes": ["repo"],
+      "required_auth_key": "oauth"
+    },
+    "create_or_update_file": {
+      "required_scopes": ["repo"],
+      "required_auth_key": "oauth"
+    },
+    "create_repository": {
+      "required_scopes": ["repo"],
+      "required_auth_key": "oauth"
+    },
+    "delete_file": {
+      "required_scopes": ["repo"],
+      "required_auth_key": "oauth"
+    },
+    "fork_repository": {
+      "required_scopes": ["public_repo"],
+      "required_auth_key": "oauth"
+    },
+    "push_files": {
+      "required_scopes": ["repo"],
+      "required_auth_key": "oauth"
+    },
+    "search_issues": {
+      "required_scopes": ["public_repo"],
+      "required_auth_key": "oauth"
+    },
+    "list_issues": {
+      "required_scopes": ["public_repo"],
+      "required_auth_key": "oauth"
+    },
+    "issue_read": {
+      "required_scopes": ["public_repo"],
+      "required_auth_key": "oauth"
+    },
+    "list_issue_types": {
+      "required_scopes": ["public_repo"],
+      "required_auth_key": "oauth"
+    },
+    "issue_write": {
+      "required_scopes": ["repo"],
+      "required_auth_key": "oauth"
+    },
+    "add_issue_comment": {
+      "required_scopes": ["repo"],
+      "required_auth_key": "oauth"
+    },
+    "sub_issue_write": {
+      "required_scopes": ["repo"],
+      "required_auth_key": "oauth"
+    },
+    "search_pull_requests": {
+      "required_scopes": ["public_repo"],
+      "required_auth_key": "oauth"
+    },
+    "list_pull_requests": {
+      "required_scopes": ["public_repo"],
+      "required_auth_key": "oauth"
+    },
+    "pull_request_read": {
+      "required_scopes": ["public_repo"],
+      "required_auth_key": "oauth"
+    },
+    "create_pull_request": {
+      "required_scopes": ["repo"],
+      "required_auth_key": "oauth"
+    },
+    "update_pull_request": {
+      "required_scopes": ["repo"],
+      "required_auth_key": "oauth"
+    },
+    "update_pull_request_branch": {
+      "required_scopes": ["repo"],
+      "required_auth_key": "oauth"
+    },
+    "merge_pull_request": {
+      "required_scopes": ["repo"],
+      "required_auth_key": "oauth"
+    },
+    "pull_request_review_write": {
+      "required_scopes": ["repo"],
+      "required_auth_key": "oauth"
+    },
+    "add_comment_to_pending_review": {
+      "required_scopes": ["repo"],
+      "required_auth_key": "oauth"
+    },
+    "add_reply_to_pull_request_comment": {
+      "required_scopes": ["repo"],
+      "required_auth_key": "oauth"
+    },
+    "actions_list": {
+      "required_scopes": ["workflow"],
+      "required_auth_key": "oauth"
+    },
+    "actions_get": {
+      "required_scopes": ["workflow"],
+      "required_auth_key": "oauth"
+    },
+    "get_job_logs": {
+      "required_scopes": ["workflow"],
+      "required_auth_key": "oauth"
+    },
+    "actions_run_trigger": {
+      "required_scopes": ["workflow"],
+      "required_auth_key": "oauth"
+    },
     "list_code_scanning_alerts": {
-      "requiredAuthKey": "oauth",
-      "requiredScopes": ["security_events"]
+      "required_scopes": ["security_events"],
+      "required_auth_key": "oauth"
     },
     "get_code_scanning_alert": {
-      "requiredAuthKey": "oauth",
-      "requiredScopes": ["security_events"]
+      "required_scopes": ["security_events"],
+      "required_auth_key": "oauth"
     },
-
     "list_secret_scanning_alerts": {
-      "requiredAuthKey": "oauth",
-      "requiredScopes": ["security_events"]
+      "required_scopes": ["security_events"],
+      "required_auth_key": "oauth"
     },
     "get_secret_scanning_alert": {
-      "requiredAuthKey": "oauth",
-      "requiredScopes": ["security_events"]
+      "required_scopes": ["security_events"],
+      "required_auth_key": "oauth"
     },
-
-    "list_dependabot_alerts": { "requiredAuthKey": "oauth", "requiredScopes": ["security_events"] },
-    "get_dependabot_alert": { "requiredAuthKey": "oauth", "requiredScopes": ["security_events"] },
-
-    "list_notifications": { "requiredAuthKey": "oauth", "requiredScopes": ["notifications"] },
-    "get_notification_details": { "requiredAuthKey": "oauth", "requiredScopes": ["notifications"] },
+    "list_dependabot_alerts": {
+      "required_scopes": ["security_events"],
+      "required_auth_key": "oauth"
+    },
+    "get_dependabot_alert": {
+      "required_scopes": ["security_events"],
+      "required_auth_key": "oauth"
+    },
+    "list_notifications": {
+      "required_scopes": ["notifications"],
+      "required_auth_key": "oauth"
+    },
+    "get_notification_details": {
+      "required_scopes": ["notifications"],
+      "required_auth_key": "oauth"
+    },
     "mark_all_notifications_read": {
-      "requiredAuthKey": "oauth",
-      "requiredScopes": ["notifications"]
+      "required_scopes": ["notifications"],
+      "required_auth_key": "oauth"
     },
-    "dismiss_notification": { "requiredAuthKey": "oauth", "requiredScopes": ["notifications"] },
+    "dismiss_notification": {
+      "required_scopes": ["notifications"],
+      "required_auth_key": "oauth"
+    },
     "manage_notification_subscription": {
-      "requiredAuthKey": "oauth",
-      "requiredScopes": ["notifications"]
+      "required_scopes": ["notifications"],
+      "required_auth_key": "oauth"
     },
     "manage_repository_notification_subscription": {
-      "requiredAuthKey": "oauth",
-      "requiredScopes": ["notifications"]
+      "required_scopes": ["notifications"],
+      "required_auth_key": "oauth"
     },
-
-    "search_users": { "requiredAuthKey": "oauth", "requiredScopes": [] },
-
-    "search_orgs": { "requiredAuthKey": "oauth", "requiredScopes": [] },
-
-    "projects_list": { "requiredAuthKey": "oauth", "requiredScopes": ["read:project"] },
-    "projects_get": { "requiredAuthKey": "oauth", "requiredScopes": ["read:project"] },
-    "projects_write": { "requiredAuthKey": "oauth", "requiredScopes": ["project"] },
-
-    "list_gists": { "requiredAuthKey": "oauth", "requiredScopes": ["gist"] },
-    "get_gist": { "requiredAuthKey": "oauth", "requiredScopes": ["gist"] },
-    "create_gist": { "requiredAuthKey": "oauth", "requiredScopes": ["gist"] },
-    "update_gist": { "requiredAuthKey": "oauth", "requiredScopes": ["gist"] },
-
-    "list_discussions": { "requiredAuthKey": "oauth", "requiredScopes": ["read:discussion"] },
+    "search_users": {
+      "required_scopes": [],
+      "required_auth_key": "oauth"
+    },
+    "search_orgs": {
+      "required_scopes": [],
+      "required_auth_key": "oauth"
+    },
+    "projects_list": {
+      "required_scopes": ["read:project"],
+      "required_auth_key": "oauth"
+    },
+    "projects_get": {
+      "required_scopes": ["read:project"],
+      "required_auth_key": "oauth"
+    },
+    "projects_write": {
+      "required_scopes": ["project"],
+      "required_auth_key": "oauth"
+    },
+    "list_gists": {
+      "required_scopes": ["gist"],
+      "required_auth_key": "oauth"
+    },
+    "get_gist": {
+      "required_scopes": ["gist"],
+      "required_auth_key": "oauth"
+    },
+    "create_gist": {
+      "required_scopes": ["gist"],
+      "required_auth_key": "oauth"
+    },
+    "update_gist": {
+      "required_scopes": ["gist"],
+      "required_auth_key": "oauth"
+    },
+    "list_discussions": {
+      "required_scopes": ["read:discussion"],
+      "required_auth_key": "oauth"
+    },
     "list_discussion_categories": {
-      "requiredAuthKey": "oauth",
-      "requiredScopes": ["read:discussion"]
+      "required_scopes": ["read:discussion"],
+      "required_auth_key": "oauth"
     },
-    "get_discussion": { "requiredAuthKey": "oauth", "requiredScopes": ["read:discussion"] },
+    "get_discussion": {
+      "required_scopes": ["read:discussion"],
+      "required_auth_key": "oauth"
+    },
     "get_discussion_comments": {
-      "requiredAuthKey": "oauth",
-      "requiredScopes": ["read:discussion"]
+      "required_scopes": ["read:discussion"],
+      "required_auth_key": "oauth"
     },
     "discussion_comment_write": {
-      "requiredAuthKey": "oauth",
-      "requiredScopes": ["write:discussion"]
+      "required_scopes": ["write:discussion"],
+      "required_auth_key": "oauth"
     },
-
-    "assign_copilot_to_issue": { "requiredAuthKey": "oauth", "requiredScopes": ["repo"] },
-    "request_copilot_review": { "requiredAuthKey": "oauth", "requiredScopes": ["repo"] },
-    "create_pull_request_with_copilot": { "requiredAuthKey": "oauth", "requiredScopes": ["repo"] },
-
-    "list_copilot_spaces": { "requiredAuthKey": "oauth", "requiredScopes": ["read:user"] },
-    "get_copilot_space": { "requiredAuthKey": "oauth", "requiredScopes": ["read:user"] },
-
-    "get_repository_tree": { "requiredAuthKey": "oauth", "requiredScopes": ["public_repo"] },
-
-    "list_label": { "requiredAuthKey": "oauth", "requiredScopes": ["public_repo"] },
-    "get_label": { "requiredAuthKey": "oauth", "requiredScopes": ["public_repo"] },
-    "label_write": { "requiredAuthKey": "oauth", "requiredScopes": ["repo"] },
-
-    "list_starred_repositories": { "requiredAuthKey": "oauth", "requiredScopes": ["public_repo"] },
-    "star_repository": { "requiredAuthKey": "oauth", "requiredScopes": ["public_repo"] },
-    "unstar_repository": { "requiredAuthKey": "oauth", "requiredScopes": ["public_repo"] },
-
-    "list_global_security_advisories": { "requiredAuthKey": "oauth", "requiredScopes": [] },
-    "get_global_security_advisory": { "requiredAuthKey": "oauth", "requiredScopes": [] },
+    "assign_copilot_to_issue": {
+      "required_scopes": ["repo"],
+      "required_auth_key": "oauth"
+    },
+    "request_copilot_review": {
+      "required_scopes": ["repo"],
+      "required_auth_key": "oauth"
+    },
+    "create_pull_request_with_copilot": {
+      "required_scopes": ["repo"],
+      "required_auth_key": "oauth"
+    },
+    "list_copilot_spaces": {
+      "required_scopes": ["read:user"],
+      "required_auth_key": "oauth"
+    },
+    "get_copilot_space": {
+      "required_scopes": ["read:user"],
+      "required_auth_key": "oauth"
+    },
+    "get_repository_tree": {
+      "required_scopes": ["public_repo"],
+      "required_auth_key": "oauth"
+    },
+    "list_label": {
+      "required_scopes": ["public_repo"],
+      "required_auth_key": "oauth"
+    },
+    "get_label": {
+      "required_scopes": ["public_repo"],
+      "required_auth_key": "oauth"
+    },
+    "label_write": {
+      "required_scopes": ["repo"],
+      "required_auth_key": "oauth"
+    },
+    "list_starred_repositories": {
+      "required_scopes": ["public_repo"],
+      "required_auth_key": "oauth"
+    },
+    "star_repository": {
+      "required_scopes": ["public_repo"],
+      "required_auth_key": "oauth"
+    },
+    "unstar_repository": {
+      "required_scopes": ["public_repo"],
+      "required_auth_key": "oauth"
+    },
+    "list_global_security_advisories": {
+      "required_scopes": [],
+      "required_auth_key": "oauth"
+    },
+    "get_global_security_advisory": {
+      "required_scopes": [],
+      "required_auth_key": "oauth"
+    },
     "list_repository_security_advisories": {
-      "requiredAuthKey": "oauth",
-      "requiredScopes": ["repo"]
+      "required_scopes": ["repo"],
+      "required_auth_key": "oauth"
     },
     "list_org_repository_security_advisories": {
-      "requiredAuthKey": "oauth",
-      "requiredScopes": ["repo"]
+      "required_scopes": ["repo"],
+      "required_auth_key": "oauth"
     },
-
-    "github_support_docs_search": { "requiredAuthKey": "oauth", "requiredScopes": [] }
+    "github_support_docs_search": {
+      "required_scopes": [],
+      "required_auth_key": "oauth"
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    }
   }
 }

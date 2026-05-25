@@ -80,23 +80,28 @@ function startTokenServer(): TokenServer {
 
 function gmailManifest(tokenUrl: string): Record<string, unknown> {
   return {
-    manifestVersion: "1.1",
+    schema_version: "2.0",
     type: "integration",
     name: INTEGRATION_ID,
     version: "1.0.0",
-    displayName: "Gmail",
-    server: { type: "python", entryPoint: "./server.py" },
+    display_name: "Gmail",
+    source: { kind: "local", server: { name: "@official/gmail-server", version: "^1.0.0" } },
     auths: {
       primary: {
         type: "oauth2",
-        authorizationUrl: "https://idp/a",
-        tokenUrl,
-        tokenAuthMethod: "client_secret_post",
-        authorizedUris: ["https://api/*"],
+        authorization_endpoint: "https://idp/a",
+        token_endpoint: tokenUrl,
+        token_endpoint_auth_method: "client_secret_post",
+        authorized_uris: ["https://api/*"],
         delivery: {
-          http: { headerName: "Authorization", headerPrefix: "Bearer ", valueFrom: "access_token" },
+          http: {
+            in: "header",
+            name: "Authorization",
+            prefix: "Bearer ",
+            value: "{$credential.access_token}",
+          },
         },
-        availableScopes: [
+        scope_catalog: [
           { value: "read", label: "Read" },
           { value: "send", label: "Send" },
           { value: "delete", label: "Delete" },
@@ -104,9 +109,9 @@ function gmailManifest(tokenUrl: string): Record<string, unknown> {
       },
     },
     tools: {
-      list_messages: { requiredScopes: ["read"] },
-      send_message: { requiredScopes: ["send"] },
-      delete_message: { requiredScopes: ["delete"] },
+      list_messages: { required_scopes: ["read"] },
+      send_message: { required_scopes: ["send"] },
+      delete_message: { required_scopes: ["delete"] },
     },
   };
 }
@@ -116,8 +121,8 @@ function agentManifest(name: string, tools: string[]): Record<string, unknown> {
     name,
     version: "1.0.0",
     type: "agent",
-    schemaVersion: "1.0",
-    displayName: name,
+    schema_version: "2.0",
+    display_name: name,
     dependencies: { integrations: { [INTEGRATION_ID]: "^1.0.0" } },
     integrations: { [INTEGRATION_ID]: { tools } },
   };

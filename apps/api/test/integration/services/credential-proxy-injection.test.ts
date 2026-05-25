@@ -25,6 +25,11 @@ import { applicationPackages, integrationConnections } from "@appstrate/db/schem
 import { encryptCredentials } from "@appstrate/connect";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { proxyCall, ProxySubstitutionError } from "../../../src/services/credential-proxy/core.ts";
+import {
+  localIntegrationManifest,
+  httpHeaderDelivery,
+  envDelivery,
+} from "../../helpers/integration-manifests.ts";
 
 async function seedIntegration(orgId: string, manifest: IntegrationManifest) {
   return seedPackage({
@@ -69,25 +74,25 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
 
   it("injects Authorization: Bearer <token> for an api_key delivery.http plan", async () => {
     const packageId = "@cpinjectorg/gmail";
-    await seedIntegration(ctx.orgId, {
-      manifestVersion: "1.0",
-      type: "integration",
-      name: packageId,
-      version: "1.0.0",
-      displayName: "Gmail",
-      description: "Gmail integration",
-      server: { type: "node", entryPoint: "main.js" },
-      auths: {
-        api: {
-          type: "api_key",
-          authorizedUris: ["https://gmail.googleapis.com/**"],
-          credentials: { schema: { type: "object", properties: { api_key: { type: "string" } } } },
-          delivery: {
-            http: { headerName: "Authorization", headerPrefix: "Bearer ", valueFrom: "api_key" },
+    await seedIntegration(
+      ctx.orgId,
+      localIntegrationManifest({
+        name: packageId,
+        displayName: "Gmail",
+        description: "Gmail integration",
+        auths: {
+          api: {
+            type: "api_key",
+            authorizedUris: ["https://gmail.googleapis.com/**"],
+            delivery: httpHeaderDelivery({
+              name: "Authorization",
+              prefix: "Bearer ",
+              field: "api_key",
+            }),
           },
         },
-      },
-    });
+      }),
+    );
     await installAndConnect(ctx, packageId, "api", { api_key: "ya29.live-token" });
 
     let captured: Record<string, string> | undefined;
@@ -120,25 +125,21 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
 
   it("injects X-Api-Key without prefix when the plan declares it", async () => {
     const packageId = "@cpinjectorg/svc";
-    await seedIntegration(ctx.orgId, {
-      manifestVersion: "1.0",
-      type: "integration",
-      name: packageId,
-      version: "1.0.0",
-      displayName: "Svc",
-      description: "Svc integration",
-      server: { type: "node", entryPoint: "main.js" },
-      auths: {
-        api: {
-          type: "api_key",
-          authorizedUris: ["https://api.example.com/**"],
-          credentials: { schema: { type: "object", properties: { api_key: { type: "string" } } } },
-          delivery: {
-            http: { headerName: "X-Api-Key", valueFrom: "api_key" },
+    await seedIntegration(
+      ctx.orgId,
+      localIntegrationManifest({
+        name: packageId,
+        displayName: "Svc",
+        description: "Svc integration",
+        auths: {
+          api: {
+            type: "api_key",
+            authorizedUris: ["https://api.example.com/**"],
+            delivery: httpHeaderDelivery({ name: "X-Api-Key", field: "api_key" }),
           },
         },
-      },
-    });
+      }),
+    );
     await installAndConnect(ctx, packageId, "api", { api_key: "sk_live_abc" });
 
     let captured: Record<string, string> | undefined;
@@ -167,28 +168,22 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
 
   it("does not inject when the auth declares no delivery.http (custom)", async () => {
     const packageId = "@cpinjectorg/custom";
-    await seedIntegration(ctx.orgId, {
-      manifestVersion: "1.0",
-      type: "integration",
-      name: packageId,
-      version: "1.0.0",
-      displayName: "Custom",
-      description: "Custom integration",
-      server: { type: "node", entryPoint: "main.js" },
-      auths: {
-        custom: {
-          type: "custom",
-          authorizedUris: ["https://api.example.com/**"],
-          credentials: {
-            schema: {
-              type: "object",
-              properties: { username: { type: "string" }, password: { type: "string" } },
-            },
+    await seedIntegration(
+      ctx.orgId,
+      localIntegrationManifest({
+        name: packageId,
+        displayName: "Custom",
+        description: "Custom integration",
+        auths: {
+          custom: {
+            type: "custom",
+            authorizedUris: ["https://api.example.com/**"],
+            credentialFields: ["username", "password"],
+            delivery: envDelivery({ TOKEN: "username" }),
           },
-          delivery: { env: { TOKEN: { from: "username" } } },
         },
-      },
-    });
+      }),
+    );
     await installAndConnect(ctx, packageId, "custom", { username: "admin", password: "s3cret" });
 
     let captured: Record<string, string> | undefined;
@@ -215,25 +210,21 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
 
   it("respects a caller-supplied non-Authorization header override", async () => {
     const packageId = "@cpinjectorg/dual";
-    await seedIntegration(ctx.orgId, {
-      manifestVersion: "1.0",
-      type: "integration",
-      name: packageId,
-      version: "1.0.0",
-      displayName: "Dual",
-      description: "Dual integration",
-      server: { type: "node", entryPoint: "main.js" },
-      auths: {
-        api: {
-          type: "api_key",
-          authorizedUris: ["https://api.example.com/**"],
-          credentials: { schema: { type: "object", properties: { api_key: { type: "string" } } } },
-          delivery: {
-            http: { headerName: "X-Api-Key", valueFrom: "api_key" },
+    await seedIntegration(
+      ctx.orgId,
+      localIntegrationManifest({
+        name: packageId,
+        displayName: "Dual",
+        description: "Dual integration",
+        auths: {
+          api: {
+            type: "api_key",
+            authorizedUris: ["https://api.example.com/**"],
+            delivery: httpHeaderDelivery({ name: "X-Api-Key", field: "api_key" }),
           },
         },
-      },
-    });
+      }),
+    );
     await installAndConnect(ctx, packageId, "api", { api_key: "platform-pinned-key" });
 
     let captured: Record<string, string> | undefined;
@@ -260,27 +251,23 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
 
   it("throws ProxySubstitutionError (fail-closed) when the target references an unresolved {{field}}", async () => {
     const packageId = "@cpinjectorg/failclosed";
-    await seedIntegration(ctx.orgId, {
-      manifestVersion: "1.0",
-      type: "integration",
-      name: packageId,
-      version: "1.0.0",
-      displayName: "FailClosed",
-      description: "FailClosed integration",
-      server: { type: "node", entryPoint: "main.js" },
-      auths: {
-        api: {
-          type: "api_key",
-          // `**` allows any path, so the only gate that can fire is the
-          // unresolved-placeholder fail-closed check — not the allowlist.
-          authorizedUris: ["https://api.example.com/**"],
-          credentials: { schema: { type: "object", properties: { api_key: { type: "string" } } } },
-          delivery: {
-            http: { headerName: "X-Api-Key", valueFrom: "api_key" },
+    await seedIntegration(
+      ctx.orgId,
+      localIntegrationManifest({
+        name: packageId,
+        displayName: "FailClosed",
+        description: "FailClosed integration",
+        auths: {
+          api: {
+            type: "api_key",
+            // `**` allows any path, so the only gate that can fire is the
+            // unresolved-placeholder fail-closed check — not the allowlist.
+            authorizedUris: ["https://api.example.com/**"],
+            delivery: httpHeaderDelivery({ name: "X-Api-Key", field: "api_key" }),
           },
         },
-      },
-    });
+      }),
+    );
     // Resolved credential fields = { api_key }. The target references
     // {{mailbox}}, which is NOT a credential field → must fail closed.
     await installAndConnect(ctx, packageId, "api", { api_key: "sk_live_abc" });

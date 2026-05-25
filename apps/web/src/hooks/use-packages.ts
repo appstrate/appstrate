@@ -24,12 +24,14 @@ import type {
 const PACKAGE_CONFIG = {
   agent: { path: "agents" },
   skill: { path: "skills" },
+  "mcp-server": { path: "mcp-servers" },
   integration: { path: "integrations" },
 } as const;
 
 type PackageDetailMap = {
   agent: AgentDetail;
   skill: OrgPackageItemDetail;
+  "mcp-server": OrgPackageItemDetail;
   integration: OrgPackageItemDetail;
 };
 

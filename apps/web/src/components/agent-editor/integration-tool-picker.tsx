@@ -96,7 +96,7 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
   // keep the first occurrence's label/description.
   const scopeCatalog = new Map<string, { value: string; label: string; description?: string }>();
   for (const auth of Object.values(detail.manifest.auths ?? {})) {
-    for (const s of auth.availableScopes ?? []) {
+    for (const s of auth.scope_catalog ?? []) {
       if (!scopeCatalog.has(s.value)) scopeCatalog.set(s.value, s);
     }
   }
@@ -119,7 +119,7 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
   const inferredScopes = new Map<string, string[]>();
   for (const toolName of entry.tools ?? []) {
     const meta = declaredTools[toolName];
-    for (const scope of meta?.requiredScopes ?? []) {
+    for (const scope of meta?.required_scopes ?? []) {
       const existing = inferredScopes.get(scope) ?? [];
       if (!existing.includes(toolName)) existing.push(toolName);
       inferredScopes.set(scope, existing);
@@ -163,7 +163,7 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
   const selectNoTools = () => onChange({ ...entry, tools: [] });
 
   // Niveau 2 contract: when the integration manifest declares neither a
-  // `tools` block nor any `availableScopes` catalog, there is literally
+  // `tools` block nor any `scope_catalog` catalog, there is literally
   // nothing for the agent author to pick — every tool is allowed and
   // scopes default to `auths.{key}.scopes`. Render an explicit notice
   // (rather than `return null`) so the user understands why the panel
@@ -249,10 +249,10 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
                   />
                   <span className="flex min-w-0 flex-col">
                     <span className="font-mono">{name}</span>
-                    {meta?.requiredScopes && meta.requiredScopes.length > 0 && (
+                    {meta?.required_scopes && meta.required_scopes.length > 0 && (
                       <span className="text-muted-foreground">
                         {t("agentEditor.integrations.tools.requires")}{" "}
-                        <span className="font-mono">{meta.requiredScopes.join(", ")}</span>
+                        <span className="font-mono">{meta.required_scopes.join(", ")}</span>
                       </span>
                     )}
                   </span>

@@ -28,11 +28,11 @@ const app = getTestApp();
 function validManifest() {
   return {
     name: "@inline/r-ignored", // overridden by the platform
-    displayName: "Ad-hoc Agent",
+    display_name: "Ad-hoc Agent",
     version: "0.0.0",
     type: "agent",
     description: "Inline run",
-    schemaVersion: "1.0",
+    schema_version: "2.0",
     dependencies: {
       skills: {},
     },

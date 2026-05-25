@@ -74,21 +74,26 @@ function startTokenServer(): TokenServer {
 
 function gmailManifest(tokenUrl: string): Record<string, unknown> {
   return {
-    manifestVersion: "1.1",
+    schema_version: "2.0",
     type: "integration",
     name: INTEGRATION_ID,
     version: "1.0.0",
-    displayName: "Gmail",
-    server: { type: "python", entryPoint: "./server.py" },
+    display_name: "Gmail",
+    source: { kind: "local", server: { name: "@official/gmail-server", version: "^1.0.0" } },
     auths: {
       primary: {
         type: "oauth2",
-        authorizationUrl: "https://idp/a",
-        tokenUrl,
-        tokenAuthMethod: "client_secret_post",
-        authorizedUris: ["https://api.example.com/*"],
+        authorization_endpoint: "https://idp/a",
+        token_endpoint: tokenUrl,
+        token_endpoint_auth_method: "client_secret_post",
+        authorized_uris: ["https://api.example.com/*"],
         delivery: {
-          http: { headerName: "Authorization", headerPrefix: "Bearer ", valueFrom: "access_token" },
+          http: {
+            in: "header",
+            name: "Authorization",
+            prefix: "Bearer ",
+            value: "{$credential.access_token}",
+          },
         },
       },
     },
@@ -182,12 +187,24 @@ describe("credential-proxy integration-resolver", () => {
       type: "integration",
       source: "local",
       draftManifest: {
-        manifestVersion: "1.1",
+        schema_version: "2.0",
         type: "integration",
         name: NO_AUTH,
         version: "1.0.0",
-        displayName: "NoAuth",
-        server: { type: "python", entryPoint: "./server.py" },
+        display_name: "NoAuth",
+        source: { kind: "local", server: { name: "@official/noauth-server", version: "^1.0.0" } },
+        auths: {
+          primary: {
+            type: "api_key",
+            authorized_uris: ["https://api.example.com/*"],
+            credentials: {
+              schema: { type: "object", properties: { api_key: { type: "string" } } },
+            },
+            delivery: {
+              http: { in: "header", name: "X-Api-Key", value: "{$credential.api_key}" },
+            },
+          },
+        },
       },
     });
     await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, NO_AUTH);

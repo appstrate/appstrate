@@ -37,15 +37,15 @@ function ctx(overrides: Partial<ExecutionContext> = {}): ExecutionContext {
 }
 
 describe("buildPlatformPromptInputs", () => {
-  it("extracts template + schemaVersion + timeout from the root package", () => {
+  it("extracts template + schema_version + timeout from the root package", () => {
     const root = pkg(
       "@acme/agent@1.0.0",
-      { type: "agent", schemaVersion: "1.3", timeout: 120 },
+      { type: "agent", schema_version: "2.0", timeout: 120 },
       { "prompt.md": "HELLO" },
     );
     const inputs = buildPlatformPromptInputs(bundleOf(root), ctx());
     expect(inputs.template).toBe("HELLO");
-    expect(inputs.schemaVersion).toBe("1.3");
+    expect(inputs.schemaVersion).toBe("2.0");
     expect(inputs.timeoutSeconds).toBe(120);
   });
 
@@ -70,16 +70,22 @@ describe("buildPlatformPromptInputs", () => {
     });
   });
 
-  it("collects skill dependencies (tools are advertised via MCP tools/list, not derived here)", () => {
+  it("collects skill dependencies (mcp-servers are advertised via MCP tools/list, not derived here)", () => {
     const root = pkg("@acme/agent@1.0.0", { type: "agent" }, { "prompt.md": "" });
-    // A `tool` package (legacy) must NOT surface — tools are not collected.
-    const tool = pkg(
-      "@acme/t1@1.0.0",
-      { type: "tool", name: "tool-one", description: "First" },
-      { "TOOL.md": "# tool-one docs" },
+    // An `mcp-server` package must NOT surface — only skills are collected;
+    // mcp-server tools reach the model via MCP `tools/list`.
+    const mcp = pkg(
+      "@acme/m1@1.0.0",
+      {
+        manifest_version: "0.3",
+        name: "m1-server",
+        version: "1.0.0",
+        _meta: { "dev.afps/mcp-server": { name: "@acme/m1", type: "mcp-server" } },
+      },
+      { "server/index.js": "//" },
     );
     const skill = pkg("@acme/s1@1.0.0", { type: "skill", name: "skill-one" });
-    const inputs = buildPlatformPromptInputs(bundleOf(root, tool, skill), ctx());
+    const inputs = buildPlatformPromptInputs(bundleOf(root, mcp, skill), ctx());
     expect(inputs.availableSkills).toEqual([{ id: "@acme/s1", name: "skill-one" }]);
   });
 
@@ -98,21 +104,25 @@ describe("buildPlatformPromptInputs", () => {
       "@acme/agent@1.0.0",
       {
         type: "agent",
-        schemaVersion: "1.3",
+        schema_version: "2.0",
         timeout: 60,
         output: { schema: { properties: { msg: { type: "string" } }, required: ["msg"] } },
       },
       { "prompt.md": "Do the thing." },
     );
-    const tool = pkg("@acme/t@1.0.0", { type: "tool", name: "t", description: "d" });
+    const mcp = pkg("@acme/m@1.0.0", {
+      manifest_version: "0.3",
+      name: "m-server",
+      version: "1.0.0",
+      _meta: { "dev.afps/mcp-server": { name: "@acme/m", type: "mcp-server" } },
+    });
     const prompt = renderPlatformPrompt(
-      buildPlatformPromptInputs(bundleOf(root, tool), ctx(), { platformName: "Test" }),
+      buildPlatformPromptInputs(bundleOf(root, mcp), ctx(), { platformName: "Test" }),
     );
     expect(prompt).toContain("running on the Test platform");
     expect(prompt).toContain("**Timeout**: You have 60 seconds");
-    // Tools are advertised via MCP tools/list — not rendered in the prompt.
+    // mcp-server tools are advertised via MCP tools/list — not in the prompt.
     expect(prompt).not.toContain("### Tools");
-    expect(prompt).not.toContain("**t**: d");
     expect(prompt).toContain("## Output Format");
     expect(prompt).toContain("Do the thing.");
   });

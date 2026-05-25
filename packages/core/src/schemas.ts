@@ -11,5 +11,7 @@
 
 import agentSchema from "../schema/agent.schema.json";
 import skillSchema from "../schema/skill.schema.json";
+import mcpServerSchema from "../schema/mcp-server.schema.json";
+import integrationSchema from "../schema/integration.schema.json";
 
-export { agentSchema, skillSchema };
+export { agentSchema, skillSchema, mcpServerSchema, integrationSchema };

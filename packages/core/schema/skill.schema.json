@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Appstrate Skill Manifest",
-  "description": "Appstrate skill manifest — AFPS skill with no extensions.",
+  "description": "Appstrate skill manifest — AFPS 2.0 skill with relaxed optional metadata.",
   "type": "object",
   "properties": {
     "name": {
@@ -15,7 +15,7 @@
       "type": "string",
       "const": "skill"
     },
-    "displayName": {
+    "display_name": {
       "type": "string"
     },
     "description": {
@@ -33,9 +33,9 @@
     "repository": {
       "type": "string"
     },
-    "schemaVersion": {
+    "schema_version": {
       "type": "string",
-      "pattern": "^1\\.(0|[1-9]\\d*)$"
+      "pattern": "^2\\.(0|[1-9]\\d*)$"
     },
     "dependencies": {
       "type": "object",
@@ -50,7 +50,7 @@
             "type": "string"
           }
         },
-        "tools": {
+        "mcp_servers": {
           "type": "object",
           "propertyNames": {
             "type": "string",
@@ -60,7 +60,7 @@
             "type": "string"
           }
         },
-        "providers": {
+        "integrations": {
           "type": "object",
           "propertyNames": {
             "type": "string",
@@ -72,6 +72,19 @@
         }
       },
       "additionalProperties": {}
+    },
+    "_meta": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "propertyNames": {
+          "type": "string"
+        },
+        "additionalProperties": {}
+      }
     }
   },
   "required": [

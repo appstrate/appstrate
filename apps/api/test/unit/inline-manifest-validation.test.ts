@@ -21,8 +21,8 @@ function baseManifest(overrides: Record<string, unknown> = {}): Record<string, u
     name: "@acme/inline-test",
     version: "1.0.0",
     type: "agent",
-    schemaVersion: "1.0",
-    displayName: "Inline Test",
+    schema_version: "2.0",
+    display_name: "Inline Test",
     author: "ACME",
     ...overrides,
   };
@@ -228,7 +228,7 @@ describe("validateInlineManifest — error aggregation", () => {
   it("reports multiple independent violations in one pass", () => {
     const tight = { ...defaults, max_skills: 0, manifest_bytes: 10 };
     const manifest = baseManifest({
-      displayName: "P",
+      display_name: "P",
       dependencies: {
         skills: { "@x/a": "1.0.0", "@x/b": "1.0.0" },
       },

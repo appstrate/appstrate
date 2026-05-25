@@ -94,7 +94,7 @@ function AgentEditorInner({
     toWireBody: (s) => ({ manifest: s.manifest, content: s.prompt }),
     validate: (s) => {
       const { id } = getManifestName(s.manifest);
-      if (!id || !s.manifest.displayName) {
+      if (!id || !s.manifest.display_name) {
         return { error: t("editor.errorRequired"), tab: "general" };
       }
       if (!s.prompt.trim()) {
@@ -163,7 +163,7 @@ function AgentEditorInner({
       type="agent"
       packageId={packageId}
       isEdit={isEdit}
-      displayName={(state.manifest.displayName as string) || packageId}
+      displayName={(state.manifest.display_name as string) || packageId}
       tabs={agentTabs}
       activeTab={activeTab}
       onTabChange={(v) => {
@@ -314,7 +314,7 @@ function PackageEditorInner({
     }),
     validate: (s) => {
       const { id } = getManifestName(s.manifest);
-      if (!id || !s.manifest.displayName) {
+      if (!id || !s.manifest.display_name) {
         return { error: t("editor.errorRequired"), tab: "general" };
       }
       if (!s.content.trim()) {
@@ -344,7 +344,7 @@ function PackageEditorInner({
       type={type}
       packageId={packageId}
       isEdit={isEdit}
-      displayName={(state.manifest.displayName as string) || packageId}
+      displayName={(state.manifest.display_name as string) || packageId}
       tabs={pkgTabs}
       activeTab={activeTab}
       onTabChange={(v) => {
