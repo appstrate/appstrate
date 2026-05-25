@@ -63,7 +63,7 @@ function readTimeoutSeconds(bundle: Bundle): number | undefined {
 }
 
 /**
- * Extract the AFPS 1.3 `{ schema, fileConstraints?, uiHints?, … }` wrapper
+ * Extract the AFPS 2.0 `{ schema, file_constraints?, ui_hints?, … }` wrapper
  * for input/config/output sections. Returns the inner JSON Schema when
  * present, or `undefined`.
  */

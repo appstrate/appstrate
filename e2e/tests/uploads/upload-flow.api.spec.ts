@@ -32,7 +32,7 @@ async function createAgentWithFileInput(client: ApiClient, scope: string, name: 
         },
         required: ["doc"],
       },
-      fileConstraints: { doc: { accept: ".pdf", maxSize: 5_000_000 } },
+      file_constraints: { doc: { accept: ".pdf", max_size: 5_000_000 } },
     },
   };
 

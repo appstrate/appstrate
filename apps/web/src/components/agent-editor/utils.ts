@@ -37,7 +37,7 @@ export function defaultEditorState(orgSlug?: string, userEmail?: string): AgentE
   return {
     manifest: {
       $schema: AFPS_SCHEMA_URLS.agent,
-      schemaVersion: "1.1",
+      schema_version: "2.0",
       type: "agent",
       name: orgSlug ? `@${orgSlug}/` : "",
       version: "1.0.0",
@@ -59,7 +59,7 @@ export function defaultSkillManifest(
 ): Record<string, unknown> {
   return {
     $schema: AFPS_SCHEMA_URLS.skill,
-    schemaVersion: "1.1",
+    schema_version: "2.0",
     type: "skill",
     name: orgSlug ? `@${orgSlug}/` : "",
     version: "1.0.0",
@@ -204,13 +204,50 @@ export function toResourceEntry(r: {
 export function manifestToSchemaFields(
   manifest: Record<string, unknown>,
 ): Record<string, SchemaField[]> {
+  // AFPS 1.x compat: legacy camelCase wrappers (`fileConstraints` /
+  // `uiHints` / `propertyOrder` / `maxSize`) are still on disk for
+  // manifests saved before the 2.0 migration. Accept both shapes, prefer
+  // canonical snake_case. `fieldsToSchema` always writes canonical so
+  // re-saving migrates the manifest forward. Drop the legacy fields once a
+  // backfill re-saves every persisted manifest.
+  type LegacyConstraint = { accept?: string; max_size?: number; maxSize?: number };
   type ManifestWrapper = {
     schema?: JSONSchemaObject;
-    fileConstraints?: Record<string, { accept?: string; maxSize?: number }>;
+    file_constraints?: Record<string, LegacyConstraint>;
+    fileConstraints?: Record<string, LegacyConstraint>;
+    ui_hints?: Record<string, { placeholder?: string }>;
     uiHints?: Record<string, { placeholder?: string }>;
+    property_order?: string[];
     propertyOrder?: string[];
   };
-  const wrapperFor = (key: string) => manifest[key] as ManifestWrapper | undefined;
+  const wrapperFor = (key: string) => {
+    const raw = manifest[key] as ManifestWrapper | undefined;
+    if (!raw) return undefined;
+    const fileConstraintsRaw = raw.file_constraints ?? raw.fileConstraints;
+    const fileConstraints = fileConstraintsRaw
+      ? Object.fromEntries(
+          Object.entries(fileConstraintsRaw).map(([k, v]) => [
+            k,
+            {
+              ...(v.accept !== undefined ? { accept: v.accept } : {}),
+              // Bridge legacy maxSize into canonical max_size before passing
+              // to schemaToFields (which reads max_size via FileConstraint).
+              ...(v.max_size != null
+                ? { max_size: v.max_size }
+                : v.maxSize != null
+                  ? { max_size: v.maxSize }
+                  : {}),
+            } satisfies FileConstraint,
+          ]),
+        )
+      : undefined;
+    return {
+      schema: raw.schema,
+      file_constraints: fileConstraints,
+      ui_hints: raw.ui_hints ?? raw.uiHints,
+      property_order: raw.property_order ?? raw.propertyOrder,
+    };
+  };
   return {
     input: schemaToFields(wrapperFor("input")?.schema, "input", wrapperFor("input")),
     output: schemaToFields(wrapperFor("output")?.schema, "output", wrapperFor("output")),
@@ -235,20 +272,20 @@ export function schemaToFields(
   schema: JSONSchemaObject | undefined,
   mode: "input" | "output" | "config" | "credentials",
   wrapper?: {
-    fileConstraints?: Record<string, FileConstraint>;
-    uiHints?: Record<string, UIHint>;
-    propertyOrder?: string[];
+    file_constraints?: Record<string, FileConstraint>;
+    ui_hints?: Record<string, UIHint>;
+    property_order?: string[];
   },
 ): SchemaField[] {
   if (!schema?.properties) return [];
   const requiredSet = new Set(schema.required || []);
-  const keys = getOrderedKeys(schema, wrapper?.propertyOrder);
+  const keys = getOrderedKeys(schema, wrapper?.property_order);
   return keys.map((key) => {
     const prop = schema.properties[key]!;
     const fileField = isFileField(prop);
     const isInputFile = mode === "input" && fileField;
-    const constraints = wrapper?.fileConstraints?.[key];
-    const hint = wrapper?.uiHints?.[key];
+    const constraints = wrapper?.file_constraints?.[key];
+    const hint = wrapper?.ui_hints?.[key];
     const type = isInputFile ? "string" : typeof prop.type === "string" ? prop.type : "string";
 
     // Extract array enum items
@@ -275,7 +312,7 @@ export function schemaToFields(
         ? {
             isFile: true,
             accept: constraints?.accept || "",
-            maxSize: constraints?.maxSize != null ? String(constraints.maxSize) : "",
+            maxSize: constraints?.max_size != null ? String(constraints.max_size) : "",
             multiple: isMultipleFileField(prop),
             maxFiles: prop.maxItems != null ? String(prop.maxItems) : "",
           }
@@ -322,8 +359,8 @@ export function fieldsToSchema(
   if (filtered.length === 0) return null;
   const properties: Record<string, JSONSchema7> = {};
   const required: string[] = [];
-  const fileConstraints: Record<string, FileConstraint> = {};
-  const uiHints: Record<string, UIHint> = {};
+  const file_constraints: Record<string, FileConstraint> = {};
+  const ui_hints: Record<string, UIHint> = {};
   for (const f of filtered) {
     const key = f.key.trim();
     if (mode === "input" && f.isFile) {
@@ -346,14 +383,14 @@ export function fieldsToSchema(
         if (f.description) prop.description = f.description;
         properties[key] = prop;
       }
-      // Build fileConstraints
+      // Build file_constraints (canonical AFPS 2.0 snake_case)
       const constraint: FileConstraint = {};
       if (f.accept) constraint.accept = f.accept;
       if (f.maxSize) {
         const n = Number(f.maxSize);
-        if (!isNaN(n)) constraint.maxSize = n;
+        if (!isNaN(n)) constraint.max_size = n;
       }
-      if (Object.keys(constraint).length > 0) fileConstraints[key] = constraint;
+      if (Object.keys(constraint).length > 0) file_constraints[key] = constraint;
     } else {
       const prop: JSONSchema7 = { type: f.type as JSONSchema7TypeName };
       if (f.description) prop.description = f.description;
@@ -410,9 +447,9 @@ export function fieldsToSchema(
         }
       }
       properties[key] = prop;
-      // Build uiHints for placeholder
+      // Build ui_hints for placeholder (canonical AFPS 2.0 snake_case)
       if (mode === "input" && f.placeholder) {
-        uiHints[key] = { placeholder: f.placeholder };
+        ui_hints[key] = { placeholder: f.placeholder };
       }
     }
     if (f.required) required.push(key);
@@ -423,8 +460,8 @@ export function fieldsToSchema(
       properties,
       ...(required.length > 0 ? { required } : {}),
     },
-    ...(Object.keys(fileConstraints).length > 0 ? { fileConstraints } : {}),
-    ...(Object.keys(uiHints).length > 0 ? { uiHints } : {}),
-    propertyOrder: filtered.map((f) => f.key.trim()),
+    ...(Object.keys(file_constraints).length > 0 ? { file_constraints } : {}),
+    ...(Object.keys(ui_hints).length > 0 ? { ui_hints } : {}),
+    property_order: filtered.map((f) => f.key.trim()),
   };
 }

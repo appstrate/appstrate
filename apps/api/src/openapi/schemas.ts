@@ -211,9 +211,9 @@ export const schemas = {
         properties: {
           schema: { type: "object", description: "Pure JSON Schema 2020-12 object" },
           current: { type: "object", description: "Current configuration values" },
-          fileConstraints: { $ref: "#/components/schemas/FileConstraintsMap" },
-          uiHints: { $ref: "#/components/schemas/UIHintsMap" },
-          propertyOrder: {
+          file_constraints: { $ref: "#/components/schemas/FileConstraintsMap" },
+          ui_hints: { $ref: "#/components/schemas/UIHintsMap" },
+          property_order: {
             type: "array",
             items: { type: "string" },
             description: "Presentation order for schema properties",
@@ -225,9 +225,9 @@ export const schemas = {
         description: "AFPS schema wrapper for per-run input.",
         properties: {
           schema: { type: "object", description: "Pure JSON Schema 2020-12 object" },
-          fileConstraints: { $ref: "#/components/schemas/FileConstraintsMap" },
-          uiHints: { $ref: "#/components/schemas/UIHintsMap" },
-          propertyOrder: {
+          file_constraints: { $ref: "#/components/schemas/FileConstraintsMap" },
+          ui_hints: { $ref: "#/components/schemas/UIHintsMap" },
+          property_order: {
             type: "array",
             items: { type: "string" },
             description: "Presentation order for schema properties",
@@ -239,7 +239,7 @@ export const schemas = {
         description: "AFPS schema wrapper for per-run output.",
         properties: {
           schema: { type: "object", description: "Pure JSON Schema 2020-12 object" },
-          propertyOrder: {
+          property_order: {
             type: "array",
             items: { type: "string" },
             description: "Presentation order for schema properties",
@@ -798,7 +798,7 @@ export const schemas = {
           type: "string",
           description: "Comma-separated accepted file extensions (e.g. .pdf,.docx)",
         },
-        maxSize: {
+        max_size: {
           type: "number",
           description: "Maximum file size in bytes",
         },

@@ -9,6 +9,7 @@ import {
   setResourceEntries,
   schemaToFields,
   fieldsToSchema,
+  manifestToSchemaFields,
 } from "../utils";
 import type { SchemaField } from "../schema-section";
 import type { JSONSchemaObject } from "@appstrate/core/form";
@@ -150,6 +151,9 @@ describe("defaultEditorState", () => {
     expect(state.manifest.author).toBe("user@test.com");
     expect(state.manifest.type).toBe("agent");
     expect(state.manifest.version).toBe("1.0.0");
+    // Canonical AFPS 2.0 manifest version — was wrongly "1.1" pre-rename.
+    expect(state.manifest.schema_version).toBe("2.0");
+    expect(state.manifest.schemaVersion).toBeUndefined();
     expect(state.prompt).toBe("");
   });
 
@@ -180,7 +184,7 @@ describe("schemaToFields / fieldsToSchema roundtrip", () => {
       },
       required: ["summary"],
     } satisfies JSONSchemaObject;
-    const fields = schemaToFields(schema, "output", { propertyOrder: ["summary", "count"] });
+    const fields = schemaToFields(schema, "output", { property_order: ["summary", "count"] });
     expect(fields).toHaveLength(2);
     expect(fields[0]!.key).toBe("summary");
     expect(fields[0]!.required).toBe(true);
@@ -200,7 +204,7 @@ describe("schemaToFields / fieldsToSchema roundtrip", () => {
         mode: { type: "string", description: "Mode", default: "fast", enum: ["fast", "slow"] },
       },
     } satisfies JSONSchemaObject;
-    const fields = schemaToFields(schema, "config", { propertyOrder: ["mode"] });
+    const fields = schemaToFields(schema, "config", { property_order: ["mode"] });
     expect(fields[0]!.default).toBe("fast");
     expect(fields[0]!.enumValues).toBe("fast, slow");
 
@@ -209,7 +213,7 @@ describe("schemaToFields / fieldsToSchema roundtrip", () => {
     expect(result!.schema.properties.mode!.enum).toEqual(["fast", "slow"]);
   });
 
-  it("roundtrips input schema with placeholder via uiHints", () => {
+  it("roundtrips input schema with placeholder via ui_hints", () => {
     const schema = {
       type: "object",
       properties: {
@@ -217,14 +221,14 @@ describe("schemaToFields / fieldsToSchema roundtrip", () => {
       },
     } satisfies JSONSchemaObject;
     const wrapper = {
-      uiHints: { query: { placeholder: "Enter query..." } },
-      propertyOrder: ["query"],
+      ui_hints: { query: { placeholder: "Enter query..." } },
+      property_order: ["query"],
     };
     const fields = schemaToFields(schema, "input", wrapper);
     expect(fields[0]!.placeholder).toBe("Enter query...");
 
     const result = fieldsToSchema(fields, "input");
-    expect(result!.uiHints?.query?.placeholder).toBe("Enter query...");
+    expect(result!.ui_hints?.query?.placeholder).toBe("Enter query...");
   });
 
   it("roundtrips input schema with file field", () => {
@@ -240,8 +244,8 @@ describe("schemaToFields / fieldsToSchema roundtrip", () => {
       },
     } satisfies JSONSchemaObject;
     const wrapper = {
-      fileConstraints: { doc: { accept: ".pdf", maxSize: 10485760 } },
-      propertyOrder: ["doc"],
+      file_constraints: { doc: { accept: ".pdf", max_size: 10485760 } },
+      property_order: ["doc"],
     };
     const fields = schemaToFields(schema, "input", wrapper);
     expect(fields[0]!.type).toBe("string");
@@ -258,8 +262,8 @@ describe("schemaToFields / fieldsToSchema roundtrip", () => {
     expect(docItems?.format).toBe("uri");
     expect(docItems?.contentMediaType).toBe("application/octet-stream");
     expect(result!.schema.properties.doc!.maxItems).toBe(5);
-    expect(result!.fileConstraints?.doc?.accept).toBe(".pdf");
-    expect(result!.fileConstraints?.doc?.maxSize).toBe(10485760);
+    expect(result!.file_constraints?.doc?.accept).toBe(".pdf");
+    expect(result!.file_constraints?.doc?.max_size).toBe(10485760);
   });
 
   it("returns null for empty fields", () => {
@@ -277,9 +281,11 @@ const BANNED_SCHEMA_KEYWORDS = [
   "placeholder",
   "accept",
   "maxSize",
+  "max_size",
   "multiple",
   "maxFiles",
   "propertyOrder",
+  "property_order",
 ];
 
 function findKeywordInObject(obj: unknown, keyword: string, path = ""): string[] {
@@ -362,7 +368,7 @@ describe("fieldsToSchema — JSON Schema purity", () => {
     expect(violations).toEqual([]);
   });
 
-  it("placeholder goes to uiHints, not into schema properties", () => {
+  it("placeholder goes to ui_hints, not into schema properties", () => {
     const fields = [
       {
         _id: "1",
@@ -379,11 +385,11 @@ describe("fieldsToSchema — JSON Schema purity", () => {
 
     // Not in schema
     expect(result!.schema.properties.email).not.toHaveProperty("placeholder");
-    // In wrapper uiHints
-    expect(result!.uiHints?.email?.placeholder).toBe("user@example.com");
+    // In wrapper ui_hints
+    expect(result!.ui_hints?.email?.placeholder).toBe("user@example.com");
   });
 
-  it("file constraints go to fileConstraints, not into schema properties", () => {
+  it("file constraints go to file_constraints, not into schema properties", () => {
     const fields = [
       {
         _id: "1",
@@ -403,15 +409,16 @@ describe("fieldsToSchema — JSON Schema purity", () => {
 
     // Not in schema
     expect(result!.schema.properties.doc).not.toHaveProperty("accept");
+    expect(result!.schema.properties.doc).not.toHaveProperty("max_size");
     expect(result!.schema.properties.doc).not.toHaveProperty("maxSize");
     expect(result!.schema.properties.doc).not.toHaveProperty("multiple");
     expect(result!.schema.properties.doc).not.toHaveProperty("maxFiles");
     // In wrapper
-    expect(result!.fileConstraints?.doc?.accept).toBe(".pdf");
-    expect(result!.fileConstraints?.doc?.maxSize).toBe(5242880);
+    expect(result!.file_constraints?.doc?.accept).toBe(".pdf");
+    expect(result!.file_constraints?.doc?.max_size).toBe(5242880);
   });
 
-  it("propertyOrder is at wrapper level, not in schema", () => {
+  it("property_order is at wrapper level, not in schema", () => {
     const fields = [
       {
         _id: "1",
@@ -436,8 +443,67 @@ describe("fieldsToSchema — JSON Schema purity", () => {
     expect(result).not.toBeNull();
 
     // Not in schema
+    expect(result!.schema).not.toHaveProperty("property_order");
     expect(result!.schema).not.toHaveProperty("propertyOrder");
     // In wrapper
-    expect(result!.propertyOrder).toEqual(["a", "b"]);
+    expect(result!.property_order).toEqual(["a", "b"]);
+  });
+});
+
+// ─── AFPS 1.x lenient-reader compat regression ──────────────
+//
+// Manifests saved by the pre-2.0 editor still live in users' databases
+// with camelCase wrapper fields. `manifestToSchemaFields` must accept
+// both shapes — re-saving migrates the manifest forward to snake_case.
+
+describe("manifestToSchemaFields — AFPS 1.x lenient compat", () => {
+  it("reads a legacy manifest with camelCase wrapper fields", () => {
+    const legacyManifest: Record<string, unknown> = {
+      input: {
+        schema: {
+          type: "object",
+          properties: {
+            query: { type: "string", description: "Search" },
+            doc: {
+              type: "string",
+              format: "uri",
+              contentMediaType: "application/octet-stream",
+              description: "Upload",
+            },
+          },
+          required: ["query"],
+        },
+        uiHints: { query: { placeholder: "type…" } },
+        fileConstraints: { doc: { accept: ".pdf", maxSize: 1_000_000 } },
+        propertyOrder: ["doc", "query"],
+      },
+    };
+    const input = manifestToSchemaFields(legacyManifest).input!;
+    // property_order respected → doc first, query second
+    expect(input.map((f) => f.key)).toEqual(["doc", "query"]);
+    const queryField = input.find((f) => f.key === "query")!;
+    expect(queryField.placeholder).toBe("type…");
+    const docField = input.find((f) => f.key === "doc")!;
+    expect(docField.isFile).toBe(true);
+    expect(docField.accept).toBe(".pdf");
+    expect(docField.maxSize).toBe("1000000");
+  });
+
+  it("prefers canonical snake_case when both shapes are present", () => {
+    const mixedManifest: Record<string, unknown> = {
+      input: {
+        schema: {
+          type: "object",
+          properties: { a: { type: "string" }, b: { type: "string" } },
+        },
+        property_order: ["a", "b"],
+        propertyOrder: ["b", "a"],
+        ui_hints: { a: { placeholder: "canonical" } },
+        uiHints: { a: { placeholder: "legacy" } },
+      },
+    };
+    const input = manifestToSchemaFields(mixedManifest).input!;
+    expect(input.map((f) => f.key)).toEqual(["a", "b"]);
+    expect(input.find((f) => f.key === "a")!.placeholder).toBe("canonical");
   });
 });
