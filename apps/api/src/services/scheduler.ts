@@ -61,7 +61,11 @@ interface ScheduleJobData {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Convert a Drizzle schedule row to the snake_case wire DTO. */
+/**
+ * Convert a Drizzle schedule row to the wire DTO. Universal DB-convention
+ * fields (createdAt, *Id, userId) stay camelCase; domain-specific fields
+ * use snake_case.
+ */
 function toSchedule(row: typeof schedules.$inferSelect): ScheduleWireDto {
   return {
     id: row.id,

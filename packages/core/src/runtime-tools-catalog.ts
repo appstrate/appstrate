@@ -7,7 +7,7 @@
  * pin,report}` `tool` packages, now baked into the runtime image).
  *
  * Every tool is opt-in per agent via the manifest's top-level
- * `runtimeTools: string[]` field — none is injected by default. The editor
+ * `runtime_tools: string[]` field — none is injected by default. The editor
  * renders this catalog as a checklist and the runner filters the built-in
  * factories by the selection. `output` materialises the run result; it is
  * only required (and enforced at save time) when the agent declares an
@@ -15,7 +15,7 @@
  * output schema may simply perform its task and finish without it.
  *
  * This is the single source of truth shared by:
- *   - `@appstrate/core/validation` — the `runtimeTools` enum
+ *   - `@appstrate/core/validation` — the `runtime_tools` enum
  *   - the agent editor (checklist labels)
  *   - the runner (`packages/runner-pi` built-in factory filter)
  */
