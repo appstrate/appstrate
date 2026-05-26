@@ -170,6 +170,23 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
 
 ## Key Conventions & Gotchas
 
+### Casing conventions (snake_case wire / camelCase TS internal)
+
+The codebase has a strict casing policy with documented carve-outs. **See `docs/CASING_CONVENTIONS.md` for the authoritative reference** — every casing decision, every carve-out, every SOTA justification, and the full field-name catalog.
+
+**TL;DR rules**:
+- **Wire JSON** (HTTP responses, request bodies, AFPS manifests, OpenAPI components, OAuth2 fields, SQL columns) → **snake_case**
+- **Drizzle TS schema fields** → **camelCase** TS / **snake_case** SQL aliases (pattern: `userId: text("user_id")`)
+- **TS internal** (function args, variables, React props, Zustand state) → **camelCase**
+- **Universal DB convention fields** (`id`, `createdAt`, `updatedAt`, `expiresAt`, `userId`, `orgId`, `applicationId`, `packageId`, `endUserId`, `apiKeyId`, `scheduleId`, `runNumber`, `runOrigin`, `contextSnapshot`, `modelCredentialId`, `notifiedAt`, `readAt`, `revokedAt`, `lastUsedAt`) → stay **camelCase EVERYWHERE** (Drizzle, wire DTOs, OpenAPI, frontend)
+- **Better Auth tables** (`user`, `session`, `account`, `verification`, OIDC plugin tables) → camelCase TS (HARD framework blocker)
+- **Module hook contracts, logger fields, CloudEvents, Webhook deliveries, BullMQ jobs** → camelCase
+- **Audit log JSONB `after` payloads** → camelCase explicit keys (not raw snake_case body)
+
+When in doubt: wire = snake_case, internal = camelCase. Full decision tree in `docs/CASING_CONVENTIONS.md`.
+
+**Audit command**: `/audit-casing` (see `.claude/commands/audit-casing.md`) dispatches 6 parallel opus sub-agents to verify 100% compliance with the convention doc, across all repos (skip `_dev/`).
+
 ### Module System
 
 Appstrate uses a formalized module system for optional features. The contract is defined in `@appstrate/core/module` (published on npm) so external modules can implement it without depending on the API package.
