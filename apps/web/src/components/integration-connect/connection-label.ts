@@ -11,11 +11,11 @@
  */
 
 interface ConnectionLabelFields {
-  accountId: string;
+  account_id: string;
   label?: string | null;
 }
 
 /** The connection's display name. */
 export function connectionDisplayLabel(c: ConnectionLabelFields): string {
-  return c.label ?? c.accountId;
+  return c.label ?? c.account_id;
 }

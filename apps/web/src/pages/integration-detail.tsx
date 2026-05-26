@@ -148,7 +148,7 @@ function OAuthClientForm({ packageId, authKey }: { packageId: string; authKey: s
         <CollapsibleContent className="px-4 pb-4">
           {client && (
             <p className="text-muted-foreground mb-3 text-xs">
-              {t("integration.oauthClient.registered", { clientId: client.clientId })}
+              {t("integration.oauthClient.registered", { clientId: client.client_id })}
             </p>
           )}
           <form className="grid gap-3 sm:grid-cols-2" onSubmit={submit}>
@@ -160,7 +160,7 @@ function OAuthClientForm({ packageId, authKey }: { packageId: string; authKey: s
                 id={`cid-${authKey}`}
                 value={clientId}
                 onChange={(e) => setClientId(e.target.value)}
-                placeholder={client?.clientId ?? ""}
+                placeholder={client?.client_id ?? ""}
                 data-testid={`oauth-clientid-${authKey}`}
               />
             </div>
@@ -174,7 +174,7 @@ function OAuthClientForm({ packageId, authKey }: { packageId: string; authKey: s
                 value={clientSecret}
                 onChange={(e) => setClientSecret(e.target.value)}
                 disabled={publicClient}
-                placeholder={client?.hasClientSecret ? "••••••••" : ""}
+                placeholder={client?.has_client_secret ? "••••••••" : ""}
                 data-testid={`oauth-clientsecret-${authKey}`}
               />
             </div>
@@ -187,7 +187,7 @@ function OAuthClientForm({ packageId, authKey }: { packageId: string; authKey: s
                 type="url"
                 value={redirectUri}
                 onChange={(e) => setRedirectUri(e.target.value)}
-                placeholder={client?.redirectUri ?? ""}
+                placeholder={client?.redirect_uri ?? ""}
               />
             </div>
             <label className="flex items-center gap-2 text-sm sm:col-span-2">
@@ -268,13 +268,13 @@ function AuthSection({
 }) {
   const { t } = useTranslation("settings");
   const isOAuth = status.type === "oauth2";
-  const clientMissing = isOAuth && !status.hasOAuthClient;
+  const clientMissing = isOAuth && !status.has_oauth_client;
 
   return (
-    <div className="bg-card rounded-lg border p-4" data-testid={`auth-section-${status.authKey}`}>
+    <div className="bg-card rounded-lg border p-4" data-testid={`auth-section-${status.auth_key}`}>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <ShieldCheck size={16} className="text-muted-foreground" />
-        <span className="font-mono text-sm font-semibold">{status.authKey}</span>
+        <span className="font-mono text-sm font-semibold">{status.auth_key}</span>
         <Badge variant="outline">{status.type}</Badge>
         {status.required ? (
           <Badge variant="default">{t("integration.auth.required")}</Badge>
@@ -316,7 +316,7 @@ function AuthSection({
           a fix that's right here, not in another tab. */}
       {isOAuth && isAdmin && (
         <div className="mb-3">
-          <OAuthClientForm packageId={packageId} authKey={status.authKey} />
+          <OAuthClientForm packageId={packageId} authKey={status.auth_key} />
         </div>
       )}
 
@@ -325,7 +325,7 @@ function AuthSection({
       {clientMissing ? (
         <p
           className="text-muted-foreground mb-2 text-xs"
-          data-testid={`no-oauth-client-hint-${status.authKey}`}
+          data-testid={`no-oauth-client-hint-${status.auth_key}`}
         >
           {isAdmin ? t("integration.auth.noClientHintAdmin") : t("integration.auth.noClientHint")}
         </p>
@@ -333,7 +333,7 @@ function AuthSection({
         <div className="mb-2 flex items-center justify-end">
           <InlineConnectButton
             packageId={packageId}
-            authKey={status.authKey}
+            authKey={status.auth_key}
             intent="connect"
             label={t("integration.auth.addAccount")}
             forceAccountSelect={status.connections.length > 0}
@@ -451,7 +451,7 @@ function OrgDefaultSection({ packageId }: { packageId: string }) {
   const upsert = useUpsertIntegrationOrgDefault();
   const remove = useDeleteIntegrationOrgDefault();
 
-  const shared = (connections ?? []).filter((c) => c.sharedWithOrg === true);
+  const shared = (connections ?? []).filter((c) => c.shared_with_org === true);
   const connectionDisplay = (id: string): string => {
     const c = (connections ?? []).find((x) => x.id === id);
     if (!c) return id;
@@ -462,11 +462,11 @@ function OrgDefaultSection({ packageId }: { packageId: string }) {
   const [enforce, setEnforce] = useState(false);
 
   // Seed the form from the persisted default once loaded.
-  const seededFor = orgDefault?.connectionId ?? null;
+  const seededFor = orgDefault?.connection_id ?? null;
   const [seeded, setSeeded] = useState<string | null>(null);
   if (seededFor !== seeded) {
     setSeeded(seededFor);
-    setConnectionId(orgDefault?.connectionId ?? "");
+    setConnectionId(orgDefault?.connection_id ?? "");
     setEnforce(orgDefault?.enforce ?? false);
   }
 
@@ -556,11 +556,11 @@ function PinManagementSection({ packageId }: { packageId: string }) {
   const [newAgent, setNewAgent] = useState("");
   const [newConnectionId, setNewConnectionId] = useState("");
 
-  const pinnableConnections = (connections ?? []).filter((c) => c.sharedWithOrg === true);
+  const pinnableConnections = (connections ?? []).filter((c) => c.shared_with_org === true);
 
   // Lookup helpers for the table
   const agentDisplayName = (id: string): string =>
-    consumingAgents?.find((a) => a.packageId === id)?.displayName ?? id;
+    consumingAgents?.find((a) => a.packageId === id)?.display_name ?? id;
   const connectionDisplay = (id: string): string => {
     const c = (connections ?? []).find((x) => x.id === id);
     if (!c) return id;
@@ -586,7 +586,7 @@ function PinManagementSection({ packageId }: { packageId: string }) {
 
   // Only include agents not already pinned.
   const alreadyPinnedAgentIds = new Set(
-    (pins ?? []).filter((p) => p.integrationPackageId === packageId).map((p) => p.packageId),
+    (pins ?? []).filter((p) => p.integration_package_id === packageId).map((p) => p.packageId),
   );
   const pinnableAgents = (consumingAgents ?? []).filter(
     (a) => !alreadyPinnedAgentIds.has(a.packageId),
@@ -625,17 +625,17 @@ function PinManagementSection({ packageId }: { packageId: string }) {
             <tbody>
               {(pins ?? []).map((p) => (
                 <tr
-                  key={`${p.packageId}-${p.authKey}`}
+                  key={`${p.packageId}-${p.auth_key}`}
                   className="border-border border-t"
-                  data-testid={`pin-row-${p.packageId}-${p.authKey}`}
+                  data-testid={`pin-row-${p.packageId}-${p.auth_key}`}
                 >
                   <td className="px-3 py-2">{agentDisplayName(p.packageId)}</td>
                   <td className="px-3 py-2">
                     <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 font-mono text-[10px]">
-                      {p.authKey}
+                      {p.auth_key}
                     </span>
                   </td>
-                  <td className="px-3 py-2">{connectionDisplay(p.connectionId)}</td>
+                  <td className="px-3 py-2">{connectionDisplay(p.connection_id)}</td>
                   <td className="px-3 py-2">
                     <Button
                       size="icon"
@@ -688,7 +688,7 @@ function PinManagementSection({ packageId }: { packageId: string }) {
               <option value="">—</option>
               {pinnableAgents.map((a) => (
                 <option key={a.packageId} value={a.packageId}>
-                  {a.displayName}
+                  {a.display_name}
                 </option>
               ))}
             </select>
@@ -743,7 +743,7 @@ function ConnectionRow({
   // `label` is the single source of truth (set at creation to the identity or
   // "Connexion N"); render it verbatim.
   const name = connectionDisplayLabel(connection);
-  const isShared = connection.sharedWithOrg === true;
+  const isShared = connection.shared_with_org === true;
   const startEdit = () => {
     setDraftLabel(connection.label ?? "");
     setEditing(true);
@@ -836,13 +836,13 @@ function ConnectionRow({
                   {t("integration.connection.sharedBadge")}
                 </Badge>
               )}
-              {connection.needsReconnection && (
+              {connection.needs_reconnection && (
                 <Badge variant="destructive">{t("integration.auth.needsReconnection")}</Badge>
               )}
             </div>
-            {connection.scopesGranted.length > 0 && (
+            {connection.scopes_granted.length > 0 && (
               <p className="text-muted-foreground truncate font-mono text-[0.65rem]">
-                {connection.scopesGranted.join(" ")}
+                {connection.scopes_granted.join(" ")}
               </p>
             )}
             {connection.expiresAt && (
@@ -1063,9 +1063,9 @@ export function IntegrationDetailPage() {
           </TabsTrigger>
           <TabsTrigger value="tools" data-testid="tab-tools">
             {t("integration.tabs.tools")}
-            {detail.toolCatalog && detail.toolCatalog.length > 0 && (
+            {detail.tool_catalog && detail.tool_catalog.length > 0 && (
               <Badge variant="outline" className="ml-1.5 text-[0.65rem]">
-                {detail.toolCatalog.length}
+                {detail.tool_catalog.length}
               </Badge>
             )}
           </TabsTrigger>
@@ -1089,11 +1089,11 @@ export function IntegrationDetailPage() {
                 <p className="text-muted-foreground text-sm">{t("integration.auth.none")}</p>
               ) : (
                 detail.auths.map((authStatus) => {
-                  const declared = (m.auths ?? {})[authStatus.authKey];
+                  const declared = (m.auths ?? {})[authStatus.auth_key];
                   if (!declared) return null;
                   return (
                     <AuthSection
-                      key={authStatus.authKey}
+                      key={authStatus.auth_key}
                       packageId={packageId}
                       status={authStatus}
                       authDecl={declared}
@@ -1105,7 +1105,7 @@ export function IntegrationDetailPage() {
               {isAdmin && (
                 <AccessRulesSection
                   packageId={packageId}
-                  blockUserConnections={summary?.blockUserConnections ?? false}
+                  blockUserConnections={summary?.block_user_connections ?? false}
                 />
               )}
             </>
@@ -1116,13 +1116,13 @@ export function IntegrationDetailPage() {
         <TabsContent value="tools" className="mt-4">
           <div className="max-w-2xl space-y-3">
             <p className="text-muted-foreground text-xs">{t("integration.tools.intro")}</p>
-            {(detail.toolCatalog ?? []).length === 0 ? (
+            {(detail.tool_catalog ?? []).length === 0 ? (
               <p className="text-muted-foreground text-sm">{t("integration.tools.none")}</p>
             ) : (
               <div className="grid gap-2">
-                {(detail.toolCatalog ?? []).map((tool) => {
-                  const scopes = tool.policy?.requiredScopes ?? [];
-                  const patterns = tool.policy?.urlPatterns ?? [];
+                {(detail.tool_catalog ?? []).map((tool) => {
+                  const scopes = tool.policy?.required_scopes ?? [];
+                  const patterns = tool.policy?.url_patterns ?? [];
                   return (
                     <div
                       key={tool.name}
@@ -1131,9 +1131,9 @@ export function IntegrationDetailPage() {
                     >
                       <div className="flex flex-wrap items-baseline gap-2">
                         <span className="font-mono text-sm font-semibold">{tool.name}</span>
-                        {tool.policy?.requiredAuthKey && (
+                        {tool.policy?.required_auth_key && (
                           <Badge variant="outline" className="text-[0.65rem]">
-                            auth: {tool.policy.requiredAuthKey}
+                            auth: {tool.policy.required_auth_key}
                           </Badge>
                         )}
                       </div>

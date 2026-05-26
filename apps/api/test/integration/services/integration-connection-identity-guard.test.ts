@@ -50,7 +50,7 @@ describe("integration connection — identity guard on reconnect/upgrade", () =>
     expect(created.label).toBe("alice@example.com");
     const updated = await connect("alice@example.com", created.id);
     expect(updated.id).toBe(created.id);
-    expect(updated.accountId).toBe("alice@example.com");
+    expect(updated.account_id).toBe("alice@example.com");
     // Reconnect never rewrites the label.
     expect(updated.label).toBe("alice@example.com");
   });
@@ -61,7 +61,7 @@ describe("integration connection — identity guard on reconnect/upgrade", () =>
 
     // The row is untouched — still Alice.
     const after = await connect("alice@example.com", created.id);
-    expect(after.accountId).toBe("alice@example.com");
+    expect(after.account_id).toBe("alice@example.com");
   });
 
   it("allows upgrading an identity-less connection to a real identity", async () => {
@@ -76,7 +76,7 @@ describe("integration connection — identity guard on reconnect/upgrade", () =>
     // Identity-less connect falls back to the "Connexion N" label.
     expect(created.label).toBe("Connexion 1");
     const upgraded = await connect("alice@example.com", created.id);
-    expect(upgraded.accountId).toBe("alice@example.com");
+    expect(upgraded.account_id).toBe("alice@example.com");
     // The label is fixed at creation — the upgrade doesn't rewrite it.
     expect(upgraded.label).toBe("Connexion 1");
   });

@@ -22,7 +22,7 @@ import type { MeConnectionEntry, MeConnectionSourceGroup } from "@appstrate/shar
 // ─────────────────────────────────────────────
 
 function statusBadge(t: ReturnType<typeof useTranslation>["t"], conn: MeConnectionEntry) {
-  if (conn.needsReconnection) {
+  if (conn.needs_reconnection) {
     return (
       <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-px text-[0.65rem] text-amber-600">
         {t("connectors.statusNeedsReconnection")}
@@ -164,14 +164,14 @@ function ConnectionRow({
   // Connected at
   rows.push({
     label: t("connectors.connectedAtLabel"),
-    value: conn.connectedAt ? formatDateField(conn.connectedAt) : "—",
+    value: conn.connected_at ? formatDateField(conn.connected_at) : "—",
   });
 
   // Scopes
-  if (conn.scopesGranted.length > 0) {
+  if (conn.scopes_granted.length > 0) {
     rows.push({
       label: t("connectors.scopesLabel"),
-      value: conn.scopesGranted.join(", "),
+      value: conn.scopes_granted.join(", "),
     });
   }
 
@@ -188,7 +188,7 @@ function ConnectionRow({
             </span>
           )}
           {statusBadge(t, conn)}
-          {conn.sharedWithOrg && (
+          {conn.shared_with_org && (
             <span className="rounded-full border border-blue-500/40 bg-blue-500/10 px-2 py-px text-[0.65rem] text-blue-700">
               {t("connectors.sharedBadge")}
             </span>
@@ -210,7 +210,7 @@ function ConnectionRow({
           <label className="text-muted-foreground inline-flex items-center gap-2 text-xs">
             <input
               type="checkbox"
-              checked={conn.sharedWithOrg}
+              checked={conn.shared_with_org}
               disabled={updating}
               onChange={(e) => onToggleShare(e.target.checked)}
             />
@@ -256,12 +256,12 @@ function SourceGroupCard({
             <img
               className="h-8 w-8 rounded-md object-contain"
               src={group.logo}
-              alt={group.displayName}
+              alt={group.display_name}
             />
           )}
           <div className="flex-1">
             <div className="flex items-center gap-2">
-              <h3 className="text-[0.95rem] font-semibold">{group.displayName}</h3>
+              <h3 className="text-[0.95rem] font-semibold">{group.display_name}</h3>
               <span className="text-muted-foreground border-border rounded-full border bg-transparent px-2 py-px text-[0.65rem] tracking-wide uppercase">
                 {t("connectors.kindIntegration")}
               </span>
@@ -284,7 +284,7 @@ function SourceGroupCard({
       {expanded && (
         <div className="border-border mt-3 flex flex-col gap-2 border-t pt-3">
           {group.connections.map((conn) => (
-            <div key={conn.connectionId}>{renderRow(conn)}</div>
+            <div key={conn.connection_id}>{renderRow(conn)}</div>
           ))}
         </div>
       )}
@@ -366,7 +366,7 @@ export function PreferencesConnectorsPage() {
       ) : (
         <div className="flex flex-col gap-3">
           {(groups ?? []).map((group) => {
-            const key = `${group.kind}:${group.sourceId}`;
+            const key = `${group.kind}:${group.source_id}`;
             return (
               <SourceGroupCard
                 key={key}
@@ -381,16 +381,16 @@ export function PreferencesConnectorsPage() {
                     onDisconnect={() =>
                       setConfirmState({
                         kind: "integration",
-                        displayName: group.displayName,
+                        displayName: group.display_name,
                         identity: conn.identity,
-                        connectionId: conn.connectionId,
+                        connectionId: conn.connection_id,
                         reused_by_agents: conn.reused_by_agents ?? 0,
                       })
                     }
                     onUpdateLabel={(label) =>
                       updateIntegration.mutate({
-                        packageId: group.sourceId,
-                        connectionId: conn.connectionId,
+                        packageId: group.source_id,
+                        connectionId: conn.connection_id,
                         orgId: conn.org.id,
                         applicationId: conn.application.id,
                         label,
@@ -398,8 +398,8 @@ export function PreferencesConnectorsPage() {
                     }
                     onToggleShare={(next) =>
                       updateIntegration.mutate({
-                        packageId: group.sourceId,
-                        connectionId: conn.connectionId,
+                        packageId: group.source_id,
+                        connectionId: conn.connection_id,
                         orgId: conn.org.id,
                         applicationId: conn.application.id,
                         sharedWithOrg: next,

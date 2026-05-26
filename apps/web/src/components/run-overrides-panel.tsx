@@ -360,7 +360,7 @@ function IntegrationOverrideRow({
     <div className="space-y-1.5" data-testid={`schedule-conn-row-${integration.id}`}>
       <div className="text-xs font-medium">{displayName}</div>
       {requiredAuthKeys.map((authKey) => {
-        const candidates = (connections ?? []).filter((c) => c.authKey === authKey);
+        const candidates = (connections ?? []).filter((c) => c.auth_key === authKey);
         if (candidates.length === 0) {
           return (
             <div
@@ -397,7 +397,7 @@ function IntegrationOverrideRow({
                 const display = connectionDisplayLabel(c);
                 return (
                   <option key={c.id} value={c.id}>
-                    {c.sharedWithOrg
+                    {c.shared_with_org
                       ? t("schedule.connection_overrides.sharedSuffix", { label: display })
                       : display}
                   </option>

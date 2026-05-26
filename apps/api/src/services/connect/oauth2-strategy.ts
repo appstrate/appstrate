@@ -67,7 +67,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
         `Administrator must register OAuth client credentials for '${ctx.integrationPackageId}' auth '${ctx.authKey}' before connection`,
       );
     }
-    const redirectUri = client.redirectUri ?? `${getEnv().APP_URL}/api/integrations/callback`;
+    const redirectUri = client.redirect_uri ?? `${getEnv().APP_URL}/api/integrations/callback`;
     // AFPS 2.0 §7.3 / §7.4 (Appendix D renames): `authorization_endpoint`,
     // `token_endpoint`, `resource` (was audience), `token_endpoint_auth_method`
     // (was tokenAuthMethod), `default_scopes`, `code_challenge_methods_supported`
@@ -84,7 +84,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
         ? { authorizationEndpoint: auth.authorization_endpoint }
         : {}),
       ...(auth.token_endpoint ? { tokenEndpoint: auth.token_endpoint } : {}),
-      clientId: client.clientId,
+      clientId: client.client_id,
       clientSecret: client.clientSecret,
       ...(auth.token_endpoint_auth_method
         ? { tokenEndpointAuthMethod: auth.token_endpoint_auth_method }

@@ -244,7 +244,7 @@ function MissingRow({
                   >
                     {isPicked && <Check className="text-primary size-3 shrink-0" />}
                     <span className="truncate font-medium">{name}</span>
-                    {c.sharedWithOrg && (
+                    {c.shared_with_org && (
                       <Badge variant="secondary" className="text-[0.6rem]">
                         {t("missingConnections.mustChoose.sharedBadge")}
                       </Badge>

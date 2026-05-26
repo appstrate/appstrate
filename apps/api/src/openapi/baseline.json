@@ -3703,7 +3703,7 @@
                           "active": {
                             "type": "boolean"
                           },
-                          "blockUserConnections": {
+                          "block_user_connections": {
                             "type": "boolean"
                           }
                         }
@@ -3814,7 +3814,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["manifest", "auths", "toolCatalog"],
+                  "required": ["manifest", "auths", "tool_catalog"],
                   "properties": {
                     "manifest": {
                       "type": "object",
@@ -3825,16 +3825,16 @@
                       "items": {
                         "type": "object",
                         "required": [
-                          "authKey",
+                          "auth_key",
                           "type",
                           "required",
                           "scopes",
                           "audience",
                           "connections",
-                          "hasOAuthClient"
+                          "has_oauth_client"
                         ],
                         "properties": {
-                          "authKey": {
+                          "auth_key": {
                             "type": "string"
                           },
                           "type": {
@@ -3860,14 +3860,14 @@
                               "required": [
                                 "id",
                                 "packageId",
-                                "authKey",
-                                "accountId",
-                                "identityClaims",
-                                "scopesGranted",
-                                "needsReconnection",
+                                "auth_key",
+                                "account_id",
+                                "identity_claims",
+                                "scopes_granted",
+                                "needs_reconnection",
                                 "expiresAt",
-                                "ownerType",
-                                "ownerId",
+                                "owner_type",
+                                "owner_id",
                                 "createdAt",
                                 "updatedAt"
                               ],
@@ -3879,40 +3879,40 @@
                                 "packageId": {
                                   "type": "string"
                                 },
-                                "authKey": {
+                                "auth_key": {
                                   "type": "string"
                                 },
-                                "accountId": {
+                                "account_id": {
                                   "type": "string"
                                 },
-                                "identityClaims": {
+                                "identity_claims": {
                                   "type": ["object", "null"],
                                   "additionalProperties": true
                                 },
-                                "scopesGranted": {
+                                "scopes_granted": {
                                   "type": "array",
                                   "items": {
                                     "type": "string"
                                   }
                                 },
-                                "needsReconnection": {
+                                "needs_reconnection": {
                                   "type": "boolean"
                                 },
                                 "expiresAt": {
                                   "type": ["string", "null"],
                                   "format": "date-time"
                                 },
-                                "ownerType": {
+                                "owner_type": {
                                   "type": "string",
                                   "enum": ["user", "end_user"]
                                 },
-                                "ownerId": {
+                                "owner_id": {
                                   "type": "string"
                                 },
                                 "label": {
                                   "type": ["string", "null"]
                                 },
-                                "sharedWithOrg": {
+                                "shared_with_org": {
                                   "type": "boolean"
                                 },
                                 "createdAt": {
@@ -3926,13 +3926,13 @@
                               }
                             }
                           },
-                          "hasOAuthClient": {
+                          "has_oauth_client": {
                             "type": "boolean"
                           }
                         }
                       }
                     },
-                    "toolCatalog": {
+                    "tool_catalog": {
                       "type": "array",
                       "items": {
                         "type": "object",
@@ -3947,16 +3947,16 @@
                           "policy": {
                             "type": "object",
                             "properties": {
-                              "requiredScopes": {
+                              "required_scopes": {
                                 "type": "array",
                                 "items": {
                                   "type": "string"
                                 }
                               },
-                              "requiredAuthKey": {
+                              "required_auth_key": {
                                 "type": "string"
                               },
-                              "urlPatterns": {
+                              "url_patterns": {
                                 "type": "array",
                                 "items": {
                                   "type": "object",
@@ -4173,11 +4173,11 @@
                   "type": "object",
                   "required": [
                     "applicationId",
-                    "integrationPackageId",
-                    "authKey",
-                    "clientId",
-                    "hasClientSecret",
-                    "redirectUri",
+                    "integration_package_id",
+                    "auth_key",
+                    "client_id",
+                    "has_client_secret",
+                    "redirect_uri",
                     "createdAt",
                     "updatedAt"
                   ],
@@ -4185,19 +4185,19 @@
                     "applicationId": {
                       "type": "string"
                     },
-                    "integrationPackageId": {
+                    "integration_package_id": {
                       "type": "string"
                     },
-                    "authKey": {
+                    "auth_key": {
                       "type": "string"
                     },
-                    "clientId": {
+                    "client_id": {
                       "type": "string"
                     },
-                    "hasClientSecret": {
+                    "has_client_secret": {
                       "type": "boolean"
                     },
-                    "redirectUri": {
+                    "redirect_uri": {
                       "type": ["string", "null"]
                     },
                     "createdAt": {
@@ -4256,17 +4256,17 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["clientId", "clientSecret"],
+                "required": ["client_id", "client_secret"],
                 "properties": {
-                  "clientId": {
+                  "client_id": {
                     "type": "string",
                     "minLength": 1
                   },
-                  "clientSecret": {
+                  "client_secret": {
                     "type": "string",
                     "default": ""
                   },
-                  "redirectUri": {
+                  "redirect_uri": {
                     "type": "string",
                     "format": "uri"
                   }
@@ -4292,11 +4292,11 @@
                   "type": "object",
                   "required": [
                     "applicationId",
-                    "integrationPackageId",
-                    "authKey",
-                    "clientId",
-                    "hasClientSecret",
-                    "redirectUri",
+                    "integration_package_id",
+                    "auth_key",
+                    "client_id",
+                    "has_client_secret",
+                    "redirect_uri",
                     "createdAt",
                     "updatedAt"
                   ],
@@ -4304,19 +4304,19 @@
                     "applicationId": {
                       "type": "string"
                     },
-                    "integrationPackageId": {
+                    "integration_package_id": {
                       "type": "string"
                     },
-                    "authKey": {
+                    "auth_key": {
                       "type": "string"
                     },
-                    "clientId": {
+                    "client_id": {
                       "type": "string"
                     },
-                    "hasClientSecret": {
+                    "has_client_secret": {
                       "type": "boolean"
                     },
-                    "redirectUri": {
+                    "redirect_uri": {
                       "type": ["string", "null"]
                     },
                     "createdAt": {
@@ -4470,14 +4470,14 @@
                   "required": [
                     "id",
                     "packageId",
-                    "authKey",
-                    "accountId",
-                    "identityClaims",
-                    "scopesGranted",
-                    "needsReconnection",
+                    "auth_key",
+                    "account_id",
+                    "identity_claims",
+                    "scopes_granted",
+                    "needs_reconnection",
                     "expiresAt",
-                    "ownerType",
-                    "ownerId",
+                    "owner_type",
+                    "owner_id",
                     "createdAt",
                     "updatedAt"
                   ],
@@ -4489,40 +4489,40 @@
                     "packageId": {
                       "type": "string"
                     },
-                    "authKey": {
+                    "auth_key": {
                       "type": "string"
                     },
-                    "accountId": {
+                    "account_id": {
                       "type": "string"
                     },
-                    "identityClaims": {
+                    "identity_claims": {
                       "type": ["object", "null"],
                       "additionalProperties": true
                     },
-                    "scopesGranted": {
+                    "scopes_granted": {
                       "type": "array",
                       "items": {
                         "type": "string"
                       }
                     },
-                    "needsReconnection": {
+                    "needs_reconnection": {
                       "type": "boolean"
                     },
                     "expiresAt": {
                       "type": ["string", "null"],
                       "format": "date-time"
                     },
-                    "ownerType": {
+                    "owner_type": {
                       "type": "string",
                       "enum": ["user", "end_user"]
                     },
-                    "ownerId": {
+                    "owner_id": {
                       "type": "string"
                     },
                     "label": {
                       "type": ["string", "null"]
                     },
-                    "sharedWithOrg": {
+                    "shared_with_org": {
                       "type": "boolean"
                     },
                     "createdAt": {
@@ -4593,10 +4593,10 @@
                       "type": "string"
                     }
                   },
-                  "forceAccountSelect": {
+                  "force_account_select": {
                     "type": "boolean"
                   },
-                  "connectionId": {
+                  "connection_id": {
                     "type": "string",
                     "format": "uuid"
                   }
@@ -4694,14 +4694,14 @@
                         "required": [
                           "id",
                           "packageId",
-                          "authKey",
-                          "accountId",
-                          "identityClaims",
-                          "scopesGranted",
-                          "needsReconnection",
+                          "auth_key",
+                          "account_id",
+                          "identity_claims",
+                          "scopes_granted",
+                          "needs_reconnection",
                           "expiresAt",
-                          "ownerType",
-                          "ownerId",
+                          "owner_type",
+                          "owner_id",
                           "createdAt",
                           "updatedAt"
                         ],
@@ -4713,40 +4713,40 @@
                           "packageId": {
                             "type": "string"
                           },
-                          "authKey": {
+                          "auth_key": {
                             "type": "string"
                           },
-                          "accountId": {
+                          "account_id": {
                             "type": "string"
                           },
-                          "identityClaims": {
+                          "identity_claims": {
                             "type": ["object", "null"],
                             "additionalProperties": true
                           },
-                          "scopesGranted": {
+                          "scopes_granted": {
                             "type": "array",
                             "items": {
                               "type": "string"
                             }
                           },
-                          "needsReconnection": {
+                          "needs_reconnection": {
                             "type": "boolean"
                           },
                           "expiresAt": {
                             "type": ["string", "null"],
                             "format": "date-time"
                           },
-                          "ownerType": {
+                          "owner_type": {
                             "type": "string",
                             "enum": ["user", "end_user"]
                           },
-                          "ownerId": {
+                          "owner_id": {
                             "type": "string"
                           },
                           "label": {
                             "type": ["string", "null"]
                           },
-                          "sharedWithOrg": {
+                          "shared_with_org": {
                             "type": "boolean"
                           },
                           "createdAt": {
@@ -4822,12 +4822,12 @@
                   "type": "object",
                   "required": [
                     "status",
-                    "resolvedConnectionId",
-                    "resolvedMissingScopes",
-                    "resolvedOwnedByActor",
-                    "adminPinnedConnectionId",
-                    "memberPinnedConnectionId",
-                    "canAddConnection",
+                    "resolved_connection_id",
+                    "resolved_missing_scopes",
+                    "resolved_owned_by_actor",
+                    "admin_pinned_connection_id",
+                    "member_pinned_connection_id",
+                    "can_add_connection",
                     "candidates"
                   ],
                   "properties": {
@@ -4843,25 +4843,31 @@
                         "needs_reconnection"
                       ]
                     },
-                    "resolvedConnectionId": {
+                    "resolved_connection_id": {
                       "type": ["string", "null"]
                     },
-                    "resolvedMissingScopes": {
+                    "resolved_missing_scopes": {
                       "type": "array",
                       "items": {
                         "type": "string"
                       }
                     },
-                    "resolvedOwnedByActor": {
+                    "resolved_owned_by_actor": {
                       "type": "boolean"
                     },
-                    "adminPinnedConnectionId": {
+                    "admin_pinned_connection_id": {
                       "type": ["string", "null"]
                     },
-                    "memberPinnedConnectionId": {
+                    "member_pinned_connection_id": {
                       "type": ["string", "null"]
                     },
-                    "canAddConnection": {
+                    "org_default_connection_id": {
+                      "type": ["string", "null"]
+                    },
+                    "org_default_enforced": {
+                      "type": "boolean"
+                    },
+                    "can_add_connection": {
                       "type": "boolean"
                     },
                     "candidates": {
@@ -4870,16 +4876,16 @@
                         "type": "object",
                         "required": [
                           "id",
-                          "authKey",
-                          "accountId",
+                          "auth_key",
+                          "account_id",
                           "label",
-                          "ownerUserId",
-                          "ownerEndUserId",
-                          "ownerName",
-                          "scopesGranted",
-                          "sharedWithOrg",
-                          "needsReconnection",
-                          "missingScopes",
+                          "owner_user_id",
+                          "owner_end_user_id",
+                          "owner_name",
+                          "scopes_granted",
+                          "shared_with_org",
+                          "needs_reconnection",
+                          "missing_scopes",
                           "isOwn"
                         ],
                         "properties": {
@@ -4887,37 +4893,37 @@
                             "type": "string",
                             "format": "uuid"
                           },
-                          "authKey": {
+                          "auth_key": {
                             "type": "string"
                           },
-                          "accountId": {
+                          "account_id": {
                             "type": "string"
                           },
                           "label": {
                             "type": ["string", "null"]
                           },
-                          "ownerUserId": {
+                          "owner_user_id": {
                             "type": ["string", "null"]
                           },
-                          "ownerEndUserId": {
+                          "owner_end_user_id": {
                             "type": ["string", "null"]
                           },
-                          "ownerName": {
+                          "owner_name": {
                             "type": ["string", "null"]
                           },
-                          "scopesGranted": {
+                          "scopes_granted": {
                             "type": "array",
                             "items": {
                               "type": "string"
                             }
                           },
-                          "sharedWithOrg": {
+                          "shared_with_org": {
                             "type": "boolean"
                           },
-                          "needsReconnection": {
+                          "needs_reconnection": {
                             "type": "boolean"
                           },
-                          "missingScopes": {
+                          "missing_scopes": {
                             "type": "array",
                             "items": {
                               "type": "string"
@@ -4941,7 +4947,7 @@
       "patch": {
         "operationId": "updateIntegrationConnectionMetadata",
         "tags": ["Integrations"],
-        "summary": "Update an integration connection's label and/or sharedWithOrg flag",
+        "summary": "Update an integration connection's label and/or shared_with_org flag",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -4981,7 +4987,7 @@
                     "type": ["string", "null"],
                     "maxLength": 80
                   },
-                  "sharedWithOrg": {
+                  "shared_with_org": {
                     "type": "boolean"
                   }
                 }
@@ -5004,7 +5010,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["id", "label", "sharedWithOrg", "updatedAt"],
+                  "required": ["id", "label", "shared_with_org", "updatedAt"],
                   "properties": {
                     "id": {
                       "type": "string",
@@ -5013,7 +5019,7 @@
                     "label": {
                       "type": ["string", "null"]
                     },
-                    "sharedWithOrg": {
+                    "shared_with_org": {
                       "type": "boolean"
                     },
                     "updatedAt": {
@@ -5081,9 +5087,9 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["blockUserConnections"],
+                "required": ["block_user_connections"],
                 "properties": {
-                  "blockUserConnections": {
+                  "block_user_connections": {
                     "type": "boolean"
                   }
                 }
@@ -5175,9 +5181,9 @@
                         "type": "object",
                         "required": [
                           "packageId",
-                          "integrationPackageId",
-                          "authKey",
-                          "connectionId",
+                          "integration_package_id",
+                          "auth_key",
+                          "connection_id",
                           "createdAt",
                           "updatedAt"
                         ],
@@ -5185,13 +5191,13 @@
                           "packageId": {
                             "type": "string"
                           },
-                          "integrationPackageId": {
+                          "integration_package_id": {
                             "type": "string"
                           },
-                          "authKey": {
+                          "auth_key": {
                             "type": "string"
                           },
-                          "connectionId": {
+                          "connection_id": {
                             "type": "string",
                             "format": "uuid"
                           },
@@ -5266,12 +5272,12 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "required": ["packageId", "displayName"],
+                        "required": ["packageId", "display_name"],
                         "properties": {
                           "packageId": {
                             "type": "string"
                           },
-                          "displayName": {
+                          "display_name": {
                             "type": "string"
                           }
                         }
@@ -5327,9 +5333,9 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["connectionId"],
+                "required": ["connection_id"],
                 "properties": {
-                  "connectionId": {
+                  "connection_id": {
                     "type": "string",
                     "format": "uuid"
                   }
@@ -5355,9 +5361,9 @@
                   "type": "object",
                   "required": [
                     "packageId",
-                    "integrationPackageId",
-                    "authKey",
-                    "connectionId",
+                    "integration_package_id",
+                    "auth_key",
+                    "connection_id",
                     "createdAt",
                     "updatedAt"
                   ],
@@ -5365,13 +5371,13 @@
                     "packageId": {
                       "type": "string"
                     },
-                    "integrationPackageId": {
+                    "integration_package_id": {
                       "type": "string"
                     },
-                    "authKey": {
+                    "auth_key": {
                       "type": "string"
                     },
-                    "connectionId": {
+                    "connection_id": {
                       "type": "string",
                       "format": "uuid"
                     },
@@ -5508,22 +5514,22 @@
                         {
                           "type": "object",
                           "required": [
-                            "integrationPackageId",
-                            "connectionId",
-                            "authKey",
+                            "integration_package_id",
+                            "connection_id",
+                            "auth_key",
                             "enforce",
                             "createdAt",
                             "updatedAt"
                           ],
                           "properties": {
-                            "integrationPackageId": {
+                            "integration_package_id": {
                               "type": "string"
                             },
-                            "connectionId": {
+                            "connection_id": {
                               "type": "string",
                               "format": "uuid"
                             },
-                            "authKey": {
+                            "auth_key": {
                               "type": "string"
                             },
                             "enforce": {
@@ -5579,9 +5585,9 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["connectionId", "enforce"],
+                "required": ["connection_id", "enforce"],
                 "properties": {
-                  "connectionId": {
+                  "connection_id": {
                     "type": "string",
                     "format": "uuid"
                   },
@@ -5610,22 +5616,22 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "integrationPackageId",
-                    "connectionId",
-                    "authKey",
+                    "integration_package_id",
+                    "connection_id",
+                    "auth_key",
                     "enforce",
                     "createdAt",
                     "updatedAt"
                   ],
                   "properties": {
-                    "integrationPackageId": {
+                    "integration_package_id": {
                       "type": "string"
                     },
-                    "connectionId": {
+                    "connection_id": {
                       "type": "string",
                       "format": "uuid"
                     },
-                    "authKey": {
+                    "auth_key": {
                       "type": "string"
                     },
                     "enforce": {
@@ -9213,8 +9219,8 @@
                         "type": "object",
                         "required": [
                           "kind",
-                          "sourceId",
-                          "displayName",
+                          "source_id",
+                          "display_name",
                           "logo",
                           "total_connections",
                           "connections"
@@ -9224,10 +9230,10 @@
                             "type": "string",
                             "enum": ["integration"]
                           },
-                          "sourceId": {
+                          "source_id": {
                             "type": "string"
                           },
-                          "displayName": {
+                          "display_name": {
                             "type": "string"
                           },
                           "logo": {
@@ -9241,22 +9247,22 @@
                             "items": {
                               "type": "object",
                               "required": [
-                                "connectionId",
+                                "connection_id",
                                 "kind",
                                 "label",
-                                "scopesGranted",
-                                "connectedAt",
-                                "needsReconnection",
+                                "scopes_granted",
+                                "connected_at",
+                                "needs_reconnection",
                                 "expiresAt",
                                 "identity",
-                                "authKey",
-                                "sharedWithOrg",
+                                "auth_key",
+                                "shared_with_org",
                                 "reused_by_agents",
                                 "org",
                                 "application"
                               ],
                               "properties": {
-                                "connectionId": {
+                                "connection_id": {
                                   "type": "string"
                                 },
                                 "kind": {
@@ -9266,17 +9272,17 @@
                                 "label": {
                                   "type": ["string", "null"]
                                 },
-                                "scopesGranted": {
+                                "scopes_granted": {
                                   "type": "array",
                                   "items": {
                                     "type": "string"
                                   }
                                 },
-                                "connectedAt": {
+                                "connected_at": {
                                   "type": "string",
                                   "format": "date-time"
                                 },
-                                "needsReconnection": {
+                                "needs_reconnection": {
                                   "type": "boolean"
                                 },
                                 "expiresAt": {
@@ -9296,10 +9302,10 @@
                                 "reused_by_agents": {
                                   "type": ["integer", "null"]
                                 },
-                                "authKey": {
+                                "auth_key": {
                                   "type": ["string", "null"]
                                 },
-                                "sharedWithOrg": {
+                                "shared_with_org": {
                                   "type": "boolean"
                                 },
                                 "org": {
@@ -9386,12 +9392,12 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "required": ["integrationPackageId", "connectionId"],
+                        "required": ["integration_package_id", "connection_id"],
                         "properties": {
-                          "integrationPackageId": {
+                          "integration_package_id": {
                             "type": "string"
                           },
-                          "connectionId": {
+                          "connection_id": {
                             "type": "string",
                             "format": "uuid"
                           }
@@ -9430,15 +9436,15 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["agentPackageId", "integrationPackageId", "connectionId"],
+                "required": ["agent_package_id", "integration_package_id", "connection_id"],
                 "properties": {
-                  "agentPackageId": {
+                  "agent_package_id": {
                     "type": "string"
                   },
-                  "integrationPackageId": {
+                  "integration_package_id": {
                     "type": "string"
                   },
-                  "connectionId": {
+                  "connection_id": {
                     "type": "string",
                     "format": "uuid"
                   }
@@ -9456,9 +9462,9 @@
                   "type": "object",
                   "required": [
                     "packageId",
-                    "integrationPackageId",
-                    "authKey",
-                    "connectionId",
+                    "integration_package_id",
+                    "auth_key",
+                    "connection_id",
                     "createdAt",
                     "updatedAt"
                   ],
@@ -9466,13 +9472,13 @@
                     "packageId": {
                       "type": "string"
                     },
-                    "integrationPackageId": {
+                    "integration_package_id": {
                       "type": "string"
                     },
-                    "authKey": {
+                    "auth_key": {
                       "type": "string"
                     },
-                    "connectionId": {
+                    "connection_id": {
                       "type": "string",
                       "format": "uuid"
                     },

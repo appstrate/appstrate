@@ -23,10 +23,10 @@ import type { AppScope } from "../lib/scope.ts";
 import { validatePinTarget } from "./integration-pins-service.ts";
 
 export interface OrgDefaultSummary {
-  integrationPackageId: string;
-  connectionId: string;
+  integration_package_id: string;
+  connection_id: string;
   /** The default connection's own authKey — surfaced for UI parity with pins. */
-  authKey: string;
+  auth_key: string;
   enforce: boolean;
   createdAt: string;
   updatedAt: string;
@@ -65,9 +65,9 @@ export async function getOrgDefault(
     .limit(1);
   if (!row) return null;
   return {
-    integrationPackageId,
-    connectionId: row.connectionId,
-    authKey: row.authKey,
+    integration_package_id: integrationPackageId,
+    connection_id: row.connectionId,
+    auth_key: row.authKey,
     enforce: row.enforce,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -131,9 +131,9 @@ export async function upsertOrgDefault(
     });
 
   return {
-    integrationPackageId,
-    connectionId: input.connectionId,
-    authKey: conn.authKey,
+    integration_package_id: integrationPackageId,
+    connection_id: input.connectionId,
+    auth_key: conn.authKey,
     enforce: input.enforce,
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),

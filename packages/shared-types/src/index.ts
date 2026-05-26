@@ -23,6 +23,7 @@ export type {
   IntegrationPickStatus,
   IntegrationPin,
   IntegrationSummary,
+  IntegrationToolCatalogEntry,
 } from "./integrations.ts";
 
 export type { UserProfile, RunLog } from "@appstrate/db/schema";
@@ -273,20 +274,20 @@ export type MeConnectionKind = "integration";
 
 export interface MeConnectionEntry {
   /** Stable connection id (uuid). */
-  connectionId: string;
+  connection_id: string;
   kind: MeConnectionKind;
   /** Display label set by the user. */
   label: string | null;
-  scopesGranted: string[];
-  connectedAt: string;
-  needsReconnection: boolean;
+  scopes_granted: string[];
+  connected_at: string;
+  needs_reconnection: boolean;
   expiresAt: string | null;
   /** Human-friendly identity (accountEmail, sub claim). */
   identity: string | null;
   /** Which auth slot this connection satisfies. */
-  authKey: string | null;
+  auth_key: string | null;
   /** Admin/owner sharing toggle (per-org). */
-  sharedWithOrg: boolean;
+  shared_with_org: boolean;
   /**
    * Number of installed agents in this connection's application that
    * declare this integration in their dependencies. Used by the UI to
@@ -302,8 +303,8 @@ export interface MeConnectionEntry {
 export interface MeConnectionSourceGroup {
   kind: MeConnectionKind;
   /** Integration package id. */
-  sourceId: string;
-  displayName: string;
+  source_id: string;
+  display_name: string;
   logo: string;
   total_connections: number;
   connections: MeConnectionEntry[];

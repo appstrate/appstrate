@@ -42,8 +42,8 @@ import type { Actor } from "@appstrate/connect";
 import {
   resolveIntegrationToolCatalog,
   type IntegrationManifest,
-  type IntegrationToolCatalogEntry,
 } from "@appstrate/core/integration";
+import type { IntegrationToolCatalogEntry } from "@appstrate/shared-types";
 import { getLocalServerRef } from "./integration-manifest-helpers.ts";
 import { fetchMcpServerManifest } from "./integration-service.ts";
 import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
@@ -398,11 +398,11 @@ export async function upsertIntegrationOAuthClient(
 
   return {
     applicationId: row.applicationId,
-    integrationPackageId: row.integrationPackageId,
-    authKey: row.authKey,
-    clientId: row.clientId,
-    hasClientSecret: (input.clientSecret ?? "").length > 0,
-    redirectUri: row.redirectUri,
+    integration_package_id: row.integrationPackageId,
+    auth_key: row.authKey,
+    client_id: row.clientId,
+    has_client_secret: (input.clientSecret ?? "").length > 0,
+    redirect_uri: row.redirectUri,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -443,12 +443,12 @@ export async function getIntegrationOAuthClient(
   }
   return {
     applicationId: row.applicationId,
-    integrationPackageId: row.integrationPackageId,
-    authKey: row.authKey,
-    clientId: row.clientId,
+    integration_package_id: row.integrationPackageId,
+    auth_key: row.authKey,
+    client_id: row.clientId,
     clientSecret: secret,
-    hasClientSecret: secret.length > 0,
-    redirectUri: row.redirectUri,
+    has_client_secret: secret.length > 0,
+    redirect_uri: row.redirectUri,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -845,16 +845,16 @@ function rowToSummary(
   return {
     id: row.id,
     packageId: row.integrationPackageId,
-    authKey: row.authKey,
-    accountId: row.accountId,
-    identityClaims: (row.identityClaims as Record<string, unknown> | null) ?? null,
-    scopesGranted: row.scopesGranted,
-    needsReconnection: row.needsReconnection,
+    auth_key: row.authKey,
+    account_id: row.accountId,
+    identity_claims: (row.identityClaims as Record<string, unknown> | null) ?? null,
+    scopes_granted: row.scopesGranted,
+    needs_reconnection: row.needsReconnection,
     expiresAt: row.expiresAt ? row.expiresAt.toISOString() : null,
-    ownerType: row.userId ? "user" : "end_user",
-    ownerId: (row.userId ?? row.endUserId)!,
+    owner_type: row.userId ? "user" : "end_user",
+    owner_id: (row.userId ?? row.endUserId)!,
     label: row.label,
-    sharedWithOrg: row.sharedWithOrg,
+    shared_with_org: row.sharedWithOrg,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -890,7 +890,7 @@ export async function getIntegrationAuthStatuses(
    * {@link resolveIntegrationToolCatalog} so the UI doesn't need a second
    * fetch for the referenced mcp-server's MCPB tool advertisement.
    */
-  toolCatalog: IntegrationToolCatalogEntry[];
+  tool_catalog: IntegrationToolCatalogEntry[];
 }> {
   await assertAppBelongsToOrg(scope);
   const manifest = await loadManifestOrThrow(scope, packageId);
@@ -916,7 +916,28 @@ export async function getIntegrationAuthStatuses(
       }
     }
   }
-  const toolCatalog = resolveIntegrationToolCatalog({ integration: manifest, mcpServerTools });
+  const toolCatalog: IntegrationToolCatalogEntry[] = resolveIntegrationToolCatalog({
+    integration: manifest,
+    mcpServerTools,
+  }).map((entry) => ({
+    name: entry.name,
+    ...(entry.description !== undefined ? { description: entry.description } : {}),
+    ...(entry.policy
+      ? {
+          policy: {
+            ...(entry.policy.requiredScopes !== undefined
+              ? { required_scopes: entry.policy.requiredScopes }
+              : {}),
+            ...(entry.policy.requiredAuthKey !== undefined
+              ? { required_auth_key: entry.policy.requiredAuthKey }
+              : {}),
+            ...(entry.policy.urlPatterns !== undefined
+              ? { url_patterns: entry.policy.urlPatterns }
+              : {}),
+          },
+        }
+      : {}),
+  }));
 
   const allConnections = await listIntegrationConnections(scope, packageId, actor);
   const oauthClients = await db
@@ -939,17 +960,17 @@ export async function getIntegrationAuthStatuses(
       | { required?: boolean }
       | undefined;
     return {
-      authKey: key,
+      auth_key: key,
       type: auth.type,
       required: authMeta?.required ?? true,
       scopes: auth.default_scopes ?? [],
       audience: auth.resource ?? null,
-      connections: allConnections.filter((c) => c.authKey === key),
-      hasOAuthClient: oauthClientKeys.has(key),
+      connections: allConnections.filter((c) => c.auth_key === key),
+      has_oauth_client: oauthClientKeys.has(key),
     };
   });
 
-  return { manifest, auths, toolCatalog };
+  return { manifest, auths, tool_catalog: toolCatalog };
 }
 
 /**

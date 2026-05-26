@@ -116,7 +116,7 @@ describe("block_user_connections workflow", () => {
     const res = await app.request("/api/integrations/@myorg/gmail/settings", {
       method: "PATCH",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ blockUserConnections: true }),
+      body: JSON.stringify({ block_user_connections: true }),
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { blocked: boolean };
@@ -135,7 +135,7 @@ describe("block_user_connections workflow", () => {
     await app.request("/api/integrations/@myorg/gmail/settings", {
       method: "PATCH",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ blockUserConnections: true }),
+      body: JSON.stringify({ block_user_connections: true }),
     });
 
     // A plain member holds `integrations:connect` (so it clears
@@ -167,7 +167,7 @@ describe("block_user_connections workflow", () => {
     await app.request("/api/integrations/@myorg/gmail/settings", {
       method: "PATCH",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ blockUserConnections: true }),
+      body: JSON.stringify({ block_user_connections: true }),
     });
 
     // ctx.user is the org owner (admin-equivalent) — `assertConnectionCreationAllowed`
@@ -179,8 +179,8 @@ describe("block_user_connections workflow", () => {
       body: JSON.stringify({ credentials: { api_key: "AKIA-SECRET" } }),
     });
     expect(res.status).toBe(200);
-    const conn = (await res.json()) as { id: string; authKey: string };
-    expect(conn.authKey).toBe("api");
+    const conn = (await res.json()) as { id: string; auth_key: string };
+    expect(conn.auth_key).toBe("api");
 
     const rows = await db
       .select()
@@ -266,13 +266,13 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
     const res = await app.request(`/api/integrations/@myorg/gmail/connections/${connId}`, {
       method: "PATCH",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ sharedWithOrg: true }),
+      body: JSON.stringify({ shared_with_org: true }),
     });
-    // Admin is allowed to edit metadata in general, but sharedWithOrg is
+    // Admin is allowed to edit metadata in general, but shared_with_org is
     // consent — only the owner may flip it.
     expect(res.status).toBe(403);
     const body = (await res.json()) as { detail?: string };
-    expect(body.detail ?? "").toMatch(/only the connection owner can change sharedwithorg/i);
+    expect(body.detail ?? "").toMatch(/only the connection owner can change shared_with_org/i);
 
     // Not flipped.
     const [row] = await db
@@ -363,11 +363,11 @@ describe("assertOrgAdmin defense-in-depth (api-key role/scope intersection)", ()
     const res = await app.request("/api/integrations/@myorg/gmail/default", {
       method: "PUT",
       headers: { Authorization: `Bearer ${key.rawKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ connectionId: connId }),
+      body: JSON.stringify({ connection_id: connId }),
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { connectionId: string };
-    expect(body.connectionId).toBe(connId);
+    const body = (await res.json()) as { connection_id: string };
+    expect(body.connection_id).toBe(connId);
   });
 
   it("member-created api key requesting integrations:install is stripped to 403 at requirePermission", async () => {
@@ -390,7 +390,7 @@ describe("assertOrgAdmin defense-in-depth (api-key role/scope intersection)", ()
     const res = await app.request("/api/integrations/@myorg/gmail/default", {
       method: "PUT",
       headers: { Authorization: `Bearer ${key.rawKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ connectionId: connId }),
+      body: JSON.stringify({ connection_id: connId }),
     });
     expect(res.status).toBe(403);
   });
@@ -412,7 +412,7 @@ describe("connect/oauth2 reconnect scope-union (incremental consent)", () => {
     await app.request("/api/integrations/@myorg/gmail/oauth-clients/google", {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ clientId: "abc", clientSecret: "shh" }),
+      body: JSON.stringify({ client_id: "abc", client_secret: "shh" }),
     });
   });
 
@@ -438,7 +438,7 @@ describe("connect/oauth2 reconnect scope-union (incremental consent)", () => {
     const res = await app.request("/api/integrations/@myorg/gmail/auths/google/connect/oauth2", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ connectionId: connId }),
+      body: JSON.stringify({ connection_id: connId }),
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { authUrl: string };

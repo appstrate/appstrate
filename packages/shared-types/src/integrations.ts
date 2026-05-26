@@ -32,22 +32,22 @@ export interface IntegrationSummary {
   /** True when an application_packages row exists for this (app, integration). */
   active?: boolean;
   /** Admin-only per-(app, integration) lock; defaults to false when inactive. */
-  blockUserConnections?: boolean;
+  block_user_connections?: boolean;
 }
 
 export interface IntegrationConnection {
   id: string;
   packageId: string;
-  authKey: string;
+  auth_key: string;
   /** Multi-account discriminator extracted at connect time. */
-  accountId: string;
+  account_id: string;
   /** Identity claims extracted via `extractTokenIdentity` (e.g. `sub`, `email`). */
-  identityClaims: Record<string, unknown> | null;
-  scopesGranted: string[];
-  needsReconnection: boolean;
+  identity_claims: Record<string, unknown> | null;
+  scopes_granted: string[];
+  needs_reconnection: boolean;
   expiresAt: string | null;
-  ownerType: "user" | "end_user";
-  ownerId: string;
+  owner_type: "user" | "end_user";
+  owner_id: string;
   /**
    * Display name, set at creation: the extracted identity (email/login) when
    * available, else "Connexion N". Stable for the connection's lifetime and
@@ -55,13 +55,13 @@ export interface IntegrationConnection {
    */
   label?: string | null;
   /** Opt-in: makes this connection selectable by other members of the same app. */
-  sharedWithOrg?: boolean;
+  shared_with_org?: boolean;
   createdAt: string;
   updatedAt: string;
 }
 
 export interface IntegrationAuthStatus {
-  authKey: string;
+  auth_key: string;
   type: IntegrationAuthType;
   required: boolean;
   /** Scopes declared in the manifest (the ones the connect button requests). */
@@ -70,7 +70,7 @@ export interface IntegrationAuthStatus {
   /** Connections the calling actor has for this auth (multi-account = >1). */
   connections: IntegrationConnection[];
   /** True when this auth has an admin-registered OAuth2 client (oauth2 only). */
-  hasOAuthClient: boolean;
+  has_oauth_client: boolean;
 }
 
 /**
@@ -85,9 +85,9 @@ export interface IntegrationToolCatalogEntry {
   name: string;
   description?: string;
   policy?: {
-    requiredScopes?: readonly string[];
-    requiredAuthKey?: string;
-    urlPatterns?: ReadonlyArray<{ pattern: string; methods?: readonly string[] }>;
+    required_scopes?: readonly string[];
+    required_auth_key?: string;
+    url_patterns?: ReadonlyArray<{ pattern: string; methods?: readonly string[] }>;
   };
 }
 
@@ -95,17 +95,17 @@ export interface IntegrationDetail {
   manifest: IntegrationManifestView;
   auths: IntegrationAuthStatus[];
   /** Effective agent-facing tool catalog — the picker's source of truth. */
-  toolCatalog: IntegrationToolCatalogEntry[];
+  tool_catalog: IntegrationToolCatalogEntry[];
 }
 
 export interface IntegrationOAuthClient {
   applicationId: string;
-  integrationPackageId: string;
-  authKey: string;
-  clientId: string;
+  integration_package_id: string;
+  auth_key: string;
+  client_id: string;
   /** True when the client_secret blob is non-empty (private client). */
-  hasClientSecret: boolean;
-  redirectUri: string | null;
+  has_client_secret: boolean;
+  redirect_uri: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -119,17 +119,17 @@ export interface IntegrationOAuthClient {
  */
 export interface AccessibleIntegrationConnection {
   id: string;
-  authKey: string;
-  accountId: string;
+  auth_key: string;
+  account_id: string;
   label: string | null;
-  ownerUserId: string | null;
-  ownerEndUserId: string | null;
+  owner_user_id: string | null;
+  owner_end_user_id: string | null;
   /** Display name of the connection's creator (null if owner row deleted). */
-  ownerName: string | null;
+  owner_name: string | null;
   /** OAuth scopes granted to this connection (empty for api_key/basic). */
-  scopesGranted: string[];
-  sharedWithOrg: boolean;
-  needsReconnection: boolean;
+  scopes_granted: string[];
+  shared_with_org: boolean;
+  needs_reconnection: boolean;
 }
 
 /**
@@ -139,10 +139,10 @@ export interface AccessibleIntegrationConnection {
  */
 export interface IntegrationPin {
   packageId: string;
-  integrationPackageId: string;
+  integration_package_id: string;
   /** Denormalised from the pinned connection — display hint only. */
-  authKey: string;
-  connectionId: string;
+  auth_key: string;
+  connection_id: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -153,10 +153,10 @@ export interface IntegrationPin {
  * override with their own pin. See the resolver cascade.
  */
 export interface IntegrationOrgDefault {
-  integrationPackageId: string;
-  connectionId: string;
+  integration_package_id: string;
+  connection_id: string;
   /** Denormalised from the default connection — display hint only. */
-  authKey: string;
+  auth_key: string;
   enforce: boolean;
   createdAt: string;
   updatedAt: string;
@@ -165,7 +165,7 @@ export interface IntegrationOrgDefault {
 /** An installed agent that declares a given integration as a dependency. */
 export interface ConsumingAgentSummary {
   packageId: string;
-  displayName: string;
+  display_name: string;
 }
 
 /**
@@ -174,7 +174,7 @@ export interface ConsumingAgentSummary {
  * whether the calling actor owns it.
  */
 export interface IntegrationCandidate extends AccessibleIntegrationConnection {
-  missingScopes: string[];
+  missing_scopes: string[];
   isOwn: boolean;
 }
 
@@ -204,25 +204,25 @@ export type IntegrationPickStatus =
 export interface IntegrationAgentResolution {
   status: IntegrationPickStatus;
   /** Connection the next run would use, or null for none/must_choose/stale. */
-  resolvedConnectionId: string | null;
+  resolved_connection_id: string | null;
   /** Missing scopes on the resolved connection (empty unless under-scoped). */
-  resolvedMissingScopes: string[];
+  resolved_missing_scopes: string[];
   /** True when the resolved connection belongs to the calling actor. */
-  resolvedOwnedByActor: boolean;
+  resolved_owned_by_actor: boolean;
   /** Admin pin connection id (status admin_locked), else null. */
-  adminPinnedConnectionId: string | null;
+  admin_pinned_connection_id: string | null;
   /** The actor's own member pin connection id, else null. */
-  memberPinnedConnectionId: string | null;
+  member_pinned_connection_id: string | null;
   /**
    * Org-wide default connection id for this integration (all agents), or
    * null when unset. `orgDefaultEnforced` distinguishes a hard lock
    * (members can't override — surfaced like an admin pin) from a soft
    * default the member can still override with their own pick.
    */
-  orgDefaultConnectionId: string | null;
-  orgDefaultEnforced: boolean;
+  org_default_connection_id: string | null;
+  org_default_enforced: boolean;
   /** Whether the actor may add a connection (admin OR not blocked). */
-  canAddConnection: boolean;
+  can_add_connection: boolean;
   /** Own + shared connections, annotated for the dropdown. */
   candidates: IntegrationCandidate[];
 }

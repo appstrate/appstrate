@@ -98,9 +98,9 @@ interface PinJoinRow {
 function toPinSummary(row: PinJoinRow): PinSummary {
   return {
     packageId: row.pin.packageId,
-    integrationPackageId: row.pin.integrationPackageId,
-    authKey: row.conn?.authKey ?? "",
-    connectionId: row.pin.connectionId,
+    integration_package_id: row.pin.integrationPackageId,
+    auth_key: row.conn?.authKey ?? "",
+    connection_id: row.pin.connectionId,
     createdAt: row.pin.createdAt.toISOString(),
     updatedAt: row.pin.updatedAt.toISOString(),
   };
@@ -159,7 +159,7 @@ export async function listAgentsConsumingIntegration(
     }[]
   ).map((r) => ({
     packageId: r.package_id,
-    displayName: r.display_name ?? r.package_id,
+    display_name: r.display_name ?? r.package_id,
   }));
 }
 
@@ -269,9 +269,9 @@ async function upsertPin(args: {
 
   return {
     packageId: agentPackageId,
-    integrationPackageId,
-    authKey: conn.authKey,
-    connectionId,
+    integration_package_id: integrationPackageId,
+    auth_key: conn.authKey,
+    connection_id: connectionId,
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
   };
@@ -587,19 +587,19 @@ async function attachOwnerNames(rows: ConnectionRow[]): Promise<SharedConnection
 
   return rows.map((row) => ({
     id: row.id,
-    authKey: row.authKey,
-    accountId: row.accountId,
+    auth_key: row.authKey,
+    account_id: row.accountId,
     label: row.label,
-    ownerUserId: row.userId,
-    ownerEndUserId: row.endUserId,
-    ownerName: row.userId
+    owner_user_id: row.userId,
+    owner_end_user_id: row.endUserId,
+    owner_name: row.userId
       ? (userNames.get(row.userId) ?? null)
       : row.endUserId
         ? (endUserNames.get(row.endUserId) ?? null)
         : null,
-    scopesGranted: row.scopesGranted ?? [],
-    sharedWithOrg: row.sharedWithOrg,
-    needsReconnection: row.needsReconnection,
+    scopes_granted: row.scopesGranted ?? [],
+    shared_with_org: row.sharedWithOrg,
+    needs_reconnection: row.needsReconnection,
   }));
 }
 
@@ -659,24 +659,24 @@ export async function resolveAgentIntegrationPick(args: {
   );
 
   const adminPinnedConnectionId =
-    adminPins.find((p) => p.packageId === agentPackageId)?.connectionId ?? null;
+    adminPins.find((p) => p.packageId === agentPackageId)?.connection_id ?? null;
   const memberPinnedConnectionId =
     memberPins.find((p) => p.integrationPackageId === integrationPackageId)?.connectionId ?? null;
-  const orgDefaultConnectionId = orgDefault?.connectionId ?? null;
+  const orgDefaultConnectionId = orgDefault?.connection_id ?? null;
   const orgDefaultEnforced = orgDefault?.enforce ?? false;
 
   const candidates: IntegrationCandidate[] = candidatesRaw.map((c) => ({
     ...c,
-    missingScopes: manifest
+    missing_scopes: manifest
       ? missingScopesForConnection({
           manifest,
-          authKey: c.authKey,
-          granted: c.scopesGranted,
+          authKey: c.auth_key,
+          granted: c.scopes_granted,
           agentTools,
           agentScopes,
         })
       : [],
-    isOwn: actor.type === "user" ? c.ownerUserId === actor.id : c.ownerEndUserId === actor.id,
+    isOwn: actor.type === "user" ? c.owner_user_id === actor.id : c.owner_end_user_id === actor.id,
   }));
 
   const resolved = resolution.resolved[integrationPackageId] ?? null;
@@ -733,14 +733,14 @@ export async function resolveAgentIntegrationPick(args: {
 
   return {
     status,
-    resolvedConnectionId,
-    resolvedMissingScopes,
-    resolvedOwnedByActor,
-    adminPinnedConnectionId,
-    memberPinnedConnectionId,
-    orgDefaultConnectionId,
-    orgDefaultEnforced,
-    canAddConnection: isAdmin || !blocked,
+    resolved_connection_id: resolvedConnectionId,
+    resolved_missing_scopes: resolvedMissingScopes,
+    resolved_owned_by_actor: resolvedOwnedByActor,
+    admin_pinned_connection_id: adminPinnedConnectionId,
+    member_pinned_connection_id: memberPinnedConnectionId,
+    org_default_connection_id: orgDefaultConnectionId,
+    org_default_enforced: orgDefaultEnforced,
+    can_add_connection: isAdmin || !blocked,
     candidates,
   };
 }

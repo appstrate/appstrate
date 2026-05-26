@@ -98,10 +98,10 @@ describe("LoginSecretStrategy.complete — store the secret, session pending", (
     });
 
     // Connection metadata: default account, not flagged for reconnection.
-    expect(summary.accountId).toBe("default");
-    expect(summary.needsReconnection).toBe(false);
+    expect(summary.account_id).toBe("default");
+    expect(summary.needs_reconnection).toBe(false);
     expect(summary.expiresAt).toBeNull();
-    expect(summary.scopesGranted).toEqual([]);
+    expect(summary.scopes_granted).toEqual([]);
   });
 
   it("rejects an empty credentials payload", async () => {

@@ -146,8 +146,8 @@ async function listAllActorIntegrationConnections(
       const info = packageInfo.get(row.packageId);
       group = {
         kind: "integration",
-        sourceId: row.packageId,
-        displayName: info?.displayName ?? row.packageId,
+        source_id: row.packageId,
+        display_name: info?.displayName ?? row.packageId,
         logo: info?.logo ?? "",
         total_connections: 0,
         connections: [],
@@ -166,16 +166,16 @@ async function listAllActorIntegrationConnections(
             : row.accountId;
 
     const entry: MeConnectionEntry = {
-      connectionId: row.connectionId,
+      connection_id: row.connectionId,
       kind: "integration",
       label: row.label,
-      scopesGranted: row.scopesGranted ?? [],
-      connectedAt: toISORequired(row.createdAt),
-      needsReconnection: row.needsReconnection,
+      scopes_granted: row.scopesGranted ?? [],
+      connected_at: toISORequired(row.createdAt),
+      needs_reconnection: row.needsReconnection,
       expiresAt: row.expiresAt ? row.expiresAt.toISOString() : null,
       identity,
-      authKey: row.authKey,
-      sharedWithOrg: row.sharedWithOrg,
+      auth_key: row.authKey,
+      shared_with_org: row.sharedWithOrg,
       reused_by_agents: reuseCount.get(`${row.applicationId}|${row.packageId}`) ?? 0,
       org: { id: row.orgId, name: orgName },
       application: { id: row.applicationId, name: row.applicationName },
@@ -193,6 +193,6 @@ async function listAllActorIntegrationConnections(
  */
 export async function listMeConnections(actor: Actor): Promise<MeConnectionSourceGroup[]> {
   const integrations = await listAllActorIntegrationConnections(actor);
-  integrations.sort((a, b) => a.displayName.localeCompare(b.displayName));
+  integrations.sort((a, b) => a.display_name.localeCompare(b.display_name));
   return integrations;
 }

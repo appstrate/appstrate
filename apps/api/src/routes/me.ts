@@ -162,9 +162,9 @@ router.get("/connections", async (c) => {
  * the two sets coexist in the same table, discriminated by `user_id`.
  */
 const upsertMemberPinSchema = z.object({
-  agentPackageId: z.string().min(1),
-  integrationPackageId: z.string().min(1),
-  connectionId: z.uuid(),
+  agent_package_id: z.string().min(1),
+  integration_package_id: z.string().min(1),
+  connection_id: z.uuid(),
 });
 
 router.get("/integration-pins", requireAppContext(), async (c) => {
@@ -193,12 +193,17 @@ router.put("/integration-pins", requireAppContext(), async (c) => {
   const scope = getAppScope(c);
   const body = await c.req.json().catch(() => ({}));
   const input = parseBody(upsertMemberPinSchema, body);
-  const result = await upsertMemberPin(scope, { ...input, userId: user.id });
+  const result = await upsertMemberPin(scope, {
+    agentPackageId: input.agent_package_id,
+    integrationPackageId: input.integration_package_id,
+    connectionId: input.connection_id,
+    userId: user.id,
+  });
   await recordAuditFromContext(c, {
     action: "integration.member_pin.upserted",
     resourceType: "integration_pin",
-    resourceId: `${input.agentPackageId}|${input.integrationPackageId}`,
-    after: { connectionId: input.connectionId },
+    resourceId: `${input.agent_package_id}|${input.integration_package_id}`,
+    after: { connectionId: input.connection_id },
   });
   return c.json(result);
 });

@@ -56,7 +56,7 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
     if (entry.tools !== undefined) return;
     // catalog excludes the synthetic api_call entry for the purposes of this
     // check — we want "does the integration expose discrete MCP tools too?"
-    const nativeCount = (detail.toolCatalog ?? []).filter(
+    const nativeCount = (detail.tool_catalog ?? []).filter(
       (t) => t.name !== API_CALL_TOOL_NAME,
     ).length;
     if (nativeCount > 0) return;
@@ -84,7 +84,7 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
   // auto-hidden connect.tool primitives — the integration's sparse
   // `tools{}` policy table is no longer the source of truth for "what
   // exists" (it only carries per-tool policy when present).
-  const fullCatalog = detail.toolCatalog ?? [];
+  const fullCatalog = detail.tool_catalog ?? [];
   // The synthetic api_call entry has its own dedicated checkbox row;
   // exclude it from the native tools list so it doesn't render twice.
   const nativeCatalog = fullCatalog.filter((t) => t.name !== API_CALL_TOOL_NAME);
@@ -136,7 +136,7 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
   const inferredScopes = new Map<string, string[]>();
   for (const toolName of entry.tools ?? []) {
     const meta = catalogByName.get(toolName);
-    for (const scope of meta?.policy?.requiredScopes ?? []) {
+    for (const scope of meta?.policy?.required_scopes ?? []) {
       const existing = inferredScopes.get(scope) ?? [];
       if (!existing.includes(toolName)) existing.push(toolName);
       inferredScopes.set(scope, existing);
@@ -252,7 +252,7 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
           </p>
           <div className="grid gap-1.5">
             {nativeCatalog.map((entry) => {
-              const requiredScopes = entry.policy?.requiredScopes ?? [];
+              const requiredScopes = entry.policy?.required_scopes ?? [];
               return (
                 <label
                   key={entry.name}
