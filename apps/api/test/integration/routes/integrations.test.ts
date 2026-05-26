@@ -531,6 +531,42 @@ describe("GET /api/integrations/callback (public — no session required)", () =
     expect(body).toContain("window.close");
     expect(body).toContain("access_denied");
   });
+
+  it("rejects an unknown/forged state (CSRF guard — state never written to the store)", async () => {
+    // The `state` value is the CSRF binding: oauth-state-store.set() at
+    // kickoff persists it, get() at callback consumes-once. Replaying a
+    // state that was never persisted (or was already consumed) must NOT
+    // dispatch token exchange — that's the whole CSRF protection.
+    //
+    // handleIntegrationOAuthCallback throws OAuthCallbackError("transient")
+    // when `store.get(state)` returns null; the route renders the
+    // generic "Could not complete the connection" popup HTML (NOT the
+    // "expired" variant — that's keyed on `kind === "revoked"`).
+    const res = await app.request(
+      "/api/integrations/callback?code=any-code&state=forged-state-never-stored",
+    );
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    // popup HTML is rendered (window.close present), with the generic
+    // user-facing transient error — the forged state was REFUSED, not
+    // silently exchanged.
+    expect(body).toContain("window.close");
+    expect(body).toMatch(/Could not complete the connection|try again/i);
+    // Sanity foil: a token-exchange success would have shown a clean
+    // close with no error text.
+    expect(body).not.toContain("access_denied");
+  });
+
+  it("rejects an empty state value (cannot bypass CSRF by omitting state)", async () => {
+    // ?code=… without ?state=… — caller is treated as missing-params, not
+    // exchanged. The route's pre-handler guard at `if (!code || !state)`
+    // is the first line of defence.
+    const res = await app.request("/api/integrations/callback?code=any-code&state=");
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("window.close");
+    expect(body).toMatch(/Missing required parameters|try again/i);
+  });
 });
 
 describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default connection)", () => {
