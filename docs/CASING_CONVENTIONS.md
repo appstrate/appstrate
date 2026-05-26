@@ -41,6 +41,8 @@ Everything that crosses HTTP in JSON or sits at rest in canonical formats.
 - AFPS spec Zod schemas (`afps-spec/packages/schema/src/schemas.ts`)
 - Appstrate validators (`packages/core/src/{validation,integration,mcp-server,form}.ts`)
 
+**Sub-exception — `form.ts` legacy camelCase reader**: `mapAfpsToRjsf` in `packages/core/src/form.ts` reads BOTH canonical snake_case (`file_constraints`, `ui_hints`, `property_order`, `max_size`) AND legacy camelCase (`fileConstraints`, `uiHints`, `propertyOrder`, `maxSize`) wrappers. Canonical snake_case wins; writeback is always snake_case. Reason: AFPS 1.x manifests persisted before the 2.0 migration are still on disk. Drop once a backfill re-saves every persisted manifest. RJSF vendor-namespaced keys (`ui:order`, `ui:widget`, `ui:placeholder`) and RJSF widget options (`accept`, `maxSize`, `multiple`, `maxFiles`) are third-party APIs and intentionally camelCase — out of scope for Zone 1.
+
 **Why snake_case** (SOTA evidence):
 
 - Stripe, GitHub, AWS, OpenAI, Anthropic, Twilio, Slack: all use snake_case wire
@@ -242,6 +244,24 @@ await recordAuditFromContext({
 ```
 
 Reason: SIEM queries (Datadog, Splunk) need stable field names, and all other audit sites already use camelCase explicit keys.
+
+#### Carve-out 4n — Headless-platform DTO fields (camelCase end-to-end)
+
+**Files**:
+
+- `packages/shared-types/src/index.ts` (`ApiKeyInfo`, `ApplicationInfo`, `EndUserInfo`, `OrgProxyInfo`, `SocialProviderView`, `SmtpConfigView`, paginated list envelopes)
+- `apps/api/src/openapi/schemas.ts` + `paths/{api-keys,applications,end-users,webhooks,oauth-clients,proxies,organizations}.ts`
+- Webhook module CRUD surface (`apps/api/src/modules/webhooks/`)
+
+**Rule**: a fixed set of headless-platform / developer-surface wire fields stays **camelCase** end-to-end (TS schema + service + OpenAPI + frontend hook all match):
+
+- API key surface: `keyPrefix`
+- Proxy surface: `urlPrefix`
+- Application / end-user surface: `externalId`, `isDefault`, `allowedRedirectDomains`
+- Pagination envelopes: `hasMore`
+- Webhook CRUD surface: `payloadMode`, `eventId`, `eventType`, `statusCode`
+
+**Why**: developer-platform surfaces modelled on the Stripe headless API convention (camelCase for developer-platform CRUD). End-to-end coherent (no impedance mismatch); flipping is a breaking change for external API consumers with zero user-visible benefit. Treat new fields on these specific surfaces the same way; for any new endpoint family, prefer snake_case wire per the Zone 1 default.
 
 ---
 

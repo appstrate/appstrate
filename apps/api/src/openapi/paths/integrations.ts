@@ -241,7 +241,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "List available integrations",
       description:
-        "List every AFPS integration accessible to the current org (own + system), enriched with `active` + `blockUserConnections` flags for the current application.",
+        "List every AFPS integration accessible to the current org (own + system), enriched with `active` + `block_user_connections` flags for the current application.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
