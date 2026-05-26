@@ -42,8 +42,8 @@ export interface MissingIntegrationFieldError {
     | string;
   title?: string;
   message: string;
-  /** Required scopes — populated on insufficient_scopes for the OAuth re-consent. */
-  requiredScopes?: string[];
+  /** Missing scopes — populated on insufficient_scopes for the OAuth re-consent upgrade. */
+  missing_scopes?: string[];
   /** Candidate connection ids — populated on must_choose_connection. */
   candidateConnectionIds?: string[];
 }
@@ -196,7 +196,7 @@ function MissingRow({
           <InlineConnectButton
             packageId={packageId}
             authKey={targetAuthKey}
-            {...(err.requiredScopes ? { scopes: err.requiredScopes } : {})}
+            {...(err.missing_scopes ? { scopes: err.missing_scopes } : {})}
             intent={
               err.code === "insufficient_scopes"
                 ? "upgrade"

@@ -4886,7 +4886,7 @@
                           "shared_with_org",
                           "needs_reconnection",
                           "missing_scopes",
-                          "isOwn"
+                          "is_own"
                         ],
                         "properties": {
                           "id": {
@@ -4929,7 +4929,7 @@
                               "type": "string"
                             }
                           },
-                          "isOwn": {
+                          "is_own": {
                             "type": "boolean"
                           }
                         }

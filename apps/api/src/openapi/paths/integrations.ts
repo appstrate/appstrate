@@ -660,7 +660,7 @@ export const integrationsPaths = {
                         "shared_with_org",
                         "needs_reconnection",
                         "missing_scopes",
-                        "isOwn",
+                        "is_own",
                       ],
                       properties: {
                         id: { type: "string", format: "uuid" },
@@ -674,7 +674,7 @@ export const integrationsPaths = {
                         shared_with_org: { type: "boolean" },
                         needs_reconnection: { type: "boolean" },
                         missing_scopes: { type: "array", items: { type: "string" } },
-                        isOwn: { type: "boolean" },
+                        is_own: { type: "boolean" },
                       },
                     },
                   },

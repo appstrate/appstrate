@@ -439,7 +439,7 @@ function MemberConnectionPicker({
   } = resolution;
 
   const ownerLabel = (c: IntegrationCandidate): string =>
-    c.isOwn
+    c.is_own
       ? t("detail.integrationMemberPicker.byYou")
       : (c.owner_name ?? t("detail.integrationMemberPicker.ownerUnknown"));
 

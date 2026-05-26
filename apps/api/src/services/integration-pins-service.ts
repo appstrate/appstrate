@@ -676,7 +676,7 @@ export async function resolveAgentIntegrationPick(args: {
           agentScopes,
         })
       : [],
-    isOwn: actor.type === "user" ? c.owner_user_id === actor.id : c.owner_end_user_id === actor.id,
+    is_own: actor.type === "user" ? c.owner_user_id === actor.id : c.owner_end_user_id === actor.id,
   }));
 
   const resolved = resolution.resolved[integrationPackageId] ?? null;
@@ -695,7 +695,7 @@ export async function resolveAgentIntegrationPick(args: {
         : resolved.source === "member_pin"
           ? "pinned"
           : "auto";
-    resolvedOwnedByActor = candidates.find((c) => c.id === resolved.connectionId)?.isOwn ?? false;
+    resolvedOwnedByActor = candidates.find((c) => c.id === resolved.connectionId)?.is_own ?? false;
   } else if (err) {
     switch (err.code) {
       case "insufficient_scopes":

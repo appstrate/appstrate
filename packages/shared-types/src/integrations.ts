@@ -175,7 +175,7 @@ export interface ConsumingAgentSummary {
  */
 export interface IntegrationCandidate extends AccessibleIntegrationConnection {
   missing_scopes: string[];
-  isOwn: boolean;
+  is_own: boolean;
 }
 
 /**
