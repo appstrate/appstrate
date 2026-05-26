@@ -205,8 +205,26 @@ function extractDefaults(filePath: string): Match[] {
 
 // ─── Main ────────────────────────────────────────────────────────────
 
+type Finding =
+  | {
+      kind: "duplicate";
+      file: string;
+      line: number;
+      varName: string;
+      yamlDefault: string;
+      codeDefault: string;
+    }
+  | {
+      kind: "allowlist-drift";
+      file: string;
+      line: number;
+      varName: string;
+      yamlDefault: string;
+      expectedYamlDefault: string;
+    };
+
 function main(): number {
-  const findings: Array<Match & { codeDefault: string }> = [];
+  const findings: Finding[] = [];
 
   for (const file of COMPOSE_FILES) {
     for (const match of extractDefaults(file)) {
@@ -218,18 +236,27 @@ function main(): number {
         // Allowed — but sanity-check the recorded yamlDefault still
         // matches what the file actually says. Catch silent drift.
         if (allowed.yamlDefault !== match.yamlDefault) {
-          console.error(
-            `\x1b[33mwarn\x1b[0m  ALLOWLIST for ${match.varName} expects yamlDefault=${JSON.stringify(allowed.yamlDefault)} but ${match.file}:${match.line} has ${JSON.stringify(match.yamlDefault)}.`,
-          );
-          console.error(
-            `       Either update the ALLOWLIST entry in scripts/verify-compose-defaults.ts or fix the compose file.`,
-          );
+          findings.push({
+            kind: "allowlist-drift",
+            file: match.file,
+            line: match.line,
+            varName: match.varName,
+            yamlDefault: match.yamlDefault,
+            expectedYamlDefault: allowed.yamlDefault,
+          });
         }
         continue;
       }
 
       if (match.yamlDefault === codeDefault) {
-        findings.push({ ...match, codeDefault });
+        findings.push({
+          kind: "duplicate",
+          file: match.file,
+          line: match.line,
+          varName: match.varName,
+          yamlDefault: match.yamlDefault,
+          codeDefault,
+        });
       }
     }
   }
@@ -241,26 +268,53 @@ function main(): number {
     return 0;
   }
 
-  console.error(
-    `\x1b[31m✗\x1b[0m verify-compose-defaults: ${findings.length} duplicated env default(s) found.\n`,
-  );
-  console.error(`Compose files should not mirror defaults already defined in ${SCHEMA_SOURCE}.`);
-  console.error(
-    `Drop the YAML default and rely on the Zod schema's single source of truth — or, if the\n` +
-      `override is deliberate, add the variable to the ALLOWLIST in\n` +
-      `scripts/verify-compose-defaults.ts with a documented reason.\n`,
-  );
-  console.error(`This was the root cause of #513 (MODULES drift → no model providers).\n`);
+  const duplicates = findings.filter((f) => f.kind === "duplicate");
+  const drifts = findings.filter((f) => f.kind === "allowlist-drift");
 
-  for (const f of findings) {
+  console.error(
+    `\x1b[31m✗\x1b[0m verify-compose-defaults: ${findings.length} issue(s) found ` +
+      `(${duplicates.length} duplicates, ${drifts.length} ALLOWLIST drift).\n`,
+  );
+
+  if (duplicates.length > 0) {
+    console.error(`\x1b[1m── Class 1: duplicates code default ──\x1b[0m`);
     console.error(
-      `  \x1b[1m${f.file}:${f.line}\x1b[0m  ${f.varName}=${JSON.stringify(f.yamlDefault)}`,
+      `Compose files should not mirror defaults already defined in ${SCHEMA_SOURCE}.\n` +
+        `Drop the YAML default and rely on the Zod schema's single source of truth — or, if the\n` +
+        `override is deliberate, add the variable to the ALLOWLIST in\n` +
+        `scripts/verify-compose-defaults.ts with a documented reason.\n` +
+        `This was the root cause of #513 (MODULES drift → no model providers).\n`,
     );
-    console.error(
-      `    duplicates code default in ${SCHEMA_SOURCE} (${f.varName}: ${JSON.stringify(f.codeDefault)})`,
-    );
+    for (const f of duplicates) {
+      console.error(
+        `  \x1b[1m${f.file}:${f.line}\x1b[0m  ${f.varName}=${JSON.stringify(f.yamlDefault)}`,
+      );
+      console.error(
+        `    \x1b[33m[duplicates code default]\x1b[0m in ${SCHEMA_SOURCE} (${f.varName}: ${JSON.stringify(f.codeDefault)})`,
+      );
+    }
+    console.error("");
   }
-  console.error("");
+
+  if (drifts.length > 0) {
+    console.error(`\x1b[1m── Class 2: ALLOWLIST drift ──\x1b[0m`);
+    console.error(
+      `The ALLOWLIST entry's recorded yamlDefault no longer matches the compose file.\n` +
+        `Either update the ALLOWLIST entry in scripts/verify-compose-defaults.ts (when the\n` +
+        `change is intentional — also revise the documented reason) or revert the compose\n` +
+        `change. Silent drift would let an intentional override quietly change semantics.\n`,
+    );
+    for (const f of drifts) {
+      console.error(
+        `  \x1b[1m${f.file}:${f.line}\x1b[0m  ${f.varName}=${JSON.stringify(f.yamlDefault)}`,
+      );
+      console.error(
+        `    \x1b[33m[ALLOWLIST drift]\x1b[0m expected yamlDefault=${JSON.stringify(f.expectedYamlDefault)} ` +
+          `but compose file has ${JSON.stringify(f.yamlDefault)}`,
+      );
+    }
+    console.error("");
+  }
 
   return 1;
 }
