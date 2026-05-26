@@ -308,8 +308,8 @@ describe("api-keys service", () => {
 
       expect(keys).toHaveLength(1);
       expect(keys[0]!.createdBy).toBe(ctx.user.id);
-      // createdByName comes from profiles.displayName or user.name
-      expect(keys[0]!.createdByName).toBeDefined();
+      // created_by_name comes from profiles.displayName or user.name
+      expect(keys[0]!.created_by_name).toBeDefined();
     });
 
     it("returns keys with expected shape", async () => {

@@ -92,16 +92,16 @@ export const internalPaths = {
                     type: "array",
                     items: {
                       type: "object",
-                      required: ["id", "content", "createdAt", "actorType"],
+                      required: ["id", "content", "createdAt", "actor_type"],
                       properties: {
                         id: { type: "integer" },
                         content: {},
                         createdAt: { type: "string", format: "date-time" },
-                        actorType: {
+                        actor_type: {
                           type: "string",
                           enum: ["user", "end_user", "shared"],
                         },
-                        actorId: { type: ["string", "null"] },
+                        actor_id: { type: ["string", "null"] },
                       },
                     },
                   },
@@ -113,8 +113,8 @@ export const internalPaths = {
                     id: 42,
                     content: "User prefers Python over JS for data tasks",
                     createdAt: "2026-04-20T10:00:00Z",
-                    actorType: "user",
-                    actorId: "usr_abc",
+                    actor_type: "user",
+                    actor_id: "usr_abc",
                   },
                 ],
               },

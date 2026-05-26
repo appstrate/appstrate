@@ -313,7 +313,7 @@ export async function getResolvedRunConfig(
     config: asRecord(row.config),
     modelId: row.modelId ?? null,
     proxyId: row.proxyId ?? null,
-    versionPin,
+    version_pin: versionPin,
   };
 }
 

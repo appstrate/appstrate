@@ -383,7 +383,7 @@ describe("Agents API", () => {
       const body = (await res.json()) as any;
       const agent = body.data.find((f: { id: string }) => f.id === "@myorg/counted-agent");
       expect(agent).toBeDefined();
-      expect(agent.runningRuns).toBe(1);
+      expect(agent.running_runs).toBe(1);
     });
   });
 
@@ -423,11 +423,11 @@ describe("Agents API", () => {
       });
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
-        pinned: Array<{ key: string; actorType: string; content: { step: string } }>;
+        pinned: Array<{ key: string; actor_type: string; content: { step: string } }>;
       };
       expect(Array.isArray(body.pinned)).toBe(true);
       expect(body.pinned).toHaveLength(2);
-      const actorTypes = body.pinned.map((c) => c.actorType).sort();
+      const actorTypes = body.pinned.map((c) => c.actor_type).sort();
       expect(actorTypes).toEqual(["shared", "user"]);
       // Every row is the `checkpoint` slot here.
       expect(body.pinned.every((c) => c.key === "checkpoint")).toBe(true);

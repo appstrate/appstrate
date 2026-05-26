@@ -149,7 +149,7 @@ async function listAllActorIntegrationConnections(
         sourceId: row.packageId,
         displayName: info?.displayName ?? row.packageId,
         logo: info?.logo ?? "",
-        totalConnections: 0,
+        total_connections: 0,
         connections: [],
       };
       groups.set(row.packageId, group);
@@ -176,12 +176,12 @@ async function listAllActorIntegrationConnections(
       identity,
       authKey: row.authKey,
       sharedWithOrg: row.sharedWithOrg,
-      reusedByAgents: reuseCount.get(`${row.applicationId}|${row.packageId}`) ?? 0,
+      reused_by_agents: reuseCount.get(`${row.applicationId}|${row.packageId}`) ?? 0,
       org: { id: row.orgId, name: orgName },
       application: { id: row.applicationId, name: row.applicationName },
     };
     group.connections.push(entry);
-    group.totalConnections += 1;
+    group.total_connections += 1;
   }
 
   return [...groups.values()];

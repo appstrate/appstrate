@@ -21,10 +21,10 @@ export function RunRow({
   disableLink?: boolean;
 }) {
   const { t } = useTranslation(["agents"]);
-  const isRunning = ACTIVE_RUN_STATUSES.has(run.status);
-  const isUnread = run.notifiedAt != null && run.readAt == null;
-  const date = run.startedAt ? formatDateField(run.startedAt) : "";
-  const isInline = run.packageEphemeral === true;
+  const isRunning = (ACTIVE_RUN_STATUSES as ReadonlySet<string>).has(run.status);
+  const isUnread = run.notifiedAt != null;
+  const date = run.started_at ? formatDateField(run.started_at) : "";
+  const isInline = run.package_ephemeral === true;
   const isRemote = run.runOrigin === "remote";
   // Source agent deleted (FK SET NULL after migration 0017): the run row
   // survives but `/agents/:packageId/runs/:id` would 404. Render as a static
@@ -35,13 +35,13 @@ export function RunRow({
   // Live elapsed timer while running
   const [elapsed, setElapsed] = useState(0);
   useEffect(() => {
-    if (!isRunning || !run.startedAt) return;
-    const start = new Date(run.startedAt).getTime();
+    if (!isRunning || !run.started_at) return;
+    const start = new Date(run.started_at).getTime();
     const tick = () => setElapsed(Date.now() - start);
     tick();
     const id = setInterval(tick, 100);
     return () => clearInterval(id);
-  }, [isRunning, run.startedAt]);
+  }, [isRunning, run.started_at]);
 
   const time = isRunning ? elapsed : run.duration;
   const duration = time ? `${(time / 1000).toFixed(1)}s` : "";
@@ -77,7 +77,7 @@ export function RunRow({
 
       <RunTrigger run={run} />
 
-      {run.proxyLabel && (
+      {run.proxy_label && (
         <Shield size={12} className="text-muted-foreground hidden shrink-0 sm:block" />
       )}
       <div className="ml-auto flex shrink-0 items-center gap-2">

@@ -52,7 +52,7 @@ export const agentsPaths = {
                     scope: "@acme",
                     version: "1.2.0",
                     type: "agent",
-                    runningRuns: 1,
+                    running_runs: 1,
                     dependencies: {
                       skills: {},
                     },
@@ -68,7 +68,7 @@ export const agentsPaths = {
                     scope: "@appstrate",
                     version: "2.0.0",
                     type: "agent",
-                    runningRuns: 0,
+                    running_runs: 0,
                     dependencies: {
                       skills: { "@appstrate/summarize": "^1.0.0" },
                     },
@@ -217,7 +217,7 @@ export const agentsPaths = {
       tags: ["Agents"],
       summary: "List unified agent persistence (pinned slots + memories)",
       description:
-        "Returns the agent's named pinned slots and archive memories visible to the caller's actor scope. Pinned slots include the `checkpoint` carry-over slot alongside Letta-style named blocks (`persona`, `goals`, …). Admins inspecting at agent level (no `actorType` and no `runId`) see every actor's pinned slots; members always see their own actor scope plus shared rows. See ADR-011, ADR-013.",
+        "Returns the agent's named pinned slots and archive memories visible to the caller's actor scope. Pinned slots include the `checkpoint` carry-over slot alongside Letta-style named blocks (`persona`, `goals`, …). Admins inspecting at agent level (no `actor_type` and no `runId`) see every actor's pinned slots; members always see their own actor scope plus shared rows. See ADR-011, ADR-013.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -231,18 +231,18 @@ export const agentsPaths = {
           description: "Limit the response to one kind. Omitted → both.",
         },
         {
-          name: "actorType",
+          name: "actor_type",
           in: "query",
           required: false,
           schema: { type: "string", enum: ["user", "end_user", "shared"] },
           description: "Admin-only scope override. Defaults to caller's actor scope.",
         },
         {
-          name: "actorId",
+          name: "actor_id",
           in: "query",
           required: false,
           schema: { type: "string" },
-          description: "Required when `actorType` is `user` or `end_user`.",
+          description: "Required when `actor_type` is `user` or `end_user`.",
         },
         {
           name: "runId",
@@ -273,8 +273,8 @@ export const agentsPaths = {
                         key: { type: "string" },
                         content: {},
                         runId: { type: ["string", "null"] },
-                        actorType: { type: "string", enum: ["user", "end_user", "shared"] },
-                        actorId: { type: ["string", "null"] },
+                        actor_type: { type: "string", enum: ["user", "end_user", "shared"] },
+                        actor_id: { type: ["string", "null"] },
                         createdAt: { type: ["string", "null"], format: "date-time" },
                         updatedAt: { type: ["string", "null"], format: "date-time" },
                       },
@@ -288,8 +288,8 @@ export const agentsPaths = {
                         id: { type: "integer" },
                         content: {},
                         runId: { type: ["string", "null"] },
-                        actorType: { type: "string", enum: ["user", "end_user", "shared"] },
-                        actorId: { type: ["string", "null"] },
+                        actor_type: { type: "string", enum: ["user", "end_user", "shared"] },
+                        actor_id: { type: ["string", "null"] },
                         createdAt: { type: ["string", "null"], format: "date-time" },
                       },
                     },
@@ -309,7 +309,7 @@ export const agentsPaths = {
       tags: ["Agents"],
       summary: "Bulk-delete persistence rows for an agent",
       description:
-        "Wipes memories (always) and optionally the `checkpoint` slot (when `actorType` + `actorId` resolve to a single scope). Other named pinned slots must be deleted individually via DELETE /persistence/pinned/{id}. Admin-only.",
+        "Wipes memories (always) and optionally the `checkpoint` slot (when `actor_type` + `actor_id` resolve to a single scope). Other named pinned slots must be deleted individually via DELETE /persistence/pinned/{id}. Admin-only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -322,13 +322,13 @@ export const agentsPaths = {
           schema: { type: "string", enum: ["pinned", "memory"] },
         },
         {
-          name: "actorType",
+          name: "actor_type",
           in: "query",
           required: false,
           schema: { type: "string", enum: ["user", "end_user", "shared"] },
         },
         {
-          name: "actorId",
+          name: "actor_id",
           in: "query",
           required: false,
           schema: { type: "string" },

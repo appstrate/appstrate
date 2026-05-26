@@ -111,7 +111,7 @@ export const mePaths = {
                         "sourceId",
                         "displayName",
                         "logo",
-                        "totalConnections",
+                        "total_connections",
                         "connections",
                       ],
                       properties: {
@@ -119,7 +119,7 @@ export const mePaths = {
                         sourceId: { type: "string" },
                         displayName: { type: "string" },
                         logo: { type: "string" },
-                        totalConnections: { type: "integer" },
+                        total_connections: { type: "integer" },
                         connections: {
                           type: "array",
                           items: {
@@ -135,7 +135,7 @@ export const mePaths = {
                               "identity",
                               "authKey",
                               "sharedWithOrg",
-                              "reusedByAgents",
+                              "reused_by_agents",
                               "org",
                               "application",
                             ],
@@ -150,7 +150,7 @@ export const mePaths = {
                                 oneOf: [{ type: "string", format: "date-time" }, { type: "null" }],
                               },
                               identity: { type: ["string", "null"] },
-                              reusedByAgents: { type: ["integer", "null"] },
+                              reused_by_agents: { type: ["integer", "null"] },
                               authKey: { type: ["string", "null"] },
                               sharedWithOrg: { type: "boolean" },
                               org: {

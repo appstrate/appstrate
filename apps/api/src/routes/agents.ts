@@ -45,9 +45,9 @@ export const proxyIdSchema = z.object({ proxyId: z.string().nullable() });
 export const modelIdSchema = z.object({ modelId: z.string().nullable() });
 
 /**
- * Parse the `actorType` / `actorId` query-param pair shared by the
+ * Parse the `actor_type` / `actor_id` query-param pair shared by the
  * persistence GET / DELETE routes into a {@link PersistenceScope}.
- * Returns `null` when the caller did not supply `actorType` (i.e. no
+ * Returns `null` when the caller did not supply `actor_type` (i.e. no
  * scope override) and throws `invalidRequest` when the combination is
  * malformed.
  */
@@ -63,7 +63,7 @@ function scopeFromQueryParams(
   if (actorTypeParam === "end_user" && actorIdParam) {
     return { type: "end_user", id: actorIdParam };
   }
-  throw invalidRequest("Invalid actorType / actorId combination");
+  throw invalidRequest("Invalid actor_type / actor_id combination");
 }
 
 export function createAgentsRouter() {
@@ -92,7 +92,7 @@ export function createAgentsRouter() {
         dependencies: {
           skills: (manifest.dependencies?.skills ?? {}) as Record<string, string>,
         },
-        runningRuns: runningCounts[row.id] ?? 0,
+        running_runs: runningCounts[row.id] ?? 0,
         source: row.source ?? "local",
         scope: parsed?.scope ?? null,
         version: manifest.version,
@@ -208,7 +208,7 @@ export function createAgentsRouter() {
   // Unified persistence (checkpoints + memories) — ADR-011
   // ─────────────────────────────────────────────────────────────────
 
-  // GET /api/agents/:scope/:name/persistence?kind=&actorType=&actorId=
+  // GET /api/agents/:scope/:name/persistence?kind=&actor_type=&actor_id=
   // Read the unified persistence rows visible to the caller.
   router.get(
     "/:scope{@[^/]+}/:name/persistence",
@@ -218,8 +218,8 @@ export function createAgentsRouter() {
       const agent = c.get("package");
       const applicationId = c.get("applicationId");
       const kindParam = c.req.query("kind");
-      const actorTypeParam = c.req.query("actorType");
-      const actorIdParam = c.req.query("actorId");
+      const actorTypeParam = c.req.query("actor_type");
+      const actorIdParam = c.req.query("actor_id");
       const runIdParam = c.req.query("runId");
 
       // Default scope = caller's actor. Admin filtering by other actors
@@ -262,8 +262,8 @@ export function createAgentsRouter() {
               key: slot.key,
               content: slot.content,
               runId: slot.runId,
-              actorType: slot.actorType,
-              actorId: slot.actorId,
+              actor_type: slot.actorType,
+              actor_id: slot.actorId,
               createdAt: slot.createdAt?.toISOString() ?? null,
               updatedAt: slot.updatedAt?.toISOString() ?? null,
             }))
@@ -273,8 +273,8 @@ export function createAgentsRouter() {
               id: m.id,
               content: m.content,
               runId: m.runId,
-              actorType: m.actorType,
-              actorId: m.actorId,
+              actor_type: m.actorType,
+              actor_id: m.actorId,
               pinned: m.pinned,
               createdAt: m.createdAt?.toISOString() ?? null,
             }))
@@ -335,7 +335,7 @@ export function createAgentsRouter() {
     },
   );
 
-  // DELETE /api/agents/:scope/:name/persistence?kind=&actorType=&actorId=
+  // DELETE /api/agents/:scope/:name/persistence?kind=&actor_type=&actor_id=
   // Bulk delete: by default wipes every memory + checkpoint for the agent
   // in this app. Narrow with query params.
   router.delete(
@@ -346,8 +346,8 @@ export function createAgentsRouter() {
       const agent = c.get("package");
       const applicationId = c.get("applicationId");
       const kindParam = c.req.query("kind");
-      const actorTypeParam = c.req.query("actorType");
-      const actorIdParam = c.req.query("actorId");
+      const actorTypeParam = c.req.query("actor_type");
+      const actorIdParam = c.req.query("actor_id");
 
       const scope = scopeFromQueryParams(actorTypeParam, actorIdParam) ?? undefined;
 

@@ -31,20 +31,64 @@ export type { PackageType };
 
 export type { Run } from "@appstrate/db/schema";
 
-import type { Run } from "@appstrate/db/schema";
+/**
+ * Wire-shape Run DTO returned to API consumers. The Drizzle `Run` row keeps
+ * camelCase field names internally (Better Auth blocker); this is the single
+ * snake_case wire surface every JSON response uses. Universal DB-convention
+ * fields (`id`, `*Id`, `createdAt`, …) stay camelCase per Phase 3 scope.
+ */
+export interface RunWireDto {
+  id: string;
+  packageId: string | null;
+  userId: string | null;
+  endUserId: string | null;
+  apiKeyId: string | null;
+  orgId: string;
+  applicationId: string;
+  scheduleId: string | null;
+  status: string;
+  input: unknown;
+  result: unknown;
+  checkpoint: unknown;
+  error: string | null;
+  metadata: unknown;
+  config: unknown;
+  config_override: unknown;
+  started_at: string | null;
+  completed_at: string | null;
+  duration: number | null;
+  cost: number | null;
+  notifiedAt: string | null;
+  readAt: string | null;
+  runNumber: number | null;
+  token_usage: unknown;
+  version_label: string | null;
+  version_dirty: boolean | null;
+  proxy_label: string | null;
+  model_label: string | null;
+  model_source: string | null;
+  runner_name: string | null;
+  runner_kind: string | null;
+  agent_scope: string | null;
+  agent_name: string | null;
+  runOrigin: string | null;
+  contextSnapshot: unknown;
+  modelCredentialId: string | null;
+  connection_overrides: unknown;
+}
 
 /** Run with enriched display names from LEFT JOINs (dashboard user, end-user, API key, schedule). */
-export type EnrichedRun = Run & {
-  userName: string | null;
-  endUserName: string | null;
-  apiKeyName: string | null;
-  scheduleName: string | null;
+export type EnrichedRun = RunWireDto & {
+  user_name: string | null;
+  end_user_name: string | null;
+  api_key_name: string | null;
+  schedule_name: string | null;
   /** True if the run's source package is an inline/ephemeral shadow (POST /api/runs/inline). */
-  packageEphemeral?: boolean;
+  package_ephemeral?: boolean;
   /** For inline runs only — snapshot of the manifest submitted at run time. Null after compaction. */
-  inlineManifest?: Record<string, unknown> | null;
+  inline_manifest?: Record<string, unknown> | null;
   /** For inline runs only — snapshot of the prompt submitted at run time. Null after compaction. */
-  inlinePrompt?: string | null;
+  inline_prompt?: string | null;
 };
 
 // --- App Config Types ---
@@ -141,11 +185,39 @@ export type { TerminalRunStatus } from "@appstrate/db/schema";
 import type { Schedule } from "@appstrate/db/schema";
 export type { Schedule };
 
-export type EnrichedSchedule = Schedule & {
+/**
+ * Wire-shape Schedule DTO — snake_case fields exposed to the API consumer.
+ * Diverges from the Drizzle `Schedule` row (which stays camelCase internally)
+ * because Drizzle field names are a private implementation detail.
+ */
+export interface ScheduleWireDto {
+  id: string;
+  packageId: string;
+  userId: string | null;
+  endUserId: string | null;
+  orgId: string;
+  applicationId: string;
+  name: string | null;
+  enabled: boolean | null;
+  cron_expression: string;
+  timezone: string | null;
+  input: Record<string, unknown> | null;
+  config_override: Record<string, unknown> | null;
+  model_id_override: string | null;
+  proxy_id_override: string | null;
+  version_override: string | null;
+  connection_overrides: Record<string, string> | null;
+  last_run_at: string | null;
+  next_run_at: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type EnrichedSchedule = ScheduleWireDto & {
   /** Display name of the actor (member or end-user) the schedule runs as. */
-  actorName: string | null;
+  actor_name: string | null;
   /** Which actor kind owns the schedule run. Null for org/system-owned schedules. */
-  actorType: "user" | "end_user" | null;
+  actor_type: "user" | "end_user" | null;
 };
 
 // --- Organization Types ---
@@ -221,7 +293,7 @@ export interface MeConnectionEntry {
    * surface "reused by N agents" so members understand that the connection
    * is shared across the org's agents rather than per-agent.
    */
-  reusedByAgents: number | null;
+  reused_by_agents: number | null;
   /** Where this connection lives (the connection is keyed per-app). */
   org: { id: string; name: string };
   application: { id: string; name: string };
@@ -233,7 +305,7 @@ export interface MeConnectionSourceGroup {
   sourceId: string;
   displayName: string;
   logo: string;
-  totalConnections: number;
+  total_connections: number;
   connections: MeConnectionEntry[];
 }
 
@@ -261,7 +333,7 @@ export interface AgentListItem extends BasePackageListItem {
     mcp_servers?: Record<string, string>;
     integrations?: Record<string, string>;
   };
-  runningRuns: number;
+  running_runs: number;
   type: PackageType;
   /** Always non-null on agents — narrowed for ergonomics. */
   description: string;
@@ -289,18 +361,23 @@ export interface AgentDetail {
   config: SchemaWrapper & {
     current: Record<string, unknown>;
   };
-  runningRuns: number;
-  lastRun: Partial<import("@appstrate/db/schema").Run> | null;
+  running_runs: number;
+  last_run: {
+    id: string;
+    status: string;
+    started_at: Date | string | null;
+    duration: number | null;
+  } | null;
   updatedAt: string | null;
-  lockVersion: number;
+  lock_version: number;
   prompt?: string;
   scope: string | null;
   version: string | null;
   manifest?: Record<string, unknown>; // Raw manifest from DB (user agents only)
 
-  callbackUrl?: string;
-  versionCount?: number;
-  hasUnarchivedChanges?: boolean;
+  callback_url?: string;
+  version_count?: number;
+  has_unarchived_changes?: boolean;
   forked_from: string | null;
 }
 
@@ -310,23 +387,23 @@ export interface OrgPackageItem extends BasePackageListItem {
   /** Display name from the manifest, may be missing on legacy rows. */
   name: string | null;
   createdBy: string | null;
-  createdByName: string | null;
+  created_by_name: string | null;
   createdAt: string;
   updatedAt: string;
-  usedByAgents: number;
-  autoInstalled: boolean;
+  used_by_agents: number;
+  auto_installed: boolean;
 }
 
 export interface OrgPackageItemDetail extends OrgPackageItem {
   content: string;
   /** Secondary source file content (e.g. .ts for tools). */
-  sourceCode?: string | null;
+  source_code?: string | null;
   agents: { id: string; display_name: string }[];
   manifest?: Record<string, unknown>;
-  manifestName?: string | null;
-  lockVersion?: number;
-  versionCount?: number;
-  hasUnarchivedChanges?: boolean;
+  manifest_name?: string | null;
+  lock_version?: number;
+  version_count?: number;
+  has_unarchived_changes?: boolean;
 }
 
 // --- Model Cost Types ---
@@ -379,7 +456,7 @@ interface PackageVersionInfo {
   id: number;
   version: string;
   integrity: string;
-  artifactSize: number;
+  artifact_size: number;
   yanked: boolean;
   createdAt: string;
 }
@@ -395,10 +472,10 @@ export interface VersionDetailResponse extends Omit<PackageVersionInfo, "created
   manifest: Record<string, unknown>;
   content?: string | null;
   /** Secondary source file content (e.g. .ts for tools). */
-  sourceCode?: string | null;
-  yankedReason: string | null;
+  source_code?: string | null;
+  yanked_reason: string | null;
   createdAt: string | null;
-  distTags: string[];
+  dist_tags: string[];
 }
 
 // --- Agent Memory Types ---
@@ -410,9 +487,9 @@ export interface AgentMemoryItem {
   content: string;
   runId: string | null;
   /** Actor scope of this memory row. `shared` = visible to all actors. */
-  actorType: PersistenceActorType;
-  /** Actor identifier. NULL when `actorType === "shared"`. */
-  actorId: string | null;
+  actor_type: PersistenceActorType;
+  /** Actor identifier. NULL when `actor_type === "shared"`. */
+  actor_id: string | null;
   /**
    * When true, this memory is rendered into the system prompt on every
    * run (working set). When false, it lives in the archive and is only
@@ -434,8 +511,8 @@ export interface AgentPinnedSlotItem {
   content: unknown;
   /** Run that wrote the latest snapshot, if any. */
   runId: string | null;
-  actorType: PersistenceActorType;
-  actorId: string | null;
+  actor_type: PersistenceActorType;
+  actor_id: string | null;
   createdAt: string | null;
   updatedAt: string | null;
 }
@@ -600,7 +677,7 @@ export interface ApiKeyInfo {
   keyPrefix: string;
   scopes: string[];
   createdBy: string | null;
-  createdByName?: string;
+  created_by_name?: string;
   expiresAt: string | null;
   lastUsedAt: string | null;
   revokedAt: string | null;
@@ -630,7 +707,7 @@ export interface InstalledPackage {
   updatedAt: string;
   packageType: string;
   packageSource: string;
-  draftManifest: Record<string, unknown> | null;
+  draft_manifest: Record<string, unknown> | null;
 }
 
 /**
@@ -645,7 +722,7 @@ export interface ResolvedRunConfig {
   modelId: string | null;
   proxyId: string | null;
   /** Pinned semver label (`1.2.3`), or null when the app uses the floating dist-tag. */
-  versionPin: string | null;
+  version_pin: string | null;
 }
 
 // --- End-User Types ---

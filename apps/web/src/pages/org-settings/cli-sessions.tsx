@@ -14,11 +14,11 @@ import { deriveLabel, type CliSessionDisplay } from "../../lib/cli-sessions";
 interface AdminCliSession extends CliSessionDisplay {
   userId: string;
   userEmail: string | null;
-  userName: string | null;
+  user_name: string | null;
 }
 
 function memberLabel(s: AdminCliSession): string {
-  return s.userName || s.userEmail || s.userId;
+  return s.user_name || s.userEmail || s.userId;
 }
 
 export function OrgSettingsCliSessionsPage() {

@@ -159,13 +159,13 @@ function ScheduleParams({
           <p className="text-muted-foreground mb-1 text-xs">{t("schedule.paramActor")}</p>
           <p className="inline-flex items-center gap-1.5 text-sm font-medium">
             <ActorLabel
-              actorType={schedule.actorType}
-              actorName={schedule.actorName}
+              actor_type={schedule.actor_type}
+              actor_name={schedule.actor_name}
               iconSize="size-3.5"
             />
-            {schedule.actorType && (
+            {schedule.actor_type && (
               <UIBadge variant="outline" className="px-1 py-0 text-[10px]">
-                {schedule.actorType}
+                {schedule.actor_type}
               </UIBadge>
             )}
           </p>
@@ -183,7 +183,7 @@ function ScheduleParams({
 
         <div className="border-border bg-muted/30 rounded-lg border p-4">
           <p className="text-muted-foreground mb-1 text-xs">{t("schedule.paramCron")}</p>
-          <p className="font-mono text-sm">{schedule.cronExpression}</p>
+          <p className="font-mono text-sm">{schedule.cron_expression}</p>
         </div>
 
         <div className="border-border bg-muted/30 rounded-lg border p-4">
@@ -194,14 +194,14 @@ function ScheduleParams({
         <div className="border-border bg-muted/30 rounded-lg border p-4">
           <p className="text-muted-foreground mb-1 text-xs">{t("schedule.paramNextRun")}</p>
           <p className="text-sm font-medium">
-            {schedule.nextRunAt ? formatDateField(schedule.nextRunAt) : "-"}
+            {schedule.next_run_at ? formatDateField(schedule.next_run_at) : "-"}
           </p>
         </div>
 
         <div className="border-border bg-muted/30 rounded-lg border p-4">
           <p className="text-muted-foreground mb-1 text-xs">{t("schedule.paramLastRun")}</p>
           <p className="text-sm font-medium">
-            {schedule.lastRunAt ? formatDateField(schedule.lastRunAt) : "-"}
+            {schedule.last_run_at ? formatDateField(schedule.last_run_at) : "-"}
           </p>
         </div>
       </div>
@@ -264,12 +264,12 @@ function ScheduleHistory({
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const previewRow =
-    isActive && showNext && schedule.nextRunAt ? (
+    isActive && showNext && schedule.next_run_at ? (
       <NextRunPreview
         runNumber={(firstExec?.runNumber ?? 0) + 1}
         agentName={agentName}
-        scheduleName={schedule.name || schedule.id}
-        nextRunAt={schedule.nextRunAt}
+        schedule_name={schedule.name || schedule.id}
+        next_run_at={schedule.next_run_at}
       />
     ) : null;
 

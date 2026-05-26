@@ -47,7 +47,7 @@ export const runsPaths = {
                   description:
                     "Per-run config override. Deep-merged with the per-application persisted config (`application_packages.config`): override leaves replace, plain-object children merge recursively, arrays are replaced wholesale, `null` at a leaf sets the value to null (validated as missing for required string fields), missing keys fall through. Re-validated against the manifest config schema after the merge — a 400 `invalid_config` is returned if the merged result violates the schema. Top-level `null` is rejected (returns 400) — omit the field to inherit persisted defaults, send `{}` for an explicit empty override. Mirrors the OpenAPI Assistants `runs.create { instructions, model, tools }` and Argo Workflows `submitOptions.parameters` SOTA — every client (UI, CLI, SDK) reaches the same resolved config for the same `(persisted, override)` pair.",
                 },
-                connectionOverrides: {
+                connection_overrides: {
                   type: "object",
                   description:
                     'Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor.',
@@ -395,7 +395,7 @@ export const runsPaths = {
       tags: ["Runs"],
       summary: "List runs across the application (global view)",
       description:
-        "Org + application scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, and a date range. Inline runs surface via `packageEphemeral: true` on each row. Note: `kind`, `status`, and date filters are ignored when `user=me` (self-view uses a simpler path).",
+        "Org + application scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, and a date range. Inline runs surface via `package_ephemeral: true` on each row. Note: `kind`, `status`, and date filters are ignored when `user=me` (self-view uses a simpler path).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -489,21 +489,21 @@ export const runsPaths = {
                 input: { folder: "inbox", maxEmails: 50 },
                 result: { processed: 42, labeled: 38 },
                 checkpoint: { lastProcessedId: "msg_99f2a" },
-                tokenUsage: {
+                token_usage: {
                   input_tokens: 8200,
                   output_tokens: 4250,
                   cache_creation_input_tokens: 0,
                   cache_read_input_tokens: 1024,
                 },
-                startedAt: "2026-01-15T10:30:00Z",
-                completedAt: "2026-01-15T10:31:12Z",
+                started_at: "2026-01-15T10:30:00Z",
+                completed_at: "2026-01-15T10:31:12Z",
                 duration: 72000,
                 scheduleId: "sched_cm1abc456def789",
-                versionLabel: "1.2.0",
-                versionDirty: false,
-                proxyLabel: null,
-                modelLabel: "Claude Sonnet 4",
-                modelSource: "system",
+                version_label: "1.2.0",
+                version_dirty: false,
+                proxy_label: null,
+                model_label: "Claude Sonnet 4",
+                model_source: "system",
                 cost: 0.0034,
                 endUserId: null,
                 applicationId: "app_m4n5o6p7",
@@ -657,7 +657,7 @@ export const runsPaths = {
                           enum: ["draft", "published"],
                           default: "published",
                           description:
-                            "`draft` reads `draftManifest`/`draftContent` (mutable, mirrors the dashboard Run button on never-published agents); `published` resolves a concrete `package_versions` row.",
+                            "`draft` reads `draft_manifest`/`draftContent` (mutable, mirrors the dashboard Run button on never-published agents); `published` resolves a concrete `package_versions` row.",
                         },
                         spec: {
                           type: "string",

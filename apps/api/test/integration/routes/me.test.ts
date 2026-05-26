@@ -219,7 +219,7 @@ describe("Me API (/api/me)", () => {
     type Group = {
       kind: string;
       sourceId: string;
-      totalConnections: number;
+      total_connections: number;
       connections: Array<{ connectionId: string; kind: string; org: { id: string } }>;
     };
 
@@ -243,7 +243,7 @@ describe("Me API (/api/me)", () => {
       const group = body.data.find((g) => g.sourceId === "@conn/gmail");
       expect(group).toBeDefined();
       expect(group?.kind).toBe("integration");
-      expect(group?.totalConnections).toBe(1);
+      expect(group?.total_connections).toBe(1);
       expect(group?.connections[0]?.kind).toBe("integration");
     });
 

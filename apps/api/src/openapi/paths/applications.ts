@@ -446,19 +446,19 @@ export const applicationsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["config", "modelId", "proxyId", "versionPin"],
+                required: ["config", "modelId", "proxyId", "version_pin"],
                 properties: {
                   config: { type: "object" },
                   modelId: { type: ["string", "null"] },
                   proxyId: { type: ["string", "null"] },
-                  versionPin: { type: ["string", "null"] },
+                  version_pin: { type: ["string", "null"] },
                 },
               },
               example: {
                 config: { dryRun: true },
                 modelId: "claude-sonnet-4-6",
                 proxyId: null,
-                versionPin: "1.2.3",
+                version_pin: "1.2.3",
               },
             },
           },

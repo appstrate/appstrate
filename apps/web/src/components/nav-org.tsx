@@ -46,7 +46,7 @@ export function NavOrg() {
     offset: 0,
   });
   const hasRunning =
-    (agents?.some((f) => f.runningRuns > 0) ?? false) || (runningInline?.total ?? 0) > 0;
+    (agents?.some((f) => f.running_runs > 0) ?? false) || (runningInline?.total ?? 0) > 0;
   const unread = unreadCount ?? 0;
 
   const automationItems = [

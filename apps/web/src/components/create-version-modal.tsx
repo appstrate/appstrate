@@ -73,8 +73,8 @@ export function CreateVersionModal({
 
   const selectedBump = useWatch({ control, name: "selectedBump" });
 
-  const latestVersion = versionInfo?.latestPublishedVersion ?? null;
-  const activeVersion = versionInfo?.activeVersion ?? null;
+  const latestVersion = versionInfo?.latest_published_version ?? null;
+  const activeVersion = versionInfo?.active_version ?? null;
 
   // Mode A: active === latest -> show bump selector
   const needsBump = !!activeVersion && !!latestVersion && semverEq(activeVersion, latestVersion);

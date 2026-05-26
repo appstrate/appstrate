@@ -24,13 +24,13 @@ async function upsertItem(
   manifest: Record<string, unknown>,
 ): Promise<void> {
   const existing = await getOrgItem(orgId, packageId, cfg);
-  if (existing && existing.lockVersion != null) {
+  if (existing && existing.lock_version != null) {
     // Re-install: update existing package
     await updateOrgItem(
       orgId,
       packageId,
       { manifest, content: item.content },
-      existing.lockVersion,
+      existing.lock_version,
     );
   } else {
     await createOrgItem(orgId, item, cfg, manifest);

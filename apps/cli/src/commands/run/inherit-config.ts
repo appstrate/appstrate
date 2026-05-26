@@ -149,7 +149,7 @@ export function mergeRunConfig(inputs: MergeRunConfigInputs): InheritedRunConfig
   const config = deepMergeConfig(inherited?.config ?? {}, inputs.flagConfig);
   const modelId = inputs.flagModel ?? inputs.envModel ?? inherited?.modelId ?? null;
   const proxyId = inputs.flagProxy ?? inputs.envProxy ?? inherited?.proxyId ?? null;
-  const versionPin = inputs.hasExplicitSpec ? null : (inherited?.versionPin ?? null);
+  const versionPin = inputs.hasExplicitSpec ? null : (inherited?.version_pin ?? null);
   return {
     config,
     modelId,

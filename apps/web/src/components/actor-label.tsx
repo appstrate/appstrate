@@ -3,8 +3,8 @@
 import { User, Building2 } from "lucide-react";
 
 interface ActorLabelProps {
-  actorType: "user" | "end_user" | null;
-  actorName: string | null;
+  actor_type: "user" | "end_user" | null;
+  actor_name: string | null;
   iconSize?: string;
   className?: string;
 }
@@ -13,19 +13,19 @@ interface ActorLabelProps {
  * Renders the actor (member or end-user) a schedule runs as.
  */
 export function ActorLabel({
-  actorType,
-  actorName,
+  actor_type,
+  actor_name,
   iconSize = "size-3",
   className,
 }: ActorLabelProps) {
-  if (!actorName) return null;
+  if (!actor_name) return null;
 
-  const Icon = actorType === "end_user" ? Building2 : User;
+  const Icon = actor_type === "end_user" ? Building2 : User;
 
   return (
     <span className={`inline-flex items-center gap-1 ${className ?? ""}`}>
       <Icon className={iconSize} />
-      {actorName}
+      {actor_name}
     </span>
   );
 }

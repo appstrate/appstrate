@@ -48,7 +48,7 @@ describe("Multi-tenancy isolation", () => {
         headers: authHeaders(orgB, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           content: "Hijacked prompt",
-          lockVersion: pkg.lockVersion,
+          lock_version: pkg.lockVersion,
         }),
       });
 

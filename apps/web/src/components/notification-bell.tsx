@@ -14,7 +14,7 @@ import { useUnreadCount, useMarkRead, useMarkAllRead } from "../hooks/use-notifi
 import { usePaginatedRuns } from "../hooks/use-paginated-runs";
 import { useAgents } from "../hooks/use-packages";
 import { useIsMobile } from "../hooks/use-mobile";
-import type { Run } from "@appstrate/shared-types";
+import type { EnrichedRun } from "@appstrate/shared-types";
 import { formatDateField } from "../lib/markdown";
 
 function NotificationContent({
@@ -26,7 +26,7 @@ function NotificationContent({
   markAllRead,
 }: {
   unread: number;
-  unreadRuns: Pick<Run, "id" | "packageId" | "agentName" | "status" | "startedAt">[];
+  unreadRuns: Pick<EnrichedRun, "id" | "packageId" | "agent_name" | "status" | "started_at">[];
   agentNameMap: Map<string, string>;
   onItemClick: (runId: string) => void;
   onClose: () => void;
@@ -70,8 +70,8 @@ function NotificationContent({
         <div className="max-h-[60vh] overflow-y-auto sm:max-h-96">
           {unreadRuns.map((run) => {
             const displayName = run.packageId
-              ? (agentNameMap.get(run.packageId) ?? run.agentName ?? run.packageId)
-              : (run.agentName ?? t("runs.deletedAgent", { ns: "agents" }));
+              ? (agentNameMap.get(run.packageId) ?? run.agent_name ?? run.packageId)
+              : (run.agent_name ?? t("runs.deletedAgent", { ns: "agents" }));
             // Source agent gone → no link target. Render as a non-interactive
             // row so users still see the notification but can't click into a
             // 404. Marking it read still flows through `onItemClick`.
@@ -92,7 +92,7 @@ function NotificationContent({
                     <Badge status={run.status} />
                   </div>
                   <p className="text-muted-foreground text-xs">
-                    {run.startedAt ? formatDateField(run.startedAt) : ""}
+                    {run.started_at ? formatDateField(run.started_at) : ""}
                   </p>
                 </div>
               </Link>
@@ -126,14 +126,17 @@ export function NotificationBell() {
   const [open, setOpen] = useState(false);
   const isMobile = useIsMobile();
   const unread = count ?? 0;
-  const hasRunning = agents?.some((f) => f.runningRuns > 0) ?? false;
+  const hasRunning = agents?.some((f) => f.running_runs > 0) ?? false;
 
   const agentNameMap = new Map<string, string>();
   if (agents) {
     for (const f of agents) agentNameMap.set(f.id, f.display_name);
   }
 
-  const unreadRuns = runsData?.data.filter((e) => e.notifiedAt != null && e.readAt == null) ?? [];
+  const unreadRuns = (runsData?.data.filter((e) => e.notifiedAt != null) ?? []) as unknown as Pick<
+    EnrichedRun,
+    "id" | "packageId" | "agent_name" | "status" | "started_at"
+  >[];
 
   const handleClick = (runId: string) => {
     markRead.mutate(runId);

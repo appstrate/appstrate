@@ -226,8 +226,8 @@ export function createInternalRouter() {
           id: m.id,
           content: m.content,
           createdAt: m.createdAt.toISOString(),
-          actorType: m.actorType,
-          actorId: m.actorId,
+          actor_type: m.actorType,
+          actor_id: m.actorId,
         })),
       });
     } catch (err) {

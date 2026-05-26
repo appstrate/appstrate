@@ -16,8 +16,8 @@ export interface PinnedSlotCardProps {
     id: number;
     key: string;
     content: unknown;
-    actorType: PersistenceActorType;
-    actorId: string | null;
+    actor_type: PersistenceActorType;
+    actor_id: string | null;
     runId: string | null;
     updatedAt: string | null;
   };
@@ -87,7 +87,7 @@ export function PinnedSlotCard({ slot, onDelete, isDeleting }: PinnedSlotCardPro
             {t("detail.pinnedCheckpointHint")}
           </span>
         )}
-        <ActorBadge actorType={slot.actorType} actorId={slot.actorId} />
+        <ActorBadge actor_type={slot.actor_type} actor_id={slot.actor_id} />
         <span className="text-muted-foreground text-xs whitespace-nowrap">
           {slot.updatedAt ? formatDateField(slot.updatedAt) : ""}
         </span>

@@ -151,13 +151,13 @@ function ConnectionRow({
   // Reuse hint — tells the user this connection is
   // shared across N agents in the application, killing the "do I need
   // one connection per agent?" confusion.
-  if (typeof conn.reusedByAgents === "number") {
+  if (typeof conn.reused_by_agents === "number") {
     rows.push({
       label: t("connectors.reusedByLabel"),
       value:
-        conn.reusedByAgents === 0
+        conn.reused_by_agents === 0
           ? t("connectors.reusedByNone")
-          : t("connectors.reusedByCount", { count: conn.reusedByAgents }),
+          : t("connectors.reusedByCount", { count: conn.reused_by_agents }),
     });
   }
 
@@ -267,7 +267,7 @@ function SourceGroupCard({
               </span>
             </div>
             <span className="text-muted-foreground text-sm">
-              {t("connectors.connectionCount", { count: group.totalConnections })}
+              {t("connectors.connectionCount", { count: group.total_connections })}
             </span>
           </div>
         </div>
@@ -314,11 +314,11 @@ export function PreferencesConnectorsPage() {
      * surfaced in the confirm dialog so the user understands the blast
      * radius before deleting the connection globally.
      */
-    reusedByAgents: number;
+    reused_by_agents: number;
   } | null>(null);
 
   const totalConnections = useMemo(
-    () => (groups ?? []).reduce((s, g) => s + g.totalConnections, 0),
+    () => (groups ?? []).reduce((s, g) => s + g.total_connections, 0),
     [groups],
   );
 
@@ -340,7 +340,7 @@ export function PreferencesConnectorsPage() {
           {t("connectors.myConnections")}
         </div>
         <span className="text-muted-foreground text-xs">
-          {t("connectors.totalConnections", { count: totalConnections })}
+          {t("connectors.total_connections", { count: totalConnections })}
         </span>
       </div>
 
@@ -384,7 +384,7 @@ export function PreferencesConnectorsPage() {
                         displayName: group.displayName,
                         identity: conn.identity,
                         connectionId: conn.connectionId,
-                        reusedByAgents: conn.reusedByAgents ?? 0,
+                        reused_by_agents: conn.reused_by_agents ?? 0,
                       })
                     }
                     onUpdateLabel={(label) =>
@@ -426,9 +426,9 @@ export function PreferencesConnectorsPage() {
           // Impact list surfaces the blast radius so the user can
           // intentionally choose between deleting (here) vs changing the
           // agent-side pick (on the agent page).
-          if (confirmState.reusedByAgents > 0) {
+          if (confirmState.reused_by_agents > 0) {
             return `${base}\n\n${t("connectors.deleteConfirmImpact", {
-              count: confirmState.reusedByAgents,
+              count: confirmState.reused_by_agents,
             })}`;
           }
           return base;

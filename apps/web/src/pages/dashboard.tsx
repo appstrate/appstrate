@@ -48,7 +48,7 @@ export function DashboardPage() {
       description?: string | null;
       source?: string;
       keywords?: string[];
-      runningRuns?: number;
+      running_runs?: number;
     }
   >();
   if (agents) {
@@ -58,7 +58,7 @@ export function DashboardPage() {
         description: f.description,
         source: f.source,
         keywords: f.keywords,
-        runningRuns: f.runningRuns,
+        running_runs: f.running_runs,
       });
     }
   }
@@ -78,8 +78,8 @@ export function DashboardPage() {
 
   // Upcoming schedules: active, with nextRunAt, sorted by soonest first
   const upcomingSchedules = (schedules ?? [])
-    .filter((s) => s.enabled !== false && s.nextRunAt)
-    .sort((a, b) => new Date(a.nextRunAt!).getTime() - new Date(b.nextRunAt!).getTime())
+    .filter((s) => s.enabled !== false && s.next_run_at)
+    .sort((a, b) => new Date(a.next_run_at!).getTime() - new Date(b.next_run_at!).getTime())
     .slice(0, 5);
 
   const firstName = (profile?.displayName || user?.name || "").split(/\s+/)[0];
@@ -140,7 +140,7 @@ export function DashboardPage() {
                     description={agent?.description}
                     type="agent"
                     source={agent?.source as "system" | "local" | undefined}
-                    runningRuns={agent?.runningRuns}
+                    runningRuns={agent?.running_runs}
                     keywords={agent?.keywords}
                     unreadCount={unreadCounts?.[agentId]}
                   />

@@ -169,7 +169,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const displayName = agentDetail?.display_name ?? pkgDetail?.name ?? pkgDetail?.id ?? "";
   const source = agentDetail?.source ?? pkgDetail?.source;
   const version = agentDetail?.version ?? pkgDetail?.version;
-  const hasUnarchivedChanges = agentDetail?.hasUnarchivedChanges ?? pkgDetail?.hasUnarchivedChanges;
+  const hasUnarchivedChanges =
+    agentDetail?.has_unarchived_changes ?? pkgDetail?.has_unarchived_changes;
   const forkedFrom = agentDetail?.forked_from ?? pkgDetail?.forked_from ?? null;
 
   const { data: versionDetail, isLoading: versionLoading } = useVersionDetail(
@@ -537,7 +538,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                   type="agent"
                   source={agent.source}
                   keywords={agent.keywords}
-                  runningRuns={agent.runningRuns}
+                  runningRuns={agent.running_runs}
                 />
               ))}
             </div>

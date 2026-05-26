@@ -114,7 +114,7 @@ export const forkSchema = z
 /** Enrich items with creator display names (batch lookup). */
 async function enrichWithCreatorNames<T extends { createdBy?: string | null }>(
   items: T[],
-): Promise<(T & { createdByName?: string })[]> {
+): Promise<(T & { created_by_name?: string })[]> {
   const userIds = [...new Set(items.map((i) => i.createdBy).filter(Boolean))] as string[];
   if (userIds.length === 0) return items;
 
@@ -127,7 +127,7 @@ async function enrichWithCreatorNames<T extends { createdBy?: string | null }>(
 
   return items.map((item) => ({
     ...item,
-    createdByName: item.createdBy ? (nameMap.get(item.createdBy) ?? undefined) : undefined,
+    created_by_name: item.createdBy ? (nameMap.get(item.createdBy) ?? undefined) : undefined,
   }));
 }
 
@@ -409,12 +409,12 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       const body = await c.req.json<{
         manifest: Record<string, unknown>;
         content?: string;
-        sourceCode?: string;
+        source_code?: string;
       }>();
 
       const manifest = body.manifest;
       const content = body.content ?? "";
-      const sourceCode = body.sourceCode ?? "";
+      const sourceCode = body.source_code ?? "";
 
       // Validate manifest
       const manifestResult = validateManifest(manifest);
@@ -443,7 +443,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       }
 
       if (rcfg.sourceFileName && !sourceCode.trim()) {
-        throw invalidRequest("Source is required", "sourceCode");
+        throw invalidRequest("Source is required", "source_code");
       }
 
       if (rcfg.validateSource && sourceCode) {
@@ -451,7 +451,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
         if (!validation.valid) {
           throw validationFailed(
             validation.errors.map((message) => ({
-              field: "sourceCode",
+              field: "source_code",
               code: "invalid_source",
               title: "Invalid Source",
               message,
@@ -522,7 +522,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       return c.json(
         {
           packageId,
-          lockVersion: item.lockVersion,
+          lock_version: item.lockVersion,
           message: `${rcfg.cfg.label.slice(0, -1)} created`,
         },
         201,
@@ -630,7 +630,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
     return c.json(
       {
         packageId: item.id,
-        lockVersion: item.lockVersion,
+        lock_version: item.lockVersion,
         message: `${rcfg.cfg.label.slice(0, -1)} created`,
         ...(warnings.length > 0 ? { warnings } : {}),
       },
@@ -679,9 +679,9 @@ function makeGetHandler(rcfg: PackageRouteConfig) {
 
     return c.json({
       ...item,
-      ...(sourceText != null ? { sourceCode: sourceText } : {}),
-      versionCount,
-      hasUnarchivedChanges: computeHasUnpublishedChanges(
+      ...(sourceText != null ? { source_code: sourceText } : {}),
+      version_count: versionCount,
+      has_unarchived_changes: computeHasUnpublishedChanges(
         item.source,
         versionCount,
         item.updatedAt ? new Date(item.updatedAt) : null,
@@ -709,18 +709,18 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     const body = await c.req.json<{
       manifest?: Record<string, unknown>;
       content?: string;
-      sourceCode?: string;
-      lockVersion?: number;
+      source_code?: string;
+      lock_version?: number;
     }>();
 
-    if (body.lockVersion == null || typeof body.lockVersion !== "number") {
-      throw invalidRequest("lockVersion (integer) is required for updates", "lockVersion");
+    if (body.lock_version == null || typeof body.lock_version !== "number") {
+      throw invalidRequest("lock_version (integer) is required for updates", "lock_version");
     }
 
     const manifest =
       body.manifest ?? (existing as { manifest?: Record<string, unknown> }).manifest ?? {};
     const content = body.content ?? existing.content ?? "";
-    const sourceCode = body.sourceCode;
+    const sourceCode = body.source_code;
 
     // Validate manifest
     const manifestResult = validateManifest(manifest);
@@ -763,14 +763,14 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     // Source validation (tools)
     if (rcfg.sourceFileName && sourceCode !== undefined) {
       if (!sourceCode.trim()) {
-        throw invalidRequest("Source cannot be empty", "sourceCode");
+        throw invalidRequest("Source cannot be empty", "source_code");
       }
       if (rcfg.validateSource) {
         const validation = rcfg.validateSource(sourceCode);
         if (!validation.valid) {
           throw validationFailed(
             validation.errors.map((message) => ({
-              field: "sourceCode",
+              field: "source_code",
               code: "invalid_source",
               title: "Invalid Source",
               message,
@@ -784,7 +784,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       orgId,
       itemId,
       { manifest: manifest as Record<string, unknown>, content },
-      body.lockVersion,
+      body.lock_version,
     );
 
     if (!updated) {
@@ -813,7 +813,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
 
     return c.json({
       packageId: updated.id,
-      lockVersion: updated.lockVersion,
+      lock_version: updated.lockVersion,
       ...(warnings.length > 0 ? { warnings } : {}),
     });
   };
@@ -906,13 +906,13 @@ function makeVersionDetailHandler(rcfg: PackageRouteConfig) {
       version: detail.version,
       manifest: detail.manifest,
       content,
-      ...(sourceText != null ? { sourceCode: sourceText } : {}),
+      ...(sourceText != null ? { source_code: sourceText } : {}),
       yanked: detail.yanked,
-      yankedReason: detail.yankedReason,
+      yanked_reason: detail.yankedReason,
       integrity: detail.integrity,
-      artifactSize: detail.artifactSize,
+      artifact_size: detail.artifactSize,
       createdAt: detail.createdAt,
-      distTags: matchingTags,
+      dist_tags: matchingTags,
     });
   };
 }
@@ -1019,7 +1019,7 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
     }
 
     const existing = await getOrgItem(orgId, itemId, rcfg.cfg);
-    if (!existing || !existing.lockVersion) {
+    if (!existing || !existing.lock_version) {
       throw notFound(`${label} '${itemId}' not found`);
     }
 
@@ -1037,7 +1037,7 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
       orgId,
       itemId,
       { manifest: detail.manifest, content },
-      existing.lockVersion,
+      existing.lock_version,
     );
 
     if (!updated) {
@@ -1074,8 +1074,8 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
 
     return c.json({
       message: `Version ${detail.version} restored`,
-      restoredVersion: detail.version,
-      lockVersion: updated.lockVersion,
+      restored_version: detail.version,
+      lock_version: updated.lockVersion,
     });
   };
 }

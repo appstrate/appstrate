@@ -25,7 +25,7 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
   const [dragOver, setDragOver] = useState(false);
   const [confirmOverwrite, setConfirmOverwrite] = useState<{
     packageId: string;
-    activeVersion: string | null;
+    active_version: string | null;
   } | null>(null);
   const [confirmIntegrity, setConfirmIntegrity] = useState<{
     packageId: string;
@@ -115,7 +115,7 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
             if (err instanceof ApiError && err.code === "draft_overwrite" && err.details) {
               setConfirmOverwrite({
                 packageId: err.details.packageId as string,
-                activeVersion: (err.details.activeVersion as string) ?? null,
+                active_version: (err.details.active_version as string) ?? null,
               });
               return;
             }
@@ -248,7 +248,7 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
       {errorMessage && <p className="text-destructive mt-3 text-sm">{errorMessage}</p>}
       {confirmOverwrite && (
         <p className="text-destructive mt-3 text-sm">
-          {t("import.confirmOverwrite", { activeVersion: confirmOverwrite.activeVersion ?? "?" })}
+          {t("import.confirmOverwrite", { active_version: confirmOverwrite.active_version ?? "?" })}
         </p>
       )}
       {confirmIntegrity && (

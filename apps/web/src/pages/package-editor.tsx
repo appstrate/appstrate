@@ -436,7 +436,7 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
         ? {
             manifest: (agentDetail.manifest ?? {}) as Record<string, unknown>,
             prompt: agentDetail.prompt || "",
-            lockVersion: agentDetail.lockVersion,
+            lock_version: agentDetail.lock_version,
           }
         : defaultEditorState(currentOrg?.slug, user?.email);
 
@@ -466,7 +466,7 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
       ? {
           manifest: pkgDetail.manifest ?? {},
           content: pkgDetail.content ?? "",
-          lockVersion: pkgDetail.lockVersion,
+          lock_version: pkgDetail.lock_version,
         }
       : {
           manifest: defaultSkillManifest(currentOrg?.slug, user?.email),

@@ -55,7 +55,7 @@ export function useRunAgent(packageId: string) {
       const qs = buildQs({ version });
       const body: Record<string, unknown> = {};
       if (input !== undefined) body.input = input;
-      if (connectionOverrides !== undefined) body.connectionOverrides = connectionOverrides;
+      if (connectionOverrides !== undefined) body.connection_overrides = connectionOverrides;
       return api<{ runId: string }>(`/agents/${packageId}/run${qs}`, {
         method: "POST",
         body: JSON.stringify(body),
@@ -234,9 +234,9 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
       manifest: Record<string, unknown>;
       content: string;
       sourceCode?: string;
-      lockVersion: number;
+      lock_version: number;
     }) => {
-      return api<{ lockVersion: number }>(`/packages/${cfg.path}/${packageId}`, {
+      return api<{ lock_version: number }>(`/packages/${cfg.path}/${packageId}`, {
         method: "PUT",
         body: JSON.stringify(body),
       });

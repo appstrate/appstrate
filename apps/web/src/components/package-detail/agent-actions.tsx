@@ -101,10 +101,10 @@ export function AgentActions({
         downloadVersion={downloadVersion}
         onDownload={downloadPackage}
         onDownloadBundle={downloadBundle}
-        hasPublishedVersion={(detail.versionCount ?? 0) > 0}
+        hasPublishedVersion={(detail.version_count ?? 0) > 0}
         onCreateVersion={onCreateVersion}
         onFork={onFork}
-        runningRuns={detail.runningRuns}
+        runningRuns={detail.running_runs}
         hasRuns={!!runs && runs.length > 0}
         hasMemories={!!memories && memories.length > 0}
         hasFileInput={!!hasFileInput}

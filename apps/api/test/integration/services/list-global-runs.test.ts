@@ -79,8 +79,8 @@ describe("listGlobalRuns", () => {
     expect(result.total).toBe(2);
 
     const byId = Object.fromEntries(result.data.map((r) => [r.id, r]));
-    expect(byId[inline.id]?.packageEphemeral).toBe(true);
-    expect(byId[pkg.id]?.packageEphemeral).toBe(false);
+    expect(byId[inline.id]?.package_ephemeral).toBe(true);
+    expect(byId[pkg.id]?.package_ephemeral).toBe(false);
   });
 
   it("kind='inline' returns only runs backed by an ephemeral package", async () => {
@@ -94,7 +94,7 @@ describe("listGlobalRuns", () => {
     );
     expect(result.total).toBe(2);
     for (const run of result.data) {
-      expect(run.packageEphemeral).toBe(true);
+      expect(run.package_ephemeral).toBe(true);
     }
   });
 
@@ -109,7 +109,7 @@ describe("listGlobalRuns", () => {
     );
     expect(result.total).toBe(2);
     for (const run of result.data) {
-      expect(run.packageEphemeral).toBe(false);
+      expect(run.package_ephemeral).toBe(false);
     }
   });
 

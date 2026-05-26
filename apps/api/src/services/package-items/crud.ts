@@ -244,9 +244,9 @@ export async function listOrgItems(
       createdBy: row.createdBy,
       createdAt: toISORequired(row.createdAt),
       updatedAt: toISORequired(row.updatedAt),
-      usedByAgents: countMap.get(row.id) ?? 0,
+      used_by_agents: countMap.get(row.id) ?? 0,
       version: typeof m.version === "string" ? m.version : null,
-      autoInstalled: row.autoInstalled,
+      auto_installed: row.autoInstalled,
       forked_from: row.forkedFrom ?? null,
     };
   });
@@ -279,11 +279,11 @@ export async function getOrgItem(orgId: string, itemId: string, cfg: PackageType
     createdBy: data.createdBy,
     createdAt: toISORequired(data.createdAt),
     updatedAt: toISORequired(data.updatedAt),
-    autoInstalled: data.autoInstalled,
+    auto_installed: data.autoInstalled,
     version: typeof m.version === "string" ? m.version : null,
-    manifestName: typeof m.name === "string" ? m.name : null,
+    manifest_name: typeof m.name === "string" ? m.name : null,
     manifest: asRecord(data.draftManifest),
-    lockVersion: data.lockVersion,
+    lock_version: data.lockVersion,
     forked_from: data.forkedFrom ?? null,
     agents: dependents,
   };

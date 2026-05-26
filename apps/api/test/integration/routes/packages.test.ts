@@ -157,8 +157,8 @@ describe("Packages API", () => {
       const body = (await res.json()) as any;
       expect(body).toBeDefined();
       expect(body.id).toBe("@pkgorg/detail-agent");
-      expect(body.versionCount).toBe(0);
-      expect(body.hasUnarchivedChanges).toBe(true);
+      expect(body.version_count).toBe(0);
+      expect(body.has_unarchived_changes).toBe(true);
     });
 
     it("returns hasUnarchivedChanges false when no changes since last version", async () => {
@@ -185,8 +185,8 @@ describe("Packages API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.versionCount).toBe(1);
-      expect(body.hasUnarchivedChanges).toBe(false);
+      expect(body.version_count).toBe(1);
+      expect(body.has_unarchived_changes).toBe(false);
     });
 
     it("returns 404 for non-existent package", async () => {
@@ -348,7 +348,7 @@ describe("Packages API", () => {
       expect(res.status).toBe(201);
       const body = (await res.json()) as any;
       expect(body.packageId).toBe("@pkgorg/new-agent");
-      expect(body.lockVersion).toBeNumber();
+      expect(body.lock_version).toBeNumber();
 
       await assertDbHas(packages, eq(packages.id, "@pkgorg/new-agent"));
     });
@@ -467,14 +467,14 @@ describe("Packages API", () => {
             description: "Updated agent",
           },
           content: "Updated prompt content.",
-          lockVersion: agent.lockVersion,
+          lock_version: agent.lockVersion,
         }),
       });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.packageId).toBe("@pkgorg/update-agent");
-      expect(body.lockVersion).toBeGreaterThan(agent.lockVersion!);
+      expect(body.lock_version).toBeGreaterThan(agent.lockVersion!);
     });
 
     it("returns 400 when lockVersion is missing", async () => {
@@ -517,7 +517,7 @@ describe("Packages API", () => {
             description: "Ghost",
           },
           content: "ghost",
-          lockVersion: 1,
+          lock_version: 1,
         }),
       });
 
@@ -545,7 +545,7 @@ describe("Packages API", () => {
             description: "Hijack",
           },
           content: "hijack",
-          lockVersion: 1,
+          lock_version: 1,
         }),
       });
 
@@ -713,7 +713,7 @@ describe("Packages API", () => {
             integrations: { [integrationId]: { tools: ["nope"] } },
           },
           content: "Updated prompt",
-          lockVersion: agent.lockVersion,
+          lock_version: agent.lockVersion,
         }),
       });
       expect(res.status).toBe(400);
@@ -1055,8 +1055,8 @@ describe("Packages API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.activeVersion).toBe("1.2.0");
-      expect(body.latestPublishedVersion).toBeNull();
+      expect(body.active_version).toBe("1.2.0");
+      expect(body.latest_published_version).toBeNull();
     });
 
     it("returns latestPublishedVersion when a version with dist-tag exists", async () => {
@@ -1095,8 +1095,8 @@ describe("Packages API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.activeVersion).toBe("2.0.0");
-      expect(body.latestPublishedVersion).toBe("1.0.0");
+      expect(body.active_version).toBe("2.0.0");
+      expect(body.latest_published_version).toBe("1.0.0");
     });
 
     it("returns 404 for non-existent agent", async () => {

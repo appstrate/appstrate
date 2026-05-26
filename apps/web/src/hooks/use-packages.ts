@@ -251,7 +251,7 @@ export function useRestoreVersion(type: PackageType, packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (version: string) =>
-      api<{ message: string; restoredVersion: string; lockVersion: number }>(
+      api<{ message: string; restored_version: string; lock_version: number }>(
         `${packageBasePath(type, packageId)}/versions/${version}/restore`,
         { method: "POST" },
       ),
@@ -268,7 +268,7 @@ export function useVersionInfo(type: PackageType, packageId: string | undefined)
   return useQuery({
     queryKey: ["version-info", orgId, applicationId, type, packageId],
     queryFn: () =>
-      api<{ latestPublishedVersion: string | null; activeVersion: string | null }>(
+      api<{ latest_published_version: string | null; active_version: string | null }>(
         `${packageBasePath(type, packageId!)}/versions/info`,
       ),
     enabled: !!orgId && !!applicationId && !!packageId,

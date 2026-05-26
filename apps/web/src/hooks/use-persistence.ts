@@ -56,12 +56,12 @@ function usePersistenceQuery<T>(
   });
 }
 
-function applyScopeFilter<T extends { actorType: PersistenceActorType }>(
+function applyScopeFilter<T extends { actor_type: PersistenceActorType }>(
   rows: T[],
   filter: PersistenceScopeFilter,
 ): T[] {
-  if (filter === "shared") return rows.filter((r) => r.actorType === "shared");
-  if (filter === "mine") return rows.filter((r) => r.actorType !== "shared");
+  if (filter === "shared") return rows.filter((r) => r.actor_type === "shared");
+  if (filter === "mine") return rows.filter((r) => r.actor_type !== "shared");
   return rows;
 }
 

@@ -29,20 +29,20 @@ const NONE = "__none__";
 
 export interface RunOverridesValue {
   /** Override delta — deep-merged with persisted config on the server. */
-  configOverride?: Record<string, unknown>;
+  config_override?: Record<string, unknown>;
   /** Per-run model id override. */
-  modelIdOverride?: string;
+  model_id_override?: string;
   /** Per-run proxy id override. */
-  proxyIdOverride?: string;
+  proxy_id_override?: string;
   /** Per-run version label or dist-tag override. */
-  versionOverride?: string;
+  version_override?: string;
   /**
    * Per-(integration, authKey) connection picks — frozen at schedule
    * create/edit so every fire uses the same row. Loses to admin pins;
    * beats schedule-less fallback + per-run overrides on the actor.
    * Shape: `{ "@scope/integration": { "<authKey>": "<connection_id>" } }`.
    */
-  connectionOverrides?: Record<string, Record<string, string>>;
+  connection_overrides?: Record<string, Record<string, string>>;
 }
 
 interface AgentIntegrationRef {
@@ -107,7 +107,7 @@ export function RunOverridesPanel({
   // override) so the form reflects the merged starting point.
   const [configValues, setConfigValues] = useState<Record<string, unknown>>(() => ({
     ...persistedConfig,
-    ...(value.configOverride ?? {}),
+    ...(value.config_override ?? {}),
   }));
 
   const wrapper: SchemaWrapper | null = useMemo(
@@ -120,31 +120,31 @@ export function RunOverridesPanel({
 
   const setModel = (next: string) => {
     if (next === INHERIT || next === persistedModelId) {
-      const { modelIdOverride: _omit, ...rest } = value;
+      const { model_id_override: _omit, ...rest } = value;
       void _omit;
       onChange(rest);
     } else {
-      onChange({ ...value, modelIdOverride: next });
+      onChange({ ...value, model_id_override: next });
     }
   };
 
   const setProxy = (next: string) => {
     if (next === INHERIT || next === (persistedProxyId ?? INHERIT)) {
-      const { proxyIdOverride: _omit, ...rest } = value;
+      const { proxy_id_override: _omit, ...rest } = value;
       void _omit;
       onChange(rest);
     } else {
-      onChange({ ...value, proxyIdOverride: next });
+      onChange({ ...value, proxy_id_override: next });
     }
   };
 
   const setVersion = (next: string) => {
     if (next === INHERIT || next === (persistedVersion ?? "latest")) {
-      const { versionOverride: _omit, ...rest } = value;
+      const { version_override: _omit, ...rest } = value;
       void _omit;
       onChange(rest);
     } else {
-      onChange({ ...value, versionOverride: next });
+      onChange({ ...value, version_override: next });
     }
   };
 
@@ -152,20 +152,20 @@ export function RunOverridesPanel({
     setConfigValues(formData);
     const delta = computeConfigDelta(persistedConfig, formData);
     if (delta === null) {
-      const { configOverride: _omit, ...rest } = value;
+      const { config_override: _omit, ...rest } = value;
       void _omit;
       onChange(rest);
     } else {
-      onChange({ ...value, configOverride: delta });
+      onChange({ ...value, config_override: delta });
     }
   };
 
   const orgDefaultModel = orgModels?.find((m) => m.isDefault && m.enabled);
   const orgDefaultProxy = orgProxies?.find((p) => p.isDefault && p.enabled);
 
-  const modelSelectValue = value.modelIdOverride ?? persistedModelId ?? INHERIT;
-  const proxySelectValue = value.proxyIdOverride ?? persistedProxyId ?? INHERIT;
-  const versionSelectValue = value.versionOverride ?? persistedVersion ?? INHERIT;
+  const modelSelectValue = value.model_id_override ?? persistedModelId ?? INHERIT;
+  const proxySelectValue = value.proxy_id_override ?? persistedProxyId ?? INHERIT;
+  const versionSelectValue = value.version_override ?? persistedVersion ?? INHERIT;
 
   return (
     <div className="space-y-4">
@@ -231,7 +231,7 @@ export function RunOverridesPanel({
 
       {versions && versions.length > 0 && (
         <div className="space-y-2">
-          <Label>{t("run.overrides.versionLabel", { ns: "agents" })}</Label>
+          <Label>{t("run.overrides.version_label", { ns: "agents" })}</Label>
           <Select value={versionSelectValue} onValueChange={setVersion}>
             <SelectTrigger>
               <SelectValue />
@@ -278,7 +278,7 @@ export function RunOverridesPanel({
       {agentIntegrations && agentIntegrations.length > 0 && (
         <ScheduleConnectionOverridesSection
           integrations={agentIntegrations}
-          value={value.connectionOverrides ?? {}}
+          value={value.connection_overrides ?? {}}
           onChange={(next) => {
             const compacted: Record<string, Record<string, string>> = {};
             for (const [intId, perAuth] of Object.entries(next)) {
@@ -289,11 +289,11 @@ export function RunOverridesPanel({
               if (Object.keys(cleaned).length > 0) compacted[intId] = cleaned;
             }
             if (Object.keys(compacted).length === 0) {
-              const { connectionOverrides: _omit, ...rest } = value;
+              const { connection_overrides: _omit, ...rest } = value;
               void _omit;
               onChange(rest);
             } else {
-              onChange({ ...value, connectionOverrides: compacted });
+              onChange({ ...value, connection_overrides: compacted });
             }
           }}
         />
@@ -303,7 +303,7 @@ export function RunOverridesPanel({
 }
 
 /**
- * Per-integration picker section that drives `value.connectionOverrides`.
+ * Per-integration picker section that drives `value.connection_overrides`.
  * Renders one select per (integration, required authKey) listing the
  * actor's accessible (own + shared) connections. "Inherit" leaves the
  * resolver's default cascade in charge (admin pin → user fallback at
@@ -321,8 +321,8 @@ function ScheduleConnectionOverridesSection({
   const { t } = useTranslation(["agents"]);
   return (
     <div className="space-y-2">
-      <Label>{t("schedule.connectionOverrides.label")}</Label>
-      <p className="text-muted-foreground text-xs">{t("schedule.connectionOverrides.hint")}</p>
+      <Label>{t("schedule.connection_overrides.label")}</Label>
+      <p className="text-muted-foreground text-xs">{t("schedule.connection_overrides.hint")}</p>
       <div className="border-border bg-card space-y-3 rounded-md border p-3">
         {integrations.map((integ) => (
           <IntegrationOverrideRow
@@ -370,7 +370,7 @@ function IntegrationOverrideRow({
               <span className="bg-muted rounded px-1.5 py-0.5 font-mono text-[10px]">
                 {authKey}
               </span>
-              <span>{t("schedule.connectionOverrides.noCandidate")}</span>
+              <span>{t("schedule.connection_overrides.noCandidate")}</span>
             </div>
           );
         }
@@ -390,15 +390,15 @@ function IntegrationOverrideRow({
               }}
               className="border-border bg-background flex-1 rounded border px-2 py-1 text-xs"
               data-testid={`schedule-conn-select-${integration.id}-${authKey}`}
-              aria-label={t("schedule.connectionOverrides.selectAria", { authKey })}
+              aria-label={t("schedule.connection_overrides.selectAria", { authKey })}
             >
-              <option value="">{t("schedule.connectionOverrides.inherit")}</option>
+              <option value="">{t("schedule.connection_overrides.inherit")}</option>
               {candidates.map((c) => {
                 const display = connectionDisplayLabel(c);
                 return (
                   <option key={c.id} value={c.id}>
                     {c.sharedWithOrg
-                      ? t("schedule.connectionOverrides.sharedSuffix", { label: display })
+                      ? t("schedule.connection_overrides.sharedSuffix", { label: display })
                       : display}
                   </option>
                 );

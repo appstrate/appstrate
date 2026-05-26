@@ -26,38 +26,38 @@ import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
 import { runConfigOverrideSchema, scheduleInputSchema } from "../lib/jsonb-schemas.ts";
 
 // Per-integration connection picks frozen on the schedule row (cascade
-// mechanism #3). Same wire shape as the run-route's connectionOverrides;
+// mechanism #3). Same wire shape as the run-route's connection_overrides;
 // loses to admin pins at fire time. Shape: { "@scope/integration": "<connection_id>" }.
 const connectionOverridesSchema = z.record(z.string(), z.string());
 
 export const createScheduleSchema = z.object({
   name: z.string().optional(),
-  cronExpression: z.string().min(1, "cronExpression is required"),
+  cron_expression: z.string().min(1, "cron_expression is required"),
   timezone: z.string().default("UTC"),
   input: scheduleInputSchema.default({}),
   // Per-schedule override layer — frozen at create/update and deep-merged
   // with the application's persisted config every time the schedule
   // fires. Mirrors the per-run override pipeline (POST /run body) so a
   // schedule is "a recurring run with frozen overrides".
-  configOverride: runConfigOverrideSchema.optional(),
-  modelIdOverride: z.string().optional(),
-  proxyIdOverride: z.string().optional(),
-  versionOverride: z.string().optional(),
-  connectionOverrides: connectionOverridesSchema.optional(),
+  config_override: runConfigOverrideSchema.optional(),
+  model_id_override: z.string().optional(),
+  proxy_id_override: z.string().optional(),
+  version_override: z.string().optional(),
+  connection_overrides: connectionOverridesSchema.optional(),
 });
 
 export const updateScheduleSchema = z.object({
   name: z.string().optional(),
-  cronExpression: z.string().optional(),
+  cron_expression: z.string().optional(),
   timezone: z.string().optional(),
   input: scheduleInputSchema.optional(),
   enabled: z.boolean().optional(),
   // `null` clears the override; omitted leaves it untouched.
-  configOverride: runConfigOverrideSchema.nullable().optional(),
-  modelIdOverride: z.string().nullable().optional(),
-  proxyIdOverride: z.string().nullable().optional(),
-  versionOverride: z.string().nullable().optional(),
-  connectionOverrides: connectionOverridesSchema.nullable().optional(),
+  config_override: runConfigOverrideSchema.nullable().optional(),
+  model_id_override: z.string().nullable().optional(),
+  proxy_id_override: z.string().nullable().optional(),
+  version_override: z.string().nullable().optional(),
+  connection_overrides: connectionOverridesSchema.nullable().optional(),
 });
 
 export function createSchedulesRouter() {
@@ -98,8 +98,8 @@ export function createSchedulesRouter() {
       }
 
       // Validate cron expression
-      if (!isValidCron(data.cronExpression)) {
-        throw invalidRequest("Invalid cron expression", "cronExpression");
+      if (!isValidCron(data.cron_expression)) {
+        throw invalidRequest("Invalid cron expression", "cron_expression");
       }
 
       // Validate input against agent's input schema (catches missing required fields even when input is undefined)
@@ -119,12 +119,15 @@ export function createSchedulesRouter() {
 
       const scope = getAppScope(c);
       const schedule = await createSchedule(scope, agent.id, actor, {
-        ...data,
-        configOverride: data.configOverride ?? null,
-        modelIdOverride: data.modelIdOverride ?? null,
-        proxyIdOverride: data.proxyIdOverride ?? null,
-        versionOverride: data.versionOverride ?? null,
-        connectionOverrides: data.connectionOverrides ?? null,
+        name: data.name,
+        cronExpression: data.cron_expression,
+        timezone: data.timezone,
+        input: data.input,
+        configOverride: data.config_override ?? null,
+        modelIdOverride: data.model_id_override ?? null,
+        proxyIdOverride: data.proxy_id_override ?? null,
+        versionOverride: data.version_override ?? null,
+        connectionOverrides: data.connection_overrides ?? null,
       });
       await recordAuditFromContext(c, {
         action: "schedule.created",
@@ -132,7 +135,7 @@ export function createSchedulesRouter() {
         resourceId: schedule.id,
         after: {
           packageId: agent.id,
-          cronExpression: data.cronExpression,
+          cronExpression: data.cron_expression,
           timezone: data.timezone,
         },
       });
@@ -163,11 +166,23 @@ export function createSchedulesRouter() {
     const data = parseBody(updateScheduleSchema, body);
 
     // Validate cron expression if provided
-    if (data.cronExpression && !isValidCron(data.cronExpression)) {
-      throw invalidRequest("Invalid cron expression", "cronExpression");
+    if (data.cron_expression && !isValidCron(data.cron_expression)) {
+      throw invalidRequest("Invalid cron expression", "cron_expression");
     }
 
-    const schedule = await updateSchedule(scope, id, data);
+    // Translate snake_case wire fields to internal camelCase for the service.
+    const schedule = await updateSchedule(scope, id, {
+      name: data.name,
+      cronExpression: data.cron_expression,
+      timezone: data.timezone,
+      input: data.input,
+      enabled: data.enabled,
+      configOverride: data.config_override,
+      modelIdOverride: data.model_id_override,
+      proxyIdOverride: data.proxy_id_override,
+      versionOverride: data.version_override,
+      connectionOverrides: data.connection_overrides,
+    });
     await recordAuditFromContext(c, {
       action: "schedule.updated",
       resourceType: "schedule",
