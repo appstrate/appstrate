@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "bun:test";
-import { validateManifest, extractSkillMeta, extractManifestMetadata } from "../src/validation.ts";
+import { describe, expect, it, spyOn } from "bun:test";
+import {
+  validateManifest,
+  extractSkillMeta,
+  extractManifestMetadata,
+  agentManifestSchema,
+  SUPPORTED_SCHEMA_VERSION_MAJOR,
+} from "../src/validation.ts";
 import type { Manifest } from "../src/validation.ts";
 import { agentManifestSchema as afpsAgentManifestSchema } from "@afps-spec/schema";
 
@@ -903,6 +909,96 @@ describe("validateManifest — v2 common fields (§3.1)", () => {
       scopes: ["read"],
       tools: ["list"],
     });
+  });
+
+  // ── schema_version MAJOR-policy (§2.4) ──
+
+  it("schema_version — agent schema rejects forward-major (3.0) at the Zod boundary", () => {
+    // Per AFPS §2.4, consumers MUST reject manifests whose MAJOR exceeds the
+    // highest supported. The lift into the common manifest schema means
+    // programmatic `safeParse` calls now fail at the schema boundary, not only
+    // at the bundle/DB layer.
+    const result = agentManifestSchema.safeParse({
+      name: "@test/my-agent",
+      version: "1.0.0",
+      type: "agent",
+      schema_version: "3.0",
+      display_name: "My Agent",
+      author: "test",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("schema_version — agent schema accepts higher MINOR (2.5) as best-effort (§2.4)", () => {
+    const result = agentManifestSchema.safeParse({
+      name: "@test/my-agent",
+      version: "1.0.0",
+      type: "agent",
+      schema_version: "2.5",
+      display_name: "My Agent",
+      author: "test",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("schema_version — SUPPORTED_SCHEMA_VERSION_MAJOR is 2", () => {
+    // Constant pinning so a future bump becomes a deliberate code edit.
+    expect(SUPPORTED_SCHEMA_VERSION_MAJOR).toBe(2);
+  });
+
+  // ── _meta soft-fail unknown-namespace keys (§10.1) ──
+
+  it("_meta — soft-accepts malformed namespace key and emits a warning (§10.1)", () => {
+    // §10.1: "Consumers MUST NOT reject manifests that contain unknown `_meta`
+    // keys." A key like `nodots/foo` violates Appendix B's META_NAMESPACE_KEY
+    // regex (the namespace before `/` requires at least one `.`), but the
+    // manifest must still round-trip — only a warning is emitted.
+    const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const result = validateManifest(
+        validSkillManifest({
+          _meta: {
+            "nodots/foo": { foo: "bar" },
+          },
+        }),
+      );
+      expect(result.valid).toBe(true);
+      // A warning must have been emitted referencing the malformed key.
+      expect(warnSpy).toHaveBeenCalled();
+      const warned = warnSpy.mock.calls.some((args) =>
+        args.some((a) => typeof a === "string" && a.includes("nodots/foo")),
+      );
+      expect(warned).toBe(true);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("_meta — bare key with no namespace prefix is accepted (matches META_NAMESPACE_KEY)", () => {
+    // The Appendix B regex makes the namespace prefix optional; a bare key
+    // like `bare-key` is structurally valid (`[A-Za-z0-9._-]+`). No warning,
+    // no reject.
+    const result = validateManifest(
+      validSkillManifest({
+        _meta: {
+          "bare-key": { foo: "bar" },
+        },
+      }),
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it("_meta — still hard-rejects the reserved MCP prefixes (§10)", () => {
+    // Producers MUST NOT use `mcp/` / `modelcontextprotocol/`. The §10 reservation
+    // is strictly stronger than §10.1's "don't reject unknown keys" rule.
+    const result = validateManifest(
+      validSkillManifest({
+        _meta: {
+          "mcp/foo": { bar: "baz" },
+        },
+      }),
+    );
+    expect(result.valid).toBe(false);
   });
 });
 

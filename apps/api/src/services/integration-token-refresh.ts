@@ -245,10 +245,12 @@ export function decryptIntegrationConnectionFields(
  * Build the OAuth2 {@link IntegrationRefreshContext} for an integration
  * auth from its per-application `integration_oauth_clients` row. Returns
  * `null` (the auth is not refreshable) for: non-oauth2 auths, auths without a
- * `tokenUrl`, missing per-app OAuth client, undecryptable client secret, and
- * public clients (`tokenAuthMethod: "none"`, not modelled by the shared
- * refresh helper). Single source of truth shared by both integration
- * credential resolvers.
+ * `tokenUrl`, missing per-app OAuth client, and undecryptable client secret.
+ *
+ * Public clients (`token_endpoint_auth_method: "none"`, RFC 7591 §2) ARE
+ * supported — the refresh helper sends `client_id` in the body with no
+ * `client_secret` (RFC 6749 §6 + §3.2.1). Single source of truth shared by
+ * both integration credential resolvers.
  */
 export async function buildIntegrationOAuthRefreshContext(
   packageId: string,
@@ -290,31 +292,25 @@ export async function buildIntegrationOAuthRefreshContext(
     });
     return null;
   }
-  let clientSecret: string;
-  try {
-    const decrypted = decryptCredentials<{ client_secret?: string }>(client.clientSecretEncrypted);
-    clientSecret = decrypted.client_secret ?? "";
-  } catch (err) {
-    logger.warn("Integration auth client_secret decrypt failed", {
-      packageId,
-      authKey,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return null;
-  }
-  // `token_endpoint_auth_method: "none"` (public clients) needs `client_id` in
-  // the body with NO `client_secret`. The shared refresh helper doesn't model
-  // that — skip rather than send a malformed request the upstream would reject.
+  // Public clients (RFC 7591 §2, `token_endpoint_auth_method: "none"`) have
+  // no client_secret to decrypt — the client_secret_encrypted column may hold
+  // an empty/placeholder envelope. Skip decryption entirely for those.
   const tokenEndpointAuthMethod = afpsAuth.token_endpoint_auth_method;
-  if (tokenEndpointAuthMethod === "none") {
-    logger.info(
-      "Integration auth refresh skipped — public client (token_endpoint_auth_method=none)",
-      {
+  let clientSecret = "";
+  if (tokenEndpointAuthMethod !== "none") {
+    try {
+      const decrypted = decryptCredentials<{ client_secret?: string }>(
+        client.clientSecretEncrypted,
+      );
+      clientSecret = decrypted.client_secret ?? "";
+    } catch (err) {
+      logger.warn("Integration auth client_secret decrypt failed", {
         packageId,
         authKey,
-      },
-    );
-    return null;
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }
   }
   // AFPS 2.0: `scope_separator` moved under `_meta["dev.appstrate/oauth"]`.
   const oauthMeta = (afpsAuth._meta?.["dev.appstrate/oauth"] ?? undefined) as

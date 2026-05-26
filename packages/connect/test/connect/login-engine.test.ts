@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { runLogin, LoginError, type LoginConfig } from "../../src/connect/login-engine.ts";
+import {
+  runLogin,
+  LoginError,
+  evaluateSuccessCriteriaForTest,
+  type LoginConfig,
+} from "../../src/connect/login-engine.ts";
 
 const b64url = (obj: unknown): string => Buffer.from(JSON.stringify(obj)).toString("base64url");
 
@@ -484,5 +489,165 @@ describe("runLogin — Arazzo Selector Object outputs (AFPS §7.7)", () => {
     }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(LoginError);
     expect((err as LoginError).reason).toBe("invalid_config");
+  });
+});
+
+describe("success_criteria engine — Arazzo Criterion types (AFPS §7.7)", () => {
+  it("defaults to 2xx range when no criteria are declared", () => {
+    expect(evaluateSuccessCriteriaForTest(200, new Headers(), "", [])).toBe(true);
+    expect(evaluateSuccessCriteriaForTest(299, new Headers(), "", [])).toBe(true);
+    expect(evaluateSuccessCriteriaForTest(300, new Headers(), "", [])).toBe(false);
+    expect(evaluateSuccessCriteriaForTest(404, new Headers(), "", [])).toBe(false);
+  });
+
+  it("simple (type omitted): $statusCode == N equality", () => {
+    expect(
+      evaluateSuccessCriteriaForTest(201, new Headers(), "", [{ condition: "$statusCode == 201" }]),
+    ).toBe(true);
+    expect(
+      evaluateSuccessCriteriaForTest(500, new Headers(), "", [{ condition: "$statusCode == 200" }]),
+    ).toBe(false);
+  });
+
+  it("simple: $response.body#/<pointer> == <literal>", () => {
+    const body = JSON.stringify({ status: "ok", count: 3 });
+    expect(
+      evaluateSuccessCriteriaForTest(200, new Headers(), body, [
+        { condition: '$response.body#/status == "ok"', type: "simple" },
+      ]),
+    ).toBe(true);
+    expect(
+      evaluateSuccessCriteriaForTest(200, new Headers(), body, [
+        { condition: "$response.body#/count == 3", type: "simple" },
+      ]),
+    ).toBe(true);
+    expect(
+      evaluateSuccessCriteriaForTest(200, new Headers(), body, [
+        { condition: '$response.body#/status == "fail"', type: "simple" },
+      ]),
+    ).toBe(false);
+  });
+
+  it("simple: $response.header.<name> == <literal>", () => {
+    const headers = new Headers({ "X-Status": "ok" });
+    expect(
+      evaluateSuccessCriteriaForTest(200, headers, "", [
+        { condition: '$response.header.X-Status == "ok"', type: "simple" },
+      ]),
+    ).toBe(true);
+  });
+
+  it("jsonpath: passes when query yields a non-empty value", () => {
+    const body = JSON.stringify({ session: { id: "abc" } });
+    expect(
+      evaluateSuccessCriteriaForTest(200, new Headers(), body, [
+        { condition: "$.session.id", type: "jsonpath" },
+      ]),
+    ).toBe(true);
+    // Missing path → fail.
+    expect(
+      evaluateSuccessCriteriaForTest(200, new Headers(), body, [
+        { condition: "$.session.missing", type: "jsonpath" },
+      ]),
+    ).toBe(false);
+    // Empty string → fail closed.
+    const bodyEmpty = JSON.stringify({ session: { id: "" } });
+    expect(
+      evaluateSuccessCriteriaForTest(200, new Headers(), bodyEmpty, [
+        { condition: "$.session.id", type: "jsonpath" },
+      ]),
+    ).toBe(false);
+  });
+
+  it("regex: passes when condition matches $response.body", () => {
+    const body = '{"status":"ok"}';
+    expect(
+      evaluateSuccessCriteriaForTest(200, new Headers(), body, [
+        { condition: '"status"\\s*:\\s*"ok"', type: "regex" },
+      ]),
+    ).toBe(true);
+    expect(
+      evaluateSuccessCriteriaForTest(200, new Headers(), body, [
+        { condition: '"status"\\s*:\\s*"fail"', type: "regex" },
+      ]),
+    ).toBe(false);
+  });
+
+  it("regex against $response.header.<name>", () => {
+    const headers = new Headers({ "Content-Type": "application/json; charset=utf-8" });
+    expect(
+      evaluateSuccessCriteriaForTest(200, headers, "", [
+        {
+          condition: "^application/json",
+          type: "regex",
+          context: "$response.header.Content-Type",
+        },
+      ]),
+    ).toBe(true);
+  });
+
+  it("xpath: conservatively fails (no XML evaluator)", () => {
+    expect(
+      evaluateSuccessCriteriaForTest(200, new Headers(), "<root/>", [
+        { condition: "//root", type: "xpath" },
+      ]),
+    ).toBe(false);
+  });
+
+  it("all criteria must pass (AND semantics)", () => {
+    const body = JSON.stringify({ status: "ok" });
+    expect(
+      evaluateSuccessCriteriaForTest(200, new Headers(), body, [
+        { condition: "$statusCode == 200" },
+        { condition: '$response.body#/status == "ok"' },
+      ]),
+    ).toBe(true);
+    expect(
+      evaluateSuccessCriteriaForTest(200, new Headers(), body, [
+        { condition: "$statusCode == 200" },
+        { condition: '$response.body#/status == "fail"' },
+      ]),
+    ).toBe(false);
+  });
+
+  it("integration: runLogin honors a jsonpath criterion against the response body", async () => {
+    const { impl } = fakeFetch([
+      { status: 200, body: JSON.stringify({ token: "TOK", session: { id: "S1" } }) },
+    ]);
+    const config: LoginConfig = {
+      login: {
+        request: { method: "POST", url: "https://idp.example.com/token" },
+        success_criteria: [{ condition: "$.session.id", type: "jsonpath" }],
+        outputs: { access_token: "$response.body#/token" },
+      },
+    };
+    const res = await runLogin(config, {
+      inputs: {},
+      authorizedUris: ALLOW,
+      allowAllUris: false,
+      fetchImpl: impl,
+    });
+    expect(res.outputs.access_token).toBe("TOK");
+  });
+
+  it("integration: runLogin fails with bad_status when a regex criterion does NOT match", async () => {
+    const { impl } = fakeFetch([
+      { status: 200, body: JSON.stringify({ token: "TOK", status: "fail" }) },
+    ]);
+    const config: LoginConfig = {
+      login: {
+        request: { method: "POST", url: "https://idp.example.com/token" },
+        success_criteria: [{ condition: '"status"\\s*:\\s*"ok"', type: "regex" }],
+        outputs: { access_token: "$response.body#/token" },
+      },
+    };
+    const err = await runLogin(config, {
+      inputs: {},
+      authorizedUris: ALLOW,
+      allowAllUris: false,
+      fetchImpl: impl,
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(LoginError);
+    expect((err as LoginError).reason).toBe("bad_status");
   });
 });

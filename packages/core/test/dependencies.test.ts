@@ -6,6 +6,8 @@ import {
   detectCycle,
   parseManifestIntegrations,
   writeManifestIntegrations,
+  assertNoLegacyDepKeys,
+  LegacyDepKeyError,
 } from "../src/dependencies.ts";
 import type { DepEntry } from "../src/dependencies.ts";
 
@@ -278,6 +280,76 @@ describe("extractDependencies", () => {
     const deps = extractDependencies(manifest);
     expect(deps).toHaveLength(1);
     expect(deps[0]!.versionRange).toBe("^2.0.0");
+  });
+});
+
+// ─────────────────────────────────────────────
+// assertNoLegacyDepKeys — publish-time guard (AFPS 2.0 §2.1 / Appendix D)
+// ─────────────────────────────────────────────
+
+describe("assertNoLegacyDepKeys (publish-time guard)", () => {
+  it("rejects manifests that emit dependencies.providers", () => {
+    const manifest = {
+      dependencies: {
+        providers: { "@acme/gmail": "^1.0.0" },
+      },
+    };
+    expect(() => assertNoLegacyDepKeys(manifest)).toThrow(LegacyDepKeyError);
+    try {
+      assertNoLegacyDepKeys(manifest);
+    } catch (err) {
+      expect(err).toBeInstanceOf(LegacyDepKeyError);
+      const e = err as LegacyDepKeyError;
+      expect(e.field).toBe("dependencies.providers");
+      expect(e.suggestedRename).toBe("dependencies.integrations");
+    }
+  });
+
+  it("rejects manifests that emit dependencies.tools", () => {
+    const manifest = {
+      dependencies: {
+        tools: { "@acme/git-tool": "^1.0.0" },
+      },
+    };
+    expect(() => assertNoLegacyDepKeys(manifest)).toThrow(LegacyDepKeyError);
+    try {
+      assertNoLegacyDepKeys(manifest);
+    } catch (err) {
+      const e = err as LegacyDepKeyError;
+      expect(e.field).toBe("dependencies.tools");
+      expect(e.suggestedRename).toBe("dependencies.mcp_servers");
+    }
+  });
+
+  it("accepts canonical AFPS 2.0 dependency shapes (integrations + mcp_servers + skills)", () => {
+    const manifest = {
+      dependencies: {
+        skills: { "@acme/skill-a": "^1.0.0" },
+        integrations: { "@acme/gmail": "^1.0.0" },
+        mcp_servers: { "@acme/srv": "^1.0.0" },
+      },
+    };
+    expect(() => assertNoLegacyDepKeys(manifest)).not.toThrow();
+  });
+
+  it("accepts manifests with no dependencies field at all", () => {
+    expect(() => assertNoLegacyDepKeys({})).not.toThrow();
+    expect(() => assertNoLegacyDepKeys({ dependencies: {} })).not.toThrow();
+  });
+
+  it("read path (extractDependencies) keeps accepting legacy keys and projects them", () => {
+    // Read fallback must still work for legacy DB-stored manifests — the
+    // publish-time guard is the ONLY enforcement point per AFPS Appendix D.
+    const manifest = {
+      dependencies: {
+        providers: { "@acme/gmail": "^1.0.0" },
+        tools: { "@acme/srv": "^2.0.0" },
+      },
+    };
+    const deps = extractDependencies(manifest);
+    expect(deps).toHaveLength(2);
+    expect(deps.find((d) => d.depName === "gmail")!.depType).toBe("integration");
+    expect(deps.find((d) => d.depName === "srv")!.depType).toBe("mcp-server");
   });
 });
 

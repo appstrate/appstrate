@@ -60,6 +60,10 @@ import { tryParseSkillOnlyZip } from "../services/skill-zip.ts";
 import { fetchGithubDirectory, GithubImportError } from "../services/github-import.ts";
 import { validateAgentIntegrationSelections } from "../services/integration-scope-validation.ts";
 import {
+  collectConnectLoginWarnings,
+  collectMetaWarnings,
+} from "../services/integration-install-warnings.ts";
+import {
   ApiError,
   invalidRequest,
   forbidden,
@@ -1434,7 +1438,25 @@ export function createPackagesRouter() {
 
     logger.info("Package imported", { packageId, type: packageType, orgId });
     const importedVersion = (manifest as Record<string, unknown>).version as string | undefined;
-    return c.json({ packageId, type: packageType, version: importedVersion }, 201);
+    // Surface engine-subset limitations for integration manifests as
+    // non-blocking warnings (AFPS §7.7 / audit P2 #12). Publishers learn
+    // about unsupported `connect.login` selectors / criteria at install
+    // time rather than chasing the runtime LoginError later. Also lift the
+    // validator's `_meta` Appendix B regex soft-fail warnings to the same
+    // channel (re-audit 2A observation) so publishers see them on import.
+    const installWarnings = [
+      ...collectConnectLoginWarnings(manifest),
+      ...collectMetaWarnings(manifest),
+    ];
+    return c.json(
+      {
+        packageId,
+        type: packageType,
+        version: importedVersion,
+        ...(installWarnings.length > 0 ? { warnings: installWarnings } : {}),
+      },
+      201,
+    );
   }
 
   // POST /api/packages/import-bundle — import a multi-package .afps-bundle

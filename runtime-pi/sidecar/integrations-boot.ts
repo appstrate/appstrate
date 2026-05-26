@@ -114,7 +114,18 @@ export interface BootIntegrationsResult {
    */
   tools: AppstrateToolDefinition[];
   /** Per-integration spawn outcome — useful for run-event observability. */
-  spawned: Array<{ integrationId: string; namespace: string; toolCount: number }>;
+  spawned: Array<{
+    integrationId: string;
+    namespace: string;
+    toolCount: number;
+    /**
+     * AFPS §7.1 build-provenance flag forwarded from
+     * `IntegrationSpawnSpec.manifest.server.vendored`. Set only for local
+     * sources whose mcp-server was vendored into the integration's own
+     * bundle; omitted for remote/serverless integrations.
+     */
+    vendored?: boolean;
+  }>;
   /** Per-integration failures — captured here; the agent aborts the run on any. */
   failed: Array<{ integrationId: string; error: string }>;
   /**
@@ -909,6 +920,7 @@ export async function bootIntegrations(
           integrationId: spec.integrationId,
           namespace: spec.namespace,
           toolCount: apiCallToolCount,
+          // serverless integration — no `source.server`, so `vendored` is N/A.
         });
         const ms = Math.round(performance.now() - specStart);
         breadcrumbs.push({
@@ -960,6 +972,7 @@ export async function bootIntegrations(
           integrationId: spec.integrationId,
           namespace: spec.namespace,
           toolCount: added + apiCallAdded,
+          // remote-source integration — no `source.server.vendored` field.
         });
         logger.info("integration registered (remote http)", {
           integrationId: spec.integrationId,
@@ -1042,6 +1055,11 @@ export async function bootIntegrations(
         integrationId: spec.integrationId,
         namespace: spec.namespace,
         toolCount: added + apiCallAdded,
+        // AFPS §7.1 — forward the local source's `vendored` build-provenance
+        // flag so the boot report surfaces it for audit/security consumers.
+        ...(typeof spec.manifest.server?.vendored === "boolean"
+          ? { vendored: spec.manifest.server.vendored }
+          : {}),
       });
       logger.info("integration registered", {
         integrationId: spec.integrationId,

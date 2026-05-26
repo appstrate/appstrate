@@ -225,14 +225,25 @@ export function getIntegrationSourceKind(
 /** `source.server` reference for a `local`-source integration (the mcp-server package). */
 export function getLocalServerRef(
   manifest: IntegrationManifest,
-): { name: string; version: string } | null {
+): { name: string; version: string; vendored?: boolean } | null {
   const source = (
-    manifest as { source?: { kind?: string; server?: { name?: unknown; version?: unknown } } }
+    manifest as {
+      source?: {
+        kind?: string;
+        server?: { name?: unknown; version?: unknown; vendored?: unknown };
+      };
+    }
   ).source;
   if (source?.kind !== "local" || !source.server) return null;
-  const { name, version } = source.server;
+  const { name, version, vendored } = source.server;
   if (typeof name !== "string" || typeof version !== "string") return null;
-  return { name, version };
+  // AFPS §7.1 — `source.server.vendored` is an optional boolean build-provenance
+  // signal: `true` means the referenced mcp-server's source is vendored into
+  // the integration's own bundle (audit + reproducibility). Forwarded verbatim
+  // through `IntegrationSpawnSpec.manifest.server.vendored` and surfaced on the
+  // sidecar's boot report so operators can audit "this run used a vendored
+  // foreign package".
+  return typeof vendored === "boolean" ? { name, version, vendored } : { name, version };
 }
 
 /** `source.remote` for a `remote`-source integration (`{ url, transport }`). */

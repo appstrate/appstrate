@@ -82,6 +82,39 @@ describe("getLocalServerRef", () => {
     ).toBeNull();
     expect(getLocalServerRef(manifest({ kind: "local" }))).toBeNull();
   });
+
+  // AFPS §7.1 — `source.server.vendored` is an optional boolean build-provenance
+  // signal forwarded verbatim through the spawn spec → boot report so operators
+  // can audit which runs used a vendored foreign mcp-server. Phase 2B audit P2 #9.
+  it("forwards `source.server.vendored` when declared", () => {
+    expect(
+      getLocalServerRef(
+        manifest({
+          kind: "local",
+          server: { name: "@x/srv", version: "^1.0.0", vendored: true },
+        }),
+      ),
+    ).toEqual({ name: "@x/srv", version: "^1.0.0", vendored: true });
+    expect(
+      getLocalServerRef(
+        manifest({
+          kind: "local",
+          server: { name: "@x/srv", version: "^1.0.0", vendored: false },
+        }),
+      ),
+    ).toEqual({ name: "@x/srv", version: "^1.0.0", vendored: false });
+  });
+
+  it("omits `vendored` when absent or non-boolean (defensive parse)", () => {
+    expect(
+      getLocalServerRef(manifest({ kind: "local", server: { name: "@x/srv", version: "1" } })),
+    ).toEqual({ name: "@x/srv", version: "1" });
+    expect(
+      getLocalServerRef(
+        manifest({ kind: "local", server: { name: "@x/srv", version: "1", vendored: "yes" } }),
+      ),
+    ).toEqual({ name: "@x/srv", version: "1" });
+  });
 });
 
 describe("getRemoteSource", () => {

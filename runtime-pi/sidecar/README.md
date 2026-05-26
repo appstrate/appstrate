@@ -64,13 +64,13 @@ The sidecar layers two token-aware checks on top of the byte caps (see `token-bu
 
 Token estimation uses the Anthropic-recommended **3.5 chars/token** heuristic — deterministic, allocation-free, suitable for the hot path of every `api_call`. The official `@anthropic-ai/tokenizer` is no longer accurate for Claude 3+ models, and a real tokenizer (tiktoken / `count_tokens` API) would add 5-50 ms per call to the credential-injection round-trip.
 
-Each text-path tool result carries an `appstrate://token-budget` `_meta` payload so the agent runtime can surface accounting and react to structured truncation events:
+Each text-path tool result carries a `dev.appstrate/token-budget` `_meta` payload so the agent runtime can surface accounting and react to structured truncation events (AFPS 2.0.2 Phase F1 follow-up — renamed from the legacy URI-scheme key `appstrate://token-budget`, which is still accepted on read for one release window):
 
 ```jsonc
 {
   "content": [{ "type": "text", "text": "<upstream body>" }],
   "_meta": {
-    "appstrate://token-budget": {
+    "dev.appstrate/token-budget": {
       "estimatedTokens": 1234,
       "consumedTokens": 5000,
       "runBudgetTokens": 100000,

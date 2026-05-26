@@ -53,6 +53,7 @@
     "./mcp-server": "./src/mcp-server.ts",
     "./mcp-server-bundle": "./src/mcp-server-bundle/index.ts",
     "./zip": "./src/zip.ts",
+    "./companion-files": "./src/companion-files.ts",
     "./naming": "./src/naming.ts",
     "./dependencies": "./src/dependencies.ts",
     "./integrity": "./src/integrity.ts",

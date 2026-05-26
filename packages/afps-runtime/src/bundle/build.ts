@@ -20,6 +20,7 @@ import { unzipSync } from "fflate";
 import { BundleError } from "./errors.ts";
 import { parseAfpsManifestBytes } from "./parse-manifest.ts";
 import { sanitizeEntries, stripWrapperPrefix, sumSizes } from "./archive-utils.ts";
+import { assertCompanionFiles } from "./companion-files.ts";
 import { resolveBundleLimits, type BundleLimits } from "./limits.ts";
 import {
   bundleIntegrity,
@@ -214,6 +215,19 @@ export function extractRootFromAfps(
   let entries = sanitizeEntries(raw, { limits, context: "afps" });
   entries = stripWrapperPrefix(entries);
 
+  // Entry-count cap mirrors the multi-package bundle path (`read.ts`). Per
+  // spec §8.1, archive processing MUST limit total entry count; without
+  // this guard a 1M-entry `.afps` with tiny files slips through the per-file
+  // and decompressed caps. Both single-package and multi-package paths now
+  // enforce the same `maxFiles` ceiling.
+  if (entries.size > limits.maxFiles) {
+    throw new BundleError(
+      "LIMITS_EXCEEDED",
+      `afps archive has ${entries.size} files — exceeds limit ${limits.maxFiles}`,
+      { field: "files", count: entries.size },
+    );
+  }
+
   const decompressed = sumSizes(entries);
   if (decompressed > limits.maxDecompressedBytes) {
     throw new BundleError(
@@ -255,6 +269,16 @@ export function extractRootFromAfps(
     );
   }
   const identity = formatPackageIdentity(name as `@${string}/${string}`, version);
+
+  // §3.3 / §3.4 companion-file enforcement — single source of truth shared
+  // with the platform's ZIP-import path (`@appstrate/core/zip:parsePackageZip`
+  // via `@appstrate/core/companion-files`). Both paths reject the same
+  // inputs: agent prompt.md non-empty, skill SKILL.md + frontmatter name,
+  // mcp-server server.entry_point payload present.
+  assertCompanionFiles(
+    manifest as { type?: unknown; server?: unknown } & Record<string, unknown>,
+    entries,
+  );
 
   // Compute per-package integrity over the RECORD.
   const recordBody = serializeRecord(computeRecordEntries(entries));

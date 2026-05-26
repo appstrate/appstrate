@@ -322,7 +322,7 @@ export interface ApiCallSuccess {
   /**
    * URL the response was eventually served from after any redirect
    * follow. Equals the resolved target URL when no redirect happened.
-   * Propagated to `_meta["appstrate/upstream"].finalUrl` (sanitised
+   * Propagated to `_meta["dev.appstrate/upstream"].finalUrl` (sanitised
    * for userinfo + fragment) by the MCP handler so agents driving
    * OAuth Authorization Code / CAS / magic-link flows can extract
    * callback query params from the terminal hop.

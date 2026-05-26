@@ -83,13 +83,28 @@ export async function performRefreshTokenExchange(
   // omits the field, fall through to Basic auth instead of body auth so the
   // refresh wire matches the wider OAuth 2.1 ecosystem (Anthropic, Google,
   // GitHub, Slack all accept Basic; some IdPs require it).
+  //
+  // Per-method body shape (RFC 6749 §6 + RFC 7591 §2):
+  //   - client_secret_basic: only grant_type + refresh_token in body; client
+  //     credentials travel in the Authorization: Basic header.
+  //   - client_secret_post:  client_id + client_secret in body, no Basic header.
+  //   - none (public client): client_id in body, NO client_secret, NO Basic
+  //     header. RFC 6749 §6 + §3.2.1: a public client MUST authenticate
+  //     itself by including its client_id in the request.
   const tokenAuthMethod = ctx.tokenEndpointAuthMethod ?? "client_secret_basic";
-  const useBasicAuth = tokenAuthMethod === "client_secret_basic";
   const bodyParams: Record<string, string> = {
     grant_type: "refresh_token",
     refresh_token: refreshToken,
-    ...(useBasicAuth ? {} : { client_id: ctx.clientId, client_secret: ctx.clientSecret }),
   };
+  if (tokenAuthMethod === "client_secret_post") {
+    bodyParams.client_id = ctx.clientId;
+    bodyParams.client_secret = ctx.clientSecret;
+  } else if (tokenAuthMethod === "none") {
+    // Public client: client_id in body only, no secret, no Basic header.
+    bodyParams.client_id = ctx.clientId;
+  }
+  // tokenAuthMethod === "client_secret_basic" → headers carry credentials,
+  // body stays minimal (grant_type + refresh_token).
   const body = buildTokenBody(bodyParams, ctx.tokenContentType);
 
   let response: Response;

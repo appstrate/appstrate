@@ -13,7 +13,12 @@ import {
 } from "./package-storage.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { computeIntegrity } from "@appstrate/core/integrity";
-import { extractDependencies, detectCycle, type DepEntry } from "@appstrate/core/dependencies";
+import {
+  extractDependencies,
+  detectCycle,
+  assertNoLegacyDepKeys,
+  type DepEntry,
+} from "@appstrate/core/dependencies";
 import { storeVersionDependencies, clearVersionDependencies } from "./package-version-deps.ts";
 import { packageVersionDependencies } from "@appstrate/db/schema";
 import {
@@ -696,6 +701,10 @@ export async function replaceVersionContent(params: {
   // bad manifest can't leave a partial side-effect (uploaded ZIP, stale row).
   // `extractDependencies` itself rejects invalid scoped names and invalid
   // semver ranges (see H5 — invalid ranges are rejected upstream here).
+  // AFPS 2.0 §2.1 / Appendix D: producers MUST NOT emit `dependencies.providers`
+  // or `dependencies.tools`. The read fallback in `extractDependencies` stays
+  // for in-DB legacy rows; publish-time we reject the legacy shapes outright.
+  assertNoLegacyDepKeys(manifest);
   const deps = extractDependencies(manifest);
   await assertNoCycle(packageId, deps);
 
@@ -744,6 +753,9 @@ export async function createVersionAndUpload(params: {
   // version row. `extractDependencies` rejects invalid scoped names and
   // invalid semver ranges (see H5 — invalid ranges are rejected upstream
   // here, so the throw propagates and no ZIP / row is created).
+  // AFPS 2.0 §2.1 / Appendix D: producers MUST NOT emit legacy
+  // `dependencies.providers` / `dependencies.tools` keys at publish time.
+  assertNoLegacyDepKeys(manifest);
   const deps = extractDependencies(manifest);
   await assertNoCycle(packageId, deps);
 

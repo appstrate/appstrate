@@ -49,6 +49,14 @@ const VALID_SKILL = {
   schema_version: "2.0",
 };
 
+/**
+ * SKILL.md fixture with valid YAML frontmatter `name`. AFPS §3.3 requires
+ * skill packages to declare a `name` frontmatter — the validator + the
+ * runtime bundle loader both reject SKILL.md without it (covered by the
+ * dedicated conformance cases).
+ */
+const VALID_SKILL_MD = enc("---\nname: skill\n---\nbody");
+
 /** A valid AFPS 2.0.2 mcp-server manifest (MCPB shape + root identity). */
 const VALID_MCP_SERVER = {
   manifest_version: "0.3",
@@ -255,7 +263,7 @@ describe("validateBundle (AFPS 2.0)", () => {
         ...VALID_SKILL,
         dependencies: { skills: { "@me/b": "^1" } },
       },
-      { "SKILL.md": enc("a") },
+      { "SKILL.md": VALID_SKILL_MD },
     );
     const b = makePkg(
       "@me/b@1.0.0" as PackageIdentity,
@@ -266,7 +274,7 @@ describe("validateBundle (AFPS 2.0)", () => {
         schema_version: "2.0",
         dependencies: { skills: { "@me/a": "^1" } },
       },
-      { "SKILL.md": enc("b") },
+      { "SKILL.md": VALID_SKILL_MD },
     );
     const cat = new InMemoryPackageCatalog([a, b]);
     const bundle = await buildBundleFromCatalog(root, cat);
@@ -285,12 +293,12 @@ describe("validateBundle (AFPS 2.0)", () => {
     const a1 = makePkg(
       "@me/dup@1.0.0" as PackageIdentity,
       { name: "@me/dup", version: "1.0.0", type: "skill", schema_version: "2.0" },
-      { "SKILL.md": enc("a") },
+      { "SKILL.md": VALID_SKILL_MD },
     );
     const a2 = makePkg(
       "@me/dup@1.1.0" as PackageIdentity,
       { name: "@me/dup", version: "1.1.0", type: "skill", schema_version: "2.0" },
-      { "SKILL.md": enc("b") },
+      { "SKILL.md": VALID_SKILL_MD },
     );
     const bundle = await buildBundleFromCatalog(root, emptyPackageCatalog);
     // Splice both versions in manually (buildBundleFromCatalog would
@@ -312,7 +320,7 @@ describe("validateBundle (AFPS 2.0)", () => {
       { "prompt.md": enc("p") },
     );
     const skill = makePkg("@me/a@1.0.0" as PackageIdentity, VALID_SKILL, {
-      "SKILL.md": enc("s"),
+      "SKILL.md": VALID_SKILL_MD,
     });
     const bundle = await buildBundleFromCatalog(root, new InMemoryPackageCatalog([skill]));
     const result = validateBundle(bundle);
@@ -432,7 +440,7 @@ describe("validateBundle (AFPS 2.0)", () => {
       { "prompt.md": enc("p") },
     );
     const skill = makePkg("@me/a@1.0.0" as PackageIdentity, skillNoVersion, {
-      "SKILL.md": enc("s"),
+      "SKILL.md": VALID_SKILL_MD,
     });
     const bundle = await buildBundleFromCatalog(root, new InMemoryPackageCatalog([skill]));
     const result = validateBundle(bundle);
@@ -448,7 +456,7 @@ describe("validateBundle (AFPS 2.0)", () => {
       { "prompt.md": enc("p") },
     );
     const skill = makePkg("@me/a@1.0.0" as PackageIdentity, VALID_SKILL, {
-      "SKILL.md": enc("s"),
+      "SKILL.md": VALID_SKILL_MD,
     });
     const bundle = await buildBundleFromCatalog(root, new InMemoryPackageCatalog([skill]));
     const result = validateBundle(bundle, { supportedMajors: [2, 3] });
@@ -480,5 +488,63 @@ describe("validateBundle (AFPS 2.0)", () => {
     const result = validateBundle(bundle);
     expect(result.valid).toBe(false);
     expect(result.issues.some((i) => i.code === "UNSUPPORTED_TYPE")).toBe(true);
+  });
+
+  // ── §3.3 / §3.4 companion-file enforcement — direct validator coverage ──
+  // The conformance harness (L1.10/L1.11/L1.13) exercises these through the
+  // loadBundle route; these tests pin the validateBundle()-level contract so
+  // a regression in the shared companion-files helper that returned `null`
+  // for an entire type (e.g. mcp-server) would be caught by the unit suite
+  // independently of the conformance harness.
+
+  it("flags an agent missing prompt.md with COMPANION_FILE_MISSING", async () => {
+    // Agent root without prompt.md companion (AFPS §3.3 requires it).
+    const root = makePkg("@me/root@1.0.0" as PackageIdentity, VALID_AGENT);
+    const bundle = await buildBundleFromCatalog(root, emptyPackageCatalog);
+    const result = validateBundle(bundle);
+    expect(result.valid).toBe(false);
+    const issue = result.issues.find((i) => i.code === "COMPANION_FILE_MISSING");
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe("error");
+    expect(issue?.identity).toBe("@me/root@1.0.0" as PackageIdentity);
+  });
+
+  it("flags a skill missing SKILL.md with COMPANION_FILE_MISSING", async () => {
+    // Skill dependency without SKILL.md companion (AFPS §3.3 requires it).
+    const root = makePkg(
+      "@me/root@1.0.0" as PackageIdentity,
+      { ...VALID_AGENT, dependencies: { skills: { "@me/a": "^1" } } },
+      { "prompt.md": enc("p") },
+    );
+    const skill = makePkg("@me/a@1.0.0" as PackageIdentity, VALID_SKILL);
+    const bundle = await buildBundleFromCatalog(root, new InMemoryPackageCatalog([skill]));
+    const result = validateBundle(bundle);
+    expect(result.valid).toBe(false);
+    const issue = result.issues.find(
+      (i) =>
+        i.code === "COMPANION_FILE_MISSING" && i.identity === ("@me/a@1.0.0" as PackageIdentity),
+    );
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe("error");
+  });
+
+  it("flags an mcp-server missing server.entry_point payload with COMPANION_FILE_MISSING", async () => {
+    // mcp-server manifest references `server/index.js` via entry_point, but
+    // the file is absent from the package (AFPS §3.4 requires the payload).
+    const root = makePkg(
+      "@me/root@1.0.0" as PackageIdentity,
+      { ...VALID_AGENT, dependencies: { mcp_servers: { "@me/mcp": "^1" } } },
+      { "prompt.md": enc("p") },
+    );
+    const mcp = makePkg("@me/mcp@1.0.0" as PackageIdentity, VALID_MCP_SERVER);
+    const bundle = await buildBundleFromCatalog(root, new InMemoryPackageCatalog([mcp]));
+    const result = validateBundle(bundle);
+    expect(result.valid).toBe(false);
+    const issue = result.issues.find(
+      (i) =>
+        i.code === "COMPANION_FILE_MISSING" && i.identity === ("@me/mcp@1.0.0" as PackageIdentity),
+    );
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe("error");
   });
 });

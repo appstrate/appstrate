@@ -45,6 +45,10 @@ import { buildBundleFromUploadedAfps, type BundleAssemblyScope } from "./bundle-
 import { installPackage } from "./application-packages.ts";
 import { downloadVersionZip } from "./package-storage.ts";
 import { logger } from "../lib/logger.ts";
+import {
+  collectConnectLoginWarnings,
+  collectMetaWarnings,
+} from "./integration-install-warnings.ts";
 
 // Pinned mtime — must match the bundle writer exactly for cross-format
 // integrity parity. Anchored at 1980-01-02T12:00Z so fflate's local-TZ
@@ -215,6 +219,13 @@ export interface ImportBundleResult {
   rootInstalled: boolean;
   rootPackageId: string;
   rootVersion: string;
+  /**
+   * Non-blocking install-time warnings (AFPS §7.7 / audit P2 #12) — surfaces
+   * `connect.login` selector/criteria patterns the Appstrate runtime engine
+   * cannot evaluate (XPath, multi-value JSONPath, xpath criteria). Empty
+   * array when no integration manifest in the bundle hits a limitation.
+   */
+  warnings: string[];
 }
 
 /**
@@ -229,6 +240,7 @@ export async function importBundle(
   userId: string,
 ): Promise<ImportBundleResult> {
   const imported: ImportedPackageResult[] = [];
+  const warnings: string[] = [];
 
   for (const [identity, pkg] of bundle.packages) {
     const parsedIdentity = parsePackageIdentity(identity);
@@ -270,6 +282,22 @@ export async function importBundle(
       parsedZip = parsePackageZip(reconstructed);
     } catch (err) {
       throw invalidRequest(`Invalid package '${identity}' in bundle: ${getErrorMessage(err)}`);
+    }
+
+    // Surface engine-subset limitations for integration manifests as
+    // non-blocking warnings (AFPS §7.7 / audit P2 #12).
+    if (parsedZip.type === "integration") {
+      for (const w of collectConnectLoginWarnings(parsedZip.manifest)) {
+        warnings.push(`${identity}: ${w}`);
+      }
+    }
+
+    // Surface `_meta` policy warnings for all package types — the validator
+    // soft-fails malformed namespace keys to console.warn only (per AFPS §10.1
+    // "consumers MUST NOT reject unknown `_meta` keys"). Lift them to the
+    // install-warning channel so publishers see them (re-audit 2A observation).
+    for (const w of collectMetaWarnings(parsedZip.manifest)) {
+      warnings.push(`${identity}: ${w}`);
     }
 
     // Ensure a packages row exists before the version snapshot. If a
@@ -335,6 +363,7 @@ export async function importBundle(
     rootInstalled,
     rootPackageId: rootParsed.packageId,
     rootVersion: rootParsed.version,
+    warnings,
   };
 }
 

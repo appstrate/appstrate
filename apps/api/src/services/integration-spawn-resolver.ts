@@ -265,7 +265,15 @@ async function resolveOne(
     // server keeps an MCPB-vocabulary `server.type: "node"` and declares
     // `bun` in _meta; the runner then picks the bun interpreter/image.
     const effectiveType = getMcpServerRuntime(mcpServer) ?? run.type;
-    serverSpec = { type: effectiveType, entry_point: run.entry_point, serverPackageId: ref.name };
+    // AFPS §7.1 — propagate `source.server.vendored` build-provenance signal
+    // through the spawn spec → boot report so operators can audit "this run
+    // used a vendored foreign package". Only meaningful for local sources.
+    serverSpec = {
+      type: effectiveType,
+      entry_point: run.entry_point,
+      serverPackageId: ref.name,
+      ...(typeof ref.vendored === "boolean" ? { vendored: ref.vendored } : {}),
+    };
   }
   // sourceKind === "api" (or unknown) → serverless, serverSpec stays undefined.
 

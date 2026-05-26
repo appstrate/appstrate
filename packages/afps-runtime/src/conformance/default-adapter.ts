@@ -36,17 +36,13 @@ export function createDefaultAdapter(): ConformanceAdapter {
   return {
     name: "@appstrate/afps-runtime",
     loadBundle: (bytes) => {
-      // Conformance L1 tests provide single-package AFPS zips
-      // (manifest.json + prompt.md at root). Wrap them into a
-      // Bundle-of-1 synchronously — no catalog walk since any
-      // declared deps cannot resolve in the test fixture.
+      // Conformance L1 tests provide single-package AFPS zips. The
+      // companion-file checks (prompt.md / SKILL.md / server.entry_point)
+      // are enforced inside `extractRootFromAfps` via the shared helper —
+      // see `packages/afps-runtime/src/bundle/companion-files.ts`. Wrap
+      // the root into a Bundle-of-1 synchronously (no catalog walk:
+      // declared deps can't resolve in test fixtures).
       const root = extractRootFromAfps(bytes);
-      // AFPS single-package agents mandate prompt.md at the root;
-      // surfacing that check at load time preserves the loader-level
-      // rejection semantics downstream consumers rely on.
-      if (!root.files.has("prompt.md")) {
-        throw new Error("afps: archive missing prompt.md");
-      }
       return bundleOfOne(root);
     },
     renderPrompt: (template, context, snapshot) => {

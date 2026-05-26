@@ -43,6 +43,15 @@ export { mcpServerManifestSchema, type McpServerManifest };
  */
 export const SCHEMA_VERSION_REGEX: RegExp = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
 
+/**
+ * Highest AFPS `schema_version` MAJOR this build supports. Per spec §2.4,
+ * consumers MUST reject manifests whose MAJOR exceeds the highest known
+ * MAJOR — a forward-major manifest may carry breaking changes that this
+ * build can't safely interpret. Higher MINOR within the same MAJOR is
+ * best-effort accepted (additive-only per §2.4).
+ */
+export const SUPPORTED_SCHEMA_VERSION_MAJOR = 2 as const;
+
 export const scopedNameRegex: RegExp = (() => {
   // Zod 4 internal: scopedName._zod.def.checks[0]._zod.def.pattern : RegExp
   type ZodInternalCheck = { _zod?: { def?: { pattern?: RegExp } } };
@@ -135,10 +144,10 @@ const RESERVED_META_PREFIXES = ["mcp/", "modelcontextprotocol/"] as const;
  * `_meta` reverse-DNS extension namespace (§10). Wraps the upstream
  * `@afps-spec/schema` `metaSchema` (which validates the value shape — `MUST be a
  * JSON object per namespace key`, §10.1) with a local `.superRefine` that
- * enforces the Appendix B `META_NAMESPACE_KEY` regex on the keys AND rejects
- * the reserved MCP prefixes (§10). Upstream `@afps-spec/schema@2.0.3` does not
- * enforce either rule; this local refine keeps appstrate compliant until the
- * upstream fix lands (tracked as M1 in /tmp/afps-audit/FINAL-REPORT.md).
+ * enforces the reserved-prefix rejection (§10 — producers MUST NOT use
+ * `mcp/` / `modelcontextprotocol/`) and soft-fails Appendix B
+ * `META_NAMESPACE_KEY` regex violations with a `console.warn` (per §10.1
+ * consumers MUST NOT reject unknown `_meta` keys).
  */
 export const metaSchema = afpsMetaSchema.superRefine((meta, ctx) => {
   if (!meta || typeof meta !== "object") return;
@@ -159,11 +168,15 @@ export const metaSchema = afpsMetaSchema.superRefine((meta, ctx) => {
     }
     if (isReserved) continue;
     if (!META_NAMESPACE_KEY_REGEX.test(key)) {
-      ctx.addIssue({
-        code: "custom",
-        path: [key],
-        message: `_meta key "${key}" does not match the AFPS Appendix B META_NAMESPACE_KEY pattern`,
-      });
+      // AFPS §10.1: "Consumers MUST NOT reject manifests that contain unknown
+      // `_meta` keys." Soft-fail malformed-namespace keys with a warning so
+      // forward-compat manifests (e.g. future Appendix B regex revisions) keep
+      // round-tripping. Reserved prefixes above remain hard-rejected because
+      // §10 says producers MUST NOT author them at all.
+
+      console.warn(
+        `_meta key "${key}" does not match the AFPS Appendix B META_NAMESPACE_KEY pattern — accepted for forward compatibility per §10.1`,
+      );
     }
   }
 });
@@ -178,6 +191,15 @@ export const manifestSchema = z.looseObject({
     .regex(SCHEMA_VERSION_REGEX, {
       error: 'schema_version must follow MAJOR.MINOR format with no leading zeros (e.g. "2.0")',
     })
+    .refine(
+      (v) => {
+        const major = parseInt(v.split(".")[0]!, 10);
+        return Number.isFinite(major) && major <= SUPPORTED_SCHEMA_VERSION_MAJOR;
+      },
+      {
+        error: `schema_version MAJOR exceeds highest supported (${SUPPORTED_SCHEMA_VERSION_MAJOR}) — per AFPS §2.4, consumers MUST reject forward-major manifests`,
+      },
+    )
     .optional(),
   display_name: z.string().optional(),
   description: z.string().optional(),
@@ -361,6 +383,45 @@ export type ValidateManifestResult =
     }
   | { valid: false; errors: string[]; manifest?: undefined };
 
+/**
+ * Apply the local `_meta` policy to a parsed manifest: hard-reject keys under
+ * the reserved MCP prefixes (§10 — producers MUST NOT author them) and
+ * soft-warn keys that violate the Appendix B `META_NAMESPACE_KEY` regex
+ * (§10.1 — consumers MUST NOT reject unknown keys). Upstream
+ * `@afps-spec/schema@2.0.3`'s per-type schemas use a loose `metaSchema` that
+ * accepts both shapes; this helper layers the local policy on top.
+ *
+ * @returns `null` when no violation requires hard-rejection, or an array of
+ *   error strings (currently only reserved-prefix rejections).
+ */
+function applyMetaPolicy(raw: unknown): string[] | null {
+  if (!raw || typeof raw !== "object") return null;
+  const meta = (raw as { _meta?: unknown })._meta;
+  if (!meta || typeof meta !== "object") return null;
+  const errors: string[] = [];
+  for (const key of Object.keys(meta as Record<string, unknown>)) {
+    let isReserved = false;
+    for (const reserved of RESERVED_META_PREFIXES) {
+      if (key.startsWith(reserved)) {
+        errors.push(
+          `_meta.${key}: _meta key "${key}" uses a reserved prefix — "mcp/" and "modelcontextprotocol/" are reserved by MCP per AFPS §10`,
+        );
+        isReserved = true;
+        break;
+      }
+    }
+    if (isReserved) continue;
+    if (!META_NAMESPACE_KEY_REGEX.test(key)) {
+      // §10.1: soft-fail with a warning so forward-compat manifests round-trip.
+
+      console.warn(
+        `_meta key "${key}" does not match the AFPS Appendix B META_NAMESPACE_KEY pattern — accepted for forward compatibility per §10.1`,
+      );
+    }
+  }
+  return errors.length > 0 ? errors : null;
+}
+
 function parseWithSchema(
   schema:
     | typeof manifestSchema
@@ -375,6 +436,13 @@ function parseWithSchema(
     const errors = result.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`);
     return { valid: false, errors };
   }
+
+  // Apply local `_meta` policy on top of the canonical per-type schema (which
+  // uses the upstream `metaSchema` — accepts any key shape as long as the
+  // value is a JSON object). Reserved MCP prefixes hard-reject; malformed
+  // namespace keys soft-fail with a `console.warn`.
+  const metaErrors = applyMetaPolicy(raw);
+  if (metaErrors) return { valid: false, errors: metaErrors };
 
   return { valid: true, errors: [], manifest: result.data };
 }

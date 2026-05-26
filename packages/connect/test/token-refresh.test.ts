@@ -69,6 +69,37 @@ describe("performRefreshTokenExchange — token_endpoint_auth_method default (R8
     expect(capturedBody).not.toContain("client_secret=");
   });
 
+  it("token_endpoint_auth_method=none sends client_id in body, no secret, no Basic header (RFC 6749 §6 public client)", async () => {
+    let capturedHeaders: Headers | undefined;
+    let capturedBody: string | undefined;
+    const ctxNone: RefreshContext = {
+      tokenEndpoint: "https://idp.example.com/token",
+      clientId: "public-client-id",
+      clientSecret: "", // public clients carry no secret
+      tokenEndpointAuthMethod: "none",
+    };
+    await withFetch(
+      (async (_url, init) => {
+        capturedHeaders = new Headers(init?.headers as HeadersInit);
+        capturedBody = init?.body as string;
+        return new Response(JSON.stringify({ access_token: "new", token_type: "Bearer" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }) as unknown as typeof fetch,
+      () => performRefreshTokenExchange(ctxNone, "rt_abc", { label: "refresh" }),
+    );
+    // No Authorization header — public clients don't carry credentials in headers.
+    expect(capturedHeaders?.get("Authorization")).toBeNull();
+    // client_id MUST be in the body (RFC 6749 §3.2.1).
+    expect(capturedBody).toContain("client_id=public-client-id");
+    // client_secret MUST NOT be in the body — there is no secret to send.
+    expect(capturedBody).not.toContain("client_secret=");
+    // grant_type + refresh_token are always present.
+    expect(capturedBody).toContain("grant_type=refresh_token");
+    expect(capturedBody).toContain("refresh_token=rt_abc");
+  });
+
   it("explicit client_secret_post overrides the default", async () => {
     let capturedHeaders: Headers | undefined;
     let capturedBody: string | undefined;

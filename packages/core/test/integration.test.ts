@@ -10,7 +10,7 @@
  * superRefine rules; validateManifest dispatch; and every exported helper.
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, spyOn } from "bun:test";
 import {
   integrationManifestSchema,
   type IntegrationManifest,
@@ -1276,17 +1276,27 @@ describe("validateAgentIntegrationScopes", () => {
 // (reverse-DNS namespace + `/` + identifier). Upstream `@afps-spec/schema@2.0.3`
 // types `_meta` as `z.record(z.string(), z.record(z.string(), z.unknown()))` —
 // any string key passes, including uppercase + whitespace + reserved
-// `mcp/` / `modelcontextprotocol/` prefixes per §10. The Wave 5 local refine in
-// `validation.ts` wraps the upstream `metaSchema` with a `.superRefine` that
-// enforces Appendix B + rejects reserved prefixes until the upstream fix lands.
+// `mcp/` / `modelcontextprotocol/` prefixes per §10.
+//
+// Per §10.1, consumers MUST NOT reject manifests with unknown `_meta` keys.
+// The local refine therefore SOFT-fails Appendix B violations (accept + warn)
+// while HARD-rejecting the §10 reserved prefixes (which producers MUST NOT
+// author at all).
 //
 // Final-report cross-reference: M1.
 describe("T7 — _meta namespace key validation (local refine)", () => {
-  it("rejects _meta keys that do not match META_NAMESPACE_KEY regex", () => {
-    const r = metaSchema.safeParse({ "BAD KEY": {} });
-    expect(r.success).toBe(false);
-    if (!r.success) {
-      expect(r.error.issues.some((i) => i.path.includes("BAD KEY"))).toBe(true);
+  it("soft-accepts _meta keys that do not match META_NAMESPACE_KEY regex (§10.1)", () => {
+    const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const r = metaSchema.safeParse({ "BAD KEY": {} });
+      expect(r.success).toBe(true);
+      expect(warnSpy).toHaveBeenCalled();
+      const warned = warnSpy.mock.calls.some((args) =>
+        args.some((a) => typeof a === "string" && a.includes("BAD KEY")),
+      );
+      expect(warned).toBe(true);
+    } finally {
+      warnSpy.mockRestore();
     }
   });
 
@@ -1307,11 +1317,16 @@ describe("T7 — _meta namespace key validation (local refine)", () => {
     expect(r.success).toBe(false);
   });
 
-  it("rejects _meta keys whose namespace contains uppercase letters (Appendix B regex)", () => {
-    const r = metaSchema.safeParse({ "dev.AFPS/x": {} });
-    expect(r.success).toBe(false);
-    if (!r.success) {
-      expect(r.error.issues.some((i) => i.path.includes("dev.AFPS/x"))).toBe(true);
+  it("soft-accepts _meta keys whose namespace contains uppercase letters (§10.1)", () => {
+    // Appendix B regex requires lowercase namespace segments — but §10.1 says
+    // consumers MUST NOT reject unknown keys. Accept with a warning.
+    const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const r = metaSchema.safeParse({ "dev.AFPS/x": {} });
+      expect(r.success).toBe(true);
+      expect(warnSpy).toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
     }
   });
 

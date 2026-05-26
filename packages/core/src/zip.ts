@@ -4,7 +4,6 @@
 import { unzipSync, zipSync, type Zippable } from "fflate";
 import {
   validateManifest,
-  extractSkillMeta,
   type Manifest,
   type AgentManifest,
   type SkillManifest,
@@ -12,6 +11,7 @@ import {
   type IntegrationManifest,
   type McpServerManifest,
 } from "./validation.ts";
+import { checkCompanionFiles, companionFilesFromRecord } from "./companion-files.ts";
 
 export type { Zippable };
 
@@ -274,33 +274,32 @@ export function parsePackageZip(zipBuffer: Uint8Array, maxSize?: number): Parsed
   // so every package type now declares its `type` at the top level.
   const type: PackageType | undefined = (manifest as { type?: PackageType }).type;
 
-  // Extract primary content based on type
+  // Enforce §3.3 / §3.4 companion-file invariants via the shared helper so
+  // the platform import path and the runtime bundle loader reject the same
+  // inputs. The helper covers: agent prompt.md non-empty, skill SKILL.md +
+  // frontmatter name, mcp-server server.entry_point payload present.
+  const violation = checkCompanionFiles(
+    manifest as { type?: unknown; server?: unknown } & Record<string, unknown>,
+    companionFilesFromRecord(files),
+  );
+  if (violation) {
+    const code =
+      violation.reason === "SKILL_MISSING_FRONTMATTER_NAME" ? "INVALID_CONTENT" : "MISSING_CONTENT";
+    throw new PackageZipError(code, violation.message);
+  }
+
+  // Extract primary content based on type. Companion-file presence is
+  // already guaranteed above; the switch below only reads the bytes the
+  // caller wants surfaced as `content`.
   let content: string;
 
   switch (type) {
     case "agent": {
-      const promptRaw = files["prompt.md"];
-      const promptMd = promptRaw ? new TextDecoder().decode(promptRaw) : undefined;
-      if (!promptMd || promptMd.trim().length === 0) {
-        throw new PackageZipError("MISSING_CONTENT", "Agent package must contain prompt.md");
-      }
-      content = promptMd;
+      content = new TextDecoder().decode(files["prompt.md"]!);
       break;
     }
     case "skill": {
-      const skillRaw = files["SKILL.md"];
-      const skillMd = skillRaw ? new TextDecoder().decode(skillRaw) : undefined;
-      if (!skillMd) {
-        throw new PackageZipError("MISSING_CONTENT", "Skill package must contain SKILL.md");
-      }
-      const meta = extractSkillMeta(skillMd);
-      if (!meta.name) {
-        throw new PackageZipError(
-          "INVALID_CONTENT",
-          "SKILL.md must contain a 'name' in YAML frontmatter",
-        );
-      }
-      content = skillMd;
+      content = new TextDecoder().decode(files["SKILL.md"]!);
       break;
     }
     case "integration": {

@@ -43,7 +43,7 @@ export type UploadProtocol = string;
 /**
  * Outcome of a single `apiCall` issued by an adapter.
  *
- * Mirrors the sidecar's `_meta.appstrate/upstream` payload after
+ * Mirrors the sidecar's `_meta["dev.appstrate/upstream"]` payload after
  * resolver-side parsing — adapters consume `status` and `headers`
  * for protocol semantics, and `body` for the few protocols that need
  * to read the response payload (S3's `CreateMultipartUpload` returns

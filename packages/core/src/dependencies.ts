@@ -48,6 +48,59 @@ export interface Dependencies {
 }
 
 // ─────────────────────────────────────────────
+// Publish-time guard against legacy 1.x dep keys
+// ─────────────────────────────────────────────
+
+/**
+ * Error thrown by {@link assertNoLegacyDepKeys} when a manifest carries the
+ * retired AFPS 1.x dependency keys (`dependencies.providers` /
+ * `dependencies.tools`). Per AFPS 2.0 §2.1 / Appendix D, producers MUST NOT
+ * emit these keys — they were renamed to `dependencies.integrations` and
+ * `dependencies.mcp_servers`. The read path ({@link extractDependencies})
+ * keeps projecting legacy keys for back-compat against in-DB manifests; the
+ * publish path calls this guard to reject newly-emitted legacy shapes.
+ */
+export class LegacyDepKeyError extends Error {
+  /** Manifest field path that triggered the rejection (e.g. `"dependencies.providers"`). */
+  public readonly field: string;
+  /** Canonical AFPS 2.0 key that should be used instead. */
+  public readonly suggestedRename: string;
+
+  constructor(field: string, suggestedRename: string) {
+    super(
+      `${field} is a retired AFPS 1.x dependency key — producers MUST NOT emit it per AFPS 2.0 §2.1 / Appendix D. Rename to "${suggestedRename}".`,
+    );
+    this.name = "LegacyDepKeyError";
+    this.field = field;
+    this.suggestedRename = suggestedRename;
+  }
+}
+
+/**
+ * Publish-time guard: reject manifests that carry the retired AFPS 1.x
+ * dependency keys (`dependencies.providers`, `dependencies.tools`). Per
+ * AFPS 2.0 §2.1 + Appendix D, producers MUST NOT emit these keys; they map
+ * to `dependencies.integrations` and `dependencies.mcp_servers` respectively.
+ *
+ * Call this from the publish path BEFORE persisting a new version row. The
+ * read-side projection in {@link extractDependencies} continues to accept
+ * legacy keys so existing in-DB manifests keep resolving.
+ *
+ * @throws LegacyDepKeyError when a legacy key is detected on the manifest.
+ */
+export function assertNoLegacyDepKeys(manifest: Record<string, unknown>): void {
+  const deps = manifest.dependencies;
+  if (!deps || typeof deps !== "object") return;
+  const legacy = deps as Record<string, unknown>;
+  if (legacy.providers !== undefined) {
+    throw new LegacyDepKeyError("dependencies.providers", "dependencies.integrations");
+  }
+  if (legacy.tools !== undefined) {
+    throw new LegacyDepKeyError("dependencies.tools", "dependencies.mcp_servers");
+  }
+}
+
+// ─────────────────────────────────────────────
 // Dependency extraction from manifests
 // ─────────────────────────────────────────────
 

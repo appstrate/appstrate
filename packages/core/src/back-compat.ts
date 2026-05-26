@@ -73,6 +73,111 @@
  * --  location: input, output, config, agent config sections.)
  * ```
  *
- * Tracking: AFPS 2.0 migration window end-of-life.
+ * Dependency-key backfill (AFPS 1.x → 2.0 Appendix D projection). Currently
+ * masked by the read fallback in `extractDependencies` (see
+ * `packages/core/src/dependencies.ts`); this backfill MUST run before that
+ * fallback is removed in the {@link AFPS_1X_READ_FALLBACK_REMOVAL} release.
+ * Applies to every JSONB column that stores an AFPS manifest:
+ *
+ *   - `packages.draft_manifest`            — editable draft (nullable)
+ *   - `package_versions.manifest`          — published version snapshot
+ *
+ * NOT applicable: `application_packages.config` stores the resolved per-app
+ * config payload (not a manifest snapshot), so it carries no
+ * `dependencies.*` keys to project.
+ *
+ * The rewrite is idempotent — the `WHERE` clauses gate on the presence of the
+ * legacy key, so re-running is a no-op once the projection has been applied.
+ *
+ * ```sql
+ * -- 1. Dry-run: count affected rows per table + column.
+ * SELECT
+ *   (SELECT COUNT(*) FROM packages
+ *      WHERE draft_manifest -> 'dependencies' ? 'providers'
+ *         OR draft_manifest -> 'dependencies' ? 'tools')     AS packages_draft_legacy_deps,
+ *   (SELECT COUNT(*) FROM package_versions
+ *      WHERE manifest -> 'dependencies' ? 'providers'
+ *         OR manifest -> 'dependencies' ? 'tools')           AS package_versions_legacy_deps;
+ *
+ * -- 2. Rewrite. Run inside a single transaction so a partial failure rolls
+ * --    back the whole projection. Order matters: rename `providers` →
+ * --    `integrations` and `tools` → `mcp_servers`, merging into any
+ * --    already-present canonical key (Postgres `||` does shallow merge).
+ *
+ * BEGIN;
+ *
+ * -- packages.draft_manifest: providers → integrations
+ * UPDATE packages
+ *    SET draft_manifest = jsonb_set(
+ *          draft_manifest,
+ *          '{dependencies}',
+ *          (draft_manifest -> 'dependencies') #- '{providers}'
+ *            || jsonb_build_object(
+ *                 'integrations',
+ *                 COALESCE(draft_manifest -> 'dependencies' -> 'integrations', '{}'::jsonb)
+ *                   || (draft_manifest -> 'dependencies' -> 'providers')
+ *               )
+ *        )
+ *  WHERE draft_manifest -> 'dependencies' ? 'providers';
+ *
+ * -- packages.draft_manifest: tools → mcp_servers
+ * UPDATE packages
+ *    SET draft_manifest = jsonb_set(
+ *          draft_manifest,
+ *          '{dependencies}',
+ *          (draft_manifest -> 'dependencies') #- '{tools}'
+ *            || jsonb_build_object(
+ *                 'mcp_servers',
+ *                 COALESCE(draft_manifest -> 'dependencies' -> 'mcp_servers', '{}'::jsonb)
+ *                   || (draft_manifest -> 'dependencies' -> 'tools')
+ *               )
+ *        )
+ *  WHERE draft_manifest -> 'dependencies' ? 'tools';
+ *
+ * -- package_versions.manifest: providers → integrations
+ * UPDATE package_versions
+ *    SET manifest = jsonb_set(
+ *          manifest,
+ *          '{dependencies}',
+ *          (manifest -> 'dependencies') #- '{providers}'
+ *            || jsonb_build_object(
+ *                 'integrations',
+ *                 COALESCE(manifest -> 'dependencies' -> 'integrations', '{}'::jsonb)
+ *                   || (manifest -> 'dependencies' -> 'providers')
+ *               )
+ *        )
+ *  WHERE manifest -> 'dependencies' ? 'providers';
+ *
+ * -- package_versions.manifest: tools → mcp_servers
+ * UPDATE package_versions
+ *    SET manifest = jsonb_set(
+ *          manifest,
+ *          '{dependencies}',
+ *          (manifest -> 'dependencies') #- '{tools}'
+ *            || jsonb_build_object(
+ *                 'mcp_servers',
+ *                 COALESCE(manifest -> 'dependencies' -> 'mcp_servers', '{}'::jsonb)
+ *                   || (manifest -> 'dependencies' -> 'tools')
+ *               )
+ *        )
+ *  WHERE manifest -> 'dependencies' ? 'tools';
+ *
+ * COMMIT;
+ *
+ * -- 3. Post-check: every counter MUST return 0. Anything non-zero means a
+ * --    legacy dep key survived the rewrite — investigate before removing the
+ * --    read fallback in `extractDependencies`.
+ * SELECT
+ *   (SELECT COUNT(*) FROM packages
+ *      WHERE draft_manifest -> 'dependencies' ? 'providers'
+ *         OR draft_manifest -> 'dependencies' ? 'tools')     AS packages_draft_legacy_deps,
+ *   (SELECT COUNT(*) FROM package_versions
+ *      WHERE manifest -> 'dependencies' ? 'providers'
+ *         OR manifest -> 'dependencies' ? 'tools')           AS package_versions_legacy_deps;
+ * ```
+ *
+ * Tracking: AFPS 2.0 migration window end-of-life. Planned removal of the
+ * read fallback (and execution of this backfill as a one-shot migration) is
+ * scheduled for {@link AFPS_1X_READ_FALLBACK_REMOVAL}.
  */
 export const AFPS_1X_READ_FALLBACK_REMOVAL = "AFPS 2.1";

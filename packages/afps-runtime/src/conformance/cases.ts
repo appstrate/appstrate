@@ -20,8 +20,11 @@ import {
   generateKeyPair,
   signBundle,
   signChildKey,
+  verifyBundleSignature,
+  type BundleSignature,
   type TrustRoot,
 } from "../bundle/signing.ts";
+import { BundleSignaturePolicyError, verifyBundleWithPolicy } from "../bundle/signature-policy.ts";
 import type { Bundle } from "../bundle/types.ts";
 import type { RunEvent } from "@afps-spec/types";
 import type { ConformanceAdapter } from "./adapter.ts";
@@ -856,6 +859,352 @@ const L4_RUN_EVENT_ENVELOPE: ConformanceCase = {
   },
 };
 
+// ─── L1 — §3.3 / §3.4 companion-file invariants ────────────────────
+//
+// These exercise the runtime bundle loader's companion-file checks (now
+// unified with the platform's ZIP-import path via `@appstrate/core/companion-files`):
+//
+//   - agent     → prompt.md present + non-empty at archive root (§3.2/§3.4)
+//   - skill     → SKILL.md present + YAML frontmatter `name` (§3.3)
+//   - mcp-server → `server.entry_point` payload present in archive (§3.4)
+//
+// Each case builds a minimal `.afps` archive with the violation and asserts
+// the loader rejects it. The matching positive cases are covered by L1.1 /
+// L1.6 (mcp-server) and a positive entry_point case below.
+const SKILL_MANIFEST = {
+  name: "@afps/conformance-skill",
+  version: "1.0.0",
+  type: "skill",
+  schema_version: "2.0",
+};
+
+const MCP_SERVER_MANIFEST = {
+  manifest_version: "0.3",
+  name: "@afps/conformance-mcp",
+  version: "1.0.0",
+  type: "mcp-server",
+  schema_version: "2.0",
+  display_name: "Conformance MCP Server",
+  server: {
+    type: "node",
+    entry_point: "main.js",
+    mcp_config: { command: "node", args: ["main.js"] },
+  },
+};
+
+const L1_SKILL_MISSING_SKILL_MD: ConformanceCase = {
+  id: "L1.10",
+  level: "L1",
+  title: "rejects a skill bundle missing SKILL.md (§3.3)",
+  run: (adapter) => {
+    const bytes = zipSync({ "manifest.json": enc(JSON.stringify(SKILL_MANIFEST)) });
+    return expectThrow(() => adapter.loadBundle(bytes), /SKILL\.md/i, "skill missing SKILL.md");
+  },
+};
+
+const L1_SKILL_MISSING_FRONTMATTER_NAME: ConformanceCase = {
+  id: "L1.11",
+  level: "L1",
+  title: "rejects a skill bundle whose SKILL.md has no frontmatter name (§3.3)",
+  run: (adapter) => {
+    const bytes = zipSync({
+      "manifest.json": enc(JSON.stringify(SKILL_MANIFEST)),
+      // YAML frontmatter present but no `name` key — must reject.
+      "SKILL.md": enc("---\ndescription: skill without name\n---\nbody"),
+    });
+    return expectThrow(
+      () => adapter.loadBundle(bytes),
+      /name|frontmatter/i,
+      "skill missing frontmatter name",
+    );
+  },
+};
+
+const L1_MCP_SERVER_ENTRY_POINT_PRESENT: ConformanceCase = {
+  id: "L1.12",
+  level: "L1",
+  title: "accepts an mcp-server bundle whose server.entry_point file is present (§3.4)",
+  run: (adapter) => {
+    const bytes = zipSync({
+      "manifest.json": enc(JSON.stringify(MCP_SERVER_MANIFEST)),
+      "main.js": enc("// server"),
+    });
+    try {
+      const bundle = adapter.loadBundle(bytes);
+      const rootPkg = bundle.packages.get(bundle.root);
+      if (!rootPkg) return fail("loadBundle returned no root package");
+      if (!rootPkg.files.has("main.js")) {
+        return fail("loaded bundle missing server.entry_point file");
+      }
+      return pass();
+    } catch (err) {
+      return fail(
+        `positive mcp-server load rejected: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  },
+};
+
+const L1_MCP_SERVER_ENTRY_POINT_MISSING: ConformanceCase = {
+  id: "L1.13",
+  level: "L1",
+  title: "rejects an mcp-server bundle whose server.entry_point file is absent (§3.4)",
+  run: (adapter) => {
+    // entry_point references missing.js, archive contains a stub file at a
+    // different path → loader MUST refuse, not defer to spawn-time failure.
+    const bytes = zipSync({
+      "manifest.json": enc(
+        JSON.stringify({
+          ...MCP_SERVER_MANIFEST,
+          server: { ...MCP_SERVER_MANIFEST.server, entry_point: "missing.js" },
+        }),
+      ),
+      "main.js": enc("// wrong file"),
+    });
+    return expectThrow(
+      () => adapter.loadBundle(bytes),
+      /entry_point|missing\.js/i,
+      "mcp-server entry_point missing",
+    );
+  },
+};
+
+// ─── L1 — §8.1 archive-processing rejections ───────────────────────
+//
+// These pin the path-sanitization rules already implemented in
+// `archive-utils.sanitizeEntries`. The conformance suite reproduces them so
+// third-party runners hit identical pass/fail behaviour.
+//
+// We construct raw ZIP buffers via fflate and rely on the loader to reject
+// the offending entries (either by throwing or by filtering them out so the
+// archive looks structurally invalid downstream — both modes count as
+// rejection for the purposes of the spec). Where the runtime is fail-closed
+// (per `archive-utils.ts` comments) the cases assert a throw; where the
+// platform-import path is fail-soft (per `core/zip.ts`) the parity test in
+// `packages/core/test/sanitizer-parity.test.ts` handles the dual.
+const L1_REJECT_PATH_TRAVERSAL: ConformanceCase = {
+  id: "L1.14",
+  level: "L1",
+  title: "rejects an archive entry containing '..' path traversal (§8.1)",
+  run: (adapter) => {
+    const bytes = zipSync({
+      "manifest.json": enc(JSON.stringify(REFERENCE_MANIFEST)),
+      "prompt.md": enc("ok"),
+      "../escape.txt": enc("evil"),
+    });
+    return expectThrow(() => adapter.loadBundle(bytes), /traversal|\.\./, "path traversal entry");
+  },
+};
+
+const L1_REJECT_ABSOLUTE_PATH: ConformanceCase = {
+  id: "L1.15",
+  level: "L1",
+  title: "rejects an archive entry with an absolute path (§8.1)",
+  run: (adapter) => {
+    const bytes = zipSync({
+      "manifest.json": enc(JSON.stringify(REFERENCE_MANIFEST)),
+      "prompt.md": enc("ok"),
+      "/etc/passwd": enc("evil"),
+    });
+    return expectThrow(() => adapter.loadBundle(bytes), /absolute/i, "absolute path entry");
+  },
+};
+
+const L1_REJECT_BACKSLASH: ConformanceCase = {
+  id: "L1.16",
+  level: "L1",
+  title: "rejects an archive entry containing a backslash (§8.1)",
+  run: (adapter) => {
+    const bytes = zipSync({
+      "manifest.json": enc(JSON.stringify(REFERENCE_MANIFEST)),
+      "prompt.md": enc("ok"),
+      "win\\path.txt": enc("evil"),
+    });
+    return expectThrow(() => adapter.loadBundle(bytes), /backslash/i, "backslash entry");
+  },
+};
+
+const L1_REJECT_NULL_BYTE: ConformanceCase = {
+  id: "L1.17",
+  level: "L1",
+  title: "rejects an archive entry containing a null byte (§8.1)",
+  run: (adapter) => {
+    const bytes = zipSync({
+      "manifest.json": enc(JSON.stringify(REFERENCE_MANIFEST)),
+      "prompt.md": enc("ok"),
+      "evil\0name.txt": enc("evil"),
+    });
+    return expectThrow(() => adapter.loadBundle(bytes), /null byte/i, "null byte entry");
+  },
+};
+
+const L1_FILTER_MACOSX: ConformanceCase = {
+  id: "L1.18",
+  level: "L1",
+  title: "ignores __MACOSX/ metadata entries (§8.1)",
+  run: (adapter) => {
+    // __MACOSX/* is dropped silently — the rest of the archive MUST still
+    // load cleanly. We assert load succeeds AND the macOS noise is absent
+    // from the loaded package.
+    const bytes = zipSync({
+      "manifest.json": enc(JSON.stringify(REFERENCE_MANIFEST)),
+      "prompt.md": enc("ok"),
+      "__MACOSX/._prompt.md": enc("metadata"),
+    });
+    try {
+      const bundle = adapter.loadBundle(bytes);
+      const rootPkg = bundle.packages.get(bundle.root);
+      if (!rootPkg) return fail("loadBundle returned no root package");
+      for (const key of rootPkg.files.keys()) {
+        if (key.startsWith("__MACOSX/")) {
+          return fail(`__MACOSX entry leaked into bundle: ${key}`);
+        }
+      }
+      return pass();
+    } catch (err) {
+      return fail(
+        `bundle with __MACOSX noise rejected: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  },
+};
+
+const L1_REJECT_DEEP_PATH: ConformanceCase = {
+  id: "L1.19",
+  level: "L1",
+  title: "rejects archives whose path depth exceeds the cap (§8.1)",
+  run: (adapter) => {
+    // Path depth 32 — comfortably beyond any reasonable default cap
+    // (the runtime defaults to 16). Any conformant loader MUST refuse
+    // rather than risk filesystem-side surprises. This is the cheapest
+    // way to exercise the decompression-side limits gate without
+    // building a true zip-bomb in memory.
+    const deep = Array(32).fill("a").join("/") + "/leaf.txt";
+    const bytes = zipSync({
+      "manifest.json": enc(JSON.stringify(REFERENCE_MANIFEST)),
+      "prompt.md": enc("ok"),
+      [deep]: enc("evil"),
+    });
+    return expectThrow(() => adapter.loadBundle(bytes), /depth|limit|exceeds/i, "deep path");
+  },
+};
+
+// ─── L3 — extended signing coverage ─────────────────────────────────
+//
+// Covers gaps surfaced by the AFPS 2.0 audit: alg_unsupported (alg field
+// outside the supported vocabulary), chain_invalid (loop detection), and
+// `verifyBundleWithPolicy`'s 3-state gate.
+
+const L3_ALG_UNSUPPORTED: ConformanceCase = {
+  id: "L3.6",
+  level: "L3",
+  title: "rejects a signature document with an unsupported algorithm (§3.4)",
+  run: (adapter) => {
+    const trust: TrustRoot = { keys: [] };
+    const doc: BundleSignature = {
+      alg: "rsa" as unknown as "ed25519",
+      keyId: "k",
+      signature: "AAAA",
+    };
+    const r = adapter.verifySignature(enc("anything"), doc, trust);
+    if (r.ok) return fail("verify accepted unsupported alg");
+    if (r.reason !== "alg_unsupported") {
+      return fail(`unexpected reason: ${r.reason}`);
+    }
+    return pass();
+  },
+};
+
+const L3_CHAIN_INVALID_LOOP: ConformanceCase = {
+  id: "L3.7",
+  level: "L3",
+  title: "rejects a trust chain with a loop (chain_invalid, §3.4)",
+  run: (adapter) => {
+    const a = generateKeyPair();
+    const b = generateKeyPair();
+    // a ← b ← a — A and B sign each other, terminating in neither root.
+    const aSignedByB = signChildKey({
+      childKeyId: a.keyId,
+      childPublicKey: a.publicKey,
+      parentPrivateKey: b.privateKey,
+      parentKeyId: b.keyId,
+    });
+    const bSignedByA = signChildKey({
+      childKeyId: b.keyId,
+      childPublicKey: b.publicKey,
+      parentPrivateKey: a.privateKey,
+      parentKeyId: a.keyId,
+    });
+    const loaded = adapter.loadBundle(buildReferenceBundle());
+    const canonical = canonicalBundleDigest(loaded);
+    const sig = signBundle(canonical, {
+      privateKey: a.privateKey,
+      keyId: a.keyId,
+      chain: [aSignedByB, bSignedByA],
+    });
+    // Trust root is irrelevant — loop detection trips before any trust
+    // match is attempted.
+    const trust: TrustRoot = { keys: [] };
+    const r = adapter.verifySignature(canonical, sig, trust);
+    if (r.ok) return fail("verify accepted a chain with a loop");
+    if (r.reason !== "chain_invalid") {
+      // Some implementations may surface this as chain_missing once the
+      // loop exhausts the chain — both are acceptable rejections.
+      if (r.reason !== "chain_missing") {
+        return fail(`unexpected reason: ${r.reason}`);
+      }
+    }
+    return pass();
+  },
+};
+
+const L3_POLICY_REQUIRED_UNSIGNED: ConformanceCase = {
+  id: "L3.8",
+  level: "L3",
+  title: "verifyBundleWithPolicy 'required' rejects an unsigned bundle (§8.2)",
+  run: (adapter) => {
+    const loaded = adapter.loadBundle(buildReferenceBundle());
+    const trust: TrustRoot = { keys: [] };
+    // policy 'off' short-circuits — must not consult trust root.
+    const off = verifyBundleWithPolicy(loaded, { policy: "off" });
+    if (off.status !== "off") return fail(`policy=off returned status ${off.status}`);
+
+    // policy 'warn' on an unsigned bundle MUST invoke onWarn('unsigned')
+    // and NOT throw.
+    const warnings: string[] = [];
+    const warn = verifyBundleWithPolicy(loaded, {
+      policy: "warn",
+      trustRoot: trust,
+      onWarn: (reason) => warnings.push(reason),
+    });
+    if (warn.status !== "unsigned-warned") {
+      return fail(`policy=warn returned status ${warn.status}`);
+    }
+    if (warnings.length !== 1 || warnings[0] !== "unsigned") {
+      return fail(`policy=warn warnings unexpected: ${JSON.stringify(warnings)}`);
+    }
+
+    // policy 'required' on an unsigned bundle MUST throw
+    // BundleSignaturePolicyError with code 'unsigned_required'.
+    try {
+      verifyBundleWithPolicy(loaded, { policy: "required", trustRoot: trust });
+      return fail("policy=required accepted an unsigned bundle");
+    } catch (err) {
+      if (!(err instanceof BundleSignaturePolicyError)) {
+        return fail(`policy=required threw wrong class: ${err}`);
+      }
+      if (err.code !== "unsigned_required") {
+        return fail(`policy=required code wrong: ${err.code}`);
+      }
+    }
+    return pass();
+  },
+};
+
+// Silence unused-import warning when these symbols are not referenced
+// elsewhere in the module.
+void verifyBundleSignature;
+
 export const BUILT_IN_CASES: readonly ConformanceCase[] = Object.freeze([
   L1_LOAD_MINIMAL,
   L1_REJECT_NON_ZIP,
@@ -866,6 +1215,16 @@ export const BUILT_IN_CASES: readonly ConformanceCase[] = Object.freeze([
   L1_INTEGRATION_MUTUAL_EXCLUSION,
   L1_POLYMORPHIC_DEPENDENCIES,
   L1_TOOLS_POLICY,
+  L1_SKILL_MISSING_SKILL_MD,
+  L1_SKILL_MISSING_FRONTMATTER_NAME,
+  L1_MCP_SERVER_ENTRY_POINT_PRESENT,
+  L1_MCP_SERVER_ENTRY_POINT_MISSING,
+  L1_REJECT_PATH_TRAVERSAL,
+  L1_REJECT_ABSOLUTE_PATH,
+  L1_REJECT_BACKSLASH,
+  L1_REJECT_NULL_BYTE,
+  L1_FILTER_MACOSX,
+  L1_REJECT_DEEP_PATH,
   L2_INTERPOLATION,
   L2_SECTIONS,
   L2_INVERTED,
@@ -877,6 +1236,9 @@ export const BUILT_IN_CASES: readonly ConformanceCase[] = Object.freeze([
   L3_UNKNOWN_KEY,
   L3_CHAIN_ACCEPTED,
   L3_UNTRUSTED_ROOT,
+  L3_ALG_UNSUPPORTED,
+  L3_CHAIN_INVALID_LOOP,
+  L3_POLICY_REQUIRED_UNSIGNED,
   L4_ORDERED_EMISSION,
   L4_FINALIZE_EXACTLY_ONCE,
   L4_REDUCER_SEMANTICS,

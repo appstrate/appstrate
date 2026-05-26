@@ -84,15 +84,31 @@ export function useImportPackage() {
         const res = await uploadFormData<{
           rootPackageId: string;
           rootVersion: string;
+          warnings?: string[];
         }>("/packages/import-bundle", fd);
-        return { packageId: res.rootPackageId, type: "agent" as const };
+        return {
+          packageId: res.rootPackageId,
+          type: "agent" as const,
+          warnings: res.warnings,
+        };
       }
       const qs = force ? "?force=true" : "";
-      return uploadFormData<{ packageId: string; type: string }>(`/packages/import${qs}`, fd);
+      return uploadFormData<{ packageId: string; type: string; warnings?: string[] }>(
+        `/packages/import${qs}`,
+        fd,
+      );
     },
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["agents"] });
       qc.invalidateQueries({ queryKey: ["packages"] });
+      // Non-blocking install-time warnings (AFPS §7.7 / audit P2 #12) —
+      // surface each one as a sonner warning toast so publishers see them
+      // immediately after a successful import (re-audit P3-1 follow-up).
+      if (data.warnings && data.warnings.length > 0) {
+        for (const message of data.warnings) {
+          toast.warning(message);
+        }
+      }
       navigate(`/${data.type === "agent" ? "agent" : data.type}s/${data.packageId}`);
     },
     onError: onMutationError,

@@ -19,15 +19,13 @@
  *   - an Arazzo Selector Object
  *     (`{ context, selector, type: "jsonpath"|"xpath"|"jsonpointer" }`).
  *
- * KNOWN LIMITATIONS (documented for manifest authors, deliberately not
- * reported as install-blocking errors so spec-valid manifests still install):
- *   - `success_criteria` evaluation only supports the equality form
- *     `$statusCode == <n>` (and the default 2xx range when no criteria are
- *     declared). Arazzo's broader Criterion vocabulary
- *     (`type: simple|regex|jsonpath|xpath`) is NOT yet evaluated — manifests
- *     declaring those forms will fall through to the conservative-fail branch
- *     in `passesSuccessCriteria`. See finding L7 in
- *     `/tmp/afps-audit/FINAL-REPORT.md`.
+ * KNOWN LIMITATIONS (documented for manifest authors, surfaced as install-time
+ * warnings — see `apps/api/src/services/integration-install-warnings.ts` — but
+ * never install-blocking so spec-valid manifests still install):
+ *   - `success_criteria` evaluation supports `type` omitted/`"simple"`
+ *     (runtime-expression equality), `"jsonpath"`, and `"regex"` (AFPS §7.7).
+ *     `"xpath"` is parsed but conservatively fails — there is no XML evaluator
+ *     in this engine.
  *   - The Arazzo Selector Object `type: "xpath"` is parsed but raises a
  *     runtime `LoginError` at extraction time — there is no XPath evaluator
  *     in this engine yet.
@@ -106,6 +104,21 @@ export interface LoginRequest {
 
 export interface ArazzoCriterion {
   condition: string;
+  /**
+   * AFPS §7.7 Arazzo criterion type. When omitted (or `"simple"`), the
+   * condition is an Arazzo runtime-expression equality (e.g.
+   * `$statusCode == 200`, `$response.body#/status == "ok"`). When
+   * `"jsonpath"` / `"regex"`, the criterion is evaluated against the
+   * `context` document (defaulting to `$response.body`).
+   */
+  type?: "simple" | "jsonpath" | "regex" | "xpath";
+  /**
+   * Arazzo runtime expression naming the document the criterion runs against
+   * (typically `$response.body`). Only honored for `jsonpath` / `regex`
+   * criteria — `simple` evaluates against the runtime expression in its
+   * `condition`.
+   */
+  context?: string;
 }
 
 export interface LoginRequestSpec {
@@ -159,18 +172,192 @@ export class LoginError extends Error {
 }
 
 /**
- * Evaluate AFPS `success_criteria` (Arazzo). We only support the equality form
- * the decoder emits (`$statusCode == <n>`). When no criteria are declared,
- * default to the 2xx range. Any unrecognised criterion is treated
- * conservatively as a failure to pass.
+ * Resolve an Arazzo runtime-expression operand to a comparable value.
+ *  - `$statusCode` → numeric status
+ *  - `$response.body#/<json-pointer>` → JSON-pointer read against the parsed body
+ *  - `$response.header.<name>` → header value (string)
+ *  - literal numbers / quoted strings (`"foo"` / `'foo'`) / `true|false|null`
+ *  - bare identifier → returned as a literal string (best-effort)
+ *
+ * Body parsing is lazy: the parsed-body slot is shared across operands within
+ * a single criterion evaluation so the body is parsed at most once.
  */
-function passesSuccessCriteria(status: number, criteria?: ArazzoCriterion[]): boolean {
+function evaluateRuntimeOperand(
+  raw: string,
+  status: number,
+  headers: Headers,
+  bodyText: () => string,
+  parsedBodySlot: { parsed?: unknown; tried?: boolean },
+): unknown {
+  const expr = raw.trim();
+  if (expr === "$statusCode") return status;
+  if (expr.startsWith("$response.body#")) {
+    const pointer = expr.slice("$response.body#".length);
+    if (!parsedBodySlot.tried) {
+      parsedBodySlot.tried = true;
+      try {
+        parsedBodySlot.parsed = JSON.parse(bodyText());
+      } catch {
+        parsedBodySlot.parsed = undefined;
+      }
+    }
+    return readJsonPointer(parsedBodySlot.parsed, pointer);
+  }
+  if (expr.startsWith("$response.header.")) {
+    const headerName = expr.slice("$response.header.".length);
+    return headers.get(headerName) ?? undefined;
+  }
+  // Literals.
+  if (/^-?\d+(\.\d+)?$/.test(expr)) return Number(expr);
+  if (expr === "true") return true;
+  if (expr === "false") return false;
+  if (expr === "null") return null;
+  if (
+    (expr.startsWith('"') && expr.endsWith('"')) ||
+    (expr.startsWith("'") && expr.endsWith("'"))
+  ) {
+    return expr.slice(1, -1);
+  }
+  return expr;
+}
+
+/**
+ * Loose equality comparison for Arazzo simple criteria. Numbers coerce
+ * strings on either side; everything else falls back to strict equality.
+ */
+function arazzoEquals(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (typeof left === "number" && typeof right === "string") return left === Number(right);
+  if (typeof right === "number" && typeof left === "string") return right === Number(left);
+  return false;
+}
+
+/**
+ * Evaluate one Arazzo Criterion (AFPS §7.7).
+ *
+ *  - `type` absent or `"simple"`: `condition` is a runtime-expression equality
+ *    (`<lhs> == <rhs>`). LHS / RHS resolve via {@link evaluateRuntimeOperand}.
+ *  - `type: "jsonpath"`: `condition` is a JSONPath query evaluated against
+ *    `context` (defaulting to `$response.body`). Passes when the result is
+ *    a defined non-empty value (matches Arazzo's "non-empty result set"
+ *    semantics for the single-value subset this engine supports).
+ *  - `type: "regex"`: `condition` is a regex tested against `context`
+ *    (defaulting to `$response.body`).
+ *  - `type: "xpath"`: not implemented — returns `false` (conservative fail).
+ */
+function evaluateCriterion(
+  criterion: ArazzoCriterion,
+  status: number,
+  headers: Headers,
+  bodyText: () => string,
+  parsedBodySlot: { parsed?: unknown; tried?: boolean },
+): boolean {
+  const condition = criterion.condition;
+  const type = criterion.type ?? "simple";
+
+  if (type === "simple") {
+    // Equality only — Arazzo's simple criterion grammar includes more
+    // operators but the AFPS profile (§7.7) treats `simple` as the legacy
+    // shape; equality covers `$statusCode == 200` and richer body checks.
+    const eqIdx = condition.indexOf("==");
+    if (eqIdx === -1) return false;
+    const lhs = evaluateRuntimeOperand(
+      condition.slice(0, eqIdx),
+      status,
+      headers,
+      bodyText,
+      parsedBodySlot,
+    );
+    const rhs = evaluateRuntimeOperand(
+      condition.slice(eqIdx + 2),
+      status,
+      headers,
+      bodyText,
+      parsedBodySlot,
+    );
+    return arazzoEquals(lhs, rhs);
+  }
+
+  if (type === "jsonpath") {
+    // Default context: $response.body (Arazzo §10.5.3.4).
+    const ctxExpr = criterion.context ?? "$response.body";
+    if (ctxExpr !== "$response.body") return false;
+    if (!parsedBodySlot.tried) {
+      parsedBodySlot.tried = true;
+      try {
+        parsedBodySlot.parsed = JSON.parse(bodyText());
+      } catch {
+        parsedBodySlot.parsed = undefined;
+      }
+    }
+    if (parsedBodySlot.parsed === undefined) return false;
+    let result: unknown;
+    try {
+      result = evaluateJsonPath(parsedBodySlot.parsed, condition);
+    } catch {
+      return false;
+    }
+    if (result === undefined || result === null) return false;
+    if (typeof result === "string") return result.length > 0;
+    if (Array.isArray(result)) return result.length > 0;
+    return true;
+  }
+
+  if (type === "regex") {
+    const ctxExpr = criterion.context ?? "$response.body";
+    let target: string;
+    if (ctxExpr === "$response.body") {
+      target = bodyText();
+    } else if (ctxExpr.startsWith("$response.header.")) {
+      target = headers.get(ctxExpr.slice("$response.header.".length)) ?? "";
+    } else {
+      return false;
+    }
+    let re: RegExp;
+    try {
+      re = new RegExp(condition);
+    } catch {
+      return false;
+    }
+    return re.test(target);
+  }
+
+  // xpath / unknown → conservative fail.
+  return false;
+}
+
+/**
+ * Evaluate AFPS `success_criteria` (Arazzo, §7.7). Supports the four declared
+ * types: omitted/`"simple"` (runtime-expression equality), `"jsonpath"`,
+ * `"regex"`. `"xpath"` is parsed but conservatively fails (no XML evaluator
+ * in this engine). When no criteria are declared, defaults to the 2xx range.
+ *
+ * Body-bearing criteria use a lazy reader so a criteria-set that only checks
+ * `$statusCode` never reads the body.
+ */
+function passesSuccessCriteria(
+  status: number,
+  headers: Headers,
+  bodyText: () => string,
+  criteria?: ArazzoCriterion[],
+): boolean {
   if (!criteria || criteria.length === 0) return status >= 200 && status < 300;
-  return criteria.every((c) => {
-    const m = /^\s*\$statusCode\s*==\s*(\d+)\s*$/.exec(c.condition);
-    if (!m) return false;
-    return status === Number(m[1]);
-  });
+  const parsedBodySlot: { parsed?: unknown; tried?: boolean } = {};
+  return criteria.every((c) => evaluateCriterion(c, status, headers, bodyText, parsedBodySlot));
+}
+
+/**
+ * @internal — visible for tests. Returns true iff every Arazzo criterion
+ * passes given the response shape. Same signature as the private
+ * {@link passesSuccessCriteria}.
+ */
+export function evaluateSuccessCriteriaForTest(
+  status: number,
+  headers: Headers,
+  bodyText: string,
+  criteria: ArazzoCriterion[],
+): boolean {
+  return passesSuccessCriteria(status, headers, () => bodyText, criteria);
 }
 
 /**
@@ -527,14 +714,27 @@ export async function runLogin(config: LoginConfig, ctx: LoginContext): Promise<
     clearTimeout(timer);
   }
 
-  if (!passesSuccessCriteria(res.status, login.success_criteria)) {
+  // Some Arazzo `success_criteria` (`jsonpath`, `regex`, and simple criteria
+  // referencing `$response.body#/...`) need the body to evaluate. Determine
+  // whether ANY consumer (criteria OR outputs) requires it, then read once.
+  const outputEntries = Object.entries(login.outputs ?? {});
+  const criteriaNeedsBody = (login.success_criteria ?? []).some((c) => {
+    const t = c.type ?? "simple";
+    if (t === "jsonpath" || t === "regex") {
+      return (c.context ?? "$response.body") === "$response.body";
+    }
+    return c.condition.includes("$response.body");
+  });
+  const outputsNeedsBody = outputEntries.some(([, out]) => outputNeedsBody(out));
+  const bodyText =
+    criteriaNeedsBody || outputsNeedsBody
+      ? await readBoundedText(res, limits.maxResponseBytes)
+      : "";
+
+  if (!passesSuccessCriteria(res.status, res.headers, () => bodyText, login.success_criteria)) {
     // Never log/echo the body — only the status.
     throw new LoginError(`unexpected status ${res.status}`, "bad_status");
   }
-
-  const outputEntries = Object.entries(login.outputs ?? {});
-  const needsBody = outputEntries.some(([, out]) => outputNeedsBody(out));
-  const bodyText = needsBody ? await readBoundedText(res, limits.maxResponseBytes) : "";
 
   // Extract in two passes so a `jwt` extractor can reference any other
   // same-request value regardless of key order. We can't rely on insertion

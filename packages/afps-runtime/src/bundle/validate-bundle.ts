@@ -25,6 +25,7 @@ import {
 } from "@afps-spec/schema";
 import type { z } from "zod";
 import { validateTemplate } from "../template/mustache.ts";
+import { checkCompanionFiles } from "./companion-files.ts";
 import type { Bundle, BundlePackage, PackageIdentity } from "./types.ts";
 import { parsePackageIdentity } from "./types.ts";
 
@@ -40,7 +41,8 @@ export interface BundleValidationIssue {
     | "SCHEMA_VERSION_MISSING"
     | "SCHEMA_VERSION_UNSUPPORTED"
     | "CYCLE_DETECTED"
-    | "VERSION_DIVERGENCE";
+    | "VERSION_DIVERGENCE"
+    | "COMPANION_FILE_MISSING";
   /** Which package raised this issue — `null` for bundle-level. */
   identity: PackageIdentity | null;
   /** Dot-path inside the package's manifest when relevant. */
@@ -182,6 +184,24 @@ function validatePackage(
         });
       }
     }
+  }
+
+  // §3.3 / §3.4 companion-file enforcement — single source of truth shared
+  // with the platform's ZIP-import path. Flags missing prompt.md (agent),
+  // missing SKILL.md / frontmatter name (skill), and missing
+  // server.entry_point payload (mcp-server) as bundle-level errors.
+  const violation = checkCompanionFiles(
+    manifest as { type?: unknown; server?: unknown } & Record<string, unknown>,
+    pkg.files,
+  );
+  if (violation) {
+    ctx.issues.push({
+      code: "COMPANION_FILE_MISSING",
+      identity,
+      path: violation.path ? `files.${violation.path}` : "files",
+      message: violation.message,
+      severity: "error",
+    });
   }
 }
 

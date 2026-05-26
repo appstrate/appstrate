@@ -223,8 +223,39 @@ const INLINE_RESPONSE_THRESHOLD_BYTES = 32 * 1024;
  * Distinct from {@link UPSTREAM_META_KEY} (which carries upstream
  * `{ status, headers }`) so a CallToolResult can carry both without
  * collision.
+ *
+ * AFPS 2.0.2 (Phase F1 follow-up): reverse-DNS namespace — `_meta` keys
+ * must be either a single bare token or a reverse-DNS prefix (RFC §10.1
+ * / Appendix B). The legacy URI-scheme form `"appstrate://token-budget"`
+ * violated Appendix B's `META_NAMESPACE_KEY` regex; the canonical form
+ * is now `"dev.appstrate/token-budget"`.
+ *
+ * Writers always emit the new key; readers accept BOTH the new key and
+ * the legacy key for one release window so a runtime built from this
+ * release can still consume `_meta` from a sidecar built against AFPS
+ * 2.0.1. See {@link TOKEN_BUDGET_META_KEY_LEGACY}.
  */
-export const TOKEN_BUDGET_META_KEY = "appstrate://token-budget";
+export const TOKEN_BUDGET_META_KEY = "dev.appstrate/token-budget";
+
+/**
+ * Deprecated legacy `_meta` key for token-budget accounting. Accepted on
+ * read for back-compat with sidecars built against AFPS 2.0.1 or
+ * earlier. New writes always use {@link TOKEN_BUDGET_META_KEY}; the
+ * legacy alias is read-only and is scheduled for removal in
+ * {@link TOKEN_BUDGET_LEGACY_REMOVAL}.
+ *
+ * @deprecated AFPS 2.0.2: read-only alias. Removal target:
+ *   {@link TOKEN_BUDGET_LEGACY_REMOVAL}.
+ */
+export const TOKEN_BUDGET_META_KEY_LEGACY = "appstrate://token-budget";
+
+/**
+ * Removal target for {@link TOKEN_BUDGET_META_KEY_LEGACY}. Mirrors the
+ * tracked-removal pattern used by `AFPS_1X_READ_FALLBACK_REMOVAL` in
+ * `@appstrate/core/back-compat`. Search this constant when sweeping
+ * legacy `_meta` aliases at the targeted release.
+ */
+export const TOKEN_BUDGET_LEGACY_REMOVAL = "AFPS 2.1";
 
 /**
  * Discriminated reason surfaced in the agent-facing `_meta` payload.
@@ -1224,7 +1255,7 @@ function evaluateBudget(args: {
  *   legacy byte threshold. Production always supplies a BlobStore +
  *   TokenBudget via `mountMcp`.
  *
- * Every text-path result carries an `appstrate://token-budget` `_meta`
+ * Every text-path result carries a `dev.appstrate/token-budget` `_meta`
  * payload (when a TokenBudget is configured) so the agent runtime can
  * surface accounting and react to structured truncation events.
  */
@@ -1620,7 +1651,7 @@ export interface MountMcpOptions {
    * through the budget tracker before being delivered to the agent —
    * dense JSON that fits under the byte cap but would exhaust the
    * context window now spills to the blob store, and a structured
-   * `appstrate://token-budget` `_meta` payload records the accounting.
+   * `dev.appstrate/token-budget` `_meta` payload records the accounting.
    *
    * Optional only so tests and embedders that don't care about the
    * token path can omit it; production wires a `TokenBudget`
