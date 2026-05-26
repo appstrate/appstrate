@@ -105,7 +105,7 @@ export function PackageList() {
     description: f.description,
     type: "agent",
     source: f.source,
-    running_runs: f.running_runs,
+    runningRuns: f.running_runs,
     keywords: f.keywords,
     unreadCount: unreadCounts?.[f.id],
   }));

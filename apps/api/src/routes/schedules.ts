@@ -183,11 +183,27 @@ export function createSchedulesRouter() {
       versionOverride: data.version_override,
       connectionOverrides: data.connection_overrides,
     });
+    // Mirror schedule.created: explicit camelCase keys (dominant audit
+    // convention — see api-keys.ts, modules/webhooks/routes.ts). Only
+    // include keys the caller actually sent so the audit reflects the
+    // patch, not a snapshot of the whole row.
+    const auditAfter: Record<string, unknown> = {};
+    if (data.name !== undefined) auditAfter.name = data.name;
+    if (data.cron_expression !== undefined) auditAfter.cronExpression = data.cron_expression;
+    if (data.timezone !== undefined) auditAfter.timezone = data.timezone;
+    if (data.input !== undefined) auditAfter.input = data.input;
+    if (data.enabled !== undefined) auditAfter.enabled = data.enabled;
+    if (data.config_override !== undefined) auditAfter.configOverride = data.config_override;
+    if (data.model_id_override !== undefined) auditAfter.modelIdOverride = data.model_id_override;
+    if (data.proxy_id_override !== undefined) auditAfter.proxyIdOverride = data.proxy_id_override;
+    if (data.version_override !== undefined) auditAfter.versionOverride = data.version_override;
+    if (data.connection_overrides !== undefined)
+      auditAfter.connectionOverrides = data.connection_overrides;
     await recordAuditFromContext(c, {
       action: "schedule.updated",
       resourceType: "schedule",
       resourceId: id,
-      after: data as unknown as Record<string, unknown>,
+      after: auditAfter,
     });
     return c.json(schedule);
   });

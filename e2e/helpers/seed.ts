@@ -260,7 +260,7 @@ export async function createSchedule(
   agentName: string,
 ): Promise<{ id: string }> {
   const res = await client.post(`/agents/${agentScope}/${agentName}/schedules`, {
-    cronExpression: "0 * * * *",
+    cron_expression: "0 * * * *",
     name: `E2E Schedule ${Date.now()}`,
   });
 

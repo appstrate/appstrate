@@ -70,11 +70,11 @@ export function ItemTab({
     description: item.description,
     type,
     source: item.source,
-    used_by_agents: item.used_by_agents,
+    usedByAgents: item.used_by_agents,
     statusBadge: badgeMap?.get(item.id),
     actions: actionsMap?.get(item.id),
     iconUrl: iconMap?.get(item.id),
-    auto_installed: item.auto_installed,
+    autoInstalled: item.auto_installed,
   }));
 
   return (
