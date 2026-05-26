@@ -207,7 +207,7 @@ export function useCreatePackage(type: PackageType) {
       id?: string;
       manifest: Record<string, unknown>;
       content: string;
-      sourceCode?: string;
+      source_code?: string;
     }) => {
       return api<{ packageId: string }>(`/packages/${cfg.path}`, {
         method: "POST",
@@ -233,7 +233,7 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
     mutationFn: async (body: {
       manifest: Record<string, unknown>;
       content: string;
-      sourceCode?: string;
+      source_code?: string;
       lock_version: number;
     }) => {
       return api<{ lock_version: number }>(`/packages/${cfg.path}/${packageId}`, {

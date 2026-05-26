@@ -9,14 +9,14 @@ import { usePackageDetail } from "./use-packages";
 import { useAgentModel } from "./use-models";
 import { useAgentProxy } from "./use-proxies";
 import { onMutationError } from "./use-mutations";
-import type { ScheduleWireDto, EnrichedSchedule, Run } from "@appstrate/shared-types";
+import type { ScheduleWireDto, EnrichedSchedule, EnrichedRun } from "@appstrate/shared-types";
 
 export function useScheduleRuns(scheduleId: string | undefined) {
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
   return useQuery({
     queryKey: ["schedule-runs", orgId, applicationId, scheduleId],
-    queryFn: () => apiList<Run>(`/schedules/${scheduleId}/runs`),
+    queryFn: () => apiList<EnrichedRun>(`/schedules/${scheduleId}/runs`),
     enabled: !!scheduleId && !!applicationId,
   });
 }

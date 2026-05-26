@@ -32,6 +32,9 @@ export type { PackageType };
 
 export type { Run } from "@appstrate/db/schema";
 
+import { runStatusEnum as _runStatusEnum } from "@appstrate/db/schema";
+type _RunStatus = (typeof _runStatusEnum.enumValues)[number];
+
 /**
  * Wire-shape Run DTO returned to API consumers. The Drizzle `Run` row keeps
  * camelCase field names internally (Better Auth blocker); this is the single
@@ -47,7 +50,7 @@ export interface RunWireDto {
   orgId: string;
   applicationId: string;
   scheduleId: string | null;
-  status: string;
+  status: _RunStatus;
   input: unknown;
   result: unknown;
   checkpoint: unknown;

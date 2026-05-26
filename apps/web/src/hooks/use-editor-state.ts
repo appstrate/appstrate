@@ -25,9 +25,9 @@ export interface UseEditorStateOptions<S extends EditorStateBase> {
   packageId: string | undefined;
   isEdit: boolean;
   /**
-   * Build the wire body (manifest + content + sourceCode + …) sent to
+   * Build the wire body (manifest + content + source_code + …) sent to
    * `POST /packages/:type` on create and to `PUT /packages/:type/:id`
-   * on update. `lockVersion` is appended automatically by the hook
+   * on update. `lock_version` is appended automatically by the hook
    * for updates and draft saves — do not include it here.
    */
   toWireBody: (state: S) => Record<string, unknown>;

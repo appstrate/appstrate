@@ -243,7 +243,7 @@ function ScheduleHistory({
   const firstExec = data?.data?.[0];
 
   // Show the fake "next run" row only if the last run started > 30s ago.
-  const lastStartedAt = firstExec?.startedAt;
+  const lastStartedAt = firstExec?.started_at;
   const [showNext, setShowNext] = useState(true);
 
   /* eslint-disable react-hooks/set-state-in-effect -- syncing with wall clock timer */

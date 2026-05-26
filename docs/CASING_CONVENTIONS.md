@@ -8,17 +8,17 @@ This document captures every casing decision made during the AFPS 1.x → 2.0 + 
 
 ## TL;DR
 
-| Surface | Convention | Example |
-|---------|------------|---------|
-| Wire/JSON (HTTP responses, request bodies, AFPS manifests, OpenAPI) | **snake_case** | `display_name`, `running_runs`, `cron_expression` |
-| SQL columns | **snake_case** | `user_id`, `created_at`, `display_name` |
-| Drizzle TS schema field names | **camelCase** TS / **snake_case** SQL aliases | `userId: text("user_id")` |
-| TS internal (vars, function args, React props, Zustand state) | **camelCase** | `const userId = ...` |
-| Universal DB-convention fields (carve-out — stay camelCase EVERYWHERE) | **camelCase** | `id`, `createdAt`, `userId`, `packageId` |
-| Better Auth tables + plugin tables (carve-out — HARD blocker) | **camelCase** TS / **snake_case** SQL | `user.emailVerified` |
-| Module hook contracts, logger fields, CloudEvents, Webhooks, BullMQ jobs | **camelCase** | `logger.info({ runId })` |
-| JSONB internal `token_usage` | **snake_case** | `{ input_tokens, output_tokens }` (SDK convention) |
-| JSONB internal `runs.metadata.creditsUsed` | **camelCase** | (cloud's afterRun hook contract) |
+| Surface                                                                  | Convention                                    | Example                                            |
+| ------------------------------------------------------------------------ | --------------------------------------------- | -------------------------------------------------- |
+| Wire/JSON (HTTP responses, request bodies, AFPS manifests, OpenAPI)      | **snake_case**                                | `display_name`, `running_runs`, `cron_expression`  |
+| SQL columns                                                              | **snake_case**                                | `user_id`, `created_at`, `display_name`            |
+| Drizzle TS schema field names                                            | **camelCase** TS / **snake_case** SQL aliases | `userId: text("user_id")`                          |
+| TS internal (vars, function args, React props, Zustand state)            | **camelCase**                                 | `const userId = ...`                               |
+| Universal DB-convention fields (carve-out — stay camelCase EVERYWHERE)   | **camelCase**                                 | `id`, `createdAt`, `userId`, `packageId`           |
+| Better Auth tables + plugin tables (carve-out — HARD blocker)            | **camelCase** TS / **snake_case** SQL         | `user.emailVerified`                               |
+| Module hook contracts, logger fields, CloudEvents, Webhooks, BullMQ jobs | **camelCase**                                 | `logger.info({ runId })`                           |
+| JSONB internal `token_usage`                                             | **snake_case**                                | `{ input_tokens, output_tokens }` (SDK convention) |
+| JSONB internal `runs.metadata.creditsUsed`                               | **camelCase**                                 | (cloud's afterRun hook contract)                   |
 
 When in doubt: **wire = snake_case, internal = camelCase**, with explicit carve-outs below.
 
@@ -31,6 +31,7 @@ When in doubt: **wire = snake_case, internal = camelCase**, with explicit carve-
 Everything that crosses HTTP in JSON or sits at rest in canonical formats.
 
 **Concretely**:
+
 - REST API response bodies (every field, every route)
 - REST API request bodies (POST/PUT/PATCH inputs)
 - AFPS manifest files (`manifest.json` inside packages)
@@ -41,6 +42,7 @@ Everything that crosses HTTP in JSON or sits at rest in canonical formats.
 - Appstrate validators (`packages/core/src/{validation,integration,mcp-server,form}.ts`)
 
 **Why snake_case** (SOTA evidence):
+
 - Stripe, GitHub, AWS, OpenAI, Anthropic, Twilio, Slack: all use snake_case wire
 - OAuth 2.0 RFC 6749 mandates snake_case
 - PostgreSQL/MySQL/SQLite universal convention
@@ -56,6 +58,7 @@ Everything that crosses HTTP in JSON or sits at rest in canonical formats.
 Every Drizzle `pgTable()` definition in `packages/db/src/schema/*.ts`.
 
 **Pattern**:
+
 ```typescript
 export const runs = pgTable("runs", {
   // ✅ Correct: camelCase TS field, snake_case SQL alias
@@ -66,7 +69,7 @@ export const runs = pgTable("runs", {
 
 // ❌ Wrong: snake_case TS field name
 export const runs_wrong = pgTable("runs", {
-  user_id: text("user_id"),  // breaks Better Auth adapter expectations
+  user_id: text("user_id"), // breaks Better Auth adapter expectations
 });
 ```
 
@@ -82,6 +85,7 @@ export const runs_wrong = pgTable("runs", {
 → 95%+ of TS ORM ecosystem uses this split.
 
 **Why NOT snake_case TS Drizzle fields**:
+
 - Better Auth's `drizzleAdapter` resolves model fields by TS property name. Snake_casing TS fields breaks BA at runtime ([Issue #1027](https://github.com/better-auth/better-auth/issues/1027), [#5649](https://github.com/better-auth/better-auth/issues/5649), [#5662](https://github.com/better-auth/better-auth/issues/5662) — all open/locked, not resolved)
 - Drizzle Studio, drizzle-kit, all tooling assume camelCase TS
 - Forking BA = bad idea; waiting for BA `casing: 'snake_case'` first-class option ([Issue #410](https://github.com/better-auth/better-auth/issues/410) since 2024, unresolved)
@@ -94,6 +98,7 @@ export const runs_wrong = pgTable("runs", {
 Function arguments, local variables, React component props, Zustand state, internal type names, class properties.
 
 **Examples**:
+
 ```typescript
 // ✅ All correct camelCase
 function getRun({ runId, packageId }) { ... }
@@ -113,6 +118,7 @@ The exceptions to "wire = snake_case". Each has explicit documented reason.
 #### Carve-out 4a — Better Auth managed tables (HARD framework blocker)
 
 **Files**:
+
 - `packages/db/src/auth.ts` (Better Auth config)
 - `packages/db/src/schema/auth.ts` (BA core tables)
 - `apps/api/src/modules/oidc/schema.ts` (BA plugin tables)
@@ -138,6 +144,7 @@ These specific field names stay camelCase on **Drizzle, wire DTOs, OpenAPI, fron
 **Why**: These fields appear on dozens of types — flipping them cascades to ~15,000 sites cross-codebase + breaking change for all external API consumers, with zero user-visible benefit. The convention is universal across Drizzle/Prisma/TypeORM ecosystems (camelCase TS regardless of SQL casing).
 
 **Domain timestamps DO flip** (do NOT include in this carve-out):
+
 - `started_at`, `completed_at`, `last_run_at`, `next_run_at`, `connected_at`, `installed_at`
 
 If unsure: "universal" means "appears on >5 different types". Otherwise snake_case.
@@ -161,6 +168,7 @@ If unsure: "universal" means "appears on >5 different types". Otherwise snake_ca
 #### Carve-out 4e — ModelProviderDefinition + provider DTOs
 
 **Files**:
+
 - `apps/api/src/modules/core-providers/index.ts`
 - `module-claude-code/src/index.ts`
 - `module-codex/src/index.ts`
@@ -176,11 +184,11 @@ If unsure: "universal" means "appears on >5 different types". Otherwise snake_ca
 
 #### Carve-out 4g — JSONB internal contracts
 
-| JSONB column | Interior casing | Why |
-|--------------|----------------|-----|
-| `runs.token_usage` | snake_case (`input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`) | Anthropic/OpenAI SDK wire convention |
-| `runs.metadata.creditsUsed` | camelCase | Cloud's `afterRun` hook contract; opaque storage of TS object |
-| `runs.checkpoint`, `runs.config`, `runs.config_override`, `runs.input`, `runs.result`, `runs.connection_overrides`, `runs.inline_manifest`, `runs.context_snapshot`, `pinned`, `memory`, `webhooks.payload` | Opaque (varies by producer) | Each producer documents its own shape |
+| JSONB column                                                                                                                                                                                                | Interior casing                                                                                        | Why                                                           |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------- |
+| `runs.token_usage`                                                                                                                                                                                          | snake_case (`input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`) | Anthropic/OpenAI SDK wire convention                          |
+| `runs.metadata.creditsUsed`                                                                                                                                                                                 | camelCase                                                                                              | Cloud's `afterRun` hook contract; opaque storage of TS object |
+| `runs.checkpoint`, `runs.config`, `runs.config_override`, `runs.input`, `runs.result`, `runs.connection_overrides`, `runs.inline_manifest`, `runs.context_snapshot`, `pinned`, `memory`, `webhooks.payload` | Opaque (varies by producer)                                                                            | Each producer documents its own shape                         |
 
 #### Carve-out 4h — SSE event payloads (historical)
 
@@ -221,6 +229,7 @@ If unsure: "universal" means "appears on >5 different types". Otherwise snake_ca
 **Rule**: `recordAuditFromContext({ after: { keyA, keyB } })` — camelCase explicit keys (NOT raw snake_case request body).
 
 **Pattern**: when audit-logging an update, the route handler must map the snake_case request body to camelCase explicit keys:
+
 ```typescript
 await recordAuditFromContext({
   action: "schedule.updated",
@@ -242,21 +251,39 @@ These are inconsistencies we know about and chose not to fix. Don't introduce ne
 
 #### 5a — Env-vars JSON envelopes split convention
 
-| Env var | JSON casing |
-|---------|-------------|
-| `SYSTEM_PROVIDER_KEYS` | camelCase |
-| `SYSTEM_PROXIES` | camelCase |
-| `OIDC_INSTANCE_CLIENTS` | camelCase |
-| `PLATFORM_RUN_LIMITS` | snake_case |
-| `INLINE_RUN_LIMITS` | snake_case |
-| `LLM_PROXY_LIMITS` | snake_case |
-| `CREDENTIAL_PROXY_LIMITS` | snake_case |
+| Env var                   | JSON casing |
+| ------------------------- | ----------- |
+| `SYSTEM_PROVIDER_KEYS`    | camelCase   |
+| `SYSTEM_PROXIES`          | camelCase   |
+| `OIDC_INSTANCE_CLIENTS`   | camelCase   |
+| `PLATFORM_RUN_LIMITS`     | snake_case  |
+| `INLINE_RUN_LIMITS`       | snake_case  |
+| `LLM_PROXY_LIMITS`        | snake_case  |
+| `CREDENTIAL_PROXY_LIMITS` | snake_case  |
 
 Historical split. Credentials/clients/proxies envelopes follow TS object convention (they map to TS types). Limit-config envelopes follow JSON wire convention.
 
 #### 5b — SSE vs REST wire on the same logical entity
 
 SSE Run payload is camelCase (per Carve-out 4h). REST Run payload mixes snake_case (domain) + camelCase (universal DB conv). Same logical Run object has two different field-name shapes depending on transport. Frontend handles both.
+
+#### 5c — Model/proxy/credential ID wire on standalone vs override endpoints
+
+**Standalone endpoints** (`/api/agents/:id/model`, `/api/agents/:id/proxy`, `/api/orgs/:id/models`) use **camelCase** wire fields: `modelId`, `proxyId`, `credentialId`.
+
+**Schedule override endpoints** (`/api/schedules`, `/api/agents/:id/schedules`) use **snake_case** wire fields: `model_id_override`, `proxy_id_override`, `version_override`.
+
+End-to-end consistent within each endpoint family (backend Zod ↔ OpenAPI ↔ frontend hook all match). The asymmetry is historical — the override fields followed AFPS 2.0 snake_case canon while the standalone fields predate the migration. These IDs appear on 4 types each (≤5 threshold for Carve-out 4b), so they don't qualify as universal DB convention.
+
+Don't introduce new endpoints in this surface; if a new model/proxy/credential endpoint is needed, prefer snake_case wire.
+
+#### 5d — OAuth client management endpoints (Better Auth plugin pass-through)
+
+`/api/oauth/clients/*` management routes (CRUD on the `oauthClient` BA plugin table) use **camelCase** wire: `redirectUris`, `postLogoutRedirectUris`, `isFirstParty`, `allowSignup`, `signupRole`, `referencedOrgId`, `referencedApplicationId`, `clientSecret`.
+
+**Why**: these routes are CRUD pass-throughs on a Better Auth plugin-owned table. The wire shape mirrors the BA plugin's TS field names (Carve-out 4a chain). The actual OAuth 2.0 wire endpoints (`/oauth2/authorize`, `/oauth2/token`) correctly stay snake_case per RFC 6749 — only the management surface is camelCase.
+
+Treat any new management-CRUD route on a BA plugin table the same way (mirror the plugin's TS field names). For non-plugin tables, the default snake_case wire rule still applies.
 
 ---
 
@@ -278,6 +305,7 @@ SSE Run payload is camelCase (per Carve-out 4h). REST Run payload mixes snake_ca
 **MCP-server (MCPB)**: `manifest_version`, `server.{type, entry_point, mcp_config}`, `mcp_config.{command, args, env, platform_overrides}`, `tools[].{name, description}`, `user_config`, `_meta["dev.afps/mcp-server"]`, `_meta["dev.appstrate/mcp-server"].runtime`
 
 **Integration**:
+
 - `source.kind`: `"local" | "remote" | "api"`
 - `source.server.{name, version, vendored}`
 - `source.remote.{url, transport}`
@@ -333,17 +361,17 @@ SSE Run payload is camelCase (per Carve-out 4h). REST Run payload mixes snake_ca
 
 ## SOTA evidence summary
 
-| Surface | Our choice | SOTA reference |
-|---------|-----------|----------------|
-| Wire JSON | snake_case | Stripe, GitHub, AWS, OpenAI, Anthropic, Twilio, Slack |
-| OAuth 2.0 wire | snake_case (`client_id`, `redirect_uri`) | RFC 6749 mandate |
-| SQL columns | snake_case | PostgreSQL/MySQL/SQLite universal |
-| Drizzle TS layer | camelCase TS / snake_case SQL | Prisma, Drizzle, TypeORM, Kysely, MikroORM (~95% of TS ORM ecosystem) |
-| TS internal | camelCase | TC39, ESLint default, Prettier, TypeScript style guide |
-| Better Auth integration | camelCase TS / snake_case SQL alias | Better Auth official docs Option 4 |
-| JSONB token usage | snake_case (`input_tokens`) | Anthropic + OpenAI SDK convention |
-| CloudEvents | camelCase | CloudEvents spec |
-| Logger fields | camelCase | pino convention |
+| Surface                 | Our choice                               | SOTA reference                                                        |
+| ----------------------- | ---------------------------------------- | --------------------------------------------------------------------- |
+| Wire JSON               | snake_case                               | Stripe, GitHub, AWS, OpenAI, Anthropic, Twilio, Slack                 |
+| OAuth 2.0 wire          | snake_case (`client_id`, `redirect_uri`) | RFC 6749 mandate                                                      |
+| SQL columns             | snake_case                               | PostgreSQL/MySQL/SQLite universal                                     |
+| Drizzle TS layer        | camelCase TS / snake_case SQL            | Prisma, Drizzle, TypeORM, Kysely, MikroORM (~95% of TS ORM ecosystem) |
+| TS internal             | camelCase                                | TC39, ESLint default, Prettier, TypeScript style guide                |
+| Better Auth integration | camelCase TS / snake_case SQL alias      | Better Auth official docs Option 4                                    |
+| JSONB token usage       | snake_case (`input_tokens`)              | Anthropic + OpenAI SDK convention                                     |
+| CloudEvents             | camelCase                                | CloudEvents spec                                                      |
+| Logger fields           | camelCase                                | pino convention                                                       |
 
 **Score: 10/10 conventions correctly aligned with SOTA.**
 
@@ -354,34 +382,42 @@ The only "compromise" non-SOTA-strict (universal DB fields stay camelCase on wir
 ## Decisions explicitly REJECTED
 
 ### Rejected — Full snake_case Drizzle TS schema fields
+
 **Why considered**: aesthetic uniformity ("everything snake_case").
 **Why rejected**: ~15,000 sites cross-codebase + Better Auth runtime crashes ([Issue #1027](https://github.com/better-auth/better-auth/issues/1027) etc.) + zero user-visible benefit + breaks ORM ecosystem convention.
 
 ### Rejected — Full camelCase wire DTOs
+
 **Why considered**: minimize translation in TS frontend.
 **Why rejected**: AFPS spec is snake_case (authoritative), OAuth2 RFC mandates snake_case, SQL columns are snake_case, all major multi-language APIs use snake_case wire.
 
 ### Rejected — Rename SQL columns
+
 **Why considered**: never seriously.
 **Why rejected**: zero user-visible value, real risk (migration + FK recreation + index recreation + downtime), SQL columns are already snake_case anyway.
 
 ### Rejected — `fields: { ... }` Better Auth mapping for snake_case TS
+
 **Why considered**: theoretically allows snake_case TS with manual per-field mapping.
 **Why rejected**: 5+ open Better Auth GitHub issues prove plugin ecosystem doesn't honor mappings reliably ([#410](https://github.com/better-auth/better-auth/issues/410), [#799](https://github.com/better-auth/better-auth/issues/799), [#1027](https://github.com/better-auth/better-auth/issues/1027), [#2175](https://github.com/better-auth/better-auth/issues/2175), [#5649](https://github.com/better-auth/better-auth/issues/5649), [#5662](https://github.com/better-auth/better-auth/issues/5662)). Fragile, breaks on every BA minor upgrade.
 
 ### Rejected — Fork Better Auth
+
 **Why considered**: never seriously.
 **Why rejected**: massive maintenance burden, ecosystem isolation.
 
 ### Rejected — Migrate away from Better Auth
+
 **Why considered**: brief thought.
 **Why rejected**: huge engineering work, BA is otherwise excellent, blocker is acceptable.
 
 ### Rejected — Normalize SSE to snake_case
+
 **Why considered**: align with REST wire.
 **Why rejected**: Historical, frontend handles both shapes, low impact, deferred.
 
 ### Rejected — Normalize env-vars JSON to single casing
+
 **Why considered**: split between camelCase (credentials) and snake_case (limits).
 **Why rejected**: Both shapes work, low impact, breaking change for operators with existing env files.
 
@@ -442,17 +478,17 @@ The `/audit-casing` skill dispatches parallel opus sub-agents to verify every di
 
 ## Migration history
 
-| Phase | Commit | Scope |
-|-------|--------|-------|
-| Pass 1 | (many) | AFPS 1.x → 2.0 manifest field renames (snake_case) |
-| Pass 2 | (many) | Fix readers/writers that missed Pass 1 |
-| Phase 1 | `79bb77f5` | DTO mirror fields: `display_name`, `schema_version`, `forked_from` |
-| Phase 2 | `009ae169` | ~30 DTO domain fields (agent/skill/run/schedule) |
-| Phase 3 cloud | `bf257538` + `88c8ba1` | Cloud billing DTOs |
-| Phase 4 | `9c28f946` | Integration DTOs (12 interfaces) |
-| F1 | `7b5665d7` | UI prop mismatches + e2e seed + audit log shape |
-| F2 | `fb81095b` | OpenAPI contract drift (Run/Schedule/AgentDetail) |
-| F4 | `9400e897` | Doc drift (JSDoc + CLAUDE.md) |
-| Micro-drift | `c5cd8add` | `is_own`, ValidationFieldError extras, missing_scopes prop |
+| Phase         | Commit                 | Scope                                                              |
+| ------------- | ---------------------- | ------------------------------------------------------------------ |
+| Pass 1        | (many)                 | AFPS 1.x → 2.0 manifest field renames (snake_case)                 |
+| Pass 2        | (many)                 | Fix readers/writers that missed Pass 1                             |
+| Phase 1       | `79bb77f5`             | DTO mirror fields: `display_name`, `schema_version`, `forked_from` |
+| Phase 2       | `009ae169`             | ~30 DTO domain fields (agent/skill/run/schedule)                   |
+| Phase 3 cloud | `bf257538` + `88c8ba1` | Cloud billing DTOs                                                 |
+| Phase 4       | `9c28f946`             | Integration DTOs (12 interfaces)                                   |
+| F1            | `7b5665d7`             | UI prop mismatches + e2e seed + audit log shape                    |
+| F2            | `fb81095b`             | OpenAPI contract drift (Run/Schedule/AgentDetail)                  |
+| F4            | `9400e897`             | Doc drift (JSDoc + CLAUDE.md)                                      |
+| Micro-drift   | `c5cd8add`             | `is_own`, ValidationFieldError extras, missing_scopes prop         |
 
 Adjacent commits: `3d230fbc` (shared-types signature), `23fed6ad` (briefing-agent example), `3f78f136` (test fixtures), `591807846` (OpenAPI v2 + SQL JSONB), `bf257538` (web cloud billing consume).

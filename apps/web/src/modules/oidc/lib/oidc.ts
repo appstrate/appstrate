@@ -16,7 +16,7 @@ interface OidcConfig {
   // Use this verbatim — deriving it from `window.location.origin` breaks
   // when `APP_URL` differs from the browser origin (reverse proxy, TLS
   // termination, subdomain mismatch) and triggers `redirect_uri_mismatch`.
-  callback_url: string;
+  callbackUrl: string;
 }
 
 export function getOidcConfig(): OidcConfig | undefined {
@@ -79,7 +79,7 @@ async function initPkceFlow(
   return new URLSearchParams({
     response_type: "code",
     client_id: config.clientId,
-    redirect_uri: config.callback_url,
+    redirect_uri: config.callbackUrl,
     // `offline_access` deliberately omitted: the SPA discards the tokens
     // immediately after exchange (see `handleOidcCallback`), so a refresh
     // token would be dead weight persisted server-side with no consumer.
@@ -168,7 +168,7 @@ export async function handleOidcCallback(): Promise<{ redirectTo: string }> {
   const tokenBody = new URLSearchParams({
     grant_type: "authorization_code",
     code,
-    redirect_uri: config.callback_url,
+    redirect_uri: config.callbackUrl,
     client_id: config.clientId,
     code_verifier: codeVerifier,
     resource: config.issuer,

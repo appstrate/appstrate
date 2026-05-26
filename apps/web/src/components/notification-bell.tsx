@@ -133,7 +133,8 @@ export function NotificationBell() {
     for (const f of agents) agentNameMap.set(f.id, f.display_name);
   }
 
-  const unreadRuns = (runsData?.data.filter((e) => e.notifiedAt != null) ?? []) as unknown as Pick<
+  const unreadRuns = (runsData?.data.filter((e) => e.notifiedAt != null && e.readAt == null) ??
+    []) as unknown as Pick<
     EnrichedRun,
     "id" | "packageId" | "agent_name" | "status" | "started_at"
   >[];

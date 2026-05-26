@@ -5,7 +5,7 @@ import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
 import { invalidateRunAndNotificationQueries } from "./use-notifications";
-import { type Run, type RunStatus, TERMINAL_RUN_STATUSES } from "@appstrate/shared-types";
+import { type EnrichedRun, type RunStatus, TERMINAL_RUN_STATUSES } from "@appstrate/shared-types";
 
 function handleSSEMessage(qc: QueryClient, orgId: string, applicationId: string, raw: string) {
   try {
@@ -15,18 +15,18 @@ function handleSSEMessage(qc: QueryClient, orgId: string, applicationId: string,
     const status = newRow.status as string;
     const scheduleId = newRow.scheduleId as string | null;
 
-    qc.setQueryData<Run>(["run", orgId, applicationId, runId], (prev) => {
+    qc.setQueryData<EnrichedRun>(["run", orgId, applicationId, runId], (prev) => {
       if (!prev) return prev;
-      return { ...prev, ...newRow } as Run;
+      return { ...prev, ...newRow } as EnrichedRun;
     });
 
-    qc.setQueryData<Run[]>(["runs", orgId, applicationId, packageId], (prev) => {
+    qc.setQueryData<EnrichedRun[]>(["runs", orgId, applicationId, packageId], (prev) => {
       if (!prev) return prev;
       const exists = prev.some((ex) => ex.id === runId);
       if (exists) {
-        return prev.map((ex) => (ex.id === runId ? ({ ...ex, ...newRow } as Run) : ex));
+        return prev.map((ex) => (ex.id === runId ? ({ ...ex, ...newRow } as EnrichedRun) : ex));
       }
-      return [newRow as Run, ...prev].slice(0, 50);
+      return [newRow as unknown as EnrichedRun, ...prev].slice(0, 50);
     });
 
     qc.invalidateQueries({ queryKey: ["agents", orgId] });
