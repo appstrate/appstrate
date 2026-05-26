@@ -80,6 +80,51 @@ describe("extractDependencies", () => {
     expect(deps.find((d) => d.depType === "integration")).toBeDefined();
   });
 
+  it("manifest with mcp_servers — AFPS 2.0 first-class dep map", () => {
+    const manifest = {
+      dependencies: {
+        mcp_servers: { "@acme/gmail-server": "^1.0.0", "@acme/github-server": "~2.0.0" },
+      },
+    };
+    const deps = extractDependencies(manifest);
+    expect(deps).toHaveLength(2);
+
+    const gmail = deps.find((d) => d.depName === "gmail-server");
+    expect(gmail).toBeDefined();
+    expect(gmail!.depScope).toBe("@acme");
+    expect(gmail!.depType).toBe("mcp-server");
+    expect(gmail!.versionRange).toBe("^1.0.0");
+  });
+
+  it("manifest with all three dep categories (skills + mcp_servers + integrations)", () => {
+    const manifest = {
+      dependencies: {
+        skills: { "@acme/skill-a": "^1.0.0" },
+        mcp_servers: { "@acme/gmail-server": "^1.0.0" },
+        integrations: { "@acme/gmail-mcp": "^1.0.0" },
+      },
+    };
+    const deps = extractDependencies(manifest);
+    expect(deps).toHaveLength(3);
+    expect(deps.find((d) => d.depType === "skill")).toBeDefined();
+    expect(deps.find((d) => d.depType === "mcp-server")).toBeDefined();
+    expect(deps.find((d) => d.depType === "integration")).toBeDefined();
+  });
+
+  it("throws on invalid scoped name in mcp_servers", () => {
+    const manifest = {
+      dependencies: { mcp_servers: { "no-scope": "^1.0.0" } },
+    };
+    expect(() => extractDependencies(manifest)).toThrow("Invalid scoped package name: no-scope");
+  });
+
+  it("throws when mcp_servers value is not a bare string", () => {
+    const manifest = {
+      dependencies: { mcp_servers: { "@acme/srv": { version: "^1.0.0" } } },
+    };
+    expect(() => extractDependencies(manifest)).toThrow(/expected string/);
+  });
+
   it("throws on invalid scoped package name", () => {
     const manifest = {
       dependencies: {
@@ -274,5 +319,28 @@ describe("detectCycle", () => {
     };
     const result = await detectCycle("@acme/pkg-a", deps, resolveDeps);
     expect(result.hasCycle).toBe(false);
+  });
+
+  it("detects a cycle that crosses an mcp-server hop", async () => {
+    // integration → mcp-server → integration (back to root)
+    // Confirms `depType: "mcp-server"` flows through cycle detection
+    // just like skill/integration — regression guard for the dep
+    // extractor previously ignoring `dependencies.mcp_servers`.
+    const deps: DepEntry[] = [
+      { depScope: "@acme", depName: "mcp-srv", depType: "mcp-server", versionRange: "^1.0.0" },
+    ];
+    const resolveDeps = async (_scope: string, name: string): Promise<DepEntry[]> => {
+      if (name === "mcp-srv") {
+        return [
+          { depScope: "@acme", depName: "integ-a", depType: "integration", versionRange: "^1.0.0" },
+        ];
+      }
+      return [];
+    };
+    const result = await detectCycle("@acme/integ-a", deps, resolveDeps);
+    expect(result.hasCycle).toBe(true);
+    expect(result.cyclePath).toBeDefined();
+    expect(result.cyclePath![0]).toBe("@acme/integ-a");
+    expect(result.cyclePath![result.cyclePath!.length - 1]).toBe("@acme/integ-a");
   });
 });
