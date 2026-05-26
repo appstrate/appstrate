@@ -20,7 +20,7 @@
  *     inputs never appear in the returned bundle.
  */
 
-import { resolveAfpsHttpDelivery, type AfpsHttpDelivery } from "@appstrate/connect";
+import { resolveAfpsHttpDelivery, type AfpsHttpDelivery } from "@appstrate/connect/afps-delivery";
 import type { CredentialBundle } from "@appstrate/connect/connect";
 import type { ManifestDeliveryHttp } from "@appstrate/core/sidecar-types";
 import type { McpHost } from "./mcp-host.ts";
