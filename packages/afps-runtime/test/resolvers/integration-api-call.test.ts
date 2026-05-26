@@ -392,7 +392,7 @@ describe("LocalIntegrationResolver", () => {
     const { ctx } = makeCtx();
     await expect(
       tools[0]!.execute({ method: "GET", target: "https://evil.example.com/x" }, ctx),
-    ).rejects.toThrow(/not in authorizedUris/);
+    ).rejects.toThrow(/not in authorized_uris/);
   });
 
   it("strips a caller-supplied header of the same name (allowServerOverride default false)", async () => {
