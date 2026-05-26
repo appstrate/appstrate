@@ -76,7 +76,7 @@ function buildIntegrationManifest(id: string) {
         }),
       },
     },
-    tools: { search: {} },
+    tools_policy: { search: {} },
   });
 }
 

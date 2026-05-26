@@ -159,7 +159,7 @@ describe("buildConnectLoginSpec", () => {
     expect(spec.integrationId).toBe("@scope/connect-it");
     expect(spec.toolAllowlist).toEqual([]);
     // The runnable server config comes from the referenced mcp-server package.
-    expect(spec.manifest.server).toEqual({ type: "python", entryPoint: "./server.py" });
+    expect(spec.manifest.server).toEqual({ type: "python", entry_point: "./server.py" });
     expect(spec.connectLogin).toBeDefined();
     expect(spec.connectLogin!).toMatchObject({
       toolName: "login",

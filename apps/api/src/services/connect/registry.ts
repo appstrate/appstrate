@@ -4,10 +4,18 @@
  * Strategy selector (spec §4.2). Maps a manifest auth declaration to its
  * acquisition strategy:
  *
- *   - `oauth2`                          → OAuth2Strategy
- *   - `custom` + `connect.login`        → LoginStrategy (declarative)
- *   - `custom` + `connect.tool`         → OrchestratedStrategy (code, needs executor)
- *   - `api_key` / `basic` / bare custom → FieldsStrategy (paste-the-bag)
+ *   - `oauth2`                                  → OAuth2Strategy
+ *   - `custom` + `connect.login`                → LoginStrategy (declarative)
+ *   - `custom` + `connect.tool`                 → OrchestratedStrategy (code, needs executor)
+ *   - `api_key` / `basic` / `mtls` / bare custom → FieldsStrategy (paste-the-bag)
+ *
+ * `mtls` (AFPS 2.0.1+ §7.2) reuses FieldsStrategy: the user pastes a credential
+ * bag (client certificate PEM + private key PEM, optional intermediate chain),
+ * the manifest's `credentials.schema` validates the shape, and the bag is
+ * persisted on the connection. At runtime the integration spawn resolver
+ * materialises those fields into `delivery.files` entries — the runtime adapter
+ * writes them to the runner's filesystem at the manifest-declared paths where
+ * the HTTPS client loads them as cert + key.
  *
  * `connect.tool` (Orchestrated) requires a {@link ConnectToolExecutor} — the
  * connect-run substrate that actually runs the untrusted login tool. Callers
@@ -70,6 +78,12 @@ export function resolveStrategy(
     }
     case "api_key":
     case "basic":
+    case "mtls":
+      // mtls reuses FieldsStrategy: the user pastes cert + key PEM (and an
+      // optional chain) and the manifest's `credentials.schema` validates the
+      // bag. The integration spawn resolver materialises the fields into
+      // `delivery.files` entries at runtime — there is no separate acquisition
+      // step beyond storing the user-supplied credentials.
       return new FieldsStrategy();
     default:
       throw invalidRequest(`Auth type '${auth.type}' has no connect strategy`);

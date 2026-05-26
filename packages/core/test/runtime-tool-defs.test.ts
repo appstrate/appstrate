@@ -5,6 +5,7 @@ import {
   buildRuntimeToolDefs,
   reEmitRuntimeToolEvents,
   RUNTIME_TOOL_EVENTS_META_KEY,
+  RUNTIME_TOOL_EVENTS_META_KEY_LEGACY,
   type RuntimeToolEvent,
 } from "../src/runtime-tool-defs.ts";
 
@@ -107,5 +108,32 @@ describe("reEmitRuntimeToolEvents", () => {
     reEmitRuntimeToolEvents(undefined, (e) => emitted.push(e));
     reEmitRuntimeToolEvents({ [RUNTIME_TOOL_EVENTS_META_KEY]: "nope" }, (e) => emitted.push(e));
     expect(emitted).toHaveLength(0);
+  });
+
+  // AFPS 2.0.2 (Phase F1): the canonical `_meta` key was renamed from the
+  // single-segment `"appstrate/events"` to the reverse-DNS
+  // `"dev.appstrate/events"`. We still accept the legacy key for one
+  // release window so an agent built against AFPS 2.0.1 can keep talking
+  // to a fresh runtime. Writers always emit the new key; this test pins
+  // the read-side back-compat.
+  it("accepts the legacy `appstrate/events` _meta key for one release window", () => {
+    const emitted: RuntimeToolEvent[] = [];
+    reEmitRuntimeToolEvents(
+      { [RUNTIME_TOOL_EVENTS_META_KEY_LEGACY]: [{ type: "log.written", message: "legacy" }] },
+      (e) => emitted.push(e),
+    );
+    expect(emitted).toEqual([{ type: "log.written", message: "legacy" }]);
+  });
+
+  it("prefers the canonical key when both are present", () => {
+    const emitted: RuntimeToolEvent[] = [];
+    reEmitRuntimeToolEvents(
+      {
+        [RUNTIME_TOOL_EVENTS_META_KEY]: [{ type: "log.written", message: "new" }],
+        [RUNTIME_TOOL_EVENTS_META_KEY_LEGACY]: [{ type: "log.written", message: "old" }],
+      },
+      (e) => emitted.push(e),
+    );
+    expect(emitted).toEqual([{ type: "log.written", message: "new" }]);
   });
 });

@@ -725,6 +725,7 @@
   "integration.field.repository": "Dépôt",
   "integration.field.serverType": "Type de source",
   "integration.auth.scopes": "Permissions",
+  "integration.auth.resource": "Ressource (RFC 8707)",
   "integration.auth.audience": "Audience (RFC 8707)",
   "integration.auth.authorizedUris": "URIs autorisées",
   "integration.auth.required": "Requise",
@@ -767,6 +768,7 @@
   "integration.oauthClient.clientSecret": "Client Secret",
   "integration.oauthClient.publicClient": "Client public (PKCE seul, pas de secret)",
   "integration.oauthClient.redirectUri": "Redirect URI (optionnel)",
+  "integration.oauthClient.callbackUrlHint": "Callback à enregistrer chez le fournisseur",
   "integration.oauthClient.btnRegister": "Enregistrer le client OAuth",
   "integration.oauthClient.btnRotate": "Modifier les credentials",
   "integration.oauthClient.btnDelete": "Supprimer le client OAuth",
@@ -794,6 +796,6 @@
   "agentEditor.integrations.scopes.advancedToggle": "Avancé : épingler des scopes supplémentaires",
   "agentEditor.integrations.scopes.advancedNotice": "Réservé aux cas particuliers : scope orthogonal aux outils (ex. user:email pour un side-effect), future-proofing avant d'ajouter des outils, ou compléter un manifeste où requiredScopes est sous-déclaré. Sinon, cocher des outils suffit — les scopes sont inférés.",
   "agentEditor.integrations.scopes.alreadyInferred": "(déjà inféré)",
-  "agentEditor.integrations.tools.noCatalog": "Cette intégration ne déclare ni catalogue d'outils (`tools`) ni catalogue de scopes (`availableScopes`) dans son manifeste — rien à sélectionner. Si vous attendez un picker, vérifiez que le manifeste source les déclare et redémarrez le serveur API pour resynchroniser.",
+  "agentEditor.integrations.tools.noCatalog": "Cette intégration ne déclare ni catalogue d'outils (`tools`) ni catalogue de scopes (`scope_catalog`) dans son manifeste — rien à sélectionner. Si vous attendez un picker, vérifiez que le manifeste source les déclare et redémarrez le serveur API pour resynchroniser.",
   "agentEditor.integrations.tools.detailUnavailable": "Impossible de charger le détail de l'intégration — vérifiez qu'elle est bien visible dans cette application."
 }

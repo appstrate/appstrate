@@ -20,11 +20,12 @@ import type { IntegrationManifest } from "@appstrate/core/integration";
 function manifest(
   tools: Record<string, { urlPatterns?: { pattern: string; methods?: string[] }[] }>,
 ): IntegrationManifest {
-  // AFPS 2.0: per-tool patterns live under `tools.{name}.url_patterns`.
-  const afpsTools: Record<string, { url_patterns?: { pattern: string; methods?: string[] }[] }> =
-    {};
+  // AFPS 2.0.2 §7: per-tool policy lives under `tools_policy.{name}.url_patterns`
+  // (a sparse policy table, not the tool catalog — that comes from the
+  // referenced mcp-server's `tools[]`).
+  const policy: Record<string, { url_patterns?: { pattern: string; methods?: string[] }[] }> = {};
   for (const [name, t] of Object.entries(tools)) {
-    afpsTools[name] = t.urlPatterns ? { url_patterns: t.urlPatterns } : {};
+    policy[name] = t.urlPatterns ? { url_patterns: t.urlPatterns } : {};
   }
   return {
     type: "integration",
@@ -33,7 +34,7 @@ function manifest(
     version: "1.0.0",
     display_name: "Test",
     source: { kind: "local", server: { name: "@vendor/test-server", version: "^1.0.0" } },
-    tools: afpsTools,
+    tools_policy: policy,
   } as unknown as IntegrationManifest;
 }
 

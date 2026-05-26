@@ -128,6 +128,48 @@ describe("readIntegrationRefs", () => {
     const root = makePackage("@acme/agent", "1.0.0", "agent", {});
     expect(readIntegrationRefs(makeBundle(root))).toEqual([]);
   });
+
+  it("accepts AFPS 2.0.2 §4.1 object-form deps and extracts version from `version`", () => {
+    const root = makePackage(
+      "@acme/agent",
+      "1.0.0",
+      "agent",
+      {},
+      {
+        dependencies: {
+          integrations: {
+            "@acme/api": "^1.0.0",
+            "@acme/rich": { version: "^2.0.0", scopes: ["s1"], auth_key: "oauth" },
+          },
+        },
+      },
+    );
+    const refs = readIntegrationRefs(makeBundle(root));
+    expect(refs).toEqual([
+      { name: "@acme/api", version: "^1.0.0" },
+      { name: "@acme/rich", version: "^2.0.0" },
+    ]);
+  });
+
+  it("skips integration deps with non-string and missing `version`", () => {
+    const root = makePackage(
+      "@acme/agent",
+      "1.0.0",
+      "agent",
+      {},
+      {
+        dependencies: {
+          integrations: {
+            "@acme/ok": "^1.0.0",
+            "@acme/bad-no-version": { scopes: ["s"] },
+            "@acme/bad-typed": 42,
+          } as unknown as Record<string, unknown>,
+        },
+      },
+    );
+    const refs = readIntegrationRefs(makeBundle(root));
+    expect(refs).toEqual([{ name: "@acme/ok", version: "^1.0.0" }]);
+  });
 });
 
 describe("readApiCallIntegrationMeta", () => {

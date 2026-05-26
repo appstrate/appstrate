@@ -1,42 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for the mcp-server `_meta` accessors:
- *   - `getMcpServerAfpsName` — scoped AFPS identity (`dev.afps/mcp-server`).
- *   - `getMcpServerRuntime` — Appstrate runtime override (`dev.appstrate/mcp-server`).
- * Pure functions, no DB/network.
+ * Unit tests for the mcp-server `_meta` accessors.
+ *
+ * AFPS 2.0.2 (§3.4 / §11.2) lifted mcp-server identity (`name`, `type`,
+ * `schema_version`, `dependencies`) from `_meta["dev.afps/mcp-server"]` to
+ * the manifest root, so the previous `getMcpServerAfpsName` helper is gone.
+ * The vendor extension under `_meta["dev.appstrate/mcp-server"]` (runtime
+ * override) is unchanged.
  */
 
 import { describe, it, expect } from "bun:test";
-import {
-  getMcpServerAfpsName,
-  getMcpServerRuntime,
-  type McpServerManifest,
-} from "../src/mcp-server.ts";
+import { getMcpServerRuntime, type McpServerManifest } from "../src/mcp-server.ts";
 
 function manifest(meta?: Record<string, unknown>): McpServerManifest {
   return {
     manifest_version: "0.3",
-    name: "toolkit-server",
+    name: "@me/toolkit-server",
     version: "1.0.0",
+    type: "mcp-server",
+    schema_version: "2.0",
     server: { type: "node", entry_point: "./server.ts" },
     ...(meta ? { _meta: meta } : {}),
   } as unknown as McpServerManifest;
 }
-
-describe("getMcpServerAfpsName", () => {
-  it("reads the scoped identity from _meta['dev.afps/mcp-server'].name", () => {
-    const m = manifest({
-      "dev.afps/mcp-server": { name: "@me/toolkit-server", type: "mcp-server" },
-    });
-    expect(getMcpServerAfpsName(m)).toBe("@me/toolkit-server");
-  });
-
-  it("returns undefined when the _meta identity is absent", () => {
-    expect(getMcpServerAfpsName(manifest())).toBeUndefined();
-    expect(getMcpServerAfpsName(manifest({ "dev.afps/mcp-server": {} }))).toBeUndefined();
-  });
-});
 
 describe("getMcpServerRuntime", () => {
   it("reads the runtime override from _meta['dev.appstrate/mcp-server'].runtime", () => {

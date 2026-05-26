@@ -725,6 +725,7 @@
   "integration.field.repository": "Repository",
   "integration.field.serverType": "Source type",
   "integration.auth.scopes": "Scopes",
+  "integration.auth.resource": "Resource (RFC 8707)",
   "integration.auth.audience": "Audience (RFC 8707)",
   "integration.auth.authorizedUris": "Authorized URIs",
   "integration.auth.required": "Required",
@@ -767,6 +768,7 @@
   "integration.oauthClient.clientSecret": "Client Secret",
   "integration.oauthClient.publicClient": "Public client (PKCE only, no secret)",
   "integration.oauthClient.redirectUri": "Redirect URI (optional)",
+  "integration.oauthClient.callbackUrlHint": "Callback to register at the provider",
   "integration.oauthClient.btnRegister": "Register OAuth client",
   "integration.oauthClient.btnRotate": "Update credentials",
   "integration.oauthClient.btnDelete": "Delete OAuth client",
@@ -794,6 +796,6 @@
   "agentEditor.integrations.scopes.advancedToggle": "Advanced: pin extra scopes",
   "agentEditor.integrations.scopes.advancedNotice": "Reserved for edge cases: scope orthogonal to tools (e.g. user:email for a side-effect), future-proofing before adding tools, or completing a manifest where requiredScopes is under-declared. Otherwise, ticking tools is enough — scopes are inferred.",
   "agentEditor.integrations.scopes.alreadyInferred": "(already inferred)",
-  "agentEditor.integrations.tools.noCatalog": "This integration declares neither a `tools` block nor an `availableScopes` catalog in its manifest — nothing to pick. If you expected a picker, check that the source manifest declares them and restart the API server to resync.",
+  "agentEditor.integrations.tools.noCatalog": "This integration declares neither a `tools` block nor a `scope_catalog` in its manifest — nothing to pick. If you expected a picker, check that the source manifest declares them and restart the API server to resync.",
   "agentEditor.integrations.tools.detailUnavailable": "Could not load the integration detail — make sure it is visible in this application."
 }

@@ -355,7 +355,10 @@ describe("handleIntegrationOAuthCallback", () => {
   }
 
   it("exchanges the code, deletes state, and returns the parsed token shape", async () => {
-    const { state } = await seedState();
+    // Pin `client_secret_post` so the test exercises the body-credential
+    // path independent of the default-auth-method flip (AFPS 2.0.1
+    // changed the default-when-missing from POST to BASIC).
+    const { state } = await seedState({ tokenEndpointAuthMethod: "client_secret_post" });
     let captured: { url: string; body: string; headers: Record<string, string> } | null = null;
     const stubFetch = (async (input: Request | URL | string, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input.toString();
@@ -404,6 +407,61 @@ describe("handleIntegrationOAuthCallback", () => {
 
     // State row is consumed
     expect(await store.get(state)).toBeNull();
+  });
+
+  // AFPS 2.0.1 (CC-10, §7.3): when the manifest omits
+  // `token_endpoint_auth_method`, the runtime now defaults to
+  // `client_secret_basic` — the RFC 8414 §2 / RFC 7591 §2 default.
+  // Manifest-explicit values still win.
+  it("defaults to client_secret_basic when the manifest omits token_endpoint_auth_method", async () => {
+    const { state } = await seedState(); // no tokenEndpointAuthMethod
+    let captured: { body: string; headers: Record<string, string> } | null = null;
+    const stub = (async (_input: unknown, init?: RequestInit) => {
+      const body = init?.body ? String(init.body) : "";
+      const headers: Record<string, string> = {};
+      if (init?.headers instanceof Headers) {
+        init.headers.forEach((v, k) => (headers[k] = v));
+      } else if (init?.headers) {
+        Object.assign(headers, init.headers as Record<string, string>);
+      }
+      captured = { body, headers };
+      return new Response(
+        JSON.stringify({ access_token: "AT", expires_in: 60, token_type: "Bearer" }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+
+    await withFetch(stub, () => handleIntegrationOAuthCallback(store, "CODE", state));
+    const authHeader = captured!.headers["Authorization"] ?? captured!.headers["authorization"];
+    expect(authHeader?.startsWith("Basic ")).toBe(true);
+    // Basic auth carries credentials in the header, not the body.
+    const params = new URLSearchParams(captured!.body);
+    expect(params.get("client_secret")).toBeNull();
+  });
+
+  it("manifest-explicit client_secret_post still wins over the new default", async () => {
+    const { state } = await seedState({ tokenEndpointAuthMethod: "client_secret_post" });
+    let captured: { body: string; headers: Record<string, string> } | null = null;
+    const stub = (async (_input: unknown, init?: RequestInit) => {
+      const body = init?.body ? String(init.body) : "";
+      const headers: Record<string, string> = {};
+      if (init?.headers instanceof Headers) {
+        init.headers.forEach((v, k) => (headers[k] = v));
+      } else if (init?.headers) {
+        Object.assign(headers, init.headers as Record<string, string>);
+      }
+      captured = { body, headers };
+      return new Response(
+        JSON.stringify({ access_token: "AT", expires_in: 60, token_type: "Bearer" }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+
+    await withFetch(stub, () => handleIntegrationOAuthCallback(store, "CODE", state));
+    const authHeader = captured!.headers["Authorization"] ?? captured!.headers["authorization"];
+    expect(authHeader).toBeUndefined();
+    const params = new URLSearchParams(captured!.body);
+    expect(params.get("client_secret")).toBe("client-secret");
   });
 
   it("threads tokenAuthMethod through to the token exchange", async () => {

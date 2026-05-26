@@ -6,7 +6,7 @@
  *
  * Covers: source kinds (local/remote/api); oauth2 discovery + manual; api_key
  * / basic / custom + credentials; delivery http/env/files; connect.login
- * outputs + §7.7 gating; tools metadata; the Appstrate cross-field
+ * outputs + §7.7 gating; tools_policy metadata; the Appstrate cross-field
  * superRefine rules; validateManifest dispatch; and every exported helper.
  */
 
@@ -15,6 +15,7 @@ import {
   integrationManifestSchema,
   type IntegrationManifest,
   API_CALL_TOOL_NAME,
+  getConnectToolNames,
   getDeclaredToolNames,
   getApiCallConfig,
   getToolUrlPatterns,
@@ -25,7 +26,7 @@ import {
   expandScopesGranted,
   missingScopesForConnection,
   validateAgentIntegrationScopes,
-  integrationUploadProtocolEnum,
+  RESERVED_INTEGRATION_UPLOAD_PROTOCOLS,
 } from "../src/integration.ts";
 import { validateManifest } from "../src/validation.ts";
 
@@ -139,11 +140,16 @@ describe("integrationManifestSchema — source kinds", () => {
     ).toBeGreaterThan(0);
   });
 
-  it("rejects an upload protocol outside the closed enum", () => {
+  it("accepts a non-reserved upload protocol (AFPS 2.0.2 — open vocabulary)", () => {
+    // AFPS 2.0.2 dropped the closed enum for `source.api.upload_protocols`;
+    // any unique non-empty string is now accepted (producers MAY emit
+    // reverse-DNS-qualified values, consumers MUST tolerate them).
     const r = integrationManifestSchema.safeParse(
-      baseManifest({ source: { kind: "api", api: { upload_protocols: ["bogus"] } } }),
+      baseManifest({
+        source: { kind: "api", api: { upload_protocols: ["com.example.custom-resumable"] } },
+      }),
     );
-    expect(r.success).toBe(false);
+    expect(r.success).toBe(true);
   });
 });
 
@@ -286,6 +292,37 @@ describe("integrationManifestSchema — delivery rules", () => {
     auths.oauth!.delivery = {
       http: { in: "header", name: "Authorization", value: "{$credential.access_token}" },
       env: { TOKEN: { value: "{$credential.access_token}" } },
+    };
+    expect(integrationManifestSchema.safeParse(m).success).toBe(false);
+  });
+
+  it("install-time error path cites §7.6 on the auths.{key}.delivery field (R8b)", () => {
+    // AFPS 2.0 §7.6 mutex: an auth method MUST NOT mix `http` (proxy
+    // injection, server never holds the secret) with `env`/`files` (server
+    // holds the secret). The error path MUST surface on the delivery field
+    // so the editor lands the user on the right spot.
+    const m = baseManifest();
+    const auths = m.auths as Record<string, Record<string, unknown>>;
+    auths.oauth!.delivery = {
+      http: { in: "header", name: "Authorization", value: "{$credential.access_token}" },
+      env: { TOKEN: { value: "{$credential.access_token}" } },
+    };
+    const r = integrationManifestSchema.safeParse(m);
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      const issues = r.error.issues;
+      const onDelivery = issues.find((i) => i.path.join(".") === "auths.oauth.delivery");
+      expect(onDelivery).toBeDefined();
+      expect(onDelivery!.message).toMatch(/mutually exclusive|env\/files/);
+    }
+  });
+
+  it("install-time mutex also rejects http mixed with files (R8b)", () => {
+    const m = baseManifest();
+    const auths = m.auths as Record<string, Record<string, unknown>>;
+    auths.oauth!.delivery = {
+      http: { in: "header", name: "Authorization", value: "{$credential.access_token}" },
+      files: { "/run/creds/token": { value: "{$credential.access_token}" } },
     };
     expect(integrationManifestSchema.safeParse(m).success).toBe(false);
   });
@@ -538,10 +575,10 @@ describe("integrationManifestSchema — scope_catalog", () => {
 });
 
 // ─────────────────────────────────────────────
-// tools.{name} metadata cross-field
+// tools_policy.{name} metadata cross-field
 // ─────────────────────────────────────────────
 
-function multiAuthManifest(tools: Record<string, unknown>): Record<string, unknown> {
+function multiAuthManifest(toolsPolicy: Record<string, unknown>): Record<string, unknown> {
   return baseManifest({
     source: { kind: "remote", remote: { url: "https://x/mcp", transport: "sse" } },
     auths: {
@@ -564,14 +601,14 @@ function multiAuthManifest(tools: Record<string, unknown>): Record<string, unkno
         delivery: { env: { TOKEN: { value: "{$credential.token}" } } },
       },
     },
-    tools,
+    tools_policy: toolsPolicy,
   });
 }
 
-describe("integrationManifestSchema — tools metadata", () => {
+describe("integrationManifestSchema — tools_policy metadata", () => {
   it("accepts a tool with required_scopes + url_patterns (single auth)", () => {
     const m = baseManifest({
-      tools: {
+      tools_policy: {
         list_messages: {
           required_scopes: ["read"],
           url_patterns: [{ pattern: "https://gmail.googleapis.com/**", methods: ["GET"] }],
@@ -590,12 +627,12 @@ describe("integrationManifestSchema — tools metadata", () => {
           list_issues: { required_scopes: ["bogus"], required_auth_key: "oauth" },
         }),
       ),
-    ).toContain("tools.list_issues.required_scopes");
+    ).toContain("tools_policy.list_issues.required_scopes");
   });
 
   it("rejects required_scopes on a multi-auth integration without required_auth_key", () => {
     expect(errorPaths(multiAuthManifest({ list_issues: { required_scopes: ["repo"] } }))).toContain(
-      "tools.list_issues.required_auth_key",
+      "tools_policy.list_issues.required_auth_key",
     );
   });
 
@@ -606,7 +643,7 @@ describe("integrationManifestSchema — tools metadata", () => {
           list_issues: { required_scopes: ["repo"], required_auth_key: "nope" },
         }),
       ),
-    ).toContain("tools.list_issues.required_auth_key");
+    ).toContain("tools_policy.list_issues.required_auth_key");
   });
 
   it("accepts a well-formed multi-auth tool", () => {
@@ -618,7 +655,9 @@ describe("integrationManifestSchema — tools metadata", () => {
 
   it("accepts a tool without required_scopes (default behaviour)", () => {
     const r = integrationManifestSchema.safeParse(
-      baseManifest({ tools: { list_messages: { url_patterns: [{ pattern: "https://x/**" }] } } }),
+      baseManifest({
+        tools_policy: { list_messages: { url_patterns: [{ pattern: "https://x/**" }] } },
+      }),
     );
     expect(r.success).toBe(true);
   });
@@ -644,12 +683,12 @@ describe("validateManifest — integration dispatch", () => {
 });
 
 // ─────────────────────────────────────────────
-// upload protocol enum re-export
+// upload protocol reserved-values re-export
 // ─────────────────────────────────────────────
 
-describe("integrationUploadProtocolEnum", () => {
-  it("matches the AFPS closed enum", () => {
-    expect([...integrationUploadProtocolEnum.options].sort()).toEqual([
+describe("RESERVED_INTEGRATION_UPLOAD_PROTOCOLS", () => {
+  it("matches the AFPS 2.0.2 reserved set", () => {
+    expect([...RESERVED_INTEGRATION_UPLOAD_PROTOCOLS].sort()).toEqual([
       "google-resumable",
       "ms-resumable",
       "s3-multipart",
@@ -688,7 +727,7 @@ describe("getApiCallConfig", () => {
 describe("getDeclaredToolNames / getAvailableScopes / getToolUrlPatterns", () => {
   function withTools(): IntegrationManifest {
     const m = baseManifest({
-      tools: {
+      tools_policy: {
         list_messages: { required_scopes: ["read"], url_patterns: [{ pattern: "https://x/**" }] },
         send_message: { required_scopes: ["write"] },
       },
@@ -726,12 +765,70 @@ describe("getDeclaredToolNames / getAvailableScopes / getToolUrlPatterns", () =>
 });
 
 // ─────────────────────────────────────────────
+// getConnectToolNames — spec-natural + vendor _meta back-compat (R8b N-2)
+// ─────────────────────────────────────────────
+
+/** Build a custom-auth integration carrying a `connect.tool` block under the
+ *  caller-specified shape. */
+function connectToolManifest(connectBlock: Record<string, unknown>): IntegrationManifest {
+  return parse(
+    baseManifest({
+      source: { kind: "api", api: {} },
+      auths: {
+        session: {
+          type: "custom",
+          credentials: {
+            schema: { type: "object", properties: { token: { type: "string" } } },
+          },
+          authorized_uris: ["https://api.example.com/**"],
+          connect: connectBlock,
+          delivery: { env: { TOKEN: { value: "{$credential.token}" } } },
+        },
+      },
+    }),
+  );
+}
+
+describe("getConnectToolNames — AFPS spec-natural + vendor _meta", () => {
+  it("reads the spec-natural `connect.tool.name` location (R8b N-2)", () => {
+    // AFPS 2.0 §7.7: `connect.tool` is the canonical block for the
+    // orchestrated-acquisition mode; the inner `name` is the tool reference.
+    const m = connectToolManifest({ tool: { name: "perform_login" } });
+    expect(getConnectToolNames(m)).toEqual(["perform_login"]);
+  });
+
+  it("falls back to the legacy vendor `_meta` location", () => {
+    // Back-compat: published manifests written before the spec-natural form
+    // existed carry the tool name under `_meta["dev.appstrate/connect"].tool`.
+    const m = connectToolManifest({
+      tool: {},
+      _meta: { "dev.appstrate/connect": { tool: "perform_login" } },
+    });
+    expect(getConnectToolNames(m)).toEqual(["perform_login"]);
+  });
+
+  it("prefers spec-natural over vendor _meta when both are present", () => {
+    // The two locations should never disagree, but if they do, the
+    // spec-natural form wins — that's the canonical reading.
+    const m = connectToolManifest({
+      tool: { name: "spec_natural" },
+      _meta: { "dev.appstrate/connect": { tool: "vendor_legacy" } },
+    });
+    expect(getConnectToolNames(m)).toEqual(["spec_natural"]);
+  });
+
+  it("returns [] when no auth declares connect.tool", () => {
+    expect(getConnectToolNames(parse(baseManifest()))).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────
 // scope expansion + missing scopes
 // ─────────────────────────────────────────────
 
 function scopedManifest(): IntegrationManifest {
   const m = baseManifest({
-    tools: {
+    tools_policy: {
       read_tool: { required_scopes: ["read:org"], required_auth_key: "oauth" },
       admin_tool: { required_scopes: ["admin:org"], required_auth_key: "oauth" },
     },
@@ -934,7 +1031,7 @@ describe("validateAgentIntegrationScopes", () => {
             delivery: { env: { K: { value: "{$credential.k}" } } },
           },
         },
-        tools: { real_tool: { required_scopes: [] } },
+        tools_policy: { real_tool: { required_scopes: [] } },
       }),
     );
     expect(

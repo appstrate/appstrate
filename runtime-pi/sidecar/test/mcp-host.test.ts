@@ -451,6 +451,78 @@ describe("McpHost — allowedTools filter", () => {
   });
 });
 
+describe("McpHost — hidden_tools defensive filter (R8a)", () => {
+  it("drops tools listed in hiddenTools, after the allowlist", async () => {
+    const fs = await makeUpstream(fsTool());
+    try {
+      const host = new McpHost();
+      await host.register({
+        namespace: "fs",
+        client: fs.client,
+        // Allowlist permits both; hiddenTools claws back `write_file`.
+        allowedTools: ["read_file", "write_file"],
+        hiddenTools: ["write_file"],
+      });
+      expect(host.size()).toBe(1);
+      const built = host.buildTools();
+      expect(built.map((t) => t.descriptor.name)).toEqual(["fs__read_file"]);
+    } finally {
+      await fs.pair.close();
+    }
+  });
+
+  it("emits a 'tool_excluded_by_hidden_tools' log entry on each drop", async () => {
+    const fs = await makeUpstream(fsTool());
+    try {
+      const logs: Array<{ source: string; level: string; data: unknown }> = [];
+      const host = new McpHost({ onLog: (e) => logs.push(e) });
+      await host.register({
+        namespace: "fs",
+        client: fs.client,
+        hiddenTools: ["write_file"],
+      });
+      const excluded = logs.filter(
+        (l) => (l.data as { event?: string }).event === "tool_excluded_by_hidden_tools",
+      );
+      expect(excluded).toHaveLength(1);
+      expect((excluded[0]!.data as { originalName: string }).originalName).toBe("write_file");
+    } finally {
+      await fs.pair.close();
+    }
+  });
+
+  it("undefined hiddenTools preserves the legacy behaviour (no extra filter)", async () => {
+    const fs = await makeUpstream(fsTool());
+    try {
+      const host = new McpHost();
+      await host.register({ namespace: "fs", client: fs.client });
+      expect(host.size()).toBe(2);
+    } finally {
+      await fs.pair.close();
+    }
+  });
+
+  it("hides a tool even when allowlist is undefined (default permissive)", async () => {
+    // Without an allowlist, `hidden_tools` is the SINGLE filter — it must
+    // still kick in (the defensive guard is for fixtures that bypassed
+    // catalog resolution, where the allowlist is often left undefined).
+    const fs = await makeUpstream(fsTool());
+    try {
+      const host = new McpHost();
+      await host.register({
+        namespace: "fs",
+        client: fs.client,
+        hiddenTools: ["write_file"],
+      });
+      expect(host.size()).toBe(1);
+      const built = host.buildTools();
+      expect(built.map((t) => t.descriptor.name)).toEqual(["fs__read_file"]);
+    } finally {
+      await fs.pair.close();
+    }
+  });
+});
+
 describe("McpHost — capability discovery (V7)", () => {
   it("emits upstream_registered with serverInfo + capabilities on register", async () => {
     const fs = await makeUpstream(fsTool());

@@ -40,7 +40,7 @@ const appstrateSchemas = [
     filename: "mcp-server.schema.json",
     title: "Appstrate MCP-Server Manifest",
     description:
-      'Appstrate mcp-server manifest — the canonical AFPS 2.0 / MCPB schema (re-exported from @afps-spec/schema). The AFPS identity contract under _meta["dev.afps/mcp-server"] is validated by the Zod superRefine and is not representable in JSON Schema.',
+      "Appstrate mcp-server manifest — the canonical AFPS 2.0.2 / MCPB schema (re-exported from @afps-spec/schema). The AFPS identity contract (type, name, schema_version, dependencies) lives at the manifest root (AFPS 2.0.2 §3.4 / §11.2).",
     schema: mcpServerManifestSchema,
   },
   {

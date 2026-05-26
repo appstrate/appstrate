@@ -81,7 +81,15 @@ import { connectionDisplayLabel } from "../components/integration-connect/connec
 // OAuth client (admin) form
 // ─────────────────────────────────────────────
 
-function OAuthClientForm({ packageId, authKey }: { packageId: string; authKey: string }) {
+function OAuthClientForm({
+  packageId,
+  authKey,
+  authDecl,
+}: {
+  packageId: string;
+  authKey: string;
+  authDecl?: IntegrationManifestAuth;
+}) {
   const { t } = useTranslation("settings");
   const { data: client, isLoading } = useIntegrationOAuthClient(packageId, authKey);
   const upsert = useUpsertIntegrationOAuthClient();
@@ -189,6 +197,21 @@ function OAuthClientForm({ packageId, authKey }: { packageId: string; authKey: s
                 onChange={(e) => setRedirectUri(e.target.value)}
                 placeholder={client?.redirect_uri ?? ""}
               />
+              {/* AFPS 2.0 §7.10 — surface `auths.<key>.callback_url_hint` when
+                  the integration manifest declares one (publisher tip on
+                  what to register at the IdP). Read-only display; the actual
+                  redirectUri value lives in the input above. */}
+              {authDecl?.callback_url_hint && (
+                <p
+                  className="text-muted-foreground text-[0.7rem]"
+                  data-testid={`callback-url-hint-${authKey}`}
+                >
+                  <span className="font-semibold">
+                    {t("integration.oauthClient.callbackUrlHint")}:
+                  </span>{" "}
+                  <span className="font-mono">{authDecl.callback_url_hint}</span>
+                </p>
+              )}
             </div>
             <label className="flex items-center gap-2 text-sm sm:col-span-2">
               <Checkbox
@@ -244,7 +267,8 @@ function OAuthClientForm({ packageId, authKey }: { packageId: string; authKey: s
 
 /**
  * Per-auth card, grouped by authKey. Self-contained setup + connections:
- *   - Auth metadata: type, required flag, default scopes, audience,
+ *   - Auth metadata: type, required flag, default scopes, resource
+ *     (RFC 8707 — `resource` in AFPS 2.0 §7.3; `audience` is back-compat alias),
  *     authorized URIs.
  *   - For oauth2 + admin: the OAuth client registration form sits INSIDE
  *     the card, directly above the connection list — a missing client
@@ -283,8 +307,8 @@ function AuthSection({
         )}
       </div>
 
-      {/* Scopes / audience */}
-      {(status.scopes.length > 0 || status.audience) && (
+      {/* Scopes / resource (RFC 8707 — `resource` in AFPS 2.0 §7.3; `audience` is back-compat alias) */}
+      {(status.scopes.length > 0 || status.resource || status.audience) && (
         <div className="text-muted-foreground mb-3 grid gap-1 text-xs">
           {status.scopes.length > 0 && (
             <p>
@@ -292,10 +316,10 @@ function AuthSection({
               <span className="font-mono">{status.scopes.join(", ")}</span>
             </p>
           )}
-          {status.audience && (
+          {(status.resource ?? status.audience) && (
             <p>
-              <span className="font-semibold">{t("integration.auth.audience")}:</span>{" "}
-              <span className="font-mono">{status.audience}</span>
+              <span className="font-semibold">{t("integration.auth.resource")}:</span>{" "}
+              <span className="font-mono">{status.resource ?? status.audience}</span>
             </p>
           )}
           {(authDecl.authorized_uris?.length ?? 0) > 0 && (
@@ -316,7 +340,7 @@ function AuthSection({
           a fix that's right here, not in another tab. */}
       {isOAuth && isAdmin && (
         <div className="mb-3">
-          <OAuthClientForm packageId={packageId} authKey={status.auth_key} />
+          <OAuthClientForm packageId={packageId} authKey={status.auth_key} authDecl={authDecl} />
         </div>
       )}
 

@@ -89,6 +89,15 @@ export const packages = pgTable(
       .on(table.createdAt)
       .where(sql`${table.ephemeral} = true`),
     check("packages_id_format", sql`${table.id} ~ '^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$'`),
+    // AFPS 2.0 shape gate (audit 03c §D-1): refuse persisting a draft manifest
+    // that declares a non-2.x `schema_version`. AFPS 1.x is unsupported — no
+    // back-compat reader, no rewrite path. Permissive when `schema_version` is
+    // absent so legacy/in-flight drafts pre-dating the 2.0.2 root-identity
+    // lift (Phase C / migration 0002) survive untouched.
+    check(
+      "packages_draft_manifest_v2",
+      sql`"draft_manifest" IS NULL OR ("draft_manifest" ->> 'schema_version') IS NULL OR ("draft_manifest" ->> 'schema_version') LIKE '2.%'`,
+    ),
   ],
 );
 
@@ -111,6 +120,13 @@ export const packageVersions = pgTable(
   (table) => [
     uniqueIndex("package_versions_pkg_version_unique").on(table.packageId, table.version),
     index("idx_package_versions_package_id").on(table.packageId),
+    // AFPS 2.0 shape gate (audit 03c §D-2): published version snapshots MUST
+    // carry a 2.x `schema_version` when present. Mirrors the draft-side gate
+    // on `packages` so the wire and the persisted snapshot never disagree.
+    check(
+      "package_versions_manifest_v2",
+      sql`"manifest" IS NULL OR ("manifest" ->> 'schema_version') IS NULL OR ("manifest" ->> 'schema_version') LIKE '2.%'`,
+    ),
   ],
 );
 
@@ -129,6 +145,23 @@ export const packageDistTags = pgTable(
   (table) => [primaryKey({ columns: [table.packageId, table.tag] })],
 );
 
+/**
+ * Per-version dependency index — a flattened projection of
+ * `package_versions.manifest.dependencies`.
+ *
+ * AFPS 2.0.2 §4.1 makes dependency values polymorphic: each entry is EITHER a
+ * bare semver range string OR an object `{ version, scopes?, auth_key?, ... }`
+ * carrying per-dependency configuration. The canonical, lossless form lives
+ * on `package_versions.manifest`; this table stores ONLY the flattened
+ * `(dep_scope, dep_name, dep_type, version_range)` tuple so the resolver,
+ * dist-tag retargeter, and registry search can use plain SQL joins / indexes
+ * instead of walking the JSONB blob.
+ *
+ * Treat this table as a derived index: when adding a new polymorphic field
+ * (e.g. AFPS picks up new per-dep config), update the manifest schema first,
+ * then decide whether the new field deserves a column here. The flattener
+ * lives in `@appstrate/core/dependencies.storeVersionDependencies`.
+ */
 export const packageVersionDependencies = pgTable(
   "package_version_dependencies",
   {
@@ -139,6 +172,7 @@ export const packageVersionDependencies = pgTable(
     depScope: text("dep_scope").notNull(),
     depName: text("dep_name").notNull(),
     depType: packageTypeEnum("dep_type").notNull(),
+    /** Flattened semver range string. Canonical polymorphic form lives on `package_versions.manifest`. */
     versionRange: text("version_range").notNull(),
   },
   (table) => [

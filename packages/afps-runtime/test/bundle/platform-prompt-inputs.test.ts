@@ -78,9 +78,15 @@ describe("buildPlatformPromptInputs", () => {
       "@acme/m1@1.0.0",
       {
         manifest_version: "0.3",
-        name: "m1-server",
+        name: "@acme/m1",
         version: "1.0.0",
-        _meta: { "dev.afps/mcp-server": { name: "@acme/m1", type: "mcp-server" } },
+        type: "mcp-server",
+        schema_version: "2.0",
+        server: {
+          type: "node",
+          entry_point: "server/index.js",
+          mcp_config: { command: "node", args: ["server/index.js"] },
+        },
       },
       { "server/index.js": "//" },
     );
@@ -112,9 +118,15 @@ describe("buildPlatformPromptInputs", () => {
     );
     const mcp = pkg("@acme/m@1.0.0", {
       manifest_version: "0.3",
-      name: "m-server",
+      name: "@acme/m",
       version: "1.0.0",
-      _meta: { "dev.afps/mcp-server": { name: "@acme/m", type: "mcp-server" } },
+      type: "mcp-server",
+      schema_version: "2.0",
+      server: {
+        type: "node",
+        entry_point: "server/index.js",
+        mcp_config: { command: "node", args: ["server/index.js"] },
+      },
     });
     const prompt = renderPlatformPrompt(
       buildPlatformPromptInputs(bundleOf(root, mcp), ctx(), { platformName: "Test" }),

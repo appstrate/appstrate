@@ -7,10 +7,11 @@
  * Runs:
  *   - AFPS 2.0 manifest schema check per package (via `@afps-spec/schema`),
  *     dispatched across the four package types `agent | skill | mcp-server |
- *     integration`.
+ *     integration` via the root-level `type` discriminator (AFPS 2.0.2 §3.4
+ *     lifted mcp-server identity to the manifest root).
  *   - `schema_version` MAJOR policy check on the types that carry one
- *     (`agent` requires it; `skill`/`integration` declare it optionally;
- *     `mcp-server` carries an MCPB `manifest_version` instead and is exempt).
+ *     (`agent` requires it; `skill`/`integration`/`mcp-server` declare it at
+ *     the root — AFPS 2.0.2 lifted it there for mcp-server too).
  *   - `type = "agent"` for the root when `agentOnlyRoot` is on
  *   - Prompt template syntax check on the root's `prompt.md` if present
  *   - Cycle + divergent-version detection (non-fatal warnings)
@@ -24,7 +25,6 @@ import {
 } from "@afps-spec/schema";
 import type { z } from "zod";
 import { validateTemplate } from "../template/mustache.ts";
-import { MCP_SERVER_META_KEY } from "../types/manifest.ts";
 import type { Bundle, BundlePackage, PackageIdentity } from "./types.ts";
 import { parsePackageIdentity } from "./types.ts";
 
@@ -122,13 +122,10 @@ function validatePackage(
   },
 ): void {
   const manifest = pkg.manifest as Record<string, unknown>;
-  // AFPS 2.0 (§3.4): an mcp-server manifest IS a verbatim MCPB manifest. It
-  // carries no top-level AFPS `type` — its identity (and `type: "mcp-server"`)
-  // lives under `_meta["dev.afps/mcp-server"]`. Recognise it by either signal.
-  const meta = manifest["_meta"] as Record<string, unknown> | undefined;
-  const afpsMcp = meta?.[MCP_SERVER_META_KEY] as { type?: unknown } | undefined;
-  const isMcpServer = manifest["type"] === "mcp-server" || afpsMcp?.type === "mcp-server";
-  const effectiveType: unknown = isMcpServer ? "mcp-server" : manifest["type"];
+  // AFPS 2.0.2 (§3.4 / §11.2): mcp-server identity was lifted from
+  // `_meta["dev.afps/mcp-server"]` to the manifest root, so the root `type`
+  // discriminator is now authoritative for every package type.
+  const effectiveType: unknown = manifest["type"];
 
   if (isRoot && ctx.agentOnlyRoot && effectiveType !== "agent") {
     ctx.issues.push({
@@ -215,16 +212,17 @@ function schemaForType(type: unknown): TypeSchema | null {
 }
 
 /**
- * Enforce the `schema_version` MAJOR policy per package type (AFPS 2.0,
+ * Enforce the `schema_version` MAJOR policy per package type (AFPS 2.0.2,
  * snake_case `schema_version`).
  *
  *   - `agent`       — `schema_version` is REQUIRED by the AFPS schema, so a
  *     missing/invalid one already surfaces as a MANIFEST_SCHEMA error above.
  *     Here we additionally enforce the runtime's supported-MAJOR policy.
- *   - `skill` / `integration` — `schema_version` is OPTIONAL. When present we
- *     enforce the MAJOR policy; when absent we accept it (the AFPS schema does).
- *   - `mcp-server` — carries an MCPB `manifest_version` instead of an AFPS
- *     `schema_version`, so it is exempt from this check entirely.
+ *   - `skill` / `integration` / `mcp-server` — `schema_version` is OPTIONAL at
+ *     the schema level. When present we enforce the MAJOR policy; when absent
+ *     we accept it. AFPS 2.0.2 lifted `schema_version` to the root of
+ *     mcp-server (§3.4), so mcp-server is no longer exempt — it gets the same
+ *     check as skill/integration.
  */
 function checkSchemaVersion(
   type: unknown,
@@ -232,13 +230,11 @@ function checkSchemaVersion(
   identity: PackageIdentity,
   ctx: { supportedMajors: readonly number[]; issues: BundleValidationIssue[] },
 ): void {
-  if (type === "mcp-server") return;
-
   const schemaVersion = (data as { schema_version?: unknown }).schema_version;
 
   if (typeof schemaVersion !== "string" || schemaVersion.length === 0) {
     // agent REQUIRES schema_version (already flagged by MANIFEST_SCHEMA);
-    // skill/integration may omit it — accept silently.
+    // skill/integration/mcp-server may omit it — accept silently.
     if (type === "agent") {
       ctx.issues.push({
         code: "SCHEMA_VERSION_MISSING",

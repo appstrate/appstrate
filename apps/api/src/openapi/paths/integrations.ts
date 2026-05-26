@@ -157,16 +157,32 @@ const authStatusSchema = {
     "type",
     "required",
     "scopes",
+    "resource",
     "audience",
     "connections",
     "has_oauth_client",
   ],
   properties: {
     auth_key: { type: "string" },
-    type: { type: "string", enum: ["oauth2", "api_key", "basic", "custom"] },
+    type: {
+      type: "string",
+      enum: ["oauth2", "api_key", "basic", "mtls", "custom"],
+      description:
+        "Auth method type (AFPS 2.0.2 §7.2). `mtls` was added in v2.0.1 — client cert + key are supplied via `credentials.schema` and injected at runtime through `delivery.files`.",
+    },
     required: { type: "boolean" },
     scopes: { type: "array", items: { type: "string" } },
-    audience: { type: ["string", "null"] },
+    resource: {
+      type: ["string", "null"],
+      description:
+        "RFC 8707 resource indicator declared by the manifest (`auths.{key}.resource`). AFPS 2.0 §7.3 name — matches the RFC.",
+    },
+    audience: {
+      type: ["string", "null"],
+      deprecated: true,
+      description:
+        "Deprecated alias for `resource`. AFPS 2.0 §7.3 (RFC 8707) renamed the wire field; `audience` is kept for one release window for back-compat.",
+    },
     connections: { type: "array", items: integrationConnectionSchema },
     has_oauth_client: { type: "boolean" },
   },
@@ -208,7 +224,7 @@ const integrationDetailSchema = {
     // Effective agent-facing tool catalog. Resolved server-side from the
     // referenced mcp-server's MCPB `tools[]` (local source) minus
     // `hidden_tools` and auto-hidden connect.tool primitives. Falls back
-    // to `manifest.tools` keys when the mcp-server is absent.
+    // to `manifest.tools_policy` keys when the mcp-server is absent.
     tool_catalog: { type: "array", items: toolCatalogEntrySchema },
   },
 } as const;

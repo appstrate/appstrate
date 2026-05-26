@@ -22,20 +22,19 @@ import { unzipArtifact } from "@appstrate/core/zip";
 
 const DEC = new TextDecoder();
 
-/** A self-contained author-time MCPB (`mcp-server`) manifest. */
+/** A self-contained author-time MCPB (`mcp-server`) manifest (AFPS 2.0.2 §3.4). */
 function authorManifest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     manifest_version: "0.3",
-    name: "gmail-server",
+    name: "@official/gmail",
     version: "1.0.0",
+    type: "mcp-server",
+    schema_version: "2.0",
     display_name: "Gmail Server",
     server: {
       type: "node",
       entry_point: "./server/index.js",
       mcp_config: { command: "node", args: ["./server/index.js"] },
-    },
-    _meta: {
-      "dev.afps/mcp-server": { name: "@official/gmail", type: "mcp-server" },
     },
     ...overrides,
   };
@@ -151,8 +150,8 @@ describe("afps bundle — CLI", () => {
     );
     expect(code).toBe(0);
     const out = io.stdoutText();
-    expect(out).toContain('"dev.afps/mcp-server"');
     expect(out).toContain('"@official/gmail"');
+    expect(out).toContain('"type": "mcp-server"');
   });
 
   it("rejects a structurally invalid manifest with exit 1", async () => {

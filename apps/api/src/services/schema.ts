@@ -153,7 +153,10 @@ export const validateConfig = validateConfigCore;
  */
 export function validateConnectionCredentials(
   schema: JSONSchemaObject | undefined,
-  credentials: Record<string, string>,
+  // Credential values can be any JSON type per JSON Schema 2020-12 §7.5 —
+  // numbers, booleans, objects, arrays, not just strings. The AJV validator
+  // honours the manifest schema's `type` declarations regardless.
+  credentials: Record<string, unknown>,
 ): ValidationResult {
   if (!schema?.properties || Object.keys(schema.properties).length === 0) {
     return { valid: true, errors: [], data: credentials };

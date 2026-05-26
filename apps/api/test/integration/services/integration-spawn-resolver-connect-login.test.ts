@@ -52,7 +52,7 @@ function runStartManifest(name = INTEG): IntegrationManifest {
     },
     // The agent may pick `fetch_invoices`; the login tool itself must never
     // surface to the agent regardless of selection.
-    tools: { fetch_invoices: {}, login: {} },
+    tools_policy: { fetch_invoices: {}, login: {} },
   });
 }
 
@@ -208,7 +208,7 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
           }),
         },
       },
-      tools: { fetch_invoices: {}, login: {} },
+      tools_policy: { fetch_invoices: {}, login: {} },
     });
     await seedPackage({
       id: INTEG,

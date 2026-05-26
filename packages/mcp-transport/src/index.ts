@@ -312,6 +312,7 @@ export {
 // duplicating constants.
 export {
   UPSTREAM_META_KEY,
+  UPSTREAM_META_KEY_LEGACY,
   UPSTREAM_HEADER_ALLOWLIST,
   type UpstreamMeta,
 } from "./upstream-meta.ts";

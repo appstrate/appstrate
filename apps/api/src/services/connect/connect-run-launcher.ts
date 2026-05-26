@@ -57,6 +57,23 @@ import type { CredentialBundle } from "./strategy.ts";
 const RESULT_SENTINEL = "APPSTRATE_CONNECT_RESULT:";
 const ERROR_SENTINEL = "APPSTRATE_CONNECT_ERROR:";
 
+/**
+ * Coerce a credential bag's values to strings. The sidecar's MITM substitutes
+ * `{{name}}` placeholders only on strings (a URL or header value template
+ * has no notion of "substitute a number"), so non-string credential values
+ * are JSON-stringified at this boundary. The route layer's
+ * `connectFieldsSchema` accepts JSON-typed credentials per JSON Schema
+ * 2020-12 §7.5; this is where they get serialized for the wire-level
+ * substitution contract.
+ */
+function stringifyInputs(inputs: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(inputs)) {
+    out[k] = typeof v === "string" ? v : JSON.stringify(v);
+  }
+  return out;
+}
+
 /** How long to wait for the connect-run sidecar to mint the session before killing it. */
 const DEFAULT_CONNECT_TIMEOUT_MS = 60_000;
 
@@ -144,7 +161,7 @@ export async function buildConnectLoginSpec(
       version: execution.manifest.version,
       server: {
         type: run.type,
-        entryPoint: run.entry_point,
+        entry_point: run.entry_point,
       },
     },
     spawnEnv: {},
@@ -170,7 +187,9 @@ export async function buildConnectLoginSpec(
       authType: auth.type,
       authorizedUris: [...authorizedUris],
       deliveryHttp,
-      inputs: execution.inputs,
+      // The sidecar's MITM substitutes `{{name}}` placeholders only on strings —
+      // JSON-stringify non-string credential values so they round-trip cleanly.
+      inputs: stringifyInputs(execution.inputs),
       ...(reauthOn ? { reauthOn: [...reauthOn] } : {}),
     },
   };

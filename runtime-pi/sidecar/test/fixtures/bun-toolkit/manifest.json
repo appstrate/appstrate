@@ -50,7 +50,7 @@
       }
     }
   },
-  "tools": {
+  "tools_policy": {
     "fetch_echo": {
       "required_auth_key": "primary",
       "required_scopes": ["read"],

@@ -258,8 +258,13 @@ export async function resolveLiveIntegrationCredentials(
     authType: authDef.type,
     fields: Object.freeze({ ...fields }),
     authorizedUris: Object.freeze([...(authDef.authorized_uris ?? [])]),
-    // AFPS 2.0 §7.3 renamed `audience` → `resource` (RFC 8707).
-    ...(authDef.resource !== undefined ? { audience: authDef.resource } : {}),
+    // AFPS 2.0 §7.3 (RFC 8707) names this field `resource`. We dual-emit
+    // `{ resource, audience: resource }` for one release window so sidecars /
+    // external consumers built against the pre-rename wire keep working.
+    // `audience` is the deprecated alias — drop in a future release.
+    ...(authDef.resource !== undefined
+      ? { resource: authDef.resource, audience: authDef.resource }
+      : {}),
     ...(connection.expiresAt ? { expiresAt: connection.expiresAt.toISOString() } : {}),
     ...(connection.scopesGranted.length > 0
       ? { scopesGranted: Object.freeze([...connection.scopesGranted]) }

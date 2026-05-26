@@ -24,10 +24,9 @@
 
 import {
   integrationManifestSchema as afpsIntegrationManifestSchema,
-  uploadProtocolEnum,
+  RESERVED_UPLOAD_PROTOCOLS,
   type IntegrationManifest as AfpsIntegrationManifest,
 } from "@afps-spec/schema";
-import { z } from "zod";
 import type { ManifestIntegrationEntry } from "./dependencies.ts";
 
 // ─────────────────────────────────────────────
@@ -35,13 +34,22 @@ import type { ManifestIntegrationEntry } from "./dependencies.ts";
 // ─────────────────────────────────────────────
 
 /**
- * Resumable-upload protocols an `api`-source integration advertises
- * (`source.api.upload_protocols`, AFPS §7.1). Re-exported from
- * `@afps-spec/schema` so the runtime-pi upload adapters stay pinned to the
- * canonical enum.
+ * Resumable-upload protocols an `api`-source integration MAY advertise
+ * (`source.api.upload_protocols`, AFPS §7.1 / §7.5). AFPS 2.0.2 dropped the
+ * closed enum in favour of an open string array of *reserved* values:
+ * producers MAY emit other (reverse-DNS-qualified) values and consumers MUST
+ * tolerate them. The runtime-pi upload adapters use this list to recognise
+ * the well-known protocols; non-reserved values flow through as opaque
+ * strings.
  */
-export const integrationUploadProtocolEnum = uploadProtocolEnum;
-export type IntegrationUploadProtocol = z.infer<typeof integrationUploadProtocolEnum>;
+export const RESERVED_INTEGRATION_UPLOAD_PROTOCOLS = RESERVED_UPLOAD_PROTOCOLS;
+/**
+ * @deprecated AFPS 2.0.2 replaced the closed enum with an open string array.
+ * The type is now `string` and the constant {@link RESERVED_INTEGRATION_UPLOAD_PROTOCOLS}
+ * lists the values reserved by the spec. Kept as a back-compat alias for
+ * downstream consumers; will be removed in a follow-up phase.
+ */
+export type IntegrationUploadProtocol = string;
 
 // ─────────────────────────────────────────────
 // Integration manifest (AFPS 2.0 + Appstrate cross-field rules)
@@ -61,7 +69,7 @@ export type IntegrationUploadProtocol = z.infer<typeof integrationUploadProtocol
  *   2. `default_scopes` ⊆ `scope_catalog` (when both declared).
  *   3. `scope_catalog[].implies` targets MUST exist in the catalog; no
  *      self-imply.
- *   4. `tools.{name}.required_auth_key` MUST match an `auths` key, and
+ *   4. `tools_policy.{name}.required_auth_key` MUST match an `auths` key, and
  *      `required_scopes` ⊆ the targeted auth's `scope_catalog`; a tool that
  *      declares `required_scopes` on a multi-auth integration MUST disambiguate
  *      with `required_auth_key`.
@@ -166,17 +174,17 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
     }
   }
 
-  // (4) tools.{name} cross-field validation.
-  if (manifest.tools) {
+  // (4) tools_policy.{name} cross-field validation.
+  if (manifest.tools_policy) {
     const authKeys = Object.keys(auths);
-    for (const [toolName, tool] of Object.entries(manifest.tools)) {
+    for (const [toolName, tool] of Object.entries(manifest.tools_policy)) {
       let targetAuthKey: string | undefined;
       if (tool.required_auth_key) {
         if (!authKeys.includes(tool.required_auth_key)) {
           ctx.addIssue({
             code: "custom",
-            message: `tools.${toolName}.required_auth_key "${tool.required_auth_key}" does not match any auths.{key}`,
-            path: ["tools", toolName, "required_auth_key"],
+            message: `tools_policy.${toolName}.required_auth_key "${tool.required_auth_key}" does not match any auths.{key}`,
+            path: ["tools_policy", toolName, "required_auth_key"],
           });
           continue;
         }
@@ -186,8 +194,8 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
       } else if (authKeys.length > 1 && tool.required_scopes && tool.required_scopes.length > 0) {
         ctx.addIssue({
           code: "custom",
-          message: `tools.${toolName}.required_scopes declared but the integration has multiple auths; add required_auth_key to disambiguate`,
-          path: ["tools", toolName, "required_auth_key"],
+          message: `tools_policy.${toolName}.required_scopes declared but the integration has multiple auths; add required_auth_key to disambiguate`,
+          path: ["tools_policy", toolName, "required_auth_key"],
         });
         continue;
       }
@@ -200,8 +208,8 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
             if (!catalog.has(s)) {
               ctx.addIssue({
                 code: "custom",
-                message: `tools.${toolName}.required_scopes contains "${s}" not declared in auths.${targetAuthKey}.scope_catalog`,
-                path: ["tools", toolName, "required_scopes"],
+                message: `tools_policy.${toolName}.required_scopes contains "${s}" not declared in auths.${targetAuthKey}.scope_catalog`,
+                path: ["tools_policy", toolName, "required_scopes"],
               });
             }
           }
@@ -270,13 +278,13 @@ export const API_CALL_TOOL_NAME = "api_call";
 
 /**
  * Names of MCP tools the integration declares POLICY for in its top-level
- * `tools` record. Empty when the integration didn't opt into per-tool
- * metadata. This is NOT the catalog of exposed tools — `tools` is a sparse
- * policy table. The catalog comes from
+ * `tools_policy` record. Empty when the integration didn't opt into per-tool
+ * metadata. This is NOT the catalog of exposed tools — `tools_policy` is a
+ * sparse policy table. The catalog comes from
  * {@link resolveIntegrationToolCatalog}.
  */
 export function getDeclaredToolNames(manifest: IntegrationManifest): string[] {
-  return manifest.tools ? Object.keys(manifest.tools) : [];
+  return manifest.tools_policy ? Object.keys(manifest.tools_policy) : [];
 }
 
 /** The `_meta` key carrying Appstrate's connect-tool extension on an auth's connect block. */
@@ -286,11 +294,34 @@ export const APPSTRATE_CONNECT_META_KEY = "dev.appstrate/connect";
  * Tool names referenced as a run-start `connect.tool` across all auths.
  * Auto-hidden from the agent surface — these are credential-acquisition
  * primitives the platform invokes at boot, not agent capabilities.
+ *
+ * Reads two locations in this priority order:
+ *   1. `connect.tool.name` (string) — AFPS 2.0 §7.7 spec-natural location.
+ *      `connect.tool` is the canonical block for the orchestrated-acquisition
+ *      mode; `name` is the tool reference. Preferred form for new manifests.
+ *   2. `connect._meta["dev.appstrate/connect"].tool` — legacy vendor-extension
+ *      location used before the spec-natural `connect.tool.name` shape was
+ *      adopted. Kept for back-compat so older published manifests keep
+ *      auto-hiding their connect tool.
  */
 export function getConnectToolNames(manifest: IntegrationManifest): string[] {
   const names: string[] = [];
   for (const auth of Object.values(manifest.auths ?? {})) {
-    const connect = (auth as { connect?: { _meta?: Record<string, { tool?: unknown }> } }).connect;
+    const connect = (
+      auth as {
+        connect?: {
+          tool?: { name?: unknown };
+          _meta?: Record<string, { tool?: unknown }>;
+        };
+      }
+    ).connect;
+    // (1) spec-natural — `connect.tool.name`
+    const specNatural = connect?.tool?.name;
+    if (typeof specNatural === "string" && specNatural.length > 0) {
+      names.push(specNatural);
+      continue;
+    }
+    // (2) legacy vendor extension — `connect._meta["dev.appstrate/connect"].tool`
     const meta = connect?._meta?.[APPSTRATE_CONNECT_META_KEY];
     const t = meta?.tool;
     if (typeof t === "string" && t.length > 0) names.push(t);
@@ -298,7 +329,7 @@ export function getConnectToolNames(manifest: IntegrationManifest): string[] {
   return names;
 }
 
-/** Effective per-tool policy as carried in `integration.tools[name]`. */
+/** Effective per-tool policy as carried in `integration.tools_policy[name]`. */
 export interface IntegrationToolPolicy {
   requiredScopes?: readonly string[];
   requiredAuthKey?: string;
@@ -309,7 +340,7 @@ export interface IntegrationToolPolicy {
 export interface IntegrationToolCatalogEntry {
   name: string;
   description?: string;
-  /** Present iff `integration.tools[name]` declared metadata for this tool. */
+  /** Present iff `integration.tools_policy[name]` declared metadata for this tool. */
   policy?: IntegrationToolPolicy;
 }
 
@@ -319,7 +350,7 @@ export interface ResolveIntegrationToolCatalogInput {
    * Verbatim MCPB `tools[]` from the referenced mcp-server (local source
    * only). Pass `undefined` for remote/api sources or when the mcp-server
    * manifest is unavailable — the resolver then falls back to
-   * `integration.tools` keys.
+   * `integration.tools_policy` keys.
    */
   mcpServerTools?: ReadonlyArray<{ name: string; description?: string }>;
 }
@@ -331,10 +362,10 @@ export interface ResolveIntegrationToolCatalogInput {
  *   1. Base catalog
  *      - api source        → synthetic `[api_call]`
  *      - local + mcpServerTools provided → MCPB-canonical entries
- *      - otherwise          → `integration.tools` keys (sparse fallback)
+ *      - otherwise          → `integration.tools_policy` keys (sparse fallback)
  *   2. Subtract `integration.hidden_tools` (explicit opt-out)
  *   3. Subtract `getConnectToolNames` (auto-hide run-start primitives)
- *   4. Attach policy from `integration.tools[name]` when present
+ *   4. Attach policy from `integration.tools_policy[name]` when present
  */
 export function resolveIntegrationToolCatalog(
   input: ResolveIntegrationToolCatalogInput,
@@ -358,14 +389,12 @@ export function resolveIntegrationToolCatalog(
     ...getConnectToolNames(integration),
   ]);
 
-  // Step 4 — attach policy from the sparse `tools{}` table
-  const policyTable = integration.tools ?? {};
+  // Step 4 — attach policy from the sparse `tools_policy{}` table
+  const policyTable = integration.tools_policy ?? {};
   const out: IntegrationToolCatalogEntry[] = [];
   for (const entry of base) {
     if (hidden.has(entry.name)) continue;
-    const raw = policyTable[entry.name] as
-      | { required_scopes?: string[]; required_auth_key?: string; url_patterns?: unknown[] }
-      | undefined;
+    const raw = policyTable[entry.name];
     if (!raw) {
       out.push(entry);
       continue;
@@ -373,8 +402,8 @@ export function resolveIntegrationToolCatalog(
     out.push({
       ...entry,
       policy: {
-        requiredScopes: raw.required_scopes,
-        requiredAuthKey: raw.required_auth_key,
+        requiredScopes: raw.required_scopes as readonly string[] | undefined,
+        requiredAuthKey: raw.required_auth_key as string | undefined,
         urlPatterns: raw.url_patterns as IntegrationToolPolicy["urlPatterns"],
       },
     });
@@ -414,7 +443,7 @@ export function getApiCallConfig(
 
 /**
  * URL patterns a single tool will reach upstream, looked up against
- * `tools.{name}.url_patterns`. Returns `undefined` when the tool isn't
+ * `tools_policy.{name}.url_patterns`. Returns `undefined` when the tool isn't
  * declared or didn't declare patterns. The distinction between "no entry" and
  * "empty array" matters: an explicit empty array means "tool talks to
  * nothing".
@@ -423,7 +452,7 @@ export function getToolUrlPatterns(
   manifest: IntegrationManifest,
   toolName: string,
 ): ReadonlyArray<{ pattern: string; methods?: readonly string[] }> | undefined {
-  return manifest.tools?.[toolName]?.url_patterns as
+  return manifest.tools_policy?.[toolName]?.url_patterns as
     | ReadonlyArray<{ pattern: string; methods?: readonly string[] }>
     | undefined;
 }
@@ -446,15 +475,15 @@ export function requiredAuthKeysForAgent(
   if (declaredAuths.length === 0) return [];
   if (declaredAuths.length === 1) return declaredAuths;
 
-  const toolsRecord = manifest.tools ?? {};
+  const toolsRecord = manifest.tools_policy ?? {};
   const out = new Set<string>();
   for (const toolName of agentTools ?? []) {
     const tool = toolsRecord[toolName];
-    if (!tool || !tool.required_auth_key) continue;
+    if (!tool || typeof tool.required_auth_key !== "string") continue;
     if (declaredAuths.includes(tool.required_auth_key)) out.add(tool.required_auth_key);
   }
-  // The generic `api_call` tool isn't in `manifest.tools`; pin the auth it
-  // draws from (the api source) when selected.
+  // The generic `api_call` tool isn't in `manifest.tools_policy`; pin the auth
+  // it draws from (the api source) when selected.
   if (agentTools?.includes(API_CALL_TOOL_NAME)) {
     const cfg = getApiCallConfig(manifest);
     if (cfg && declaredAuths.includes(cfg.authKey)) out.add(cfg.authKey);
@@ -498,7 +527,7 @@ export function scopesContributedByTools(input: {
   agentTools: readonly string[] | undefined;
 }): string[] {
   if (!input.agentTools || input.agentTools.length === 0) return [];
-  const toolsRecord = input.manifest.tools;
+  const toolsRecord = input.manifest.tools_policy;
   if (!toolsRecord) return [];
 
   const authKeys = input.manifest.auths ? Object.keys(input.manifest.auths) : [];
@@ -507,11 +536,12 @@ export function scopesContributedByTools(input: {
   const out = new Set<string>();
   for (const toolName of input.agentTools) {
     const tool = toolsRecord[toolName];
-    if (!tool || !tool.required_scopes || tool.required_scopes.length === 0) continue;
+    const requiredScopes = tool?.required_scopes as string[] | undefined;
+    if (!tool || !requiredScopes || requiredScopes.length === 0) continue;
     if (isSingleAuth) {
       if (authKeys[0] !== input.authKey) continue;
     } else if (tool.required_auth_key !== input.authKey) continue;
-    for (const s of tool.required_scopes) out.add(s);
+    for (const s of requiredScopes) out.add(s);
   }
   return [...out];
 }

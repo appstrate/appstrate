@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Appstrate
 
-import {
-  integrationUploadProtocolEnum,
-  type IntegrationUploadProtocol,
-} from "@appstrate/core/integration";
+import { RESERVED_INTEGRATION_UPLOAD_PROTOCOLS } from "@appstrate/core/integration";
 
 /**
  * `UploadAdapter` interface — the contract every chunked-upload
@@ -31,18 +28,17 @@ import {
 /**
  * Stable protocol identifier surfaced through the upload tool's
  * `uploadProtocol` enum and through integration manifests'
- * `apiCall.uploadProtocols[]`.
+ * `source.api.upload_protocols[]`.
  *
- * Sourced from `@appstrate/core/integration` (`integrationUploadProtocolEnum`)
- * so the runtime's gating enum cannot drift from the AFPS canonical set.
- *
- * Add a new entry by extending `integrationUploadProtocolEnum` in
- * `@appstrate/core/integration`, publishing a minor bump, and registering a
- * matching adapter in `./index.ts` — the resolver's `ADAPTERS[protocol]`
- * lookup yields `undefined` for any value not present in the registry, which
- * the resolver surfaces to the agent as a structured failure.
+ * AFPS 2.0.2 dropped the closed enum in favour of an open string array; the
+ * runtime treats the protocol as an opaque `string` and recognises the
+ * well-known reserved values via {@link RESERVED_INTEGRATION_UPLOAD_PROTOCOLS}
+ * from `@appstrate/core/integration`. Producers MAY emit other
+ * (reverse-DNS-qualified) values; consumers tolerate them and surface a
+ * structured "no adapter registered" failure when no matching entry exists in
+ * `./index.ts`'s `ADAPTERS` map.
  */
-export type UploadProtocol = IntegrationUploadProtocol;
+export type UploadProtocol = string;
 
 /**
  * Outcome of a single `apiCall` issued by an adapter.
@@ -249,10 +245,11 @@ export interface UploadAdapter {
 }
 
 /**
- * Set of all valid `uploadProtocol` values. Useful for schema validation
+ * Set of *reserved* `uploadProtocol` values. Useful for schema validation
  * in the Pi tool surface. Sourced from `@appstrate/core/integration`
- * (`integrationUploadProtocolEnum`) — the same enum the manifest schema
- * validates `apiCall.uploadProtocols` against — so the runtime's gating
- * enum cannot drift from the canonical set.
+ * (`RESERVED_INTEGRATION_UPLOAD_PROTOCOLS`) — the same list AFPS reserves
+ * for the well-known protocols — so the runtime's recognition set cannot
+ * drift from the canonical reserved set. Per AFPS 2.0.2 the field is open
+ * (producers MAY emit other values); consumers SHOULD ignore unknown ones.
  */
-export const UPLOAD_PROTOCOLS: readonly UploadProtocol[] = integrationUploadProtocolEnum.options;
+export const UPLOAD_PROTOCOLS: readonly UploadProtocol[] = RESERVED_INTEGRATION_UPLOAD_PROTOCOLS;

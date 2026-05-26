@@ -30,15 +30,18 @@ const ENC = new TextEncoder();
 const DEC = new TextDecoder();
 
 /**
- * A valid author-time MCPB (`mcp-server`) manifest. The vendoring source is
- * declared under `_meta["dev.appstrate/vendor"]`; the AFPS identity lives under
- * `_meta["dev.afps/mcp-server"]`.
+ * A valid author-time MCPB (`mcp-server`) manifest (AFPS 2.0.2). The
+ * vendoring source is declared under `_meta["dev.appstrate/vendor"]`. AFPS
+ * 2.0.2 (§3.4) lifted the scoped identity (`name`, `type`, `schema_version`)
+ * to the manifest root.
  */
 function authorManifest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   const base: Record<string, unknown> = {
     manifest_version: "0.3",
-    name: "widget-server",
+    name: "@official/widget",
     version: "1.0.0",
+    type: "mcp-server",
+    schema_version: "2.0",
     display_name: "Widget Server",
     server: {
       type: "node",
@@ -46,7 +49,6 @@ function authorManifest(overrides: Record<string, unknown> = {}): Record<string,
       mcp_config: { command: "node", args: ["./server/index.js"] },
     },
     _meta: {
-      "dev.afps/mcp-server": { name: "@official/widget", type: "mcp-server" },
       "dev.appstrate/vendor": {
         source: "npm",
         identifier: "@modelcontextprotocol/server-widget",
@@ -62,16 +64,15 @@ function authorManifest(overrides: Record<string, unknown> = {}): Record<string,
 function selfContainedManifest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     manifest_version: "0.3",
-    name: "widget-server",
+    name: "@official/widget",
     version: "1.0.0",
+    type: "mcp-server",
+    schema_version: "2.0",
     display_name: "Widget Server",
     server: {
       type: "node",
       entry_point: "./server/index.js",
       mcp_config: { command: "node", args: ["./server/index.js"] },
-    },
-    _meta: {
-      "dev.afps/mcp-server": { name: "@official/widget", type: "mcp-server" },
     },
     ...overrides,
   };
@@ -128,16 +129,17 @@ describe("packDeterministicZip", () => {
 });
 
 describe("suggestBundleFileName", () => {
-  it("uses the scoped AFPS identity, escaping scope separators", () => {
+  it("uses the scoped root identity, escaping scope separators", () => {
+    // AFPS 2.0.2 (§3.4): the scoped identity lives at the manifest root.
     expect(
       suggestBundleFileName({
-        name: "widget-server",
+        name: "@official/widget",
         version: "1.2.3",
-        _meta: { "dev.afps/mcp-server": { name: "@official/widget", type: "mcp-server" } },
+        type: "mcp-server",
       } as never),
     ).toBe("official__widget@1.2.3.afps");
   });
-  it("falls back to top-level name when AFPS identity is absent", () => {
+  it("handles an unscoped root name as a flat filename", () => {
     expect(suggestBundleFileName({ name: "widget", version: "0.0.1" } as never)).toBe(
       "widget@0.0.1.afps",
     );
@@ -323,8 +325,8 @@ describe("bundleMcpServer — author sugars", () => {
   it("uses pypi resolver with stubbed deps and rewrites to binary", async () => {
     const result = await bundleMcpServer({
       manifest: authorManifest({
+        name: "@official/git",
         _meta: {
-          "dev.afps/mcp-server": { name: "@official/git", type: "mcp-server" },
           "dev.appstrate/vendor": {
             source: "pypi",
             identifier: "mcp-server-git",
@@ -556,7 +558,6 @@ describe("readVendorSource", () => {
   it("rejects an unknown vendor source kind", () => {
     const m = authorManifest({
       _meta: {
-        "dev.afps/mcp-server": { name: "@official/widget", type: "mcp-server" },
         "dev.appstrate/vendor": { source: "cargo", identifier: "x", version: "1.0.0" },
       },
     });
@@ -566,7 +567,6 @@ describe("readVendorSource", () => {
   it("rejects a vendor source missing its identifier", () => {
     const m = authorManifest({
       _meta: {
-        "dev.afps/mcp-server": { name: "@official/widget", type: "mcp-server" },
         "dev.appstrate/vendor": { source: "npm", version: "1.0.0" },
       },
     });
@@ -576,7 +576,6 @@ describe("readVendorSource", () => {
   it("rejects a vendor source missing its version", () => {
     const m = authorManifest({
       _meta: {
-        "dev.afps/mcp-server": { name: "@official/widget", type: "mcp-server" },
         "dev.appstrate/vendor": { source: "pypi", identifier: "x" },
       },
     });

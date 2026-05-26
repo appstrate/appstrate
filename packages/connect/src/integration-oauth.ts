@@ -76,7 +76,17 @@ export interface InitiateIntegrationOAuthInput {
    * (`token_endpoint_auth_method=none`). Carried into state for the callback.
    */
   clientSecret: string;
-  /** Token endpoint client-auth method (`token_endpoint_auth_method`). Defaults to `client_secret_post`. */
+  /**
+   * Token endpoint client-auth method (`token_endpoint_auth_method`).
+   *
+   * AFPS 2.0.1 (CC-10, §7.3, CHANGELOG): when the manifest does not specify
+   * a value, the default is now `"client_secret_basic"` — the RFC 8414 §2 /
+   * RFC 7591 §2 default. AFPS 2.0.0 documented `"client_secret_post"` as the
+   * default; the flip aligns with the OAuth 2.1 ecosystem (Anthropic, Google,
+   * GitHub, Slack all accept Basic; some IdPs require it).
+   *
+   * Manifest-explicit values continue to work unchanged.
+   */
   tokenEndpointAuthMethod?: "client_secret_post" | "client_secret_basic" | "none";
   /** Scopes requested in the authorize URL (joined per `scopeSeparator`). */
   scopes?: string[];
@@ -142,7 +152,10 @@ export async function initiateIntegrationOAuth(
   store: OAuthStateStore,
   input: InitiateIntegrationOAuthInput,
 ): Promise<InitiateIntegrationOAuthResult> {
-  const tokenAuthMethod = input.tokenEndpointAuthMethod ?? "client_secret_post";
+  // AFPS 2.0.1 (CC-10, §7.3): default-when-missing flipped from
+  // `"client_secret_post"` to `"client_secret_basic"` — RFC 8414 §2 /
+  // RFC 7591 §2 default. Manifest-explicit values continue to work.
+  const tokenAuthMethod = input.tokenEndpointAuthMethod ?? "client_secret_basic";
   const scopeSeparator = input.scopeSeparator ?? " ";
   const uniqueScopes = [...new Set(input.scopes ?? [])];
   const scopeString = uniqueScopes.join(scopeSeparator);
@@ -291,7 +304,9 @@ export async function handleIntegrationOAuthCallback(
     tokenEndpoint: integration.tokenEndpoint,
     clientId: integration.clientId ?? "",
     clientSecret: integration.clientSecret ?? "",
-    tokenEndpointAuthMethod: integration.tokenEndpointAuthMethod ?? "client_secret_post",
+    // AFPS 2.0.1 (CC-10, §7.3): default-when-missing flipped from
+    // `"client_secret_post"` to `"client_secret_basic"`.
+    tokenEndpointAuthMethod: integration.tokenEndpointAuthMethod ?? "client_secret_basic",
     codeVerifier: stateRow.codeVerifier || undefined,
     redirectUri: stateRow.redirectUri,
     code,

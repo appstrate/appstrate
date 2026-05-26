@@ -124,7 +124,7 @@ function spec(overrides?: Partial<IntegrationSpawnSpec>): IntegrationSpawnSpec {
     manifest: {
       name: "@orga/wajax",
       version: "0.1.0",
-      server: { type: "node", entryPoint: "main.js" },
+      server: { type: "node", entry_point: "main.js" },
     },
     spawnEnv: {},
     // The spawn resolver already stripped `login` from the allowlist.

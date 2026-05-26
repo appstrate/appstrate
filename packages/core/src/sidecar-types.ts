@@ -174,7 +174,14 @@ export interface IntegrationSpawnSpec {
      */
     server?: {
       type: string;
-      entryPoint?: string;
+      /**
+       * Path (relative to bundle root) of the spawned server's entry. AFPS
+       * 2.0 §7.4 / MCPB calls this field `entry_point` — snake_case on the
+       * wire and on the spawn spec to avoid a per-type translation hop
+       * (the prior `entryPoint` camelCase was a churn-only divergence
+       * from the manifest the spawn-resolver reads).
+       */
+      entry_point?: string;
       /**
        * AFPS 2.0 — the SEPARATE `mcp-server` package id this integration's
        * `source.kind: "local"` references (`source.server.name`). The sidecar
@@ -188,9 +195,17 @@ export interface IntegrationSpawnSpec {
        * Phase 7 — remote MCP endpoint URL. Required when `server.type` is
        * `"http"`. The sidecar opens a Streamable HTTP MCP client against
        * this URL instead of spawning a runner. Mutually exclusive with
-       * `entryPoint` (enforced by `integrationManifestSchema`).
+       * `entry_point` (enforced by `integrationManifestSchema`).
        */
       url?: string;
+      /**
+       * AFPS 2.0 §7.1 — remote MCP transport selector. Mirrors the
+       * manifest's `source.remote.transport` enum (`"streamable-http" |
+       * "sse"`). Defaults to `"streamable-http"` on the sidecar side when
+       * absent (back-compat for v2.0.0 manifests). Only meaningful when
+       * `server.type === "http"`.
+       */
+      transport?: "streamable-http" | "sse";
     };
   };
   /**
@@ -225,6 +240,24 @@ export interface IntegrationSpawnSpec {
    */
   spawnEnv: Record<string, string>;
   /**
+   * AFPS 2.0.2 §7.6 — `delivery.files` mounts. The sidecar materialises each
+   * entry into the runner's filesystem at the declared absolute path with the
+   * declared POSIX `mode` (default `"0400"`). `content_b64` is the rendered
+   * file body (the `{$credential.<field>}` template applied to the credential
+   * bag) base64-encoded so binary cert/key material survives the JSON wire.
+   *
+   * Sensitive (the bytes are the live credential material) — never logged.
+   * Omitted when no auth declares `delivery.files`. Used primarily for `mtls`
+   * (client cert + key) but available for any auth type whose credential is
+   * naturally a file (custom auth, GCP service-account JSON, …).
+   *
+   * Schema: `<absolute-posix-path>: { content_b64, mode }`. The path key MUST
+   * be absolute, MUST NOT contain `..` segments, and MUST NOT collapse to `/`
+   * (enforced by the resolver via {@link isSafeDeliveryFilePath} — manifests
+   * declaring an unsafe path are skipped with a warning).
+   */
+  fileMounts?: Record<string, { content_b64: string; mode: string }>;
+  /**
    * Phase 1.5 — per-auth `delivery.http` metadata. The sidecar starts a
    * per-integration MITM HTTPS proxy and uses these plans to inject
    * `headerName: headerPrefix + value` on every upstream request whose
@@ -235,6 +268,20 @@ export interface IntegrationSpawnSpec {
    * auths — those integrations stay on the env-delivery-only path.
    */
   httpDeliveryAuths?: Record<string, HttpDeliveryAuthSpec>;
+  /**
+   * R8a defensive filter — names from `manifest.hidden_tools` (AFPS 2.0.2
+   * §3.4 / `integration.schema.json`). Install-time validation already
+   * subtracts these from the agent's tool catalog via
+   * {@link resolveIntegrationToolCatalog}, so in the happy path the
+   * sidecar's allowlist never references a hidden name. The sidecar
+   * applies the same filter at runtime as a belt-and-suspenders guard
+   * against misconfigurations that bypass install-time validation
+   * (test fixtures, direct DB writes, schema relaxations on disk).
+   *
+   * Empty / undefined = no extra filtering (the install-time catalog
+   * resolution is the authoritative source).
+   */
+  hiddenTools?: readonly string[];
   /**
    * Niveau 2 Phase 3 — agent-declared MCP tool allowlist. The sidecar's
    * `McpHost` filters `tools/list` to only expose these tools to the
@@ -258,7 +305,7 @@ export interface IntegrationSpawnSpec {
    * the integration to talk to an unrelated endpoint), the MITM refuses
    * the request before the credential is injected upstream.
    *
-   * Resolved by the platform as `⋃ manifest.tools[t].url_patterns` for
+   * Resolved by the platform as `⋃ manifest.tools_policy[t].url_patterns` for
    * every `t` in {@link toolAllowlist}. Only emitted when EVERY tool in
    * the allowlist declares non-empty `url_patterns` — a single tool
    * without patterns means we can't safely enforce (we'd block legit

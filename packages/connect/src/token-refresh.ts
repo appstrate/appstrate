@@ -78,7 +78,13 @@ export async function performRefreshTokenExchange(
   refreshToken: string,
   opts: { label: string; accessTokenFallback?: string },
 ): Promise<RefreshExchangeResult> {
-  const useBasicAuth = ctx.tokenEndpointAuthMethod === "client_secret_basic";
+  // AFPS 2.0.1+ default for `token_endpoint_auth_method` is
+  // `client_secret_basic` (RFC 8414 §2 / RFC 7591 §2). When the manifest
+  // omits the field, fall through to Basic auth instead of body auth so the
+  // refresh wire matches the wider OAuth 2.1 ecosystem (Anthropic, Google,
+  // GitHub, Slack all accept Basic; some IdPs require it).
+  const tokenAuthMethod = ctx.tokenEndpointAuthMethod ?? "client_secret_basic";
+  const useBasicAuth = tokenAuthMethod === "client_secret_basic";
   const bodyParams: Record<string, string> = {
     grant_type: "refresh_token",
     refresh_token: refreshToken,
@@ -91,7 +97,7 @@ export async function performRefreshTokenExchange(
     response = await fetch(ctx.tokenEndpoint, {
       method: "POST",
       headers: buildTokenHeaders(
-        ctx.tokenEndpointAuthMethod,
+        tokenAuthMethod,
         ctx.clientId,
         ctx.clientSecret,
         ctx.tokenContentType,

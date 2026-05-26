@@ -38,7 +38,12 @@ export type { ConnectContext, BeginOptions, BeginResult, CredentialBundle };
  */
 export type ConnectCompleteInput =
   | { kind: "oauth2-result"; result: IntegrationOAuthCallbackResult }
-  | { kind: "fields"; credentials: Record<string, string> };
+  // `credentials` is typed `Record<string, unknown>` because JSON Schema
+  // 2020-12 §7.5 permits credential field values of any JSON type (number,
+  // boolean, object, array) — narrowing to `string` would silently reject
+  // well-formed non-string credential shapes before the manifest's
+  // `credentials.schema` (AJV) ever sees them.
+  | { kind: "fields"; credentials: Record<string, unknown> };
 
 export interface IntegrationConnectStrategy {
   /** Interactive step (OAuth2 only): authorize URL + state. */
@@ -58,7 +63,7 @@ export interface IntegrationConnectStrategy {
 export function assertFieldsInput(
   input: ConnectCompleteInput,
   strategyName: string,
-): Record<string, string> {
+): Record<string, unknown> {
   if (input.kind !== "fields") {
     throw new Error(`${strategyName}.complete: unexpected input kind '${input.kind}'`);
   }
@@ -66,7 +71,7 @@ export function assertFieldsInput(
 }
 
 /** Reject an empty credential bag with the shared `invalidRequest` UX. */
-export function requireNonEmptyCredentials(credentials: Record<string, string>): void {
+export function requireNonEmptyCredentials(credentials: Record<string, unknown>): void {
   if (!credentials || Object.keys(credentials).length === 0) {
     throw invalidRequest("credentials payload cannot be empty", "credentials");
   }

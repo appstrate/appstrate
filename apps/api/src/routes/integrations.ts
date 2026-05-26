@@ -80,8 +80,15 @@ import { oauthStateStore } from "../services/connect/oauth-state-store.ts";
 // Zod schemas
 // ─────────────────────────────────────────────
 
+// `credentials` is intentionally typed `Record<string, unknown>` here. JSON
+// Schema 2020-12 §7.5 permits credential field values of any JSON type
+// (numbers, booleans, objects, arrays), and the Zod check at the route layer
+// is purely *structural* — tighter shape validation happens against the
+// integration manifest's `credentials.schema` (AJV) downstream. Narrowing to
+// `Record<string, string>` here would silently reject every well-formed
+// non-string credential shape before AJV ever got to see it.
 export const connectFieldsSchema = z.object({
-  credentials: z.record(z.string(), z.string()).refine((c) => Object.keys(c).length > 0, {
+  credentials: z.record(z.string(), z.unknown()).refine((c) => Object.keys(c).length > 0, {
     message: "credentials must contain at least one field",
   }),
 });

@@ -2,41 +2,29 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AFPS 2.0 mcp-server manifest — re-exported from `@afps-spec/schema`.
+ * AFPS 2.0.2 mcp-server manifest — re-exported from `@afps-spec/schema`.
  *
  * An `mcp-server` package's `manifest.json` IS a verbatim MCP Bundle (MCPB)
- * manifest plus the AFPS identity contract under `_meta["dev.afps/mcp-server"]`
- * (AFPS §3.4). The schema stays MCPB-conformant; Appstrate-specific runtime
- * hints live under `_meta["dev.appstrate/mcp-server"]` (the blessed extension
- * point) so a built `mcp-server` still runs unmodified in any MCPB host.
+ * manifest extended with the AFPS identity contract lifted to the root:
+ * `type: "mcp-server"`, the scoped `name`, `schema_version`, and
+ * `dependencies` (AFPS 2.0.2 §3.4 / §11.2). The previous
+ * `_meta["dev.afps/mcp-server"]` identity block was removed in 2.0.2. The
+ * Appstrate-specific runtime hints stay under `_meta["dev.appstrate/mcp-server"]`
+ * (the blessed vendor extension point) so a built `mcp-server` still runs
+ * unmodified in any MCPB host.
  */
 
 import {
   mcpServerManifestSchema,
   mcpServerTypeEnum,
-  mcpServerAfpsMeta,
   type McpServerManifest,
 } from "@afps-spec/schema";
 
-export { mcpServerManifestSchema, mcpServerTypeEnum, mcpServerAfpsMeta };
+export { mcpServerManifestSchema, mcpServerTypeEnum };
 export type { McpServerManifest };
-
-/** The `_meta` key carrying an mcp-server's portable AFPS identity (§3.4). */
-export const MCP_SERVER_META_KEY = "dev.afps/mcp-server";
 
 /** The `_meta` key carrying Appstrate-specific mcp-server runtime hints. */
 export const MCP_SERVER_APPSTRATE_META_KEY = "dev.appstrate/mcp-server";
-
-/**
- * Read an mcp-server's AFPS package identity from
- * `_meta["dev.afps/mcp-server"].name` (the top-level `name` is MCPB-governed,
- * not the AFPS scoped identity — §3.4 / §2.2).
- */
-export function getMcpServerAfpsName(manifest: McpServerManifest): string | undefined {
-  const meta = (manifest as { _meta?: Record<string, unknown> })._meta;
-  const afps = meta?.[MCP_SERVER_META_KEY] as { name?: string } | undefined;
-  return typeof afps?.name === "string" ? afps.name : undefined;
-}
 
 /**
  * Read the Appstrate runtime override from `_meta["dev.appstrate/mcp-server"]
@@ -50,4 +38,52 @@ export function getMcpServerRuntime(manifest: McpServerManifest): string | undef
   const meta = (manifest as { _meta?: Record<string, unknown> })._meta;
   const appstrate = meta?.[MCP_SERVER_APPSTRATE_META_KEY] as { runtime?: unknown } | undefined;
   return typeof appstrate?.runtime === "string" ? appstrate.runtime : undefined;
+}
+
+/**
+ * Read the MCPB `server.mcp_config.env` map — the placeholders an mcp-server
+ * declares for `${user_config.<key>}` substitution at MCPB-host launch time.
+ *
+ * AFPS 2.0.2 §7.6 + §3.4: when a local-source integration's `delivery.env.<var>`
+ * carries `user_config_key`, the AFPS build step injects the rendered value
+ * into the referenced mcp-server's `mcp_config.env` template so the same
+ * package runs in both the Appstrate runtime AND a standalone MCPB host.
+ *
+ * Returns the env map (typically `Record<string, string>` with literal values
+ * or `"${user_config.<key>}"` placeholders) or `null` when absent / malformed.
+ */
+export function getMcpServerMcpConfigEnv(
+  manifest: McpServerManifest,
+): Record<string, string> | null {
+  const server = (manifest as { server?: { mcp_config?: { env?: unknown } } }).server;
+  const env = server?.mcp_config?.env;
+  if (!env || typeof env !== "object" || Array.isArray(env)) return null;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(env as Record<string, unknown>)) {
+    if (typeof v === "string") out[k] = v;
+  }
+  return out;
+}
+
+/**
+ * Pre-render `${user_config.<key>}` placeholders in an MCPB `mcp_config.env`
+ * template against a substitution map. Returns the rendered env block — keys
+ * with no placeholder pass through unchanged; keys whose placeholder resolves
+ * to a value in `substitutions` are replaced.
+ *
+ * Used by the integration spawn resolver (AFPS 2.0.2 §7.6 CC-4) to bridge
+ * `delivery.env.<var>.user_config_key` → mcp-server `mcp_config.env` template.
+ * The substitution map's keys are the `user_config_key` names; the values are
+ * the rendered credential strings.
+ */
+const USER_CONFIG_REF = /\$\{user_config\.([A-Za-z0-9_]+)\}/g;
+export function renderMcpConfigEnv(
+  envTemplate: Readonly<Record<string, string>>,
+  substitutions: Readonly<Record<string, string>>,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(envTemplate)) {
+    out[k] = v.replace(USER_CONFIG_REF, (_match, key: string) => substitutions[key] ?? "");
+  }
+  return out;
 }

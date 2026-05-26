@@ -518,7 +518,7 @@ describe("resolveConnections — insufficient scopes on resolved connection", ()
           },
         },
       },
-      tools: { t1: { required_scopes: ["repo"] } },
+      tools_policy: { t1: { required_scopes: ["repo"] } },
     } as unknown as IntegrationManifest;
   }
 
@@ -680,7 +680,7 @@ describe("resolveConnections — org default", () => {
           },
         },
       },
-      tools: { t1: { required_scopes: ["repo"] } },
+      tools_policy: { t1: { required_scopes: ["repo"] } },
     } as unknown as IntegrationManifest;
     const def = conn({ sharedWithOrg: true, scopesGranted: [] });
     const result = resolveConnections({

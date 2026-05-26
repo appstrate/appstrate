@@ -61,9 +61,10 @@ export interface ConnectToolExecution {
   /**
    * Transient bootstrap secrets (the submitted credential bag). Installed on
    * the egress path so the tool's `api_call` bodies resolve `{{name}}`
-   * placeholders proxy-side. NEVER passed to tool code.
+   * placeholders proxy-side. NEVER passed to tool code. Values are JSON-typed
+   * (any of string/number/boolean/object/array) per JSON Schema 2020-12 §7.5.
    */
-  inputs: Record<string, string>;
+  inputs: Record<string, unknown>;
   /** Names of the bootstrap fields the tool may reference as `{{name}}`. */
   inputFields: string[];
 }

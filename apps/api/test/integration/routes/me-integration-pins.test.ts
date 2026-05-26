@@ -68,7 +68,7 @@ function buildIntegrationManifest() {
         }),
       },
     },
-    tools: { search: {} },
+    tools_policy: { search: {} },
   });
 }
 

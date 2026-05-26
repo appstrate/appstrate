@@ -5232,7 +5232,7 @@
     "public.package_type": {
       "name": "package_type",
       "schema": "public",
-      "values": ["agent", "skill", "integration"]
+      "values": ["agent", "skill", "integration", "mcp-server"]
     },
     "public.run_origin": {
       "name": "run_origin",

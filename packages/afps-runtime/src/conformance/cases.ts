@@ -10,6 +10,12 @@
 
 import { zipSync } from "fflate";
 import {
+  integrationManifestSchema,
+  mcpServerManifestSchema,
+  metaSchema,
+  agentManifestSchema,
+} from "@afps-spec/schema";
+import {
   canonicalBundleDigest,
   generateKeyPair,
   signBundle,
@@ -494,17 +500,378 @@ const L4_EMPTY_SCRIPT: ConformanceCase = {
   },
 };
 
+// ─── AFPS 2.0.2 manifest-shape cases ─────────────────────────────
+//
+// These cases exercise the v2.0.2 spec invariants the bundle-load path does
+// NOT enforce on its own: manifest validation, dependency walking, and
+// `_meta` namespace hygiene. They run validation against the canonical
+// `@afps-spec/schema` (v2) directly so the suite stays portable across
+// language runtimes (third-party runners get the same pass/fail by
+// re-implementing the same validators).
+//
+// L1.6 — mcp-server identity at the manifest root (§3.4 / §11.2).
+//   AFPS 2.0.2 lifted `type`, `name`, and `schema_version` out of the
+//   `_meta["dev.afps/mcp-server"]` block onto the root. Accepting the old
+//   shape (identity ONLY in `_meta`) would silently break tools that key
+//   off the root discriminant.
+const L1_MCP_SERVER_ROOT_IDENTITY: ConformanceCase = {
+  id: "L1.6",
+  level: "L1",
+  title: "mcp-server identity lives at the manifest root (AFPS 2.0.2 §3.4)",
+  run: () => {
+    const goodManifest = {
+      manifest_version: "0.3",
+      name: "@afps/conformance-mcp",
+      version: "1.0.0",
+      type: "mcp-server",
+      schema_version: "2.0",
+      display_name: "Conformance MCP Server",
+      server: {
+        type: "node",
+        entry_point: "main.js",
+        mcp_config: { command: "node", args: ["main.js"] },
+      },
+    };
+    const goodResult = mcpServerManifestSchema.safeParse(goodManifest);
+    if (!goodResult.success) {
+      return fail(
+        `v2.0.2 root-identity manifest rejected: ${goodResult.error.issues
+          .map((i) => `${i.path.join(".")}: ${i.message}`)
+          .join("; ")}`,
+      );
+    }
+
+    // Legacy v2.0.0/v2.0.1 shape — identity ONLY in `_meta`. The root is
+    // missing `type`/`name`/`schema_version`, so the lifted-shape schema
+    // MUST refuse it.
+    const legacyManifest = {
+      manifest_version: "0.3",
+      version: "1.0.0",
+      display_name: "Legacy MCP",
+      server: {
+        type: "node",
+        entry_point: "main.js",
+        mcp_config: { command: "node", args: ["main.js"] },
+      },
+      _meta: {
+        "dev.afps/mcp-server": {
+          name: "@afps/conformance-mcp",
+          type: "mcp-server",
+          schema_version: "2.0",
+        },
+      },
+    };
+    const legacyResult = mcpServerManifestSchema.safeParse(legacyManifest);
+    if (legacyResult.success) {
+      return fail("legacy _meta-only mcp-server identity must be rejected post-2.0.2");
+    }
+    return pass();
+  },
+};
+
+// L1.7 — integration `delivery.http` mutually exclusive with `delivery.env`
+// (AFPS §7.6). The proxy injects the credential header on the way out
+// (`http`) OR the integration server reads it from env / file (`env`/`files`);
+// declaring both on the same auth is contradictory.
+const L1_INTEGRATION_MUTUAL_EXCLUSION: ConformanceCase = {
+  id: "L1.7",
+  level: "L1",
+  title: "integration delivery.http excludes delivery.env on the same auth (§7.6)",
+  run: () => {
+    function manifest(delivery: Record<string, unknown>): Record<string, unknown> {
+      return {
+        name: "@afps/conformance-integ",
+        version: "1.0.0",
+        type: "integration",
+        schema_version: "2.0",
+        display_name: "Conformance Integration",
+        source: { kind: "local", server: { name: "@afps/conformance-integ", version: "^1.0.0" } },
+        auths: {
+          primary: {
+            type: "api_key",
+            authorized_uris: ["https://api.example.com/**"],
+            credentials: {
+              schema: { type: "object", properties: { api_key: { type: "string" } } },
+            },
+            delivery,
+          },
+        },
+      };
+    }
+
+    // (a) http alone — valid.
+    const httpOnly = integrationManifestSchema.safeParse(
+      manifest({
+        http: {
+          in: "header",
+          name: "Authorization",
+          prefix: "Bearer ",
+          value: "{$credential.api_key}",
+        },
+      }),
+    );
+    if (!httpOnly.success) {
+      return fail(
+        `http-only delivery rejected: ${httpOnly.error.issues.map((i) => i.message).join("; ")}`,
+      );
+    }
+
+    // (b) env alone — valid.
+    const envOnly = integrationManifestSchema.safeParse(
+      manifest({ env: { API_KEY: { value: "{$credential.api_key}" } } }),
+    );
+    if (!envOnly.success) {
+      return fail(
+        `env-only delivery rejected: ${envOnly.error.issues.map((i) => i.message).join("; ")}`,
+      );
+    }
+
+    // (c) http + env on the same auth — MUST reject.
+    const both = integrationManifestSchema.safeParse(
+      manifest({
+        http: {
+          in: "header",
+          name: "Authorization",
+          prefix: "Bearer ",
+          value: "{$credential.api_key}",
+        },
+        env: { API_KEY: { value: "{$credential.api_key}" } },
+      }),
+    );
+    if (both.success) {
+      return fail("delivery.http + delivery.env on the same auth must be rejected per §7.6");
+    }
+    return pass();
+  },
+};
+
+// L1.8 — polymorphic `dependencies` values (§4.1). A dependency entry MAY
+// be a bare semver string OR an object carrying per-dep configuration
+// (e.g. integrations declare `scopes`/`auth_key`). The agent schema MUST
+// accept both shapes.
+const L1_POLYMORPHIC_DEPENDENCIES: ConformanceCase = {
+  id: "L1.8",
+  level: "L1",
+  title: "polymorphic dependencies — bare string AND object form (§4.1)",
+  run: () => {
+    const manifest = {
+      name: "@afps/conformance-agent",
+      version: "1.0.0",
+      type: "agent",
+      schema_version: "2.0",
+      display_name: "Conformance Agent",
+      author: "AFPS",
+      dependencies: {
+        skills: {
+          "@afps/skill-bare": "^1.0.0",
+          "@afps/skill-object": { version: "^1.0.0" },
+        },
+        integrations: {
+          "@afps/integration-bare": "^2.0.0",
+          "@afps/integration-object": {
+            version: "^2.0.0",
+            scopes: ["read", "write"],
+            auth_key: "primary",
+          },
+        },
+      },
+    };
+    const result = agentManifestSchema.safeParse(manifest);
+    if (!result.success) {
+      return fail(
+        `polymorphic dependencies rejected: ${result.error.issues
+          .map((i) => `${i.path.join(".")}: ${i.message}`)
+          .join("; ")}`,
+      );
+    }
+    const parsed = result.data as {
+      dependencies?: {
+        integrations?: Record<string, unknown>;
+      };
+    };
+    const integrationsDep = parsed.dependencies?.integrations?.["@afps/integration-object"];
+    if (!integrationsDep || typeof integrationsDep !== "object") {
+      return fail("object-form integration dep dropped during parse");
+    }
+    const obj = integrationsDep as { version?: string; scopes?: unknown; auth_key?: string };
+    if (obj.version !== "^2.0.0" || obj.auth_key !== "primary" || !Array.isArray(obj.scopes)) {
+      return fail(`object-form payload not preserved: ${JSON.stringify(obj)}`);
+    }
+    return pass();
+  },
+};
+
+// L1.9 — `tools_policy` drives per-tool policy (§7.10). 2.0.2 renamed the
+// legacy `tools` map to `tools_policy` to disambiguate from the
+// mcp-server's `tools[]` catalog. Manifests using the new key MUST
+// validate; the new key is what platform helpers read.
+const L1_TOOLS_POLICY: ConformanceCase = {
+  id: "L1.9",
+  level: "L1",
+  title: "tools_policy drives per-tool policy (AFPS 2.0.2 §7.10)",
+  run: () => {
+    const manifest = {
+      name: "@afps/conformance-tp",
+      version: "1.0.0",
+      type: "integration",
+      schema_version: "2.0",
+      display_name: "Conformance Integration",
+      source: { kind: "local", server: { name: "@afps/conformance-tp", version: "^1.0.0" } },
+      auths: {
+        primary: {
+          type: "oauth2",
+          authorized_uris: ["https://api.example.com/**"],
+          authorization_endpoint: "https://auth.example.com/authorize",
+          token_endpoint: "https://auth.example.com/token",
+          scope_catalog: [
+            { value: "read", label: "Read" },
+            { value: "write", label: "Write" },
+          ],
+          default_scopes: ["read"],
+          delivery: {
+            http: {
+              in: "header",
+              name: "Authorization",
+              prefix: "Bearer ",
+              value: "{$credential.access_token}",
+            },
+          },
+        },
+      },
+      tools_policy: {
+        list_things: { required_scopes: ["read"] },
+        write_thing: { required_scopes: ["write"] },
+      },
+    };
+    const result = integrationManifestSchema.safeParse(manifest);
+    if (!result.success) {
+      return fail(
+        `tools_policy manifest rejected: ${result.error.issues
+          .map((i) => `${i.path.join(".")}: ${i.message}`)
+          .join("; ")}`,
+      );
+    }
+    const parsed = result.data as { tools_policy?: Record<string, { required_scopes?: string[] }> };
+    if (!parsed.tools_policy || !parsed.tools_policy["list_things"]) {
+      return fail("tools_policy not preserved on parsed manifest");
+    }
+    if (
+      !Array.isArray(parsed.tools_policy["list_things"]!.required_scopes) ||
+      parsed.tools_policy["list_things"]!.required_scopes![0] !== "read"
+    ) {
+      return fail("tools_policy.required_scopes payload not preserved");
+    }
+    return pass();
+  },
+};
+
+// L2.6 — `_meta` reverse-DNS tolerance (§10.1, Appendix B). Vendor
+// reverse-DNS keys (`dev.appstrate/…`) MUST validate as a valid record;
+// the upstream-MCP reserved prefixes (`mcp.*`, `modelcontextprotocol.*`)
+// are NOT carved out by the AFPS schema itself (the spec defers to
+// producers and to platform-specific validators).
+//
+// The conformance test here is positive-only: the AFPS metaSchema MUST
+// accept any reverse-DNS-namespaced key. The producer-side rejection of
+// the MCP-reserved prefixes lives in Appstrate-specific validation
+// (see `@appstrate/core/validation`) and is exercised by Appstrate's
+// own integration tests — keeping the reserved-prefix gate out of the
+// portable conformance surface avoids forcing third-party runners to
+// implement a producer-side rule the spec marks as "MUST NOT" without
+// a corresponding consumer-side "MUST reject".
+const L2_META_REVERSE_DNS: ConformanceCase = {
+  id: "L2.6",
+  level: "L2",
+  title: "_meta reverse-DNS namespaces validate (AFPS §10.1, Appendix B)",
+  run: () => {
+    const appstrateMeta = { "dev.appstrate/anything": { foo: "bar" } };
+    const vendorMeta = { "com.example.vendor/payload": { kind: "ext" } };
+    const afpsMeta = { "dev.afps/hint": { runtime: "bun" } };
+
+    for (const [label, value] of [
+      ["dev.appstrate prefix", appstrateMeta],
+      ["third-party reverse-DNS", vendorMeta],
+      ["dev.afps blessed prefix", afpsMeta],
+    ] as const) {
+      const result = metaSchema.safeParse(value);
+      if (!result.success) {
+        return fail(`${label} rejected: ${result.error.issues.map((i) => i.message).join("; ")}`);
+      }
+    }
+
+    // Non-object payloads are not valid `_meta` values per §10.1 ("each
+    // value MUST be a JSON object"). The schema's record-of-record shape
+    // refuses them.
+    const stringValue = metaSchema.safeParse({ "dev.appstrate/anything": "string" });
+    if (stringValue.success) {
+      return fail("_meta values must be objects, not bare strings");
+    }
+    return pass();
+  },
+};
+
+// L4.5 — `RunEvent` envelope matches `@afps-spec/types`. The conformance
+// suite emits a sample RunEvent and asserts the canonical envelope keys
+// (`type`/`timestamp`/`runId`) are present and shaped correctly. Type
+// alignment is checked structurally so the suite stays runtime-agnostic.
+const L4_RUN_EVENT_ENVELOPE: ConformanceCase = {
+  id: "L4.5",
+  level: "L4",
+  title: "RunEvent CloudEvents envelope matches @afps-spec/types",
+  run: async (adapter) => {
+    const sample: RunEvent = {
+      type: "output.emitted",
+      timestamp: 1_700_000_000_000,
+      runId: "run_envelope",
+      data: { answer: 42 },
+    };
+    if (!adapter.runScripted) return skipped("adapter does not implement runScripted");
+    const bundle = adapter.loadBundle(buildReferenceBundle());
+    const out = await adapter.runScripted(bundle, { runId: "run_envelope", input: {} }, [sample]);
+    if (out.emitted.length !== 1) {
+      return fail(`expected 1 emitted event, got ${out.emitted.length}`);
+    }
+    const emitted = out.emitted[0]!;
+    // Envelope keys MUST be present and stable across @afps-spec/types
+    // major versions (only the open-payload index signature is allowed
+    // to evolve).
+    if (typeof emitted.type !== "string" || emitted.type.length === 0) {
+      return fail(`event.type missing or not a string: ${String(emitted.type)}`);
+    }
+    if (typeof emitted.timestamp !== "number" || !Number.isFinite(emitted.timestamp)) {
+      return fail(`event.timestamp missing or not a finite number: ${String(emitted.timestamp)}`);
+    }
+    if (typeof emitted.runId !== "string" || emitted.runId.length === 0) {
+      return fail(`event.runId missing or not a string: ${String(emitted.runId)}`);
+    }
+    if (emitted.runId !== "run_envelope") {
+      return fail(`event.runId not propagated: got ${emitted.runId}`);
+    }
+    // Payload index signature — `data` MUST flow through verbatim.
+    const data = emitted["data"] as { answer?: number } | undefined;
+    if (!data || data.answer !== 42) {
+      return fail(`payload data dropped: ${JSON.stringify(emitted)}`);
+    }
+    return pass();
+  },
+};
+
 export const BUILT_IN_CASES: readonly ConformanceCase[] = Object.freeze([
   L1_LOAD_MINIMAL,
   L1_REJECT_NON_ZIP,
   L1_REJECT_MISSING_MANIFEST,
   L1_REJECT_MISSING_PROMPT,
   L1_STRIP_WRAPPER,
+  L1_MCP_SERVER_ROOT_IDENTITY,
+  L1_INTEGRATION_MUTUAL_EXCLUSION,
+  L1_POLYMORPHIC_DEPENDENCIES,
+  L1_TOOLS_POLICY,
   L2_INTERPOLATION,
   L2_SECTIONS,
   L2_INVERTED,
   L2_FUNCTION_SANITIZE,
   L2_RUN_ID,
+  L2_META_REVERSE_DNS,
   L3_VERIFY_DIRECT,
   L3_DETECT_TAMPER,
   L3_UNKNOWN_KEY,
@@ -514,4 +881,5 @@ export const BUILT_IN_CASES: readonly ConformanceCase[] = Object.freeze([
   L4_FINALIZE_EXACTLY_ONCE,
   L4_REDUCER_SEMANTICS,
   L4_EMPTY_SCRIPT,
+  L4_RUN_EVENT_ENVELOPE,
 ]);

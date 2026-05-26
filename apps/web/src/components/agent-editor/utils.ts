@@ -78,9 +78,14 @@ export const DEFAULT_SKILL_CONTENT = "---\nname: \ndescription: \n---\n\n";
  * was 1.x `runtimeTools`) — the built-in runtime tools the agent author opted
  * into (all opt-in, `output` included). Tolerates a missing or malformed field
  * by returning an empty array.
+ *
+ * Reads the canonical snake_case field first, then falls back to the legacy
+ * 1.x camelCase `runtimeTools` for manifests saved before the 2.0 migration.
+ * `setRuntimeTools` always writes the canonical form, so re-saving migrates
+ * the manifest forward.
  */
 export function getRuntimeTools(m: Record<string, unknown>): string[] {
-  const raw = m.runtime_tools;
+  const raw = m.runtime_tools ?? m.runtimeTools;
   return Array.isArray(raw) ? raw.filter((v): v is string => typeof v === "string") : [];
 }
 
@@ -104,16 +109,36 @@ export function getManifestName(m: Record<string, unknown>): { scope: string; id
   return match ? { scope: match[1]!, id: match[2]! } : { scope: "", id: raw };
 }
 
-/** Extract MetadataState from a manifest object. Includes timeout if present (agents only). */
+/** Extract MetadataState from a manifest object. Includes timeout if present (agents only).
+ *
+ * Reads canonical AFPS 2.0 snake_case fields first; falls back to legacy 1.x
+ * camelCase aliases (`displayName`, `runtimeTools`, etc.) so manifests saved
+ * before the 2.0 migration still load into the editor. Writes go through
+ * `metadataToManifestPatch`, which always emits canonical snake_case — so
+ * editing-and-saving an old manifest migrates it forward.
+ *
+ * `author` accepts both the AFPS §3.1 bare-string form and the structured
+ * `{ name, email?, url? }` object form: the editor's metadata UI is a single
+ * text input, so the object form is rendered as its `name` field. Saving
+ * collapses the object to a string — round-tripping the object shape
+ * end-to-end would require an editor UI change.
+ */
 export function manifestToMetadata(m: Record<string, unknown>): MetadataState {
   const { scope, id } = getManifestName(m);
+  const authorRaw = m.author;
+  const authorText =
+    typeof authorRaw === "string"
+      ? authorRaw
+      : authorRaw && typeof authorRaw === "object" && "name" in authorRaw
+        ? ((authorRaw as { name?: string }).name ?? "")
+        : "";
   return {
     id,
     scope,
     version: (m.version as string) ?? "1.0.0",
-    displayName: (m.display_name as string) ?? "",
+    displayName: (m.display_name as string) ?? (m.displayName as string) ?? "",
     description: (m.description as string) ?? "",
-    author: (m.author as string) ?? "",
+    author: authorText,
     keywords: Array.isArray(m.keywords) ? (m.keywords as string[]) : [],
     ...(typeof m.timeout === "number" ? { timeout: m.timeout } : {}),
   };
@@ -140,8 +165,11 @@ export function getResourceEntries(
   m: Record<string, unknown>,
   type: "skills" | "integrations",
 ): ResourceEntry[] {
-  // Integrations: version from `dependencies.integrations`, tools/scopes
-  // from the top-level `integrations` block (niveau 2 scope model).
+  // Integrations: AFPS 2.0.2 §4.1 canonical inline object form —
+  // `dependencies.integrations.<id>` is `{ version, scopes?, tools?, auth_key? }`.
+  // `parseManifestIntegrations` merges canonical + the deprecated
+  // `integrations_configuration` alias + a legacy top-level `integrations`
+  // block (back-compat for manifests saved before AFPS 2.0.2).
   if (type === "integrations") {
     return parseManifestIntegrations(m).map((e) => ({
       id: e.id,

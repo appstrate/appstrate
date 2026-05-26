@@ -32,7 +32,18 @@ export interface ResolvedAuthCredentials {
   fields: Readonly<Record<string, string>>;
   /** URL allowlist from the manifest (AFPS `authorized_uris` glob format). */
   authorizedUris: readonly string[];
-  /** Audience value if declared (RFC 8707 binding token). */
+  /**
+   * RFC 8707 resource indicator declared by the manifest
+   * (`auths.{key}.resource`). AFPS 2.0 §7.3 name — matches the RFC.
+   * Sidecar consumers should read `resource` first, falling back to
+   * {@link audience} for one release window while the wire alias is alive.
+   */
+  resource?: string;
+  /**
+   * @deprecated AFPS 2.0 §7.3 — use {@link resource} (RFC 8707).
+   * Legacy wire alias dual-emitted by the platform for one release window
+   * for back-compat with sidecars built against the pre-rename payload.
+   */
   audience?: string;
   /** Identity claims extracted by `extractTokenIdentity` — passthrough metadata. */
   identityClaims?: Readonly<Record<string, string>>;

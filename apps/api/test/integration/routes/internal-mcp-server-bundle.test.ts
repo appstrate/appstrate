@@ -74,7 +74,7 @@ describe("GET /internal/mcp-server-bundle/:scope/:name", () => {
             }),
           },
         },
-        tools: { search: {} },
+        tools_policy: { search: {} },
       }),
     });
     if (installed) {

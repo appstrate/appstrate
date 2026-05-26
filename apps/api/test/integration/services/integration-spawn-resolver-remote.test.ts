@@ -42,7 +42,7 @@ function manifest(withRemote = true) {
         }),
       },
     },
-    tools: { search: {} },
+    tools_policy: { search: {} },
   });
 }
 
@@ -103,7 +103,11 @@ describe("resolveIntegrationSpawns — remote source", () => {
     });
     expect(specs.length).toBe(1);
     const spec = specs[0]!;
-    expect(spec.manifest.server).toEqual({ type: "http", url: "https://mcp.example.com/mcp/v1" });
+    expect(spec.manifest.server).toEqual({
+      type: "http",
+      url: "https://mcp.example.com/mcp/v1",
+      transport: "streamable-http",
+    });
     // Remote HTTP MCP bypasses the per-integration MITM listener.
     expect(spec.httpDeliveryAuths).toBeUndefined();
     expect(spec.toolUrlEnvelope).toBeUndefined();
@@ -142,7 +146,7 @@ describe("resolveIntegrationSpawns — local source error guards", () => {
           }),
         },
       },
-      tools: { search: {} },
+      tools_policy: { search: {} },
     });
   }
 
@@ -217,8 +221,7 @@ describe("resolveIntegrationSpawns — local source error guards", () => {
       type: "mcp-server",
       source: "local",
       draftManifest: mcpServerManifest({
-        name: "bun-server",
-        afpsName: SERVER,
+        name: SERVER,
         version: "0.1.0",
         serverType: "node",
         entryPoint: "./server.ts",
@@ -236,7 +239,7 @@ describe("resolveIntegrationSpawns — local source error guards", () => {
     expect(specs.length).toBe(1);
     expect(specs[0]!.manifest.server).toEqual({
       type: "bun",
-      entryPoint: "./server.ts",
+      entry_point: "./server.ts",
       serverPackageId: SERVER,
     });
   });

@@ -179,7 +179,10 @@ export async function buildRunContext(params: {
   // ready-to-spawn specs (manifest + bundle bytes + delivery env with
   // live credentials). Failures here are per-integration warnings; the
   // run proceeds with the surviving subset. The resolver reads the
-  // tool/scope selection from `manifest.integrations[id]` (niveau 2).
+  // tool/scope selection per AFPS 2.0.2 §4.1 / §4.4 — canonical inline
+  // object form on `dependencies.integrations[id]` wins over the
+  // deprecated `integrations_configuration` alias, with a back-compat
+  // fall-back to the legacy top-level `manifest.integrations[id]` block.
   const integrationSpawns = await resolveIntegrationSpawns({
     applicationId,
     actor,

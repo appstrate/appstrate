@@ -10,6 +10,8 @@ import {
   schemaToFields,
   fieldsToSchema,
   manifestToSchemaFields,
+  manifestToMetadata,
+  getRuntimeTools,
 } from "../utils";
 import type { SchemaField } from "../schema-section";
 import type { JSONSchemaObject } from "@appstrate/core/form";
@@ -103,28 +105,33 @@ describe("getResourceEntries / setResourceEntries", () => {
       expect(m.integrations).toBeUndefined();
     });
 
-    it("writes the selection block when tools is an explicit array (even empty)", () => {
+    it("writes the canonical inline object form when tools is an explicit array (even empty)", () => {
+      // AFPS 2.0.2 §4.1 — dep value is `{ version, tools? }`. The Appstrate-
+      // invented top-level `manifest.integrations` block is no longer written;
+      // it is only read for legacy back-compat.
       const m: Record<string, unknown> = { dependencies: {} };
       setResourceEntries(m, "integrations", [
         { id: "@vendor/gmail", version: "^1.0.0", tools: [] },
       ]);
       expect((m.dependencies as Record<string, unknown>).integrations).toEqual({
-        "@vendor/gmail": "^1.0.0",
+        "@vendor/gmail": { version: "^1.0.0", tools: [] },
       });
-      expect(m.integrations).toEqual({ "@vendor/gmail": { tools: [] } });
+      expect(m.integrations).toBeUndefined();
     });
 
-    it("writes tools + scopes into the top-level integrations block", () => {
+    it("writes tools + scopes inline on the canonical dep entry (§4.1)", () => {
       const m: Record<string, unknown> = { dependencies: {} };
       setResourceEntries(m, "integrations", [
         { id: "@vendor/gmail", version: "^1.0.0", tools: ["list_messages"], scopes: ["delete"] },
       ]);
       expect((m.dependencies as Record<string, unknown>).integrations).toEqual({
-        "@vendor/gmail": "^1.0.0",
+        "@vendor/gmail": {
+          version: "^1.0.0",
+          scopes: ["delete"],
+          tools: ["list_messages"],
+        },
       });
-      expect(m.integrations).toEqual({
-        "@vendor/gmail": { tools: ["list_messages"], scopes: ["delete"] },
-      });
+      expect(m.integrations).toBeUndefined();
     });
 
     it("round-trips a mix of selection-less + selected entries", () => {
@@ -505,5 +512,152 @@ describe("manifestToSchemaFields — AFPS 1.x lenient compat", () => {
     const input = manifestToSchemaFields(mixedManifest).input!;
     expect(input.map((f) => f.key)).toEqual(["a", "b"]);
     expect(input.find((f) => f.key === "a")!.placeholder).toBe("canonical");
+  });
+});
+
+// ─── manifestToMetadata — v1 camelCase compat ───────────────
+
+describe("manifestToMetadata — v1 → v2 compat", () => {
+  it("reads canonical display_name (snake_case)", () => {
+    const m = {
+      name: "@test/agent",
+      version: "1.0.0",
+      type: "agent",
+      display_name: "Canonical Name",
+    };
+    const meta = manifestToMetadata(m);
+    expect(meta.displayName).toBe("Canonical Name");
+  });
+
+  it("falls back to camelCase displayName for legacy manifests", () => {
+    const m = {
+      name: "@test/agent",
+      version: "1.0.0",
+      type: "agent",
+      displayName: "Legacy Name",
+    };
+    const meta = manifestToMetadata(m);
+    expect(meta.displayName).toBe("Legacy Name");
+  });
+
+  it("prefers canonical display_name when both are present", () => {
+    const m = {
+      name: "@test/agent",
+      version: "1.0.0",
+      type: "agent",
+      display_name: "Canonical",
+      displayName: "Legacy",
+    };
+    const meta = manifestToMetadata(m);
+    expect(meta.displayName).toBe("Canonical");
+  });
+
+  it("renders structured author object's name field as the editor text", () => {
+    const m = {
+      name: "@test/agent",
+      version: "1.0.0",
+      type: "agent",
+      author: { name: "Jane Doe", email: "jane@example.com" },
+    };
+    const meta = manifestToMetadata(m);
+    expect(meta.author).toBe("Jane Doe");
+  });
+
+  it("accepts bare string author verbatim", () => {
+    const m = {
+      name: "@test/agent",
+      version: "1.0.0",
+      type: "agent",
+      author: "Jane Doe <jane@example.com>",
+    };
+    const meta = manifestToMetadata(m);
+    expect(meta.author).toBe("Jane Doe <jane@example.com>");
+  });
+});
+
+// ─── getRuntimeTools — v1 camelCase compat ──────────────────
+
+describe("getRuntimeTools — v1 → v2 compat", () => {
+  it("reads canonical runtime_tools (snake_case)", () => {
+    const m = { runtime_tools: ["output", "note"] };
+    expect(getRuntimeTools(m)).toEqual(["output", "note"]);
+  });
+
+  it("falls back to camelCase runtimeTools for legacy manifests", () => {
+    const m = { runtimeTools: ["output", "log"] };
+    expect(getRuntimeTools(m)).toEqual(["output", "log"]);
+  });
+
+  it("prefers canonical runtime_tools when both are present", () => {
+    const m = { runtime_tools: ["output"], runtimeTools: ["note"] };
+    expect(getRuntimeTools(m)).toEqual(["output"]);
+  });
+
+  it("tolerates missing field", () => {
+    expect(getRuntimeTools({})).toEqual([]);
+  });
+
+  it("tolerates malformed field", () => {
+    expect(getRuntimeTools({ runtime_tools: "not-an-array" })).toEqual([]);
+  });
+});
+
+// ─── getResourceEntries — v1 providersConfiguration compat ──
+
+describe("getResourceEntries — providersConfiguration v1 alias", () => {
+  it("reads scopes from v1 camelCase providersConfiguration", () => {
+    const m = {
+      dependencies: { integrations: { "@scope/int": "^1.0.0" } },
+      providersConfiguration: {
+        "@scope/int": { scopes: ["read", "write"] },
+      },
+    };
+    const entries = getResourceEntries(m, "integrations");
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.scopes).toEqual(["read", "write"]);
+  });
+
+  it("reads tools from v1 camelCase providersConfiguration", () => {
+    const m = {
+      dependencies: { integrations: { "@scope/int": "^1.0.0" } },
+      providersConfiguration: {
+        "@scope/int": { tools: ["list_x", "create_x"] },
+      },
+    };
+    const entries = getResourceEntries(m, "integrations");
+    expect(entries[0]!.tools).toEqual(["list_x", "create_x"]);
+  });
+
+  it("canonical dependencies.integrations object wins over providersConfiguration", () => {
+    const m = {
+      dependencies: {
+        integrations: {
+          "@scope/int": { version: "^1.0.0", scopes: ["canonical"] },
+        },
+      },
+      providersConfiguration: {
+        "@scope/int": { scopes: ["v1-legacy"] },
+      },
+    };
+    const entries = getResourceEntries(m, "integrations");
+    expect(entries[0]!.scopes).toEqual(["canonical"]);
+  });
+
+  it("setResourceEntries — drops providersConfiguration after canonical write", () => {
+    const m: Record<string, unknown> = {
+      dependencies: { integrations: { "@scope/int": "^1.0.0" } },
+      providersConfiguration: {
+        "@scope/int": { tools: ["legacy"] },
+      },
+    };
+    setResourceEntries(m, "integrations", [
+      { id: "@scope/int", version: "^1.0.0", tools: ["new_canonical"] },
+    ]);
+    expect(m.providersConfiguration).toBeUndefined();
+    const deps = m.dependencies as Record<string, Record<string, unknown>>;
+    expect(deps.integrations!["@scope/int"]).toMatchObject({
+      version: "^1.0.0",
+      tools: ["new_canonical"],
+    });
   });
 });

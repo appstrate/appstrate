@@ -51,7 +51,7 @@ function spec(): IntegrationSpawnSpec {
       // The process adapter runs `.ts` under bun (`HOST_INTERPRETER_BY_TYPE["bun"]`).
       // The MCPB manifest declares `node` (a valid MCPB type), but this synthetic
       // spec pins `bun` so the host subprocess runs the TypeScript entry directly.
-      server: { type: "bun", entryPoint: "./server.ts", serverPackageId: SERVER_ID },
+      server: { type: "bun", entry_point: "./server.ts", serverPackageId: SERVER_ID },
     },
     spawnEnv: {},
     // Native-tool subset under test (api_call / fetch_echo need creds + MITM).
@@ -160,7 +160,7 @@ describe("@appstrate/bun-toolkit fixtures", () => {
         string,
         { type: string; delivery: { http: { in: string; name: string; value: string } } }
       >;
-      tools: Record<string, { required_scopes?: string[] }>;
+      tools_policy: Record<string, { required_scopes?: string[] }>;
     };
     expect(m.source.kind).toBe("local");
     expect(m.source.server?.name).toBe(SERVER_ID);
@@ -168,7 +168,7 @@ describe("@appstrate/bun-toolkit fixtures", () => {
     expect(m.auths.primary!.type).toBe("api_key");
     expect(m.auths.primary!.delivery.http.name).toBe("X-Toolkit-Token");
     expect(m.auths.primary!.delivery.http.value).toBe("{$credential.api_key}");
-    expect(m.tools.fetch_echo!.required_scopes).toEqual(["read"]);
+    expect(m.tools_policy.fetch_echo!.required_scopes).toEqual(["read"]);
   });
 
   it("the mcp-server manifest is a valid MCPB manifest referencing the server code", () => {
@@ -177,11 +177,14 @@ describe("@appstrate/bun-toolkit fixtures", () => {
     expect(parsed.success).toBe(true);
     if (!parsed.success) throw new Error(JSON.stringify(parsed.error.issues));
     const mcp = parsed.data as unknown as {
+      name: string;
+      type: string;
       server: { type: string; entry_point: string };
-      _meta: Record<string, { name?: string; type?: string }>;
     };
     expect(mcp.server.type).toBe("node");
     expect(mcp.server.entry_point).toBe("./server.ts");
-    expect(mcp._meta["dev.afps/mcp-server"]?.name).toBe(SERVER_ID);
+    // AFPS 2.0.2 (§3.4): scoped identity lives at the manifest root.
+    expect(mcp.name).toBe(SERVER_ID);
+    expect(mcp.type).toBe("mcp-server");
   });
 });

@@ -17,7 +17,7 @@
  * touching the network or the disk.
  */
 
-import { getMcpServerAfpsName, type McpServerManifest } from "../mcp-server.ts";
+import type { McpServerManifest } from "../mcp-server.ts";
 import {
   SOURCE_RESOLUTION_META_KEY,
   VENDOR_META_KEY,
@@ -70,13 +70,13 @@ export function rewriteManifestForDistribution(
 
 /**
  * Tiny helper used by the CLI to compute the canonical output file
- * name for an mcp-server bundle. Uses the scoped AFPS identity from
- * `_meta["dev.afps/mcp-server"].name` (NOT the MCPB-governed top-level
- * `name`). Scoped names like `@official/gmail` become
+ * name for an mcp-server bundle. AFPS 2.0.2 lifted the scoped identity
+ * `name` to the manifest root (§3.4), so the top-level `name` IS the
+ * AFPS scoped identity. Scoped names like `@official/gmail` become
  * `official__gmail@1.0.0.afps` (filesystem-safe).
  */
 export function suggestBundleFileName(manifest: McpServerManifest): string {
-  const afpsName = getMcpServerAfpsName(manifest) ?? (manifest as { name: string }).name;
+  const afpsName = (manifest as { name: string }).name;
   const scoped = afpsName.startsWith("@") ? afpsName.slice(1) : afpsName;
   const safe = scoped.replace(/\//g, "__");
   return `${safe}@${(manifest as { version: string }).version}.afps`;

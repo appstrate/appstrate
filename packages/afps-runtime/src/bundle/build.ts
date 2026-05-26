@@ -21,7 +21,6 @@ import { BundleError } from "./errors.ts";
 import { parseAfpsManifestBytes } from "./parse-manifest.ts";
 import { sanitizeEntries, stripWrapperPrefix, sumSizes } from "./archive-utils.ts";
 import { resolveBundleLimits, type BundleLimits } from "./limits.ts";
-import { getMcpServerAfpsName } from "../types/manifest.ts";
 import {
   bundleIntegrity,
   computeRecordEntries,
@@ -231,24 +230,19 @@ export function extractRootFromAfps(
 
   const manifest = parseAfpsManifestBytes(manifestBytes) as AfpsManifest;
 
-  // An mcp-server manifest's top-level `name` is MCPB-governed (an unscoped
-  // server slug), NOT the AFPS scoped identity — that lives under
-  // `_meta["dev.afps/mcp-server"].name` (§3.4 / §2.2). For every other type the
-  // scoped identity IS the top-level `name`.
-  const isMcpServer =
-    manifest.type === "mcp-server" || getMcpServerAfpsName(manifest) !== undefined;
-  const rawName = isMcpServer
-    ? getMcpServerAfpsName(manifest)
-    : typeof manifest.name === "string"
-      ? manifest.name
-      : undefined;
+  // AFPS 2.0.2 (§3.4 / §11.2) lifted the mcp-server scoped identity to the
+  // manifest root, so every package type — including mcp-server — now
+  // declares its `@scope/name` identity at the top-level `name`. The previous
+  // `_meta["dev.afps/mcp-server"].name` slot is gone.
+  const isMcpServer = manifest.type === "mcp-server";
+  const rawName = typeof manifest.name === "string" ? manifest.name : undefined;
   const name = rawName ?? null;
   const version = typeof manifest.version === "string" ? manifest.version : null;
   if (!name || !version) {
     throw new BundleError(
       "BUNDLE_JSON_INVALID",
       isMcpServer
-        ? `mcp-server manifest must declare _meta["dev.afps/mcp-server"].name + version (got name=${JSON.stringify(name)}, version=${JSON.stringify(version)})`
+        ? `mcp-server manifest must declare a scoped root name + version (got name=${JSON.stringify(name)}, version=${JSON.stringify(version)})`
         : `manifest.json must declare name + version (got name=${JSON.stringify(name)}, version=${JSON.stringify(version)})`,
     );
   }
@@ -256,7 +250,7 @@ export function extractRootFromAfps(
     throw new BundleError(
       "BUNDLE_JSON_INVALID",
       isMcpServer
-        ? `mcp-server AFPS identity _meta["dev.afps/mcp-server"].name must be scoped (@scope/name), got ${name}`
+        ? `mcp-server identity name must be scoped (@scope/name), got ${name}`
         : `manifest.name must be scoped (@scope/name), got ${name}`,
     );
   }
@@ -285,8 +279,20 @@ function extractDependencies(manifest: AfpsManifest, depTypes: DepRequest["type"
     const section = depsObj[type];
     if (!section || typeof section !== "object" || Array.isArray(section)) continue;
     for (const [name, spec] of Object.entries(section as Record<string, unknown>)) {
-      if (typeof spec !== "string") continue;
-      out.push({ name, versionSpec: spec, type });
+      // AFPS 2.0.2 §4.1 — dependency value is polymorphic: bare semver
+      // string OR object `{ version, ... }` carrying per-dep configuration.
+      // The bundle walker only needs the version range; object-form extras
+      // (scopes / auth_key for integrations) are consumed downstream by
+      // `parseManifestIntegrations` against the same manifest.
+      let versionSpec: string | null = null;
+      if (typeof spec === "string") {
+        versionSpec = spec;
+      } else if (spec && typeof spec === "object") {
+        const v = (spec as { version?: unknown }).version;
+        if (typeof v === "string") versionSpec = v;
+      }
+      if (versionSpec === null) continue;
+      out.push({ name, versionSpec, type });
     }
   }
   return out;

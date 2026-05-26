@@ -29,7 +29,10 @@
  */
 
 import { isValidToolNameForExisting } from "@appstrate/core/naming";
-import { RUNTIME_TOOL_EVENTS_META_KEY } from "@appstrate/core/runtime-tool-defs";
+import {
+  RUNTIME_TOOL_EVENTS_META_KEY,
+  RUNTIME_TOOL_EVENTS_META_KEY_LEGACY,
+} from "@appstrate/core/runtime-tool-defs";
 import {
   sanitiseToolDescriptor,
   type AppstrateMcpClient,
@@ -40,16 +43,26 @@ import {
 
 /**
  * Drop the first-party runtime-event channel from a third-party tool result.
- * `appstrate/events` under `_meta` is the trusted channel the platform's own
- * runtime tools (output/log/note/pin/report) use to surface canonical run
- * events; an integration upstream has no legitimate reason to set it, so we
- * remove it to prevent run-event forgery. Returns the result untouched when
- * the key is absent (the common case).
+ * `dev.appstrate/events` under `_meta` (plus its legacy single-segment alias
+ * `appstrate/events`) is the trusted channel the platform's own runtime tools
+ * (output/log/note/pin/report) use to surface canonical run events; an
+ * integration upstream has no legitimate reason to set it, so we remove BOTH
+ * forms to prevent run-event forgery. Returns the result untouched when
+ * neither key is present (the common case).
  */
 function stripForgedRuntimeEvents(result: CallToolResult): CallToolResult {
   const meta = result._meta;
-  if (!meta || !(RUNTIME_TOOL_EVENTS_META_KEY in meta)) return result;
-  const { [RUNTIME_TOOL_EVENTS_META_KEY]: _dropped, ...rest } = meta;
+  if (
+    !meta ||
+    (!(RUNTIME_TOOL_EVENTS_META_KEY in meta) && !(RUNTIME_TOOL_EVENTS_META_KEY_LEGACY in meta))
+  ) {
+    return result;
+  }
+  const {
+    [RUNTIME_TOOL_EVENTS_META_KEY]: _dropped,
+    [RUNTIME_TOOL_EVENTS_META_KEY_LEGACY]: _droppedLegacy,
+    ...rest
+  } = meta;
   return { ...result, _meta: rest };
 }
 
@@ -69,6 +82,17 @@ export interface McpHostUpstream {
    * behaviour. Empty `[]` is a valid explicit "register nothing".
    */
   allowedTools?: readonly string[];
+  /**
+   * R8a defensive filter — names from the integration manifest's
+   * `hidden_tools` field. Applied AFTER `allowedTools`: a tool that
+   * survives the allowlist is still dropped if it appears here. This
+   * mirrors the install-time `resolveIntegrationToolCatalog` policy
+   * (which already excludes hidden tools from the agent's selection),
+   * adding a runtime-side guarantee that the same names can never reach
+   * the agent even when fixtures / direct DB writes bypass install-time
+   * validation. `undefined` / empty = no extra filtering.
+   */
+  hiddenTools?: readonly string[];
   /**
    * Trusted first-party upstream (e.g. the sidecar's own in-process
    * `api_call` server). Skips the tool-poisoning sanitiser
@@ -210,6 +234,12 @@ export class McpHost {
     // ORIGINAL upstream tool name; namespacing happens downstream and
     // wouldn't survive a Set lookup against the agent's declared names.
     const allowlist = upstream.allowedTools ? new Set<string>(upstream.allowedTools) : null;
+    // R8a defensive filter — `hidden_tools` exclusion runs AFTER the
+    // allowlist (a tool that survives the allowlist can still be hidden).
+    // Empty set = no extra exclusion. Original-name matching, same as
+    // the allowlist, so authors declare names exactly as the upstream
+    // advertises them.
+    const hiddenSet = upstream.hiddenTools ? new Set<string>(upstream.hiddenTools) : null;
     for (const tool of tools) {
       if (allowlist && !allowlist.has(tool.name)) {
         this.options.onLog?.({
@@ -217,6 +247,17 @@ export class McpHost {
           level: "info",
           data: {
             event: "tool_excluded_by_allowlist",
+            originalName: tool.name,
+          },
+        });
+        continue;
+      }
+      if (hiddenSet && hiddenSet.has(tool.name)) {
+        this.options.onLog?.({
+          source: `host:${normalisedNs}`,
+          level: "info",
+          data: {
+            event: "tool_excluded_by_hidden_tools",
             originalName: tool.name,
           },
         });

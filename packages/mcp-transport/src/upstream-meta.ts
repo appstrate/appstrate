@@ -32,8 +32,28 @@
  * MCP `_meta` key under which the sidecar packages upstream HTTP
  * status + response headers. Namespaced to avoid colliding with
  * vendor-specific or future SDK-defined `_meta` keys.
+ *
+ * AFPS 2.0.2 (Phase F1): reverse-DNS namespace — `_meta` keys must be
+ * either a single bare token or a reverse-DNS prefix (RFC §2.2 / Appendix
+ * B). The legacy single-segment `"appstrate/upstream"` key violated that
+ * rule; the canonical form is now `"dev.appstrate/upstream"`.
+ *
+ * Writers always emit the new key; the runtime-side parser accepts BOTH
+ * the new key and the legacy key for one release window so a runtime
+ * built from this release can still consume `_meta` from a sidecar
+ * built against AFPS 2.0.1. See {@link UPSTREAM_META_KEY_LEGACY}.
  */
-export const UPSTREAM_META_KEY = "appstrate/upstream";
+export const UPSTREAM_META_KEY = "dev.appstrate/upstream";
+
+/**
+ * Deprecated legacy `_meta` key for upstream HTTP metadata. Accepted on
+ * read for back-compat with sidecars built against AFPS 2.0.1 or
+ * earlier. Drop after one release window; new writes always use
+ * {@link UPSTREAM_META_KEY}.
+ *
+ * @deprecated Use {@link UPSTREAM_META_KEY} for writes.
+ */
+export const UPSTREAM_META_KEY_LEGACY = "appstrate/upstream";
 
 /**
  * Headers the sidecar is willing to forward AND the runtime is willing

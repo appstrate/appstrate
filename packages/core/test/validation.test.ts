@@ -201,11 +201,53 @@ describe("validateManifest", () => {
     expect(result.valid).toBe(true);
   });
 
-  it("rejects an integration dependency value that's not a bare string", () => {
+  it("accepts an integration dependency value in object form (AFPS 2.0.2 §4.1)", () => {
     const result = validateManifest(
       validAgentManifest({
         dependencies: {
           integrations: { "@test/gmail-mcp": { version: "^1.0.0" } },
+        },
+      }),
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it("accepts integration dependency object form with scopes + auth_key inline (§4.1)", () => {
+    const result = validateManifest(
+      validAgentManifest({
+        dependencies: {
+          integrations: {
+            "@test/gmail-mcp": {
+              version: "^1.0.0",
+              scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
+              auth_key: "oauth",
+            },
+          },
+        },
+      }),
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it("accepts skill + mcp_server dependency values in object form (§4.1)", () => {
+    const result = validateManifest(
+      validAgentManifest({
+        dependencies: {
+          skills: { "@test/skill": { version: "^1.0.0" } },
+          mcp_servers: { "@test/mcp": { version: "^2.0.0" } },
+        },
+      }),
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects integration dependency object missing `version`", () => {
+    const result = validateManifest(
+      validAgentManifest({
+        dependencies: {
+          integrations: {
+            "@test/gmail-mcp": { scopes: ["https://www.googleapis.com/auth/gmail.readonly"] },
+          },
         },
       }),
     );
@@ -222,6 +264,46 @@ describe("validateManifest", () => {
       }),
     );
     expect(result.valid).toBe(false);
+  });
+
+  it("rejects agent integration tool names with a leading underscore (R8b N-1)", () => {
+    // Drift fix: validation.ts used to allow `_internal` while naming.ts's
+    // namespaced TOOL_NAME_PATTERN_NEW disallowed `_internal__foo`. Both halves
+    // now share TOOL_NAME_INNER_PATTERN — leading underscores are rejected.
+    const result = validateManifest(
+      validAgentManifest({
+        dependencies: { integrations: { "@test/gmail-mcp": "^1.0.0" } },
+        integrations_configuration: {
+          "@test/gmail-mcp": { tools: ["__leading_underscore"] },
+        },
+      }),
+    );
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.includes("tools"))).toBe(true);
+  });
+
+  it("rejects a single leading underscore on integration tool names (R8b N-1)", () => {
+    const result = validateManifest(
+      validAgentManifest({
+        dependencies: { integrations: { "@test/gmail-mcp": "^1.0.0" } },
+        integrations_configuration: {
+          "@test/gmail-mcp": { tools: ["_internal"] },
+        },
+      }),
+    );
+    expect(result.valid).toBe(false);
+  });
+
+  it("accepts a well-formed snake_case integration tool name", () => {
+    const result = validateManifest(
+      validAgentManifest({
+        dependencies: { integrations: { "@test/gmail-mcp": "^1.0.0" } },
+        integrations_configuration: {
+          "@test/gmail-mcp": { tools: ["list_messages", "send_message"] },
+        },
+      }),
+    );
+    expect(result.valid).toBe(true);
   });
 
   it("agent with built-in skill using wildcard version", () => {
@@ -409,12 +491,48 @@ describe("validateManifest — package-type dispatch", () => {
     expect(r.valid).toBe(true);
   });
 
-  it("dispatches an mcp-server manifest via _meta identity (no top-level type)", () => {
+  it("dispatches an mcp-server manifest via root identity (AFPS 2.0.2 §3.4)", () => {
+    const r = validateManifest({
+      manifest_version: "0.3",
+      name: "@test/fetch-json",
+      version: "1.0.0",
+      type: "mcp-server",
+      schema_version: "2.0",
+      display_name: "Fetch JSON",
+      server: {
+        type: "node",
+        entry_point: "server/index.js",
+        mcp_config: { command: "node", args: ["server/index.js"] },
+      },
+    });
+    expect(r.valid).toBe(true);
+  });
+
+  it("rejects an mcp-server manifest with no root identity", () => {
+    const r = validateManifest({
+      manifest_version: "0.3",
+      name: "@test/fetch-json",
+      version: "1.0.0",
+      // missing type: "mcp-server"
+      server: {
+        type: "node",
+        entry_point: "server/index.js",
+        mcp_config: { command: "node" },
+      },
+    });
+    // No root `type` → falls through to base manifest schema which rejects it.
+    expect(r.valid).toBe(false);
+  });
+
+  it("rejects an mcp-server carrying only the legacy _meta identity (AFPS 2.0.2 removed it)", () => {
+    // Pre-2.0.2 producers may still emit `_meta["dev.afps/mcp-server"]`. The
+    // new dispatch ignores it entirely — without a root `type: "mcp-server"`,
+    // the manifest is not routed to the mcp-server schema and the base
+    // manifest schema must reject the now-unrecognised shape.
     const r = validateManifest({
       manifest_version: "0.3",
       name: "fetch-json",
       version: "1.0.0",
-      display_name: "Fetch JSON",
       server: {
         type: "node",
         entry_point: "server/index.js",
@@ -422,33 +540,17 @@ describe("validateManifest — package-type dispatch", () => {
       },
       _meta: { "dev.afps/mcp-server": { name: "@test/fetch-json", type: "mcp-server" } },
     });
-    expect(r.valid).toBe(true);
-  });
-
-  it("rejects an mcp-server manifest missing the AFPS _meta identity", () => {
-    const r = validateManifest({
-      manifest_version: "0.3",
-      name: "fetch-json",
-      version: "1.0.0",
-      type: "mcp-server",
-      server: {
-        type: "node",
-        entry_point: "server/index.js",
-        mcp_config: { command: "node" },
-      },
-      _meta: {},
-    });
     expect(r.valid).toBe(false);
   });
 
   it("rejects an mcp-server with uv server type on manifest_version 0.3", () => {
     const r = validateManifest({
       manifest_version: "0.3",
-      name: "uv-srv",
+      name: "@test/uv-srv",
       version: "1.0.0",
       type: "mcp-server",
+      schema_version: "2.0",
       server: { type: "uv", entry_point: "main.py", mcp_config: { command: "uv" } },
-      _meta: { "dev.afps/mcp-server": { name: "@test/uv-srv", type: "mcp-server" } },
     });
     expect(r.valid).toBe(false);
   });
@@ -508,6 +610,177 @@ describe("extractManifestMetadata", () => {
     expect(metadata.keywords).toBeUndefined();
     expect(metadata.license).toBeUndefined();
     expect(metadata.repositoryUrl).toBeUndefined();
+  });
+
+  // ── AFPS 2.0 §3.1 common-field projection ──
+
+  it("v2 common fields — all projected to ManifestMetadata", () => {
+    const manifest = {
+      name: "@test/pkg",
+      version: "1.0.0",
+      type: "skill" as const,
+      long_description: "Detailed prose description",
+      homepage: "https://example.com",
+      documentation: "https://docs.example.com",
+      support: "https://example.com/issues",
+      icon: "icon.png",
+      icons: [{ src: "icon-128.png", size: "128x128" }],
+      screenshots: ["s1.png", "s2.png"],
+      privacy_policies: ["https://example.com/privacy"],
+      compatibility: { platforms: ["darwin", "linux"] as Array<"darwin" | "linux"> },
+    } as Partial<Manifest>;
+    const metadata = extractManifestMetadata(manifest);
+    expect(metadata.longDescription).toBe("Detailed prose description");
+    expect(metadata.homepage).toBe("https://example.com");
+    expect(metadata.documentation).toBe("https://docs.example.com");
+    expect(metadata.support).toBe("https://example.com/issues");
+    expect(metadata.icon).toBe("icon.png");
+    expect(metadata.icons).toEqual([{ src: "icon-128.png", size: "128x128" }]);
+    expect(metadata.screenshots).toEqual(["s1.png", "s2.png"]);
+    expect(metadata.privacyPolicies).toEqual(["https://example.com/privacy"]);
+    expect(metadata.compatibility?.platforms).toEqual(["darwin", "linux"]);
+  });
+
+  it("author — string form round-trips verbatim", () => {
+    const manifest = {
+      name: "@test/pkg",
+      version: "1.0.0",
+      type: "skill" as const,
+      author: "Jane Doe <jane@example.com>",
+    } as Partial<Manifest>;
+    const metadata = extractManifestMetadata(manifest);
+    expect(metadata.author).toBe("Jane Doe <jane@example.com>");
+  });
+
+  it("author — object form round-trips as structured shape", () => {
+    const manifest = {
+      name: "@test/pkg",
+      version: "1.0.0",
+      type: "skill" as const,
+      author: { name: "Jane Doe", email: "jane@example.com", url: "https://jane.example" },
+    } as Partial<Manifest>;
+    const metadata = extractManifestMetadata(manifest);
+    expect(typeof metadata.author).toBe("object");
+    expect(metadata.author).toEqual({
+      name: "Jane Doe",
+      email: "jane@example.com",
+      url: "https://jane.example",
+    });
+  });
+
+  it("repository — string form maps to repositoryUrl only", () => {
+    const manifest = {
+      name: "@test/pkg",
+      version: "1.0.0",
+      type: "skill" as const,
+      repository: "https://github.com/test/repo",
+    } as Partial<Manifest>;
+    const metadata = extractManifestMetadata(manifest);
+    expect(metadata.repositoryUrl).toBe("https://github.com/test/repo");
+    expect(metadata.repository).toBeUndefined();
+  });
+
+  it("repository — object form populates both repository and repositoryUrl", () => {
+    const manifest = {
+      name: "@test/pkg",
+      version: "1.0.0",
+      type: "skill" as const,
+      repository: {
+        type: "git",
+        url: "https://github.com/test/repo.git",
+        directory: "packages/pkg",
+      },
+    } as Partial<Manifest>;
+    const metadata = extractManifestMetadata(manifest);
+    expect(metadata.repositoryUrl).toBe("https://github.com/test/repo.git");
+    expect(metadata.repository).toEqual({
+      type: "git",
+      url: "https://github.com/test/repo.git",
+      directory: "packages/pkg",
+    });
+  });
+});
+
+// ─────────────────────────────────────────────
+// validateManifest — v2 §3.1 common fields
+// ─────────────────────────────────────────────
+
+describe("validateManifest — v2 common fields (§3.1)", () => {
+  it("accepts a manifest declaring every v2 common field at once", () => {
+    const result = validateManifest(
+      validSkillManifest({
+        long_description: "Detailed prose",
+        homepage: "https://example.com",
+        documentation: "https://docs.example.com",
+        support: "https://example.com/issues",
+        icon: "icon.png",
+        icons: [{ src: "icon-128.png", size: "128x128", theme: "dark" }],
+        screenshots: ["s1.png"],
+        privacy_policies: ["https://example.com/privacy"],
+        compatibility: { platforms: ["darwin"], runtimes: { node: ">=18" } },
+        author: "Jane Doe",
+        repository: "https://github.com/test/repo",
+        _meta: { "com.example.x": { foo: "bar" } },
+      }),
+    );
+    expect(result.valid).toBe(true);
+    expect(result.errors).toHaveLength(0);
+  });
+
+  it("author — accepts structured object form", () => {
+    const result = validateManifest(
+      validSkillManifest({
+        author: { name: "Jane Doe", email: "jane@example.com", url: "https://jane.example" },
+      }),
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it("author — accepts bare string form", () => {
+    const result = validateManifest(validSkillManifest({ author: "Jane Doe" }));
+    expect(result.valid).toBe(true);
+  });
+
+  it("repository — accepts structured object form", () => {
+    const result = validateManifest(
+      validSkillManifest({
+        repository: {
+          type: "git",
+          url: "https://github.com/test/repo.git",
+          directory: "packages/pkg",
+        },
+      }),
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it("repository — accepts bare string form", () => {
+    const result = validateManifest(
+      validSkillManifest({ repository: "https://github.com/test/repo" }),
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it("icons — rejects malformed size", () => {
+    // The base manifestSchema (used when type doesn't dispatch elsewhere) and
+    // the skill schema both inherit the icon-object regex from AFPS. Bad size
+    // strings must surface as validation errors.
+    const result = validateManifest(
+      validSkillManifest({ icons: [{ src: "icon.png", size: "not-a-size" }] }),
+    );
+    expect(result.valid).toBe(false);
+  });
+
+  it("_meta — accepts reverse-DNS-namespaced keys (round-trips)", () => {
+    const result = validateManifest(
+      validSkillManifest({
+        _meta: {
+          "com.example.publisher": { reviewedBy: "ops" },
+          "dev.afps.audit": { trail: ["a", "b"] },
+        },
+      }),
+    );
+    expect(result.valid).toBe(true);
   });
 });
 

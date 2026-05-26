@@ -49,18 +49,19 @@ const VALID_SKILL = {
   schema_version: "2.0",
 };
 
-/** A valid AFPS 2.0 mcp-server manifest (MCPB shape + _meta identity). */
+/** A valid AFPS 2.0.2 mcp-server manifest (MCPB shape + root identity). */
 const VALID_MCP_SERVER = {
   manifest_version: "0.3",
-  name: "my-mcp-server",
+  name: "@me/mcp",
   version: "1.0.0",
+  type: "mcp-server",
+  schema_version: "2.0",
   display_name: "My MCP Server",
   server: {
     type: "node",
     entry_point: "server/index.js",
     mcp_config: { command: "node", args: ["server/index.js"] },
   },
-  _meta: { "dev.afps/mcp-server": { name: "@me/mcp", type: "mcp-server" } },
 };
 
 /** A valid AFPS 2.0 integration manifest (snake_case, `source` discriminant). */
@@ -334,14 +335,13 @@ describe("validateBundle (AFPS 2.0)", () => {
     expect(result.issues.filter((i) => i.severity === "error")).toHaveLength(0);
   });
 
-  it("rejects an mcp-server with a corrupt _meta AFPS identity (unscoped name)", async () => {
-    // Keep an explicit top-level `type: "mcp-server"` annotation so the package
-    // routes to the mcp-server schema, but corrupt the _meta identity contract
-    // (unscoped name) — the schema MUST reject it.
+  it("rejects an mcp-server with a corrupt root identity (unscoped name)", async () => {
+    // AFPS 2.0.2 lifted the scoped identity to the manifest root. The schema's
+    // root `name` regex enforces `@scope/name`, so an unscoped value MUST be
+    // rejected.
     const badMcp = {
       ...VALID_MCP_SERVER,
-      type: "mcp-server",
-      _meta: { "dev.afps/mcp-server": { name: "not-scoped", type: "mcp-server" } },
+      name: "not-scoped",
     };
     const root = makePkg(
       "@me/root@1.0.0" as PackageIdentity,
@@ -354,18 +354,16 @@ describe("validateBundle (AFPS 2.0)", () => {
     const bundle = await buildBundleFromCatalog(root, new InMemoryPackageCatalog([mcp]));
     const result = validateBundle(bundle);
     expect(result.valid).toBe(false);
-    expect(
-      result.issues.some(
-        (i) => i.code === "MANIFEST_SCHEMA" && i.path.includes("dev.afps/mcp-server"),
-      ),
-    ).toBe(true);
+    expect(result.issues.some((i) => i.code === "MANIFEST_SCHEMA" && i.path.includes("name"))).toBe(
+      true,
+    );
   });
 
-  it("flags an mcp-server with no AFPS identity signal as unsupported", async () => {
-    // No top-level `type` and no _meta["dev.afps/mcp-server"] → the package is
-    // genuinely unidentifiable, so it surfaces as UNSUPPORTED_TYPE.
+  it("flags an mcp-server with no root type as unsupported", async () => {
+    // Without `type: "mcp-server"` at the root (AFPS 2.0.2 §3.4), the package
+    // is genuinely unidentifiable and surfaces as UNSUPPORTED_TYPE.
     const orphan = { ...VALID_MCP_SERVER } as Record<string, unknown>;
-    delete orphan._meta;
+    delete orphan.type;
     const root = makePkg(
       "@me/root@1.0.0" as PackageIdentity,
       { ...VALID_AGENT, dependencies: { mcp_servers: { "@me/mcp": "^1" } } },

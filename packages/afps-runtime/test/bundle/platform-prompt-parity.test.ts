@@ -70,9 +70,15 @@ function makeFixtureBundle(): Bundle {
     "@fixture/search@1.0.0",
     {
       manifest_version: "0.3",
-      name: "search-server",
+      name: "@fixture/search",
       version: "1.0.0",
-      _meta: { "dev.afps/mcp-server": { name: "@fixture/search", type: "mcp-server" } },
+      type: "mcp-server",
+      schema_version: "2.0",
+      server: {
+        type: "node",
+        entry_point: "server/index.js",
+        mcp_config: { command: "node", args: ["server/index.js"] },
+      },
     },
     { "server/index.js": "//" },
   );

@@ -8,10 +8,10 @@
  *
  * Discovers every package source directory regardless of type — both
  * `integration-*` (AFPS 2.0 integration manifests) and `mcp-server-*` (MCPB
- * manifests carrying `_meta["dev.afps/mcp-server"]`, produced when an
- * integration's inline local server is split into its own package).
- * `validateManifest` dispatches by type (`agent`/`skill`/`integration`/
- * `mcp-server`), so the loop below is type-agnostic.
+ * manifests with the AFPS identity contract lifted to the root in AFPS
+ * 2.0.2 §3.4 — `type: "mcp-server"`, `name`, `schema_version` all at the
+ * top level). `validateManifest` dispatches by root `type`, so the loop
+ * below is type-agnostic.
  *
  * Each source directory must contain a manifest.json. All files in the
  * directory are bundled into the archive.
@@ -80,11 +80,9 @@ async function main() {
     }
 
     const manifest = result.manifest;
-    // An mcp-server manifest is a verbatim MCPB manifest with no top-level
-    // AFPS `type` — its identity lives under `_meta["dev.afps/mcp-server"]`.
-    const meta = (manifest as { _meta?: Record<string, unknown> })._meta;
-    const afpsMcp = meta?.["dev.afps/mcp-server"] as { type?: string } | undefined;
-    const type = (manifest.type as string | undefined) ?? afpsMcp?.type ?? "unknown";
+    // AFPS 2.0.2 (§3.4) lifted mcp-server identity to the manifest root, so
+    // every package type now declares its `type` at the top level.
+    const type = (manifest.type as string | undefined) ?? "unknown";
     byType[type] = (byType[type] ?? 0) + 1;
 
     // Collect all files — bundled into the archive.

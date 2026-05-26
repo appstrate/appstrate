@@ -11,7 +11,9 @@ import type { IntegrationManifest } from "@appstrate/core/integration";
 
 export type IntegrationManifestView = IntegrationManifest;
 export type IntegrationManifestAuth = NonNullable<IntegrationManifest["auths"]>[string];
-export type IntegrationManifestTool = NonNullable<IntegrationManifest["tools"]>[string];
+export type IntegrationManifestToolPolicy = NonNullable<
+  IntegrationManifest["tools_policy"]
+>[string];
 export type IntegrationAuthType = IntegrationManifestAuth["type"];
 
 /**
@@ -66,7 +68,18 @@ export interface IntegrationAuthStatus {
   required: boolean;
   /** Scopes declared in the manifest (the ones the connect button requests). */
   scopes: string[];
-  audience: string | null;
+  /**
+   * RFC 8707 resource indicator declared by the manifest
+   * (`auths.{key}.resource`). AFPS 2.0 §7.3 name — matches the RFC.
+   */
+  resource: string | null;
+  /**
+   * @deprecated AFPS 2.0 §7.3 — use `resource` (RFC 8707).
+   * `audience` is the legacy wire alias, dual-emitted for one release window
+   * for back-compat. Optional on the type so callers reading new payloads
+   * after the alias is dropped continue to compile.
+   */
+  audience?: string | null;
   /** Connections the calling actor has for this auth (multi-account = >1). */
   connections: IntegrationConnection[];
   /** True when this auth has an admin-registered OAuth2 client (oauth2 only). */
@@ -77,9 +90,9 @@ export interface IntegrationAuthStatus {
  * One entry in the agent-facing tool catalog the picker consumes. Resolved
  * server-side by `resolveIntegrationToolCatalog` from the referenced
  * mcp-server's MCPB `tools[]` minus `hidden_tools` and auto-hidden
- * connect.tool primitives. Falls back to the integration's sparse `tools{}`
- * keys when the mcp-server is unavailable. Per-tool `policy` is attached
- * verbatim from `integration.tools[name]` when declared.
+ * connect.tool primitives. Falls back to the integration's sparse
+ * `tools_policy{}` keys when the mcp-server is unavailable. Per-tool `policy`
+ * is attached verbatim from `integration.tools_policy[name]` when declared.
  */
 export interface IntegrationToolCatalogEntry {
   name: string;

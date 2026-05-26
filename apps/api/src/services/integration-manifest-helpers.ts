@@ -34,7 +34,15 @@ export type AfpsHttpDelivery = ManifestDeliveryHttp;
 
 /** Narrowed view of a single `auths.{key}` method (AFPS 2.0 §7.2 – §7.9). */
 export interface AfpsManifestAuth {
-  type: "oauth2" | "api_key" | "basic" | "custom";
+  /**
+   * Auth-method type discriminant (AFPS 2.0.1+ §7.2).
+   *  - `oauth2` / `api_key` / `basic` / `custom`: legacy v2.0.0 set.
+   *  - `mtls`: mutual TLS client authentication (v2.0.1). The client certificate +
+   *    private key (and optional chain) are described by `credentials.schema` (§7.5)
+   *    and injected via `delivery.files` (§7.6) at well-known paths the underlying
+   *    HTTP client loads. Maps to OpenAPI `mutualTLS` (§7.11).
+   */
+  type: "oauth2" | "api_key" | "basic" | "custom" | "mtls";
   // OAuth2 (§7.3)
   issuer?: string;
   authorization_endpoint?: string;
@@ -55,7 +63,7 @@ export interface AfpsManifestAuth {
   delivery: {
     http?: AfpsHttpDelivery;
     env?: Record<string, AfpsDeliveryEnvEntry>;
-    files?: Record<string, AfpsDeliveryFileEntry>;
+    files?: Record<string, AfpsDeliveryFilesEntry>;
   };
   // URI restrictions (§7.9)
   authorized_uris?: string[];
@@ -66,9 +74,27 @@ export interface AfpsManifestAuth {
 export interface AfpsDeliveryEnvEntry {
   value: string;
   sensitive?: boolean;
+  /**
+   * AFPS 2.0.2 §7.6 — when this `delivery.env` entry's value flows into the
+   * referenced mcp-server's `${user_config.<key>}` placeholder (in
+   * `server.mcp_config.env`). The resolver pre-renders the substitution so the
+   * same integration package works in both Appstrate's local-source path AND a
+   * standalone MCPB host. When omitted, consumers default to the env-variable
+   * name itself (the map key).
+   */
+  user_config_key?: string;
 }
-export interface AfpsDeliveryFileEntry {
+export interface AfpsDeliveryFilesEntry {
+  /**
+   * Value template rendered against the credential bag — same grammar as
+   * `delivery.env` (`{$credential.<field>}`). The rendered bytes are
+   * materialised as the file's contents.
+   */
   value: string;
+  /**
+   * POSIX permission bits as an octal string (e.g. `"0400"`, `"0600"`).
+   * Defaults to `"0400"` (read-only owner) per AFPS 2.0.2 §7.6.
+   */
   mode?: string;
 }
 
@@ -124,6 +150,66 @@ export function renderCredentialTemplate(
 ): string | null {
   const rendered = template.replace(CREDENTIAL_REF, (_m, field: string) => fields[field] ?? "");
   return rendered.length === 0 ? null : rendered;
+}
+
+/**
+ * Default file mode for `delivery.files` entries (AFPS 2.0.2 §7.6: `"0400"`).
+ * Read-only by owner — the strictest sane default for credential material.
+ */
+export const DEFAULT_DELIVERY_FILE_MODE = "0400";
+
+/**
+ * Parse a `delivery.files.<path>.mode` octal-string into a normalized
+ * lowercase form (`"0400"`). Returns `null` for malformed input — callers
+ * should fall back to {@link DEFAULT_DELIVERY_FILE_MODE} in that case.
+ *
+ * Accepted forms: `"0400"`, `"400"`, `"0o400"`. POSIX permissions only —
+ * we reject values that don't fit `[0-7]{3,4}` after stripping an optional
+ * `0o`/`0` prefix.
+ */
+export function parseFileMode(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  // Strip optional `0o` prefix; otherwise treat a leading `0` as the octal
+  // prefix convention (`"0400"`).
+  const body =
+    trimmed.startsWith("0o") || trimmed.startsWith("0O")
+      ? trimmed.slice(2)
+      : trimmed.replace(/^0+/, "");
+  if (body.length === 0 || body.length > 4) return null;
+  if (!/^[0-7]+$/.test(body)) return null;
+  // Re-pad to 4 chars with leading zero (POSIX convention).
+  return `0${body.padStart(3, "0").slice(-3)}`;
+}
+
+/**
+ * Validate a `delivery.files.<path>` key: must be an absolute POSIX path
+ * (`/run/creds/token`), MUST NOT contain `..` segments, and MUST NOT contain
+ * NUL bytes. Returns `true` when safe to materialise inside the runner's
+ * filesystem.
+ *
+ * Rejection criteria (any one → invalid):
+ *   - relative path (no leading `/`)
+ *   - empty / whitespace-only
+ *   - contains `..` segment after normalisation
+ *   - contains NUL byte
+ *   - path collapses to `/` (we won't overwrite the root)
+ */
+export function isSafeDeliveryFilePath(path: string): boolean {
+  if (typeof path !== "string" || path.length === 0) return false;
+  if (path.includes("\0")) return false;
+  if (!path.startsWith("/")) return false;
+  // Normalise: split on `/`, reject any `..` segment. We don't allow them
+  // even if they don't escape because the manifest can declare paths
+  // directly; a `..` is always operator error.
+  const segments = path.split("/");
+  for (const seg of segments) {
+    if (seg === "..") return false;
+  }
+  // Reject pure-root.
+  const meaningful = segments.filter((s) => s.length > 0 && s !== ".");
+  if (meaningful.length === 0) return false;
+  return true;
 }
 
 /** The integration source discriminant kind (`local` | `remote` | `api`). */

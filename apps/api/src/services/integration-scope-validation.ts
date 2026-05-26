@@ -20,7 +20,7 @@
  *    validation is skipped silently. The run-readiness check
  *    (`agent-readiness.ts`) is the authority on "integration must be
  *    installed", not us.
- *  - Integration declares no `tools` block or no `availableScopes`
+ *  - Integration declares no `tools_policy` block or no `scope_catalog`
  *    catalog → the corresponding subset check is skipped (matches the
  *    Phase 0 schema semantics).
  *
@@ -82,7 +82,7 @@ export async function validateAgentIntegrationSelections(
     }
     // For local-source integrations the catalog comes from the referenced
     // mcp-server's MCPB tools. Fetch it best-effort — the validator falls
-    // back to `integration.tools` keys when undefined (mirrors the picker).
+    // back to `integration.tools_policy` keys when undefined (mirrors the picker).
     let mcpServerTools: ReadonlyArray<{ name: string; description?: string }> | undefined;
     const localRef = getLocalServerRef(integration.manifest);
     if (localRef) {

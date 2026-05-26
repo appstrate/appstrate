@@ -90,6 +90,16 @@ export function toSlug(value: string, maxLen?: number): string {
  * `isValidToolNameForNew` only, leaving older tools unaffected.
  */
 export const TOOL_NAME_MAX_LEN = 56;
+/**
+ * Inner-token snake_case pattern shared by both halves of the namespaced MCP
+ * tool name. Exposed so consumers that validate a *single* tool name (e.g.
+ * `agentManifestSchema`'s `integrations_configuration.tools[]` — the agent
+ * picks bare tool names, not pre-namespaced ones) match the same alphabet as
+ * `TOOL_NAME_PATTERN_NEW`. Forbids a leading underscore so the strict and
+ * lenient halves agree: validation.ts used to accept `_internal` while
+ * naming.ts rejected `_internal__foo`, leaving a manifest-vs-runtime drift.
+ */
+export const TOOL_NAME_INNER_PATTERN = /^[a-z][a-z0-9_]*$/;
 const TOOL_NAME_PATTERN_NEW = /^[a-z][a-z0-9_]*__[a-z][a-z0-9_]*$/;
 
 export function isValidToolNameForNew(name: string): boolean {

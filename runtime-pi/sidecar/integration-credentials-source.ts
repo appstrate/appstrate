@@ -113,6 +113,45 @@ export interface IntegrationCredentialsSource extends MitmCredentialSource {
 }
 
 /**
+ * Coerce an auth's `expiresAt` into an absolute epoch-ms timestamp.
+ *
+ * Accepted shapes:
+ *   - ISO-8601 string (`"2026-01-01T00:00:00Z"`) → `Date.parse()`.
+ *   - Numeric string of an absolute epoch in ms (`"1735689600000"`) →
+ *     `Number()`.
+ *   - Numeric/string `expires_in` in seconds-from-now (`60`, `"60"`) →
+ *     `Date.now() + n * 1000`. Disambiguated by magnitude: values below
+ *     `EPOCH_MS_THRESHOLD` (1e12, ~Sep 2001) are treated as seconds-from-now
+ *     since no real absolute epoch-ms or ISO date parses that low.
+ *   - `null` / `undefined` / unparseable → `null` (treated as never-expiring
+ *     by upstream callers).
+ *
+ * Defence against `Date.parse(<numeric>) === NaN` regression (#F3): the
+ * earlier `Date.parse(auth.expiresAt)` call rejected numeric `expires_in`
+ * payloads silently, leaving the listener with no expiry signal.
+ */
+export function coerceExpiresAtToEpochMs(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const EPOCH_MS_THRESHOLD = 1e12; // ~2001-09-09; below this we assume seconds-from-now.
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) return null;
+    return value < EPOCH_MS_THRESHOLD ? Date.now() + value * 1000 : value;
+  }
+  if (typeof value === "string") {
+    if (value === "") return null;
+    // Try numeric first (covers `"60"` seconds-from-now and `"1735689600000"`).
+    if (/^-?\d+(\.\d+)?$/.test(value)) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return null;
+      return n < EPOCH_MS_THRESHOLD ? Date.now() + n * 1000 : n;
+    }
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+/**
  * Build a `MitmCredentialSource` backed by the platform's live
  * credentials endpoints. The returned source mutates its internal
  * state on refresh; the same object stays valid for the run's lifetime.
@@ -285,7 +324,7 @@ export function createIntegrationCredentialsSource(
       deliveryPlans: { ...payload.deliveryPlans, [auth.authKey]: plan },
       expiresAtEpochMs: {
         ...payload.expiresAtEpochMs,
-        [auth.authKey]: auth.expiresAt ? Date.parse(auth.expiresAt) : null,
+        [auth.authKey]: coerceExpiresAtToEpochMs(auth.expiresAt),
       },
     };
     logger.info("integration session outputs installed", {

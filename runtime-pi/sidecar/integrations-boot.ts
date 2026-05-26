@@ -36,6 +36,7 @@ import { randomUUID } from "node:crypto";
 import { unzipSync } from "fflate";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import {
   createInProcessPair,
   createMcpHttpClient,
@@ -248,6 +249,57 @@ export interface ConnectRemoteHttpDeps {
   fetchInitial?: typeof fetchInitialIntegrationCredentials;
   createSource?: typeof createIntegrationCredentialsSource;
   createClient?: typeof createMcpHttpClient;
+  /**
+   * Optional override for the SSE transport path (AFPS 2.0 §7.1
+   * `source.remote.transport: "sse"`). Production callers omit it — the
+   * default wires `SSEClientTransport` from `@modelcontextprotocol/sdk`.
+   * Tests inject a stub to exercise the SSE branch without binding a
+   * real EventSource.
+   */
+  createSseClient?: (
+    url: string,
+    opts: {
+      fetch: typeof fetch;
+      clientInfo: { name: string; version: string };
+    },
+  ) => Promise<AppstrateMcpClient>;
+}
+
+/**
+ * Default SSE client builder — wires `SSEClientTransport` from the MCP SDK
+ * with our `customFetch` (per-request Bearer + 401-retry). The SDK's SSE
+ * transport accepts a `fetch` override under `eventSourceInit` for the
+ * stream and `requestInit` for outbound POSTs; we route both through the
+ * same custom fetch so credential headers are injected on every hop.
+ *
+ * AFPS 2.0 §7.1 — `"sse"` is the SDK's deprecated-but-supported legacy
+ * transport, kept here for manifests targeting older remote MCP servers
+ * (some hosted MCP providers still default to SSE).
+ */
+async function defaultCreateSseClient(
+  url: string,
+  opts: {
+    fetch: typeof fetch;
+    clientInfo: { name: string; version: string };
+  },
+): Promise<AppstrateMcpClient> {
+  const targetUrl = new URL(url);
+  const transport = new SSEClientTransport(targetUrl, {
+    // The SDK's SSEClientTransport accepts a `fetch` override applied to
+    // both the initial GET (stream open) and the outbound POSTs (client→
+    // server JSON-RPC messages). Routing through customFetch attaches the
+    // Bearer header per-request and triggers the 401-refresh-and-retry
+    // closure consistently across both directions.
+    fetch: opts.fetch as never,
+  });
+  const client = new Client(opts.clientInfo);
+  try {
+    await client.connect(transport);
+  } catch (err) {
+    await transport.close().catch(() => {});
+    throw err;
+  }
+  return wrapClient(client, transport);
 }
 
 export async function connectRemoteHttpIntegration(
@@ -258,11 +310,30 @@ export async function connectRemoteHttpIntegration(
   const fetchInitial = deps.fetchInitial ?? fetchInitialIntegrationCredentials;
   const createSource = deps.createSource ?? createIntegrationCredentialsSource;
   const createClient = deps.createClient ?? createMcpHttpClient;
+  const createSseClient = deps.createSseClient ?? defaultCreateSseClient;
 
   const serverUrl = spec.manifest.server?.url;
   if (!serverUrl) {
     throw new Error(
       `integration ${spec.integrationId} declares server.type="http" but no server.url`,
+    );
+  }
+  // AFPS 2.0 §7.1 — pick the MCP client transport from the manifest.
+  // Default to `streamable-http` when the field is absent (back-compat
+  // for v2.0.0 manifests that predated the enum). Anything else is a
+  // hard-fail at boot — the platform validates the enum at install time,
+  // so reaching this branch means the manifest carries a value the
+  // sidecar doesn't (yet) know how to dispatch to.
+  const declaredTransport = spec.manifest.server?.transport;
+  const transport: "streamable-http" | "sse" =
+    declaredTransport === "sse" ? "sse" : "streamable-http";
+  if (
+    declaredTransport !== undefined &&
+    declaredTransport !== "streamable-http" &&
+    declaredTransport !== "sse"
+  ) {
+    throw new Error(
+      `integration ${spec.integrationId} declares unsupported source.remote.transport="${declaredTransport}" (allowed: "streamable-http" | "sse")`,
     );
   }
 
@@ -319,11 +390,22 @@ export async function connectRemoteHttpIntegration(
     return res;
   };
 
-  const client = await createClient(serverUrl, {
-    fetch: customFetch,
-    clientInfo: { name: "appstrate-sidecar-remote-integration", version: "0.1.0" },
-    retry: { deadlineMs: 30_000 },
-  });
+  const clientInfo = {
+    name: "appstrate-sidecar-remote-integration",
+    version: "0.1.0",
+  };
+  // AFPS 2.0 §7.1 — dispatch on the manifest's declared transport. Both
+  // branches share the same per-request Bearer + 401-retry closure
+  // (`customFetch` above), so credential injection + refresh semantics
+  // are identical across Streamable HTTP and SSE.
+  const client =
+    transport === "sse"
+      ? await createSseClient(serverUrl, { fetch: customFetch, clientInfo })
+      : await createClient(serverUrl, {
+          fetch: customFetch,
+          clientInfo,
+          retry: { deadlineMs: 30_000 },
+        });
   return { client, authKey };
 }
 
@@ -493,6 +575,14 @@ async function spawnAndConnectLocalIntegration(params: {
   toolUrlEnvelope?: IntegrationSpawnSpec["toolUrlEnvelope"];
   /** Allowlist for `host.register`. `[]` exposes nothing (connect-run). */
   allowedTools: readonly string[] | undefined;
+  /**
+   * R8a defensive filter — `manifest.hidden_tools` echoed back from the
+   * platform via `IntegrationSpawnSpec.hiddenTools`. The host applies it
+   * after the allowlist to defend against fixtures / direct DB writes
+   * that bypass install-time catalog resolution. `undefined` / empty =
+   * no extra filtering.
+   */
+  hiddenTools?: readonly string[];
   /** Log-message prefix: `"integration"` (agent-run) | `"connect-run"`. */
   logLabel: string;
   /** Caller-owned teardown collectors — appended to as resources are built. */
@@ -593,6 +683,10 @@ async function spawnAndConnectLocalIntegration(params: {
     // Niveau 2 Phase 3 — McpHost.register filters `tools/list` to the agent's
     // declared tools. `undefined` keeps the legacy "all tools allowed".
     ...(params.allowedTools !== undefined ? { allowedTools: params.allowedTools } : {}),
+    // R8a — apply `hidden_tools` belt-and-suspenders filter so a tool name
+    // the manifest hides is never reachable, even via fixtures that bypassed
+    // install-time catalog resolution.
+    ...((params.hiddenTools?.length ?? 0) > 0 ? { hiddenTools: params.hiddenTools } : {}),
   });
   const toolCount = host.size() - sizeBefore;
 
@@ -848,6 +942,10 @@ export async function bootIntegrations(
           // Phase 3 tool allowlist still applies — McpHost filters
           // tools/list before exposing them to the agent.
           allowedTools: spec.toolAllowlist,
+          // R8a defensive — `manifest.hidden_tools` is enforced at
+          // runtime as well as at install-time, so a manifest-hidden
+          // tool can never reach the agent via the remote MCP path.
+          ...((spec.hiddenTools?.length ?? 0) > 0 ? { hiddenTools: spec.hiddenTools } : {}),
         });
         const added = host.size() - sizeBefore;
         // Attach the in-process api_call tool alongside the remote MCP's tools.
@@ -861,6 +959,9 @@ export async function bootIntegrations(
           integrationId: spec.integrationId,
           namespace: spec.namespace,
           serverUrl: server.url,
+          // AFPS 2.0 §7.1 — surface the actual transport the sidecar
+          // dispatched to so operators can audit which path executed.
+          transport: server.transport ?? "streamable-http",
           authKey,
           toolCount: added + apiCallAdded,
         });
@@ -903,6 +1004,9 @@ export async function bootIntegrations(
         wantsMitm,
         ...(spec.toolUrlEnvelope ? { toolUrlEnvelope: spec.toolUrlEnvelope } : {}),
         allowedTools: spec.toolAllowlist,
+        // R8a — propagate `hidden_tools` so the host filters them out at
+        // runtime, regardless of whether install-time validation removed them.
+        ...((spec.hiddenTools?.length ?? 0) > 0 ? { hiddenTools: spec.hiddenTools } : {}),
         logLabel: "integration",
         clients,
         mitmListeners,

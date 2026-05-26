@@ -76,7 +76,7 @@
     "./jwt": "./src/jwt.ts"
   },
   "dependencies": {
-    "@afps-spec/schema": "link:@afps-spec/schema",
+    "@afps-spec/schema": "^2.0.3",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
     "fflate": "^0.8.0",

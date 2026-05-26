@@ -1,7 +1,9 @@
 {
   "manifest_version": "0.3",
-  "name": "bun-toolkit-server",
+  "name": "@appstrate/bun-toolkit-server",
   "version": "1.0.0",
+  "type": "mcp-server",
+  "schema_version": "2.0",
   "display_name": "Bun Toolkit Server",
   "description": "Reference mcp-server for a Bun-native MCP server. Zero-dependency, exercising bun:sqlite, Bun.CryptoHasher, Bun.password, crypto.randomUUID, and a runtime self-report.",
   "server": {
@@ -19,8 +21,5 @@
     { "name": "uuid" },
     { "name": "system_info" },
     { "name": "fetch_echo" }
-  ],
-  "_meta": {
-    "dev.afps/mcp-server": { "name": "@appstrate/bun-toolkit-server", "type": "mcp-server" }
-  }
+  ]
 }

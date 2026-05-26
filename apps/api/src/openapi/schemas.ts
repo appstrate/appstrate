@@ -759,7 +759,17 @@ export const schemas = {
             authType: { type: "string" },
             fields: { type: "object", additionalProperties: { type: "string" } },
             authorizedUris: { type: "array", items: { type: "string" } },
-            audience: { type: "string" },
+            resource: {
+              type: "string",
+              description:
+                "RFC 8707 resource indicator declared by the manifest (`auths.{key}.resource`). AFPS 2.0 §7.3 name — matches the RFC.",
+            },
+            audience: {
+              type: "string",
+              deprecated: true,
+              description:
+                "Deprecated alias for `resource`. AFPS 2.0 §7.3 (RFC 8707) renamed the wire field; `audience` is kept for one release window for back-compat.",
+            },
             expiresAt: { type: "string", format: "date-time" },
             scopesGranted: { type: "array", items: { type: "string" } },
           },

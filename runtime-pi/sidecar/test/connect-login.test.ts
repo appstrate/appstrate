@@ -12,6 +12,7 @@ import { describe, it, expect } from "bun:test";
 import { applyConnectInputSubstitution } from "../integration-mitm-listener.ts";
 import { runConnectLogin } from "../connect-login.ts";
 import {
+  coerceExpiresAtToEpochMs,
   createIntegrationCredentialsSource,
   type IntegrationCredentialsWire,
 } from "../integration-credentials-source.ts";
@@ -184,6 +185,74 @@ describe("runConnectLogin", () => {
     expect(capture.args.arguments).toEqual({});
   });
 
+  // F3 — the login-tool result wire format is snake_case (AFPS 2.0.2 §7.x);
+  // the parser must accept BOTH snake_case and the legacy camelCase form
+  // for one release window.
+  it("accepts snake_case identity_claims / expires_at / scopes_granted in the login-tool result", async () => {
+    const source = makeSource();
+    const canned = {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            outputs: { access_token: "TOK" },
+            identity_claims: { sub: "alice" },
+            expires_at: "2030-01-01T00:00:00.000Z",
+            scopes_granted: ["read", "write"],
+          }),
+        },
+      ],
+    };
+    const { host } = makeFakeHost("ns", canned, () => source.activeInputs());
+    const bundle = await runConnectLogin({
+      host: host as any,
+      namespace: "ns",
+      toolName: "login",
+      inputs: {},
+      source,
+      authKey: "primary",
+      authType: "oauth2",
+      authorizedUris: [],
+      deliveryHttp: DELIVERY_HTTP,
+    });
+    expect(bundle.outputs).toEqual({ access_token: "TOK" });
+    expect(bundle.identityClaims).toEqual({ sub: "alice" });
+    expect(bundle.expiresAt).toBe("2030-01-01T00:00:00.000Z");
+    expect(bundle.scopesGranted).toEqual(["read", "write"]);
+  });
+
+  it("still accepts legacy camelCase identityClaims / expiresAt / scopesGranted for back-compat", async () => {
+    const source = makeSource();
+    const canned = {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            outputs: { access_token: "TOK" },
+            identityClaims: { sub: "bob" },
+            expiresAt: "2030-01-01T00:00:00.000Z",
+            scopesGranted: ["read"],
+          }),
+        },
+      ],
+    };
+    const { host } = makeFakeHost("ns", canned, () => source.activeInputs());
+    const bundle = await runConnectLogin({
+      host: host as any,
+      namespace: "ns",
+      toolName: "login",
+      inputs: {},
+      source,
+      authKey: "primary",
+      authType: "oauth2",
+      authorizedUris: [],
+      deliveryHttp: DELIVERY_HTTP,
+    });
+    expect(bundle.identityClaims).toEqual({ sub: "bob" });
+    expect(bundle.expiresAt).toBe("2030-01-01T00:00:00.000Z");
+    expect(bundle.scopesGranted).toEqual(["read"]);
+  });
+
   it("clears the substitution window even when the tool call rejects", async () => {
     const source = makeSource();
     const client = {
@@ -276,7 +345,12 @@ describe("runConnectLogin", () => {
     expect(plans.primary?.value).toBe(Buffer.from("u:p", "utf8").toString("base64"));
   });
 
-  it("installs the auth with a zero-value plan when no header is injectable", async () => {
+  it("refuses to install a zero-plan injection when no header is injectable (R8a hardening)", async () => {
+    // R8a — the previous behaviour silently installed a `{ headerName: "" }`
+    // delivery plan, masking misconfigurations where the manifest declared
+    // neither `delivery.env` nor a non-empty `delivery.http.name`. The
+    // runtime now refuses the boot so operators see a clear error instead
+    // of upstream 401s with no obvious cause.
     const source = makeSource();
     const canned = {
       content: [
@@ -288,29 +362,24 @@ describe("runConnectLogin", () => {
     };
     const { host } = makeFakeHost("ns", canned);
 
-    const bundle = await runConnectLogin({
-      host: host as any,
-      namespace: "ns",
-      toolName: "login",
-      inputs: {},
-      source,
-      authKey: "primary",
-      // `custom` with an empty `delivery.http` name → resolver returns null,
-      // so the zero-value plan branch installs the auth without injection.
-      authType: "custom",
-      authorizedUris: [],
-      deliveryHttp: { in: "header", name: "" } as any,
-    });
+    await expect(
+      runConnectLogin({
+        host: host as any,
+        namespace: "ns",
+        toolName: "login",
+        inputs: {},
+        source,
+        authKey: "primary",
+        // `custom` with an empty `delivery.http` name → resolver returns
+        // null → R8a refuses the zero-plan installation.
+        authType: "custom",
+        authorizedUris: [],
+        deliveryHttp: { in: "header", name: "" } as any,
+      }),
+    ).rejects.toThrow(/no injectable header/i);
 
-    expect(bundle.outputs).toEqual({ session: "S1" });
-    const snap = source.snapshot();
-    expect(snap.auths[0]?.authKey).toBe("primary");
-    expect(snap.deliveryPlans.primary).toEqual({
-      headerName: "",
-      headerPrefix: "",
-      value: "",
-      allowServerOverride: false,
-    });
+    // The substitution window must still be closed after the rejection.
+    expect(source.activeInputs()).toBeNull();
   });
 
   it("throws when the upstream client is missing", async () => {
@@ -369,5 +438,75 @@ describe("IntegrationCredentialsSource active-input window", () => {
     expect(snap.auths[0]?.authKey).toBe("primary");
     expect(snap.deliveryPlans.primary?.value).toBe("TOK");
     expect(snap.expiresAtEpochMs.primary).toBe(Date.parse(expiresAt));
+  });
+
+  // F3 regression: `Date.parse(<numeric>)` returns NaN. A login tool that
+  // surfaces `expires_in`-style seconds-from-now via the `expires_at` /
+  // `expiresAt` field would silently drop the expiry signal. `coerceExpiresAtToEpochMs`
+  // disambiguates by magnitude.
+  it("setSessionOutputs coerces a numeric-string expiresAt (seconds-from-now) to an absolute epoch", () => {
+    const source = makeSource();
+    const before = Date.now();
+    source.setSessionOutputs(
+      {
+        authKey: "primary",
+        authType: "oauth2",
+        fields: { access_token: "TOK" },
+        authorizedUris: ["https://api.example.com/**"],
+        // 3600 seconds-from-now (typical OAuth `expires_in`). `Date.parse("3600")`
+        // would have returned NaN; the coercer should treat it as offset.
+        expiresAt: "3600",
+      },
+      {
+        headerName: "Authorization",
+        headerPrefix: "Bearer ",
+        value: "TOK",
+        allowServerOverride: false,
+      },
+    );
+    const snap = source.snapshot();
+    const got = snap.expiresAtEpochMs.primary;
+    expect(typeof got).toBe("number");
+    // Should be roughly `before + 3600s` (allow generous fuzz for test latency).
+    expect(got!).toBeGreaterThanOrEqual(before + 3600 * 1000 - 500);
+    expect(got!).toBeLessThanOrEqual(Date.now() + 3600 * 1000 + 500);
+  });
+});
+
+// F3 — unit coverage for the expiresAt coercer.
+describe("coerceExpiresAtToEpochMs", () => {
+  it("returns null for null/undefined/empty", () => {
+    expect(coerceExpiresAtToEpochMs(null)).toBeNull();
+    expect(coerceExpiresAtToEpochMs(undefined)).toBeNull();
+    expect(coerceExpiresAtToEpochMs("")).toBeNull();
+  });
+
+  it("parses ISO-8601 strings", () => {
+    const iso = "2030-01-01T00:00:00.000Z";
+    expect(coerceExpiresAtToEpochMs(iso)).toBe(Date.parse(iso));
+  });
+
+  it("treats a small numeric value as seconds-from-now", () => {
+    const before = Date.now();
+    const got = coerceExpiresAtToEpochMs(60);
+    expect(got!).toBeGreaterThanOrEqual(before + 60 * 1000 - 500);
+    expect(got!).toBeLessThanOrEqual(Date.now() + 60 * 1000 + 500);
+  });
+
+  it("treats a small numeric string as seconds-from-now", () => {
+    const before = Date.now();
+    const got = coerceExpiresAtToEpochMs("3600");
+    expect(got!).toBeGreaterThanOrEqual(before + 3600 * 1000 - 500);
+    expect(got!).toBeLessThanOrEqual(Date.now() + 3600 * 1000 + 500);
+  });
+
+  it("treats a large numeric value as an absolute epoch in ms", () => {
+    const future = Date.now() + 86_400_000;
+    expect(coerceExpiresAtToEpochMs(future)).toBe(future);
+    expect(coerceExpiresAtToEpochMs(String(future))).toBe(future);
+  });
+
+  it("returns null for malformed strings", () => {
+    expect(coerceExpiresAtToEpochMs("not a date")).toBeNull();
   });
 });

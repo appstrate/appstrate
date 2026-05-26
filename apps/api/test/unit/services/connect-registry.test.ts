@@ -28,8 +28,12 @@ describe("resolveStrategy", () => {
     expect(typeof s.begin).toBe("function");
   });
 
-  it("maps api_key / basic / bare custom → FieldsStrategy (no begin)", () => {
-    for (const t of ["api_key", "basic", "custom"] as const) {
+  it("maps api_key / basic / mtls / bare custom → FieldsStrategy (no begin)", () => {
+    // AFPS 2.0.2 §7.2 — mtls (added in v2.0.1) reuses FieldsStrategy: the user
+    // pastes a cert + key bag, the manifest's credentials.schema validates it,
+    // and the spawn resolver materialises the fields into `delivery.files`
+    // entries at runtime. No interactive step (no `begin`) beyond the bag.
+    for (const t of ["api_key", "basic", "mtls", "custom"] as const) {
       const s = resolveStrategy(auth(t));
       expect(s).toBeInstanceOf(FieldsStrategy);
       expect(s.begin).toBeUndefined();

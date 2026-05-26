@@ -7,11 +7,11 @@ import {
   extractSkillMeta,
   type Manifest,
   type AgentManifest,
+  type SkillManifest,
   type PackageType,
   type IntegrationManifest,
   type McpServerManifest,
 } from "./validation.ts";
-import { getMcpServerAfpsName } from "./mcp-server.ts";
 
 export type { Zippable };
 
@@ -167,7 +167,7 @@ export function stripWrapperPrefix(
 /** Result of parsing an AFPS package ZIP file. */
 export interface ParsedPackageZip {
   /** The validated manifest from manifest.json. */
-  manifest: Manifest | AgentManifest | IntegrationManifest | McpServerManifest;
+  manifest: Manifest | AgentManifest | SkillManifest | IntegrationManifest | McpServerManifest;
   /** The primary content (prompt.md for agents, SKILL.md for skills, manifest.json for integrations/mcp-servers). */
   content: string;
   /** All files in the ZIP archive (path to content). */
@@ -175,12 +175,10 @@ export interface ParsedPackageZip {
   /** The detected package type. */
   type: PackageType;
   /**
-   * Canonical package id. For agent/skill/integration this is the manifest
-   * `name`. For mcp-server it is the scoped AFPS identity
-   * (`_meta["dev.afps/mcp-server"].name`) — a verbatim MCPB manifest's
-   * top-level `name` is unscoped, but the package id must be scoped (it is what
-   * an integration's `source.server.name` references and what the scoped
-   * `packages.id` format requires).
+   * Canonical package id — for every package type (agent/skill/integration/
+   * mcp-server) this is the scoped manifest `name`. AFPS 2.0.2 (§3.4) lifted
+   * the mcp-server scoped identity to the manifest root, removing the
+   * previous `_meta["dev.afps/mcp-server"].name` indirection.
    */
   packageId: string;
 }
@@ -272,16 +270,9 @@ export function parsePackageZip(zipBuffer: Uint8Array, maxSize?: number): Parsed
 
   const manifest = validation.manifest!;
 
-  // An mcp-server manifest is a verbatim MCPB manifest with no top-level
-  // AFPS `type` — it declares `type: "mcp-server"` under
-  // `_meta["dev.afps/mcp-server"]` (AFPS §3.4). Derive the package type
-  // accordingly so the switch below dispatches correctly.
-  const metaForType = (manifest as { _meta?: Record<string, unknown> })._meta;
-  const afpsMcpForType = metaForType?.["dev.afps/mcp-server"] as { type?: unknown } | undefined;
-  const type: PackageType | undefined =
-    afpsMcpForType?.type === "mcp-server"
-      ? "mcp-server"
-      : (manifest as { type?: PackageType }).type;
+  // AFPS 2.0.2 (§3.4 / §11.2) lifted mcp-server identity to the manifest root,
+  // so every package type now declares its `type` at the top level.
+  const type: PackageType | undefined = (manifest as { type?: PackageType }).type;
 
   // Extract primary content based on type
   let content: string;
@@ -333,13 +324,11 @@ export function parsePackageZip(zipBuffer: Uint8Array, maxSize?: number): Parsed
       throw new PackageZipError("INVALID_MANIFEST", `Unsupported package type: "${type}"`);
   }
 
-  // Canonical AFPS identity, type-agnostic: the `_meta` package name takes
-  // precedence over the top-level `name`. Only mcp-server packages carry a
-  // `_meta["dev.afps/mcp-server"].name` (they are verbatim MCPB manifests whose
-  // top-level `name` is unscoped), so for every other type this falls through
-  // to `name` — no per-type branching.
-  const packageId =
-    getMcpServerAfpsName(manifest as McpServerManifest) ?? (manifest as { name: string }).name;
+  // Canonical AFPS identity, type-agnostic: AFPS 2.0.2 (§3.4) lifted the
+  // mcp-server scoped identity to the manifest root, so every package type
+  // now stores `@scope/name` at the top-level `name`. The previous
+  // `_meta["dev.afps/mcp-server"].name` fallback is gone.
+  const packageId = (manifest as { name: string }).name;
 
   return { manifest, content, files, type: type as PackageType, packageId };
 }

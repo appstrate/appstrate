@@ -13,7 +13,9 @@
  *   - Each (integration, auth) pair can hold multiple accounts (e.g.
  *     two Google accounts on the same Gmail integration). The
  *     `accountId` discriminator is extracted at connection time via
- *     the manifest's `extractTokenIdentity.accountId` JSONPath.
+ *     the manifest's AFPS 2.0 `auths.{key}.identity_claims` JSONPath
+ *     map (§7.4) — the connect layer renders it into the row's
+ *     `identityClaims` JSONB and `accountId` discriminator.
  *
  *   - Connections are scoped per application (every connect-able
  *     surface in Appstrate is application-scoped — see CLAUDE.md
@@ -64,7 +66,7 @@ export const integrationConnections = pgTable(
     endUserId: text("end_user_id").references(() => endUsers.id, { onDelete: "cascade" }),
     /** v1 envelope ciphertext (AES-GCM, keyring-encrypted). */
     credentialsEncrypted: text("credentials_encrypted").notNull(),
-    /** Identity claims extracted via `extractTokenIdentity` — `sub`, `email`, … */
+    /** Identity claims extracted via the AFPS 2.0 `auths.{key}.identity_claims` map (§7.4) — `sub`, `email`, … */
     identityClaims: jsonb("identity_claims"),
     /** Granted OAuth scopes — surfaced in the UI for re-consent prompts. */
     scopesGranted: text("scopes_granted")
@@ -125,6 +127,12 @@ export const integrationConnections = pgTable(
       "integration_conn_exactly_one_owner",
       sql`(user_id IS NOT NULL AND end_user_id IS NULL) OR (user_id IS NULL AND end_user_id IS NOT NULL)`,
     ),
+    // AFPS §7.2 (audit 03c §D-4): manifest auth keys MUST match
+    // `^[a-z][a-z0-9_]*$`. The DB mirrors the manifest-side validation
+    // already enforced by `@afps-spec/schema` so the wire and the row
+    // never disagree (an attacker-crafted INSERT bypassing the API still
+    // hits the same gate).
+    check("integration_connections_auth_key_valid", sql`"auth_key" ~ '^[a-z][a-z0-9_]*$'`),
   ],
 );
 

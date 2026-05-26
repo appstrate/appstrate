@@ -76,20 +76,21 @@ describe("buildBundleFromCatalog", () => {
       { name: "@me/skill-a", version: "1.3.0", type: "skill", schema_version: "2.0" },
       { "SKILL.md": enc("s") },
     );
-    // An mcp-server bundle is an MCPB manifest: top-level `name` is the MCPB
-    // server slug; the scoped AFPS identity lives under _meta.
+    // AFPS 2.0.2 (§3.4) lifted the mcp-server scoped identity to the manifest
+    // root, so `name`, `type`, and `schema_version` live at the top level.
     const mcp = makePkg(
       "@me/mcp-x@1.2.3" as PackageIdentity,
       {
         manifest_version: "0.3",
-        name: "mcp-x-server",
+        name: "@me/mcp-x",
         version: "1.2.3",
+        type: "mcp-server",
+        schema_version: "2.0",
         server: {
           type: "node",
           entry_point: "server/index.js",
           mcp_config: { command: "node", args: ["server/index.js"] },
         },
-        _meta: { "dev.afps/mcp-server": { name: "@me/mcp-x", type: "mcp-server" } },
       },
       { "server/index.js": enc("//") },
     );
@@ -142,6 +143,46 @@ describe("buildBundleFromCatalog", () => {
     expect(bundle.packages.get("@me/skill-a@1.3.0" as PackageIdentity)).toBeDefined();
     expect(bundle.packages.get("@me/mcp-x@1.2.3" as PackageIdentity)).toBeUndefined();
     expect(bundle.packages.get("@me/integ-y@1.0.0" as PackageIdentity)).toBeUndefined();
+  });
+
+  it("walks AFPS 2.0.2 §4.1 object-form deps (skills + integrations + mcp_servers)", async () => {
+    const rootManifest = {
+      ...ROOT,
+      dependencies: {
+        skills: { "@me/skill-a": { version: "^1.0.0" } },
+        mcp_servers: { "@me/mcp-x": { version: "1.2.3" } },
+        integrations: {
+          "@me/integ-y": { version: "^1.0.0", scopes: ["s1"], auth_key: "oauth" },
+        },
+      },
+    };
+    const root = makePkg("@me/root@1.0.0" as PackageIdentity, rootManifest, {
+      "prompt.md": enc("p"),
+    });
+    const skill = makePkg(
+      "@me/skill-a@1.3.0" as PackageIdentity,
+      { name: "@me/skill-a", version: "1.3.0", type: "skill", schema_version: "2.0" },
+      { "SKILL.md": enc("s") },
+    );
+    const mcp = makePkg(
+      "@me/mcp-x@1.2.3" as PackageIdentity,
+      { name: "@me/mcp-x", version: "1.2.3", type: "mcp-server", schema_version: "2.0" },
+      {},
+    );
+    const integ = makePkg(
+      "@me/integ-y@1.0.0" as PackageIdentity,
+      { name: "@me/integ-y", version: "1.0.0", type: "integration", schema_version: "2.0" },
+      {},
+    );
+    const cat = new InMemoryPackageCatalog([skill, mcp, integ]);
+
+    const bundle = await buildBundleFromCatalog(root, cat, {
+      depTypes: ["skills", "mcp_servers", "integrations"],
+    });
+    expect(bundle.packages.size).toBe(4); // root + 3 deps
+    expect(bundle.packages.get("@me/skill-a@1.3.0" as PackageIdentity)).toBeDefined();
+    expect(bundle.packages.get("@me/mcp-x@1.2.3" as PackageIdentity)).toBeDefined();
+    expect(bundle.packages.get("@me/integ-y@1.0.0" as PackageIdentity)).toBeDefined();
   });
 
   it("walks transitive deps", async () => {

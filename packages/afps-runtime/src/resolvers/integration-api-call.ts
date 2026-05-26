@@ -97,11 +97,27 @@ export interface ApiCallIntegrationMeta {
 export function readIntegrationRefs(bundle: Bundle): IntegrationRef[] {
   const root = bundle.packages.get(bundle.root);
   if (!root) return [];
+  // AFPS 2.0.2 §4.1 — dependency value is polymorphic: bare semver range
+  // OR object `{ version, scopes?, auth_key?, ... }`. Extract just the
+  // version range here; per-integration configuration is consumed by the
+  // platform-side `parseManifestIntegrations` pass against the same manifest.
   const manifest = root.manifest as {
-    dependencies?: { integrations?: Record<string, string> };
+    dependencies?: { integrations?: Record<string, unknown> };
   };
   const integrations = manifest.dependencies?.integrations ?? {};
-  return Object.entries(integrations).map(([name, version]) => ({ name, version }));
+  const refs: IntegrationRef[] = [];
+  for (const [name, raw] of Object.entries(integrations)) {
+    let version: string | null = null;
+    if (typeof raw === "string") {
+      version = raw;
+    } else if (raw && typeof raw === "object") {
+      const v = (raw as { version?: unknown }).version;
+      if (typeof v === "string") version = v;
+    }
+    if (version === null) continue;
+    refs.push({ name, version });
+  }
+  return refs;
 }
 
 /** Slugify a package id into a tool-name-safe namespace (matches platform). */

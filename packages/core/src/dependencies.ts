@@ -8,11 +8,36 @@ import { getErrorMessage } from "./errors";
 // Dependencies shape (manifest format)
 // ─────────────────────────────────────────────
 
-/** Package dependency map as declared in manifest.json, keyed by scoped package name to version range. */
+/**
+ * Generic dependency object form per AFPS 2.0.2 §4.1 — `version` is the
+ * semver range, every other field is per-dependency-type configuration
+ * (e.g. integrations carry `scopes`/`auth_key`).
+ */
+export interface DependencyObject {
+  version: string;
+  [key: string]: unknown;
+}
+
+/** Integration dependency object form (§4.1) — version + optional scopes + optional auth_key. */
+export interface IntegrationDependencyObject extends DependencyObject {
+  scopes?: string[];
+  auth_key?: string;
+}
+
+/** Polymorphic dependency value: bare semver range string OR object form. */
+export type DependencyValue = string | DependencyObject;
+export type IntegrationDependencyValue = string | IntegrationDependencyObject;
+
+/**
+ * Package dependency map as declared in manifest.json. Per AFPS 2.0.2 §4.1
+ * each value can be either a bare semver range or an object whose `version`
+ * member is a semver range (object form is the carrier for per-dependency-type
+ * configuration like `scopes`/`auth_key` for integrations).
+ */
 export interface Dependencies {
-  skills?: Record<string, string>;
-  mcp_servers?: Record<string, string>;
-  integrations?: Record<string, string>;
+  skills?: Record<string, DependencyValue>;
+  mcp_servers?: Record<string, DependencyValue>;
+  integrations?: Record<string, IntegrationDependencyValue>;
 }
 
 // ─────────────────────────────────────────────
@@ -32,44 +57,60 @@ export interface DepEntry {
 }
 
 /**
+ * Extract a normalized version range from a polymorphic AFPS dependency
+ * value. Accepts either a bare semver range string or the object form
+ * `{ version, ... }` (§4.1). Returns `null` if the value can't be coerced
+ * to a version string.
+ */
+function readVersionRange(value: unknown): string | null {
+  if (typeof value === "string") return value;
+  if (value && typeof value === "object") {
+    const v = (value as { version?: unknown }).version;
+    if (typeof v === "string") return v;
+  }
+  return null;
+}
+
+/**
  * Extract dependency entries from a manifest's `dependencies` field.
  * Parses scoped names from the skills, mcp_servers, and integrations
- * dependency maps. Every dependency value is a bare semver range string.
- * Per-integration tool/scope selection lives in the manifest's top-level
- * `integrations[id]` block — read via {@link parseManifestIntegrations}.
+ * dependency maps. Per AFPS 2.0.2 §4.1 each value is either a bare semver
+ * range string OR an object `{ version, ... }`; this helper normalizes both
+ * to a flat `DepEntry` carrying just the version range. Object-form extras
+ * (e.g. `scopes`/`auth_key` for integrations) are read via
+ * {@link parseManifestIntegrations}.
  * @param manifest - Raw manifest object containing an optional `dependencies` field
  * @returns Array of parsed dependency entries
- * @throws Error if any dependency has an invalid scoped package name
+ * @throws Error if any dependency has an invalid scoped package name or a
+ *         value whose shape doesn't match AFPS §4.1.
  */
 export function extractDependencies(manifest: Record<string, unknown>): DepEntry[] {
-  const dependencies = manifest.dependencies as
-    | {
-        skills?: Record<string, string>;
-        mcp_servers?: Record<string, string>;
-        integrations?: Record<string, string>;
-      }
-    | undefined;
+  const dependencies = manifest.dependencies as Dependencies | undefined;
 
   if (!dependencies) return [];
 
   const deps: DepEntry[] = [];
   const { skills = {}, mcp_servers = {}, integrations = {} } = dependencies;
 
-  const maps: [Record<string, string>, DepEntry["depType"]][] = [
+  const maps: [
+    Record<string, DependencyValue | IntegrationDependencyValue>,
+    DepEntry["depType"],
+  ][] = [
     [skills, "skill"],
     [mcp_servers, "mcp-server"],
     [integrations, "integration"],
   ];
 
   for (const [map, depType] of maps) {
-    for (const [fullName, versionRange] of Object.entries(map)) {
+    for (const [fullName, raw] of Object.entries(map)) {
       const parsed = parseScopedName(fullName);
       if (!parsed) {
         throw new Error(`Invalid scoped package name: ${fullName}`);
       }
-      if (typeof versionRange !== "string") {
+      const versionRange = readVersionRange(raw);
+      if (versionRange === null) {
         throw new Error(
-          `Invalid version for ${fullName}: expected string, got ${typeof versionRange}`,
+          `Invalid dependency value for ${fullName}: expected string or { version: string, ... }, got ${typeof raw}`,
         );
       }
       deps.push({ depScope: `@${parsed.scope}`, depName: parsed.name, depType, versionRange });
@@ -101,37 +142,104 @@ export interface ManifestIntegrationEntry {
   scopes?: string[];
 }
 
+function toStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.filter((s): s is string => typeof s === "string");
+}
+
 /**
- * Merge an agent manifest's `dependencies.integrations` (version) with
- * its top-level `integrations` (tool/scope selection).
+ * Resolve an agent manifest's per-integration configuration.
+ *
+ * Per AFPS 2.0.2 §4.1 / §4.4, three sources may carry per-integration
+ * configuration, read in priority order — the first non-empty value for
+ * each key wins:
+ *
+ *   1. **Canonical** — `dependencies.integrations.<id>` object form,
+ *      `{ version, scopes?, auth_key?, ... }` (§4.1).
+ *   2. **Deprecated alias** — `integrations_configuration.<id>` (§4.4).
+ *      Consumers MUST accept this; on conflict the canonical wins.
+ *   3. **Legacy back-compat read** — top-level `manifest.integrations.<id>`,
+ *      an Appstrate-invented block from before AFPS 2.0.2. Used as a
+ *      fall-back so existing stored manifests keep working; writers no
+ *      longer emit it (see {@link writeManifestIntegrations}).
+ *   4. **Pre-2.0 camelCase alias** — `providersConfiguration.<id>`. The
+ *      Appstrate 1.x name for what AFPS 2.0 §4.4 calls
+ *      `integrations_configuration`. Read-only fallback for manifests
+ *      stored before the snake_case migration; writers emit the canonical
+ *      form (which migrates the manifest forward on next save).
+ *
+ * Version range always comes from `dependencies.integrations.<id>`
+ * (string form OR `.version` on the object). An integration with no
+ * `dependencies.integrations.<id>` entry is dropped — the dep table is
+ * the canonical "is this integration declared" gate.
  */
 export function parseManifestIntegrations(
   manifest: Record<string, unknown>,
 ): ManifestIntegrationEntry[] {
   const deps = (manifest.dependencies ?? {}) as { integrations?: Record<string, unknown> };
   const versionMap = deps.integrations ?? {};
-  const selections = (manifest.integrations ?? {}) as Record<string, unknown>;
+  const deprecatedAlias = (manifest.integrations_configuration ?? {}) as Record<string, unknown>;
+  const legacyTopLevel = (manifest.integrations ?? {}) as Record<string, unknown>;
+  // 1.x camelCase alias of `integrations_configuration` — read-only.
+  const v1CamelAlias = (manifest.providersConfiguration ?? {}) as Record<string, unknown>;
+
   const out: ManifestIntegrationEntry[] = [];
-  for (const [id, version] of Object.entries(versionMap)) {
-    if (typeof version !== "string") continue;
-    const sel = selections[id];
-    const selObj = sel && typeof sel === "object" ? (sel as Record<string, unknown>) : undefined;
-    const tools = Array.isArray(selObj?.tools)
-      ? (selObj!.tools as unknown[]).filter((t): t is string => typeof t === "string")
-      : undefined;
-    const scopes = Array.isArray(selObj?.scopes)
-      ? (selObj!.scopes as unknown[]).filter((s): s is string => typeof s === "string")
-      : undefined;
+  for (const [id, rawDep] of Object.entries(versionMap)) {
+    const version = readVersionRange(rawDep);
+    if (version === null) continue;
+
+    // Canonical object-form fields on the dep entry itself (§4.1) — highest priority.
+    const depObj =
+      rawDep && typeof rawDep === "object" ? (rawDep as Record<string, unknown>) : undefined;
+    const aliasObj =
+      deprecatedAlias[id] && typeof deprecatedAlias[id] === "object"
+        ? (deprecatedAlias[id] as Record<string, unknown>)
+        : undefined;
+    const legacyObj =
+      legacyTopLevel[id] && typeof legacyTopLevel[id] === "object"
+        ? (legacyTopLevel[id] as Record<string, unknown>)
+        : undefined;
+    const v1Obj =
+      v1CamelAlias[id] && typeof v1CamelAlias[id] === "object"
+        ? (v1CamelAlias[id] as Record<string, unknown>)
+        : undefined;
+
+    // Precedence: canonical dep object > deprecated alias > legacy top-level block > v1 camelCase alias.
+    const scopes =
+      toStringArray(depObj?.scopes) ??
+      toStringArray(aliasObj?.scopes) ??
+      toStringArray(legacyObj?.scopes) ??
+      toStringArray(v1Obj?.scopes);
+    // `tools[]` is an Appstrate extension (no AFPS field of this name) — read
+    // from the same merged sources so editor round-trips don't lose the
+    // selection. `auth_key` likewise can come from any of the four.
+    const tools =
+      toStringArray(depObj?.tools) ??
+      toStringArray(aliasObj?.tools) ??
+      toStringArray(legacyObj?.tools) ??
+      toStringArray(v1Obj?.tools);
+
     out.push({ id, version: version || "*", tools, scopes });
   }
   return out;
 }
 
 /**
- * Write integration entries back to a manifest: `dependencies.integrations`
- * carries the bare version map; the top-level `integrations` block
- * carries per-id `{ tools?, scopes? }` only when the agent actually
- * picked something. Pairs with {@link parseManifestIntegrations}.
+ * Write integration entries back to a manifest using the AFPS 2.0.2 §4.1
+ * canonical inline object form: each `dependencies.integrations.<id>`
+ * becomes `{ version, scopes?, auth_key?, tools? }`. Entries with no
+ * per-integration configuration collapse to a bare semver string for
+ * minimal manifests.
+ *
+ * Drops the deprecated `integrations_configuration` alias (§4.4) and the
+ * Appstrate-invented top-level `manifest.integrations.<id>` block — both
+ * are merged back in on read by {@link parseManifestIntegrations} for
+ * back-compat, but writers emit only the canonical form so newly-saved
+ * manifests round-trip clean against AFPS validators.
+ *
+ * Note: `tools[]` is an Appstrate extension key with no AFPS field of the
+ * same name. AFPS dependency entries are `looseObject`s (§4.1), so the
+ * extra key round-trips through the canonical schema unchanged.
  */
 export function writeManifestIntegrations(
   manifest: Record<string, unknown>,
@@ -139,30 +247,37 @@ export function writeManifestIntegrations(
 ): void {
   if (!manifest.dependencies) manifest.dependencies = {};
   const deps = manifest.dependencies as Record<string, unknown>;
-  const versionMap: Record<string, string> = {};
-  const selectionMap: Record<string, { tools?: string[]; scopes?: string[] }> = {};
+  const integrationMap: Record<string, IntegrationDependencyValue> = {};
+
   for (const e of entries) {
     if (!e.id) continue;
-    versionMap[e.id] = e.version || "*";
+    const version = e.version || "*";
     const hasTools = e.tools !== undefined;
     const hasScopes = Array.isArray(e.scopes) && e.scopes.length > 0;
-    if (hasTools || hasScopes) {
-      selectionMap[e.id] = {
-        ...(hasTools ? { tools: [...e.tools!] } : {}),
+
+    if (!hasTools && !hasScopes) {
+      // Minimal entry — collapse to bare version string per §4.1.
+      integrationMap[e.id] = version;
+    } else {
+      integrationMap[e.id] = {
+        version,
         ...(hasScopes ? { scopes: [...e.scopes!] } : {}),
+        ...(hasTools ? { tools: [...e.tools!] } : {}),
       };
     }
   }
-  if (Object.keys(versionMap).length > 0) {
-    deps.integrations = versionMap;
+
+  if (Object.keys(integrationMap).length > 0) {
+    deps.integrations = integrationMap;
   } else {
     delete deps.integrations;
   }
-  if (Object.keys(selectionMap).length > 0) {
-    manifest.integrations = selectionMap;
-  } else {
-    delete manifest.integrations;
-  }
+  // Drop legacy/deprecated alternates — they are read for back-compat in
+  // parseManifestIntegrations but the canonical form is the single writer.
+  delete manifest.integrations;
+  delete manifest.integrations_configuration;
+  // 1.x camelCase alias — same back-compat read path, single writer migrates.
+  delete (manifest as Record<string, unknown>).providersConfiguration;
 }
 
 /** Result of circular dependency detection. */

@@ -11,7 +11,9 @@
  * at {@link CA_CONTAINER_PATH}.
  */
 
-import { posix } from "node:path";
+import { mkdtemp, writeFile, chmod, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { posix, join } from "node:path";
 
 import { SubprocessTransport } from "@appstrate/mcp-transport";
 
@@ -41,6 +43,16 @@ const RUNNER_IMAGE_BY_TYPE: Record<string, string> = {
   // Docker socket mounted, so third-party bun code never shares its process).
   bun: "appstrate-mcp-runner-bun:latest",
   python: "appstrate-mcp-runner-python:latest",
+  // MCPB 0.4 / AFPS 2.0.2 §3.4 — `uv` runs Python through Astral's `uv`
+  // resolver. We pragmatically route `uv` through the python runner image
+  // for now: `uv` is a Python launcher, and the python image already
+  // carries `python3` on PATH. The container entrypoint is the bundle
+  // path verbatim; if a real `uv run` invocation is needed (lockfile-driven
+  // dep install on cold start) the bundle's entry_point can shebang-invoke
+  // `uv run` itself. A dedicated `appstrate-mcp-runner-uv` image is the
+  // longer-term landing — tracked as TODO; the routing here lets `uv`
+  // manifests boot without an immediate image build.
+  uv: "appstrate-mcp-runner-python:latest",
   binary: "appstrate-mcp-runner-binary:latest",
 };
 
@@ -104,10 +116,10 @@ function planContainer(spec: IntegrationSpawnSpec, bundleRoot: string): Containe
         `Supported types: ${Object.keys(RUNNER_IMAGE_BY_TYPE).join(", ")}`,
     );
   }
-  const entry = server.entryPoint;
+  const entry = server.entry_point;
   if (!entry) {
     throw new Error(
-      `integration-runtime-adapter-docker: server.entryPoint required for server.type="${t}"`,
+      `integration-runtime-adapter-docker: server.entry_point required for server.type="${t}"`,
     );
   }
   // Path-traversal guard on the host-side path. We still re-derive the
@@ -128,8 +140,133 @@ async function killContainer(containerId: string): Promise<void> {
   await dockerExec(["kill", containerId]).catch(() => {});
 }
 
+/**
+ * AFPS 2.0.2 §7.6 (CC-5) — materialise a `delivery.files` entry into the
+ * runner container. Writes the decoded bytes to a sidecar-local temp file
+ * with the requested POSIX mode, then `docker cp`'s it into the container
+ * at the absolute manifest path. Returns the host temp file path so the
+ * caller can clean up after spawn.
+ *
+ * Security:
+ *   - The container path is the manifest-declared key. The platform-side
+ *     resolver enforces absolute-POSIX + no `..` + non-root (see
+ *     `isSafeDeliveryFilePath`) before this code ever runs, so the value
+ *     reaching us is structurally safe.
+ *   - The host temp file lives in `os.tmpdir()/appstrate-files-<random>/`
+ *     and is unlinked after the cp completes (the per-integration
+ *     `materializeFileMounts` collector handles cleanup).
+ *   - `docker cp` does NOT create parent directories on the destination
+ *     side. We pre-create the parent inside the container via
+ *     `docker exec mkdir -p` so manifest paths like
+ *     `/run/creds/cert.pem` work without operators having to image the
+ *     full directory tree.
+ */
+/**
+ * R8a — reject container destination paths that escape the runner's safe
+ * writable area. The platform-side resolver (`isSafeDeliveryFilePath`)
+ * already rejects relative + `..` traversal + NUL bytes + pure root, so by
+ * the time we get here `containerPath` is structurally a safe absolute
+ * POSIX path. The extra check below adds a second floor: top-level system
+ * directories the runner has no business mutating from credential mounts.
+ *
+ * Rejected prefixes:
+ *   - `/dev/`, `/proc/`, `/sys/` — kernel-managed; mounting credentials
+ *     there would corrupt the running container, not write a file.
+ *   - `/etc/passwd*`, `/etc/shadow*`, `/etc/sudoers*` — privilege escalation
+ *     surface; even if the runner is `--cap-drop ALL`, mounting over these
+ *     is operator error worth refusing loudly.
+ *   - `/.docker/`, `/.dockerenv` — Docker-private surfaces.
+ */
+export function isContainerPathSafeForMount(containerPath: string): boolean {
+  if (!containerPath.startsWith("/")) return false;
+  // Forbidden top-level dirs.
+  const forbiddenPrefixes = ["/dev/", "/proc/", "/sys/", "/.docker/"];
+  for (const p of forbiddenPrefixes) {
+    if (containerPath === p.replace(/\/$/, "") || containerPath.startsWith(p)) {
+      return false;
+    }
+  }
+  // Forbidden specific files (passwd/shadow/sudoers families).
+  const forbiddenFiles = [
+    "/etc/passwd",
+    "/etc/passwd-",
+    "/etc/shadow",
+    "/etc/shadow-",
+    "/etc/sudoers",
+    "/etc/gshadow",
+    "/etc/group",
+    "/etc/group-",
+    "/.dockerenv",
+  ];
+  if (forbiddenFiles.includes(containerPath)) return false;
+  // Forbidden sudoers subtree.
+  if (containerPath.startsWith("/etc/sudoers.d/")) return false;
+  return true;
+}
+
+async function materializeFileMountsInContainer(
+  containerId: string,
+  fileMounts: Record<string, { content_b64: string; mode: string }>,
+): Promise<string[]> {
+  const hostTempFiles: string[] = [];
+  // One temp dir per spawn, cleaned up by the caller after cp completes.
+  const tempDir = await mkdtemp(join(tmpdir(), "appstrate-files-"));
+  hostTempFiles.push(tempDir);
+
+  for (const [containerPath, entry] of Object.entries(fileMounts)) {
+    // R8a — refuse paths into kernel-managed / privilege-escalation
+    // surfaces. The platform-side validator already strips `..` /
+    // relative paths; this is the second floor.
+    if (!isContainerPathSafeForMount(containerPath)) {
+      throw new Error(
+        `integration-runtime-adapter-docker: refused to mount credential file at unsafe container path ${containerPath}`,
+      );
+    }
+    // Decode bytes from the base64 wire form.
+    const bytes = Buffer.from(entry.content_b64, "base64");
+    // Random host-side filename — the container path is reconstructed
+    // separately, so we don't leak the manifest path into the host fs.
+    const hostFile = join(tempDir, `f-${hostTempFiles.length}`);
+    await writeFile(hostFile, bytes);
+    // chmod on the host side so the runner reads the file with the
+    // requested mode after `docker cp` (cp preserves perms from source).
+    const modeOctal = parseInt(entry.mode, 8);
+    if (!Number.isNaN(modeOctal)) {
+      await chmod(hostFile, modeOctal);
+    }
+    // R8a — pre-create the parent dir inside the container so `docker cp`
+    // succeeds when the manifest path goes deeper than the runner image's
+    // baked-in tree (e.g. `/etc/appstrate/certs/`). The container is in
+    // `Created` state before `docker start`; `docker exec` against it works
+    // since Docker 1.13 (exec runs `runc exec` which doesn't require the
+    // PID 1 process to be live — it creates a new process namespace
+    // member). We swallow errors (some older runtimes refuse exec on a
+    // not-yet-started container) and fall back to the historical behaviour
+    // where `docker cp` itself errors out — the run boot then fails fast
+    // with a clear message that surfaces in the boot report.
+    const parent = posix.dirname(containerPath);
+    if (parent !== "/" && parent !== ".") {
+      // `mkdir -p` is idempotent and works on every base image
+      // (busybox/alpine/slim). Using `--user 0` would require an
+      // elevated runner; we accept the default user (`node` / `python`
+      // / `nobody` depending on image) — the runner has write
+      // permissions to its own writable layer regardless.
+      await dockerExec(["exec", containerId, "mkdir", "-p", parent]).catch(() => {
+        // Older docker / not-yet-started container: ignore. The
+        // subsequent `docker cp` will surface the missing-parent error
+        // itself if the directory truly doesn't exist.
+      });
+    }
+    await dockerExec(["cp", hostFile, `${containerId}:${containerPath}`]);
+  }
+
+  return hostTempFiles;
+}
+
 export function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
   const containerIds: string[] = [];
+  /** Per-spawn host temp directories holding decoded fileMounts bytes. */
+  const hostTempDirsByContainer: Map<string, string[]> = new Map();
   let runNetwork: string | null = null;
 
   return {
@@ -217,6 +354,15 @@ export function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapt
         await dockerExec(["cp", mitm.caCertHostPath, `${containerId}:${CA_CONTAINER_PATH}`]);
       }
 
+      // AFPS 2.0.2 §7.6 (CC-5) — materialise `delivery.files` entries into
+      // the runner container BEFORE `docker start -ai` so the entrypoint
+      // observes them at boot. The host temp dir is cleaned up by
+      // `shutdown()` (we keep the reference so cleanup is exception-safe).
+      if (spec.fileMounts && Object.keys(spec.fileMounts).length > 0) {
+        const hostTempDirs = await materializeFileMountsInContainer(containerId, spec.fileMounts);
+        hostTempDirsByContainer.set(containerId, hostTempDirs);
+      }
+
       // `docker start -ai <id>` starts the entrypoint AND attaches stdio.
       // SubprocessTransport spawns this as a child, pipes the JSON-RPC
       // line stream through, and tears the whole thing down on close().
@@ -243,6 +389,15 @@ export function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapt
         await killContainer(id);
       }
       containerIds.length = 0;
+      // AFPS 2.0.2 §7.6 (CC-5) — clean up host-side temp files holding
+      // decoded `delivery.files` bytes. Best-effort: if the dir is gone
+      // (already cleaned, container's own --rm removed it, …) we skip.
+      for (const dirs of hostTempDirsByContainer.values()) {
+        for (const dir of dirs) {
+          await rm(dir, { recursive: true, force: true }).catch(() => {});
+        }
+      }
+      hostTempDirsByContainer.clear();
     },
   };
 }

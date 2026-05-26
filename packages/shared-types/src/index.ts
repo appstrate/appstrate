@@ -16,7 +16,7 @@ export type {
   IntegrationConnection,
   IntegrationDetail,
   IntegrationManifestAuth,
-  IntegrationManifestTool,
+  IntegrationManifestToolPolicy,
   IntegrationManifestView,
   IntegrationOAuthClient,
   IntegrationOrgDefault,

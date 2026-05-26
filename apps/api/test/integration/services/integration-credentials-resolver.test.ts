@@ -108,7 +108,7 @@ function gmailManifest(tokenUrl: string): Record<string, unknown> {
         ],
       },
     },
-    tools: {
+    tools_policy: {
       list_messages: { required_scopes: ["read"] },
       send_message: { required_scopes: ["send"] },
       delete_message: { required_scopes: ["delete"] },

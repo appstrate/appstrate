@@ -20,11 +20,7 @@
  *     inputs never appear in the returned bundle.
  */
 
-import {
-  resolveAfpsHttpDelivery,
-  type AfpsHttpDelivery,
-  type HttpDeliveryPlan,
-} from "@appstrate/connect";
+import { resolveAfpsHttpDelivery, type AfpsHttpDelivery } from "@appstrate/connect";
 import type { CredentialBundle } from "@appstrate/connect/connect";
 import type { ManifestDeliveryHttp } from "@appstrate/core/sidecar-types";
 import type { McpHost } from "./mcp-host.ts";
@@ -37,7 +33,7 @@ import { logger } from "./logger.ts";
  * spawn spec's `connectLogin.deliveryHttp`. The `value` is a
  * `{$credential.<field>}` template; {@link resolveAfpsHttpDelivery} (the same
  * resolver the platform spawn/credentials services use) renders it into a
- * {@link HttpDeliveryPlan} directly.
+ * concrete `HttpDeliveryPlan` directly.
  */
 type DeliveryHttp = ManifestDeliveryHttp;
 
@@ -138,25 +134,22 @@ export async function runConnectLogin(opts: RunConnectLoginOptions): Promise<Cre
         plan,
       );
     } else {
-      // No header to inject — install a zero-value plan so the session's
-      // auth still replaces the payload and becomes the active auth.
-      const zeroPlan: HttpDeliveryPlan = {
-        headerName: "",
-        headerPrefix: "",
-        value: "",
-        allowServerOverride: false,
-      };
-      opts.source.setSessionOutputs(
-        {
-          authKey: opts.authKey,
-          authType: opts.authType,
-          fields: parsed.outputs,
-          authorizedUris: [...opts.authorizedUris],
-          ...(parsed.identityClaims ? { identityClaims: parsed.identityClaims } : {}),
-          ...(parsed.expiresAt ? { expiresAt: parsed.expiresAt } : {}),
-          ...(parsed.scopesGranted ? { scopesGranted: parsed.scopesGranted } : {}),
-        },
-        zeroPlan,
+      // P1 hardening (R8a) — refuse the zero-plan installation path that
+      // used to silently install a `{ headerName: "", value: "" }`
+      // injection rule. An empty headerName masks two real misconfigurations:
+      //   (a) the manifest declared `delivery.http` with an empty `name`
+      //       (schema enforces minLength: 1, but a hand-crafted spec /
+      //       direct DB write could still reach here), and
+      //   (b) the manifest declared NO http delivery at all but routed
+      //       the auth through the connect-login primitive without
+      //       declaring an alternative (`delivery.env`).
+      // Either way, the runtime can't legitimately inject anything; the
+      // older behaviour produced silent auth failures upstream rather than
+      // a clear boot error. AFPS 2.0.2 §7.3 requires every auth to declare
+      // either `delivery.env` or `delivery.http` with a non-empty header
+      // name — surface that requirement here.
+      throw new Error(
+        `connect-login: auth '${opts.authKey}' for integration namespace '${opts.namespace}' resolved to no injectable header. Manifest must declare either delivery.env or delivery.http with a non-empty header name.`,
       );
     }
 
@@ -207,13 +200,20 @@ function parseLoginToolResult(result: {
     throw new Error("connect-login: login tool result `outputs` is not a string map");
   }
   const out: LoginToolResult = { outputs };
-  const identityClaims = coerceStringMap(obj.identityClaims);
+  // AFPS 2.0.2 wire format is snake_case (`identity_claims`, `expires_at`,
+  // `scopes_granted`); accept the camelCase forms for one release window so
+  // an integration built against AFPS 2.0.1 still parses cleanly. Snake_case
+  // wins on conflict (the canonical wire form). Drop the camelCase branches
+  // in the next major release.
+  const identityClaims = coerceStringMap(obj.identity_claims ?? obj.identityClaims);
   if (identityClaims) out.identityClaims = identityClaims;
-  if (typeof obj.expiresAt === "string" || obj.expiresAt === null) {
-    out.expiresAt = obj.expiresAt;
+  const expiresAtRaw = obj.expires_at ?? obj.expiresAt;
+  if (typeof expiresAtRaw === "string" || expiresAtRaw === null) {
+    out.expiresAt = expiresAtRaw;
   }
-  if (Array.isArray(obj.scopesGranted) && obj.scopesGranted.every((s) => typeof s === "string")) {
-    out.scopesGranted = obj.scopesGranted as string[];
+  const scopesGrantedRaw = obj.scopes_granted ?? obj.scopesGranted;
+  if (Array.isArray(scopesGrantedRaw) && scopesGrantedRaw.every((s) => typeof s === "string")) {
+    out.scopesGranted = scopesGrantedRaw as string[];
   }
   return out;
 }

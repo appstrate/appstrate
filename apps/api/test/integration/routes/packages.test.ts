@@ -594,7 +594,7 @@ describe("Packages API", () => {
               ],
             },
           },
-          tools: {
+          tools_policy: {
             list_messages: { required_scopes: ["read"] },
             send_message: { required_scopes: ["send"] },
           },

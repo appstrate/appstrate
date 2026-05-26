@@ -45,8 +45,18 @@ export class LoginStrategy implements IntegrationConnectStrategy {
     }
     requireNonEmptyCredentials(credentials);
 
+    // LoginStrategy substitutes `{{name}}` placeholders into HTTP request URLs,
+    // headers, and bodies — only string-valued bootstrap inputs are meaningful.
+    // Non-string values from the widened `ConnectCompleteInput.credentials`
+    // shape get stringified so they still flow through (JSON-encoded objects
+    // round-trip cleanly), but the canonical contract here is strings.
+    const stringInputs: Record<string, string> = {};
+    for (const [k, v] of Object.entries(credentials)) {
+      stringInputs[k] = typeof v === "string" ? v : JSON.stringify(v);
+    }
+
     const { outputs, identityClaims, expiresAt } = await runLogin(auth.connect as LoginConfig, {
-      inputs: credentials,
+      inputs: stringInputs,
       authorizedUris: (auth.authorized_uris as string[] | undefined) ?? null,
       allowAllUris: (auth.allow_all_uris as boolean | undefined) ?? false,
     });

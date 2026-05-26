@@ -2,7 +2,7 @@ CREATE TYPE "public"."invitation_status" AS ENUM('pending', 'accepted', 'expired
 CREATE TYPE "public"."llm_usage_source" AS ENUM('proxy', 'runner');--> statement-breakpoint
 CREATE TYPE "public"."org_role" AS ENUM('owner', 'admin', 'member', 'viewer');--> statement-breakpoint
 CREATE TYPE "public"."package_source" AS ENUM('local', 'system');--> statement-breakpoint
-CREATE TYPE "public"."package_type" AS ENUM('agent', 'skill', 'integration');--> statement-breakpoint
+CREATE TYPE "public"."package_type" AS ENUM('agent', 'skill', 'integration', 'mcp-server');--> statement-breakpoint
 CREATE TYPE "public"."run_origin" AS ENUM('platform', 'remote');--> statement-breakpoint
 CREATE TYPE "public"."run_status" AS ENUM('pending', 'running', 'success', 'failed', 'timeout', 'cancelled');--> statement-breakpoint
 CREATE TABLE "account" (

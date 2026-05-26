@@ -44,7 +44,11 @@ import type {
 } from "@appstrate/core/integration";
 // ResolvedConnectionMap is consumed via input prop (`resolvedConnections`) below.
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
-import { getMcpServerRuntime } from "@appstrate/core/mcp-server";
+import {
+  getMcpServerRuntime,
+  getMcpServerMcpConfigEnv,
+  renderMcpConfigEnv,
+} from "@appstrate/core/mcp-server";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 
 import { logger } from "../lib/logger.ts";
@@ -57,6 +61,9 @@ import {
   getRemoteSource,
   getAppstrateConnectMeta,
   renderCredentialTemplate,
+  parseFileMode,
+  isSafeDeliveryFilePath,
+  DEFAULT_DELIVERY_FILE_MODE,
   type AfpsManifestAuth,
 } from "./integration-manifest-helpers.ts";
 
@@ -182,49 +189,44 @@ async function resolveOne(
   const apiCallAuthorizedUris = apiCallAuth?.authorized_uris ?? [];
   const apiCallAllowAllUris = apiCallAuth?.allow_all_uris ?? false;
 
-  // An integration is viable if EITHER `delivery.env` OR `delivery.http`
-  // resolved to something — pure-http integrations (no env vars) still
-  // need to spawn with an empty `spawnEnv`. apiCall integrations are
-  // viable on a resolved connection alone: their credentials flow at
-  // runtime through `/internal/integration-credentials`, and a `custom`
-  // auth (no server-side injection) legitimately resolves no delivery.
-  const deliveries = await resolveDeliveries(
-    integrationId,
-    applicationId,
-    actor,
-    manifest,
-    resolvedConnection,
-    exposeApiCall,
-  );
-  if (!deliveries) {
-    // resolveDeliveries already logged the reason (missing connection,
-    // decrypt failure, no delivery mapping); skip without surfacing further.
-    return null;
-  }
-
-  // Namespace = the manifest name's slug portion, normalised by the
-  // MCP host. We pass the package id; McpHost.normaliseNamespace does
-  // the slug + length cap.
-  const namespace = integrationId;
-
   // ── Resolve the sidecar server spec from the AFPS 2.0 `source`
   // discriminant (replaces the 1.x inline `manifest.server`). ──
   //   - remote → Streamable HTTP MCP (`{ type: "http", url }`).
   //   - local  → resolve the referenced mcp-server package's MCPB manifest
-  //              and emit `{ type, entryPoint }` from `server.{type, entry_point}`.
+  //              and emit `{ type, entry_point }` from `server.{type, entry_point}`.
   //   - api    → serverless (no `server` in the spec; sidecar skips spawn).
+  //
+  // Resolved BEFORE `resolveDeliveries` so the mcp-server's `mcp_config.env`
+  // template is available for AFPS 2.0.2 §7.6 `user_config_key` substitution
+  // (CC-4) — local-source integrations can bind a `delivery.env.<var>` to a
+  // `${user_config.<key>}` placeholder in the referenced mcp-server's env map.
   const sourceKind = getIntegrationSourceKind(manifest);
   const isRemoteHttp = sourceKind === "remote";
   let serverSpec:
-    | { type: string; entryPoint?: string; url?: string; serverPackageId?: string }
+    | {
+        type: string;
+        entry_point?: string;
+        url?: string;
+        transport?: "streamable-http" | "sse";
+        serverPackageId?: string;
+      }
     | undefined;
+  let referencedMcpServer: Awaited<ReturnType<typeof fetchMcpServerManifest>> | null = null;
   if (isRemoteHttp) {
     const remote = getRemoteSource(manifest);
     if (!remote) {
       logger.warn("remote-source integration missing remote.url; skipping", { integrationId });
       return null;
     }
-    serverSpec = { type: "http", url: remote.url };
+    // AFPS 2.0 §7.1 — `transport` is `"streamable-http" | "sse"`. The
+    // manifest schema enforces the enum + `required`; we forward the
+    // declared value verbatim so the sidecar can pick the right MCP
+    // client transport. Default to `"streamable-http"` only as a defensive
+    // back-compat fallback for any manifest that somehow shipped without
+    // the field.
+    const transport: "streamable-http" | "sse" =
+      remote.transport === "sse" ? "sse" : "streamable-http";
+    serverSpec = { type: "http", url: remote.url, transport };
   } else if (sourceKind === "local") {
     const ref = getLocalServerRef(manifest);
     if (!ref) {
@@ -239,6 +241,7 @@ async function resolveOne(
       });
       return null;
     }
+    referencedMcpServer = mcpServer;
     const run = (mcpServer as { server?: { type?: string; entry_point?: string } }).server;
     // Defensive: mcpServerManifestSchema makes `server.{type,entry_point}`
     // required, so a manifest that parsed (non-null above) always has them.
@@ -255,9 +258,35 @@ async function resolveOne(
     // server stays MCPB-conformant (e.g. `server.type: "node"`) and declares
     // `bun` in _meta; the runner then picks the bun interpreter/image.
     const effectiveType = getMcpServerRuntime(mcpServer) ?? run.type;
-    serverSpec = { type: effectiveType, entryPoint: run.entry_point, serverPackageId: ref.name };
+    serverSpec = { type: effectiveType, entry_point: run.entry_point, serverPackageId: ref.name };
   }
   // sourceKind === "api" (or unknown) → serverless, serverSpec stays undefined.
+
+  // An integration is viable if EITHER `delivery.env` OR `delivery.http`
+  // resolved to something — pure-http integrations (no env vars) still
+  // need to spawn with an empty `spawnEnv`. apiCall integrations are
+  // viable on a resolved connection alone: their credentials flow at
+  // runtime through `/internal/integration-credentials`, and a `custom`
+  // auth (no server-side injection) legitimately resolves no delivery.
+  const deliveries = await resolveDeliveries(
+    integrationId,
+    applicationId,
+    actor,
+    manifest,
+    resolvedConnection,
+    exposeApiCall,
+    referencedMcpServer,
+  );
+  if (!deliveries) {
+    // resolveDeliveries already logged the reason (missing connection,
+    // decrypt failure, no delivery mapping); skip without surfacing further.
+    return null;
+  }
+
+  // Namespace = the manifest name's slug portion, normalised by the
+  // MCP host. We pass the package id; McpHost.normaliseNamespace does
+  // the slug + length cap.
+  const namespace = integrationId;
 
   // Phase 4 — narrow the MITM URL envelope to the union of `url_patterns`
   // declared on the agent-selected tools (skipped for remote HTTP MCP).
@@ -290,7 +319,7 @@ async function resolveOne(
         ? {
             server: {
               type: serverSpec.type,
-              ...(serverSpec.entryPoint ? { entryPoint: serverSpec.entryPoint } : {}),
+              ...(serverSpec.entry_point ? { entry_point: serverSpec.entry_point } : {}),
               // AFPS 2.0 — the referenced mcp-server package id, so the sidecar
               // fetches the runnable server bundle from
               // `GET /internal/mcp-server-bundle/...` (local sources only).
@@ -299,8 +328,11 @@ async function resolveOne(
                 : {}),
               // Phase 7 — propagate the remote MCP URL so the sidecar can open
               // a Streamable HTTP client against it. Mutually exclusive with
-              // `entryPoint` (enforced by `integrationManifestSchema`).
+              // `entry_point` (enforced by `integrationManifestSchema`).
               ...(serverSpec.url ? { url: serverSpec.url } : {}),
+              // AFPS 2.0 §7.1 — `streamable-http` (default) | `sse`. Only
+              // emitted on remote `http` sources.
+              ...(serverSpec.transport ? { transport: serverSpec.transport } : {}),
             },
           }
         : {}),
@@ -316,6 +348,14 @@ async function resolveOne(
               : {}),
           },
         }
+      : {}),
+    // R8a defensive filter — surface `manifest.hidden_tools` to the
+    // sidecar so the McpHost can drop them from `tools/list` at runtime,
+    // independent of whether the install-time catalog resolver already
+    // removed them. This guards against fixtures / direct DB writes that
+    // bypass `resolveIntegrationToolCatalog`. Omitted when empty.
+    ...((manifest.hidden_tools?.length ?? 0) > 0
+      ? { hiddenTools: [...(manifest.hidden_tools ?? [])] }
       : {}),
     spawnEnv: deliveries.spawnEnv,
     // For remote HTTP MCP we deliberately drop `httpDeliveryAuths`: the
@@ -333,6 +373,9 @@ async function resolveOne(
     toolAllowlist,
     ...(toolUrlEnvelope !== undefined ? { toolUrlEnvelope } : {}),
     ...(deliveries.connectLogin ? { connectLogin: deliveries.connectLogin } : {}),
+    ...(deliveries.fileMounts && Object.keys(deliveries.fileMounts).length > 0
+      ? { fileMounts: deliveries.fileMounts }
+      : {}),
   };
 }
 
@@ -396,6 +439,14 @@ interface ResolvedDeliveries {
   spawnEnv: Record<string, string>;
   httpDeliveryAuths?: NonNullable<IntegrationSpawnSpec["httpDeliveryAuths"]>;
   /**
+   * AFPS 2.0.2 §7.6 — materialised `delivery.files.<path>` entries. Each
+   * value's `{$credential.<field>}` template is rendered against the
+   * decrypted credential bag, base64-encoded for the JSON wire, and ferried
+   * to the sidecar where the runtime adapter writes the file with the
+   * declared POSIX mode (default `0400`).
+   */
+  fileMounts?: NonNullable<IntegrationSpawnSpec["fileMounts"]>;
+  /**
    * Set when the chosen connection's auth is `connect.tool` + `runAt:
    * "run-start"`: the sidecar mints the session at boot by running the
    * login tool with the decrypted login secret. `resolveOne` copies this
@@ -426,6 +477,7 @@ async function resolveDeliveries(
   manifest: IntegrationManifest,
   resolvedConnection: ResolvedConnection | null,
   hasApiCall: boolean,
+  referencedMcpServer: Awaited<ReturnType<typeof fetchMcpServerManifest>> | null,
 ): Promise<ResolvedDeliveries | null> {
   const auths = (manifest.auths ?? {}) as Record<string, AfpsManifestAuth>;
   if (Object.keys(auths).length === 0) {
@@ -561,12 +613,21 @@ async function resolveDeliveries(
 
   const spawnEnv: Record<string, string> = {};
   const httpDeliveryAuths: NonNullable<IntegrationSpawnSpec["httpDeliveryAuths"]> = {};
+  const fileMounts: NonNullable<IntegrationSpawnSpec["fileMounts"]> = {};
   let resolvedAtLeastOne = false;
 
   // ─── delivery.env ───
   // AFPS 2.0: each entry carries a `{$credential.<field>}` value template
   // (was the 1.x `{ from }` field pointer). Render it against the credential bag.
+  //
+  // AFPS 2.0.2 §7.6 (CC-4): for local-source integrations whose referenced
+  // mcp-server declares `${user_config.<key>}` placeholders in
+  // `server.mcp_config.env`, the entry's `user_config_key` (defaulting to the
+  // env-variable name) names the placeholder we pre-render. The substituted
+  // env then flows to the sidecar exactly as if it had come from a standalone
+  // MCPB host — one package, two environments.
   const envMap = auth.delivery?.env;
+  const userConfigSubstitutions: Record<string, string> = {};
   if (envMap && Object.keys(envMap).length > 0) {
     for (const [envKey, conf] of Object.entries(envMap)) {
       const value = renderCredentialTemplate(conf.value, fields);
@@ -579,6 +640,89 @@ async function resolveDeliveries(
         continue;
       }
       spawnEnv[envKey] = value;
+      // AFPS 2.0.2 §7.6: collect the user_config bridge entries. Default
+      // `user_config_key` to the env-variable name when omitted.
+      const userConfigKey = conf.user_config_key ?? envKey;
+      userConfigSubstitutions[userConfigKey] = value;
+      resolvedAtLeastOne = true;
+    }
+  }
+
+  // AFPS 2.0.2 §7.6 + §3.4 (CC-4) — bridge into the referenced mcp-server's
+  // `mcp_config.env` template. Each `${user_config.<key>}` placeholder is
+  // replaced with the rendered credential value the integration's
+  // `delivery.env` materialised under that key. Keys without a matching
+  // substitution pass through verbatim (the placeholder reaches the runner
+  // unsubstituted — the runner is responsible for raising a clear error).
+  //
+  // The rendered map is MERGED into `spawnEnv`. The integration's own
+  // `delivery.env` keys win on conflict — the integration is the
+  // authoritative source for what its server sees.
+  if (referencedMcpServer && Object.keys(userConfigSubstitutions).length > 0) {
+    const mcpConfigEnv = getMcpServerMcpConfigEnv(referencedMcpServer);
+    if (mcpConfigEnv && Object.keys(mcpConfigEnv).length > 0) {
+      const rendered = renderMcpConfigEnv(mcpConfigEnv, userConfigSubstitutions);
+      for (const [k, v] of Object.entries(rendered)) {
+        // Integration's direct delivery.env wins — don't shadow it.
+        if (k in spawnEnv) continue;
+        spawnEnv[k] = v;
+      }
+    }
+  }
+
+  // ─── delivery.files (AFPS 2.0.2 §7.6, CC-5) ───
+  // Each entry's `value` is a `{$credential.<field>}` template rendered
+  // against the credential bag (same grammar as `delivery.env`); `mode` is
+  // an octal-string POSIX permission (default `0400`). Used primarily for
+  // mtls (client cert + key) but available for any auth whose credential
+  // is file-shaped.
+  //
+  // Security: path keys MUST be absolute POSIX, MUST NOT contain `..`, MUST
+  // NOT collapse to `/`. Unsafe paths are skipped with a warning rather
+  // than aborting the integration — operator error in one path shouldn't
+  // black-hole a multi-file mtls bundle.
+  const filesMap = auth.delivery?.files;
+  if (filesMap && Object.keys(filesMap).length > 0) {
+    for (const [path, conf] of Object.entries(filesMap)) {
+      if (!isSafeDeliveryFilePath(path)) {
+        logger.warn("delivery.files path rejected by safety guard; skipping entry", {
+          integrationId,
+          authKey: row.authKey,
+          path,
+        });
+        continue;
+      }
+      const value = renderCredentialTemplate(conf.value, fields);
+      if (value === null) {
+        logger.info("delivery.files value template resolved empty on credentials", {
+          integrationId,
+          authKey: row.authKey,
+          path,
+        });
+        continue;
+      }
+      // Parse + normalise mode. Manifest authors typically write `"0400"`,
+      // `"0600"`, etc. — reject malformed strings rather than silently
+      // applying a too-permissive default.
+      let mode = DEFAULT_DELIVERY_FILE_MODE;
+      if (conf.mode !== undefined) {
+        const parsed = parseFileMode(conf.mode);
+        if (parsed === null) {
+          logger.warn("delivery.files mode unparseable; using default 0400", {
+            integrationId,
+            authKey: row.authKey,
+            path,
+            rawMode: conf.mode,
+          });
+        } else {
+          mode = parsed;
+        }
+      }
+      // Base64-encode the rendered bytes for the JSON wire. Use Bun's
+      // `Buffer.from(...).toString("base64")` — Bun ships Node's Buffer
+      // compat layer so this is fine in Bun, Node, and the test runner.
+      const content_b64 = Buffer.from(value, "utf8").toString("base64");
+      fileMounts[path] = { content_b64, mode };
       resolvedAtLeastOne = true;
     }
   }
@@ -635,5 +779,6 @@ async function resolveDeliveries(
   return {
     spawnEnv,
     ...(Object.keys(httpDeliveryAuths).length > 0 ? { httpDeliveryAuths } : {}),
+    ...(Object.keys(fileMounts).length > 0 ? { fileMounts } : {}),
   };
 }

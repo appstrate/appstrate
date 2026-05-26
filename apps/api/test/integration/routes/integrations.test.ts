@@ -356,6 +356,89 @@ describe("api_key credentials schema validation (delivery.http silent-no-op guar
   });
 });
 
+// R8b — connectFieldsSchema accepts JSON-typed credentials (not string-only)
+describe("connectFieldsSchema — non-string credential values (R8b)", () => {
+  let ctx: TestContext;
+
+  /**
+   * A manifest whose api_key auth accepts a numeric `port`, a boolean `tls`,
+   * and an object `metadata` alongside the string `api_key`. JSON Schema
+   * 2020-12 §7.5 permits any JSON type for credential values; the route-layer
+   * Zod schema must not narrow to `Record<string, string>`.
+   */
+  function mixedTypeManifest(name = "@myorg/mixed"): IntegrationManifest {
+    return {
+      type: "integration",
+      schema_version: "2.0",
+      name,
+      version: "0.1.0",
+      display_name: "Mixed",
+      source: { kind: "local", server: { name, version: "^0.1.0" } },
+      auths: {
+        api: {
+          type: "api_key",
+          authorized_uris: ["https://api.example.com/**"],
+          credentials: {
+            schema: {
+              type: "object",
+              required: ["api_key"],
+              properties: {
+                api_key: { type: "string" },
+                port: { type: "number" },
+                tls: { type: "boolean" },
+                metadata: { type: "object" },
+              },
+            },
+          },
+          delivery: {
+            http: {
+              in: "header",
+              name: "Authorization",
+              prefix: "Bearer ",
+              value: "{$credential.api_key}",
+            },
+          },
+        },
+      },
+    };
+  }
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "myorg" });
+    await seedIntegration(ctx.orgId, mixedTypeManifest("@myorg/mixed"));
+  });
+
+  it("accepts a numeric credential value (Zod no longer narrows to string)", async () => {
+    const res = await app.request("/api/integrations/@myorg/mixed/auths/api/connect/fields", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ credentials: { api_key: "AKIA-SECRET", port: 5432 } }),
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("accepts a boolean credential value", async () => {
+    const res = await app.request("/api/integrations/@myorg/mixed/auths/api/connect/fields", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ credentials: { api_key: "AKIA-SECRET", tls: true } }),
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("accepts an object credential value", async () => {
+    const res = await app.request("/api/integrations/@myorg/mixed/auths/api/connect/fields", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        credentials: { api_key: "AKIA-SECRET", metadata: { region: "us-east-1" } },
+      }),
+    });
+    expect(res.status).toBe(200);
+  });
+});
+
 describe("OAuth client CRUD", () => {
   let ctx: TestContext;
   beforeEach(async () => {

@@ -5,6 +5,7 @@ import {
   extractDependencies,
   detectCycle,
   parseManifestIntegrations,
+  writeManifestIntegrations,
 } from "../src/dependencies.ts";
 import type { DepEntry } from "../src/dependencies.ts";
 
@@ -118,11 +119,49 @@ describe("extractDependencies", () => {
     expect(() => extractDependencies(manifest)).toThrow("Invalid scoped package name: no-scope");
   });
 
-  it("throws when mcp_servers value is not a bare string", () => {
+  it("accepts mcp_servers value in object form (§4.1) and extracts the version", () => {
     const manifest = {
       dependencies: { mcp_servers: { "@acme/srv": { version: "^1.0.0" } } },
     };
-    expect(() => extractDependencies(manifest)).toThrow(/expected string/);
+    const deps = extractDependencies(manifest);
+    expect(deps).toHaveLength(1);
+    expect(deps[0]!.depType).toBe("mcp-server");
+    expect(deps[0]!.versionRange).toBe("^1.0.0");
+  });
+
+  it("accepts skill value in object form (§4.1) and extracts the version", () => {
+    const manifest = {
+      dependencies: { skills: { "@acme/skill": { version: "^1.0.0" } } },
+    };
+    const deps = extractDependencies(manifest);
+    expect(deps).toHaveLength(1);
+    expect(deps[0]!.depType).toBe("skill");
+    expect(deps[0]!.versionRange).toBe("^1.0.0");
+  });
+
+  it("accepts integration value in object form (§4.1) with scopes + auth_key extras", () => {
+    const manifest = {
+      dependencies: {
+        integrations: {
+          "@acme/gmail-mcp": {
+            version: "^1.0.0",
+            scopes: ["gmail.readonly"],
+            auth_key: "oauth",
+          },
+        },
+      },
+    };
+    const deps = extractDependencies(manifest);
+    expect(deps).toHaveLength(1);
+    expect(deps[0]!.depType).toBe("integration");
+    expect(deps[0]!.versionRange).toBe("^1.0.0");
+  });
+
+  it("throws when dependency value is neither string nor object-with-version", () => {
+    const manifest = {
+      dependencies: { skills: { "@acme/skill": 42 as unknown as string } },
+    };
+    expect(() => extractDependencies(manifest)).toThrow(/expected string or/);
   });
 
   it("throws on invalid scoped package name", () => {
@@ -146,13 +185,15 @@ describe("extractDependencies", () => {
     expect(deps[0]!.versionRange).toBe("^1.0.0");
   });
 
-  it("throws when integration dependency value is not a bare string", () => {
+  it("accepts integration dependency value in object form (§4.1)", () => {
     const manifest = {
       dependencies: {
         integrations: { "@acme/gmail-mcp": { version: "^1.0.0" } },
       },
     };
-    expect(() => extractDependencies(manifest)).toThrow(/expected string/);
+    const deps = extractDependencies(manifest);
+    expect(deps).toHaveLength(1);
+    expect(deps[0]!.versionRange).toBe("^1.0.0");
   });
 });
 
@@ -187,17 +228,83 @@ describe("parseManifestIntegrations", () => {
     expect(out[0]!.scopes).toEqual(["s1", "s2"]);
   });
 
-  it("skips dep entries whose version is not a bare string", () => {
+  it("accepts dep entries in object form (§4.1) and surfaces inline scopes/auth_key", () => {
     const out = parseManifestIntegrations({
       dependencies: {
         integrations: {
           "@acme/ok": "^1.0.0",
-          "@acme/bad": { version: "^1.0.0" },
-        } as unknown as Record<string, string>,
+          "@acme/rich": {
+            version: "^1.0.0",
+            scopes: ["s1"],
+            auth_key: "oauth",
+          },
+        },
+      },
+    });
+    expect(out).toHaveLength(2);
+    const rich = out.find((e) => e.id === "@acme/rich");
+    expect(rich!.version).toBe("^1.0.0");
+    expect(rich!.scopes).toEqual(["s1"]);
+  });
+
+  it("merges deprecated `integrations_configuration` alias (§4.4)", () => {
+    // Per §4.4, the deprecated alias is still accepted; consumers MUST
+    // accept it and merge into the dep entry.
+    const out = parseManifestIntegrations({
+      dependencies: { integrations: { "@acme/gmail-mcp": "^1.0.0" } },
+      integrations_configuration: {
+        "@acme/gmail-mcp": {
+          tools: ["list_messages"],
+          scopes: ["gmail.readonly"],
+        },
       },
     });
     expect(out).toHaveLength(1);
-    expect(out[0]!.id).toBe("@acme/ok");
+    expect(out[0]!.tools).toEqual(["list_messages"]);
+    expect(out[0]!.scopes).toEqual(["gmail.readonly"]);
+  });
+
+  it("canonical dep-entry inline form wins over deprecated alias on conflict (§4.4)", () => {
+    const out = parseManifestIntegrations({
+      dependencies: {
+        integrations: {
+          "@acme/gmail-mcp": {
+            version: "^1.0.0",
+            scopes: ["canonical"],
+          },
+        },
+      },
+      integrations_configuration: {
+        "@acme/gmail-mcp": { scopes: ["deprecated-alias"] },
+      },
+    });
+    expect(out[0]!.scopes).toEqual(["canonical"]);
+  });
+
+  it("falls back to legacy top-level `integrations` block (back-compat read)", () => {
+    // Manifests saved before AFPS 2.0.2 may still carry an Appstrate-invented
+    // top-level `integrations` block. Read it for back-compat.
+    const out = parseManifestIntegrations({
+      dependencies: { integrations: { "@acme/gmail-mcp": "^1.0.0" } },
+      integrations: {
+        "@acme/gmail-mcp": { tools: ["legacy_tool"] },
+      },
+    });
+    expect(out[0]!.tools).toEqual(["legacy_tool"]);
+  });
+
+  it("canonical wins over legacy top-level on conflict", () => {
+    const out = parseManifestIntegrations({
+      dependencies: {
+        integrations: {
+          "@acme/gmail-mcp": { version: "^1.0.0", tools: ["canonical"] },
+        },
+      },
+      integrations: {
+        "@acme/gmail-mcp": { tools: ["legacy"] },
+      },
+    });
+    expect(out[0]!.tools).toEqual(["canonical"]);
   });
 
   it("filters non-string entries inside tools/scopes arrays", () => {
@@ -226,6 +333,83 @@ describe("parseManifestIntegrations", () => {
     });
     expect(out).toHaveLength(1);
     expect(out[0]!.id).toBe("@acme/gmail-mcp");
+  });
+});
+
+describe("writeManifestIntegrations", () => {
+  it("emits canonical inline object form (§4.1) with scopes + tools, no top-level block", () => {
+    const m: Record<string, unknown> = {};
+    writeManifestIntegrations(m, [
+      {
+        id: "@acme/gmail-mcp",
+        version: "^1.0.0",
+        scopes: ["gmail.readonly"],
+        tools: ["list_messages"],
+      },
+    ]);
+    expect(m.dependencies).toEqual({
+      integrations: {
+        "@acme/gmail-mcp": {
+          version: "^1.0.0",
+          scopes: ["gmail.readonly"],
+          tools: ["list_messages"],
+        },
+      },
+    });
+    // Must NOT emit the Appstrate-invented top-level block or the deprecated alias.
+    expect(m.integrations).toBeUndefined();
+    expect(m.integrations_configuration).toBeUndefined();
+  });
+
+  it("collapses entries with no scopes/tools to a bare semver string", () => {
+    const m: Record<string, unknown> = {};
+    writeManifestIntegrations(m, [{ id: "@acme/gmail-mcp", version: "^1.0.0" }]);
+    expect(m.dependencies).toEqual({
+      integrations: { "@acme/gmail-mcp": "^1.0.0" },
+    });
+  });
+
+  it("round-trips through parseManifestIntegrations", () => {
+    const m: Record<string, unknown> = {};
+    const entries = [
+      {
+        id: "@acme/gmail-mcp",
+        version: "^1.0.0",
+        scopes: ["gmail.readonly"],
+        tools: ["list_messages"],
+      },
+      { id: "@acme/slack", version: "^2.0.0" },
+    ];
+    writeManifestIntegrations(m, entries);
+    const parsed = parseManifestIntegrations(m);
+    expect(parsed).toHaveLength(2);
+    const gmail = parsed.find((e) => e.id === "@acme/gmail-mcp");
+    expect(gmail!.version).toBe("^1.0.0");
+    expect(gmail!.scopes).toEqual(["gmail.readonly"]);
+    expect(gmail!.tools).toEqual(["list_messages"]);
+    const slack = parsed.find((e) => e.id === "@acme/slack");
+    expect(slack!.version).toBe("^2.0.0");
+    expect(slack!.scopes).toBeUndefined();
+    expect(slack!.tools).toBeUndefined();
+  });
+
+  it("drops the legacy top-level `integrations` block + deprecated alias on write", () => {
+    const m: Record<string, unknown> = {
+      integrations: { "@acme/old": { tools: ["x"] } },
+      integrations_configuration: { "@acme/old": { scopes: ["y"] } },
+    };
+    writeManifestIntegrations(m, [{ id: "@acme/gmail-mcp", version: "^1.0.0" }]);
+    expect(m.integrations).toBeUndefined();
+    expect(m.integrations_configuration).toBeUndefined();
+  });
+
+  it("empty entries clear `dependencies.integrations`", () => {
+    const m: Record<string, unknown> = {
+      dependencies: { integrations: { "@acme/old": "^1.0.0" } },
+    };
+    writeManifestIntegrations(m, []);
+    const deps = m.dependencies as Record<string, unknown>;
+    expect(deps.integrations).toBeUndefined();
   });
 });
 

@@ -8,7 +8,7 @@
  *   1. Base catalog (api/local/fallback)
  *   2. Subtract `hidden_tools`
  *   3. Subtract auto-hidden connect-tool primitives
- *   4. Attach policy from `integration.tools[name]`
+ *   4. Attach policy from `integration.tools_policy[name]`
  *
  * `validateAgentIntegrationScopes` now consumes the same resolver, so
  * tool-membership errors track the catalog (not the sparse policy table).
@@ -55,7 +55,7 @@ function localSourceManifest(opts: {
     display_name: "Integ",
     source: { kind: "local", server: { name: opts.serverName ?? "@me/server", version: "^1.0.0" } },
     auths: { primary: auth },
-    ...(opts.tools ? { tools: opts.tools } : {}),
+    ...(opts.tools ? { tools_policy: opts.tools } : {}),
     ...(opts.hidden_tools ? { hidden_tools: opts.hidden_tools } : {}),
   } as unknown as IntegrationManifest;
 }
@@ -100,7 +100,7 @@ describe("resolveIntegrationToolCatalog", () => {
     expect(out[0]!.policy).toBeUndefined();
   });
 
-  it("attaches policy from integration.tools[name] without forcing every tool to be declared", () => {
+  it("attaches policy from integration.tools_policy[name] without forcing every tool to be declared", () => {
     const out = resolveIntegrationToolCatalog({
       integration: localSourceManifest({
         tools: {
@@ -148,7 +148,7 @@ describe("resolveIntegrationToolCatalog", () => {
     expect(out).toEqual([{ name: API_CALL_TOOL_NAME }]);
   });
 
-  it("local source without mcp-server tools: falls back to integration.tools keys", () => {
+  it("local source without mcp-server tools: falls back to integration.tools_policy keys", () => {
     const out = resolveIntegrationToolCatalog({
       integration: localSourceManifest({
         tools: { policy_only: { required_scopes: ["read"] } },
@@ -173,7 +173,7 @@ describe("getConnectToolNames", () => {
 describe("validateAgentIntegrationScopes — uses the catalog, not the policy table", () => {
   it("accepts an mcp-server tool the integration did NOT declare in its policy table", () => {
     // Regression: before the catalog refactor, this returned `unknown_tool`
-    // because `integration.tools{}` was treated as the whitelist.
+    // because `integration.tools_policy{}` was treated as the whitelist.
     const errors = validateAgentIntegrationScopes(
       { id: "@me/integ", tools: ["kv_set"] },
       localSourceManifest({

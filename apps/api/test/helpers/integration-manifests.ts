@@ -36,8 +36,47 @@ export function envDelivery(entries: Record<string, string>): {
   return { env };
 }
 
+/**
+ * AFPS 2.0.2 §7.6 `delivery.env` map with `user_config_key` bridge — exercises
+ * the CC-4 substitution path where a local-source integration's env var also
+ * flows into the referenced mcp-server's `mcp_config.env` template via
+ * `${user_config.<key>}`. Each entry: `{ envVar: { field, userConfigKey } }`.
+ */
+export function envDeliveryWithUserConfigKey(
+  entries: Record<string, { field: string; userConfigKey?: string }>,
+): { env: Record<string, { value: string; user_config_key?: string }> } {
+  const env: Record<string, { value: string; user_config_key?: string }> = {};
+  for (const [k, conf] of Object.entries(entries)) {
+    env[k] = {
+      value: `{$credential.${conf.field}}`,
+      ...(conf.userConfigKey ? { user_config_key: conf.userConfigKey } : {}),
+    };
+  }
+  return { env };
+}
+
+/**
+ * AFPS 2.0.2 §7.6 `delivery.files` map — entries are
+ * `{ absolutePath: { credentialField, mode? } }`. The value template uses the
+ * standard `{$credential.<field>}` grammar so the spawn resolver renders the
+ * file body from the decrypted credential bag. Used by mtls integrations
+ * (cert + key) and any custom file-shaped auth.
+ */
+export function filesDelivery(entries: Record<string, { field: string; mode?: string }>): {
+  files: Record<string, { value: string; mode?: string }>;
+} {
+  const files: Record<string, { value: string; mode?: string }> = {};
+  for (const [path, conf] of Object.entries(entries)) {
+    files[path] = {
+      value: `{$credential.${conf.field}}`,
+      ...(conf.mode !== undefined ? { mode: conf.mode } : {}),
+    };
+  }
+  return { files };
+}
+
 interface AuthSpec {
-  type: "oauth2" | "api_key" | "basic" | "custom";
+  type: "oauth2" | "api_key" | "basic" | "custom" | "mtls";
   authorizedUris?: string[];
   allowAllUris?: boolean;
   // oauth2
@@ -109,7 +148,7 @@ export function localIntegrationManifest(opts: {
   /** Scoped name of the referenced mcp-server package (`source.server.name`). Defaults to `name`. */
   serverName?: string;
   auths: Record<string, AuthSpec>;
-  tools?: Record<
+  tools_policy?: Record<
     string,
     {
       required_scopes?: string[];
@@ -133,7 +172,7 @@ export function localIntegrationManifest(opts: {
       server: { name: opts.serverName ?? opts.name, version: `^${version}` },
     },
     auths,
-    ...(opts.tools ? { tools: opts.tools } : {}),
+    ...(opts.tools_policy ? { tools_policy: opts.tools_policy } : {}),
   } as unknown as IntegrationManifest;
 }
 
@@ -151,7 +190,7 @@ export function remoteIntegrationManifest(opts: {
   /** When false, omit `source.remote` to exercise the missing-url guard. */
   withRemote?: boolean;
   auths: Record<string, AuthSpec>;
-  tools?: Record<string, unknown>;
+  tools_policy?: Record<string, unknown>;
 }): IntegrationManifest {
   const version = opts.version ?? "1.0.0";
   const auths: Record<string, unknown> = {};
@@ -175,7 +214,7 @@ export function remoteIntegrationManifest(opts: {
         : {}),
     },
     auths,
-    ...(opts.tools ? { tools: opts.tools } : {}),
+    ...(opts.tools_policy ? { tools_policy: opts.tools_policy } : {}),
   } as unknown as IntegrationManifest;
 }
 
@@ -186,7 +225,7 @@ export function apiIntegrationManifest(opts: {
   displayName?: string;
   uploadProtocols?: string[];
   auths: Record<string, AuthSpec>;
-  tools?: Record<string, unknown>;
+  tools_policy?: Record<string, unknown>;
 }): IntegrationManifest {
   const version = opts.version ?? "1.0.0";
   const auths: Record<string, unknown> = {};
@@ -202,7 +241,7 @@ export function apiIntegrationManifest(opts: {
       api: opts.uploadProtocols ? { upload_protocols: opts.uploadProtocols } : {},
     },
     auths,
-    ...(opts.tools ? { tools: opts.tools } : {}),
+    ...(opts.tools_policy ? { tools_policy: opts.tools_policy } : {}),
   } as unknown as IntegrationManifest;
 }
 
@@ -251,16 +290,13 @@ export function connectLoginBlock(opts: {
   return { login };
 }
 
-/** Build a minimal AFPS 2.0 mcp-server (MCPB) manifest for the local-source path. */
+/** Build a minimal AFPS 2.0.2 mcp-server (MCPB) manifest for the local-source path. */
 export function mcpServerManifest(opts: {
-  /** Verbatim MCPB top-level `name` (unscoped by convention). */
-  name: string;
   /**
-   * Scoped AFPS identity for `_meta["dev.afps/mcp-server"].name`. Real MCPB
-   * manifests keep the top-level `name` unscoped and carry the scoped id here;
-   * the platform derives the package id from this. Defaults to `name`.
+   * Scoped AFPS identity at the manifest root (AFPS 2.0.2 §3.4 lifted it from
+   * `_meta["dev.afps/mcp-server"].name`). Must follow `@scope/name`.
    */
-  afpsName?: string;
+  name: string;
   version?: string;
   serverType?: "node" | "python" | "binary" | "uv";
   entryPoint?: string;
@@ -271,25 +307,36 @@ export function mcpServerManifest(opts: {
    * belongs on the integration manifest.
    */
   appstrateRuntime?: string;
+  /**
+   * MCPB `server.mcp_config.env` map — typically literal strings or
+   * `"${user_config.<key>}"` placeholders. Used to exercise the AFPS 2.0.2
+   * §7.6 `user_config_key` substitution path (CC-4) — the integration's
+   * `delivery.env.<var>.user_config_key` names the placeholder key here.
+   */
+  mcpConfigEnv?: Record<string, string>;
 }): Record<string, unknown> {
   const type = opts.serverType ?? "node";
   const entryPoint = opts.entryPoint ?? "main.js";
-  const meta: Record<string, unknown> = {
-    "dev.afps/mcp-server": { name: opts.afpsName ?? opts.name, type: "mcp-server" },
+  const mcpConfig: Record<string, unknown> = {
+    command: type === "node" ? "node" : "python3",
+    args: [entryPoint],
   };
-  if (opts.appstrateRuntime) {
-    meta["dev.appstrate/mcp-server"] = { runtime: opts.appstrateRuntime };
-  }
-  return {
+  if (opts.mcpConfigEnv) mcpConfig.env = opts.mcpConfigEnv;
+  const manifest: Record<string, unknown> = {
     manifest_version: "0.3",
     name: opts.name,
     version: opts.version ?? "1.0.0",
+    type: "mcp-server",
+    schema_version: "2.0",
     display_name: opts.name,
     server: {
       type,
       entry_point: entryPoint,
-      mcp_config: { command: type === "node" ? "node" : "python3", args: [entryPoint] },
+      mcp_config: mcpConfig,
     },
-    _meta: meta,
   };
+  if (opts.appstrateRuntime) {
+    manifest._meta = { "dev.appstrate/mcp-server": { runtime: opts.appstrateRuntime } };
+  }
+  return manifest;
 }

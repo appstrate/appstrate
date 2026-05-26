@@ -1,19 +1,19 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Appstrate MCP-Server Manifest",
-  "description": "Appstrate mcp-server manifest — the canonical AFPS 2.0 / MCPB schema (re-exported from @afps-spec/schema). The AFPS identity contract under _meta[\"dev.afps/mcp-server\"] is validated by the Zod superRefine and is not representable in JSON Schema.",
+  "description": "Appstrate mcp-server manifest — the canonical AFPS 2.0.2 / MCPB schema (re-exported from @afps-spec/schema). The AFPS identity contract (type, name, schema_version, dependencies) lives at the manifest root (AFPS 2.0.2 §3.4 / §11.2).",
   "type": "object",
   "properties": {
-    "manifest_version": {
-      "type": "string",
-      "minLength": 1
-    },
     "name": {
       "type": "string",
-      "minLength": 1
+      "pattern": "^@[a-z0-9]([a-z0-9-]*[a-z0-9])?\\/[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
     },
     "version": {
       "type": "string"
+    },
+    "type": {
+      "type": "string",
+      "const": "mcp-server"
     },
     "display_name": {
       "type": "string"
@@ -21,19 +21,275 @@
     "description": {
       "type": "string"
     },
+    "long_description": {
+      "type": "string"
+    },
+    "keywords": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "license": {
+      "type": "string"
+    },
     "author": {
       "anyOf": [
         {
-          "type": "string"
+          "type": "string",
+          "minLength": 1
         },
         {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "email": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "additionalProperties": {}
+        }
+      ]
+    },
+    "repository": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "minLength": 1
+            },
+            "url": {
+              "type": "string",
+              "minLength": 1
+            },
+            "directory": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "url"
+          ],
+          "additionalProperties": {}
+        }
+      ]
+    },
+    "homepage": {
+      "type": "string"
+    },
+    "documentation": {
+      "type": "string"
+    },
+    "support": {
+      "type": "string"
+    },
+    "icon": {
+      "type": "string"
+    },
+    "icons": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "src": {
+            "type": "string",
+            "minLength": 1
+          },
+          "size": {
+            "type": "string",
+            "pattern": "^\\d+x\\d+$"
+          },
+          "theme": {
+            "type": "string",
+            "enum": [
+              "light",
+              "dark",
+              "high-contrast"
+            ]
+          }
+        },
+        "required": [
+          "src"
+        ],
+        "additionalProperties": {}
+      }
+    },
+    "screenshots": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "privacy_policies": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "compatibility": {
+      "type": "object",
+      "properties": {
+        "platforms": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "darwin",
+              "win32",
+              "linux"
+            ]
+          }
+        },
+        "runtimes": {
           "type": "object",
           "propertyNames": {
             "type": "string"
           },
-          "additionalProperties": {}
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "clients": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
         }
-      ]
+      },
+      "additionalProperties": {}
+    },
+    "schema_version": {
+      "type": "string",
+      "pattern": "^2\\.(0|[1-9]\\d*)$"
+    },
+    "dependencies": {
+      "type": "object",
+      "properties": {
+        "skills": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^@[a-z0-9]([a-z0-9-]*[a-z0-9])?\\/[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+          },
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "version": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "version"
+                ],
+                "additionalProperties": {}
+              }
+            ]
+          }
+        },
+        "mcp_servers": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^@[a-z0-9]([a-z0-9-]*[a-z0-9])?\\/[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+          },
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "version": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "version"
+                ],
+                "additionalProperties": {}
+              }
+            ]
+          }
+        },
+        "integrations": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^@[a-z0-9]([a-z0-9-]*[a-z0-9])?\\/[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+          },
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "version": {
+                    "type": "string"
+                  },
+                  "scopes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "auth_key": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9_]*$"
+                  }
+                },
+                "required": [
+                  "version"
+                ],
+                "additionalProperties": {}
+              }
+            ]
+          }
+        }
+      },
+      "additionalProperties": {}
+    },
+    "_meta": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "propertyNames": {
+          "type": "string"
+        },
+        "additionalProperties": {}
+      }
+    },
+    "manifest_version": {
+      "type": "string",
+      "minLength": 1
     },
     "server": {
       "type": "object",
@@ -119,27 +375,14 @@
         "type": "string"
       },
       "additionalProperties": {}
-    },
-    "_meta": {
-      "type": "object",
-      "propertyNames": {
-        "type": "string"
-      },
-      "additionalProperties": {
-        "type": "object",
-        "propertyNames": {
-          "type": "string"
-        },
-        "additionalProperties": {}
-      }
     }
   },
   "required": [
-    "manifest_version",
     "name",
     "version",
-    "server",
-    "_meta"
+    "type",
+    "manifest_version",
+    "server"
   ],
   "additionalProperties": {}
 }

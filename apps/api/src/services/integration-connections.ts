@@ -585,8 +585,11 @@ export type PersistTarget =
  */
 export interface PersistCredentialInput {
   credentials: Record<string, unknown>;
-  /** Bootstrap secrets (login password) — persisted NON-injectable (v2). */
-  inputs?: Record<string, string>;
+  /**
+   * Bootstrap secrets (login password) — persisted NON-injectable (v2). JSON-typed
+   * per JSON Schema 2020-12 §7.5 (string/number/boolean/object/array).
+   */
+  inputs?: Record<string, unknown>;
   expiresAt?: Date | null;
   needsReconnection?: boolean;
   accountId?: string;
@@ -959,12 +962,17 @@ export async function getIntegrationAuthStatuses(
     const authMeta = (auth._meta?.["dev.appstrate/auth"] ?? undefined) as
       | { required?: boolean }
       | undefined;
+    const resource = auth.resource ?? null;
     return {
       auth_key: key,
       type: auth.type,
       required: authMeta?.required ?? true,
       scopes: auth.default_scopes ?? [],
-      audience: auth.resource ?? null,
+      // AFPS 2.0 §7.3 (RFC 8707) names this field `resource`. Emitted under both
+      // names for one release window so existing API consumers keep working.
+      resource,
+      /** @deprecated AFPS 2.0 §7.3 — use `resource` (RFC 8707). `audience` kept for back-compat. */
+      audience: resource,
       connections: allConnections.filter((c) => c.auth_key === key),
       has_oauth_client: oauthClientKeys.has(key),
     };

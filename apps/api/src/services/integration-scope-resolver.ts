@@ -8,7 +8,7 @@
  * unions the scopes contributed by each:
  *
  *   - `tools[]` declared by the agent → look up
- *     `integration.tools[t].requiredScopes` (filtered by `requiredAuthKey`
+ *     `integration.tools_policy[t].requiredScopes` (filtered by `requiredAuthKey`
  *     when multi-auth) and union them.
  *   - `scopes[]` declared by the agent → unioned as-is.
  *   - Agent declared the integration as a bare semver-range string (or

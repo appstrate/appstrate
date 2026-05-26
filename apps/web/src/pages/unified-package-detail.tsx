@@ -69,8 +69,11 @@ const EMPTY_CONFIG_SCHEMA: JSONSchemaObject = { type: "object", properties: {} }
 const COMPANION_FILE_NAME: Record<PackageType, string> = {
   agent: "prompt.md",
   skill: "SKILL.md",
-  // mcp-server packages carry a verbatim MCPB manifest; no companion doc.
-  "mcp-server": "README.md",
+  // mcp-server packages have no formally-required companion (§2.5 only
+  // mandates the server payload). The AFPS CLI's `afps bundle --doc` emits
+  // `SERVER.md` for the optional human-facing doc; align the UI on the same
+  // name so the file shown matches what the CLI ships.
+  "mcp-server": "SERVER.md",
   // Phase 1.0 — INTEGRATION.md is the optional agent-facing doc;
   // manifest.json carries the authoritative spec.
   integration: "INTEGRATION.md",
