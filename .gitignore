@@ -58,6 +58,7 @@ docs/*
 !docs/cli/
 !docs/guides/
 !docs/migrations/
+!docs/CASING_CONVENTIONS.md
 flows/*
 
 claudedocs/

@@ -93,7 +93,7 @@ describe("Schedules API", () => {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
-          cronExpression: "0 9 * * 1-5",
+          cron_expression: "0 9 * * 1-5",
           input: { note: "hello" },
         }),
       });
@@ -111,7 +111,7 @@ describe("Schedules API", () => {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
-          cronExpression: "0 9 * * 1-5",
+          cron_expression: "0 9 * * 1-5",
         }),
       });
 
@@ -126,7 +126,7 @@ describe("Schedules API", () => {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
-          cronExpression: "0 9 * * 1-5",
+          cron_expression: "0 9 * * 1-5",
           input: { email: "" },
         }),
       });
@@ -142,7 +142,7 @@ describe("Schedules API", () => {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
-          cronExpression: "0 9 * * 1-5",
+          cron_expression: "0 9 * * 1-5",
           input: { email: "test@example.com" },
         }),
       });
@@ -161,7 +161,7 @@ describe("Schedules API", () => {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
-          cronExpression: "0 9 * * 1-5",
+          cron_expression: "0 9 * * 1-5",
           name: "Weekday 9am",
           timezone: "Europe/Paris",
         }),
@@ -169,7 +169,7 @@ describe("Schedules API", () => {
 
       expect(res.status).toBe(201);
       const body = (await res.json()) as any;
-      expect(body.cronExpression).toBe("0 9 * * 1-5");
+      expect(body.cron_expression).toBe("0 9 * * 1-5");
       expect(body.name).toBe("Weekday 9am");
       expect(body.timezone).toBe("Europe/Paris");
       // Schedule runs as the creating member.
@@ -185,7 +185,7 @@ describe("Schedules API", () => {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
-          cronExpression: "not-valid-cron",
+          cron_expression: "not-valid-cron",
         }),
       });
 
@@ -209,13 +209,13 @@ describe("Schedules API", () => {
       const res = await app.request(`/api/schedules/${schedule.id}`, {
         method: "PUT",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "New Name", cronExpression: "0 12 * * *" }),
+        body: JSON.stringify({ name: "New Name", cron_expression: "0 12 * * *" }),
       });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.name).toBe("New Name");
-      expect(body.cronExpression).toBe("0 12 * * *");
+      expect(body.cron_expression).toBe("0 12 * * *");
     });
   });
 
@@ -261,7 +261,7 @@ describe("Schedules API", () => {
       const body = (await res.json()) as any;
       expect(body.id).toBe(schedule.id);
       expect(body.name).toBe("Hourly Run");
-      expect(body.actorType).toBe("user");
+      expect(body.actor_type).toBe("user");
     });
 
     it("returns 404 for unknown schedule id", async () => {

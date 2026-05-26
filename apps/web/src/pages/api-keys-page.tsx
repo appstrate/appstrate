@@ -113,9 +113,9 @@ export function ApiKeysPage() {
                       {t("settings:apiKeys.lastUsed", { date: formatDate(key.lastUsedAt) })}
                     </span>
                   )}
-                  {key.createdByName && (
+                  {key.created_by_name && (
                     <span className="text-muted-foreground text-sm">
-                      {t("settings:apiKeys.createdByLabel", { name: key.createdByName })}
+                      {t("settings:apiKeys.createdByLabel", { name: key.created_by_name })}
                     </span>
                   )}
                 </div>

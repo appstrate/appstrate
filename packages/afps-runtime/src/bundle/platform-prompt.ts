@@ -121,10 +121,11 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
   //
   // That means the Checkpoint / Pinned Slots / Memory sections render
   // their data block when data exists, with no tool-specific footers.
-  // If `@appstrate/pin` isn't loaded, no `pin(...)` instructions appear
-  // anywhere in the prompt — the absence of the tool's TOOL.md is the
-  // gate. Conversely, when the tool ships, its TOOL.md teaches the LLM
-  // how to interact with the data shown in the platform-owned section.
+  // If the `pin` tool isn't loaded, no `pin(...)` instructions appear
+  // anywhere in the prompt — the absence of the tool from `tools/list`
+  // is the gate. Conversely, when the tool ships, its MCP descriptor
+  // `description` teaches the LLM how to interact with the data shown
+  // in the platform-owned section.
 
   // --- System identity & environment ---
   sections.push("## System\n");
@@ -169,7 +170,8 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
   // reaches no one. State the invariant explicitly so every result,
   // status update, question, or error is routed through a tool call.
   // Kept tool-agnostic (no opt-in tool names) per the #368 section
-  // contract — which tool to use is taught by each tool's TOOL.md.
+  // contract — which tool to use is taught by each tool's MCP descriptor
+  // `description` (surfaced via `tools/list`), not the prompt.
   sections.push("### Communication");
   sections.push(
     "Anything you write as plain text — outside a tool call — is **never delivered to the user**. " +
@@ -282,9 +284,10 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
   // --- Checkpoint ---
   // Data-only section: renders the snapshot from the prior run when one
   // exists. How to update it (or whether the agent can at all) is
-  // determined by which tools are loaded — the relevant TOOL.md (e.g.
-  // `@appstrate/pin`) carries the call instructions. With no such tool
-  // the snapshot is implicit read-only carry-over.
+  // determined by which tools are loaded — the relevant tool's MCP
+  // descriptor `description` (e.g. `pin`, surfaced via `tools/list`)
+  // carries the call instructions. With no such tool the snapshot is
+  // implicit read-only carry-over.
   if (context.checkpoint !== undefined && context.checkpoint !== null) {
     sections.push("## Checkpoint\n");
     sections.push(
@@ -302,8 +305,8 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
   // --- Pinned Slots (named, non-checkpoint) ---
   // Data-only section: dumps named pinned slots (any key other than
   // "checkpoint") so they are visible on every run. Update instructions
-  // belong to the tool that owns the slot semantics (`@appstrate/pin`'s
-  // TOOL.md) and are surfaced through the standard tool-doc flow.
+  // belong to the tool that owns the slot semantics (the `pin` tool's
+  // MCP descriptor `description`) and are surfaced via `tools/list`.
   if (context.pinnedSlots && Object.keys(context.pinnedSlots).length > 0) {
     sections.push("## Pinned Slots\n");
     sections.push("Named pinned slots (always visible across runs):\n");
@@ -323,9 +326,10 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
   // --- Memory ---
   // Data-only section: dumps the agent's pinned memory list (working
   // set, ADR-012 tier 1). The archive tier (ADR-013) is reachable via
-  // tool calls — those instructions live in the relevant TOOL.md
-  // (`@appstrate/note` for writes, runtime-injected `recall_memory`
-  // for searches). Section omitted when no memories are pinned.
+  // tool calls — those instructions live in each tool's MCP descriptor
+  // `description` (`note` for writes, runtime-injected `recall_memory`
+  // for searches, surfaced via `tools/list`). Section omitted when no
+  // memories are pinned.
   if (context.memories && context.memories.length > 0) {
     sections.push("## Memory\n");
     sections.push("Pinned memories (always visible across runs):\n");

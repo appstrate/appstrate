@@ -29,17 +29,18 @@ const INTEGRATION_ID = "@official/gmail";
 
 function integrationManifest(): Record<string, unknown> {
   return {
-    manifestVersion: "1.1",
+    schema_version: "2.0",
     type: "integration",
     name: INTEGRATION_ID,
     version: "1.0.0",
-    displayName: "Gmail",
-    server: { type: "python", entryPoint: "./server.py" },
+    display_name: "Gmail",
+    source: { kind: "local", server: { name: "@official/gmail-server", version: "^1.0.0" } },
     auths: {
       primary: {
         type: "api_key",
-        authorizedUris: ["https://api/*"],
-        delivery: { http: { headerName: "X-Api-Key", valueFrom: "api_key" } },
+        authorized_uris: ["https://api/*"],
+        credentials: { schema: { type: "object", properties: { api_key: { type: "string" } } } },
+        delivery: { http: { in: "header", name: "X-Api-Key", value: "{$credential.api_key}" } },
       },
     },
   };
@@ -89,16 +90,16 @@ describe("integration-org-defaults-service", () => {
       enforce: true,
       createdBy: ctx.user.id,
     });
-    expect(created.connectionId).toBe(connId);
+    expect(created.connection_id).toBe(connId);
     expect(created.enforce).toBe(true);
-    expect(created.authKey).toBe("primary");
+    expect(created.auth_key).toBe("primary");
 
     // get
     const fetched = await getOrgDefault(scope, INTEGRATION_ID);
     expect(fetched).not.toBeNull();
-    expect(fetched!.connectionId).toBe(connId);
+    expect(fetched!.connection_id).toBe(connId);
     expect(fetched!.enforce).toBe(true);
-    expect(fetched!.authKey).toBe("primary");
+    expect(fetched!.auth_key).toBe("primary");
 
     // listOrgDefaultsForResolver shape
     const resolverMap = await listOrgDefaultsForResolver(ctx.defaultAppId);
@@ -128,11 +129,11 @@ describe("integration-org-defaults-service", () => {
       enforce: true,
       createdBy: ctx.user.id,
     });
-    expect(replaced.connectionId).toBe(connB);
+    expect(replaced.connection_id).toBe(connB);
     expect(replaced.enforce).toBe(true);
 
     const fetched = await getOrgDefault(scope, INTEGRATION_ID);
-    expect(fetched!.connectionId).toBe(connB);
+    expect(fetched!.connection_id).toBe(connB);
     expect(fetched!.enforce).toBe(true);
   });
 

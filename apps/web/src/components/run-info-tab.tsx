@@ -42,37 +42,37 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
   const { t } = useTranslation(["agents", "settings"]);
   const input = run.input as Record<string, unknown> | null;
   const config = run.config as Record<string, unknown> | null;
-  const usage = run.tokenUsage as {
+  const usage = run.token_usage as {
     input_tokens?: number;
     output_tokens?: number;
     cache_creation_input_tokens?: number;
     cache_read_input_tokens?: number;
   } | null;
   const metadata = run.metadata as Record<string, unknown> | null;
-  const hasUsage = run.cost != null || usage != null || run.modelLabel != null;
+  const hasUsage = run.cost != null || usage != null || run.model_label != null;
   const runnerOriginLabel =
     run.runOrigin === "remote" ? t("exec.infoRunnerRemote") : t("exec.infoRunnerPlatform");
   // Append the runner name when present so the dashboard shows
   // "Distant · pierres-mbp" or "Distant · acme/web #42" instead of the
   // bare origin word.
-  const runnerLabel = run.runnerName
-    ? `${runnerOriginLabel} · ${run.runnerName}`
+  const runnerLabel = run.runner_name
+    ? `${runnerOriginLabel} · ${run.runner_name}`
     : runnerOriginLabel;
-  const startedAt = formatTimestamp(run.startedAt);
-  const completedAt = formatTimestamp(run.completedAt);
+  const startedAt = formatTimestamp(run.started_at);
+  const completedAt = formatTimestamp(run.completed_at);
 
   return (
     <div className="space-y-4">
       {/* Version + Trigger — inline runs are not versioned, so the grid
           collapses to a single column when the Version card is hidden. */}
-      <div className={cn("grid gap-4", !run.packageEphemeral && "sm:grid-cols-2")}>
-        {!run.packageEphemeral && (
+      <div className={cn("grid gap-4", !run.package_ephemeral && "sm:grid-cols-2")}>
+        {!run.package_ephemeral && (
           <InfoCard
             label="Version"
             value={
-              <span className={cn("font-mono", !run.versionLabel && "italic")}>
-                {run.versionLabel
-                  ? `v${run.versionLabel}${run.versionDirty ? ` ${t("exec.versionDirty")}` : ""}`
+              <span className={cn("font-mono", !run.version_label && "italic")}>
+                {run.version_label
+                  ? `v${run.version_label}${run.version_dirty ? ` ${t("exec.version_dirty")}` : ""}`
                   : t("exec.draft")}
               </span>
             }
@@ -104,11 +104,11 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
           )}
           {startedAt && <InfoCard label={t("exec.infoStartedAt")} value={startedAt} />}
           {completedAt && <InfoCard label={t("exec.infoCompletedAt")} value={completedAt} />}
-          {run.modelLabel != null && (
-            <InfoCard label={t("exec.usageModel")} value={run.modelLabel} />
+          {run.model_label != null && (
+            <InfoCard label={t("exec.usageModel")} value={run.model_label} />
           )}
-          {run.proxyLabel != null && (
-            <InfoCard label={t("exec.infoProxy")} value={run.proxyLabel} />
+          {run.proxy_label != null && (
+            <InfoCard label={t("exec.infoProxy")} value={run.proxy_label} />
           )}
         </div>
       </SectionCard>
@@ -121,7 +121,7 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
         <SectionCard
           title={t("exec.infoUsage")}
           headerRight={
-            run.status && ACTIVE_RUN_STATUSES.has(run.status) ? (
+            run.status && (ACTIVE_RUN_STATUSES as ReadonlySet<string>).has(run.status) ? (
               <span className="bg-primary/15 text-primary inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium tracking-wide uppercase">
                 <span className="bg-primary size-1.5 animate-pulse rounded-full" aria-hidden />
                 {t("exec.usageLive")}
@@ -171,21 +171,21 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
       )}
 
       {/* Inline run — prompt + manifest snapshot (null after compaction) */}
-      {run.packageEphemeral && (
+      {run.package_ephemeral && (
         <>
-          {run.inlinePrompt ? (
+          {run.inline_prompt ? (
             <SectionCard title={t("exec.tabPrompt")}>
               <pre className="bg-muted/30 overflow-x-auto rounded-md p-4 font-mono text-xs whitespace-pre-wrap">
-                {run.inlinePrompt}
+                {run.inline_prompt}
               </pre>
             </SectionCard>
           ) : null}
-          {run.inlineManifest ? (
+          {run.inline_manifest ? (
             <SectionCard title={t("exec.tabManifest")}>
-              <JsonView data={run.inlineManifest} />
+              <JsonView data={run.inline_manifest} />
             </SectionCard>
           ) : null}
-          {!run.inlinePrompt && !run.inlineManifest && (
+          {!run.inline_prompt && !run.inline_manifest && (
             <EmptyState message={t("runs.detailsExpired")} icon={FileCode2} compact />
           )}
         </>

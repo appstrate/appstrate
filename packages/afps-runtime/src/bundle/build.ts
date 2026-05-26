@@ -21,6 +21,7 @@ import { BundleError } from "./errors.ts";
 import { parseAfpsManifestBytes } from "./parse-manifest.ts";
 import { sanitizeEntries, stripWrapperPrefix, sumSizes } from "./archive-utils.ts";
 import { resolveBundleLimits, type BundleLimits } from "./limits.ts";
+import { getMcpServerAfpsName } from "../types/manifest.ts";
 import {
   bundleIntegrity,
   computeRecordEntries,
@@ -44,13 +45,21 @@ export interface BuildBundleOptions {
   limits?: Partial<BundleLimits>;
   /** Called with a human-readable message for non-fatal conditions (cycles). */
   onWarn?: (msg: string) => void;
+  /**
+   * Which `dependencies.*` sections to walk into the bundle graph. Defaults to
+   * all bundleable sections. Run-bundle builders pass `["skills"]`: an agent's
+   * integrations and mcp-servers are not bundle members — they are spawned /
+   * fetched separately by the sidecar at runtime — so they must not be walked
+   * into (and fetched for) the agent bundle.
+   */
+  depTypes?: DepRequest["type"][];
 }
 
 /**
  * Walk the root's transitive dependency graph via `catalog`, dedupe by
  * identity, and return the assembled Bundle.
  *
- * Walks `manifest.dependencies.{skills, tools, providers}` recursively.
+ * Walks `manifest.dependencies.{skills, mcp_servers, integrations}` recursively.
  * Cycles are tolerated (each identity is fetched once); the caller gets
  * a warning via `opts.onWarn`. Dep resolution failures are collected
  * and surfaced as a single `DEPENDENCY_UNRESOLVED` with `details.missing`.
@@ -62,6 +71,7 @@ export async function buildBundleFromCatalog(
 ): Promise<Bundle> {
   const limits = resolveBundleLimits(opts.limits);
   const onWarn = opts.onWarn ?? (() => {});
+  const depTypes = opts.depTypes ?? ["skills", "mcp_servers", "integrations"];
   const packages = new Map<PackageIdentity, BundlePackage>();
   const visiting = new Set<PackageIdentity>();
   const missing: Array<{ from: PackageIdentity; name: string; versionSpec: string }> = [];
@@ -88,7 +98,7 @@ export async function buildBundleFromCatalog(
       );
     }
 
-    const deps = extractDependencies(pkg.manifest);
+    const deps = extractDependencies(pkg.manifest, depTypes);
     for (const { name, versionSpec } of deps) {
       const resolved = await catalog.resolve(name, versionSpec);
       if (!resolved) {
@@ -221,18 +231,33 @@ export function extractRootFromAfps(
 
   const manifest = parseAfpsManifestBytes(manifestBytes) as AfpsManifest;
 
-  const name = typeof manifest.name === "string" ? manifest.name : null;
+  // An mcp-server manifest's top-level `name` is MCPB-governed (an unscoped
+  // server slug), NOT the AFPS scoped identity — that lives under
+  // `_meta["dev.afps/mcp-server"].name` (§3.4 / §2.2). For every other type the
+  // scoped identity IS the top-level `name`.
+  const isMcpServer =
+    manifest.type === "mcp-server" || getMcpServerAfpsName(manifest) !== undefined;
+  const rawName = isMcpServer
+    ? getMcpServerAfpsName(manifest)
+    : typeof manifest.name === "string"
+      ? manifest.name
+      : undefined;
+  const name = rawName ?? null;
   const version = typeof manifest.version === "string" ? manifest.version : null;
   if (!name || !version) {
     throw new BundleError(
       "BUNDLE_JSON_INVALID",
-      `manifest.json must declare name + version (got name=${JSON.stringify(name)}, version=${JSON.stringify(version)})`,
+      isMcpServer
+        ? `mcp-server manifest must declare _meta["dev.afps/mcp-server"].name + version (got name=${JSON.stringify(name)}, version=${JSON.stringify(version)})`
+        : `manifest.json must declare name + version (got name=${JSON.stringify(name)}, version=${JSON.stringify(version)})`,
     );
   }
   if (!name.startsWith("@") || !name.includes("/")) {
     throw new BundleError(
       "BUNDLE_JSON_INVALID",
-      `manifest.name must be scoped (@scope/name), got ${name}`,
+      isMcpServer
+        ? `mcp-server AFPS identity _meta["dev.afps/mcp-server"].name must be scoped (@scope/name), got ${name}`
+        : `manifest.name must be scoped (@scope/name), got ${name}`,
     );
   }
   const identity = formatPackageIdentity(name as `@${string}/${string}`, version);
@@ -247,16 +272,16 @@ export function extractRootFromAfps(
 interface DepRequest {
   name: string;
   versionSpec: string;
-  type: "skills" | "tools" | "providers";
+  type: "skills" | "mcp_servers" | "integrations";
 }
 
-function extractDependencies(manifest: AfpsManifest): DepRequest[] {
+function extractDependencies(manifest: AfpsManifest, depTypes: DepRequest["type"][]): DepRequest[] {
   const out: DepRequest[] = [];
   const deps = manifest.dependencies;
   if (!deps || typeof deps !== "object") return out;
   const depsObj = deps as Record<string, unknown>;
 
-  for (const type of ["skills", "tools", "providers"] as const) {
+  for (const type of depTypes) {
     const section = depsObj[type];
     if (!section || typeof section !== "object" || Array.isArray(section)) continue;
     for (const [name, spec] of Object.entries(section as Record<string, unknown>)) {

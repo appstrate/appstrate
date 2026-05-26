@@ -39,7 +39,14 @@ import { notFound, conflict, invalidRequest } from "../lib/errors.ts";
 import type { AppScope } from "../lib/scope.ts";
 import { actorInsert } from "../lib/actor.ts";
 import type { Actor } from "@appstrate/connect";
-import type { IntegrationManifest } from "@appstrate/core/integration";
+import {
+  resolveIntegrationToolCatalog,
+  type IntegrationManifest,
+} from "@appstrate/core/integration";
+import type { IntegrationToolCatalogEntry } from "@appstrate/shared-types";
+import { getLocalServerRef } from "./integration-manifest-helpers.ts";
+import { fetchMcpServerManifest } from "./integration-service.ts";
+import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
 import type { IntegrationAuthStatus } from "@appstrate/shared-types";
 import { getIntegration } from "./integration-service.ts";
 
@@ -391,11 +398,11 @@ export async function upsertIntegrationOAuthClient(
 
   return {
     applicationId: row.applicationId,
-    integrationPackageId: row.integrationPackageId,
-    authKey: row.authKey,
-    clientId: row.clientId,
-    hasClientSecret: (input.clientSecret ?? "").length > 0,
-    redirectUri: row.redirectUri,
+    integration_package_id: row.integrationPackageId,
+    auth_key: row.authKey,
+    client_id: row.clientId,
+    has_client_secret: (input.clientSecret ?? "").length > 0,
+    redirect_uri: row.redirectUri,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -436,12 +443,12 @@ export async function getIntegrationOAuthClient(
   }
   return {
     applicationId: row.applicationId,
-    integrationPackageId: row.integrationPackageId,
-    authKey: row.authKey,
-    clientId: row.clientId,
+    integration_package_id: row.integrationPackageId,
+    auth_key: row.authKey,
+    client_id: row.clientId,
     clientSecret: secret,
-    hasClientSecret: secret.length > 0,
-    redirectUri: row.redirectUri,
+    has_client_secret: secret.length > 0,
+    redirect_uri: row.redirectUri,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -487,8 +494,9 @@ export function extractIdentity(
   authKey: string,
   source: Record<string, unknown>,
 ): { accountId: string; identityClaims: Record<string, unknown> } {
-  const auth = lookupAuth(manifest, authKey);
-  const mapping = auth.extractTokenIdentity ?? {};
+  const auth = lookupAuth(manifest, authKey) as AfpsManifestAuth;
+  // AFPS 2.0 (Appendix D): `extractTokenIdentity` → `identity_claims`.
+  const mapping = auth.identity_claims ?? {};
   const claims: Record<string, unknown> = {};
   for (const [outKey, accessor] of Object.entries(mapping)) {
     claims[outKey] = readPath(source, accessor);
@@ -837,16 +845,16 @@ function rowToSummary(
   return {
     id: row.id,
     packageId: row.integrationPackageId,
-    authKey: row.authKey,
-    accountId: row.accountId,
-    identityClaims: (row.identityClaims as Record<string, unknown> | null) ?? null,
-    scopesGranted: row.scopesGranted,
-    needsReconnection: row.needsReconnection,
+    auth_key: row.authKey,
+    account_id: row.accountId,
+    identity_claims: (row.identityClaims as Record<string, unknown> | null) ?? null,
+    scopes_granted: row.scopesGranted,
+    needs_reconnection: row.needsReconnection,
     expiresAt: row.expiresAt ? row.expiresAt.toISOString() : null,
-    ownerType: row.userId ? "user" : "end_user",
-    ownerId: (row.userId ?? row.endUserId)!,
+    owner_type: row.userId ? "user" : "end_user",
+    owner_id: (row.userId ?? row.endUserId)!,
     label: row.label,
-    sharedWithOrg: row.sharedWithOrg,
+    shared_with_org: row.sharedWithOrg,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -873,10 +881,64 @@ export async function getIntegrationAuthStatuses(
   scope: AppScope,
   packageId: string,
   actor: Actor,
-): Promise<{ manifest: IntegrationManifest; auths: IntegrationAuthStatus[] }> {
+): Promise<{
+  manifest: IntegrationManifest;
+  auths: IntegrationAuthStatus[];
+  /**
+   * Effective agent-facing tool catalog — what the agent editor's picker
+   * should display. Resolved server-side via
+   * {@link resolveIntegrationToolCatalog} so the UI doesn't need a second
+   * fetch for the referenced mcp-server's MCPB tool advertisement.
+   */
+  tool_catalog: IntegrationToolCatalogEntry[];
+}> {
   await assertAppBelongsToOrg(scope);
   const manifest = await loadManifestOrThrow(scope, packageId);
   const authsMap = manifest.auths ?? {};
+
+  // For local-source integrations the catalog comes from the referenced
+  // mcp-server's MCPB `tools[]`. Fetch it best-effort: if the mcp-server
+  // package is missing the resolver still falls back to the integration's
+  // sparse `tools{}` keys (legacy behaviour, no regression for the picker).
+  const localRef = getLocalServerRef(manifest);
+  let mcpServerTools: ReadonlyArray<{ name: string; description?: string }> | undefined;
+  if (localRef) {
+    const mcpServer = await fetchMcpServerManifest(localRef.name);
+    if (mcpServer) {
+      const t = (mcpServer as { tools?: Array<{ name?: unknown; description?: unknown }> }).tools;
+      if (Array.isArray(t)) {
+        mcpServerTools = t
+          .filter((e): e is { name: string; description?: string } => typeof e?.name === "string")
+          .map((e) => ({
+            name: e.name,
+            description: typeof e.description === "string" ? e.description : undefined,
+          }));
+      }
+    }
+  }
+  const toolCatalog: IntegrationToolCatalogEntry[] = resolveIntegrationToolCatalog({
+    integration: manifest,
+    mcpServerTools,
+  }).map((entry) => ({
+    name: entry.name,
+    ...(entry.description !== undefined ? { description: entry.description } : {}),
+    ...(entry.policy
+      ? {
+          policy: {
+            ...(entry.policy.requiredScopes !== undefined
+              ? { required_scopes: entry.policy.requiredScopes }
+              : {}),
+            ...(entry.policy.requiredAuthKey !== undefined
+              ? { required_auth_key: entry.policy.requiredAuthKey }
+              : {}),
+            ...(entry.policy.urlPatterns !== undefined
+              ? { url_patterns: entry.policy.urlPatterns }
+              : {}),
+          },
+        }
+      : {}),
+  }));
+
   const allConnections = await listIntegrationConnections(scope, packageId, actor);
   const oauthClients = await db
     .select({ authKey: integrationOauthClients.authKey })
@@ -889,17 +951,26 @@ export async function getIntegrationAuthStatuses(
     );
   const oauthClientKeys = new Set(oauthClients.map((r) => r.authKey));
 
-  const auths: IntegrationAuthStatus[] = Object.entries(authsMap).map(([key, auth]) => ({
-    authKey: key,
-    type: auth.type,
-    required: auth.required ?? true,
-    scopes: auth.scopes ?? [],
-    audience: auth.audience ?? null,
-    connections: allConnections.filter((c) => c.authKey === key),
-    hasOAuthClient: oauthClientKeys.has(key),
-  }));
+  const auths: IntegrationAuthStatus[] = Object.entries(authsMap).map(([key, rawAuth]) => {
+    // AFPS 2.0 (Appendix D): `scopes` → `default_scopes`, `audience` →
+    // `resource`; the Appstrate run-policy `required` flag moved under
+    // `_meta["dev.appstrate/auth"].required`.
+    const auth = rawAuth as AfpsManifestAuth;
+    const authMeta = (auth._meta?.["dev.appstrate/auth"] ?? undefined) as
+      | { required?: boolean }
+      | undefined;
+    return {
+      auth_key: key,
+      type: auth.type,
+      required: authMeta?.required ?? true,
+      scopes: auth.default_scopes ?? [],
+      audience: auth.resource ?? null,
+      connections: allConnections.filter((c) => c.auth_key === key),
+      has_oauth_client: oauthClientKeys.has(key),
+    };
+  });
 
-  return { manifest, auths };
+  return { manifest, auths, tool_catalog: toolCatalog };
 }
 
 /**

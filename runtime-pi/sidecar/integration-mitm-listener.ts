@@ -715,8 +715,9 @@ async function handleInnerRequest(
   //   - OAuth (existing): a 401 on an auth whose plan declared `retry401`
   //     triggers a platform token-refresh + single retry.
   //   - connect.tool re-login (P3): any status the manifest's
-  //     `auth.connect.reauthOn` declares (default `[401]`) triggers a
-  //     re-run of the integration's login tool + single retry. The source's
+  //     `auth._meta["dev.appstrate/connect"].reauth_on` declares (default
+  //     `[401]`) triggers a re-run of the integration's login tool + single
+  //     retry. The source's
   //     `refreshOnUnauthorized` routes to the registered re-login handler;
   //     `setSessionOutputs` (inside the handler) updates the source's
   //     deliveryPlans, so the rebuilt action injects the fresh session header.

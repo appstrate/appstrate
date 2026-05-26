@@ -73,7 +73,7 @@ interface AgentIntegrationsBlockProps {
  *   ⚠️ needs_reconnection    — connection flagged for re-consent
  *   ✅ ok
  *
- * Per-tool scope inference (required = ⋃ tools.{t}.requiredScopes for selected
+ * Per-tool scope inference (required = ⋃ tools.{t}.required_scopes for selected
  * tools, filtered by requiredAuthKey) is recomputed client-side so the badge
  * never lags the agent's editor state. The exact same logic powers the 412
  * server-side; the modal (Phase C) is the recovery path when this block is
@@ -127,7 +127,7 @@ function IntegrationConnectionCard({
 }: IntegrationConnectionCardProps) {
   const { t } = useTranslation(["agents"]);
   const { data: detail, isPending: detailPending } = useIntegrationDetail(packageId);
-  const displayName = detail?.manifest.displayName ?? packageId;
+  const displayName = detail?.manifest.display_name ?? packageId;
 
   if (detailPending || !detail) {
     return (
@@ -220,7 +220,7 @@ function connectableAuthKeys(
       out.add(key);
       continue;
     }
-    if (authStatuses.find((s) => s.authKey === key)?.hasOAuthClient) out.add(key);
+    if (authStatuses.find((s) => s.auth_key === key)?.has_oauth_client) out.add(key);
   }
   return out;
 }
@@ -279,7 +279,7 @@ function FallbackConnectCard({
   // globally from /connections (destructive, with confirm + impact list).
   const connectedAuthKey = status.kind === "ok" ? status.authKey : null;
   const connectedConnection = connectedAuthKey
-    ? connections?.find((c) => c.authKey === connectedAuthKey)
+    ? connections?.find((c) => c.auth_key === connectedAuthKey)
     : null;
 
   // R5 — reuse hint: surface that this single connection is shared across
@@ -429,20 +429,19 @@ function MemberConnectionPicker({
   const {
     candidates,
     status,
-    resolvedConnectionId,
-    resolvedMissingScopes,
-    resolvedOwnedByActor,
-    adminPinnedConnectionId,
-    memberPinnedConnectionId,
-    orgDefaultConnectionId,
-    orgDefaultEnforced,
-    canAddConnection,
+    resolved_connection_id: resolvedConnectionId,
+    resolved_missing_scopes: resolvedMissingScopes,
+    admin_pinned_connection_id: adminPinnedConnectionId,
+    member_pinned_connection_id: memberPinnedConnectionId,
+    org_default_connection_id: orgDefaultConnectionId,
+    org_default_enforced: orgDefaultEnforced,
+    can_add_connection: canAddConnection,
   } = resolution;
 
   const ownerLabel = (c: IntegrationCandidate): string =>
-    c.isOwn
+    c.is_own
       ? t("detail.integrationMemberPicker.byYou")
-      : (c.ownerName ?? t("detail.integrationMemberPicker.ownerUnknown"));
+      : (c.owner_name ?? t("detail.integrationMemberPicker.ownerUnknown"));
 
   // Locked when an admin force applies and the member can never override:
   // a per-agent admin pin OR an enforced org default. Either way we render
@@ -592,7 +591,7 @@ function MemberConnectionPicker({
             {t("detail.integrationMemberPicker.title")}
           </DropdownMenuLabel>
           {candidates.map((c) => {
-            const tl = typeLabel(c.authKey);
+            const tl = typeLabel(c.auth_key);
             const isDefault = !current && resolvedConnectionId === c.id;
             return (
               <DropdownMenuItem
@@ -614,12 +613,12 @@ function MemberConnectionPicker({
                         {tl}
                       </Badge>
                     )}
-                    {c.sharedWithOrg && (
+                    {c.shared_with_org && (
                       <Badge variant="secondary" className="text-[0.6rem]">
                         {t("detail.integrationMemberPicker.sharedBadge")}
                       </Badge>
                     )}
-                    {c.missingScopes.length > 0 && (
+                    {c.missing_scopes.length > 0 && (
                       <Badge variant="destructive" className="text-[0.6rem]">
                         {t("detail.integrationMemberPicker.missingScopesBadge")}
                       </Badge>
@@ -632,7 +631,7 @@ function MemberConnectionPicker({
                   </div>
                   <span className="text-muted-foreground truncate text-[0.65rem]">
                     {t("detail.integrationMemberPicker.connectedBy", { owner: ownerLabel(c) })}
-                    {c.needsReconnection &&
+                    {c.needs_reconnection &&
                       ` · ${t("detail.integrationMemberPicker.needsReconnection")}`}
                   </span>
                 </div>
@@ -694,7 +693,7 @@ function MemberConnectionPicker({
           <div className="flex items-center gap-1.5">
             <AlertTriangle className="size-3 shrink-0" />
             <span>
-              {resolvedOwnedByActor
+              {resolution.resolved_owned_by_actor
                 ? t("detail.integrationMemberPicker.missingScopesOwn")
                 : t("detail.integrationMemberPicker.missingScopesForeign", {
                     owner: ownerLabel(resolvedConn),
@@ -704,30 +703,31 @@ function MemberConnectionPicker({
           <span className="text-foreground/80 font-mono text-[0.65rem] break-words">
             {resolvedMissingScopes.join(" ")}
           </span>
-          {resolvedOwnedByActor && auths[resolvedConn.authKey]?.type === "oauth2" && (
-            <div>
-              <Button
-                size="sm"
-                disabled={oauthPending}
-                onClick={async () => {
-                  await openPopup({
-                    packageId: integrationPackageId,
-                    authKey: resolvedConn.authKey,
-                    scopes: resolvedMissingScopes,
-                    connectionId: resolvedConn.id,
-                  });
-                  // The OAuth callback updated the connection's granted
-                  // scopes server-side; refetch so the badge clears
-                  // instead of waiting for a window-focus refetch.
-                  await refresh();
-                }}
-                data-testid={`member-pick-upgrade-${integrationPackageId}`}
-              >
-                <RefreshCw className="mr-1 size-3" />
-                {t("detail.integrationMemberPicker.upgradeButton")}
-              </Button>
-            </div>
-          )}
+          {resolution.resolved_owned_by_actor &&
+            auths[resolvedConn.auth_key]?.type === "oauth2" && (
+              <div>
+                <Button
+                  size="sm"
+                  disabled={oauthPending}
+                  onClick={async () => {
+                    await openPopup({
+                      packageId: integrationPackageId,
+                      authKey: resolvedConn.auth_key,
+                      scopes: resolvedMissingScopes,
+                      connectionId: resolvedConn.id,
+                    });
+                    // The OAuth callback updated the connection's granted
+                    // scopes server-side; refetch so the badge clears
+                    // instead of waiting for a window-focus refetch.
+                    await refresh();
+                  }}
+                  data-testid={`member-pick-upgrade-${integrationPackageId}`}
+                >
+                  <RefreshCw className="mr-1 size-3" />
+                  {t("detail.integrationMemberPicker.upgradeButton")}
+                </Button>
+              </div>
+            )}
         </div>
       )}
       {fieldsAuth && fieldsAuthKey && (
@@ -826,7 +826,7 @@ type IntegrationStatus =
 
 function deriveIntegrationStatus(input: {
   manifest: IntegrationManifestView;
-  connections: { authKey: string; needsReconnection: boolean }[];
+  connections: { auth_key: string; needs_reconnection: boolean }[];
   agentTools: string[] | undefined;
   agentScopes: string[] | undefined;
 }): IntegrationStatus {
@@ -849,9 +849,9 @@ function deriveIntegrationStatus(input: {
   // healthy one. The OAuth-scope check moved to the integration detail page
   // (passive — runtime selection is per-connection, the user may have picked
   // a different connection that doesn't need those scopes).
-  const healthy = connections.find((c) => !c.needsReconnection);
+  const healthy = connections.find((c) => !c.needs_reconnection);
   if (healthy) {
-    return { kind: "ok", authKey: healthy.authKey };
+    return { kind: "ok", authKey: healthy.auth_key };
   }
-  return { kind: "needs_reconnection", authKey: connections[0]!.authKey };
+  return { kind: "needs_reconnection", authKey: connections[0]!.auth_key };
 }

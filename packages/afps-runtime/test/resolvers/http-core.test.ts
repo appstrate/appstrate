@@ -72,7 +72,7 @@ describe("makeApiCallTool", () => {
     const { ctx } = makeCtx();
     await expect(
       tool.execute({ method: "GET", target: "https://evil.example.com/x" }, ctx),
-    ).rejects.toThrow(/not in authorizedUris/);
+    ).rejects.toThrow(/not in authorized_uris/);
   });
 
   it("emits api_call.called with status + duration on success", async () => {

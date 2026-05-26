@@ -356,15 +356,15 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   }
 
   // ─── 7b. Platform runtime tools (output/log/note/pin/report) ──────────
-  // Selected via `manifest.runtimeTools`. With no sidecar (the CLI always
+  // Selected via `manifest.runtime_tools`. With no sidecar (the CLI always
   // runs in-process), register the shared MCP tool definitions
   // (`@appstrate/core/runtime-tool-defs`) as Pi extensions. The default
   // emitter writes the canonical events as stdout-JSONL, harvested by the
   // `attachStdoutBridge` wired below into the run sink — same wire contract
   // the former built-in tools used.
   const rootRuntimeTools = (
-    bundle.packages.get(bundle.root)?.manifest as { runtimeTools?: string[] } | undefined
-  )?.runtimeTools;
+    bundle.packages.get(bundle.root)?.manifest as { runtime_tools?: string[] } | undefined
+  )?.runtime_tools;
   const runtimeToolFactories = buildRuntimeToolExtensions({
     ...(rootRuntimeTools ? { runtimeTools: rootRuntimeTools } : {}),
     outputSchema: (promptInputs.outputSchema ?? null) as Record<string, unknown> | null,

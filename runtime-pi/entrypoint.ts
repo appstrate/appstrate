@@ -9,7 +9,8 @@
  *
  * Responsibilities (runtime-pi only):
  *   1. Initialise a git repo + extract the injected agent package.
- *   2. Install TOOL.md / skills into `.pi/` for on-disk lookup.
+ *   2. Install skills into `.pi/` for on-disk lookup (tool docs live on
+ *      the MCP tool descriptors, not on disk).
  *   3. Collect tool extension factories (from agent package + built-ins).
  *   4. Build an {@link ExecutionContext} from env vars.
  *   5. Build an {@link HttpSink} against the platform's signed-event API.
@@ -499,7 +500,7 @@ if (sidecarUrl) {
   // as Pi extensions in-process. Their canonical events are re-emitted into
   // the run sink by the wrapper (default stdout-JSONL → the stdout bridge).
   const rootManifest = bundle
-    ? (bundle.packages.get(bundle.root)?.manifest as { runtimeTools?: string[] } | undefined)
+    ? (bundle.packages.get(bundle.root)?.manifest as { runtime_tools?: string[] } | undefined)
     : undefined;
   let outputSchema: Record<string, unknown> | null = null;
   if (process.env.OUTPUT_SCHEMA) {
@@ -511,7 +512,7 @@ if (sidecarUrl) {
   }
   extensionFactories.push(
     ...buildRuntimeToolExtensions({
-      ...(rootManifest?.runtimeTools ? { runtimeTools: rootManifest.runtimeTools } : {}),
+      ...(rootManifest?.runtime_tools ? { runtimeTools: rootManifest.runtime_tools } : {}),
       outputSchema,
       emit: (event) => {
         void bridgedSink.handle(event as RunEvent);

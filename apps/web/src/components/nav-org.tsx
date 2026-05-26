@@ -8,6 +8,7 @@ import {
   Activity,
   Calendar,
   Wrench,
+  Plug,
   Webhook,
   Loader2,
   Users,
@@ -45,7 +46,7 @@ export function NavOrg() {
     offset: 0,
   });
   const hasRunning =
-    (agents?.some((f) => f.runningRuns > 0) ?? false) || (runningInline?.total ?? 0) > 0;
+    (agents?.some((f) => f.running_runs > 0) ?? false) || (runningInline?.total ?? 0) > 0;
   const unread = unreadCount ?? 0;
 
   const automationItems = [
@@ -54,7 +55,10 @@ export function NavOrg() {
     { path: "/schedules", label: t("nav.schedules"), icon: Calendar },
   ];
 
-  const resourceItems = [{ path: "/skills", label: t("nav.skills"), icon: Wrench }];
+  const resourceItems = [
+    { path: "/skills", label: t("nav.skills"), icon: Wrench },
+    { path: "/mcp-servers", label: t("nav.mcpServers"), icon: Plug },
+  ];
 
   const integrationItems = [
     { path: "/integrations", label: t("nav.integrations"), icon: Boxes },

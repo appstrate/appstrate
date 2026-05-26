@@ -15,7 +15,7 @@
       "type": "string",
       "const": "agent"
     },
-    "displayName": {
+    "display_name": {
       "type": "string",
       "minLength": 1
     },
@@ -34,9 +34,9 @@
     "repository": {
       "type": "string"
     },
-    "schemaVersion": {
+    "schema_version": {
       "type": "string",
-      "pattern": "^1\\.(0|[1-9]\\d*)$"
+      "pattern": "^2\\.(0|[1-9]\\d*)$"
     },
     "dependencies": {
       "type": "object",
@@ -51,17 +51,7 @@
             "type": "string"
           }
         },
-        "tools": {
-          "type": "object",
-          "propertyNames": {
-            "type": "string",
-            "pattern": "^@[a-z0-9]([a-z0-9-]*[a-z0-9])?\\/[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
-          },
-          "additionalProperties": {
-            "type": "string"
-          }
-        },
-        "providers": {
+        "mcp_servers": {
           "type": "object",
           "propertyNames": {
             "type": "string",
@@ -84,11 +74,23 @@
       },
       "additionalProperties": {}
     },
-    "author": {
-      "type": "string",
-      "minLength": 1
+    "_meta": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "propertyNames": {
+          "type": "string"
+        },
+        "additionalProperties": {}
+      }
     },
-    "providersConfiguration": {
+    "author": {
+      "type": "string"
+    },
+    "integrations_configuration": {
       "type": "object",
       "propertyNames": {
         "type": "string",
@@ -101,6 +103,13 @@
             "type": "array",
             "items": {
               "type": "string"
+            }
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z_][a-z0-9_]*$"
             }
           }
         },
@@ -129,7 +138,7 @@
             }
           ]
         },
-        "fileConstraints": {
+        "file_constraints": {
           "type": "object",
           "propertyNames": {
             "type": "string"
@@ -140,7 +149,7 @@
               "accept": {
                 "type": "string"
               },
-              "maxSize": {
+              "max_size": {
                 "type": "number",
                 "exclusiveMinimum": 0
               }
@@ -148,7 +157,7 @@
             "additionalProperties": {}
           }
         },
-        "uiHints": {
+        "ui_hints": {
           "type": "object",
           "propertyNames": {
             "type": "string"
@@ -163,7 +172,7 @@
             "additionalProperties": {}
           }
         },
-        "propertyOrder": {
+        "property_order": {
           "type": "array",
           "items": {
             "type": "string"
@@ -197,7 +206,7 @@
             }
           ]
         },
-        "fileConstraints": {
+        "file_constraints": {
           "type": "object",
           "propertyNames": {
             "type": "string"
@@ -208,7 +217,7 @@
               "accept": {
                 "type": "string"
               },
-              "maxSize": {
+              "max_size": {
                 "type": "number",
                 "exclusiveMinimum": 0
               }
@@ -216,7 +225,7 @@
             "additionalProperties": {}
           }
         },
-        "uiHints": {
+        "ui_hints": {
           "type": "object",
           "propertyNames": {
             "type": "string"
@@ -231,7 +240,7 @@
             "additionalProperties": {}
           }
         },
-        "propertyOrder": {
+        "property_order": {
           "type": "array",
           "items": {
             "type": "string"
@@ -265,7 +274,7 @@
             }
           ]
         },
-        "fileConstraints": {
+        "file_constraints": {
           "type": "object",
           "propertyNames": {
             "type": "string"
@@ -276,7 +285,7 @@
               "accept": {
                 "type": "string"
               },
-              "maxSize": {
+              "max_size": {
                 "type": "number",
                 "exclusiveMinimum": 0
               }
@@ -284,7 +293,7 @@
             "additionalProperties": {}
           }
         },
-        "uiHints": {
+        "ui_hints": {
           "type": "object",
           "propertyNames": {
             "type": "string"
@@ -299,7 +308,7 @@
             "additionalProperties": {}
           }
         },
-        "propertyOrder": {
+        "property_order": {
           "type": "array",
           "items": {
             "type": "string"
@@ -314,15 +323,27 @@
     "timeout": {
       "type": "number",
       "exclusiveMinimum": 0
+    },
+    "runtime_tools": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "output",
+          "log",
+          "note",
+          "pin",
+          "report"
+        ]
+      }
     }
   },
   "required": [
     "name",
     "version",
     "type",
-    "displayName",
-    "schemaVersion",
-    "author"
+    "display_name",
+    "schema_version"
   ],
   "additionalProperties": {}
 }

@@ -1,24 +1,22 @@
 {
-  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
-  "manifestVersion": "1.1",
-  "type": "integration",
   "name": "@appstrate/webhooks",
   "version": "1.0.0",
-  "displayName": "Webhooks (API)",
-  "description": "Generic webhook provider \u2014 send HTTP requests to any URL with optional authentication",
-  "license": "Apache-2.0",
-  "author": "Appstrate",
-  "icon": "webhook",
+  "type": "integration",
+  "schema_version": "2.0",
+  "display_name": "Webhooks (API)",
+  "description": "Generic webhook provider — send HTTP requests to any URL with optional authentication",
   "keywords": ["integration", "automation"],
-  "apiCall": {
-    "authKey": "primary"
+  "license": "Apache-2.0",
+  "icon": "webhook",
+  "source": {
+    "kind": "api",
+    "api": {}
   },
   "auths": {
     "primary": {
       "type": "custom",
-      "required": true,
-      "authorizedUris": [],
-      "allowAllUris": true,
+      "authorized_uris": [],
+      "allow_all_uris": true,
       "credentials": {
         "schema": {
           "type": "object",
@@ -29,19 +27,44 @@
             },
             "secret_header_name": {
               "type": "string",
-              "description": "Custom authentication header name (e.g. X-Webhook-Secret) \u2014 optional"
+              "description": "Custom authentication header name (e.g. X-Webhook-Secret) — optional"
             },
             "secret_header_value": {
               "type": "string",
-              "description": "Secret value for the authentication header \u2014 optional"
+              "description": "Secret value for the authentication header — optional"
             }
           },
           "required": ["webhook_url"]
         }
       },
       "delivery": {
-        "http": {}
+        "env": {
+          "WEBHOOK_URL": {
+            "value": "{$credential.webhook_url}",
+            "sensitive": true
+          },
+          "WEBHOOK_SECRET_HEADER_NAME": {
+            "value": "{$credential.secret_header_name}"
+          },
+          "WEBHOOK_SECRET_HEADER_VALUE": {
+            "value": "{$credential.secret_header_value}",
+            "sensitive": true
+          }
+        }
+      },
+      "_meta": {
+        "dev.appstrate/auth": {
+          "required": true
+        }
       }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/api": {
+      "auth_key": "primary"
     }
   }
 }

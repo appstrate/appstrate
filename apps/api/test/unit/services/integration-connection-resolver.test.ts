@@ -40,18 +40,27 @@ const AGENT_ID = "@vendor/test-agent";
 
 function oauth2Manifest(): IntegrationManifest {
   return {
-    manifestVersion: "1.0",
     type: "integration",
+    schema_version: "2.0",
     name: INTEG,
     version: "1.0.0",
-    displayName: "Test",
-    server: { type: "node", entryPoint: "index.js" },
+    display_name: "Test",
+    source: { kind: "local", server: { name: "@vendor/test-server", version: "^1.0.0" } },
     auths: {
       oauth: {
         type: "oauth2",
-        authorizationUrl: "https://idp/auth",
-        tokenUrl: "https://idp/token",
-        scopes: [],
+        authorization_endpoint: "https://idp/auth",
+        token_endpoint: "https://idp/token",
+        default_scopes: [],
+        authorized_uris: ["https://api.example.com/**"],
+        delivery: {
+          http: {
+            in: "header",
+            name: "Authorization",
+            prefix: "Bearer ",
+            value: "{$credential.access_token}",
+          },
+        },
       },
     },
     tools: {},
@@ -485,22 +494,31 @@ describe("resolveConnections — insufficient scopes on resolved connection", ()
   // Manifest where tool `t1` requires the `repo` scope on the oauth auth.
   function scopedManifest(): IntegrationManifest {
     return {
-      manifestVersion: "1.0",
       type: "integration",
+      schema_version: "2.0",
       name: INTEG,
       version: "1.0.0",
-      displayName: "Test",
-      server: { type: "node", entryPoint: "index.js" },
+      display_name: "Test",
+      source: { kind: "local", server: { name: "@vendor/test-server", version: "^1.0.0" } },
       auths: {
         oauth: {
           type: "oauth2",
-          authorizationUrl: "https://idp/auth",
-          tokenUrl: "https://idp/token",
-          scopes: [],
-          availableScopes: [{ value: "repo", label: "Repo" }],
+          authorization_endpoint: "https://idp/auth",
+          token_endpoint: "https://idp/token",
+          default_scopes: [],
+          scope_catalog: [{ value: "repo", label: "Repo" }],
+          authorized_uris: ["https://api.example.com/**"],
+          delivery: {
+            http: {
+              in: "header",
+              name: "Authorization",
+              prefix: "Bearer ",
+              value: "{$credential.access_token}",
+            },
+          },
         },
       },
-      tools: { t1: { requiredScopes: ["repo"] } },
+      tools: { t1: { required_scopes: ["repo"] } },
     } as unknown as IntegrationManifest;
   }
 
@@ -638,22 +656,31 @@ describe("resolveConnections — org default", () => {
 
   it("a scope-deficient org default surfaces insufficient_scopes (checkHealth still runs)", () => {
     const manifest = {
-      manifestVersion: "1.0",
       type: "integration",
+      schema_version: "2.0",
       name: INTEG,
       version: "1.0.0",
-      displayName: "Test",
-      server: { type: "node", entryPoint: "index.js" },
+      display_name: "Test",
+      source: { kind: "local", server: { name: "@vendor/test-server", version: "^1.0.0" } },
       auths: {
         oauth: {
           type: "oauth2",
-          authorizationUrl: "https://idp/auth",
-          tokenUrl: "https://idp/token",
-          scopes: [],
-          availableScopes: [{ value: "repo", label: "Repo" }],
+          authorization_endpoint: "https://idp/auth",
+          token_endpoint: "https://idp/token",
+          default_scopes: [],
+          scope_catalog: [{ value: "repo", label: "Repo" }],
+          authorized_uris: ["https://api.example.com/**"],
+          delivery: {
+            http: {
+              in: "header",
+              name: "Authorization",
+              prefix: "Bearer ",
+              value: "{$credential.access_token}",
+            },
+          },
         },
       },
-      tools: { t1: { requiredScopes: ["repo"] } },
+      tools: { t1: { required_scopes: ["repo"] } },
     } as unknown as IntegrationManifest;
     const def = conn({ sharedWithOrg: true, scopesGranted: [] });
     const result = resolveConnections({

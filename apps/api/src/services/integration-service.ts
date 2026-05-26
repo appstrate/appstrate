@@ -13,6 +13,7 @@ import { db } from "@appstrate/db/client";
 import { packages } from "@appstrate/db/schema";
 import { integrationManifestSchema } from "@appstrate/core/integration";
 import type { IntegrationManifest } from "@appstrate/core/integration";
+import { mcpServerManifestSchema, type McpServerManifest } from "@appstrate/core/mcp-server";
 import type { IntegrationSummary } from "@appstrate/shared-types";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import { logger } from "../lib/logger.ts";
@@ -64,6 +65,41 @@ export async function fetchIntegrationManifest(
   const parsed = integrationManifestSchema.safeParse(pkgRow.manifest);
   if (!parsed.success) return { ok: false, failure: { kind: "invalid_manifest" } };
   return { ok: true, manifest: parsed.data };
+}
+
+/**
+ * Resolve an `mcp-server` package's MCPB manifest from the package store.
+ *
+ * An integration whose `source.kind: "local"` references a SEPARATE
+ * `mcp-server` package via `source.server.name`. The spawn resolver looks that
+ * package up here (unscoped — internal callers already hold an auth context)
+ * and reads its runnable server config (`server.{type, entry_point}`) to build
+ * the sidecar spawn spec. Returns `null` when the package is absent, is not an
+ * mcp-server, or fails MCPB manifest validation.
+ */
+export async function fetchMcpServerManifest(packageId: string): Promise<McpServerManifest | null> {
+  const [pkgRow] = await db
+    .select({ manifest: packages.draftManifest, type: packages.type })
+    .from(packages)
+    .where(eq(packages.id, packageId))
+    .limit(1);
+  if (!pkgRow) {
+    logger.info("referenced mcp-server package not found", { packageId });
+    return null;
+  }
+  if (pkgRow.type !== "mcp-server") {
+    logger.warn("referenced package is not an mcp-server", {
+      packageId,
+      actualType: pkgRow.type,
+    });
+    return null;
+  }
+  const parsed = mcpServerManifestSchema.safeParse(pkgRow.manifest);
+  if (!parsed.success) {
+    logger.warn("mcp-server manifest failed validation", { packageId });
+    return null;
+  }
+  return parsed.data;
 }
 
 // ---------------------------------------------------------------------------

@@ -42,8 +42,8 @@ export interface MissingIntegrationFieldError {
     | string;
   title?: string;
   message: string;
-  /** Required scopes — populated on insufficient_scopes for the OAuth re-consent. */
-  requiredScopes?: string[];
+  /** Missing scopes — populated on insufficient_scopes for the OAuth re-consent upgrade. */
+  missing_scopes?: string[];
   /** Candidate connection ids — populated on must_choose_connection. */
   candidateConnectionIds?: string[];
 }
@@ -169,7 +169,7 @@ function MissingRow({
   // field is integration-level — fall back to the first oauth2 / first
   // declared (mirrors the AgentIntegrationsBlock heuristic).
   const targetAuthKey = authKey ?? pickDefaultAuth(detail?.manifest.auths);
-  const displayName = detail?.manifest.displayName ?? packageId;
+  const displayName = detail?.manifest.display_name ?? packageId;
   const candidateIds = err.candidateConnectionIds ?? [];
   const candidates = (connections ?? []).filter((c) => candidateIds.includes(c.id));
   const pickedId = isMustChoose && authKey ? pickFor(packageId, authKey) : undefined;
@@ -196,7 +196,7 @@ function MissingRow({
           <InlineConnectButton
             packageId={packageId}
             authKey={targetAuthKey}
-            {...(err.requiredScopes ? { scopes: err.requiredScopes } : {})}
+            {...(err.missing_scopes ? { scopes: err.missing_scopes } : {})}
             intent={
               err.code === "insufficient_scopes"
                 ? "upgrade"
@@ -244,7 +244,7 @@ function MissingRow({
                   >
                     {isPicked && <Check className="text-primary size-3 shrink-0" />}
                     <span className="truncate font-medium">{name}</span>
-                    {c.sharedWithOrg && (
+                    {c.shared_with_org && (
                       <Badge variant="secondary" className="text-[0.6rem]">
                         {t("missingConnections.mustChoose.sharedBadge")}
                       </Badge>

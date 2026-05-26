@@ -40,19 +40,19 @@ export function ScheduleCard({ schedule, agentName }: ScheduleCardProps) {
         )}
         {runningRuns > 0 && <Badge status="running" />}
         <ActorLabel
-          actorType={schedule.actorType}
-          actorName={schedule.actorName}
+          actor_type={schedule.actor_type}
+          actor_name={schedule.actor_name}
           className="text-muted-foreground ml-auto text-xs"
         />
       </div>
 
       {/* Next run preview -- flush to card edges */}
-      {isActive && schedule.nextRunAt && (
+      {isActive && schedule.next_run_at && (
         <NextRunPreview
           runNumber={lastRunNumber + 1}
           agentName={agentName}
-          scheduleName={schedule.name || schedule.id}
-          nextRunAt={schedule.nextRunAt}
+          schedule_name={schedule.name || schedule.id}
+          next_run_at={schedule.next_run_at}
           className="border-border border-t border-dashed"
         />
       )}

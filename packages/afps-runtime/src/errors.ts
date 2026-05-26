@@ -6,7 +6,7 @@
  *
  * The package already ships several typed errors close to where they
  * are raised (`BundleError`, `BundleSignaturePolicyError`,
- * `AfpsEntrypointError`, `RunTimeoutError`). This module sits at the
+ * `RunTimeoutError`). This module sits at the
  * top so consumers can:
  *
  *   - import every typed error from a single subpath
@@ -33,14 +33,12 @@ import {
   BundleSignaturePolicyError,
   type SignaturePolicyReason,
 } from "./bundle/signature-policy.ts";
-import { AfpsEntrypointError, type AfpsEntrypointErrorCode } from "./bundle/tool-entrypoint.ts";
 
 /** Stable, machine-readable code for every error class in this module. */
 export type AfpsErrorCode =
   | BundleErrorCode
   | SignaturePolicyReason
   | "unsigned_required"
-  | AfpsEntrypointErrorCode
   | "RUN_TIMEOUT"
   | "RUN_CANCELLED"
   | "WORKLOAD_EXIT_NONZERO"
@@ -239,8 +237,6 @@ export function toProblem(
 export {
   BundleError,
   BundleSignaturePolicyError,
-  AfpsEntrypointError,
   type BundleErrorCode,
   type SignaturePolicyReason,
-  type AfpsEntrypointErrorCode,
 };

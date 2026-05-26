@@ -55,7 +55,7 @@ export function RunList({
     offset: page * pageSize,
   });
 
-  const runs = (data?.data ?? []) as EnrichedRun[];
+  const runs = (data?.data ?? []) as unknown as EnrichedRun[];
   const total = data?.total ?? 0;
   const totalPages = Math.ceil(total / pageSize);
 
@@ -64,7 +64,7 @@ export function RunList({
   const agentNameMap = new Map<string, string>();
   if (!hideAgentName && !fixedAgentName && agents) {
     for (const f of agents) {
-      agentNameMap.set(f.id, f.displayName);
+      agentNameMap.set(f.id, f.display_name);
     }
   }
 
@@ -84,18 +84,18 @@ export function RunList({
   const resolveAgentName = (run: EnrichedRun) => {
     if (hideAgentName) return undefined;
     if (fixedAgentName) return fixedAgentName;
-    // Inline runs: use the manifest displayName snapshot (run.agentName) — the
+    // Inline runs: use the manifest displayName snapshot (run.agent_name) — the
     // raw shadow packageId (`@inline/r-…`) is never meaningful to users, and
     // the ephemeral row isn't in `agents` so the map lookup would miss anyway.
-    if (run.packageEphemeral === true) {
-      return run.agentName || t("runs.inlineBadge");
+    if (run.package_ephemeral === true) {
+      return run.agent_name || t("runs.inlineBadge");
     }
     // Source agent deleted (FK SET NULL): fall back to the denormalized
     // `agent_name` snapshot stamped at INSERT time, then to a generic label.
     if (run.packageId == null) {
-      return run.agentName ?? t("runs.deletedAgent", { ns: "agents" });
+      return run.agent_name ?? t("runs.deletedAgent", { ns: "agents" });
     }
-    return agentNameMap.get(run.packageId) ?? run.agentName ?? run.packageId;
+    return agentNameMap.get(run.packageId) ?? run.agent_name ?? run.packageId;
   };
 
   return (

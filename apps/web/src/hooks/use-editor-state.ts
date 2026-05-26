@@ -16,7 +16,7 @@ import { useUnsavedChanges } from "./use-unsaved-changes";
  */
 export interface EditorStateBase {
   manifest: Record<string, unknown>;
-  lockVersion?: number;
+  lock_version?: number;
 }
 
 export interface UseEditorStateOptions<S extends EditorStateBase> {
@@ -25,9 +25,9 @@ export interface UseEditorStateOptions<S extends EditorStateBase> {
   packageId: string | undefined;
   isEdit: boolean;
   /**
-   * Build the wire body (manifest + content + sourceCode + …) sent to
+   * Build the wire body (manifest + content + source_code + …) sent to
    * `POST /packages/:type` on create and to `PUT /packages/:type/:id`
-   * on update. `lockVersion` is appended automatically by the hook
+   * on update. `lock_version` is appended automatically by the hook
    * for updates and draft saves — do not include it here.
    */
   toWireBody: (state: S) => Record<string, unknown>;
@@ -108,7 +108,7 @@ export function useEditorState<S extends EditorStateBase>(
       method: "PUT",
       body: JSON.stringify({
         ...toWireBody(state),
-        lockVersion: state.lockVersion!,
+        lock_version: state.lock_version!,
       }),
     });
     qc.invalidateQueries({ queryKey: ["packages"] });
@@ -133,7 +133,10 @@ export function useEditorState<S extends EditorStateBase>(
       const body = toWireBody(state);
       if (isEdit) {
         updatePkg.mutate(
-          { ...(body as Parameters<typeof updatePkg.mutate>[0]), lockVersion: state.lockVersion! },
+          {
+            ...(body as Parameters<typeof updatePkg.mutate>[0]),
+            lock_version: state.lock_version!,
+          },
           { onError: (err) => setError(err.message) },
         );
       } else {

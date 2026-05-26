@@ -566,32 +566,32 @@
                   "data": [
                     {
                       "id": "@acme/email-sorter",
-                      "displayName": "Email Sorter",
+                      "display_name": "Email Sorter",
                       "description": "Automatically sorts and labels incoming emails",
-                      "schemaVersion": "1.1",
+                      "schema_version": "2.0",
                       "author": "Acme Corp",
                       "keywords": ["email", "automation"],
                       "source": "local",
                       "scope": "@acme",
                       "version": "1.2.0",
                       "type": "agent",
-                      "runningRuns": 1,
+                      "running_runs": 1,
                       "dependencies": {
                         "skills": {}
                       }
                     },
                     {
                       "id": "@appstrate/code-reviewer",
-                      "displayName": "Code Reviewer",
+                      "display_name": "Code Reviewer",
                       "description": "Reviews pull requests and suggests improvements",
-                      "schemaVersion": "1.1",
+                      "schema_version": "2.0",
                       "author": "Appstrate",
                       "keywords": ["code", "review", "github"],
                       "source": "system",
                       "scope": "@appstrate",
                       "version": "2.0.0",
                       "type": "agent",
-                      "runningRuns": 0,
+                      "running_runs": 0,
                       "dependencies": {
                         "skills": {
                           "@appstrate/summarize": "^1.0.0"
@@ -816,7 +816,7 @@
         "operationId": "listAgentPersistence",
         "tags": ["Agents"],
         "summary": "List unified agent persistence (pinned slots + memories)",
-        "description": "Returns the agent's named pinned slots and archive memories visible to the caller's actor scope. Pinned slots include the `checkpoint` carry-over slot alongside Letta-style named blocks (`persona`, `goals`, …). Admins inspecting at agent level (no `actorType` and no `runId`) see every actor's pinned slots; members always see their own actor scope plus shared rows. See ADR-011, ADR-013.",
+        "description": "Returns the agent's named pinned slots and archive memories visible to the caller's actor scope. Pinned slots include the `checkpoint` carry-over slot alongside Letta-style named blocks (`persona`, `goals`, …). Admins inspecting at agent level (no `actor_type` and no `runId`) see every actor's pinned slots; members always see their own actor scope plus shared rows. See ADR-011, ADR-013.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -841,7 +841,7 @@
             "description": "Limit the response to one kind. Omitted → both."
           },
           {
-            "name": "actorType",
+            "name": "actor_type",
             "in": "query",
             "required": false,
             "schema": {
@@ -851,13 +851,13 @@
             "description": "Admin-only scope override. Defaults to caller's actor scope."
           },
           {
-            "name": "actorId",
+            "name": "actor_id",
             "in": "query",
             "required": false,
             "schema": {
               "type": "string"
             },
-            "description": "Required when `actorType` is `user` or `end_user`."
+            "description": "Required when `actor_type` is `user` or `end_user`."
           },
           {
             "name": "runId",
@@ -900,11 +900,11 @@
                           "runId": {
                             "type": ["string", "null"]
                           },
-                          "actorType": {
+                          "actor_type": {
                             "type": "string",
                             "enum": ["user", "end_user", "shared"]
                           },
-                          "actorId": {
+                          "actor_id": {
                             "type": ["string", "null"]
                           },
                           "createdAt": {
@@ -930,11 +930,11 @@
                           "runId": {
                             "type": ["string", "null"]
                           },
-                          "actorType": {
+                          "actor_type": {
                             "type": "string",
                             "enum": ["user", "end_user", "shared"]
                           },
-                          "actorId": {
+                          "actor_id": {
                             "type": ["string", "null"]
                           },
                           "createdAt": {
@@ -964,7 +964,7 @@
         "operationId": "deleteAgentPersistence",
         "tags": ["Agents"],
         "summary": "Bulk-delete persistence rows for an agent",
-        "description": "Wipes memories (always) and optionally the `checkpoint` slot (when `actorType` + `actorId` resolve to a single scope). Other named pinned slots must be deleted individually via DELETE /persistence/pinned/{id}. Admin-only.",
+        "description": "Wipes memories (always) and optionally the `checkpoint` slot (when `actor_type` + `actor_id` resolve to a single scope). Other named pinned slots must be deleted individually via DELETE /persistence/pinned/{id}. Admin-only.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -988,7 +988,7 @@
             }
           },
           {
-            "name": "actorType",
+            "name": "actor_type",
             "in": "query",
             "required": false,
             "schema": {
@@ -997,7 +997,7 @@
             }
           },
           {
-            "name": "actorId",
+            "name": "actor_id",
             "in": "query",
             "required": false,
             "schema": {
@@ -1533,7 +1533,7 @@
                     "type": "object",
                     "description": "Per-run config override. Deep-merged with the per-application persisted config (`application_packages.config`): override leaves replace, plain-object children merge recursively, arrays are replaced wholesale, `null` at a leaf sets the value to null (validated as missing for required string fields), missing keys fall through. Re-validated against the manifest config schema after the merge — a 400 `invalid_config` is returned if the merged result violates the schema. Top-level `null` is rejected (returns 400) — omit the field to inherit persisted defaults, send `{}` for an explicit empty override. Mirrors the OpenAPI Assistants `runs.create { instructions, model, tools }` and Argo Workflows `submitOptions.parameters` SOTA — every client (UI, CLI, SDK) reaches the same resolved config for the same `(persisted, override)` pair."
                   },
-                  "connectionOverrides": {
+                  "connection_overrides": {
                     "type": "object",
                     "description": "Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ \"@scope/integration\": \"<connection_id>\" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor.",
                     "additionalProperties": {
@@ -1852,12 +1852,12 @@
               },
               "example": {
                 "manifest": {
-                  "$schema": "https://afps.appstrate.dev/packages/schema/v1/agent.schema.json",
+                  "$schema": "https://afps.appstrate.dev/packages/schema/v2/agent.schema.json",
                   "name": "@inline/one-shot",
-                  "displayName": "One-shot summary",
+                  "display_name": "One-shot summary",
                   "version": "0.0.0",
                   "type": "agent",
-                  "schemaVersion": "1.1",
+                  "schema_version": "2.0",
                   "dependencies": {}
                 },
                 "prompt": "Summarize the attached document in three bullet points.",
@@ -2051,7 +2051,7 @@
         "operationId": "listRuns",
         "tags": ["Runs"],
         "summary": "List runs across the application (global view)",
-        "description": "Org + application scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, and a date range. Inline runs surface via `packageEphemeral: true` on each row. Note: `kind`, `status`, and date filters are ignored when `user=me` (self-view uses a simpler path).",
+        "description": "Org + application scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, and a date range. Inline runs surface via `package_ephemeral: true` on each row. Note: `kind`, `status`, and date filters are ignored when `user=me` (self-view uses a simpler path).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -2231,21 +2231,21 @@
                   "checkpoint": {
                     "lastProcessedId": "msg_99f2a"
                   },
-                  "tokenUsage": {
+                  "token_usage": {
                     "input_tokens": 8200,
                     "output_tokens": 4250,
                     "cache_creation_input_tokens": 0,
                     "cache_read_input_tokens": 1024
                   },
-                  "startedAt": "2026-01-15T10:30:00Z",
-                  "completedAt": "2026-01-15T10:31:12Z",
+                  "started_at": "2026-01-15T10:30:00Z",
+                  "completed_at": "2026-01-15T10:31:12Z",
                   "duration": 72000,
                   "scheduleId": "sched_cm1abc456def789",
-                  "versionLabel": "1.2.0",
-                  "versionDirty": false,
-                  "proxyLabel": null,
-                  "modelLabel": "Claude Sonnet 4",
-                  "modelSource": "system",
+                  "version_label": "1.2.0",
+                  "version_dirty": false,
+                  "proxy_label": null,
+                  "model_label": "Claude Sonnet 4",
+                  "model_source": "system",
                   "cost": 0.0034,
                   "endUserId": null,
                   "applicationId": "app_m4n5o6p7",
@@ -2467,7 +2467,7 @@
                             "type": "string",
                             "enum": ["draft", "published"],
                             "default": "published",
-                            "description": "`draft` reads `draftManifest`/`draftContent` (mutable, mirrors the dashboard Run button on never-published agents); `published` resolves a concrete `package_versions` row."
+                            "description": "`draft` reads `draft_manifest`/`draftContent` (mutable, mirrors the dashboard Run button on never-published agents); `published` resolves a concrete `package_versions` row."
                           },
                           "spec": {
                             "type": "string",
@@ -3240,12 +3240,12 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["cronExpression"],
+                "required": ["cron_expression"],
                 "properties": {
                   "name": {
                     "type": "string"
                   },
-                  "cronExpression": {
+                  "cron_expression": {
                     "type": "string",
                     "minLength": 1,
                     "description": "Cron expression (e.g. '0 9 * * 1-5')"
@@ -3257,23 +3257,23 @@
                   "input": {
                     "type": "object"
                   },
-                  "configOverride": {
+                  "config_override": {
                     "type": "object",
                     "description": "Per-schedule config delta. Deep-merged with the application's persisted `config` every time the schedule fires."
                   },
-                  "modelIdOverride": {
+                  "model_id_override": {
                     "type": "string",
                     "description": "Override the persisted model on every run triggered by this schedule."
                   },
-                  "proxyIdOverride": {
+                  "proxy_id_override": {
                     "type": "string",
                     "description": "Override the persisted proxy on every run triggered by this schedule."
                   },
-                  "versionOverride": {
+                  "version_override": {
                     "type": "string",
                     "description": "Pin the agent version every run triggered by this schedule. Literal label or dist-tag."
                   },
-                  "connectionOverrides": {
+                  "connection_overrides": {
                     "type": "object",
                     "description": "Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Shape: `{ \"@scope/integration\": \"<connection_id>\" }`. Loses to admin pins (#1), beats actor-fallback (#4). Stored on `package_schedules.connection_overrides` and replayed on every fire.",
                     "additionalProperties": {
@@ -3309,18 +3309,18 @@
                   "orgId": "org_r3t5w8y1z6",
                   "name": "Weekday morning sort",
                   "enabled": true,
-                  "cronExpression": "0 9 * * 1-5",
+                  "cron_expression": "0 9 * * 1-5",
                   "timezone": "Europe/Paris",
                   "input": {
                     "folder": "inbox",
                     "maxEmails": 50
                   },
-                  "lastRunAt": null,
-                  "nextRunAt": "2026-01-16T09:00:00Z",
+                  "last_run_at": null,
+                  "next_run_at": "2026-01-16T09:00:00Z",
                   "createdAt": "2026-01-15T10:30:00Z",
                   "updatedAt": "2026-01-15T10:30:00Z",
-                  "actorName": "Pierre",
-                  "actorType": "user"
+                  "actor_name": "Pierre",
+                  "actor_type": "user"
                 }
               }
             }
@@ -3387,18 +3387,18 @@
                   "orgId": "org_r3t5w8y1z6",
                   "name": "Weekday morning sort",
                   "enabled": true,
-                  "cronExpression": "0 9 * * 1-5",
+                  "cron_expression": "0 9 * * 1-5",
                   "timezone": "Europe/Paris",
                   "input": {
                     "folder": "inbox",
                     "maxEmails": 50
                   },
-                  "lastRunAt": "2026-01-15T09:00:00Z",
-                  "nextRunAt": "2026-01-16T09:00:00Z",
+                  "last_run_at": "2026-01-15T09:00:00Z",
+                  "next_run_at": "2026-01-16T09:00:00Z",
                   "createdAt": "2026-01-14T14:00:00Z",
                   "updatedAt": "2026-01-15T09:00:05Z",
-                  "actorName": "Pierre",
-                  "actorType": "user"
+                  "actor_name": "Pierre",
+                  "actor_type": "user"
                 }
               }
             }
@@ -3442,7 +3442,7 @@
                   "name": {
                     "type": "string"
                   },
-                  "cronExpression": {
+                  "cron_expression": {
                     "type": "string"
                   },
                   "timezone": {
@@ -3454,20 +3454,20 @@
                   "input": {
                     "type": "object"
                   },
-                  "configOverride": {
+                  "config_override": {
                     "type": ["object", "null"],
                     "description": "Per-schedule config delta. Pass `null` to clear the override."
                   },
-                  "modelIdOverride": {
+                  "model_id_override": {
                     "type": ["string", "null"]
                   },
-                  "proxyIdOverride": {
+                  "proxy_id_override": {
                     "type": ["string", "null"]
                   },
-                  "versionOverride": {
+                  "version_override": {
                     "type": ["string", "null"]
                   },
-                  "connectionOverrides": {
+                  "connection_overrides": {
                     "type": ["object", "null"],
                     "description": "Per-integration connection picks frozen on the schedule. Pass `null` to clear.",
                     "additionalProperties": {
@@ -3703,7 +3703,7 @@
                           "active": {
                             "type": "boolean"
                           },
-                          "blockUserConnections": {
+                          "block_user_connections": {
                             "type": "boolean"
                           }
                         }
@@ -3814,7 +3814,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["manifest", "auths"],
+                  "required": ["manifest", "auths", "tool_catalog"],
                   "properties": {
                     "manifest": {
                       "type": "object",
@@ -3825,16 +3825,16 @@
                       "items": {
                         "type": "object",
                         "required": [
-                          "authKey",
+                          "auth_key",
                           "type",
                           "required",
                           "scopes",
                           "audience",
                           "connections",
-                          "hasOAuthClient"
+                          "has_oauth_client"
                         ],
                         "properties": {
-                          "authKey": {
+                          "auth_key": {
                             "type": "string"
                           },
                           "type": {
@@ -3860,14 +3860,14 @@
                               "required": [
                                 "id",
                                 "packageId",
-                                "authKey",
-                                "accountId",
-                                "identityClaims",
-                                "scopesGranted",
-                                "needsReconnection",
+                                "auth_key",
+                                "account_id",
+                                "identity_claims",
+                                "scopes_granted",
+                                "needs_reconnection",
                                 "expiresAt",
-                                "ownerType",
-                                "ownerId",
+                                "owner_type",
+                                "owner_id",
                                 "createdAt",
                                 "updatedAt"
                               ],
@@ -3879,40 +3879,40 @@
                                 "packageId": {
                                   "type": "string"
                                 },
-                                "authKey": {
+                                "auth_key": {
                                   "type": "string"
                                 },
-                                "accountId": {
+                                "account_id": {
                                   "type": "string"
                                 },
-                                "identityClaims": {
+                                "identity_claims": {
                                   "type": ["object", "null"],
                                   "additionalProperties": true
                                 },
-                                "scopesGranted": {
+                                "scopes_granted": {
                                   "type": "array",
                                   "items": {
                                     "type": "string"
                                   }
                                 },
-                                "needsReconnection": {
+                                "needs_reconnection": {
                                   "type": "boolean"
                                 },
                                 "expiresAt": {
                                   "type": ["string", "null"],
                                   "format": "date-time"
                                 },
-                                "ownerType": {
+                                "owner_type": {
                                   "type": "string",
                                   "enum": ["user", "end_user"]
                                 },
-                                "ownerId": {
+                                "owner_id": {
                                   "type": "string"
                                 },
                                 "label": {
                                   "type": ["string", "null"]
                                 },
-                                "sharedWithOrg": {
+                                "shared_with_org": {
                                   "type": "boolean"
                                 },
                                 "createdAt": {
@@ -3926,8 +3926,55 @@
                               }
                             }
                           },
-                          "hasOAuthClient": {
+                          "has_oauth_client": {
                             "type": "boolean"
+                          }
+                        }
+                      }
+                    },
+                    "tool_catalog": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["name"],
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "policy": {
+                            "type": "object",
+                            "properties": {
+                              "required_scopes": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "required_auth_key": {
+                                "type": "string"
+                              },
+                              "url_patterns": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "required": ["pattern"],
+                                  "properties": {
+                                    "pattern": {
+                                      "type": "string"
+                                    },
+                                    "methods": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
                           }
                         }
                       }
@@ -4126,11 +4173,11 @@
                   "type": "object",
                   "required": [
                     "applicationId",
-                    "integrationPackageId",
-                    "authKey",
-                    "clientId",
-                    "hasClientSecret",
-                    "redirectUri",
+                    "integration_package_id",
+                    "auth_key",
+                    "client_id",
+                    "has_client_secret",
+                    "redirect_uri",
                     "createdAt",
                     "updatedAt"
                   ],
@@ -4138,19 +4185,19 @@
                     "applicationId": {
                       "type": "string"
                     },
-                    "integrationPackageId": {
+                    "integration_package_id": {
                       "type": "string"
                     },
-                    "authKey": {
+                    "auth_key": {
                       "type": "string"
                     },
-                    "clientId": {
+                    "client_id": {
                       "type": "string"
                     },
-                    "hasClientSecret": {
+                    "has_client_secret": {
                       "type": "boolean"
                     },
-                    "redirectUri": {
+                    "redirect_uri": {
                       "type": ["string", "null"]
                     },
                     "createdAt": {
@@ -4209,17 +4256,17 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["clientId", "clientSecret"],
+                "required": ["client_id", "client_secret"],
                 "properties": {
-                  "clientId": {
+                  "client_id": {
                     "type": "string",
                     "minLength": 1
                   },
-                  "clientSecret": {
+                  "client_secret": {
                     "type": "string",
                     "default": ""
                   },
-                  "redirectUri": {
+                  "redirect_uri": {
                     "type": "string",
                     "format": "uri"
                   }
@@ -4245,11 +4292,11 @@
                   "type": "object",
                   "required": [
                     "applicationId",
-                    "integrationPackageId",
-                    "authKey",
-                    "clientId",
-                    "hasClientSecret",
-                    "redirectUri",
+                    "integration_package_id",
+                    "auth_key",
+                    "client_id",
+                    "has_client_secret",
+                    "redirect_uri",
                     "createdAt",
                     "updatedAt"
                   ],
@@ -4257,19 +4304,19 @@
                     "applicationId": {
                       "type": "string"
                     },
-                    "integrationPackageId": {
+                    "integration_package_id": {
                       "type": "string"
                     },
-                    "authKey": {
+                    "auth_key": {
                       "type": "string"
                     },
-                    "clientId": {
+                    "client_id": {
                       "type": "string"
                     },
-                    "hasClientSecret": {
+                    "has_client_secret": {
                       "type": "boolean"
                     },
-                    "redirectUri": {
+                    "redirect_uri": {
                       "type": ["string", "null"]
                     },
                     "createdAt": {
@@ -4423,14 +4470,14 @@
                   "required": [
                     "id",
                     "packageId",
-                    "authKey",
-                    "accountId",
-                    "identityClaims",
-                    "scopesGranted",
-                    "needsReconnection",
+                    "auth_key",
+                    "account_id",
+                    "identity_claims",
+                    "scopes_granted",
+                    "needs_reconnection",
                     "expiresAt",
-                    "ownerType",
-                    "ownerId",
+                    "owner_type",
+                    "owner_id",
                     "createdAt",
                     "updatedAt"
                   ],
@@ -4442,40 +4489,40 @@
                     "packageId": {
                       "type": "string"
                     },
-                    "authKey": {
+                    "auth_key": {
                       "type": "string"
                     },
-                    "accountId": {
+                    "account_id": {
                       "type": "string"
                     },
-                    "identityClaims": {
+                    "identity_claims": {
                       "type": ["object", "null"],
                       "additionalProperties": true
                     },
-                    "scopesGranted": {
+                    "scopes_granted": {
                       "type": "array",
                       "items": {
                         "type": "string"
                       }
                     },
-                    "needsReconnection": {
+                    "needs_reconnection": {
                       "type": "boolean"
                     },
                     "expiresAt": {
                       "type": ["string", "null"],
                       "format": "date-time"
                     },
-                    "ownerType": {
+                    "owner_type": {
                       "type": "string",
                       "enum": ["user", "end_user"]
                     },
-                    "ownerId": {
+                    "owner_id": {
                       "type": "string"
                     },
                     "label": {
                       "type": ["string", "null"]
                     },
-                    "sharedWithOrg": {
+                    "shared_with_org": {
                       "type": "boolean"
                     },
                     "createdAt": {
@@ -4546,10 +4593,10 @@
                       "type": "string"
                     }
                   },
-                  "forceAccountSelect": {
+                  "force_account_select": {
                     "type": "boolean"
                   },
-                  "connectionId": {
+                  "connection_id": {
                     "type": "string",
                     "format": "uuid"
                   }
@@ -4647,14 +4694,14 @@
                         "required": [
                           "id",
                           "packageId",
-                          "authKey",
-                          "accountId",
-                          "identityClaims",
-                          "scopesGranted",
-                          "needsReconnection",
+                          "auth_key",
+                          "account_id",
+                          "identity_claims",
+                          "scopes_granted",
+                          "needs_reconnection",
                           "expiresAt",
-                          "ownerType",
-                          "ownerId",
+                          "owner_type",
+                          "owner_id",
                           "createdAt",
                           "updatedAt"
                         ],
@@ -4666,40 +4713,40 @@
                           "packageId": {
                             "type": "string"
                           },
-                          "authKey": {
+                          "auth_key": {
                             "type": "string"
                           },
-                          "accountId": {
+                          "account_id": {
                             "type": "string"
                           },
-                          "identityClaims": {
+                          "identity_claims": {
                             "type": ["object", "null"],
                             "additionalProperties": true
                           },
-                          "scopesGranted": {
+                          "scopes_granted": {
                             "type": "array",
                             "items": {
                               "type": "string"
                             }
                           },
-                          "needsReconnection": {
+                          "needs_reconnection": {
                             "type": "boolean"
                           },
                           "expiresAt": {
                             "type": ["string", "null"],
                             "format": "date-time"
                           },
-                          "ownerType": {
+                          "owner_type": {
                             "type": "string",
                             "enum": ["user", "end_user"]
                           },
-                          "ownerId": {
+                          "owner_id": {
                             "type": "string"
                           },
                           "label": {
                             "type": ["string", "null"]
                           },
-                          "sharedWithOrg": {
+                          "shared_with_org": {
                             "type": "boolean"
                           },
                           "createdAt": {
@@ -4775,12 +4822,12 @@
                   "type": "object",
                   "required": [
                     "status",
-                    "resolvedConnectionId",
-                    "resolvedMissingScopes",
-                    "resolvedOwnedByActor",
-                    "adminPinnedConnectionId",
-                    "memberPinnedConnectionId",
-                    "canAddConnection",
+                    "resolved_connection_id",
+                    "resolved_missing_scopes",
+                    "resolved_owned_by_actor",
+                    "admin_pinned_connection_id",
+                    "member_pinned_connection_id",
+                    "can_add_connection",
                     "candidates"
                   ],
                   "properties": {
@@ -4796,25 +4843,31 @@
                         "needs_reconnection"
                       ]
                     },
-                    "resolvedConnectionId": {
+                    "resolved_connection_id": {
                       "type": ["string", "null"]
                     },
-                    "resolvedMissingScopes": {
+                    "resolved_missing_scopes": {
                       "type": "array",
                       "items": {
                         "type": "string"
                       }
                     },
-                    "resolvedOwnedByActor": {
+                    "resolved_owned_by_actor": {
                       "type": "boolean"
                     },
-                    "adminPinnedConnectionId": {
+                    "admin_pinned_connection_id": {
                       "type": ["string", "null"]
                     },
-                    "memberPinnedConnectionId": {
+                    "member_pinned_connection_id": {
                       "type": ["string", "null"]
                     },
-                    "canAddConnection": {
+                    "org_default_connection_id": {
+                      "type": ["string", "null"]
+                    },
+                    "org_default_enforced": {
+                      "type": "boolean"
+                    },
+                    "can_add_connection": {
                       "type": "boolean"
                     },
                     "candidates": {
@@ -4823,60 +4876,60 @@
                         "type": "object",
                         "required": [
                           "id",
-                          "authKey",
-                          "accountId",
+                          "auth_key",
+                          "account_id",
                           "label",
-                          "ownerUserId",
-                          "ownerEndUserId",
-                          "ownerName",
-                          "scopesGranted",
-                          "sharedWithOrg",
-                          "needsReconnection",
-                          "missingScopes",
-                          "isOwn"
+                          "owner_user_id",
+                          "owner_end_user_id",
+                          "owner_name",
+                          "scopes_granted",
+                          "shared_with_org",
+                          "needs_reconnection",
+                          "missing_scopes",
+                          "is_own"
                         ],
                         "properties": {
                           "id": {
                             "type": "string",
                             "format": "uuid"
                           },
-                          "authKey": {
+                          "auth_key": {
                             "type": "string"
                           },
-                          "accountId": {
+                          "account_id": {
                             "type": "string"
                           },
                           "label": {
                             "type": ["string", "null"]
                           },
-                          "ownerUserId": {
+                          "owner_user_id": {
                             "type": ["string", "null"]
                           },
-                          "ownerEndUserId": {
+                          "owner_end_user_id": {
                             "type": ["string", "null"]
                           },
-                          "ownerName": {
+                          "owner_name": {
                             "type": ["string", "null"]
                           },
-                          "scopesGranted": {
+                          "scopes_granted": {
                             "type": "array",
                             "items": {
                               "type": "string"
                             }
                           },
-                          "sharedWithOrg": {
+                          "shared_with_org": {
                             "type": "boolean"
                           },
-                          "needsReconnection": {
+                          "needs_reconnection": {
                             "type": "boolean"
                           },
-                          "missingScopes": {
+                          "missing_scopes": {
                             "type": "array",
                             "items": {
                               "type": "string"
                             }
                           },
-                          "isOwn": {
+                          "is_own": {
                             "type": "boolean"
                           }
                         }
@@ -4894,7 +4947,7 @@
       "patch": {
         "operationId": "updateIntegrationConnectionMetadata",
         "tags": ["Integrations"],
-        "summary": "Update an integration connection's label and/or sharedWithOrg flag",
+        "summary": "Update an integration connection's label and/or shared_with_org flag",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -4934,7 +4987,7 @@
                     "type": ["string", "null"],
                     "maxLength": 80
                   },
-                  "sharedWithOrg": {
+                  "shared_with_org": {
                     "type": "boolean"
                   }
                 }
@@ -4957,7 +5010,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["id", "label", "sharedWithOrg", "updatedAt"],
+                  "required": ["id", "label", "shared_with_org", "updatedAt"],
                   "properties": {
                     "id": {
                       "type": "string",
@@ -4966,7 +5019,7 @@
                     "label": {
                       "type": ["string", "null"]
                     },
-                    "sharedWithOrg": {
+                    "shared_with_org": {
                       "type": "boolean"
                     },
                     "updatedAt": {
@@ -5034,9 +5087,9 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["blockUserConnections"],
+                "required": ["block_user_connections"],
                 "properties": {
-                  "blockUserConnections": {
+                  "block_user_connections": {
                     "type": "boolean"
                   }
                 }
@@ -5128,9 +5181,9 @@
                         "type": "object",
                         "required": [
                           "packageId",
-                          "integrationPackageId",
-                          "authKey",
-                          "connectionId",
+                          "integration_package_id",
+                          "auth_key",
+                          "connection_id",
                           "createdAt",
                           "updatedAt"
                         ],
@@ -5138,13 +5191,13 @@
                           "packageId": {
                             "type": "string"
                           },
-                          "integrationPackageId": {
+                          "integration_package_id": {
                             "type": "string"
                           },
-                          "authKey": {
+                          "auth_key": {
                             "type": "string"
                           },
-                          "connectionId": {
+                          "connection_id": {
                             "type": "string",
                             "format": "uuid"
                           },
@@ -5219,12 +5272,12 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "required": ["packageId", "displayName"],
+                        "required": ["packageId", "display_name"],
                         "properties": {
                           "packageId": {
                             "type": "string"
                           },
-                          "displayName": {
+                          "display_name": {
                             "type": "string"
                           }
                         }
@@ -5280,9 +5333,9 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["connectionId"],
+                "required": ["connection_id"],
                 "properties": {
-                  "connectionId": {
+                  "connection_id": {
                     "type": "string",
                     "format": "uuid"
                   }
@@ -5308,9 +5361,9 @@
                   "type": "object",
                   "required": [
                     "packageId",
-                    "integrationPackageId",
-                    "authKey",
-                    "connectionId",
+                    "integration_package_id",
+                    "auth_key",
+                    "connection_id",
                     "createdAt",
                     "updatedAt"
                   ],
@@ -5318,13 +5371,13 @@
                     "packageId": {
                       "type": "string"
                     },
-                    "integrationPackageId": {
+                    "integration_package_id": {
                       "type": "string"
                     },
-                    "authKey": {
+                    "auth_key": {
                       "type": "string"
                     },
-                    "connectionId": {
+                    "connection_id": {
                       "type": "string",
                       "format": "uuid"
                     },
@@ -5461,22 +5514,22 @@
                         {
                           "type": "object",
                           "required": [
-                            "integrationPackageId",
-                            "connectionId",
-                            "authKey",
+                            "integration_package_id",
+                            "connection_id",
+                            "auth_key",
                             "enforce",
                             "createdAt",
                             "updatedAt"
                           ],
                           "properties": {
-                            "integrationPackageId": {
+                            "integration_package_id": {
                               "type": "string"
                             },
-                            "connectionId": {
+                            "connection_id": {
                               "type": "string",
                               "format": "uuid"
                             },
-                            "authKey": {
+                            "auth_key": {
                               "type": "string"
                             },
                             "enforce": {
@@ -5532,9 +5585,9 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["connectionId", "enforce"],
+                "required": ["connection_id", "enforce"],
                 "properties": {
-                  "connectionId": {
+                  "connection_id": {
                     "type": "string",
                     "format": "uuid"
                   },
@@ -5563,22 +5616,22 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "integrationPackageId",
-                    "connectionId",
-                    "authKey",
+                    "integration_package_id",
+                    "connection_id",
+                    "auth_key",
                     "enforce",
                     "createdAt",
                     "updatedAt"
                   ],
                   "properties": {
-                    "integrationPackageId": {
+                    "integration_package_id": {
                       "type": "string"
                     },
-                    "connectionId": {
+                    "connection_id": {
                       "type": "string",
                       "format": "uuid"
                     },
-                    "authKey": {
+                    "auth_key": {
                       "type": "string"
                     },
                     "enforce": {
@@ -9166,10 +9219,10 @@
                         "type": "object",
                         "required": [
                           "kind",
-                          "sourceId",
-                          "displayName",
+                          "source_id",
+                          "display_name",
                           "logo",
-                          "totalConnections",
+                          "total_connections",
                           "connections"
                         ],
                         "properties": {
@@ -9177,16 +9230,16 @@
                             "type": "string",
                             "enum": ["integration"]
                           },
-                          "sourceId": {
+                          "source_id": {
                             "type": "string"
                           },
-                          "displayName": {
+                          "display_name": {
                             "type": "string"
                           },
                           "logo": {
                             "type": "string"
                           },
-                          "totalConnections": {
+                          "total_connections": {
                             "type": "integer"
                           },
                           "connections": {
@@ -9194,22 +9247,22 @@
                             "items": {
                               "type": "object",
                               "required": [
-                                "connectionId",
+                                "connection_id",
                                 "kind",
                                 "label",
-                                "scopesGranted",
-                                "connectedAt",
-                                "needsReconnection",
+                                "scopes_granted",
+                                "connected_at",
+                                "needs_reconnection",
                                 "expiresAt",
                                 "identity",
-                                "authKey",
-                                "sharedWithOrg",
-                                "reusedByAgents",
+                                "auth_key",
+                                "shared_with_org",
+                                "reused_by_agents",
                                 "org",
                                 "application"
                               ],
                               "properties": {
-                                "connectionId": {
+                                "connection_id": {
                                   "type": "string"
                                 },
                                 "kind": {
@@ -9219,17 +9272,17 @@
                                 "label": {
                                   "type": ["string", "null"]
                                 },
-                                "scopesGranted": {
+                                "scopes_granted": {
                                   "type": "array",
                                   "items": {
                                     "type": "string"
                                   }
                                 },
-                                "connectedAt": {
+                                "connected_at": {
                                   "type": "string",
                                   "format": "date-time"
                                 },
-                                "needsReconnection": {
+                                "needs_reconnection": {
                                   "type": "boolean"
                                 },
                                 "expiresAt": {
@@ -9246,13 +9299,13 @@
                                 "identity": {
                                   "type": ["string", "null"]
                                 },
-                                "reusedByAgents": {
+                                "reused_by_agents": {
                                   "type": ["integer", "null"]
                                 },
-                                "authKey": {
+                                "auth_key": {
                                   "type": ["string", "null"]
                                 },
-                                "sharedWithOrg": {
+                                "shared_with_org": {
                                   "type": "boolean"
                                 },
                                 "org": {
@@ -9339,12 +9392,12 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "required": ["integrationPackageId", "connectionId"],
+                        "required": ["integration_package_id", "connection_id"],
                         "properties": {
-                          "integrationPackageId": {
+                          "integration_package_id": {
                             "type": "string"
                           },
-                          "connectionId": {
+                          "connection_id": {
                             "type": "string",
                             "format": "uuid"
                           }
@@ -9383,15 +9436,15 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["agentPackageId", "integrationPackageId", "connectionId"],
+                "required": ["agent_package_id", "integration_package_id", "connection_id"],
                 "properties": {
-                  "agentPackageId": {
+                  "agent_package_id": {
                     "type": "string"
                   },
-                  "integrationPackageId": {
+                  "integration_package_id": {
                     "type": "string"
                   },
-                  "connectionId": {
+                  "connection_id": {
                     "type": "string",
                     "format": "uuid"
                   }
@@ -9409,9 +9462,9 @@
                   "type": "object",
                   "required": [
                     "packageId",
-                    "integrationPackageId",
-                    "authKey",
-                    "connectionId",
+                    "integration_package_id",
+                    "auth_key",
+                    "connection_id",
                     "createdAt",
                     "updatedAt"
                   ],
@@ -9419,13 +9472,13 @@
                     "packageId": {
                       "type": "string"
                     },
-                    "integrationPackageId": {
+                    "integration_package_id": {
                       "type": "string"
                     },
-                    "authKey": {
+                    "auth_key": {
                       "type": "string"
                     },
-                    "connectionId": {
+                    "connection_id": {
                       "type": "string",
                       "format": "uuid"
                     },
@@ -9901,7 +9954,7 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "required": ["id", "content", "createdAt", "actorType"],
+                        "required": ["id", "content", "createdAt", "actor_type"],
                         "properties": {
                           "id": {
                             "type": "integer"
@@ -9911,11 +9964,11 @@
                             "type": "string",
                             "format": "date-time"
                           },
-                          "actorType": {
+                          "actor_type": {
                             "type": "string",
                             "enum": ["user", "end_user", "shared"]
                           },
-                          "actorId": {
+                          "actor_id": {
                             "type": ["string", "null"]
                           }
                         }
@@ -9929,8 +9982,8 @@
                       "id": 42,
                       "content": "User prefers Python over JS for data tasks",
                       "createdAt": "2026-04-20T10:00:00Z",
-                      "actorType": "user",
-                      "actorId": "usr_abc"
+                      "actor_type": "user",
+                      "actor_id": "usr_abc"
                     }
                   ]
                 }
@@ -10175,12 +10228,12 @@
         }
       }
     },
-    "/internal/integration-bundle/{scope}/{name}": {
+    "/internal/mcp-server-bundle/{scope}/{name}": {
       "get": {
-        "operationId": "getIntegrationBundle",
+        "operationId": "getMcpServerBundle",
         "tags": ["Internal"],
-        "summary": "Fetch the AFPS bundle bytes for an installed integration",
-        "description": "Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise the integration's MCP server before spawning a runner container. The endpoint verifies that the run's agent declares this integration in `dependencies.integrations` AND that the integration is installed on the run's application — orthogonal access control to the credentials endpoint. Returns the raw ZIP archive (`application/zip`).",
+        "summary": "Fetch the AFPS bundle bytes for a referenced mcp-server package",
+        "description": "Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise an integration's MCP server before spawning a runner container. In AFPS 2.0 a local-source integration references a SEPARATE mcp-server package via `source.server.name`; this endpoint serves that package's bundle. It verifies that the run's agent declares an installed integration (in `dependencies.integrations`) that references this mcp-server — orthogonal access control to the credentials endpoint. Returns the raw ZIP archive (`application/zip`).",
         "security": [
           {
             "bearerExecToken": []
@@ -10209,8 +10262,8 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
-          "403": {
-            "description": "Agent does not declare this integration as a dependency OR the integration is not installed on this application.",
+          "404": {
+            "description": "Agent does not reference this mcp-server through an installed integration, or no published version exists.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10218,9 +10271,6 @@
                 }
               }
             }
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -10707,7 +10757,7 @@
                     },
                     "type": {
                       "type": "string",
-                      "description": "Package type (agent/skill/integration)"
+                      "description": "Package type (agent/skill/mcp-server/integration)"
                     },
                     "version": {
                       "type": "string",
@@ -10755,7 +10805,7 @@
                             "packageId": {
                               "type": "string"
                             },
-                            "activeVersion": {
+                            "active_version": {
                               "type": ["string", "null"]
                             }
                           }
@@ -10851,7 +10901,7 @@
                     },
                     "type": {
                       "type": "string",
-                      "description": "Package type (agent/skill/integration)"
+                      "description": "Package type (agent/skill/mcp-server/integration)"
                     },
                     "version": {
                       "type": "string",
@@ -10923,7 +10973,7 @@
                             "packageId": {
                               "type": "string"
                             },
-                            "activeVersion": {
+                            "active_version": {
                               "type": ["string", "null"]
                             }
                           }
@@ -11178,7 +11228,7 @@
                     "packageId": {
                       "type": "string"
                     },
-                    "lockVersion": {
+                    "lock_version": {
                       "type": "integer"
                     },
                     "message": {
@@ -11188,7 +11238,7 @@
                 },
                 "example": {
                   "packageId": "@acme/summarize",
-                  "lockVersion": 1,
+                  "lock_version": 1,
                   "message": "Skill created"
                 }
               }
@@ -11242,10 +11292,10 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "latestPublishedVersion": {
+                    "latest_published_version": {
                       "type": ["string", "null"]
                     },
-                    "activeVersion": {
+                    "active_version": {
                       "type": ["string", "null"]
                     }
                   }
@@ -11445,10 +11495,10 @@
                     "message": {
                       "type": "string"
                     },
-                    "restoredVersion": {
+                    "restored_version": {
                       "type": "string"
                     },
-                    "lockVersion": {
+                    "lock_version": {
                       "type": "integer"
                     }
                   }
@@ -11531,20 +11581,20 @@
                     "yanked": {
                       "type": "boolean"
                     },
-                    "yankedReason": {
+                    "yanked_reason": {
                       "type": ["string", "null"]
                     },
                     "integrity": {
                       "type": "string"
                     },
-                    "artifactSize": {
+                    "artifact_size": {
                       "type": "integer"
                     },
                     "createdAt": {
                       "type": ["string", "null"],
                       "format": "date-time"
                     },
-                    "distTags": {
+                    "dist_tags": {
                       "type": "array",
                       "items": {
                         "type": "string"
@@ -11726,7 +11776,7 @@
                     "packageId": {
                       "type": "string"
                     },
-                    "lockVersion": {
+                    "lock_version": {
                       "type": "integer"
                     }
                   }
@@ -11808,7 +11858,7 @@
                           "id": {
                             "type": "string"
                           },
-                          "displayName": {
+                          "display_name": {
                             "type": "string"
                           }
                         }
@@ -11823,7 +11873,7 @@
                           "id": {
                             "type": "string"
                           },
-                          "displayName": {
+                          "display_name": {
                             "type": "string"
                           }
                         }
@@ -11944,7 +11994,7 @@
                     "packageId": {
                       "type": "string"
                     },
-                    "lockVersion": {
+                    "lock_version": {
                       "type": "integer"
                     },
                     "message": {
@@ -12039,7 +12089,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["manifest", "content", "lockVersion"],
+                "required": ["manifest", "content", "lock_version"],
                 "properties": {
                   "manifest": {
                     "$ref": "#/components/schemas/AgentManifest"
@@ -12047,7 +12097,7 @@
                   "content": {
                     "type": "string"
                   },
-                  "lockVersion": {
+                  "lock_version": {
                     "type": "integer",
                     "description": "Optimistic lock version"
                   }
@@ -12075,7 +12125,7 @@
                     "packageId": {
                       "type": "string"
                     },
-                    "lockVersion": {
+                    "lock_version": {
                       "type": "integer"
                     }
                   }
@@ -12176,10 +12226,10 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "latestPublishedVersion": {
+                    "latest_published_version": {
                       "type": ["string", "null"]
                     },
-                    "activeVersion": {
+                    "active_version": {
                       "type": ["string", "null"]
                     }
                   }
@@ -12378,10 +12428,10 @@
                     "message": {
                       "type": "string"
                     },
-                    "restoredVersion": {
+                    "restored_version": {
                       "type": "string"
                     },
-                    "lockVersion": {
+                    "lock_version": {
                       "type": "integer"
                     }
                   }
@@ -12463,20 +12513,20 @@
                     "yanked": {
                       "type": "boolean"
                     },
-                    "yankedReason": {
+                    "yanked_reason": {
                       "type": ["string", "null"]
                     },
                     "integrity": {
                       "type": "string"
                     },
-                    "artifactSize": {
+                    "artifact_size": {
                       "type": "integer"
                     },
                     "createdAt": {
                       "type": ["string", "null"],
                       "format": "date-time"
                     },
-                    "distTags": {
+                    "dist_tags": {
                       "type": "array",
                       "items": {
                         "type": "string"
@@ -12613,7 +12663,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["packageId", "type", "forkedFrom"],
+                  "required": ["packageId", "type", "forked_from"],
                   "properties": {
                     "packageId": {
                       "type": "string",
@@ -12621,9 +12671,9 @@
                     },
                     "type": {
                       "type": "string",
-                      "enum": ["agent", "skill", "integration"]
+                      "enum": ["agent", "skill", "mcp-server", "integration"]
                     },
-                    "forkedFrom": {
+                    "forked_from": {
                       "type": "string",
                       "description": "Source package ID"
                     }
@@ -12819,7 +12869,7 @@
                     "packageId": {
                       "type": "string"
                     },
-                    "lockVersion": {
+                    "lock_version": {
                       "type": "integer"
                     }
                   }
@@ -12904,7 +12954,7 @@
                           "id": {
                             "type": "string"
                           },
-                          "displayName": {
+                          "display_name": {
                             "type": "string"
                           }
                         }
@@ -12919,7 +12969,7 @@
                           "id": {
                             "type": "string"
                           },
-                          "displayName": {
+                          "display_name": {
                             "type": "string"
                           }
                         }
@@ -13012,7 +13062,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["manifest", "content", "lockVersion"],
+                "required": ["manifest", "content", "lock_version"],
                 "properties": {
                   "manifest": {
                     "$ref": "#/components/schemas/AgentManifest"
@@ -13020,7 +13070,7 @@
                   "content": {
                     "type": "string"
                   },
-                  "lockVersion": {
+                  "lock_version": {
                     "type": "integer",
                     "description": "Optimistic lock version"
                   }
@@ -13048,7 +13098,7 @@
                     "packageId": {
                       "type": "string"
                     },
-                    "lockVersion": {
+                    "lock_version": {
                       "type": "integer"
                     }
                   }
@@ -13481,7 +13531,7 @@
             "required": false,
             "schema": {
               "type": "string",
-              "enum": ["agent", "skill", "integration"]
+              "enum": ["agent", "skill", "mcp-server", "integration"]
             },
             "description": "Filter by package type"
           }
@@ -13797,7 +13847,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["config", "modelId", "proxyId", "versionPin"],
+                  "required": ["config", "modelId", "proxyId", "version_pin"],
                   "properties": {
                     "config": {
                       "type": "object"
@@ -13808,7 +13858,7 @@
                     "proxyId": {
                       "type": ["string", "null"]
                     },
-                    "versionPin": {
+                    "version_pin": {
                       "type": ["string", "null"]
                     }
                   }
@@ -13819,7 +13869,7 @@
                   },
                   "modelId": "claude-sonnet-4-6",
                   "proxyId": null,
-                  "versionPin": "1.2.3"
+                  "version_pin": "1.2.3"
                 }
               }
             }
@@ -15928,7 +15978,7 @@
           },
           "packageType": {
             "type": "string",
-            "enum": ["agent", "skill", "integration"]
+            "enum": ["agent", "skill", "mcp-server", "integration"]
           },
           "packageSource": {
             "type": "string",
@@ -16091,13 +16141,13 @@
           "id": {
             "type": "string"
           },
-          "displayName": {
+          "display_name": {
             "type": "string"
           },
           "description": {
             "type": "string"
           },
-          "schemaVersion": {
+          "schema_version": {
             "type": "string"
           },
           "author": {
@@ -16124,15 +16174,27 @@
           "type": {
             "type": "string",
             "description": "Package type from manifest",
-            "enum": ["agent", "skill", "integration"]
+            "enum": ["agent", "skill", "mcp-server", "integration"]
           },
-          "runningRuns": {
+          "running_runs": {
             "type": "integer"
           },
           "dependencies": {
             "type": "object",
             "properties": {
               "skills": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "mcp_servers": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "integrations": {
                 "type": "object",
                 "additionalProperties": {
                   "type": "string"
@@ -16149,7 +16211,7 @@
           "id": {
             "type": "string"
           },
-          "displayName": {
+          "display_name": {
             "type": "string"
           },
           "description": {
@@ -16184,7 +16246,7 @@
             "format": "date-time",
             "description": "Last updated timestamp (user agents only)"
           },
-          "lockVersion": {
+          "lock_version": {
             "type": "integer",
             "description": "Optimistic lock version (user agents only)"
           },
@@ -16200,13 +16262,13 @@
                 "type": "object",
                 "description": "Current configuration values"
               },
-              "fileConstraints": {
+              "file_constraints": {
                 "$ref": "#/components/schemas/FileConstraintsMap"
               },
-              "uiHints": {
+              "ui_hints": {
                 "$ref": "#/components/schemas/UIHintsMap"
               },
-              "propertyOrder": {
+              "property_order": {
                 "type": "array",
                 "items": {
                   "type": "string"
@@ -16223,13 +16285,13 @@
                 "type": "object",
                 "description": "Pure JSON Schema 2020-12 object"
               },
-              "fileConstraints": {
+              "file_constraints": {
                 "$ref": "#/components/schemas/FileConstraintsMap"
               },
-              "uiHints": {
+              "ui_hints": {
                 "$ref": "#/components/schemas/UIHintsMap"
               },
-              "propertyOrder": {
+              "property_order": {
                 "type": "array",
                 "items": {
                   "type": "string"
@@ -16246,7 +16308,7 @@
                 "type": "object",
                 "description": "Pure JSON Schema 2020-12 object"
               },
-              "propertyOrder": {
+              "property_order": {
                 "type": "array",
                 "items": {
                   "type": "string"
@@ -16295,7 +16357,7 @@
               }
             }
           },
-          "lastRun": {
+          "last_run": {
             "type": ["object", "null"],
             "description": "Summary of the most recent run (null if never run)",
             "properties": {
@@ -16305,7 +16367,7 @@
               "status": {
                 "type": "string"
               },
-              "startedAt": {
+              "started_at": {
                 "type": "string",
                 "format": "date-time"
               },
@@ -16314,18 +16376,18 @@
               }
             }
           },
-          "runningRuns": {
+          "running_runs": {
             "type": "integer"
           },
-          "versionCount": {
+          "version_count": {
             "type": "integer",
             "description": "Number of published versions (0 for built-in agents)"
           },
-          "forkedFrom": {
+          "forked_from": {
             "type": ["string", "null"],
             "description": "Source package ID if forked"
           },
-          "hasUnarchivedChanges": {
+          "has_unarchived_changes": {
             "type": "boolean",
             "description": "Whether the active version has changes not yet archived as a version"
           }
@@ -16348,7 +16410,7 @@
             "type": "string",
             "description": "SRI integrity hash (sha256-...)"
           },
-          "artifactSize": {
+          "artifact_size": {
             "type": "integer",
             "description": "Artifact ZIP size in bytes"
           },
@@ -16367,14 +16429,14 @@
       },
       "Run": {
         "type": "object",
-        "required": ["id", "orgId", "applicationId", "status", "versionDirty", "startedAt"],
+        "required": ["id", "orgId", "applicationId", "status", "version_dirty", "started_at"],
         "properties": {
           "id": {
             "type": "string"
           },
           "packageId": {
             "type": ["string", "null"],
-            "description": "Source agent ID. NULL when the source agent has been deleted — the run row survives via `runs.package_id ON DELETE SET NULL` (migration 0017). Read `agentScope` / `agentName` for display in that case; re-running is not possible."
+            "description": "Source agent ID. NULL when the source agent has been deleted — the run row survives via `runs.package_id ON DELETE SET NULL` (migration 0017). Read `agent_scope` / `agent_name` for display in that case; re-running is not possible."
           },
           "userId": {
             "type": ["string", "null"],
@@ -16399,7 +16461,7 @@
           "error": {
             "type": "string"
           },
-          "tokenUsage": {
+          "token_usage": {
             "type": ["object", "null"],
             "description": "Snapshot of token consumption for the run. Snake-case keys match the AFPS wire format emitted by every runner (PiRunner / remote CLI / GitHub Action) and stored verbatim in JSONB.",
             "properties": {
@@ -16422,11 +16484,11 @@
             },
             "additionalProperties": false
           },
-          "startedAt": {
+          "started_at": {
             "type": "string",
             "format": "date-time"
           },
-          "completedAt": {
+          "completed_at": {
             "type": "string",
             "format": "date-time"
           },
@@ -16437,23 +16499,23 @@
           "scheduleId": {
             "type": "string"
           },
-          "versionLabel": {
+          "version_label": {
             "type": ["string", "null"],
             "description": "Version label at run time (e.g. '1.0.0')"
           },
-          "versionDirty": {
+          "version_dirty": {
             "type": "boolean",
             "description": "Whether the draft had unpublished changes at run time"
           },
-          "proxyLabel": {
+          "proxy_label": {
             "type": ["string", "null"],
             "description": "Proxy label used at run time"
           },
-          "modelLabel": {
+          "model_label": {
             "type": ["string", "null"],
             "description": "Model label used at run time"
           },
-          "modelSource": {
+          "model_source": {
             "type": ["string", "null"],
             "description": "Model source: 'system' (platform-provided) or 'org' (user-configured)"
           },
@@ -16483,55 +16545,88 @@
             "description": "Snapshot of the effective agent config (merged overrides) at run creation",
             "additionalProperties": true
           },
-          "configOverride": {
+          "config_override": {
             "type": ["object", "null"],
-            "description": "Per-run config delta — the raw object the caller sent in the request body. `config` is the resolved (deep-merged) snapshot; `configOverride` is the raw delta that the dashboard uses to badge 'default vs override'. Null when the run used persisted defaults verbatim.",
+            "description": "Per-run config delta — the raw object the caller sent in the request body. `config` is the resolved (deep-merged) snapshot; `config_override` is the raw delta that the dashboard uses to badge 'default vs override'. Null when the run used persisted defaults verbatim.",
             "additionalProperties": true
           },
-          "userName": {
+          "user_name": {
             "type": ["string", "null"],
             "description": "Display name of the dashboard user who triggered the run (from profiles table)"
           },
-          "endUserName": {
+          "end_user_name": {
             "type": ["string", "null"],
             "description": "Display name of the end-user (name or externalId fallback)"
           },
-          "apiKeyName": {
+          "api_key_name": {
             "type": ["string", "null"],
             "description": "Name of the API key that triggered the run"
           },
-          "scheduleName": {
+          "schedule_name": {
             "type": ["string", "null"],
             "description": "Name of the schedule that triggered the run"
           },
-          "runnerName": {
+          "runner_name": {
             "type": ["string", "null"],
             "description": "Human-friendly label for the runner that triggered the run — CLI host (`os.hostname()`), GitHub Action workflow, or whatever the caller passes via `X-Appstrate-Runner-Name`. Stamped at INSERT and never updated."
           },
-          "runnerKind": {
+          "runner_kind": {
             "type": ["string", "null"],
             "description": "Free-form classifier driving the dashboard icon (`cli`, `github-action`, …). Sourced from `X-Appstrate-Runner-Kind` or inferred from the auth context."
           },
-          "agentScope": {
+          "agent_scope": {
             "type": ["string", "null"],
             "description": "Denormalized agent scope at run creation. Survives rename, delete, or shadow compaction — the global run view falls back to this when the source package is gone."
           },
-          "agentName": {
+          "agent_name": {
             "type": ["string", "null"],
-            "description": "Denormalized agent name at run creation (see agentScope)."
+            "description": "Denormalized agent name at run creation (see agent_scope)."
           },
-          "packageEphemeral": {
+          "package_ephemeral": {
             "type": "boolean",
             "description": "Present on enriched run responses. True when the source package is an inline-run shadow (POST /api/runs/inline)."
           },
-          "inlineManifest": {
+          "inline_manifest": {
             "type": ["object", "null"],
             "description": "Inline runs only. Snapshot of the manifest submitted at run time. Null once the shadow has been compacted (see INLINE_RUN_LIMITS.retention_days).",
             "additionalProperties": true
           },
-          "inlinePrompt": {
+          "inline_prompt": {
             "type": ["string", "null"],
             "description": "Inline runs only. Snapshot of the prompt submitted at run time. Null once the shadow has been compacted."
+          },
+          "notifiedAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When the user was notified of run completion (in-app notification). Null until notification fires."
+          },
+          "readAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When the user marked the run notification as read. Null until acknowledged."
+          },
+          "runNumber": {
+            "type": ["integer", "null"],
+            "description": "Per-(app, package) monotonic counter assigned at run creation. Stable identifier for UI display."
+          },
+          "runOrigin": {
+            "type": ["string", "null"],
+            "enum": ["platform", "remote", null],
+            "description": "Which runner drives this run: 'platform' (server-managed Docker container) or 'remote' (caller's host via signed events)."
+          },
+          "contextSnapshot": {
+            "type": ["object", "null"],
+            "description": "Runner-provided execution environment metadata (os, cli version, git sha, ...) stamped at run creation.",
+            "additionalProperties": true
+          },
+          "modelCredentialId": {
+            "type": ["string", "null"],
+            "description": "ID of the model_provider_credentials row resolved at run creation (audit + cost-attribution)."
+          },
+          "connection_overrides": {
+            "type": ["object", "null"],
+            "description": "Frozen per-(integration, authKey) connection picks for this run (#199 mechanism #3). Loses to admin pins.",
+            "additionalProperties": true
           }
         }
       },
@@ -16576,7 +16671,15 @@
       },
       "Schedule": {
         "type": "object",
-        "required": ["id", "packageId", "orgId", "cronExpression", "createdAt", "updatedAt"],
+        "required": [
+          "id",
+          "packageId",
+          "orgId",
+          "applicationId",
+          "cron_expression",
+          "createdAt",
+          "updatedAt"
+        ],
         "properties": {
           "id": {
             "type": "string"
@@ -16595,13 +16698,17 @@
           "orgId": {
             "type": "string"
           },
+          "applicationId": {
+            "type": "string",
+            "description": "Application ID (app_ prefix) that owns this schedule"
+          },
           "name": {
             "type": ["string", "null"]
           },
           "enabled": {
             "type": ["boolean", "null"]
           },
-          "cronExpression": {
+          "cron_expression": {
             "type": "string"
           },
           "timezone": {
@@ -16610,26 +16717,26 @@
           "input": {
             "type": "object"
           },
-          "configOverride": {
+          "config_override": {
             "type": ["object", "null"]
           },
-          "modelIdOverride": {
+          "model_id_override": {
             "type": ["string", "null"]
           },
-          "proxyIdOverride": {
+          "proxy_id_override": {
             "type": ["string", "null"]
           },
-          "versionOverride": {
+          "version_override": {
             "type": ["string", "null"]
           },
-          "connectionOverrides": {
+          "connection_overrides": {
             "type": ["object", "null"]
           },
-          "lastRunAt": {
+          "last_run_at": {
             "type": ["string", "null"],
             "format": "date-time"
           },
-          "nextRunAt": {
+          "next_run_at": {
             "type": ["string", "null"],
             "format": "date-time"
           },
@@ -16641,11 +16748,11 @@
             "type": "string",
             "format": "date-time"
           },
-          "actorName": {
+          "actor_name": {
             "type": ["string", "null"],
             "description": "Display name of the schedule actor"
           },
-          "actorType": {
+          "actor_type": {
             "type": ["string", "null"],
             "enum": ["user", "end_user", null]
           }
@@ -16675,7 +16782,7 @@
           "createdBy": {
             "type": ["string", "null"]
           },
-          "createdByName": {
+          "created_by_name": {
             "type": "string"
           },
           "expiresAt": {
@@ -16713,23 +16820,27 @@
             "type": "string",
             "enum": ["system", "local"]
           },
+          "scope": {
+            "type": ["string", "null"],
+            "description": "Scope from manifest name (e.g. @myorg from @myorg/name)"
+          },
           "createdBy": {
             "type": ["string", "null"]
           },
-          "createdByName": {
+          "created_by_name": {
             "type": "string"
           },
-          "usedByAgents": {
+          "used_by_agents": {
             "type": "integer"
           },
           "version": {
             "type": ["string", "null"],
             "description": "Manifest version (semver)"
           },
-          "autoInstalled": {
+          "auto_installed": {
             "type": "boolean"
           },
-          "forkedFrom": {
+          "forked_from": {
             "type": ["string", "null"],
             "description": "Source package ID if forked"
           },
@@ -16760,23 +16871,31 @@
             "type": "string",
             "description": "Package item content"
           },
+          "source_code": {
+            "type": ["string", "null"],
+            "description": "Secondary source file content (e.g. .ts for tools)"
+          },
           "source": {
             "type": "string",
             "enum": ["system", "local"]
           },
+          "scope": {
+            "type": ["string", "null"],
+            "description": "Scope from manifest name (e.g. @myorg from @myorg/name)"
+          },
           "createdBy": {
             "type": ["string", "null"]
           },
-          "createdByName": {
+          "created_by_name": {
             "type": "string"
           },
-          "usedByAgents": {
+          "used_by_agents": {
             "type": "integer"
           },
-          "autoInstalled": {
+          "auto_installed": {
             "type": "boolean"
           },
-          "lockVersion": {
+          "lock_version": {
             "type": "integer",
             "description": "Optimistic lock version"
           },
@@ -16788,19 +16907,19 @@
             "type": "object",
             "description": "Full manifest object"
           },
-          "manifestName": {
+          "manifest_name": {
             "type": ["string", "null"],
             "description": "Manifest name (@scope/name) — may differ from package ID"
           },
-          "versionCount": {
+          "version_count": {
             "type": "integer",
             "description": "Number of published versions"
           },
-          "hasUnarchivedChanges": {
+          "has_unarchived_changes": {
             "type": "boolean",
             "description": "Whether the active version has changes not yet archived as a version"
           },
-          "forkedFrom": {
+          "forked_from": {
             "type": ["string", "null"],
             "description": "Source package ID if forked"
           },
@@ -16812,7 +16931,7 @@
                 "id": {
                   "type": "string"
                 },
-                "displayName": {
+                "display_name": {
                   "type": "string"
                 }
               }
@@ -17233,13 +17352,13 @@
         "description": "AFPS Agent manifest extended with Appstrate platform fields. Standard fields are defined by the AFPS Agent schema; extension fields use the x- prefix per AFPS §10.",
         "allOf": [
           {
-            "$ref": "https://afps.appstrate.dev/packages/schema/v1/agent.schema.json"
+            "$ref": "https://afps.appstrate.dev/packages/schema/v2/agent.schema.json"
           }
         ]
       },
       "SkillManifest": {
         "description": "AFPS Skill manifest. See https://afps.appstrate.dev for field reference.",
-        "$ref": "https://afps.appstrate.dev/packages/schema/v1/skill.schema.json"
+        "$ref": "https://afps.appstrate.dev/packages/schema/v2/skill.schema.json"
       },
       "FileConstraintsMap": {
         "type": "object",
@@ -17251,7 +17370,7 @@
               "type": "string",
               "description": "Comma-separated accepted file extensions (e.g. .pdf,.docx)"
             },
-            "maxSize": {
+            "max_size": {
               "type": "number",
               "description": "Maximum file size in bytes"
             }
@@ -17284,7 +17403,7 @@
             },
             "type": {
               "type": "string",
-              "enum": ["agent", "skill", "integration"]
+              "enum": ["agent", "skill", "mcp-server", "integration"]
             },
             "source": {
               "type": "string",
@@ -17292,7 +17411,7 @@
             },
             "name": {
               "type": "string",
-              "description": "Display name from the package draft manifest (`displayName`); falls back to the package id."
+              "description": "Display name from the package draft manifest (`manifest.display_name`); falls back to the package id."
             },
             "description": {
               "type": "string",

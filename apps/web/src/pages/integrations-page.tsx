@@ -29,7 +29,7 @@ function matchesQuery(integration: IntegrationSummary, query: string): boolean {
   const m = integration.manifest;
   return (
     integration.id.toLowerCase().includes(q) ||
-    m.displayName.toLowerCase().includes(q) ||
+    (m.display_name?.toLowerCase().includes(q) ?? false) ||
     (m.description?.toLowerCase().includes(q) ?? false) ||
     (m.keywords?.some((k) => k.toLowerCase().includes(q)) ?? false)
   );
@@ -87,7 +87,7 @@ function IntegrationCard({ integration }: { integration: IntegrationSummary }) {
       <div className="flex items-start gap-3">
         <IntegrationIcon src={m.icon} />
         <div className="min-w-0 flex-1">
-          <h3 className="truncate text-sm font-semibold">{m.displayName}</h3>
+          <h3 className="truncate text-sm font-semibold">{m.display_name ?? integration.id}</h3>
           <p className="text-muted-foreground truncate font-mono text-xs">{integration.id}</p>
         </div>
         <ActiveBadge active={isActive} />

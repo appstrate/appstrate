@@ -23,36 +23,33 @@ import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
+import {
+  localIntegrationManifest,
+  httpHeaderDelivery,
+  connectToolBlock,
+} from "../../helpers/integration-manifests.ts";
 
 function orchestratedManifest(name: string, persistLoginSecret: boolean): IntegrationManifest {
-  return {
-    manifestVersion: "1.0",
-    type: "integration",
+  return localIntegrationManifest({
     name,
     version: "0.1.0",
     displayName: "OrgaBusiness",
     description: "Form-login integration",
-    server: { type: "node", entryPoint: "main.js" },
     auths: {
       session: {
         type: "custom",
         authorizedUris: ["https://saas.example.com/**"],
-        credentials: {
-          schema: {
-            type: "object",
-            properties: { identifiant: { type: "string" }, mot_de_passe: { type: "string" } },
-          },
-        },
-        delivery: { http: { headerName: "Cookie", valueFrom: "JSESSIONID" } },
-        connect: {
+        credentialFields: ["identifiant", "mot_de_passe"],
+        delivery: httpHeaderDelivery({ name: "Cookie", field: "JSESSIONID" }),
+        connect: connectToolBlock({
           tool: "login",
           runAt: "run-start",
           persistLoginSecret,
           produces: ["JSESSIONID"],
-        },
+        }),
       },
     },
-  } as IntegrationManifest;
+  });
 }
 
 // Fake connect-run substrate: returns a captured session.

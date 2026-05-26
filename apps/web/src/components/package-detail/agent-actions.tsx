@@ -101,10 +101,10 @@ export function AgentActions({
         downloadVersion={downloadVersion}
         onDownload={downloadPackage}
         onDownloadBundle={downloadBundle}
-        hasPublishedVersion={(detail.versionCount ?? 0) > 0}
+        hasPublishedVersion={(detail.version_count ?? 0) > 0}
         onCreateVersion={onCreateVersion}
         onFork={onFork}
-        runningRuns={detail.runningRuns}
+        runningRuns={detail.running_runs}
         hasRuns={!!runs && runs.length > 0}
         hasMemories={!!memories && memories.length > 0}
         hasFileInput={!!hasFileInput}
@@ -114,10 +114,10 @@ export function AgentActions({
             label:
               installedAppNames.length > 0
                 ? t("detail.deleteConfirmWithApps", {
-                    name: detail.displayName,
+                    name: detail.display_name,
                     apps: installedAppNames.join(", "),
                   })
-                : t("detail.deleteConfirm", { name: detail.displayName }),
+                : t("detail.deleteConfirm", { name: detail.display_name }),
           })
         }
         canUninstall={isInstalledInCurrentApp && detail.source !== "system"}
@@ -125,7 +125,7 @@ export function AgentActions({
           setConfirmState({
             type: "uninstallAgent",
             label: t("packages.uninstallConfirm", {
-              name: detail.displayName,
+              name: detail.display_name,
               ns: "settings",
             }),
           })

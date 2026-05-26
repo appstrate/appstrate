@@ -4,12 +4,12 @@
 /**
  * End-to-end tests for the `afps bundle` CLI command.
  *
- * The CLI dispatches into `@appstrate/core/integration-bundle`, which
- * is resolvable here because both packages share the workspace's
- * `node_modules`. The pure pipeline is covered by the bundler's own
- * unit tests in `packages/core/test/integration-bundle.test.ts` — this
- * file focuses on the CLI surface: argv parsing, file I/O, exit codes,
- * stderr messaging, and dry-run semantics.
+ * The CLI dispatches into `@appstrate/core/mcp-server-bundle`, which is
+ * resolvable here because both packages share the workspace's `node_modules`.
+ * The pure pipeline is covered by the bundler's own unit tests in
+ * `packages/core/test/mcp-server-bundle.test.ts` — this file focuses on the
+ * CLI surface: argv parsing, file I/O, exit codes, stderr messaging, and
+ * dry-run semantics.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
@@ -22,14 +22,21 @@ import { unzipArtifact } from "@appstrate/core/zip";
 
 const DEC = new TextDecoder();
 
+/** A self-contained author-time MCPB (`mcp-server`) manifest. */
 function authorManifest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    manifestVersion: "1.1",
-    type: "integration",
-    name: "@official/gmail",
+    manifest_version: "0.3",
+    name: "gmail-server",
     version: "1.0.0",
-    displayName: "Gmail",
-    server: { type: "node", entryPoint: "./server/index.js" },
+    display_name: "Gmail Server",
+    server: {
+      type: "node",
+      entry_point: "./server/index.js",
+      mcp_config: { command: "node", args: ["./server/index.js"] },
+    },
+    _meta: {
+      "dev.afps/mcp-server": { name: "@official/gmail", type: "mcp-server" },
+    },
     ...overrides,
   };
 }
@@ -92,10 +99,10 @@ describe("afps bundle — CLI", () => {
     expect((distributed.server as Record<string, unknown>).type).toBe("node");
   });
 
-  it("includes --doc as INTEGRATION.md", async () => {
+  it("includes --doc as SERVER.md", async () => {
     const manifestPath = await writeManifest(dir, authorManifest());
     const docPath = join(dir, "doc.md");
-    await writeFile(docPath, "# Gmail integration\n");
+    await writeFile(docPath, "# Gmail mcp-server\n");
     const out = join(dir, "out.afps");
 
     const serverDir = join(dir, "server");
@@ -110,8 +117,8 @@ describe("afps bundle — CLI", () => {
     expect(code).toBe(0);
 
     const tree = unzipArtifact(new Uint8Array(await readFile(out)));
-    expect(tree["INTEGRATION.md"]).toBeDefined();
-    expect(DEC.decode(tree["INTEGRATION.md"]!)).toContain("Gmail");
+    expect(tree["SERVER.md"]).toBeDefined();
+    expect(DEC.decode(tree["SERVER.md"]!)).toContain("Gmail");
   });
 
   it("dry-run does not write the output file", async () => {
@@ -144,13 +151,13 @@ describe("afps bundle — CLI", () => {
     );
     expect(code).toBe(0);
     const out = io.stdoutText();
-    expect(out).toContain('"type": "integration"');
+    expect(out).toContain('"dev.afps/mcp-server"');
     expect(out).toContain('"@official/gmail"');
   });
 
   it("rejects a structurally invalid manifest with exit 1", async () => {
     const manifestPath = await writeManifest(dir, {
-      type: "integration",
+      manifest_version: "0.3",
       name: "broken",
     });
     const io = captureIo();

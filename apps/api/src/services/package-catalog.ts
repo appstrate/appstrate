@@ -42,7 +42,7 @@ function mapDependencies(
       return {
         id: d.dependencyId,
         version: versionMap[d.dependencyId] ?? caretRange(m.version ?? "0.0.0"),
-        name: m.displayName ?? undefined,
+        name: m.display_name ?? undefined,
         description: m.description ?? undefined,
       };
     });
@@ -242,7 +242,9 @@ export async function searchPackages(args: {
     extra: or(
       sql`${packages.id} ILIKE ${pattern}`,
       sql`${packages.draftManifest}->>'name' ILIKE ${pattern}`,
-      sql`${packages.draftManifest}->>'displayName' ILIKE ${pattern}`,
+      // AFPS 2.0 snake_case (`display_name`); legacy rows carrying the 1.x
+      // `displayName` key are upgraded in place by the data migration.
+      sql`${packages.draftManifest}->>'display_name' ILIKE ${pattern}`,
       sql`${packages.draftManifest}->>'description' ILIKE ${pattern}`,
     ),
     limit: limit + 1,

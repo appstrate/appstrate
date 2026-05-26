@@ -194,7 +194,7 @@ describe("package-catalog", () => {
         type: "skill",
         draftManifest: {
           name: `@${orgSlug}/my-skill`,
-          displayName: "My Skill",
+          display_name: "My Skill",
           version: "0.1.0",
           type: "skill",
           description: "A test skill",

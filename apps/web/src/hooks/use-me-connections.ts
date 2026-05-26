@@ -90,7 +90,7 @@ export function useUpdateMeIntegrationConnection() {
       label?: string | null;
       sharedWithOrg?: boolean;
     }) =>
-      api<{ id: string; label: string | null; sharedWithOrg: boolean }>(
+      api<{ id: string; label: string | null; shared_with_org: boolean }>(
         ...buildUpdateConnectionRequest({
           packageId,
           connectionId,

@@ -22,7 +22,7 @@ import {
   type ParsedTokenResponse,
 } from "./token-utils.ts";
 import type { OAuthStateStore } from "./types.ts";
-import type { OAuthTokenContentType } from "@appstrate/core/validation";
+import type { OAuthTokenContentType } from "./token-utils.ts";
 import { extractErrorMessage } from "./utils.ts";
 
 /**
@@ -32,17 +32,17 @@ import { extractErrorMessage } from "./utils.ts";
 export type TokenExchangeAuthMethod = "client_secret_basic" | "client_secret_post" | "none";
 
 export interface ExchangeAuthorizationCodeInput {
-  /** Token endpoint URL. */
-  tokenUrl: string;
+  /** Token endpoint URL (`auths.{key}.token_endpoint`). */
+  tokenEndpoint: string;
   /** OAuth client id. Required (even for `none` — sent in the body). */
   clientId: string;
   /**
    * OAuth client secret. Empty string for public clients
-   * (`tokenAuthMethod === "none"`); ignored when basic-auth is used (sent via header).
+   * (`tokenEndpointAuthMethod === "none"`); ignored when basic-auth is used (sent via header).
    */
   clientSecret: string;
-  /** Token endpoint client-auth method. */
-  tokenAuthMethod: TokenExchangeAuthMethod;
+  /** Token endpoint client-auth method (`token_endpoint_auth_method`). */
+  tokenEndpointAuthMethod: TokenExchangeAuthMethod;
   /** Body content type — defaults to `application/x-www-form-urlencoded`. */
   tokenContentType?: OAuthTokenContentType;
   /**
@@ -91,8 +91,8 @@ export interface ExchangeAuthorizationCodeResult {
 export async function exchangeAuthorizationCode(
   input: ExchangeAuthorizationCodeInput,
 ): Promise<ExchangeAuthorizationCodeResult> {
-  const useBasicAuth = input.tokenAuthMethod === "client_secret_basic";
-  const isPublicClient = input.tokenAuthMethod === "none";
+  const useBasicAuth = input.tokenEndpointAuthMethod === "client_secret_basic";
+  const isPublicClient = input.tokenEndpointAuthMethod === "none";
 
   const tokenParams: Record<string, string> = {
     grant_type: "authorization_code",
@@ -114,12 +114,14 @@ export async function exchangeAuthorizationCode(
 
   let response: Response;
   try {
-    response = await fetch(input.tokenUrl, {
+    response = await fetch(input.tokenEndpoint, {
       method: "POST",
       headers: buildTokenHeaders(
         // "none" maps to "no auth header" — buildTokenHeaders treats
         // anything other than "client_secret_basic" as body-auth.
-        input.tokenAuthMethod === "none" ? "client_secret_post" : input.tokenAuthMethod,
+        input.tokenEndpointAuthMethod === "none"
+          ? "client_secret_post"
+          : input.tokenEndpointAuthMethod,
         input.clientId,
         input.clientSecret,
         input.tokenContentType,

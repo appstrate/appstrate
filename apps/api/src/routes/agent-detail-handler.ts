@@ -59,7 +59,7 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
 
   return c.json({
     id: agent.id,
-    displayName: m.displayName,
+    display_name: m.display_name,
     description: m.description,
     source: agent.source,
     scope: parsed?.scope ?? null,
@@ -84,23 +84,23 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
       ...(m.config ?? { schema: { type: "object", properties: {} } }),
       current: configWithDefaults,
     },
-    runningRuns: runningCount,
-    lastRun: lastRun
+    running_runs: runningCount,
+    last_run: lastRun
       ? {
           id: lastRun.id,
           status: lastRun.status,
-          startedAt: lastRun.startedAt,
+          started_at: lastRun.startedAt,
           duration: lastRun.duration,
         }
       : null,
-    versionCount,
-    hasUnarchivedChanges,
-    forkedFrom: rawItem?.forkedFrom ?? null,
+    version_count: versionCount,
+    has_unarchived_changes: hasUnarchivedChanges,
+    forked_from: rawItem?.forked_from ?? null,
     ...(agent.source !== "system" && rawItem
       ? {
           manifest: agent.manifest,
           updatedAt: rawItem.updatedAt,
-          lockVersion: rawItem.lockVersion,
+          lock_version: rawItem.lock_version,
           prompt: agent.prompt,
         }
       : {}),

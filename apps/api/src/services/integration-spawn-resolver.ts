@@ -29,8 +29,9 @@
 import {
   decryptCredentialsToStringMap,
   decryptCredentialInputsToStringMap,
-  resolveHttpDelivery,
+  resolveAfpsHttpDelivery,
 } from "@appstrate/connect";
+import type { AfpsHttpDelivery as ConnectAfpsHttpDelivery } from "@appstrate/connect";
 import {
   getToolUrlPatterns,
   getApiCallConfig,
@@ -43,12 +44,21 @@ import type {
 } from "@appstrate/core/integration";
 // ResolvedConnectionMap is consumed via input prop (`resolvedConnections`) below.
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
+import { getMcpServerRuntime } from "@appstrate/core/mcp-server";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 
 import { logger } from "../lib/logger.ts";
 import type { Actor } from "../lib/actor.ts";
 import { isIntegrationActive, selectAccessibleConnection } from "./integration-connections.ts";
-import { fetchIntegrationManifest } from "./integration-service.ts";
+import { fetchIntegrationManifest, fetchMcpServerManifest } from "./integration-service.ts";
+import {
+  getIntegrationSourceKind,
+  getLocalServerRef,
+  getRemoteSource,
+  getAppstrateConnectMeta,
+  renderCredentialTemplate,
+  type AfpsManifestAuth,
+} from "./integration-manifest-helpers.ts";
 
 export interface ResolveIntegrationsInput {
   applicationId: string;
@@ -153,22 +163,24 @@ async function resolveOne(
   // AND httpDeliveryAuths from delivery.http (Phase 1.5).
   //
   // Note: bundle bytes are NOT inlined into the spec — the sidecar fetches
-  // them via `GET /internal/integration-bundle/...` at boot because base64
+  // them via `GET /internal/mcp-server-bundle/...` at boot because base64
   // encoding a typical (multi-MB) integration bundle blows past Linux's
   // env var size limit.
   //
-  // A serverless integration declares an
-  // `apiCall` block and no `server`: no runner to spawn, just the generic
+  // A serverless integration declares
+  // `source.kind: "api"` and no `server`: no runner to spawn, just the generic
   // credential-injecting tool. Exposed when the agent selected it
   // (least-privilege: the catch-all tool is never auto-granted).
-  // `authorizedUris` come from the auth the api_call config resolved to.
+  // `authorized_uris` come from the auth the api source resolved to.
   const apiCallCfg = getApiCallConfig(manifest);
   const exposeApiCall =
     apiCallCfg !== null && (agentToolSelection ?? []).includes(API_CALL_TOOL_NAME);
   const apiCallAuth =
-    exposeApiCall && apiCallCfg ? manifest.auths?.[apiCallCfg.authKey] : undefined;
-  const apiCallAuthorizedUris = apiCallAuth?.authorizedUris ?? [];
-  const apiCallAllowAllUris = apiCallAuth?.allowAllUris ?? false;
+    exposeApiCall && apiCallCfg
+      ? (manifest.auths?.[apiCallCfg.authKey] as AfpsManifestAuth | undefined)
+      : undefined;
+  const apiCallAuthorizedUris = apiCallAuth?.authorized_uris ?? [];
+  const apiCallAllowAllUris = apiCallAuth?.allow_all_uris ?? false;
 
   // An integration is viable if EITHER `delivery.env` OR `delivery.http`
   // resolved to something — pure-http integrations (no env vars) still
@@ -195,9 +207,60 @@ async function resolveOne(
   // the slug + length cap.
   const namespace = integrationId;
 
-  // Phase 4 — narrow the MITM URL envelope to the union of urlPatterns
+  // ── Resolve the sidecar server spec from the AFPS 2.0 `source`
+  // discriminant (replaces the 1.x inline `manifest.server`). ──
+  //   - remote → Streamable HTTP MCP (`{ type: "http", url }`).
+  //   - local  → resolve the referenced mcp-server package's MCPB manifest
+  //              and emit `{ type, entryPoint }` from `server.{type, entry_point}`.
+  //   - api    → serverless (no `server` in the spec; sidecar skips spawn).
+  const sourceKind = getIntegrationSourceKind(manifest);
+  const isRemoteHttp = sourceKind === "remote";
+  let serverSpec:
+    | { type: string; entryPoint?: string; url?: string; serverPackageId?: string }
+    | undefined;
+  if (isRemoteHttp) {
+    const remote = getRemoteSource(manifest);
+    if (!remote) {
+      logger.warn("remote-source integration missing remote.url; skipping", { integrationId });
+      return null;
+    }
+    serverSpec = { type: "http", url: remote.url };
+  } else if (sourceKind === "local") {
+    const ref = getLocalServerRef(manifest);
+    if (!ref) {
+      logger.warn("local-source integration missing source.server; skipping", { integrationId });
+      return null;
+    }
+    const mcpServer = await fetchMcpServerManifest(ref.name);
+    if (!mcpServer) {
+      logger.warn("referenced mcp-server could not be resolved; skipping integration", {
+        integrationId,
+        mcpServerId: ref.name,
+      });
+      return null;
+    }
+    const run = (mcpServer as { server?: { type?: string; entry_point?: string } }).server;
+    // Defensive: mcpServerManifestSchema makes `server.{type,entry_point}`
+    // required, so a manifest that parsed (non-null above) always has them.
+    // Kept as a fail-closed guard against a future schema relaxation.
+    if (!run?.type || !run.entry_point) {
+      logger.warn("referenced mcp-server has no runnable server config; skipping", {
+        integrationId,
+        mcpServerId: ref.name,
+      });
+      return null;
+    }
+    // The Appstrate runtime override (`_meta["dev.appstrate/mcp-server"].runtime`)
+    // wins over the MCPB `server.type`. MCPB has no `bun` type, so a bun-native
+    // server stays MCPB-conformant (e.g. `server.type: "node"`) and declares
+    // `bun` in _meta; the runner then picks the bun interpreter/image.
+    const effectiveType = getMcpServerRuntime(mcpServer) ?? run.type;
+    serverSpec = { type: effectiveType, entryPoint: run.entry_point, serverPackageId: ref.name };
+  }
+  // sourceKind === "api" (or unknown) → serverless, serverSpec stays undefined.
+
+  // Phase 4 — narrow the MITM URL envelope to the union of `url_patterns`
   // declared on the agent-selected tools (skipped for remote HTTP MCP).
-  const isRemoteHttp = manifest.server?.type === "http";
   const toolUrlEnvelope = isRemoteHttp
     ? undefined
     : computeToolUrlEnvelope(manifest, agentToolSelection);
@@ -217,20 +280,27 @@ async function resolveOne(
     manifest: {
       name: manifest.name,
       version: manifest.version,
-      // Serverless integrations (no `server`, only an `apiCall` block) omit
-      // `server` in the spec — the sidecar's serverless path (no
-      // spec.manifest.server) skips spawn and only wires the generic api_call
-      // tool. Real runners (node|python|binary|…) and remote MCP (http)
+      // Serverless integrations (`source.kind: "api"`) omit `server` in the
+      // spec — the sidecar's serverless path (no spec.manifest.server) skips
+      // spawn and only wires the generic api_call tool. Local runners
+      // (node|python|binary|uv, resolved from the referenced mcp-server) and
+      // remote MCP (`source.kind: "remote"` → `{ type: "http", url }`)
       // propagate normally.
-      ...(manifest.server
+      ...(serverSpec
         ? {
             server: {
-              type: manifest.server.type,
-              ...(manifest.server.entryPoint ? { entryPoint: manifest.server.entryPoint } : {}),
+              type: serverSpec.type,
+              ...(serverSpec.entryPoint ? { entryPoint: serverSpec.entryPoint } : {}),
+              // AFPS 2.0 — the referenced mcp-server package id, so the sidecar
+              // fetches the runnable server bundle from
+              // `GET /internal/mcp-server-bundle/...` (local sources only).
+              ...(serverSpec.serverPackageId
+                ? { serverPackageId: serverSpec.serverPackageId }
+                : {}),
               // Phase 7 — propagate the remote MCP URL so the sidecar can open
               // a Streamable HTTP client against it. Mutually exclusive with
               // `entryPoint` (enforced by `integrationManifestSchema`).
-              ...(manifest.server.url ? { url: manifest.server.url } : {}),
+              ...(serverSpec.url ? { url: serverSpec.url } : {}),
             },
           }
         : {}),
@@ -268,14 +338,14 @@ async function resolveOne(
 
 /**
  * Build the {@link IntegrationSpawnSpec.toolUrlEnvelope} from the agent's
- * tool selection × the integration manifest's `tools.{name}.urlPatterns`.
+ * tool selection × the integration manifest's `tools.{name}.url_patterns`.
  *
  * Returns `undefined` (no extra MITM URL enforcement) when:
  *  - The agent didn't restrict tools (`agentToolSelection === undefined`).
  *  - The agent restricted to an empty set (handled by toolAllowlist alone).
- *  - ANY selected tool lacks a `urlPatterns` declaration — we can't
+ *  - ANY selected tool lacks a `url_patterns` declaration — we can't
  *    safely narrow the envelope without blocking that tool's legitimate
- *    traffic, so we fall back to per-auth `authorizedUris`.
+ *    traffic, so we fall back to per-auth `authorized_uris`.
  *
  * When every selected tool declares patterns, returns the deduplicated
  * union. Methods are unioned per pattern (a pattern declared twice with
@@ -301,12 +371,11 @@ export function computeToolUrlEnvelope(
     for (const entry of patterns) {
       const existing = merged.get(entry.pattern);
       if (!existing) {
+        const hasMethods = !!entry.methods && entry.methods.length > 0;
         merged.set(entry.pattern, {
           pattern: entry.pattern,
-          ...(entry.methods && entry.methods.length > 0
-            ? { methods: new Set(entry.methods) }
-            : { anyMethod: true }),
-          anyMethod: !entry.methods || entry.methods.length === 0,
+          anyMethod: !hasMethods,
+          ...(hasMethods ? { methods: new Set(entry.methods) } : {}),
         });
       } else if (!existing.anyMethod && entry.methods && entry.methods.length > 0) {
         for (const m of entry.methods) (existing.methods ??= new Set()).add(m);
@@ -358,7 +427,7 @@ async function resolveDeliveries(
   resolvedConnection: ResolvedConnection | null,
   hasApiCall: boolean,
 ): Promise<ResolvedDeliveries | null> {
-  const auths = manifest.auths ?? {};
+  const auths = (manifest.auths ?? {}) as Record<string, AfpsManifestAuth>;
   if (Object.keys(auths).length === 0) {
     // Integration declares no auth — spawn with no extra env, no MITM.
     return { spawnEnv: {} };
@@ -394,12 +463,22 @@ async function resolveDeliveries(
     return null;
   }
 
-  // ─── connect.tool + runAt:"run-start" — store-the-secret acquisition ───
+  // ─── connect.tool + run_at:"run-start" — store-the-secret acquisition ───
   // The injectable outputs plane is empty at rest: only the login secret was
   // persisted (NON-injectable `inputs`). The sidecar mints the session at
   // boot by running the integration's login tool with the decrypted secret.
+  //
+  // AFPS 2.0: the orchestrated-tool name + run policy live under
+  // `connect._meta["dev.appstrate/connect"]` (`tool`, `run_at`, `reauth_on`,
+  // `produces`); `connect.tool` itself is just the spec marker object.
   const httpDecl0 = auth.delivery?.http;
-  if (auth.type === "custom" && auth.connect?.tool && auth.connect.runAt === "run-start") {
+  const connectMeta = getAppstrateConnectMeta(auth.connect);
+  if (
+    auth.type === "custom" &&
+    auth.connect?.tool !== undefined &&
+    connectMeta?.tool &&
+    connectMeta.run_at === "run-start"
+  ) {
     if (!httpDecl0) {
       // A run-start connect.tool auth without delivery.http has nothing to
       // inject the captured session into — the manifest is mis-declared.
@@ -433,17 +512,22 @@ async function resolveDeliveries(
     // credentials source + listener. The real session header is installed at
     // boot by `runConnectLogin` (`source.setSessionOutputs`). The value is
     // intentionally empty at rest — no live session exists yet.
-    const placeholderPlan = resolveHttpDelivery(auth.type, {}, httpDecl0) ?? {
+    const placeholderPlan = resolveAfpsHttpDelivery(
+      auth.type,
+      {},
+      httpDecl0 as ConnectAfpsHttpDelivery,
+    ) ?? {
       headerName: "",
       headerPrefix: "",
       value: "",
       allowServerOverride: false,
     };
+    const authorizedUris = auth.authorized_uris ?? [];
     const httpDeliveryAuths: NonNullable<IntegrationSpawnSpec["httpDeliveryAuths"]> = {
       [row.authKey]: {
         ...placeholderPlan,
         authType: auth.type,
-        authorizedUris: [...auth.authorizedUris],
+        authorizedUris: [...authorizedUris],
         expiresAtEpochMs: null,
       },
     };
@@ -451,14 +535,14 @@ async function resolveDeliveries(
       spawnEnv: {},
       httpDeliveryAuths,
       connectLogin: {
-        toolName: auth.connect.tool,
-        ...(auth.connect.produces ? { produces: auth.connect.produces } : {}),
+        toolName: connectMeta.tool,
+        ...(connectMeta.produces ? { produces: connectMeta.produces } : {}),
         authKey: row.authKey,
         authType: auth.type,
-        authorizedUris: [...auth.authorizedUris],
+        authorizedUris: [...authorizedUris],
         deliveryHttp: httpDecl0,
         inputs,
-        ...(auth.connect.reauthOn ? { reauthOn: [...auth.connect.reauthOn] } : {}),
+        ...(connectMeta.reauth_on ? { reauthOn: [...connectMeta.reauth_on] } : {}),
       },
     };
   }
@@ -480,16 +564,17 @@ async function resolveDeliveries(
   let resolvedAtLeastOne = false;
 
   // ─── delivery.env ───
+  // AFPS 2.0: each entry carries a `{$credential.<field>}` value template
+  // (was the 1.x `{ from }` field pointer). Render it against the credential bag.
   const envMap = auth.delivery?.env;
   if (envMap && Object.keys(envMap).length > 0) {
     for (const [envKey, conf] of Object.entries(envMap)) {
-      const value = fields[conf.from];
-      if (value === undefined || value.length === 0) {
-        logger.info("delivery.env source field missing on credentials", {
+      const value = renderCredentialTemplate(conf.value, fields);
+      if (value === null) {
+        logger.info("delivery.env value template resolved empty on credentials", {
           integrationId,
           authKey: row.authKey,
           envKey,
-          from: conf.from,
         });
         continue;
       }
@@ -501,7 +586,7 @@ async function resolveDeliveries(
   // ─── delivery.http (Phase 1.5) ───
   const httpDecl = auth.delivery?.http;
   if (httpDecl) {
-    const plan = resolveHttpDelivery(auth.type, fields, httpDecl);
+    const plan = resolveAfpsHttpDelivery(auth.type, fields, httpDecl as ConnectAfpsHttpDelivery);
     if (!plan) {
       logger.info("delivery.http produced no plan (auth missing required fields)", {
         integrationId,
@@ -528,7 +613,7 @@ async function resolveDeliveries(
             authType: auth.type,
             connectionId: row.id,
             headerName: plan.headerName,
-            valueFrom: typeof httpDecl.valueFrom === "string" ? httpDecl.valueFrom : "<template>",
+            valueTemplate: httpDecl.value ?? "<default>",
             storedFieldKeys: Object.keys(fields),
           },
         );
@@ -536,7 +621,7 @@ async function resolveDeliveries(
       httpDeliveryAuths[row.authKey] = {
         ...plan,
         authType: auth.type,
-        authorizedUris: [...auth.authorizedUris],
+        authorizedUris: [...(auth.authorized_uris ?? [])],
         expiresAtEpochMs: row.expiresAt ? row.expiresAt.getTime() : null,
       };
       resolvedAtLeastOne = true;

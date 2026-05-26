@@ -22,8 +22,8 @@ function loadedPackage(id: string, timeoutOverride?: number): LoadedPackage {
     manifest: {
       name: id,
       version: "0.1.0",
-      schemaVersion: "1.3",
-      displayName: id,
+      schema_version: "2.0",
+      display_name: id,
       type: "agent",
       ...(timeoutOverride !== undefined ? { timeout: timeoutOverride } : {}),
     } as unknown as LoadedPackage["manifest"],

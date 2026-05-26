@@ -3,13 +3,10 @@
 
 import { describe, it, expect } from "bun:test";
 import {
-  BundledToolResolver,
   BundledSkillResolver,
-  BundledToolResolutionError,
   BundledSkillResolutionError,
   type Bundle,
   type BundlePackage,
-  type Tool,
 } from "../../src/resolvers/index.ts";
 import {
   BUNDLE_FORMAT_VERSION,
@@ -30,7 +27,7 @@ const enc = new TextEncoder();
 function makePackage(
   name: `@${string}/${string}`,
   version: string,
-  type: "agent" | "tool" | "skill",
+  type: "agent" | "mcp-server" | "skill",
   files: Record<string, string | Uint8Array>,
   extraManifest: Record<string, unknown> = {},
 ): BundlePackage {
@@ -64,98 +61,6 @@ function makeBundle(root: BundlePackage, deps: BundlePackage[] = []): Bundle {
     integrity: bundleIntegrity(pkgIndex),
   };
 }
-
-describe("BundledToolResolver", () => {
-  it("throws BundledToolResolutionError when the tool is absent from the bundle", async () => {
-    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
-    const bundle = makeBundle(root);
-    const resolver = new BundledToolResolver();
-    await expect(
-      resolver.resolve([{ name: "@afps/memory", version: "^1" }], bundle),
-    ).rejects.toBeInstanceOf(BundledToolResolutionError);
-  });
-
-  it("materialises a tool from the file named by manifest.entrypoint (test seam)", async () => {
-    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
-    const toolPkg = makePackage(
-      "@afps/memory",
-      "1.0.0",
-      "tool",
-      { "tool.js": "// stub — loader bypassed via importModule" },
-      { entrypoint: "tool.js" },
-    );
-    const bundle = makeBundle(root, [toolPkg]);
-    const fake: Tool = {
-      name: "note",
-      description: "stub",
-      parameters: { type: "object", properties: {}, required: [] },
-      execute: async () => ({ content: [{ type: "text", text: "ok" }] }),
-    };
-    const resolver = new BundledToolResolver({
-      importModule: async () => fake,
-    });
-    const tools = await resolver.resolve([{ name: "@afps/memory", version: "^1" }], bundle);
-    expect(tools).toHaveLength(1);
-    expect(tools[0]!.name).toBe("note");
-  });
-
-  it("rejects tool packages whose manifest has no entrypoint", async () => {
-    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
-    const toolPkg = makePackage("@afps/legacy", "1.0.0", "tool", {
-      "tool.js": "// no entrypoint declared",
-    });
-    const bundle = makeBundle(root, [toolPkg]);
-    const resolver = new BundledToolResolver();
-    await expect(
-      resolver.resolve([{ name: "@afps/legacy", version: "^1" }], bundle),
-    ).rejects.toBeInstanceOf(BundledToolResolutionError);
-  });
-
-  it("rejects tool packages whose entrypoint points at a missing file", async () => {
-    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
-    const toolPkg = makePackage("@afps/gone", "1.0.0", "tool", {}, { entrypoint: "tool.js" });
-    const bundle = makeBundle(root, [toolPkg]);
-    const resolver = new BundledToolResolver();
-    await expect(
-      resolver.resolve([{ name: "@afps/gone", version: "^1" }], bundle),
-    ).rejects.toBeInstanceOf(BundledToolResolutionError);
-  });
-
-  it("rejects tool packages with unsafe entrypoint paths", async () => {
-    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
-    const toolPkg = makePackage(
-      "@afps/trav",
-      "1.0.0",
-      "tool",
-      { "tool.js": "// unreachable" },
-      { entrypoint: "../escape.js" },
-    );
-    const bundle = makeBundle(root, [toolPkg]);
-    const resolver = new BundledToolResolver();
-    await expect(
-      resolver.resolve([{ name: "@afps/trav", version: "^1" }], bundle),
-    ).rejects.toBeInstanceOf(BundledToolResolutionError);
-  });
-
-  it("rejects tool exports missing required fields", async () => {
-    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
-    const toolPkg = makePackage(
-      "@afps/bad",
-      "1.0.0",
-      "tool",
-      { "tool.js": "// stub" },
-      { entrypoint: "tool.js" },
-    );
-    const bundle = makeBundle(root, [toolPkg]);
-    const resolver = new BundledToolResolver({
-      // Missing execute → materialiseTool succeeds but validateTool should reject.
-      importModule: async () => ({ name: "bad", description: "x", parameters: {} }) as Tool,
-    });
-    await expect(
-      resolver.resolve([{ name: "@afps/bad", version: "^1" }], bundle),
-    ).rejects.toBeInstanceOf(BundledToolResolutionError);
-  });
-});
 
 describe("BundledSkillResolver", () => {
   it("loads SKILL.md and parses frontmatter", async () => {

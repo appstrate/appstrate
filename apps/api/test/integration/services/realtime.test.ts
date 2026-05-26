@@ -393,7 +393,7 @@ describe("realtime service (integration)", () => {
         application_id: "app-m",
         run_id: "exec-m",
         package_id: "@scope/agent",
-        token_usage: { input_tokens: 10, output_tokens: 5 },
+        tokenUsage: { input_tokens: 10, output_tokens: 5 },
         cost_so_far: 0.0042,
       });
       await wait();
@@ -426,7 +426,7 @@ describe("realtime service (integration)", () => {
         application_id: "app-mr",
         run_id: "other",
         package_id: "@scope/agent",
-        token_usage: null,
+        tokenUsage: null,
         cost_so_far: 0,
       });
       await wait();
@@ -437,7 +437,7 @@ describe("realtime service (integration)", () => {
         application_id: "app-mr",
         run_id: "target",
         package_id: "@scope/agent",
-        token_usage: null,
+        tokenUsage: null,
         cost_so_far: 0,
       });
       await wait();
@@ -464,7 +464,7 @@ describe("realtime service (integration)", () => {
         application_id: "app-mp",
         run_id: "rA",
         package_id: "@scope/skip",
-        token_usage: null,
+        tokenUsage: null,
         cost_so_far: 0,
       });
       await wait();
@@ -475,7 +475,7 @@ describe("realtime service (integration)", () => {
         application_id: "app-mp",
         run_id: "rB",
         package_id: "@scope/want",
-        token_usage: null,
+        tokenUsage: null,
         cost_so_far: 0,
       });
       await wait();
@@ -503,7 +503,7 @@ describe("realtime service (integration)", () => {
         application_id: "app-A",
         run_id: "x",
         package_id: "@scope/p",
-        token_usage: null,
+        tokenUsage: null,
         cost_so_far: 0,
       });
       await wait();

@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for the integration bundler (Phase 1.05).
+ * Unit tests for the mcp-server bundler.
  *
- * Network and subprocess access are stubbed via the bundler's
- * injectable dependencies so every test is hermetic. End-to-end
- * integration with live npm / pypi is exercised by the separate
- * `integration-bundle-fixtures` suite (gated on a real installer
- * being available) — these tests cover the pure pipeline.
+ * Network and subprocess access are stubbed via the bundler's injectable
+ * dependencies so every test is hermetic. The bundler reads an author-time
+ * MCPB (`mcp-server`) manifest, vendors the author-sugar npm/pypi source
+ * declared under `_meta["dev.appstrate/vendor"]`, and emits a deterministic
+ * `.afps` archive.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -17,31 +17,61 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
-  bundleIntegration,
+  bundleMcpServer,
   BundlerError,
   packDeterministicZip,
+  readVendorSource,
   rewriteManifestForDistribution,
   suggestBundleFileName,
-} from "../src/integration-bundle/index.ts";
+} from "../src/mcp-server-bundle/index.ts";
 import { unzipArtifact } from "../src/zip.ts";
 
 const ENC = new TextEncoder();
 const DEC = new TextDecoder();
 
+/**
+ * A valid author-time MCPB (`mcp-server`) manifest. The vendoring source is
+ * declared under `_meta["dev.appstrate/vendor"]`; the AFPS identity lives under
+ * `_meta["dev.afps/mcp-server"]`.
+ */
 function authorManifest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
-    manifestVersion: "1.1",
-    type: "integration",
-    name: "@official/widget",
+  const base: Record<string, unknown> = {
+    manifest_version: "0.3",
+    name: "widget-server",
     version: "1.0.0",
-    displayName: "Widget",
+    display_name: "Widget Server",
     server: {
-      type: "npx",
-      package: {
-        registryType: "npm",
+      type: "node",
+      entry_point: "./server/index.js",
+      mcp_config: { command: "node", args: ["./server/index.js"] },
+    },
+    _meta: {
+      "dev.afps/mcp-server": { name: "@official/widget", type: "mcp-server" },
+      "dev.appstrate/vendor": {
+        source: "npm",
         identifier: "@modelcontextprotocol/server-widget",
         version: "^1.0.0",
       },
+    },
+  };
+  // Allow overriding `server` / `_meta` wholesale.
+  return { ...base, ...overrides };
+}
+
+/** A self-contained MCPB manifest (no vendoring source) — packaged verbatim. */
+function selfContainedManifest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    manifest_version: "0.3",
+    name: "widget-server",
+    version: "1.0.0",
+    display_name: "Widget Server",
+    server: {
+      type: "node",
+      entry_point: "./server/index.js",
+      mcp_config: { command: "node", args: ["./server/index.js"] },
+    },
+    _meta: {
+      "dev.afps/mcp-server": { name: "@official/widget", type: "mcp-server" },
     },
     ...overrides,
   };
@@ -51,6 +81,13 @@ function manifestFromTree(tree: Record<string, Uint8Array>): Record<string, unkn
   const raw = tree["manifest.json"];
   if (!raw) throw new Error("bundle missing manifest.json");
   return JSON.parse(DEC.decode(raw)) as Record<string, unknown>;
+}
+
+function serverOf(m: { server?: unknown }): Record<string, unknown> {
+  return (m.server ?? {}) as Record<string, unknown>;
+}
+function metaOf(m: { _meta?: unknown }): Record<string, unknown> {
+  return (m._meta ?? {}) as Record<string, unknown>;
 }
 
 describe("packDeterministicZip", () => {
@@ -91,12 +128,16 @@ describe("packDeterministicZip", () => {
 });
 
 describe("suggestBundleFileName", () => {
-  it("escapes scope separators", () => {
-    expect(suggestBundleFileName({ name: "@official/widget", version: "1.2.3" } as never)).toBe(
-      "official__widget@1.2.3.afps",
-    );
+  it("uses the scoped AFPS identity, escaping scope separators", () => {
+    expect(
+      suggestBundleFileName({
+        name: "widget-server",
+        version: "1.2.3",
+        _meta: { "dev.afps/mcp-server": { name: "@official/widget", type: "mcp-server" } },
+      } as never),
+    ).toBe("official__widget@1.2.3.afps");
   });
-  it("handles unscoped names", () => {
+  it("falls back to top-level name when AFPS identity is absent", () => {
     expect(suggestBundleFileName({ name: "widget", version: "0.0.1" } as never)).toBe(
       "widget@0.0.1.afps",
     );
@@ -104,7 +145,7 @@ describe("suggestBundleFileName", () => {
 });
 
 describe("rewriteManifestForDistribution", () => {
-  it("strips server.package and pins type+entryPoint", () => {
+  it("strips the vendor intent and pins server.type + entry_point", () => {
     const source = authorManifest() as never;
     const rewritten = rewriteManifestForDistribution(source, {
       files: {},
@@ -119,16 +160,17 @@ describe("rewriteManifestForDistribution", () => {
         resolvedAt: "2026-05-17T10:00:00.000Z",
       },
     });
-    expect(rewritten.server!.type).toBe("node");
-    expect(rewritten.server!.entryPoint).toBe("./server/node_modules/x/dist/bin.js");
-    expect(rewritten.server!.package).toBeUndefined();
-    const meta = (rewritten._meta as Record<string, unknown>) ?? {};
-    const res = meta.sourceResolution as Record<string, unknown>;
+    const server = serverOf(rewritten);
+    expect(server.type).toBe("node");
+    expect(server.entry_point).toBe("./server/node_modules/x/dist/bin.js");
+    const meta = metaOf(rewritten);
+    expect(meta["dev.appstrate/vendor"]).toBeUndefined();
+    const res = meta["dev.appstrate/source-resolution"] as Record<string, unknown>;
     expect(res.versionResolved).toBe("1.4.2");
     expect(res.integrity).toBe("sha512-abc");
   });
 
-  it("encodes bunCompat=false + reason", () => {
+  it("encodes bun-compat=false + reason", () => {
     const source = authorManifest() as never;
     const rewritten = rewriteManifestForDistribution(
       source,
@@ -147,52 +189,45 @@ describe("rewriteManifestForDistribution", () => {
       },
       { ok: false, reason: "exited before MCP handshake" },
     );
-    const meta = (rewritten._meta as Record<string, unknown>) ?? {};
-    expect(meta.bunCompat).toBe(false);
-    expect(meta.bunCompatReason).toBe("exited before MCP handshake");
+    const meta = metaOf(rewritten);
+    const bunCompat = meta["dev.appstrate/bun-compat"] as Record<string, unknown>;
+    expect(bunCompat.ok).toBe(false);
+    expect(bunCompat.reason).toBe("exited before MCP handshake");
   });
 });
 
-describe("bundleIntegration — author sugars", () => {
+describe("bundleMcpServer — author sugars", () => {
   it("validates and rejects an invalid manifest", async () => {
     await expect(
-      bundleIntegration({
-        manifest: { type: "integration", name: "broken" },
+      bundleMcpServer({
+        manifest: { manifest_version: "0.3", name: "broken" },
       }),
     ).rejects.toBeInstanceOf(BundlerError);
   });
 
-  it("bundles an already-vendored manifest (no package) without network", async () => {
-    const result = await bundleIntegration({
-      manifest: authorManifest({
-        server: { type: "npx", entryPoint: "./server/index.js" },
-      }),
+  it("bundles a self-contained manifest (no vendor source) without network", async () => {
+    const result = await bundleMcpServer({
+      manifest: selfContainedManifest(),
       prebuiltServerFiles: {
         "server/index.js": ENC.encode("#!/usr/bin/env node\nconsole.log(1);\n"),
       },
     });
-    expect(result.manifest.server!.type).toBe("node");
-    expect(result.manifest.server!.entryPoint).toBe("./server/index.js");
+    expect(serverOf(result.manifest).type).toBe("node");
+    expect(serverOf(result.manifest).entry_point).toBe("./server/index.js");
     const out = unzipArtifact(result.afps);
     expect(out["server/index.js"]).toBeDefined();
     const distributed = manifestFromTree(out);
-    expect(distributed.server).toMatchObject({ type: "node", entryPoint: "./server/index.js" });
+    expect(serverOf(distributed)).toMatchObject({
+      type: "node",
+      entry_point: "./server/index.js",
+    });
   });
 
   it("rejects conflicting prebuilt files vs vendored files", async () => {
     let installCalled = false;
     await expect(
-      bundleIntegration({
-        manifest: authorManifest({
-          server: {
-            type: "npx",
-            package: {
-              registryType: "npm",
-              identifier: "@modelcontextprotocol/server-widget",
-              version: "1.0.0",
-            },
-          },
-        }),
+      bundleMcpServer({
+        manifest: authorManifest(),
         npmDeps: {
           fetchRegistry: async () => ({
             name: "@modelcontextprotocol/server-widget",
@@ -225,17 +260,15 @@ describe("bundleIntegration — author sugars", () => {
 
   it("rejects extraFiles overriding manifest.json", async () => {
     await expect(
-      bundleIntegration({
-        manifest: authorManifest({
-          server: { type: "node", entryPoint: "./server/index.js" },
-        }),
+      bundleMcpServer({
+        manifest: selfContainedManifest(),
         extraFiles: { "manifest.json": ENC.encode("{}") },
       }),
     ).rejects.toBeInstanceOf(BundlerError);
   });
 
   it("uses npm resolver with stubbed deps and rewrites to node", async () => {
-    const result = await bundleIntegration({
+    const result = await bundleMcpServer({
       manifest: authorManifest(),
       npmDeps: {
         fetchRegistry: async (url: string) => {
@@ -265,13 +298,14 @@ describe("bundleIntegration — author sugars", () => {
       },
     });
 
-    expect(result.manifest.server!.type).toBe("node");
-    expect(result.manifest.server!.entryPoint).toBe(
+    const server = serverOf(result.manifest);
+    expect(server.type).toBe("node");
+    expect(server.entry_point).toBe(
       "./server/node_modules/@modelcontextprotocol/server-widget/dist/bin.js",
     );
-    expect(result.manifest.server!.package).toBeUndefined();
-    const meta = (result.manifest._meta as Record<string, unknown>) ?? {};
-    const res = meta.sourceResolution as Record<string, unknown>;
+    const meta = metaOf(result.manifest);
+    expect(meta["dev.appstrate/vendor"]).toBeUndefined();
+    const res = meta["dev.appstrate/source-resolution"] as Record<string, unknown>;
     expect(res).toMatchObject({
       registryType: "npm",
       identifier: "@modelcontextprotocol/server-widget",
@@ -286,13 +320,13 @@ describe("bundleIntegration — author sugars", () => {
     expect(out["manifest.json"]).toBeDefined();
   });
 
-  it("uses pypi resolver with stubbed deps and rewrites to uv", async () => {
-    const result = await bundleIntegration({
+  it("uses pypi resolver with stubbed deps and rewrites to binary", async () => {
+    const result = await bundleMcpServer({
       manifest: authorManifest({
-        server: {
-          type: "uvx",
-          package: {
-            registryType: "pypi",
+        _meta: {
+          "dev.afps/mcp-server": { name: "@official/git", type: "mcp-server" },
+          "dev.appstrate/vendor": {
+            source: "pypi",
             identifier: "mcp-server-git",
             version: "0.6.2",
           },
@@ -325,11 +359,11 @@ describe("bundleIntegration — author sugars", () => {
       },
     });
 
-    expect(result.manifest.server!.type).toBe("uv");
-    expect(result.manifest.server!.entryPoint).toBe("./server/bin/mcp-server-git");
-    expect(result.manifest.server!.package).toBeUndefined();
-    const meta = (result.manifest._meta as Record<string, unknown>) ?? {};
-    const res = meta.sourceResolution as Record<string, unknown>;
+    const server = serverOf(result.manifest);
+    expect(server.type).toBe("binary");
+    expect(server.entry_point).toBe("./server/bin/mcp-server-git");
+    const meta = metaOf(result.manifest);
+    const res = meta["dev.appstrate/source-resolution"] as Record<string, unknown>;
     expect(res).toMatchObject({
       registryType: "pypi",
       identifier: "mcp-server-git",
@@ -340,14 +374,13 @@ describe("bundleIntegration — author sugars", () => {
 
   it("surfaces registry HTTP errors as BundlerError", async () => {
     await expect(
-      bundleIntegration({
+      bundleMcpServer({
         manifest: authorManifest(),
         npmDeps: {
           fetchRegistry: async () => {
             throw new BundlerError("HTTP 500", "REGISTRY_HTTP");
           },
           installPackage: async () => {
-            // Should never be reached.
             throw new Error("install should not have been called");
           },
         },
@@ -357,7 +390,7 @@ describe("bundleIntegration — author sugars", () => {
 
   it("surfaces install failures as BundlerError", async () => {
     await expect(
-      bundleIntegration({
+      bundleMcpServer({
         manifest: authorManifest(),
         npmDeps: {
           fetchRegistry: async () => ({
@@ -375,7 +408,7 @@ describe("bundleIntegration — author sugars", () => {
 
   it("rejects npm registry response missing integrity", async () => {
     await expect(
-      bundleIntegration({
+      bundleMcpServer({
         manifest: authorManifest(),
         npmDeps: {
           fetchRegistry: async () => ({
@@ -393,10 +426,8 @@ describe("bundleIntegration — author sugars", () => {
 
   it("produces a deterministic ZIP byte-for-byte across runs", async () => {
     const make = () =>
-      bundleIntegration({
-        manifest: authorManifest({
-          server: { type: "node", entryPoint: "./server/index.js" },
-        }),
+      bundleMcpServer({
+        manifest: selfContainedManifest(),
         prebuiltServerFiles: {
           "server/index.js": ENC.encode("console.log(42);\n"),
         },
@@ -408,54 +439,41 @@ describe("bundleIntegration — author sugars", () => {
   });
 });
 
-describe("bundleIntegration — direct types (no sugar)", () => {
+describe("bundleMcpServer — self-contained (no vendor source)", () => {
   it("packages a node manifest verbatim", async () => {
-    const result = await bundleIntegration({
-      manifest: authorManifest({
-        server: { type: "node", entryPoint: "./server/index.js" },
-      }),
+    const result = await bundleMcpServer({
+      manifest: selfContainedManifest(),
       prebuiltServerFiles: {
         "server/index.js": ENC.encode("/* mcp */\n"),
       },
     });
-    expect(result.manifest.server!.type).toBe("node");
+    expect(serverOf(result.manifest).type).toBe("node");
     const out = unzipArtifact(result.afps);
     expect(out["server/index.js"]).toBeDefined();
   });
 
-  it("packages a docker manifest with no vendoring", async () => {
-    const docDigest = "sha256:" + "a".repeat(64);
-    const result = await bundleIntegration({
-      manifest: authorManifest({
+  it("packages a binary manifest with a companion doc and no vendoring", async () => {
+    const result = await bundleMcpServer({
+      manifest: selfContainedManifest({
         server: {
-          type: "docker",
-          package: { registryType: "oci", identifier: "ghcr.io/x/y", digest: docDigest },
+          type: "binary",
+          entry_point: "./server/bin/run",
+          mcp_config: { command: "./server/bin/run", args: [] },
         },
       }),
-      extraFiles: {
-        "INTEGRATION.md": ENC.encode("# x\n"),
-      },
+      prebuiltServerFiles: { "server/bin/run": ENC.encode("#!/bin/sh\n") },
+      extraFiles: { "SERVER.md": ENC.encode("# x\n") },
     });
-    expect(result.manifest.server!.type).toBe("docker");
+    expect(serverOf(result.manifest).type).toBe("binary");
     const out = unzipArtifact(result.afps);
-    expect(out["INTEGRATION.md"]).toBeDefined();
-  });
-
-  it("packages an http manifest", async () => {
-    const result = await bundleIntegration({
-      manifest: authorManifest({
-        server: { type: "http", url: "https://api.example.com/mcp" },
-      }),
-    });
-    expect(result.manifest.server!.type).toBe("http");
-    expect(result.manifest.server!.url).toBe("https://api.example.com/mcp");
+    expect(out["SERVER.md"]).toBeDefined();
   });
 });
 
 describe("npm vendor — filesystem behavior under stub install", () => {
   it("collects every file under node_modules into server/", async () => {
     let workDir = "";
-    const result = await bundleIntegration({
+    const result = await bundleMcpServer({
       manifest: authorManifest(),
       npmDeps: {
         fetchRegistry: async () => ({
@@ -495,7 +513,7 @@ describe("npm vendor — filesystem behavior under stub install", () => {
     let workDir = "";
     const workRoot = await mkdtemp(join(tmpdir(), "afps-test-"));
     try {
-      await bundleIntegration({
+      await bundleMcpServer({
         manifest: authorManifest(),
         npmDeps: {
           fetchRegistry: async () => ({
@@ -527,5 +545,75 @@ describe("npm vendor — filesystem behavior under stub install", () => {
     } finally {
       await rm(workRoot, { recursive: true, force: true }).catch(() => {});
     }
+  });
+});
+
+describe("readVendorSource", () => {
+  it("returns null when no vendor _meta is present (self-contained)", () => {
+    expect(readVendorSource(selfContainedManifest() as never)).toBeNull();
+  });
+
+  it("rejects an unknown vendor source kind", () => {
+    const m = authorManifest({
+      _meta: {
+        "dev.afps/mcp-server": { name: "@official/widget", type: "mcp-server" },
+        "dev.appstrate/vendor": { source: "cargo", identifier: "x", version: "1.0.0" },
+      },
+    });
+    expect(() => readVendorSource(m as never)).toThrow(BundlerError);
+  });
+
+  it("rejects a vendor source missing its identifier", () => {
+    const m = authorManifest({
+      _meta: {
+        "dev.afps/mcp-server": { name: "@official/widget", type: "mcp-server" },
+        "dev.appstrate/vendor": { source: "npm", version: "1.0.0" },
+      },
+    });
+    expect(() => readVendorSource(m as never)).toThrow(BundlerError);
+  });
+
+  it("rejects a vendor source missing its version", () => {
+    const m = authorManifest({
+      _meta: {
+        "dev.afps/mcp-server": { name: "@official/widget", type: "mcp-server" },
+        "dev.appstrate/vendor": { source: "pypi", identifier: "x" },
+      },
+    });
+    expect(() => readVendorSource(m as never)).toThrow(BundlerError);
+  });
+});
+
+describe("bundleMcpServer — extraFiles conflict", () => {
+  it("rejects extraFiles that collide with a vendored file", async () => {
+    await expect(
+      bundleMcpServer({
+        manifest: authorManifest(),
+        npmDeps: {
+          fetchRegistry: async () => ({
+            name: "@modelcontextprotocol/server-widget",
+            version: "1.0.0",
+            dist: { integrity: "sha512-abc" },
+          }),
+          installPackage: async ({ targetDir }) => {
+            const pkgDir = join(
+              targetDir,
+              "node_modules",
+              "@modelcontextprotocol",
+              "server-widget",
+            );
+            await mkdir(pkgDir, { recursive: true });
+            await writeFile(
+              join(pkgDir, "package.json"),
+              JSON.stringify({ name: "@modelcontextprotocol/server-widget", main: "index.js" }),
+            );
+            await writeFile(join(pkgDir, "index.js"), "console.log(1);\n");
+          },
+        },
+        extraFiles: {
+          "server/node_modules/@modelcontextprotocol/server-widget/index.js": ENC.encode("x"),
+        },
+      }),
+    ).rejects.toBeInstanceOf(BundlerError);
   });
 });

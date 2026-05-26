@@ -5,11 +5,12 @@
  * AFPS 1.3 Runner surface.
  *
  * A {@link Runner} takes a loaded bundle + execution context, wires the
- * spec resolvers ({@link ToolResolver}, {@link SkillResolver}, and the
- * bundled context source), dispatches tool invocations to the LLM, and
- * emits the resulting {@link RunEvent}s to the caller's {@link EventSink}.
- * Credentialled HTTP (integration `api_call`) is wired by the runner
- * implementation as pre-built tools, not via this generic surface.
+ * spec resolvers ({@link SkillResolver} and the bundled context source),
+ * dispatches tool invocations to the LLM, and emits the resulting
+ * {@link RunEvent}s to the caller's {@link EventSink}. Tools come from
+ * spawned `mcp-server` packages and integrations; credentialled HTTP
+ * (integration `api_call`) is wired by the runner implementation as
+ * pre-built tools, not via a generic in-process resolver.
  *
  * The runtime ships this interface as the canonical execution contract;
  * individual implementations (Pi SDK backend, mock replay, remote
@@ -21,7 +22,7 @@
 import type { EventSink } from "../interfaces/event-sink.ts";
 import type { Bundle } from "../bundle/types.ts";
 import type { ExecutionContext } from "../types/execution-context.ts";
-import type { SkillResolver, Tool, ToolResolver } from "../resolvers/types.ts";
+import type { SkillResolver } from "../resolvers/types.ts";
 
 export interface RunOptions {
   /** Already-loaded {@link Bundle} (root package + transitively resolved deps). */
@@ -35,17 +36,9 @@ export interface RunOptions {
   /**
    * Internal resolvers — defaulted by the runner to the Bundled*
    * implementations. Override only for advanced cases (custom resolution
-   * of tools from an external registry, etc.).
+   * of skills from an external registry, etc.).
    */
-  toolResolver?: ToolResolver;
   skillResolver?: SkillResolver;
-
-  /**
-   * Per-tool override, applied AFTER the ToolResolver result. Use this
-   * to swap a single tool (e.g. an in-memory `@afps/memory` in tests)
-   * without replacing the whole resolver.
-   */
-  toolOverrides?: Record<string, Tool>;
 
   /** Cancellation token. Runner MUST stop emitting and reject if aborted. */
   signal?: AbortSignal;

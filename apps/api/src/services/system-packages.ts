@@ -70,3 +70,28 @@ export function isSystemPackage(id: string): boolean {
 export function getSystemPackagesByType(type: PackageType): SystemPackageEntry[] {
   return [...systemPackages.values()].filter((e) => e.type === type);
 }
+
+/**
+ * Test-only: inject system-package fixtures without reading from disk.
+ * Lets integration tests exercise `syncSystemPackagesToDb` against a
+ * controlled set of packages (insert / update / drift) instead of the
+ * real 63-bundle directory.
+ *
+ * `canonical` is the highest-semver-per-id Map the boot sync UPSERTs
+ * into `packages`. `versions` is the flat list every version of every
+ * package registered into `package_versions`. Both arguments are
+ * captured by reference; tests should pass fresh objects per test.
+ */
+export function _setSystemPackagesForTesting(
+  canonical: ReadonlyMap<string, SystemPackageEntry>,
+  versions: readonly SystemPackageEntry[],
+): void {
+  systemPackages = canonical;
+  systemPackageVersions = versions;
+}
+
+/** Test-only: reset the in-memory registry back to its empty initial state. */
+export function _resetSystemPackagesForTesting(): void {
+  systemPackages = new Map();
+  systemPackageVersions = [];
+}

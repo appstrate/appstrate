@@ -12,16 +12,27 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { getIntegration, listIntegrations } from "../../../src/services/integration-service.ts";
+import {
+  localIntegrationManifest,
+  httpHeaderDelivery,
+} from "../../helpers/integration-manifests.ts";
 
 function validIntegrationManifest(name = "@official/gmail"): Record<string, unknown> {
-  return {
-    manifestVersion: "1.1",
-    type: "integration",
+  return localIntegrationManifest({
     name,
-    version: "1.0.0",
     displayName: "Gmail",
-    server: { type: "node", entryPoint: "./server/index.js" },
-  };
+    auths: {
+      api: {
+        type: "api_key",
+        authorizedUris: ["https://gmail.googleapis.com/**"],
+        delivery: httpHeaderDelivery({
+          name: "Authorization",
+          prefix: "Bearer ",
+          field: "api_key",
+        }),
+      },
+    },
+  }) as unknown as Record<string, unknown>;
 }
 
 describe("integration-service", () => {
@@ -49,7 +60,7 @@ describe("integration-service", () => {
       const out = await getIntegration(ctx.orgId, "@official/gmail");
       expect(out).not.toBeNull();
       expect(out!.id).toBe("@official/gmail");
-      expect(out!.manifest.displayName).toBe("Gmail");
+      expect(out!.manifest.display_name).toBe("Gmail");
       expect(out!.source).toBe("local");
     });
 

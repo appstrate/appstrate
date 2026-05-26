@@ -23,6 +23,10 @@ import { FieldsStrategy } from "./fields-strategy.ts";
 import { LoginStrategy } from "./login-strategy.ts";
 import { LoginSecretStrategy } from "./login-secret-strategy.ts";
 import { OrchestratedStrategy, type ConnectToolExecutor } from "./orchestrated-strategy.ts";
+import {
+  getAppstrateConnectMeta,
+  type AfpsManifestConnect,
+} from "../integration-manifest-helpers.ts";
 import type { IntegrationConnectStrategy } from "./strategy.ts";
 
 type IntegrationAuthDef = NonNullable<IntegrationManifest["auths"]>[string];
@@ -39,26 +43,31 @@ export function resolveStrategy(
   switch (auth.type) {
     case "oauth2":
       return new OAuth2Strategy();
-    case "custom":
+    case "custom": {
       // Declarative single login request → Login.
-      if (auth.connect?.login) return new LoginStrategy();
-      // connect.tool + runAt:"run-start" → store-the-secret only (P2). The
+      const connect = auth.connect as AfpsManifestConnect | undefined;
+      if (connect?.login) return new LoginStrategy();
+      // AFPS 2.0: `connect.tool` is the marker object `{}`; the orchestrated
+      // tool name + `run_at` policy live under `connect._meta["dev.appstrate/connect"]`.
+      const connectMeta = getAppstrateConnectMeta(connect);
+      // connect.tool + run_at:"run-start" → store-the-secret only (P2). The
       // session is minted at each agent run by the sidecar's connect-login
       // primitive — no executor needed at dashboard connect.
-      if (auth.connect?.tool && auth.connect.runAt === "run-start") {
+      if (connect?.tool !== undefined && connectMeta?.run_at === "run-start") {
         return new LoginSecretStrategy();
       }
       // Code-orchestrated login → Orchestrated (requires the connect-run substrate).
-      if (auth.connect?.tool) {
+      if (connect?.tool !== undefined) {
         if (!opts.connectToolExecutor) {
           throw invalidRequest(
-            `Auth '${auth.connect.tool}' uses connect.tool (orchestrated login), which runs in the connect-run substrate and is not available on this path`,
+            `Auth tool '${connectMeta?.tool ?? "?"}' uses connect.tool (orchestrated login), which runs in the connect-run substrate and is not available on this path`,
           );
         }
         return new OrchestratedStrategy(opts.connectToolExecutor);
       }
       // Otherwise paste-the-bag Fields.
       return new FieldsStrategy();
+    }
     case "api_key":
     case "basic":
       return new FieldsStrategy();

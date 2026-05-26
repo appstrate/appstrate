@@ -69,7 +69,7 @@ async function seedRunWithSink(
      * the row without usage (exercises the heuristic on purpose).
      */
     tokenUsage?: Record<string, number> | null;
-    /** Persisted on `runs.model_source` — forwarded to the `afterRun` hook. */
+    /** Persisted on `runs.modelSource` — forwarded to the `afterRun` hook. */
     modelSource?: string | null;
   } = {},
 ): Promise<string> {
@@ -1061,7 +1061,7 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
 });
 
 // ---------------------------------------------------------------------------
-// `afterRun` hook contract — finalize MUST forward `runs.model_source` so
+// `afterRun` hook contract — finalize MUST forward `runs.modelSource` so
 // module billing handlers can distinguish platform-paid (system) runs from
 // BYOK (org) runs. Skipping the field collapses every run to "system" in
 // cloud's `recordUsage` fallback and silently bills runs the platform was

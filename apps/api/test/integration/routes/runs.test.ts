@@ -753,13 +753,13 @@ describe("Runs API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.userName).toBeString();
-      expect(body.userName).toBeTruthy();
-      expect(body.endUserName).toBeNull();
-      expect(body.apiKeyName).toBeNull();
+      expect(body.user_name).toBeString();
+      expect(body.user_name).toBeTruthy();
+      expect(body.end_user_name).toBeNull();
+      expect(body.api_key_name).toBeNull();
       // scheduleName is populated from a LEFT JOIN on package_schedules — null
       // when the run has no scheduleId.
-      expect(body.scheduleName).toBeNull();
+      expect(body.schedule_name).toBeNull();
     });
 
     it("GET /api/runs/:id returns endUserName for end-user runs", async () => {
@@ -783,8 +783,8 @@ describe("Runs API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.endUserName).toBe("Alice External");
-      expect(body.userName).toBeNull();
+      expect(body.end_user_name).toBe("Alice External");
+      expect(body.user_name).toBeNull();
     });
 
     it("GET /api/runs/:id returns endUserName from externalId fallback", async () => {
@@ -808,7 +808,7 @@ describe("Runs API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.endUserName).toBe("ext-user-123");
+      expect(body.end_user_name).toBe("ext-user-123");
     });
 
     it("GET /api/runs/:id returns apiKeyName for API key runs", async () => {
@@ -833,7 +833,7 @@ describe("Runs API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.apiKeyName).toBe("My Production Key");
+      expect(body.api_key_name).toBe("My Production Key");
     });
 
     it("GET /api/runs/:id returns scheduleName for scheduled runs", async () => {
@@ -859,8 +859,8 @@ describe("Runs API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.scheduleName).toBe("Daily Sync");
-      expect(body.userName).toBeNull();
+      expect(body.schedule_name).toBe("Daily Sync");
+      expect(body.user_name).toBeNull();
     });
 
     it("GET /api/agents/:scope/:name/runs returns enriched fields in list", async () => {
@@ -884,11 +884,11 @@ describe("Runs API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.data).toHaveLength(1);
-      expect(body.data[0].userName).toBeString();
-      expect(body.data[0].userName).toBeTruthy();
-      expect(body.data[0].endUserName).toBeNull();
-      expect(body.data[0].apiKeyName).toBeNull();
-      expect(body.data[0].scheduleName).toBeNull();
+      expect(body.data[0].user_name).toBeString();
+      expect(body.data[0].user_name).toBeTruthy();
+      expect(body.data[0].end_user_name).toBeNull();
+      expect(body.data[0].api_key_name).toBeNull();
+      expect(body.data[0].schedule_name).toBeNull();
     });
   });
 });

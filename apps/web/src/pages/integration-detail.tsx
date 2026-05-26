@@ -14,6 +14,10 @@
  *     (a missing client locks the connection list right below it). A collapsed
  *     admin "Règles d'accès" section at the bottom holds the org-wide policy
  *     (block member connections, default connection, per-agent pin exceptions).
+ *   - Outils — read-only catalog of tools the integration exposes (resolved
+ *     server-side via `resolveIntegrationToolCatalog`: MCPB-canonical from
+ *     the referenced mcp-server minus `hidden_tools` and connect.tool
+ *     primitives). Per-tool description + required scopes + URL patterns.
  *   - À propos — metadata (version, author, license, repo, …), privacy policy,
  *     keywords.
  *   - Versions — read-only release history (non-system packages only).
@@ -144,7 +148,7 @@ function OAuthClientForm({ packageId, authKey }: { packageId: string; authKey: s
         <CollapsibleContent className="px-4 pb-4">
           {client && (
             <p className="text-muted-foreground mb-3 text-xs">
-              {t("integration.oauthClient.registered", { clientId: client.clientId })}
+              {t("integration.oauthClient.registered", { clientId: client.client_id })}
             </p>
           )}
           <form className="grid gap-3 sm:grid-cols-2" onSubmit={submit}>
@@ -156,7 +160,7 @@ function OAuthClientForm({ packageId, authKey }: { packageId: string; authKey: s
                 id={`cid-${authKey}`}
                 value={clientId}
                 onChange={(e) => setClientId(e.target.value)}
-                placeholder={client?.clientId ?? ""}
+                placeholder={client?.client_id ?? ""}
                 data-testid={`oauth-clientid-${authKey}`}
               />
             </div>
@@ -170,7 +174,7 @@ function OAuthClientForm({ packageId, authKey }: { packageId: string; authKey: s
                 value={clientSecret}
                 onChange={(e) => setClientSecret(e.target.value)}
                 disabled={publicClient}
-                placeholder={client?.hasClientSecret ? "••••••••" : ""}
+                placeholder={client?.has_client_secret ? "••••••••" : ""}
                 data-testid={`oauth-clientsecret-${authKey}`}
               />
             </div>
@@ -183,7 +187,7 @@ function OAuthClientForm({ packageId, authKey }: { packageId: string; authKey: s
                 type="url"
                 value={redirectUri}
                 onChange={(e) => setRedirectUri(e.target.value)}
-                placeholder={client?.redirectUri ?? ""}
+                placeholder={client?.redirect_uri ?? ""}
               />
             </div>
             <label className="flex items-center gap-2 text-sm sm:col-span-2">
@@ -264,13 +268,13 @@ function AuthSection({
 }) {
   const { t } = useTranslation("settings");
   const isOAuth = status.type === "oauth2";
-  const clientMissing = isOAuth && !status.hasOAuthClient;
+  const clientMissing = isOAuth && !status.has_oauth_client;
 
   return (
-    <div className="bg-card rounded-lg border p-4" data-testid={`auth-section-${status.authKey}`}>
+    <div className="bg-card rounded-lg border p-4" data-testid={`auth-section-${status.auth_key}`}>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <ShieldCheck size={16} className="text-muted-foreground" />
-        <span className="font-mono text-sm font-semibold">{status.authKey}</span>
+        <span className="font-mono text-sm font-semibold">{status.auth_key}</span>
         <Badge variant="outline">{status.type}</Badge>
         {status.required ? (
           <Badge variant="default">{t("integration.auth.required")}</Badge>
@@ -294,12 +298,13 @@ function AuthSection({
               <span className="font-mono">{status.audience}</span>
             </p>
           )}
-          {authDecl.authorizedUris.length > 0 && (
+          {(authDecl.authorized_uris?.length ?? 0) > 0 && (
             <p className="truncate">
               <span className="font-semibold">{t("integration.auth.authorizedUris")}:</span>{" "}
               <span className="font-mono text-[0.7rem]">
-                {authDecl.authorizedUris.slice(0, 3).join(", ")}
-                {authDecl.authorizedUris.length > 3 && ` (+${authDecl.authorizedUris.length - 3})`}
+                {authDecl.authorized_uris!.slice(0, 3).join(", ")}
+                {authDecl.authorized_uris!.length > 3 &&
+                  ` (+${authDecl.authorized_uris!.length - 3})`}
               </span>
             </p>
           )}
@@ -311,7 +316,7 @@ function AuthSection({
           a fix that's right here, not in another tab. */}
       {isOAuth && isAdmin && (
         <div className="mb-3">
-          <OAuthClientForm packageId={packageId} authKey={status.authKey} />
+          <OAuthClientForm packageId={packageId} authKey={status.auth_key} />
         </div>
       )}
 
@@ -320,7 +325,7 @@ function AuthSection({
       {clientMissing ? (
         <p
           className="text-muted-foreground mb-2 text-xs"
-          data-testid={`no-oauth-client-hint-${status.authKey}`}
+          data-testid={`no-oauth-client-hint-${status.auth_key}`}
         >
           {isAdmin ? t("integration.auth.noClientHintAdmin") : t("integration.auth.noClientHint")}
         </p>
@@ -328,7 +333,7 @@ function AuthSection({
         <div className="mb-2 flex items-center justify-end">
           <InlineConnectButton
             packageId={packageId}
-            authKey={status.authKey}
+            authKey={status.auth_key}
             intent="connect"
             label={t("integration.auth.addAccount")}
             forceAccountSelect={status.connections.length > 0}
@@ -446,7 +451,7 @@ function OrgDefaultSection({ packageId }: { packageId: string }) {
   const upsert = useUpsertIntegrationOrgDefault();
   const remove = useDeleteIntegrationOrgDefault();
 
-  const shared = (connections ?? []).filter((c) => c.sharedWithOrg === true);
+  const shared = (connections ?? []).filter((c) => c.shared_with_org === true);
   const connectionDisplay = (id: string): string => {
     const c = (connections ?? []).find((x) => x.id === id);
     if (!c) return id;
@@ -457,11 +462,11 @@ function OrgDefaultSection({ packageId }: { packageId: string }) {
   const [enforce, setEnforce] = useState(false);
 
   // Seed the form from the persisted default once loaded.
-  const seededFor = orgDefault?.connectionId ?? null;
+  const seededFor = orgDefault?.connection_id ?? null;
   const [seeded, setSeeded] = useState<string | null>(null);
   if (seededFor !== seeded) {
     setSeeded(seededFor);
-    setConnectionId(orgDefault?.connectionId ?? "");
+    setConnectionId(orgDefault?.connection_id ?? "");
     setEnforce(orgDefault?.enforce ?? false);
   }
 
@@ -551,11 +556,11 @@ function PinManagementSection({ packageId }: { packageId: string }) {
   const [newAgent, setNewAgent] = useState("");
   const [newConnectionId, setNewConnectionId] = useState("");
 
-  const pinnableConnections = (connections ?? []).filter((c) => c.sharedWithOrg === true);
+  const pinnableConnections = (connections ?? []).filter((c) => c.shared_with_org === true);
 
   // Lookup helpers for the table
   const agentDisplayName = (id: string): string =>
-    consumingAgents?.find((a) => a.packageId === id)?.displayName ?? id;
+    consumingAgents?.find((a) => a.packageId === id)?.display_name ?? id;
   const connectionDisplay = (id: string): string => {
     const c = (connections ?? []).find((x) => x.id === id);
     if (!c) return id;
@@ -581,7 +586,7 @@ function PinManagementSection({ packageId }: { packageId: string }) {
 
   // Only include agents not already pinned.
   const alreadyPinnedAgentIds = new Set(
-    (pins ?? []).filter((p) => p.integrationPackageId === packageId).map((p) => p.packageId),
+    (pins ?? []).filter((p) => p.integration_package_id === packageId).map((p) => p.packageId),
   );
   const pinnableAgents = (consumingAgents ?? []).filter(
     (a) => !alreadyPinnedAgentIds.has(a.packageId),
@@ -620,17 +625,17 @@ function PinManagementSection({ packageId }: { packageId: string }) {
             <tbody>
               {(pins ?? []).map((p) => (
                 <tr
-                  key={`${p.packageId}-${p.authKey}`}
+                  key={`${p.packageId}-${p.auth_key}`}
                   className="border-border border-t"
-                  data-testid={`pin-row-${p.packageId}-${p.authKey}`}
+                  data-testid={`pin-row-${p.packageId}-${p.auth_key}`}
                 >
                   <td className="px-3 py-2">{agentDisplayName(p.packageId)}</td>
                   <td className="px-3 py-2">
                     <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 font-mono text-[10px]">
-                      {p.authKey}
+                      {p.auth_key}
                     </span>
                   </td>
-                  <td className="px-3 py-2">{connectionDisplay(p.connectionId)}</td>
+                  <td className="px-3 py-2">{connectionDisplay(p.connection_id)}</td>
                   <td className="px-3 py-2">
                     <Button
                       size="icon"
@@ -683,7 +688,7 @@ function PinManagementSection({ packageId }: { packageId: string }) {
               <option value="">—</option>
               {pinnableAgents.map((a) => (
                 <option key={a.packageId} value={a.packageId}>
-                  {a.displayName}
+                  {a.display_name}
                 </option>
               ))}
             </select>
@@ -738,7 +743,7 @@ function ConnectionRow({
   // `label` is the single source of truth (set at creation to the identity or
   // "Connexion N"); render it verbatim.
   const name = connectionDisplayLabel(connection);
-  const isShared = connection.sharedWithOrg === true;
+  const isShared = connection.shared_with_org === true;
   const startEdit = () => {
     setDraftLabel(connection.label ?? "");
     setEditing(true);
@@ -831,13 +836,13 @@ function ConnectionRow({
                   {t("integration.connection.sharedBadge")}
                 </Badge>
               )}
-              {connection.needsReconnection && (
+              {connection.needs_reconnection && (
                 <Badge variant="destructive">{t("integration.auth.needsReconnection")}</Badge>
               )}
             </div>
-            {connection.scopesGranted.length > 0 && (
+            {connection.scopes_granted.length > 0 && (
               <p className="text-muted-foreground truncate font-mono text-[0.65rem]">
-                {connection.scopesGranted.join(" ")}
+                {connection.scopes_granted.join(" ")}
               </p>
             )}
             {connection.expiresAt && (
@@ -905,12 +910,13 @@ function ConnectionRow({
 
 function MetadataBlock({ manifest }: { manifest: IntegrationManifestView }) {
   const { t } = useTranslation("settings");
-  const author =
-    typeof manifest.author === "string" ? manifest.author : (manifest.author?.name ?? "");
-  const repo =
-    typeof manifest.repository === "string"
-      ? manifest.repository
-      : (manifest.repository?.url ?? "");
+  // AFPS 2.0: author moved under `_meta["dev.appstrate/package"].author`,
+  // repository is now a top-level string, and the old `server`/`compatibility`
+  // fields are gone — server type is expressed by the `source.kind` discriminant.
+  const pkgMeta = manifest._meta?.["dev.appstrate/package"] as { author?: unknown } | undefined;
+  const author = typeof pkgMeta?.author === "string" ? pkgMeta.author : "";
+  const repo = typeof manifest.repository === "string" ? manifest.repository : "";
+  const sourceKind = manifest.source?.kind ?? "api";
   const rows: Array<[string, React.ReactNode]> = [
     [t("integration.field.version"), <span className="font-mono">{manifest.version}</span>],
     [t("integration.field.author"), author || "—"],
@@ -925,20 +931,7 @@ function MetadataBlock({ manifest }: { manifest: IntegrationManifestView }) {
         "—"
       ),
     ],
-    [
-      t("integration.field.serverType"),
-      <span className="font-mono">{manifest.server?.type ?? "api_call"}</span>,
-    ],
-    [
-      t("integration.field.compatibility"),
-      manifest.compatibility ? (
-        <span className="font-mono">
-          afps:{manifest.compatibility.afps ?? "—"} mcp:{manifest.compatibility.mcp ?? "—"}
-        </span>
-      ) : (
-        "—"
-      ),
-    ],
+    [t("integration.field.serverType"), <span className="font-mono">{sourceKind}</span>],
   ];
   return (
     <dl className="grid grid-cols-1 gap-y-2 text-sm sm:grid-cols-[max-content_1fr] sm:gap-x-4">
@@ -1012,7 +1005,7 @@ export function IntegrationDetailPage() {
       <SharedHeader
         detail={{
           id: packageId,
-          displayName: m.displayName,
+          displayName: m.display_name ?? packageId,
           description: m.description ?? "",
           source,
           type: "integration",
@@ -1068,6 +1061,14 @@ export function IntegrationDetailPage() {
           <TabsTrigger value="connections" data-testid="tab-connections">
             {t("integration.tabs.connections")}
           </TabsTrigger>
+          <TabsTrigger value="tools" data-testid="tab-tools">
+            {t("integration.tabs.tools")}
+            {detail.tool_catalog && detail.tool_catalog.length > 0 && (
+              <Badge variant="outline" className="ml-1.5 text-[0.65rem]">
+                {detail.tool_catalog.length}
+              </Badge>
+            )}
+          </TabsTrigger>
           <TabsTrigger value="about" data-testid="tab-about">
             {t("integration.tabs.about")}
           </TabsTrigger>
@@ -1088,11 +1089,11 @@ export function IntegrationDetailPage() {
                 <p className="text-muted-foreground text-sm">{t("integration.auth.none")}</p>
               ) : (
                 detail.auths.map((authStatus) => {
-                  const declared = (m.auths ?? {})[authStatus.authKey];
+                  const declared = (m.auths ?? {})[authStatus.auth_key];
                   if (!declared) return null;
                   return (
                     <AuthSection
-                      key={authStatus.authKey}
+                      key={authStatus.auth_key}
                       packageId={packageId}
                       status={authStatus}
                       authDecl={declared}
@@ -1104,32 +1105,82 @@ export function IntegrationDetailPage() {
               {isAdmin && (
                 <AccessRulesSection
                   packageId={packageId}
-                  blockUserConnections={summary?.blockUserConnections ?? false}
+                  blockUserConnections={summary?.block_user_connections ?? false}
                 />
               )}
             </>
           )}
         </TabsContent>
 
+        {/* ─── Outils (effective tool catalog — read-only) ─── */}
+        <TabsContent value="tools" className="mt-4">
+          <div className="max-w-2xl space-y-3">
+            <p className="text-muted-foreground text-xs">{t("integration.tools.intro")}</p>
+            {(detail.tool_catalog ?? []).length === 0 ? (
+              <p className="text-muted-foreground text-sm">{t("integration.tools.none")}</p>
+            ) : (
+              <div className="grid gap-2">
+                {(detail.tool_catalog ?? []).map((tool) => {
+                  const scopes = tool.policy?.required_scopes ?? [];
+                  const patterns = tool.policy?.url_patterns ?? [];
+                  return (
+                    <div
+                      key={tool.name}
+                      className="bg-muted/30 rounded-md border p-3 text-xs"
+                      data-testid={`integration-tool-${tool.name}`}
+                    >
+                      <div className="flex flex-wrap items-baseline gap-2">
+                        <span className="font-mono text-sm font-semibold">{tool.name}</span>
+                        {tool.policy?.required_auth_key && (
+                          <Badge variant="outline" className="text-[0.65rem]">
+                            auth: {tool.policy.required_auth_key}
+                          </Badge>
+                        )}
+                      </div>
+                      {tool.description && (
+                        <p className="text-muted-foreground mt-1">{tool.description}</p>
+                      )}
+                      {scopes.length > 0 && (
+                        <p className="text-muted-foreground mt-2">
+                          {t("integration.tools.requires")}{" "}
+                          {scopes.map((s) => (
+                            <Badge
+                              key={s}
+                              variant="secondary"
+                              className="mr-1 font-mono text-[0.65rem]"
+                            >
+                              {s}
+                            </Badge>
+                          ))}
+                        </p>
+                      )}
+                      {patterns.length > 0 && (
+                        <details className="mt-2">
+                          <summary className="text-muted-foreground cursor-pointer text-[11px]">
+                            {t("integration.tools.urlPatterns", { count: patterns.length })}
+                          </summary>
+                          <ul className="text-muted-foreground mt-1 ml-3 list-disc font-mono text-[11px]">
+                            {patterns.map((p, i) => (
+                              <li key={i}>
+                                {p.methods?.length ? `${p.methods.join("|")} ` : ""}
+                                {p.pattern}
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </TabsContent>
+
         {/* ─── À propos (metadata) ─── */}
         <TabsContent value="about" className="mt-4">
           <div className="max-w-2xl space-y-4">
             <MetadataBlock manifest={m} />
-            {m.privacyPolicy && (
-              <p className="text-xs">
-                <span className="text-muted-foreground">
-                  {t("integration.field.privacyPolicy")}:
-                </span>{" "}
-                <a
-                  href={m.privacyPolicy}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary break-all underline"
-                >
-                  {m.privacyPolicy}
-                </a>
-              </p>
-            )}
             {m.keywords && m.keywords.length > 0 && (
               <div className="flex flex-wrap gap-1">
                 {m.keywords.map((k) => (
@@ -1176,7 +1227,7 @@ export function IntegrationDetailPage() {
         title={t("btn.confirm", { ns: "common" })}
         description={t("packages.deleteConfirm", {
           type: t("packages.type.integration"),
-          name: m.displayName,
+          name: m.display_name ?? packageId,
         })}
         isPending={deletePkg.isPending}
         onConfirm={() =>

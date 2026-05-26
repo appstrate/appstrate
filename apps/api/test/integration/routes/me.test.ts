@@ -218,9 +218,9 @@ describe("Me API (/api/me)", () => {
   describe("GET /api/me/connections", () => {
     type Group = {
       kind: string;
-      sourceId: string;
-      totalConnections: number;
-      connections: Array<{ connectionId: string; kind: string; org: { id: string } }>;
+      source_id: string;
+      total_connections: number;
+      connections: Array<{ connection_id: string; kind: string; org: { id: string } }>;
     };
 
     it("returns the caller's integration connections grouped by source", async () => {
@@ -240,10 +240,10 @@ describe("Me API (/api/me)", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as { object: "list"; data: Group[] };
       expect(body.object).toBe("list");
-      const group = body.data.find((g) => g.sourceId === "@conn/gmail");
+      const group = body.data.find((g) => g.source_id === "@conn/gmail");
       expect(group).toBeDefined();
       expect(group?.kind).toBe("integration");
-      expect(group?.totalConnections).toBe(1);
+      expect(group?.total_connections).toBe(1);
       expect(group?.connections[0]?.kind).toBe("integration");
     });
 
@@ -270,7 +270,7 @@ describe("Me API (/api/me)", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as { data: Group[] };
-      const sourceIds = body.data.map((g) => g.sourceId);
+      const sourceIds = body.data.map((g) => g.source_id);
       expect(sourceIds).toContain("@conn/a");
       expect(sourceIds).toContain("@conn/b");
     });
@@ -291,7 +291,7 @@ describe("Me API (/api/me)", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as { data: Group[] };
-      expect(body.data.find((g) => g.sourceId === "@conn/secret")).toBeUndefined();
+      expect(body.data.find((g) => g.source_id === "@conn/secret")).toBeUndefined();
     });
 
     it("returns 401 without authentication", async () => {

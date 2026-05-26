@@ -15,7 +15,7 @@ import { CONFIG_BY_TYPE, type PackageTypeConfig } from "./package-items/config.t
 import { isValidVersion } from "@appstrate/core/semver";
 import type { PackageType } from "@appstrate/core/validation";
 
-/** Insert or update a skill/tool during post-install. */
+/** Insert or update a skill during post-install. */
 async function upsertItem(
   orgId: string,
   packageId: string,
@@ -24,13 +24,13 @@ async function upsertItem(
   manifest: Record<string, unknown>,
 ): Promise<void> {
   const existing = await getOrgItem(orgId, packageId, cfg);
-  if (existing && existing.lockVersion != null) {
+  if (existing && existing.lock_version != null) {
     // Re-install: update existing package
     await updateOrgItem(
       orgId,
       packageId,
       { manifest, content: item.content },
-      existing.lockVersion,
+      existing.lock_version,
     );
   } else {
     await createOrgItem(orgId, item, cfg, manifest);
@@ -39,8 +39,8 @@ async function upsertItem(
 
 /**
  * Run per-type post-install side-effects after a package is saved to the DB.
- * Creates a version in packageVersions for ALL types (agent, skill, integration),
- * handles skill/tool upsert + storage.
+ * Creates a version in packageVersions for ALL types (agent, skill, integration,
+ * mcp-server), handles skill upsert + per-type storage upload.
  */
 export async function postInstallPackage(params: {
   packageType: PackageType;
@@ -56,10 +56,10 @@ export async function postInstallPackage(params: {
   const { packageType, packageId, orgId, userId, content, files, zipBuffer } = params;
 
   const manifest = parseManifestFromFiles(files);
-  const manifestVersion = manifest.version as string | undefined;
+  const declaredVersion = manifest.version as string | undefined;
 
   // Determine version: explicit override > manifest version > error
-  const rawVersion = params.version ?? manifestVersion;
+  const rawVersion = params.version ?? declaredVersion;
   if (!rawVersion || !isValidVersion(rawVersion)) {
     throw new Error(`Package ${packageId}: missing or invalid version in manifest`);
   }
@@ -82,6 +82,13 @@ export async function postInstallPackage(params: {
     // in the AFPS bundle — store the whole tree under integrations/.
     // Phase 1.2a's resolver consumes the same payload at spawn time.
     await uploadPackageFiles("integrations", orgId, packageId, files);
+  }
+
+  if (packageType === "mcp-server" && Object.keys(files).length > 0) {
+    // AFPS 2.0 §3.4 — the verbatim MCPB manifest plus any vendored server
+    // tree. Stored under mcp-servers/ so the spawn resolver can serve the
+    // bundle to an integration whose `source.kind: "local"` references it.
+    await uploadPackageFiles("mcp-servers", orgId, packageId, files);
   }
 
   try {

@@ -59,7 +59,7 @@ export function PlanCard({
         </span>
         <span className="text-muted-foreground text-xs">
           {t("onboarding.planCredits", {
-            count: plan.creditQuota.toLocaleString(),
+            count: plan.credit_quota.toLocaleString(),
           })}
         </span>
       </div>

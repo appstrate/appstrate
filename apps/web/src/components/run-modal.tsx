@@ -39,7 +39,7 @@ export function RunModal({
     <Modal
       open={open}
       onClose={guardedClose}
-      title={t("input.title", { name: agent.displayName })}
+      title={t("input.title", { name: agent.display_name })}
       actions={null}
     >
       {open && (

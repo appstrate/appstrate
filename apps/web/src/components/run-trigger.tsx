@@ -23,50 +23,50 @@ export function RunTrigger({ run }: { run: EnrichedRun }) {
     return (
       <span className="text-muted-foreground inline-flex min-w-0 items-center gap-1 text-xs">
         <Calendar size={12} className="shrink-0" />
-        <span className="truncate">{run.scheduleName || run.scheduleId}</span>
+        <span className="truncate">{run.schedule_name || run.scheduleId}</span>
       </span>
     );
   }
-  if (run.endUserName) {
+  if (run.end_user_name) {
     return (
       <span className="text-muted-foreground inline-flex min-w-0 items-center gap-1 text-xs">
         <UserCircle size={12} className="shrink-0" />
-        <span className="truncate">{run.endUserName}</span>
+        <span className="truncate">{run.end_user_name}</span>
       </span>
     );
   }
-  if (run.apiKeyName) {
+  if (run.api_key_name) {
     return (
       <span className="text-muted-foreground inline-flex min-w-0 items-center gap-1 text-xs">
         <Key size={12} className="shrink-0" />
-        <span className="truncate">{run.apiKeyName}</span>
+        <span className="truncate">{run.api_key_name}</span>
       </span>
     );
   }
-  if (run.runnerName) {
-    const tooltip = run.runnerKind ? `${run.runnerName} (${run.runnerKind})` : run.runnerName;
+  if (run.runner_name) {
+    const tooltip = run.runner_kind ? `${run.runner_name} (${run.runner_kind})` : run.runner_name;
     return (
       <span
         className="text-muted-foreground inline-flex min-w-0 items-center gap-1 text-xs"
-        title={run.userName ? `${tooltip} · ${run.userName}` : tooltip}
+        title={run.user_name ? `${tooltip} · ${run.user_name}` : tooltip}
       >
-        <RunnerIcon kind={run.runnerKind} />
-        <span className="truncate">{run.runnerName}</span>
-        {run.userName ? (
+        <RunnerIcon kind={run.runner_kind} />
+        <span className="truncate">{run.runner_name}</span>
+        {run.user_name ? (
           <>
             <span className="shrink-0">·</span>
             <User size={12} className="shrink-0" />
-            <span className="truncate">{run.userName}</span>
+            <span className="truncate">{run.user_name}</span>
           </>
         ) : null}
       </span>
     );
   }
-  if (run.userName) {
+  if (run.user_name) {
     return (
       <span className="text-muted-foreground inline-flex min-w-0 items-center gap-1 text-xs">
         <User size={12} className="shrink-0" />
-        <span className="truncate">{run.userName}</span>
+        <span className="truncate">{run.user_name}</span>
       </span>
     );
   }

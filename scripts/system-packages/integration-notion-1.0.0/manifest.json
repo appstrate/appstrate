@@ -1,36 +1,48 @@
 {
-  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
-  "manifestVersion": "1.1",
-  "type": "integration",
   "name": "@appstrate/notion",
   "version": "1.0.0",
-  "displayName": "Notion (API)",
+  "type": "integration",
+  "schema_version": "2.0",
+  "display_name": "Notion (API)",
   "description": "All-in-one workspace for notes and docs",
-  "license": "Apache-2.0",
-  "author": "Appstrate",
-  "icon": "notion",
   "keywords": ["productivity", "documentation"],
-  "apiCall": {
-    "authKey": "primary"
+  "license": "Apache-2.0",
+  "icon": "notion",
+  "source": {
+    "kind": "api",
+    "api": {}
   },
   "auths": {
     "primary": {
       "type": "oauth2",
-      "required": true,
-      "authorizedUris": ["https://api.notion.com/**"],
-      "authorizationUrl": "https://api.notion.com/v1/oauth/authorize",
-      "tokenUrl": "https://api.notion.com/v1/oauth/token",
-      "refreshUrl": "https://api.notion.com/v1/oauth/token",
-      "scopeSeparator": " ",
-      "pkceEnabled": false,
-      "tokenAuthMethod": "client_secret_basic",
+      "authorization_endpoint": "https://api.notion.com/v1/oauth/authorize",
+      "token_endpoint": "https://api.notion.com/v1/oauth/token",
+      "token_endpoint_auth_method": "client_secret_basic",
+      "authorized_uris": ["https://api.notion.com/**"],
       "delivery": {
         "http": {
-          "headerName": "Authorization",
-          "headerPrefix": "Bearer",
-          "valueFrom": "access_token"
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": " "
+        },
+        "dev.appstrate/auth": {
+          "required": true
         }
       }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/api": {
+      "auth_key": "primary"
     }
   }
 }

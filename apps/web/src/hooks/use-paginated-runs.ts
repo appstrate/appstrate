@@ -4,11 +4,11 @@ import { useQuery } from "@tanstack/react-query";
 import { api, buildQs } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
-import type { Run } from "@appstrate/shared-types";
+import type { EnrichedRun } from "@appstrate/shared-types";
 
 interface PaginatedResult {
   object: "list";
-  data: Run[];
+  data: EnrichedRun[];
   total: number;
   hasMore: boolean;
 }

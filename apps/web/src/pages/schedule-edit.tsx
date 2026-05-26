@@ -48,15 +48,15 @@ export function ScheduleEditPage() {
         mode="edit"
         defaultValues={{
           name: schedule.name ?? "",
-          cronExpression: schedule.cronExpression,
+          cron_expression: schedule.cron_expression,
           timezone: schedule.timezone ?? "UTC",
           enabled: schedule.enabled ?? true,
           input: (schedule.input ?? {}) as Record<string, unknown>,
-          configOverride: (schedule.configOverride ?? null) as Record<string, unknown> | null,
-          modelIdOverride: schedule.modelIdOverride ?? null,
-          proxyIdOverride: schedule.proxyIdOverride ?? null,
-          versionOverride: schedule.versionOverride ?? null,
-          connectionOverrides: (schedule.connectionOverrides ?? null) as Record<
+          config_override: (schedule.config_override ?? null) as Record<string, unknown> | null,
+          model_id_override: schedule.model_id_override ?? null,
+          proxy_id_override: schedule.proxy_id_override ?? null,
+          version_override: schedule.version_override ?? null,
+          connection_overrides: (schedule.connection_overrides ?? null) as Record<
             string,
             Record<string, string>
           > | null,

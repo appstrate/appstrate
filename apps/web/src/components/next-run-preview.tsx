@@ -8,16 +8,16 @@ import { formatDateField } from "../lib/markdown";
 interface NextRunPreviewProps {
   runNumber: number;
   agentName?: string;
-  scheduleName: string;
-  nextRunAt: string | Date;
+  schedule_name: string;
+  next_run_at: string | Date;
   className?: string;
 }
 
 export function NextRunPreview({
   runNumber,
   agentName,
-  scheduleName,
-  nextRunAt,
+  schedule_name,
+  next_run_at,
   className,
 }: NextRunPreviewProps) {
   const { t } = useTranslation(["agents"]);
@@ -33,10 +33,10 @@ export function NextRunPreview({
         </UIBadge>
         <span className="text-muted-foreground hidden shrink-0 items-center gap-1 text-xs sm:inline-flex">
           <Calendar className="size-3" />
-          <span className="max-w-[150px] truncate">{scheduleName}</span>
+          <span className="max-w-[150px] truncate">{schedule_name}</span>
         </span>
         <div className="ml-auto flex shrink-0 items-center gap-2">
-          <span className="text-muted-foreground text-xs">{formatDateField(nextRunAt)}</span>
+          <span className="text-muted-foreground text-xs">{formatDateField(next_run_at)}</span>
         </div>
       </div>
     </div>

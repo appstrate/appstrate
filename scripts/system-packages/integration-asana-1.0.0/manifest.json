@@ -1,31 +1,25 @@
 {
-  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
-  "manifestVersion": "1.1",
-  "type": "integration",
   "name": "@appstrate/asana",
   "version": "1.0.0",
-  "displayName": "Asana (API)",
+  "type": "integration",
+  "schema_version": "2.0",
+  "display_name": "Asana (API)",
   "description": "Work management platform for teams to organize and track projects",
-  "license": "Apache-2.0",
-  "author": "Appstrate",
-  "icon": "asana",
   "keywords": ["project-management", "collaboration"],
-  "apiCall": {
-    "authKey": "primary"
+  "license": "Apache-2.0",
+  "icon": "asana",
+  "source": {
+    "kind": "api",
+    "api": {}
   },
   "auths": {
     "primary": {
       "type": "oauth2",
-      "required": true,
-      "authorizedUris": ["https://app.asana.com/api/**"],
-      "authorizationUrl": "https://app.asana.com/-/oauth_authorize",
-      "tokenUrl": "https://app.asana.com/-/oauth_token",
-      "refreshUrl": "https://app.asana.com/-/oauth_token",
-      "scopes": ["default"],
-      "scopeSeparator": " ",
-      "pkceEnabled": false,
-      "tokenAuthMethod": "client_secret_post",
-      "availableScopes": [
+      "authorization_endpoint": "https://app.asana.com/-/oauth_authorize",
+      "token_endpoint": "https://app.asana.com/-/oauth_token",
+      "default_scopes": ["default"],
+      "token_endpoint_auth_method": "client_secret_post",
+      "scope_catalog": [
         {
           "value": "default",
           "label": "Full access to all resources"
@@ -43,13 +37,31 @@
           "label": "Read user profile"
         }
       ],
+      "authorized_uris": ["https://app.asana.com/api/**"],
       "delivery": {
         "http": {
-          "headerName": "Authorization",
-          "headerPrefix": "Bearer",
-          "valueFrom": "access_token"
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": " "
+        },
+        "dev.appstrate/auth": {
+          "required": true
         }
       }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/api": {
+      "auth_key": "primary"
     }
   }
 }

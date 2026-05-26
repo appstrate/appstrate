@@ -83,12 +83,12 @@ describe("scheduler service", () => {
       expect(schedule.packageId).toBe(packageId);
       expect(schedule.orgId).toBe(orgId);
       expect(schedule.userId).toBe(userId);
-      expect(schedule.cronExpression).toBe("0 * * * *");
+      expect(schedule.cron_expression).toBe("0 * * * *");
       expect(schedule.timezone).toBe("UTC");
       expect(schedule.enabled).toBe(true);
       expect(schedule.name).toBe("Every hour");
-      expect(schedule.nextRunAt).toBeInstanceOf(Date);
-      expect(schedule.createdAt).toBeInstanceOf(Date);
+      expect(typeof schedule.next_run_at).toBe("string");
+      expect(typeof schedule.createdAt).toBe("string");
     });
 
     it("stores JSON input when provided", async () => {
@@ -131,8 +131,8 @@ describe("scheduler service", () => {
         },
       );
 
-      expect(schedule.nextRunAt).not.toBeNull();
-      expect(schedule.nextRunAt!.getTime()).toBeGreaterThan(Date.now());
+      expect(schedule.next_run_at).not.toBeNull();
+      expect(new Date(schedule.next_run_at!).getTime()).toBeGreaterThan(Date.now());
     });
 
     it("persists per-schedule overrides verbatim", async () => {
@@ -149,12 +149,12 @@ describe("scheduler service", () => {
         },
       );
 
-      expect(schedule.configOverride).toEqual({
+      expect(schedule.config_override).toEqual({
         integrations: { gmail: { scopes: ["read"] } },
       });
-      expect(schedule.modelIdOverride).toBe("model_abc");
-      expect(schedule.proxyIdOverride).toBe("prx_xyz");
-      expect(schedule.versionOverride).toBe("1.2.3");
+      expect(schedule.model_id_override).toBe("model_abc");
+      expect(schedule.proxy_id_override).toBe("prx_xyz");
+      expect(schedule.version_override).toBe("1.2.3");
     });
 
     it("defaults all overrides to null when omitted", async () => {
@@ -167,10 +167,10 @@ describe("scheduler service", () => {
         },
       );
 
-      expect(schedule.configOverride).toBeNull();
-      expect(schedule.modelIdOverride).toBeNull();
-      expect(schedule.proxyIdOverride).toBeNull();
-      expect(schedule.versionOverride).toBeNull();
+      expect(schedule.config_override).toBeNull();
+      expect(schedule.model_id_override).toBeNull();
+      expect(schedule.proxy_id_override).toBeNull();
+      expect(schedule.version_override).toBeNull();
     });
   });
 
@@ -313,7 +313,7 @@ describe("scheduler service", () => {
       expect(found).not.toBeNull();
       expect(found!.id).toBe(created.id);
       expect(found!.name).toBe("Hourly Run");
-      expect(found!.cronExpression).toBe("0 * * * *");
+      expect(found!.cron_expression).toBe("0 * * * *");
       expect(found!.timezone).toBe("America/New_York");
       expect(found!.packageId).toBe(packageId);
     });
@@ -346,9 +346,9 @@ describe("scheduler service", () => {
       );
 
       expect(updated).not.toBeNull();
-      expect(updated!.cronExpression).toBe("*/5 * * * *");
-      expect(updated!.nextRunAt).toBeInstanceOf(Date);
-      expect(updated!.nextRunAt!.getTime()).toBeGreaterThan(Date.now());
+      expect(updated!.cron_expression).toBe("*/5 * * * *");
+      expect(typeof updated!.next_run_at).toBe("string");
+      expect(new Date(updated!.next_run_at!).getTime()).toBeGreaterThan(Date.now());
     });
 
     it("updates name", async () => {
@@ -394,10 +394,10 @@ describe("scheduler service", () => {
         created.id,
         { cronExpression: "*/15 * * * *" },
       );
-      expect(partialUpdate!.configOverride).toEqual({ foo: "bar" });
-      expect(partialUpdate!.modelIdOverride).toBe("model_init");
-      expect(partialUpdate!.proxyIdOverride).toBe("prx_init");
-      expect(partialUpdate!.versionOverride).toBe("1.0.0");
+      expect(partialUpdate!.config_override).toEqual({ foo: "bar" });
+      expect(partialUpdate!.model_id_override).toBe("model_init");
+      expect(partialUpdate!.proxy_id_override).toBe("prx_init");
+      expect(partialUpdate!.version_override).toBe("1.0.0");
 
       // Explicit null clears the override (UI's "Inherit" sentinel).
       const cleared = await updateSchedule(
@@ -410,10 +410,10 @@ describe("scheduler service", () => {
           versionOverride: null,
         },
       );
-      expect(cleared!.configOverride).toBeNull();
-      expect(cleared!.modelIdOverride).toBeNull();
-      expect(cleared!.proxyIdOverride).toBeNull();
-      expect(cleared!.versionOverride).toBeNull();
+      expect(cleared!.config_override).toBeNull();
+      expect(cleared!.model_id_override).toBeNull();
+      expect(cleared!.proxy_id_override).toBeNull();
+      expect(cleared!.version_override).toBeNull();
     });
 
     it("sets nextRunAt to null when enabled is false", async () => {
@@ -427,7 +427,7 @@ describe("scheduler service", () => {
       );
 
       expect(created.enabled).toBe(true);
-      expect(created.nextRunAt).not.toBeNull();
+      expect(created.next_run_at).not.toBeNull();
 
       const updated = await updateSchedule(
         { orgId: orgId, applicationId: defaultAppId },
@@ -439,7 +439,7 @@ describe("scheduler service", () => {
 
       expect(updated).not.toBeNull();
       expect(updated!.enabled).toBe(false);
-      expect(updated!.nextRunAt).toBeNull();
+      expect(updated!.next_run_at).toBeNull();
     });
 
     it("re-enables and recomputes nextRunAt", async () => {
@@ -464,8 +464,8 @@ describe("scheduler service", () => {
 
       expect(updated).not.toBeNull();
       expect(updated!.enabled).toBe(true);
-      expect(updated!.nextRunAt).toBeInstanceOf(Date);
-      expect(updated!.nextRunAt!.getTime()).toBeGreaterThan(Date.now());
+      expect(typeof updated!.next_run_at).toBe("string");
+      expect(new Date(updated!.next_run_at!).getTime()).toBeGreaterThan(Date.now());
     });
 
     it("updates input data", async () => {

@@ -12,7 +12,7 @@
  * integration. So unlike real integrations there is no version, no auth,
  * and no connection: the group is always present (a checked, disabled
  * header checkbox conveys "always available"), and toggling a tool writes
- * `manifest.runtimeTools: string[]` rather than `dependencies.integrations`.
+ * `manifest.runtime_tools: string[]` rather than `dependencies.integrations`.
  */
 
 import { useTranslation } from "react-i18next";
@@ -21,7 +21,7 @@ import { RUNTIME_TOOL_CATALOG } from "@appstrate/core/runtime-tools-catalog";
 import { Checkbox } from "@/components/ui/checkbox";
 
 interface RuntimeToolsGroupProps {
-  /** Currently selected runtime tool ids (manifest.runtimeTools). */
+  /** Currently selected runtime tool ids (manifest.runtime_tools). */
   selected: string[];
   onChange: (next: string[]) => void;
 }

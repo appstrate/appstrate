@@ -2,15 +2,17 @@
 // Copyright 2026 Appstrate
 
 /**
- * `afps bundle <manifest.json>` — produce a runnable `.afps` integration
- * archive from an author-time manifest (proposal §5.3, Phase 1.05).
+ * `afps bundle <manifest.json>` — produce a runnable `.afps` mcp-server
+ * archive from an author-time MCPB manifest.
  *
- * The actual bundling pipeline lives in `@appstrate/core/integration-
- * bundle` (which depends on Zod + the integration schema). To keep
- * `@appstrate/afps-runtime` free of an `@appstrate/core` dep, we
- * dynamic-import the bundler at run-time and degrade gracefully when
- * it is missing — the typical npx user gets a one-line install hint
- * rather than a stack trace.
+ * In AFPS 2.0 the runnable MCP server lives in a separate `mcp-server` (MCPB)
+ * package. This command vendors that server's npm/pypi deps into `./server/`
+ * and rewrites the manifest to a runnable form. The actual bundling pipeline
+ * lives in `@appstrate/core/mcp-server-bundle` (which depends on Zod + the
+ * mcp-server schema). To keep `@appstrate/afps-runtime` free of an
+ * `@appstrate/core` dep, we dynamic-import the bundler at run-time and degrade
+ * gracefully when it is missing — the typical npx user gets a one-line install
+ * hint rather than a stack trace.
  */
 
 import { parseArgs } from "node:util";
@@ -18,15 +20,15 @@ import { readFile, writeFile } from "node:fs/promises";
 import { basename } from "node:path";
 import type { CliIO } from "../index.ts";
 
-const HELP = `afps bundle — vendor an integration's deps into a runnable .afps
+const HELP = `afps bundle — vendor an mcp-server's deps into a runnable .afps
 
 Usage:
   afps bundle <manifest.json> [options]
 
 Options:
-  -i, --input <path>            Source manifest path (alias of positional)
+  -i, --input <path>            Source mcp-server manifest path (alias of positional)
   -o, --output <path>           Output .afps file. Default: <name>@<version>.afps in CWD
-  -d, --doc <path>              Include this Markdown file as INTEGRATION.md
+  -d, --doc <path>              Include this Markdown file as SERVER.md
   -s, --server-dir <path>       Use a pre-vendored ./server/ tree (skips npm/pypi).
                                 The directory is embedded as-is under server/.
       --bun-probe               Run the Bun compat probe after vendoring
@@ -35,10 +37,12 @@ Options:
       --print-manifest          Print the rewritten manifest to stdout (post-bundle)
   -h, --help                    Show this help
 
-The bundler resolves \`server.type: "npx" | "uvx"\` with \`server.package\`
-against npm or pypi, vendors the resolved tree into \`./server/\`, and
-rewrites the manifest to a runnable form (\`type: "node" | "uv"\`).
-\`docker\` and \`http\` manifests are packaged verbatim.
+The bundler resolves the author-sugar vendoring source declared under
+\`_meta["dev.appstrate/vendor"]\` (\`{ source: "npm" | "pypi", identifier,
+version }\`) against npm or pypi, vendors the resolved tree into \`./server/\`,
+and rewrites the MCPB manifest to a runnable form (\`server.type: "node" |
+"binary"\`). A manifest with no vendoring source is packaged verbatim (its
+\`server.entry_point\` already points at in-bundle code).
 
 Sandbox recommendation
   Vendoring shells out to \`npm install\` / \`uv pip install\`. Postinstall
@@ -61,7 +65,7 @@ a workspace package.
 `;
 
 interface BundleModule {
-  bundleIntegration: (input: {
+  bundleMcpServer: (input: {
     manifest: unknown;
     extraFiles?: Record<string, Uint8Array>;
     prebuiltServerFiles?: Record<string, Uint8Array>;
@@ -80,7 +84,7 @@ async function loadBundler(io: CliIO): Promise<BundleModule | null> {
     // Optional peer; resolved at runtime when @appstrate/core is on the
     // path (always true inside the appstrate monorepo, opt-in for npm
     // consumers via `bun add -D @appstrate/core`).
-    return (await import("@appstrate/core/integration-bundle")) as BundleModule;
+    return (await import("@appstrate/core/mcp-server-bundle")) as BundleModule;
   } catch {
     io.stderr(INSTALL_HINT);
     return null;
@@ -141,7 +145,7 @@ export async function run(argv: readonly string[], io: CliIO): Promise<number> {
   if (parsed.values.doc) {
     try {
       const docBytes = await readFile(parsed.values.doc);
-      extraFiles["INTEGRATION.md"] = new Uint8Array(docBytes);
+      extraFiles["SERVER.md"] = new Uint8Array(docBytes);
     } catch (err) {
       io.stderr(
         `afps bundle: failed to read --doc ${parsed.values.doc}: ${(err as Error).message}\n`,
@@ -169,9 +173,9 @@ export async function run(argv: readonly string[], io: CliIO): Promise<number> {
     bunProbe = ms ? { timeoutMs: Number(ms) } : true;
   }
 
-  let result: Awaited<ReturnType<BundleModule["bundleIntegration"]>>;
+  let result: Awaited<ReturnType<BundleModule["bundleMcpServer"]>>;
   try {
-    result = await bundler.bundleIntegration({
+    result = await bundler.bundleMcpServer({
       manifest,
       extraFiles: Object.keys(extraFiles).length > 0 ? extraFiles : undefined,
       prebuiltServerFiles,
@@ -199,7 +203,7 @@ export async function run(argv: readonly string[], io: CliIO): Promise<number> {
     } else {
       io.stderr(`bun probe FAILED: ${result.bunCompat.reason ?? "(no reason)"}\n`);
       io.stderr(
-        "manifest tagged _meta.bunCompat = false; consider falling back to server.type: docker.\n",
+        'manifest tagged _meta["dev.appstrate/bun-compat"] = false; consider a docker runner.\n',
       );
     }
   }

@@ -238,7 +238,7 @@ const expectedEndpoints = [
   "GET /internal/memories",
   "GET /internal/oauth-token/{credentialId}",
   "POST /internal/oauth-token/{credentialId}/refresh",
-  "GET /internal/integration-bundle/{scope}/{name}",
+  "GET /internal/mcp-server-bundle/{scope}/{name}",
   "GET /internal/integration-credentials/{scope}/{name}",
   "POST /internal/integration-credentials/{scope}/{name}/refresh",
 

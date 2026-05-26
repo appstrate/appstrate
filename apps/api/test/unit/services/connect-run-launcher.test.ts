@@ -25,29 +25,45 @@ import {
   createConnectRunExecutor,
   buildConnectLoginSpec,
   parseConnectResult,
+  type McpServerResolver,
 } from "../../../src/services/connect/connect-run-launcher.ts";
 import type { ConnectToolExecution } from "../../../src/services/connect/orchestrated-strategy.ts";
+import {
+  localIntegrationManifest,
+  httpHeaderDelivery,
+  connectToolBlock,
+} from "../../helpers/integration-manifests.ts";
 
 beforeAll(() => {
   process.env.RUN_TOKEN_SECRET = process.env.RUN_TOKEN_SECRET ?? "connect-run-test-secret";
 });
 
-const MANIFEST: IntegrationManifest = {
-  type: "integration",
+const MANIFEST: IntegrationManifest = localIntegrationManifest({
   name: "@scope/connect-it",
-  version: "1.0.0",
-  server: { type: "python", entryPoint: "./server.py" },
   auths: {
     session: {
       type: "custom",
       authorizedUris: ["https://api.example.test/**"],
-      connect: { tool: "login", runAt: "link", produces: ["session_token"], reauthOn: [401] },
-      delivery: {
-        http: { headerName: "Authorization", headerPrefix: "Bearer ", valueFrom: "session_token" },
-      },
+      connect: connectToolBlock({
+        tool: "login",
+        runAt: "link",
+        produces: ["session_token"],
+        reauthOn: [401],
+      }),
+      delivery: httpHeaderDelivery({
+        name: "Authorization",
+        prefix: "Bearer ",
+        field: "session_token",
+      }),
     },
   },
-} as unknown as IntegrationManifest;
+});
+
+// The local-source integration references an mcp-server package; the launcher
+// resolves its runnable server config. Injected here so the unit test needs no DB.
+const fakeMcpResolver: McpServerResolver = async () => ({
+  server: { type: "python", entry_point: "./server.py" },
+});
 
 function execution(): ConnectToolExecution {
   return {
@@ -138,10 +154,11 @@ function mockOrchestrator(opts: { stdoutLines: string[]; exitCode?: number; hang
 }
 
 describe("buildConnectLoginSpec", () => {
-  it("derives the connectLogin block from the manifest auth", () => {
-    const spec = buildConnectLoginSpec(execution());
+  it("derives the connectLogin block from the manifest auth + resolved mcp-server", async () => {
+    const spec = await buildConnectLoginSpec(execution(), fakeMcpResolver);
     expect(spec.integrationId).toBe("@scope/connect-it");
     expect(spec.toolAllowlist).toEqual([]);
+    // The runnable server config comes from the referenced mcp-server package.
     expect(spec.manifest.server).toEqual({ type: "python", entryPoint: "./server.py" });
     expect(spec.connectLogin).toBeDefined();
     expect(spec.connectLogin!).toMatchObject({
@@ -153,29 +170,40 @@ describe("buildConnectLoginSpec", () => {
       inputs: { email: "a@b.c", password: "pw" },
       reauthOn: [401],
     });
+    // AFPS 2.0 delivery.http shape (snake_case header block).
     expect(spec.connectLogin!.deliveryHttp).toMatchObject({
-      headerName: "Authorization",
-      headerPrefix: "Bearer ",
-      valueFrom: "session_token",
+      in: "header",
+      name: "Authorization",
+      prefix: "Bearer ",
+      value: "{$credential.session_token}",
     });
     // Placeholder MITM auth so the sidecar wires the listener + source.
     expect(spec.httpDeliveryAuths?.session).toBeDefined();
   });
 
-  it("throws when the auth has no delivery.http", () => {
+  it("throws when the auth has no delivery.http", async () => {
     const ex = execution();
     const noHttp = JSON.parse(JSON.stringify(MANIFEST)) as IntegrationManifest;
     delete (noHttp.auths!.session as { delivery?: unknown }).delivery;
     ex.manifest = noHttp;
-    expect(() => buildConnectLoginSpec(ex)).toThrow(/no delivery.http/);
+    await expect(buildConnectLoginSpec(ex, fakeMcpResolver)).rejects.toThrow(/no delivery.http/);
   });
 
-  it("throws when the integration has no spawnable server", () => {
+  it("throws when the integration is not a local source (no spawnable server)", async () => {
     const ex = execution();
-    const noServer = JSON.parse(JSON.stringify(MANIFEST)) as IntegrationManifest;
-    delete (noServer as { server?: unknown }).server;
-    ex.manifest = noServer;
-    expect(() => buildConnectLoginSpec(ex)).toThrow(/no spawnable server/);
+    const remote = JSON.parse(JSON.stringify(MANIFEST)) as Record<string, unknown>;
+    remote.source = {
+      kind: "remote",
+      remote: { url: "https://x/mcp", transport: "streamable-http" },
+    };
+    ex.manifest = remote as unknown as IntegrationManifest;
+    await expect(buildConnectLoginSpec(ex, fakeMcpResolver)).rejects.toThrow(/no spawnable server/);
+  });
+
+  it("throws when the referenced mcp-server cannot be resolved", async () => {
+    const ex = execution();
+    const missing: McpServerResolver = async () => null;
+    await expect(buildConnectLoginSpec(ex, missing)).rejects.toThrow(/mcp-server/);
   });
 });
 
@@ -215,7 +243,10 @@ describe("createConnectRunExecutor.run", () => {
       stdoutLines: [`APPSTRATE_CONNECT_RESULT:${JSON.stringify(bundle)}`],
       exitCode: 0,
     });
-    const executor = createConnectRunExecutor({ orchestrator: orch });
+    const executor = createConnectRunExecutor({
+      orchestrator: orch,
+      resolveMcpServer: fakeMcpResolver,
+    });
 
     const result = await executor.run(execution());
 
@@ -240,7 +271,10 @@ describe("createConnectRunExecutor.run", () => {
       stdoutLines: ["APPSTRATE_CONNECT_ERROR:upstream rejected the secret"],
       exitCode: 1,
     });
-    const executor = createConnectRunExecutor({ orchestrator: orch });
+    const executor = createConnectRunExecutor({
+      orchestrator: orch,
+      resolveMcpServer: fakeMcpResolver,
+    });
 
     await expect(executor.run(execution())).rejects.toThrow(/upstream rejected the secret/);
     expect(calls.removedWorkloads).toBe(1);
@@ -249,7 +283,11 @@ describe("createConnectRunExecutor.run", () => {
 
   it("throws on timeout and tears down", async () => {
     const { orch, calls } = mockOrchestrator({ stdoutLines: [], hang: true });
-    const executor = createConnectRunExecutor({ orchestrator: orch, timeoutMs: 30 });
+    const executor = createConnectRunExecutor({
+      orchestrator: orch,
+      timeoutMs: 30,
+      resolveMcpServer: fakeMcpResolver,
+    });
 
     await expect(executor.run(execution())).rejects.toThrow(/timed out after 30ms/);
     expect(calls.removedWorkloads).toBe(1);

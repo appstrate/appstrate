@@ -13,21 +13,21 @@ import {
 // --- Fixtures ---
 
 const VALID_MANIFEST = {
-  schemaVersion: "1.0",
+  schema_version: "2.0",
   name: "@test-org/test-agent",
   version: "1.0.0",
   type: "agent",
-  displayName: "Test Agent",
+  display_name: "Test Agent",
   description: "A test agent",
   author: "test",
   dependencies: {
-    providers: { "@appstrate/gmail": "1.0.0" },
+    integrations: { "@appstrate/gmail": "1.0.0" },
     skills: { "@appstrate/greeting-style": "*" },
-    tools: { "@appstrate/web-search": "*" },
+    mcp_servers: { "@appstrate/web-search": "*" },
   },
   // Declares an output schema below, so the `output` runtime tool must be
   // enabled (enforced by agentManifestSchema's superRefine).
-  runtimeTools: ["output"],
+  runtime_tools: ["output"],
   config: {
     schema: {
       type: "object",
@@ -112,14 +112,14 @@ describe("validateManifest", () => {
 
   it("accepts manifest without optional sections (input, output, state)", () => {
     const minimal = {
-      schemaVersion: "1.0",
+      schema_version: "2.0",
       name: "@test-org/minimal",
       version: "1.0.0",
       type: "agent",
-      displayName: "Minimal",
+      display_name: "Minimal",
       description: "Minimal agent",
       author: "test",
-      dependencies: { providers: {} },
+      dependencies: { integrations: {} },
     };
     const result = validateManifest(minimal);
     expect(result.valid).toBe(true);
@@ -148,11 +148,11 @@ describe("validateManifest", () => {
 
   it("rejects manifest missing required fields", () => {
     const bad = {
-      schemaVersion: "1.0",
+      schema_version: "2.0",
       name: "@test-org/test",
       version: "1.0.0",
       type: "agent",
-      dependencies: { providers: {} },
+      dependencies: { integrations: {} },
     };
     const result = validateManifest(bad);
     expect(result.valid).toBe(false);

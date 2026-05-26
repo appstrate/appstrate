@@ -17,7 +17,7 @@
  *     {/* custom footer, or leave empty to let RJSF render a submit button *\/}
  *   </SchemaForm>
  *
- * The AFPS `SchemaWrapper` (schema + fileConstraints + uiHints + propertyOrder)
+ * The AFPS `SchemaWrapper` (schema + file_constraints + ui_hints + property_order)
  * is mapped to RJSF's `schema` + `uiSchema` by `@appstrate/core/form`. JSON
  * Schema 2020-12 is used via `customizeValidator({ AjvClass: Ajv2020 })`.
  */

@@ -15,10 +15,10 @@ function withFetch<T>(impl: typeof fetch, fn: () => Promise<T>): Promise<T> {
 }
 
 const ctx: RefreshContext = {
-  tokenUrl: "https://idp.example.com/token",
+  tokenEndpoint: "https://idp.example.com/token",
   clientId: "client-id",
   clientSecret: "client-secret",
-  tokenAuthMethod: "client_secret_post",
+  tokenEndpointAuthMethod: "client_secret_post",
 };
 
 function responding(makeResponse: () => Response | Promise<Response>): typeof fetch {

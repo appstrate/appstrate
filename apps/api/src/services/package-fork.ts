@@ -18,7 +18,7 @@ import { asRecord } from "@appstrate/core/safe-json";
 export interface ForkResult {
   packageId: string;
   type: string;
-  forkedFrom: string;
+  forked_from: string;
 }
 
 export type ForkError =
@@ -126,7 +126,7 @@ async function forkWithConfig(
     {
       id: targetId,
       name:
-        typeof versionManifest.displayName === "string" ? versionManifest.displayName : undefined,
+        typeof versionManifest.display_name === "string" ? versionManifest.display_name : undefined,
       description:
         typeof versionManifest.description === "string" ? versionManifest.description : undefined,
       content,
@@ -160,6 +160,6 @@ async function forkWithConfig(
   return {
     packageId: newPkg.id,
     type: cfg.type,
-    forkedFrom: sourcePackageId,
+    forked_from: sourcePackageId,
   };
 }

@@ -21,25 +21,29 @@ import {
   computeRequiredScopes,
   getCurrentScopesGranted,
 } from "../../../src/services/integration-scope-resolver.ts";
+import {
+  localIntegrationManifest,
+  httpHeaderDelivery,
+} from "../../helpers/integration-manifests.ts";
 
 const INTEGRATION_ID = "@official/gmail";
 
 function gmailManifest(): Record<string, unknown> {
-  return {
-    manifestVersion: "1.1",
-    type: "integration",
+  return localIntegrationManifest({
     name: INTEGRATION_ID,
-    version: "1.0.0",
     displayName: "Gmail",
-    server: { type: "python", entryPoint: "./server.py" },
     auths: {
       primary: {
         type: "oauth2",
-        authorizationUrl: "https://idp/a",
-        tokenUrl: "https://idp/t",
+        authorizationEndpoint: "https://idp/a",
+        tokenEndpoint: "https://idp/t",
         authorizedUris: ["https://api/*"],
-        delivery: { http: {} },
-        availableScopes: [
+        delivery: httpHeaderDelivery({
+          name: "Authorization",
+          prefix: "Bearer ",
+          field: "access_token",
+        }),
+        scopeCatalog: [
           { value: "read", label: "Read" },
           { value: "send", label: "Send" },
           { value: "delete", label: "Delete" },
@@ -47,12 +51,12 @@ function gmailManifest(): Record<string, unknown> {
       },
     },
     tools: {
-      list_messages: { requiredScopes: ["read"] },
-      get_message: { requiredScopes: ["read"] },
-      send_message: { requiredScopes: ["send"] },
-      delete_message: { requiredScopes: ["delete"] },
+      list_messages: { required_scopes: ["read"] },
+      get_message: { required_scopes: ["read"] },
+      send_message: { required_scopes: ["send"] },
+      delete_message: { required_scopes: ["delete"] },
     },
-  };
+  }) as unknown as Record<string, unknown>;
 }
 
 function agentManifest(
@@ -64,8 +68,8 @@ function agentManifest(
     name,
     version: "1.0.0",
     type: "agent",
-    schemaVersion: "1.0",
-    displayName: name,
+    schema_version: "2.0",
+    display_name: name,
     dependencies: { integrations: { [INTEGRATION_ID]: version } },
   };
   if (tools !== undefined || scopes !== undefined) {
@@ -236,8 +240,8 @@ describe("integration-scope-resolver", () => {
           name: "@scope/agent-other",
           version: "1.0.0",
           type: "agent",
-          schemaVersion: "1.0",
-          displayName: "Other",
+          schema_version: "2.0",
+          display_name: "Other",
           dependencies: { integrations: { "@some/other": "^1.0.0" } },
         },
       });

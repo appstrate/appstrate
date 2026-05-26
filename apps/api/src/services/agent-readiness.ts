@@ -190,11 +190,11 @@ export function translateResolutionError(e: ConnectionResolutionError): Validati
     // an upgrade (own connection) or a read-only error (foreign owner).
     ...(e.code === "insufficient_scopes"
       ? {
-          ...(e.connectionId ? { connectionId: e.connectionId } : {}),
+          ...(e.connectionId ? { connection_id: e.connectionId } : {}),
           ...(e.missingScopes && e.missingScopes.length > 0
-            ? { missingScopes: e.missingScopes }
+            ? { missing_scopes: e.missingScopes }
             : {}),
-          ...(e.ownedByActor !== undefined ? { ownedByActor: e.ownedByActor } : {}),
+          ...(e.ownedByActor !== undefined ? { owned_by_actor: e.ownedByActor } : {}),
         }
       : {}),
   } as ValidationFieldError;

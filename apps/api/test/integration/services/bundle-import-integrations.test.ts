@@ -18,6 +18,7 @@ import { handleImportBundle } from "../../../src/services/bundle-import.ts";
 import { getIntegration, listIntegrations } from "../../../src/services/integration-service.ts";
 import { packages, packageVersions } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
+import { apiIntegrationManifest, httpHeaderDelivery } from "../../helpers/integration-manifests.ts";
 
 const DOS_EPOCH_MS = Date.UTC(1980, 0, 2, 12, 0, 0);
 
@@ -50,13 +51,24 @@ function buildIntegrationAfps(opts: {
 }
 
 function validManifest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  // AFPS 2.0 serverless `api`-source integration (no separate mcp-server to
+  // bundle), so a bundle-of-one imports cleanly.
   return {
-    manifestVersion: "1.1",
-    type: "integration",
-    name: "@official/gmail",
-    version: "1.0.0",
-    displayName: "Gmail",
-    server: { type: "node", entryPoint: "./server/index.js" },
+    ...(apiIntegrationManifest({
+      name: "@official/gmail",
+      displayName: "Gmail",
+      auths: {
+        api: {
+          type: "api_key",
+          authorizedUris: ["https://gmail.googleapis.com/**"],
+          delivery: httpHeaderDelivery({
+            name: "Authorization",
+            prefix: "Bearer ",
+            field: "api_key",
+          }),
+        },
+      },
+    }) as unknown as Record<string, unknown>),
     ...overrides,
   };
 }
@@ -107,7 +119,7 @@ describe("handleImportBundle — integration packages", () => {
 
     const summary = await getIntegration(ctx.orgId, "@official/gmail");
     expect(summary).not.toBeNull();
-    expect(summary!.manifest.displayName).toBe("Gmail");
+    expect(summary!.manifest.display_name).toBe("Gmail");
 
     const list = await listIntegrations(ctx.orgId);
     expect(list.length).toBe(1);
@@ -121,13 +133,10 @@ describe("handleImportBundle — integration packages", () => {
     expect(second.imported[0]!.status).toBe("reused");
   });
 
-  it("rejects an .afps with mismatched type/discriminator (docker without digest)", async () => {
-    const broken = validManifest({
-      server: {
-        type: "docker",
-        package: { registryType: "oci", identifier: "x", digest: "latest" },
-      },
-    });
+  it("rejects an .afps whose integration manifest declares no auth method (AFPS §7)", async () => {
+    // AFPS 2.0 requires an integration to declare ≥1 auth method; an empty
+    // `auths` map fails schema validation at bundle read time.
+    const broken = validManifest({ auths: {} });
     const afps = buildIntegrationAfps({ manifest: broken });
     await expect(handleImportBundle(afps, scope, ctx.user.id)).rejects.toThrow();
   });

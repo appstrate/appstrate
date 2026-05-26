@@ -113,7 +113,7 @@ export function InlineConnectButton({
   // for the whole integration. When the button is locked to a section's
   // authKey, render the single-button path bound to that method.
   const showDropdown = authKeys.length > 1 && !lockToAuthKey;
-  const displayName = detail?.manifest.displayName ?? packageId;
+  const displayName = detail?.manifest.display_name ?? packageId;
 
   // Guard: a fresh agent run might 412 before the integration manifest
   // is in cache. Disable the trigger until the detail loads rather than

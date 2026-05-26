@@ -187,7 +187,10 @@ export async function buildRunContext(params: {
     resolvedConnections: params.resolvedConnections ?? null,
   });
 
-  const manifestRuntimeTools = (agent.manifest as { runtimeTools?: unknown }).runtimeTools;
+  // AFPS 2.0: snake_case. The editor writes `runtime_tools`; the legacy
+  // camelCase `runtimeTools` was dropped in the 2.0 migration. Reading the
+  // wrong key here silently dropped every author's runtime-tool selection.
+  const manifestRuntimeTools = (agent.manifest as { runtime_tools?: unknown }).runtime_tools;
   const runtimeTools = Array.isArray(manifestRuntimeTools)
     ? manifestRuntimeTools.filter((t): t is string => typeof t === "string")
     : undefined;

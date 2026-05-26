@@ -14,8 +14,8 @@ export interface MemoryRowProps {
   memory: {
     id: number;
     content: unknown;
-    actorType: PersistenceActorType;
-    actorId: string | null;
+    actor_type: PersistenceActorType;
+    actor_id: string | null;
     pinned?: boolean;
     createdAt: string | null;
   };
@@ -63,7 +63,7 @@ export function MemoryRow({ memory, onDelete, isDeleting }: MemoryRowProps) {
           )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <ActorBadge actorType={memory.actorType} actorId={memory.actorId} />
+          <ActorBadge actor_type={memory.actor_type} actor_id={memory.actor_id} />
           <span className="text-muted-foreground text-xs whitespace-nowrap">
             {memory.createdAt ? formatDateField(memory.createdAt) : ""}
           </span>

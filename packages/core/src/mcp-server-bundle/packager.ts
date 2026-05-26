@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Deterministic ZIP packager for integration bundles.
+ * Deterministic ZIP packager for mcp-server bundles.
  *
  * Plain `zipArtifact` (and fflate by default) embeds the current time
  * in each entry's mtime field, which breaks bit-for-bit
  * reproducibility. The bundler needs the property that "same input
- * tree + same level → same ZIP bytes" so an integration version
+ * tree + same level → same ZIP bytes" so an mcp-server version
  * published twice from the same source resolves to the same archive
  * hash (proposal §4.1.7).
  *

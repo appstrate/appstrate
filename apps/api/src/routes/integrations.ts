@@ -88,36 +88,36 @@ export const connectFieldsSchema = z.object({
 
 export const connectOAuthSchema = z.object({
   scopes: z.array(z.string()).optional(),
-  forceAccountSelect: z.boolean().optional(),
-  connectionId: z.uuid().optional(),
+  force_account_select: z.boolean().optional(),
+  connection_id: z.uuid().optional(),
 });
 
 export const updateSettingsSchema = z.object({
-  blockUserConnections: z.boolean(),
+  block_user_connections: z.boolean(),
 });
 
 export const setPinSchema = z.object({
-  connectionId: z.uuid(),
+  connection_id: z.uuid(),
 });
 
 export const setOrgDefaultSchema = z.object({
-  connectionId: z.uuid(),
+  connection_id: z.uuid(),
   enforce: z.boolean().default(false),
 });
 
 export const updateConnectionSchema = z
   .object({
     label: z.string().max(80).nullable().optional(),
-    sharedWithOrg: z.boolean().optional(),
+    shared_with_org: z.boolean().optional(),
   })
-  .refine((b) => b.label !== undefined || b.sharedWithOrg !== undefined, {
-    message: "at least one of label, sharedWithOrg must be provided",
+  .refine((b) => b.label !== undefined || b.shared_with_org !== undefined, {
+    message: "at least one of label, shared_with_org must be provided",
   });
 
 export const oauthClientSchema = z.object({
-  clientId: z.string().min(1),
-  clientSecret: z.string().default(""),
-  redirectUri: z.url().optional(),
+  client_id: z.string().min(1),
+  client_secret: z.string().default(""),
+  redirect_uri: z.url().optional(),
 });
 
 // ─────────────────────────────────────────────
@@ -345,7 +345,11 @@ export function createIntegrationsRouter() {
       const authKey = c.req.param("authKey")!;
       const scope = getAppScope(c);
       const body = parseBody(oauthClientSchema, await c.req.json());
-      const client = await upsertIntegrationOAuthClient(scope, packageId, authKey, body);
+      const client = await upsertIntegrationOAuthClient(scope, packageId, authKey, {
+        clientId: body.client_id,
+        clientSecret: body.client_secret,
+        ...(body.redirect_uri !== undefined ? { redirectUri: body.redirect_uri } : {}),
+      });
       await recordAuditFromContext(c, {
         action: "integration.oauth_client.upserted",
         resourceType: "integration",
@@ -405,7 +409,7 @@ export function createIntegrationsRouter() {
           action: "integration.connection.created",
           resourceType: "integration_connection",
           resourceId: conn.id,
-          after: { packageId, authKey, accountId: conn.accountId },
+          after: { packageId, authKey, accountId: conn.account_id },
         });
         return c.json(conn);
       } catch (err) {
@@ -449,16 +453,18 @@ export function createIntegrationsRouter() {
       // integration page's connect request more than its defaults. Scope
       // upgrades are an explicit, per-agent action on the agent's Connexions
       // tab. Endpoint validation + client lookup live in OAuth2Strategy.begin.
-      const granted = body.connectionId
+      const granted = body.connection_id
         ? await getCurrentScopesGranted({
             scope,
             integrationPackageId: packageId,
             authKey,
             actor,
-            connectionId: body.connectionId,
+            connectionId: body.connection_id,
           })
         : [];
-      const scopes = [...new Set([...(auth.scopes ?? []), ...(body.scopes ?? []), ...granted])];
+      // AFPS 2.0 (Appendix D): manifest default scopes are `default_scopes`.
+      const defaultScopes = (auth as { default_scopes?: string[] }).default_scopes ?? [];
+      const scopes = [...new Set([...defaultScopes, ...(body.scopes ?? []), ...granted])];
       const strategy = resolveStrategy(auth);
       if (!strategy.begin) {
         throw internalError();
@@ -469,9 +475,9 @@ export function createIntegrationsRouter() {
           actor,
           integrationPackageId: packageId,
           authKey,
-          ...(body.connectionId ? { connectionId: body.connectionId } : {}),
+          ...(body.connection_id ? { connectionId: body.connection_id } : {}),
         },
-        { scopes, forceAccountSelect: body.forceAccountSelect ?? false },
+        { scopes, forceAccountSelect: body.force_account_select ?? false },
       );
       return c.json({ authUrl: result.redirectUrl, state: result.state });
     },
@@ -538,7 +544,7 @@ export function createIntegrationsRouter() {
       const scope = getAppScope(c);
       await assertIsIntegration(scope, packageId);
       const body = parseBody(updateSettingsSchema, await c.req.json());
-      const result = await setBlockUserConnections(scope, packageId, body.blockUserConnections);
+      const result = await setBlockUserConnections(scope, packageId, body.block_user_connections);
       await recordAuditFromContext(c, {
         action: "integration.block_user_connections.updated",
         resourceType: "integration",
@@ -588,14 +594,14 @@ export function createIntegrationsRouter() {
       const userId = c.get("user")?.id ?? null;
       const pin = await upsertIntegrationPin(scope, packageId, {
         agentPackageId,
-        connectionId: body.connectionId,
+        connectionId: body.connection_id,
         createdBy: userId,
       });
       await recordAuditFromContext(c, {
         action: "integration.pin.upserted",
         resourceType: "integration_pin",
         resourceId: `${packageId}#${agentPackageId}`,
-        after: { connectionId: pin.connectionId },
+        after: { connectionId: pin.connection_id },
       });
       return c.json(pin);
     },
@@ -647,7 +653,7 @@ export function createIntegrationsRouter() {
       const body = parseBody(setOrgDefaultSchema, await c.req.json());
       const userId = c.get("user")?.id ?? null;
       const def = await upsertOrgDefault(scope, packageId, {
-        connectionId: body.connectionId,
+        connectionId: body.connection_id,
         enforce: body.enforce,
         createdBy: userId,
       });
@@ -655,7 +661,7 @@ export function createIntegrationsRouter() {
         action: "integration.org_default.upserted",
         resourceType: "integration_org_default",
         resourceId: packageId,
-        after: { connectionId: def.connectionId, enforce: def.enforce },
+        after: { connectionId: def.connection_id, enforce: def.enforce },
       });
       return c.json(def);
     },
@@ -708,28 +714,31 @@ export function createIntegrationsRouter() {
         });
       }
       const body = parseBody(updateConnectionSchema, await c.req.json());
-      if (body.sharedWithOrg !== undefined && !isOwner) {
+      if (body.shared_with_org !== undefined && !isOwner) {
         throw new ApiError({
           status: 403,
           code: "forbidden",
           title: "Forbidden",
-          detail: "Only the connection owner can change sharedWithOrg",
+          detail: "Only the connection owner can change shared_with_org",
         });
       }
-      const updated = await updateConnectionMetadata(connectionId, body);
+      const updated = await updateConnectionMetadata(connectionId, {
+        ...(body.label !== undefined ? { label: body.label } : {}),
+        ...(body.shared_with_org !== undefined ? { sharedWithOrg: body.shared_with_org } : {}),
+      });
       await recordAuditFromContext(c, {
         action: "integration.connection.metadata.updated",
         resourceType: "integration_connection",
         resourceId: connectionId,
         after: {
           ...(body.label !== undefined ? { label: body.label } : {}),
-          ...(body.sharedWithOrg !== undefined ? { sharedWithOrg: body.sharedWithOrg } : {}),
+          ...(body.shared_with_org !== undefined ? { sharedWithOrg: body.shared_with_org } : {}),
         },
       });
       return c.json({
         id: updated.id,
         label: updated.label,
-        sharedWithOrg: updated.sharedWithOrg,
+        shared_with_org: updated.sharedWithOrg,
         updatedAt: updated.updatedAt.toISOString(),
       });
     },

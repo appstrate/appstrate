@@ -21,7 +21,8 @@
 
 import {
   RefreshError,
-  resolveHttpDelivery,
+  resolveAfpsHttpDelivery,
+  type AfpsHttpDelivery as ConnectAfpsHttpDelivery,
   type HttpDeliveryPlan,
   type ResolvedAuthCredentials,
   type IntegrationCredentialsWire,
@@ -29,6 +30,7 @@ import {
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { expandScopesGranted } from "@appstrate/core/integration";
 import { OAUTH_REFRESH_LEAD_MS } from "@appstrate/core/sidecar-types";
+import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
 
 import { logger } from "../lib/logger.ts";
 import { notFound, gone, internalError, badGateway } from "../lib/errors.ts";
@@ -100,7 +102,7 @@ export async function resolveLiveIntegrationCredentials(
   const manifest = await loadIntegrationManifest(integrationId);
   await assertIntegrationActive(integrationId, context.applicationId);
 
-  const auths = manifest.auths ?? {};
+  const auths = (manifest.auths ?? {}) as Record<string, AfpsManifestAuth>;
   if (Object.keys(auths).length === 0) {
     return { auths: [], deliveryPlans: {}, expiresAtEpochMs: {} };
   }
@@ -245,7 +247,7 @@ export async function resolveLiveIntegrationCredentials(
 
   const http = authDef.delivery?.http;
   if (http) {
-    const plan = resolveHttpDelivery(authDef.type, fields, http);
+    const plan = resolveAfpsHttpDelivery(authDef.type, fields, http as ConnectAfpsHttpDelivery);
     if (plan) {
       out.deliveryPlans[authKey] = plan;
     }
@@ -255,8 +257,9 @@ export async function resolveLiveIntegrationCredentials(
     authKey,
     authType: authDef.type,
     fields: Object.freeze({ ...fields }),
-    authorizedUris: Object.freeze([...authDef.authorizedUris]),
-    ...(authDef.audience !== undefined ? { audience: authDef.audience } : {}),
+    authorizedUris: Object.freeze([...(authDef.authorized_uris ?? [])]),
+    // AFPS 2.0 §7.3 renamed `audience` → `resource` (RFC 8707).
+    ...(authDef.resource !== undefined ? { audience: authDef.resource } : {}),
     ...(connection.expiresAt ? { expiresAt: connection.expiresAt.toISOString() } : {}),
     ...(connection.scopesGranted.length > 0
       ? { scopesGranted: Object.freeze([...connection.scopesGranted]) }

@@ -31,7 +31,11 @@ import {
   type IntegrationCredentialsWire,
 } from "../integration-credentials-source.ts";
 
-const DELIVERY_HTTP = { headerName: "Cookie", valueFrom: "JSESSIONID" } as const;
+const DELIVERY_HTTP = {
+  in: "header",
+  name: "Cookie",
+  value: "{$credential.JSESSIONID}",
+} as const;
 
 function emptyWire(): IntegrationCredentialsWire {
   return { auths: [], deliveryPlans: {}, expiresAtEpochMs: {} };

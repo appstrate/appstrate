@@ -1,35 +1,29 @@
 {
-  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
-  "manifestVersion": "1.1",
-  "type": "integration",
   "name": "@appstrate/google-calendar",
   "version": "1.0.0",
-  "displayName": "Google Calendar (API)",
+  "type": "integration",
+  "schema_version": "2.0",
+  "display_name": "Google Calendar (API)",
   "description": "Calendar and scheduling service by Google",
-  "license": "Apache-2.0",
-  "author": "Appstrate",
-  "icon": "googlecalendar",
   "keywords": ["calendar", "productivity"],
-  "apiCall": {
-    "authKey": "primary"
+  "license": "Apache-2.0",
+  "icon": "googlecalendar",
+  "source": {
+    "kind": "api",
+    "api": {}
   },
   "auths": {
     "primary": {
       "type": "oauth2",
-      "required": true,
-      "authorizedUris": ["https://www.googleapis.com/calendar/**"],
-      "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth",
-      "tokenUrl": "https://oauth2.googleapis.com/token",
-      "refreshUrl": "https://oauth2.googleapis.com/token",
-      "scopes": ["https://www.googleapis.com/auth/calendar.readonly"],
-      "scopeSeparator": " ",
-      "authorizationParams": {
+      "authorization_endpoint": "https://accounts.google.com/o/oauth2/v2/auth",
+      "token_endpoint": "https://oauth2.googleapis.com/token",
+      "default_scopes": ["https://www.googleapis.com/auth/calendar.readonly"],
+      "authorization_params": {
         "access_type": "offline",
         "prompt": "consent"
       },
-      "pkceEnabled": false,
-      "tokenAuthMethod": "client_secret_post",
-      "availableScopes": [
+      "token_endpoint_auth_method": "client_secret_post",
+      "scope_catalog": [
         {
           "value": "https://www.googleapis.com/auth/calendar.readonly",
           "label": "Read-only access to calendars and events"
@@ -55,13 +49,31 @@
           "label": "Read free/busy information"
         }
       ],
+      "authorized_uris": ["https://www.googleapis.com/calendar/**"],
       "delivery": {
         "http": {
-          "headerName": "Authorization",
-          "headerPrefix": "Bearer",
-          "valueFrom": "access_token"
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": " "
+        },
+        "dev.appstrate/auth": {
+          "required": true
         }
       }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/api": {
+      "auth_key": "primary"
     }
   }
 }

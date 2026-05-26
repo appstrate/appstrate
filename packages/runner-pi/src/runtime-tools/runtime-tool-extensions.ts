@@ -31,7 +31,7 @@ import {
 } from "@appstrate/core/runtime-tool-defs";
 
 export interface BuildRuntimeToolExtensionsOptions {
-  /** Agent-selected runtime tools (`manifest.runtimeTools`). */
+  /** Agent-selected runtime tools (`manifest.runtime_tools`). */
   runtimeTools?: readonly string[];
   /** Output JSON Schema (constrains + validates `output`'s `data` arg). */
   outputSchema?: Record<string, unknown> | null;

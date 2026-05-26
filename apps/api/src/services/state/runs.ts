@@ -130,14 +130,117 @@ type EnrichedRunRow = {
   packageEphemeral: boolean | null;
 };
 
+/**
+ * Wire-shape Run DTO returned to API consumers. The Drizzle `Run` row keeps
+ * camelCase field names internally (Better Auth blocker); this is the
+ * single bridge between internal storage and external JSON. Universal
+ * DB-convention fields (id, *Id, *At) stay camelCase per Phase 3 scope.
+ */
+type RunWireDto = {
+  id: string;
+  packageId: string | null;
+  userId: string | null;
+  endUserId: string | null;
+  apiKeyId: string | null;
+  orgId: string;
+  applicationId: string;
+  scheduleId: string | null;
+  status: string;
+  input: unknown;
+  result: unknown;
+  checkpoint: unknown;
+  error: string | null;
+  metadata: unknown;
+  config: unknown;
+  config_override: unknown;
+  started_at: Date | null;
+  completed_at: Date | null;
+  duration: number | null;
+  cost: number | null;
+  notifiedAt: Date | null;
+  readAt: Date | null;
+  runNumber: number | null;
+  token_usage: unknown;
+  version_label: string | null;
+  version_dirty: boolean | null;
+  proxy_label: string | null;
+  model_label: string | null;
+  model_source: string | null;
+  runner_name: string | null;
+  runner_kind: string | null;
+  agent_scope: string | null;
+  agent_name: string | null;
+  runOrigin: string | null;
+  contextSnapshot: unknown;
+  sinkSecretEncrypted: string | null;
+  sinkExpiresAt: Date | null;
+  sinkClosedAt: Date | null;
+  lastHeartbeatAt: Date | null;
+  modelCredentialId: string | null;
+  connection_overrides: unknown;
+  resolvedConnections: unknown;
+};
+
+/**
+ * Translate a raw Drizzle `runs` row into its snake_case wire DTO. The DB
+ * TS field names stay camelCase (Better Auth blocker) so this function is
+ * the single bridge between internal storage and external JSON.
+ */
+function runRowToWireDto(row: typeof runs.$inferSelect): RunWireDto {
+  return {
+    id: row.id,
+    packageId: row.packageId,
+    userId: row.userId,
+    endUserId: row.endUserId,
+    apiKeyId: row.apiKeyId,
+    orgId: row.orgId,
+    applicationId: row.applicationId,
+    scheduleId: row.scheduleId,
+    status: row.status,
+    input: row.input,
+    result: row.result,
+    checkpoint: row.checkpoint,
+    error: row.error,
+    metadata: row.metadata,
+    config: row.config,
+    config_override: row.configOverride,
+    started_at: row.startedAt,
+    completed_at: row.completedAt,
+    duration: row.duration,
+    cost: row.cost,
+    notifiedAt: row.notifiedAt,
+    readAt: row.readAt,
+    runNumber: row.runNumber,
+    token_usage: row.tokenUsage,
+    version_label: row.versionLabel,
+    version_dirty: row.versionDirty,
+    proxy_label: row.proxyLabel,
+    model_label: row.modelLabel,
+    model_source: row.modelSource,
+    runner_name: row.runnerName,
+    runner_kind: row.runnerKind,
+    agent_scope: row.agentScope,
+    agent_name: row.agentName,
+    runOrigin: row.runOrigin,
+    contextSnapshot: row.contextSnapshot,
+    sinkSecretEncrypted: row.sinkSecretEncrypted,
+    sinkExpiresAt: row.sinkExpiresAt,
+    sinkClosedAt: row.sinkClosedAt,
+    lastHeartbeatAt: row.lastHeartbeatAt,
+    modelCredentialId: row.modelCredentialId,
+    connection_overrides: row.connectionOverrides,
+    resolvedConnections: row.resolvedConnections,
+  };
+}
+
 function mapEnrichedRun(r: EnrichedRunRow) {
   return {
-    ...r.run,
-    userName: r.userName ?? null,
-    endUserName: r.endUserName ?? null,
-    apiKeyName: r.apiKeyName ?? null,
-    scheduleName: r.scheduleName ?? null,
-    packageEphemeral: r.packageEphemeral ?? false,
+    ...runRowToWireDto(r.run),
+    user_name: r.userName ?? null,
+    end_user_name: r.endUserName ?? null,
+    api_key_name: r.apiKeyName ?? null,
+    schedule_name: r.scheduleName ?? null,
+    package_ephemeral: r.packageEphemeral ?? false,
   };
 }
 
@@ -171,7 +274,7 @@ interface CreateRunParams {
   apiKeyId?: string;
   /** Snapshot of the agent's @scope (e.g. "@acme") at run creation. */
   agentScope?: string | null;
-  /** Snapshot of the agent's display name (manifest.displayName ?? name). */
+  /** Snapshot of the agent's display name (manifest.display_name ?? name). */
   agentName?: string | null;
   /** Snapshot of the effective agent config (merged overrides) at run creation. */
   config?: Record<string, unknown> | null;
@@ -771,8 +874,8 @@ export async function getRunFull(scope: AppScope, id: string) {
 
   return {
     ...mapEnrichedRun(row),
-    inlineManifest,
-    inlinePrompt,
+    inline_manifest: inlineManifest,
+    inline_prompt: inlinePrompt,
   };
 }
 

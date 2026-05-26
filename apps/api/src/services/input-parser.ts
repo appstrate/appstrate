@@ -52,7 +52,7 @@ interface RunRequestBody {
   modelId?: string;
   proxyId?: string;
   config?: Record<string, unknown>;
-  connectionOverrides?: Record<string, string>;
+  connection_overrides?: Record<string, string>;
 }
 
 function getArrayItems(prop: JSONSchema7): JSONSchema7 | undefined {
@@ -174,22 +174,22 @@ export async function parseRequestInput(
     );
   }
 
-  // `connectionOverrides` shape guard. Flat map: integrationId → connectionId.
+  // `connection_overrides` shape guard. Flat map: integrationId → connectionId.
   // Invalid bodies produce a 400 with a precise param so the picker UI can
   // highlight the offender.
-  if (body.connectionOverrides !== undefined) {
+  if (body.connection_overrides !== undefined) {
     if (
-      body.connectionOverrides === null ||
-      typeof body.connectionOverrides !== "object" ||
-      Array.isArray(body.connectionOverrides)
+      body.connection_overrides === null ||
+      typeof body.connection_overrides !== "object" ||
+      Array.isArray(body.connection_overrides)
     ) {
-      throw invalidRequest("`connectionOverrides` must be a JSON object", "connectionOverrides");
+      throw invalidRequest("`connection_overrides` must be a JSON object", "connection_overrides");
     }
-    for (const [intId, connId] of Object.entries(body.connectionOverrides)) {
+    for (const [intId, connId] of Object.entries(body.connection_overrides)) {
       if (typeof connId !== "string" || connId.length === 0) {
         throw invalidRequest(
-          `\`connectionOverrides["${intId}"]\` must be a non-empty connection id`,
-          `connectionOverrides.${intId}`,
+          `\`connection_overrides["${intId}"]\` must be a non-empty connection id`,
+          `connection_overrides.${intId}`,
         );
       }
     }
@@ -201,6 +201,6 @@ export async function parseRequestInput(
     modelIdOverride: body.modelId,
     proxyIdOverride: body.proxyId,
     configOverride: body.config,
-    connectionOverrides: body.connectionOverrides,
+    connectionOverrides: body.connection_overrides,
   };
 }

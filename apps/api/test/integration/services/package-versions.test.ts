@@ -257,8 +257,8 @@ describe("package-versions service", () => {
       });
 
       const info = await getVersionInfo(`@${orgSlug}/info-no-ver`, orgId);
-      expect(info.activeVersion).toBe("0.5.0");
-      expect(info.latestPublishedVersion).toBeNull();
+      expect(info.active_version).toBe("0.5.0");
+      expect(info.latest_published_version).toBeNull();
     });
 
     it("returns latestPublishedVersion from the latest dist-tag", async () => {
@@ -282,8 +282,8 @@ describe("package-versions service", () => {
       });
 
       const info = await getVersionInfo(pkg.id, orgId);
-      expect(info.activeVersion).toBe("2.0.0");
-      expect(info.latestPublishedVersion).toBe("1.0.0");
+      expect(info.active_version).toBe("2.0.0");
+      expect(info.latest_published_version).toBe("1.0.0");
     });
 
     it("returns null activeVersion when manifest has no version", async () => {
@@ -294,8 +294,8 @@ describe("package-versions service", () => {
       });
 
       const info = await getVersionInfo(`@${orgSlug}/info-no-manifest-ver`, orgId);
-      expect(info.activeVersion).toBeNull();
-      expect(info.latestPublishedVersion).toBeNull();
+      expect(info.active_version).toBeNull();
+      expect(info.latest_published_version).toBeNull();
     });
   });
 

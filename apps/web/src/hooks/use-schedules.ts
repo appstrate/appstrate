@@ -9,14 +9,14 @@ import { usePackageDetail } from "./use-packages";
 import { useAgentModel } from "./use-models";
 import { useAgentProxy } from "./use-proxies";
 import { onMutationError } from "./use-mutations";
-import type { Schedule, EnrichedSchedule, Run } from "@appstrate/shared-types";
+import type { ScheduleWireDto, EnrichedSchedule, EnrichedRun } from "@appstrate/shared-types";
 
 export function useScheduleRuns(scheduleId: string | undefined) {
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
   return useQuery({
     queryKey: ["schedule-runs", orgId, applicationId, scheduleId],
-    queryFn: () => apiList<Run>(`/schedules/${scheduleId}/runs`),
+    queryFn: () => apiList<EnrichedRun>(`/schedules/${scheduleId}/runs`),
     enabled: !!scheduleId && !!applicationId,
   });
 }
@@ -67,16 +67,16 @@ export function useCreateSchedule(packageId: string) {
   return useMutation({
     mutationFn: async (data: {
       name?: string;
-      cronExpression: string;
+      cron_expression: string;
       timezone?: string;
       input?: Record<string, unknown>;
-      configOverride?: Record<string, unknown> | null;
-      modelIdOverride?: string | null;
-      proxyIdOverride?: string | null;
-      versionOverride?: string | null;
-      connectionOverrides?: Record<string, Record<string, string>> | null;
+      config_override?: Record<string, unknown> | null;
+      model_id_override?: string | null;
+      proxy_id_override?: string | null;
+      version_override?: string | null;
+      connection_overrides?: Record<string, Record<string, string>> | null;
     }) => {
-      return api<Schedule>(`/agents/${packageId}/schedules`, {
+      return api<ScheduleWireDto>(`/agents/${packageId}/schedules`, {
         method: "POST",
         body: JSON.stringify(data),
       });
@@ -95,17 +95,17 @@ export function useUpdateSchedule() {
     }: {
       id: string;
       name?: string;
-      cronExpression?: string;
+      cron_expression?: string;
       timezone?: string;
       input?: Record<string, unknown>;
       enabled?: boolean;
-      configOverride?: Record<string, unknown> | null;
-      modelIdOverride?: string | null;
-      proxyIdOverride?: string | null;
-      versionOverride?: string | null;
-      connectionOverrides?: Record<string, Record<string, string>> | null;
+      config_override?: Record<string, unknown> | null;
+      model_id_override?: string | null;
+      proxy_id_override?: string | null;
+      version_override?: string | null;
+      connection_overrides?: Record<string, Record<string, string>> | null;
     }) => {
-      return api<Schedule>(`/schedules/${id}`, {
+      return api<ScheduleWireDto>(`/schedules/${id}`, {
         method: "PUT",
         body: JSON.stringify(data),
       });

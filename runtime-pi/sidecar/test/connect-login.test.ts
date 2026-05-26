@@ -76,9 +76,10 @@ describe("applyConnectInputSubstitution", () => {
 // ─────────────────────────────────────────────
 
 const DELIVERY_HTTP = {
-  headerName: "Authorization",
-  headerPrefix: "Bearer ",
-  valueFrom: "access_token",
+  in: "header",
+  name: "Authorization",
+  prefix: "Bearer ",
+  value: "{$credential.access_token}",
 } as const;
 
 function emptyWire(): IntegrationCredentialsWire {
@@ -152,7 +153,6 @@ describe("runConnectLogin", () => {
     );
 
     const bundle = await runConnectLogin({
-       
       host: host as any,
       namespace: "ns",
       toolName: "login",
@@ -198,7 +198,6 @@ describe("runConnectLogin", () => {
     };
     await expect(
       runConnectLogin({
-         
         host: host as any,
         namespace: "ns",
         toolName: "login",
@@ -227,7 +226,6 @@ describe("runConnectLogin", () => {
 
     await expect(
       runConnectLogin({
-         
         host: host as any,
         namespace: "ns",
         toolName: "login",
@@ -244,12 +242,82 @@ describe("runConnectLogin", () => {
     expect(source.activeInputs()).toBeNull();
   });
 
+  it("renders a base64 multi-field delivery template", async () => {
+    const source = makeSource();
+    const canned = {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({ outputs: { username: "u", password: "p" } }),
+        },
+      ],
+    };
+    const { host } = makeFakeHost("ns", canned);
+
+    await runConnectLogin({
+      host: host as any,
+      namespace: "ns",
+      toolName: "login",
+      inputs: {},
+      source,
+      authKey: "primary",
+      authType: "api_key",
+      authorizedUris: [],
+      deliveryHttp: {
+        in: "header",
+        name: "Authorization",
+        value: "{$credential.username}:{$credential.password}",
+        encoding: "base64",
+      } as any,
+    });
+
+    const plans = source.deliveryPlans();
+    expect(plans.primary?.headerName).toBe("Authorization");
+    expect(plans.primary?.value).toBe(Buffer.from("u:p", "utf8").toString("base64"));
+  });
+
+  it("installs the auth with a zero-value plan when no header is injectable", async () => {
+    const source = makeSource();
+    const canned = {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({ outputs: { session: "S1" } }),
+        },
+      ],
+    };
+    const { host } = makeFakeHost("ns", canned);
+
+    const bundle = await runConnectLogin({
+      host: host as any,
+      namespace: "ns",
+      toolName: "login",
+      inputs: {},
+      source,
+      authKey: "primary",
+      // `custom` with an empty `delivery.http` name → resolver returns null,
+      // so the zero-value plan branch installs the auth without injection.
+      authType: "custom",
+      authorizedUris: [],
+      deliveryHttp: { in: "header", name: "" } as any,
+    });
+
+    expect(bundle.outputs).toEqual({ session: "S1" });
+    const snap = source.snapshot();
+    expect(snap.auths[0]?.authKey).toBe("primary");
+    expect(snap.deliveryPlans.primary).toEqual({
+      headerName: "",
+      headerPrefix: "",
+      value: "",
+      allowServerOverride: false,
+    });
+  });
+
   it("throws when the upstream client is missing", async () => {
     const source = makeSource();
     const host = { getUpstreamClient: () => undefined };
     await expect(
       runConnectLogin({
-         
         host: host as any,
         namespace: "absent",
         toolName: "login",

@@ -40,8 +40,8 @@ const MANIFEST = {
   name: "@afps/conformance-ref",
   version: "1.0.0",
   type: "agent",
-  schemaVersion: "1.1",
-  displayName: "Conformance Reference Agent",
+  schema_version: "2.0",
+  display_name: "Conformance Reference Agent",
   author: "AFPS",
   description: "Canonical reference bundle shipped with the AFPS runtime.",
 };
@@ -89,9 +89,8 @@ const EVENTS = [
     type: "output.emitted",
     timestamp: 0,
     runId: REF_RUN_ID,
-    data: { summary: "AFPS ships a portable runtime.", partial: true },
+    data: { summary: "AFPS ships a portable runtime.", partial: false },
   },
-  { type: "output.emitted", timestamp: 0, runId: REF_RUN_ID, data: { partial: false } },
 ];
 
 const CONTEXT = { runId: "ref_run_001", input: { topic: "AFPS conformance" } };

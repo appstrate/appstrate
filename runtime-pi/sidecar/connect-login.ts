@@ -20,20 +20,26 @@
  *     inputs never appear in the returned bundle.
  */
 
-import type { IntegrationManifest } from "@appstrate/core/integration";
 import {
-  resolveHttpDelivery,
+  resolveAfpsHttpDelivery,
+  type AfpsHttpDelivery,
   type HttpDeliveryPlan,
-} from "@appstrate/connect/integration-credentials";
+} from "@appstrate/connect";
 import type { CredentialBundle } from "@appstrate/connect/connect";
+import type { ManifestDeliveryHttp } from "@appstrate/core/sidecar-types";
 import type { McpHost } from "./mcp-host.ts";
 import type { IntegrationCredentialsSource } from "./integration-credentials-source.ts";
 import { logger } from "./logger.ts";
 
-/** Manifest `auths.{key}.delivery.http` block — the shape `resolveHttpDelivery` consumes. */
-type DeliveryHttp = NonNullable<
-  NonNullable<IntegrationManifest["auths"]>[string]["delivery"]["http"]
->;
+/**
+ * AFPS 2.0 `auths.{key}.delivery.http` block — snake_case (`in`, `name`,
+ * `value`, `prefix?`, `encoding?`, `allow_server_override?`), as carried on the
+ * spawn spec's `connectLogin.deliveryHttp`. The `value` is a
+ * `{$credential.<field>}` template; {@link resolveAfpsHttpDelivery} (the same
+ * resolver the platform spawn/credentials services use) renders it into a
+ * {@link HttpDeliveryPlan} directly.
+ */
+type DeliveryHttp = ManifestDeliveryHttp;
 
 export interface RunConnectLoginOptions {
   /** Multiplexing host holding the integration's connected MCP client. */
@@ -113,7 +119,11 @@ export async function runConnectLogin(opts: RunConnectLoginOptions): Promise<Cre
     // Render the session's delivery plan and install it as the integration's
     // injectable session. A null plan (e.g. custom auth with no header) still
     // installs the auth, but leaves deliveryPlans untouched (nothing to inject).
-    const plan = resolveHttpDelivery(opts.authType, parsed.outputs, opts.deliveryHttp);
+    const plan = resolveAfpsHttpDelivery(
+      opts.authType,
+      parsed.outputs,
+      opts.deliveryHttp as AfpsHttpDelivery,
+    );
     if (plan) {
       opts.source.setSessionOutputs(
         {

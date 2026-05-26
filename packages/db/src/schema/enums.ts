@@ -74,6 +74,11 @@ export const packageTypeValues = [
   // INTEGRATIONS_PROPOSAL §4.1. The legacy `tool`/`provider` values were
   // dropped from the enum during the provider→integration migration (squashed into the 0000_init baseline).
   "integration",
+  // AFPS 2.0 §3.4 — a standalone MCP Bundle (MCPB) package that an
+  // integration's `source.kind: "local"` references via `source.server`.
+  // The integration carries the auth/scope/delivery contract; the mcp-server
+  // package carries the runnable server (entry point + runtime).
+  "mcp-server",
 ] as const;
 export const packageTypeEnum = pgEnum("package_type", packageTypeValues);
 export const zPackageTypeEnum = z.enum(packageTypeValues);

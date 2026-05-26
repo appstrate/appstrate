@@ -47,7 +47,11 @@ export function useUpsertMemberIntegrationPin() {
         connectionId: string;
       }>("/me/integration-pins", {
         method: "PUT",
-        body: JSON.stringify(input),
+        body: JSON.stringify({
+          agent_package_id: input.agentPackageId,
+          integration_package_id: input.integrationPackageId,
+          connection_id: input.connectionId,
+        }),
         headers: { "Content-Type": "application/json" },
       }),
     onSuccess: (_data, vars) => {

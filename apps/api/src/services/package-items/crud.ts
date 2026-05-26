@@ -48,20 +48,20 @@ export async function getPackageById(id: string): Promise<Package | null> {
 async function findDependentPackages(
   orgId: string,
   targetPackageId: string,
-): Promise<{ id: string; displayName: string }[]> {
+): Promise<{ id: string; display_name: string }[]> {
   const orgPkgs = await db
     .select({ id: packages.id, draftManifest: packages.draftManifest })
     .from(packages)
     .where(and(scopedWhere(packages, { orgId }), notEphemeralFilter()));
 
-  const dependents: { id: string; displayName: string }[] = [];
+  const dependents: { id: string; display_name: string }[] = [];
   for (const pkg of orgPkgs) {
     if (!pkg.draftManifest || pkg.id === targetPackageId) continue;
     const m = parseDraftManifest(pkg.draftManifest);
     const deps = extractDependencies(m);
     for (const dep of deps) {
       if (buildPackageId(dep.depScope, dep.depName) === targetPackageId) {
-        dependents.push({ id: pkg.id, displayName: getPackageDisplayName(pkg) });
+        dependents.push({ id: pkg.id, display_name: getPackageDisplayName(pkg) });
         break;
       }
     }
@@ -244,10 +244,10 @@ export async function listOrgItems(
       createdBy: row.createdBy,
       createdAt: toISORequired(row.createdAt),
       updatedAt: toISORequired(row.updatedAt),
-      usedByAgents: countMap.get(row.id) ?? 0,
+      used_by_agents: countMap.get(row.id) ?? 0,
       version: typeof m.version === "string" ? m.version : null,
-      autoInstalled: row.autoInstalled,
-      forkedFrom: row.forkedFrom ?? null,
+      auto_installed: row.autoInstalled,
+      forked_from: row.forkedFrom ?? null,
     };
   });
 }
@@ -279,12 +279,12 @@ export async function getOrgItem(orgId: string, itemId: string, cfg: PackageType
     createdBy: data.createdBy,
     createdAt: toISORequired(data.createdAt),
     updatedAt: toISORequired(data.updatedAt),
-    autoInstalled: data.autoInstalled,
+    auto_installed: data.autoInstalled,
     version: typeof m.version === "string" ? m.version : null,
-    manifestName: typeof m.name === "string" ? m.name : null,
+    manifest_name: typeof m.name === "string" ? m.name : null,
     manifest: asRecord(data.draftManifest),
-    lockVersion: data.lockVersion,
-    forkedFrom: data.forkedFrom ?? null,
+    lock_version: data.lockVersion,
+    forked_from: data.forkedFrom ?? null,
     agents: dependents,
   };
 }
@@ -297,7 +297,7 @@ export async function deleteOrgItem(
 ): Promise<{
   ok: boolean;
   error?: string;
-  dependents?: { id: string; displayName: string }[];
+  dependents?: { id: string; display_name: string }[];
 }> {
   const dependents = await findDependentPackages(orgId, itemId);
   if (dependents.length > 0) {

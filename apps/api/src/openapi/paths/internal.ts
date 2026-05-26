@@ -92,16 +92,16 @@ export const internalPaths = {
                     type: "array",
                     items: {
                       type: "object",
-                      required: ["id", "content", "createdAt", "actorType"],
+                      required: ["id", "content", "createdAt", "actor_type"],
                       properties: {
                         id: { type: "integer" },
                         content: {},
                         createdAt: { type: "string", format: "date-time" },
-                        actorType: {
+                        actor_type: {
                           type: "string",
                           enum: ["user", "end_user", "shared"],
                         },
-                        actorId: { type: ["string", "null"] },
+                        actor_id: { type: ["string", "null"] },
                       },
                     },
                   },
@@ -113,8 +113,8 @@ export const internalPaths = {
                     id: 42,
                     content: "User prefers Python over JS for data tasks",
                     createdAt: "2026-04-20T10:00:00Z",
-                    actorType: "user",
-                    actorId: "usr_abc",
+                    actor_type: "user",
+                    actor_id: "usr_abc",
                   },
                 ],
               },
@@ -293,13 +293,13 @@ export const internalPaths = {
       },
     },
   },
-  "/internal/integration-bundle/{scope}/{name}": {
+  "/internal/mcp-server-bundle/{scope}/{name}": {
     get: {
-      operationId: "getIntegrationBundle",
+      operationId: "getMcpServerBundle",
       tags: ["Internal"],
-      summary: "Fetch the AFPS bundle bytes for an installed integration",
+      summary: "Fetch the AFPS bundle bytes for a referenced mcp-server package",
       description:
-        "Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise the integration's MCP server before spawning a runner container. The endpoint verifies that the run's agent declares this integration in `dependencies.integrations` AND that the integration is installed on the run's application — orthogonal access control to the credentials endpoint. Returns the raw ZIP archive (`application/zip`).",
+        "Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise an integration's MCP server before spawning a runner container. In AFPS 2.0 a local-source integration references a SEPARATE mcp-server package via `source.server.name`; this endpoint serves that package's bundle. It verifies that the run's agent declares an installed integration (in `dependencies.integrations`) that references this mcp-server — orthogonal access control to the credentials endpoint. Returns the raw ZIP archive (`application/zip`).",
       security: [{ bearerExecToken: [] }],
       parameters: [
         { $ref: "#/components/parameters/PackageScope" },
@@ -315,16 +315,15 @@ export const internalPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": {
+        "404": {
           description:
-            "Agent does not declare this integration as a dependency OR the integration is not installed on this application.",
+            "Agent does not reference this mcp-server through an installed integration, or no published version exists.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
             },
           },
         },
-        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
   },

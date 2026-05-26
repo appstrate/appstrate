@@ -1,20 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { OAuthTokenAuthMethod, OAuthTokenContentType } from "@appstrate/core/validation";
+import type { OAuthTokenAuthMethod } from "@appstrate/core/validation";
 import {
   parseTokenResponse,
   parseTokenErrorResponse,
   buildTokenHeaders,
   buildTokenBody,
+  type OAuthTokenContentType,
   type ParsedTokenResponse,
 } from "./token-utils.ts";
 import { extractErrorMessage } from "./utils.ts";
 
 export interface RefreshContext {
-  tokenUrl: string;
+  /**
+   * Token endpoint (`auths.{key}.token_endpoint`). AFPS 2.0 DROPS the 1.x
+   * `refresh_url`: a refresh now POSTs `grant_type=refresh_token` to the same
+   * `token_endpoint` used for the authorization-code exchange (RFC 6749 §6).
+   */
+  tokenEndpoint: string;
   clientId: string;
   clientSecret: string;
-  tokenAuthMethod?: OAuthTokenAuthMethod;
+  /** Token endpoint client-auth method (`token_endpoint_auth_method`). */
+  tokenEndpointAuthMethod?: OAuthTokenAuthMethod;
   scopeSeparator?: string;
   tokenContentType?: OAuthTokenContentType;
 }
@@ -71,7 +78,7 @@ export async function performRefreshTokenExchange(
   refreshToken: string,
   opts: { label: string; accessTokenFallback?: string },
 ): Promise<RefreshExchangeResult> {
-  const useBasicAuth = ctx.tokenAuthMethod === "client_secret_basic";
+  const useBasicAuth = ctx.tokenEndpointAuthMethod === "client_secret_basic";
   const bodyParams: Record<string, string> = {
     grant_type: "refresh_token",
     refresh_token: refreshToken,
@@ -81,10 +88,10 @@ export async function performRefreshTokenExchange(
 
   let response: Response;
   try {
-    response = await fetch(ctx.tokenUrl, {
+    response = await fetch(ctx.tokenEndpoint, {
       method: "POST",
       headers: buildTokenHeaders(
-        ctx.tokenAuthMethod,
+        ctx.tokenEndpointAuthMethod,
         ctx.clientId,
         ctx.clientSecret,
         ctx.tokenContentType,

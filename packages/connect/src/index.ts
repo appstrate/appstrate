@@ -44,7 +44,7 @@ export {
 } from "./proxy-primitives.ts";
 export type { ProxyCredentialsPayload } from "./proxy-primitives.ts";
 
-// ─── AFPS integration manifest (Phase 1.1) ─────────────────────────────
+// ─── AFPS integration manifest ─────────────────────────────────────────
 // Multi-auth credential resolver + delivery planners.
 export { resolveHttpDelivery, buildProxyCredentialsPayload } from "./integration-credentials.ts";
 // Credential-envelope decryptors — split out so they (and `encryption.ts` →
@@ -78,9 +78,19 @@ export type { RefreshContext } from "./token-refresh.ts";
 export { planMitmAction } from "./integration-mitm-planner.ts";
 export type { MitmRequestContext } from "./integration-mitm-planner.ts";
 
-// Phase 1.3 — OAuth2 user-facing connect flow for integration auths
-// (used by the marketplace UI; parameterised by manifest endpoints +
-// admin-registered client credentials).
+// AFPS 2.0 `delivery.http` resolver (snake_case, `{$credential.<field>}`
+// value templates). Counterpart to the pre-resolved `resolveHttpDelivery`.
+export { resolveAfpsHttpDelivery } from "./afps-delivery.ts";
+export type { AfpsHttpDelivery } from "./afps-delivery.ts";
+
+// Discovery-first OAuth endpoint resolution (RFC 8414 / OIDC). Used by the
+// integration OAuth initiate path when an auth declares an `issuer`.
+export { resolveOAuthEndpoints } from "./oauth-discovery.ts";
+export type { OAuthEndpointResolution, ResolveOAuthEndpointsInput } from "./oauth-discovery.ts";
+
+// OAuth2 user-facing connect flow for integration auths (used by the
+// marketplace UI; parameterised by manifest endpoints + admin-registered
+// client credentials).
 export { initiateIntegrationOAuth, handleIntegrationOAuthCallback } from "./integration-oauth.ts";
 // Only the callback-result type crosses the package boundary (apps/api's
 // integrations route + connect strategy). The initiate-side input/result

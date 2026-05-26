@@ -63,6 +63,10 @@ export interface CoreResources {
   members: "read" | "invite" | "remove" | "change-role";
   agents: "read" | "write" | "configure" | "delete" | "run";
   skills: "read" | "write" | "delete";
+  // AFPS 2.0 §3.4 — standalone MCP Bundle (MCPB) packages. Browse/import/delete
+  // like skills; no editor surface (an mcp-server manifest is a verbatim MCPB
+  // manifest, authored externally and imported as a `.afps`).
+  "mcp-servers": "read" | "write" | "delete";
   runs: "read" | "cancel" | "delete";
   schedules: "read" | "write" | "delete";
   // Unified `package_persistence` (checkpoints + memories) with first-class
@@ -110,6 +114,7 @@ export const CORE_RESOURCE_NAMES: ReadonlySet<string> = new Set<string>([
   "members",
   "agents",
   "skills",
+  "mcp-servers",
   "runs",
   "schedules",
   "persistence",

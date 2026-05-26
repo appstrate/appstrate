@@ -75,7 +75,7 @@ export function EndUserCreateModal({ open, onClose }: Props) {
     >
       <form id="create-end-user-form" onSubmit={handleSubmit(onFormSubmit)} className="space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="eu-name">{t("applications.endUserName")}</Label>
+          <Label htmlFor="eu-name">{t("applications.end_user_name")}</Label>
           <Input
             id="eu-name"
             type="text"

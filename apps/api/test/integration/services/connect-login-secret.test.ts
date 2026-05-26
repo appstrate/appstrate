@@ -22,36 +22,33 @@ import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
+import {
+  localIntegrationManifest,
+  httpHeaderDelivery,
+  connectToolBlock,
+} from "../../helpers/integration-manifests.ts";
 
 function runStartManifest(name: string): IntegrationManifest {
-  return {
-    manifestVersion: "1.0",
-    type: "integration",
+  return localIntegrationManifest({
     name,
     version: "0.1.0",
     displayName: "OrgaBusiness",
     description: "Form-login integration (run-start)",
-    server: { type: "node", entryPoint: "main.js" },
     auths: {
       session: {
         type: "custom",
         authorizedUris: ["https://saas.example.com/**"],
-        credentials: {
-          schema: {
-            type: "object",
-            properties: { identifiant: { type: "string" }, mot_de_passe: { type: "string" } },
-          },
-        },
-        delivery: { http: { headerName: "Cookie", valueFrom: "JSESSIONID" } },
-        connect: {
+        credentialFields: ["identifiant", "mot_de_passe"],
+        delivery: httpHeaderDelivery({ name: "Cookie", field: "JSESSIONID" }),
+        connect: connectToolBlock({
           tool: "login",
           runAt: "run-start",
           persistLoginSecret: true,
           produces: ["JSESSIONID"],
-        },
+        }),
       },
     },
-  } as IntegrationManifest;
+  });
 }
 
 describe("LoginSecretStrategy.complete — store the secret, session pending", () => {
@@ -101,10 +98,10 @@ describe("LoginSecretStrategy.complete — store the secret, session pending", (
     });
 
     // Connection metadata: default account, not flagged for reconnection.
-    expect(summary.accountId).toBe("default");
-    expect(summary.needsReconnection).toBe(false);
+    expect(summary.account_id).toBe("default");
+    expect(summary.needs_reconnection).toBe(false);
     expect(summary.expiresAt).toBeNull();
-    expect(summary.scopesGranted).toEqual([]);
+    expect(summary.scopes_granted).toEqual([]);
   });
 
   it("rejects an empty credentials payload", async () => {

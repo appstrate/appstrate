@@ -101,11 +101,11 @@ export function PackageList() {
 
   const items: CardItem[] | undefined = agents?.map((f) => ({
     id: f.id,
-    displayName: f.displayName,
+    displayName: f.display_name,
     description: f.description,
     type: "agent",
     source: f.source,
-    runningRuns: f.runningRuns,
+    runningRuns: f.running_runs,
     keywords: f.keywords,
     unreadCount: unreadCounts?.[f.id],
   }));

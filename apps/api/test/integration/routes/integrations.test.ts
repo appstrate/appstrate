@@ -33,34 +33,45 @@ const app = getTestApp();
 
 function gmailManifest(name = "@official/gmail"): IntegrationManifest {
   return {
-    manifestVersion: "1.0",
     type: "integration",
+    schema_version: "2.0",
     name,
     version: "0.1.0",
-    displayName: "Gmail",
+    display_name: "Gmail",
     description: "Gmail integration",
-    server: { type: "node", entryPoint: "main.js" },
+    // AFPS 2.0: local server → mcp-server reference (separate package).
+    source: { kind: "local", server: { name, version: "^0.1.0" } },
     auths: {
       api: {
         type: "api_key",
-        authorizedUris: ["https://gmail.googleapis.com/**"],
+        authorized_uris: ["https://gmail.googleapis.com/**"],
         credentials: { schema: { type: "object", properties: { api_key: { type: "string" } } } },
         delivery: {
-          http: { headerName: "Authorization", headerPrefix: "Bearer", valueFrom: "api_key" },
+          http: {
+            in: "header",
+            name: "Authorization",
+            prefix: "Bearer",
+            value: "{$credential.api_key}",
+          },
         },
       },
       google: {
         type: "oauth2",
-        authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth",
-        tokenUrl: "https://oauth2.googleapis.com/token",
-        scopes: ["openid", "email"],
-        authorizedUris: ["https://www.googleapis.com/**"],
+        authorization_endpoint: "https://accounts.google.com/o/oauth2/v2/auth",
+        token_endpoint: "https://oauth2.googleapis.com/token",
+        default_scopes: ["openid", "email"],
+        authorized_uris: ["https://www.googleapis.com/**"],
         delivery: {
-          http: { headerName: "Authorization", headerPrefix: "Bearer", valueFrom: "access_token" },
+          http: {
+            in: "header",
+            name: "Authorization",
+            prefix: "Bearer",
+            value: "{$credential.access_token}",
+          },
         },
       },
     },
-  };
+  } as unknown as IntegrationManifest;
 }
 
 async function seedIntegration(orgId: string, manifest: IntegrationManifest) {
@@ -113,7 +124,7 @@ describe("GET /api/integrations/:packageId", () => {
     ctx = await createTestContext({ orgSlug: "myorg" });
   });
 
-  it("returns the manifest + per-auth status (zero connections, no OAuth client)", async () => {
+  it("returns the manifest + per-auth status + tool catalog", async () => {
     await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
     const res = await app.request("/api/integrations/@myorg/gmail", {
       headers: authHeaders(ctx),
@@ -122,21 +133,26 @@ describe("GET /api/integrations/:packageId", () => {
     const body = (await res.json()) as {
       manifest: { name: string };
       auths: Array<{
-        authKey: string;
+        auth_key: string;
         type: string;
         connections: unknown[];
-        hasOAuthClient: boolean;
+        has_oauth_client: boolean;
       }>;
+      tool_catalog: Array<{ name: string; description?: string; policy?: unknown }>;
     };
     expect(body.manifest.name).toBe("@myorg/gmail");
     expect(body.auths).toHaveLength(2);
-    const api = body.auths.find((a) => a.authKey === "api");
-    const google = body.auths.find((a) => a.authKey === "google");
+    const api = body.auths.find((a) => a.auth_key === "api");
+    const google = body.auths.find((a) => a.auth_key === "google");
     expect(api?.type).toBe("api_key");
     expect(api?.connections).toHaveLength(0);
-    expect(api?.hasOAuthClient).toBe(false);
+    expect(api?.has_oauth_client).toBe(false);
     expect(google?.type).toBe("oauth2");
-    expect(google?.hasOAuthClient).toBe(false);
+    expect(google?.has_oauth_client).toBe(false);
+    // The gmail fixture has no referenced mcp-server seeded → resolver
+    // falls back to the integration's `tools` keys. Shape assertion keeps
+    // the contract present without coupling to fixture catalog edits.
+    expect(Array.isArray(body.tool_catalog)).toBe(true);
   });
 
   it("returns 404 for non-existent integration", async () => {
@@ -243,10 +259,10 @@ describe("api_key connection flow", () => {
       body: JSON.stringify({ credentials: { api_key: "AKIA-SECRET" } }),
     });
     expect(post.status).toBe(200);
-    const conn = (await post.json()) as { id: string; authKey: string; accountId: string };
-    expect(conn.authKey).toBe("api");
-    // No identity extraction declared → accountId falls back to "default"
-    expect(conn.accountId).toBe("default");
+    const conn = (await post.json()) as { id: string; auth_key: string; account_id: string };
+    expect(conn.auth_key).toBe("api");
+    // No identity extraction declared → account_id falls back to "default"
+    expect(conn.account_id).toBe("default");
 
     const list = await app.request("/api/integrations/@myorg/gmail/connections", {
       headers: authHeaders(ctx),
@@ -359,12 +375,12 @@ describe("OAuth client CRUD", () => {
     const put = await app.request("/api/integrations/@myorg/gmail/oauth-clients/google", {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ clientId: "abc", clientSecret: "shh" }),
+      body: JSON.stringify({ client_id: "abc", client_secret: "shh" }),
     });
     expect(put.status).toBe(200);
-    const body = (await put.json()) as { clientId: string; hasClientSecret: boolean };
-    expect(body.clientId).toBe("abc");
-    expect(body.hasClientSecret).toBe(true);
+    const body = (await put.json()) as { client_id: string; has_client_secret: boolean };
+    expect(body.client_id).toBe("abc");
+    expect(body.has_client_secret).toBe(true);
 
     // Read
     const get = await app.request("/api/integrations/@myorg/gmail/oauth-clients/google", {
@@ -376,7 +392,7 @@ describe("OAuth client CRUD", () => {
     const rotate = await app.request("/api/integrations/@myorg/gmail/oauth-clients/google", {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ clientId: "abc", clientSecret: "different" }),
+      body: JSON.stringify({ client_id: "abc", client_secret: "different" }),
     });
     expect(rotate.status).toBe(200);
     const stored = await db
@@ -408,7 +424,7 @@ describe("OAuth client CRUD", () => {
     const res = await app.request("/api/integrations/@myorg/gmail/oauth-clients/api", {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ clientId: "x", clientSecret: "y" }),
+      body: JSON.stringify({ client_id: "x", client_secret: "y" }),
     });
     expect(res.status).toBe(400);
   });
@@ -428,7 +444,7 @@ describe("OAuth client CRUD", () => {
     const res = await app.request("/api/integrations/@myorg/gmail/oauth-clients/google", {
       method: "PUT",
       headers: memberHeaders,
-      body: JSON.stringify({ clientId: "abc", clientSecret: "shh" }),
+      body: JSON.stringify({ client_id: "abc", client_secret: "shh" }),
     });
     expect(res.status).toBe(403);
     // Nothing persisted.
@@ -462,7 +478,7 @@ describe("OAuth2 connect initiate", () => {
     await app.request("/api/integrations/@myorg/gmail/oauth-clients/google", {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ clientId: "abc", clientSecret: "shh" }),
+      body: JSON.stringify({ client_id: "abc", client_secret: "shh" }),
     });
     const res = await app.request("/api/integrations/@myorg/gmail/auths/google/connect/oauth2", {
       method: "POST",
@@ -515,6 +531,42 @@ describe("GET /api/integrations/callback (public — no session required)", () =
     expect(body).toContain("window.close");
     expect(body).toContain("access_denied");
   });
+
+  it("rejects an unknown/forged state (CSRF guard — state never written to the store)", async () => {
+    // The `state` value is the CSRF binding: oauth-state-store.set() at
+    // kickoff persists it, get() at callback consumes-once. Replaying a
+    // state that was never persisted (or was already consumed) must NOT
+    // dispatch token exchange — that's the whole CSRF protection.
+    //
+    // handleIntegrationOAuthCallback throws OAuthCallbackError("transient")
+    // when `store.get(state)` returns null; the route renders the
+    // generic "Could not complete the connection" popup HTML (NOT the
+    // "expired" variant — that's keyed on `kind === "revoked"`).
+    const res = await app.request(
+      "/api/integrations/callback?code=any-code&state=forged-state-never-stored",
+    );
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    // popup HTML is rendered (window.close present), with the generic
+    // user-facing transient error — the forged state was REFUSED, not
+    // silently exchanged.
+    expect(body).toContain("window.close");
+    expect(body).toMatch(/Could not complete the connection|try again/i);
+    // Sanity foil: a token-exchange success would have shown a clean
+    // close with no error text.
+    expect(body).not.toContain("access_denied");
+  });
+
+  it("rejects an empty state value (cannot bypass CSRF by omitting state)", async () => {
+    // ?code=… without ?state=… — caller is treated as missing-params, not
+    // exchanged. The route's pre-handler guard at `if (!code || !state)`
+    // is the first line of defence.
+    const res = await app.request("/api/integrations/callback?code=any-code&state=");
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("window.close");
+    expect(body).toMatch(/Missing required parameters|try again/i);
+  });
 });
 
 describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default connection)", () => {
@@ -557,20 +609,20 @@ describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default conne
     const put = await app.request("/api/integrations/@myorg/gmail/default", {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ connectionId: connId }),
+      body: JSON.stringify({ connection_id: connId }),
     });
     expect(put.status).toBe(200);
-    const created = (await put.json()) as { connectionId: string; enforce: boolean };
-    expect(created.connectionId).toBe(connId);
+    const created = (await put.json()) as { connection_id: string; enforce: boolean };
+    expect(created.connection_id).toBe(connId);
     expect(created.enforce).toBe(false);
 
     const get = await app.request("/api/integrations/@myorg/gmail/default", {
       headers: authHeaders(ctx),
     });
     const body = (await get.json()) as {
-      default: { connectionId: string; enforce: boolean } | null;
+      default: { connection_id: string; enforce: boolean } | null;
     };
-    expect(body.default?.connectionId).toBe(connId);
+    expect(body.default?.connection_id).toBe(connId);
   });
 
   it("upsert replaces the existing default (one row per integration) and honors enforce", async () => {
@@ -579,19 +631,19 @@ describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default conne
     await app.request("/api/integrations/@myorg/gmail/default", {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ connectionId: a }),
+      body: JSON.stringify({ connection_id: a }),
     });
     const put2 = await app.request("/api/integrations/@myorg/gmail/default", {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ connectionId: b, enforce: true }),
+      body: JSON.stringify({ connection_id: b, enforce: true }),
     });
     expect(put2.status).toBe(200);
     const get = await app.request("/api/integrations/@myorg/gmail/default", {
       headers: authHeaders(ctx),
     });
-    const body = (await get.json()) as { default: { connectionId: string; enforce: boolean } };
-    expect(body.default.connectionId).toBe(b);
+    const body = (await get.json()) as { default: { connection_id: string; enforce: boolean } };
+    expect(body.default.connection_id).toBe(b);
     expect(body.default.enforce).toBe(true);
   });
 
@@ -600,7 +652,7 @@ describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default conne
     const res = await app.request("/api/integrations/@myorg/gmail/default", {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ connectionId: connId }),
+      body: JSON.stringify({ connection_id: connId }),
     });
     expect(res.status).toBe(400);
   });
@@ -610,7 +662,7 @@ describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default conne
     await app.request("/api/integrations/@myorg/gmail/default", {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ connectionId: connId }),
+      body: JSON.stringify({ connection_id: connId }),
     });
     const del = await app.request("/api/integrations/@myorg/gmail/default", {
       method: "DELETE",
@@ -637,7 +689,7 @@ describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default conne
     const res = await app.request("/api/integrations/@myorg/gmail/default", {
       method: "PUT",
       headers: memberHeaders,
-      body: JSON.stringify({ connectionId: connId }),
+      body: JSON.stringify({ connection_id: connId }),
     });
     expect(res.status).toBe(403);
   });

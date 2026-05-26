@@ -2,14 +2,20 @@
 // Copyright 2026 Appstrate
 
 /**
- * AFPS 1.3 runtime resolvers.
+ * AFPS 2.0 runtime resolvers.
  *
- * Interfaces mirroring `dependencies.tools[]` and `.skills[]` on an agent
- * manifest, plus the integration `api_call` surface. The runtime supplies
- * default "bundled" implementations that read content shipped inside the
- * `.afps` file; runners supply external implementations (notably the
- * integration credential resolvers) for anything that lives outside the
- * bundle.
+ * Interfaces for loading in-bundle `dependencies.skills[]` content plus the
+ * integration `api_call` surface. The runtime supplies a default "bundled"
+ * skill implementation that reads content shipped inside the `.afps` file;
+ * runners supply external implementations (notably the integration credential
+ * resolvers) for anything that lives outside the bundle.
+ *
+ * NOTE: the `Tool` types here are the generic MCP Tool protocol from
+ * `@afps-spec/types` — they describe the shape of a tool surfaced to the LLM
+ * (e.g. the integration `api_call` tool built by `makeApiCallTool`). In AFPS
+ * 2.0 tools come from spawned `mcp-server` packages (§3.4) and integrations
+ * (§3.5), NOT from loading a package `entrypoint` module in-process (that was
+ * the 1.x `tool` package type, removed in 2.0).
  *
  * Specification: `afps-spec/spec.md` §8.
  */
@@ -18,14 +24,12 @@ export type {
   Bundle,
   BundlePackage,
   DependencyRef,
-  ToolRef,
   SkillRef,
   JSONSchema,
   Tool,
   ToolContext,
   ToolResult,
   ResolvedSkill,
-  ToolResolver,
   SkillResolver,
 } from "./types.ts";
 
@@ -33,11 +37,6 @@ export type {
 // resolver authors can import all the types they need from one place.
 export type { RunEvent } from "@afps-spec/types";
 
-export {
-  BundledToolResolver,
-  BundledToolResolutionError,
-  type BundledToolModule,
-} from "./bundled-tool-resolver.ts";
 export { BundledSkillResolver, BundledSkillResolutionError } from "./bundled-skill-resolver.ts";
 export { resolvePackageRef, readPackageText, readPackageBytes } from "./bundle-adapter.ts";
 

@@ -88,7 +88,7 @@ export async function run(argv: readonly string[], io: CliIO): Promise<number> {
   io.stdout(`  name:          ${String(rootManifest["name"] ?? "<unknown>")}\n`);
   io.stdout(`  version:       ${String(rootManifest["version"] ?? "<unknown>")}\n`);
   io.stdout(`  type:          ${String(rootManifest["type"] ?? "<unknown>")}\n`);
-  io.stdout(`  schemaVersion: ${String(rootManifest["schemaVersion"] ?? "<unknown>")}\n`);
+  io.stdout(`  schema_version: ${String(rootManifest["schema_version"] ?? "<unknown>")}\n`);
   io.stdout(`  size:          ${compressedSize}B zipped / ${totalDecompressed}B raw\n`);
   io.stdout(`  packages:      ${bundle.packages.size}\n`);
   for (const [identity, pkg] of [...bundle.packages.entries()].sort(([a], [b]) =>

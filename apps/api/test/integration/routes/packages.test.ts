@@ -157,8 +157,8 @@ describe("Packages API", () => {
       const body = (await res.json()) as any;
       expect(body).toBeDefined();
       expect(body.id).toBe("@pkgorg/detail-agent");
-      expect(body.versionCount).toBe(0);
-      expect(body.hasUnarchivedChanges).toBe(true);
+      expect(body.version_count).toBe(0);
+      expect(body.has_unarchived_changes).toBe(true);
     });
 
     it("returns hasUnarchivedChanges false when no changes since last version", async () => {
@@ -185,8 +185,8 @@ describe("Packages API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.versionCount).toBe(1);
-      expect(body.hasUnarchivedChanges).toBe(false);
+      expect(body.version_count).toBe(1);
+      expect(body.has_unarchived_changes).toBe(false);
     });
 
     it("returns 404 for non-existent package", async () => {
@@ -337,8 +337,8 @@ describe("Packages API", () => {
             name: `@pkgorg/new-agent`,
             version: "0.1.0",
             type: "agent",
-            schemaVersion: "1.0",
-            displayName: "New Agent",
+            schema_version: "2.0",
+            display_name: "New Agent",
             description: "A brand new agent",
           },
           content: "You are a helpful assistant.",
@@ -348,7 +348,7 @@ describe("Packages API", () => {
       expect(res.status).toBe(201);
       const body = (await res.json()) as any;
       expect(body.packageId).toBe("@pkgorg/new-agent");
-      expect(body.lockVersion).toBeNumber();
+      expect(body.lock_version).toBeNumber();
 
       await assertDbHas(packages, eq(packages.id, "@pkgorg/new-agent"));
     });
@@ -362,8 +362,8 @@ describe("Packages API", () => {
             name: `@pkgorg/empty-content`,
             version: "0.1.0",
             type: "agent",
-            schemaVersion: "1.0",
-            displayName: "Empty Content",
+            schema_version: "2.0",
+            display_name: "Empty Content",
             description: "Empty content test",
           },
           content: "   ",
@@ -388,8 +388,8 @@ describe("Packages API", () => {
             name: "@pkgorg/dup-agent",
             version: "0.1.0",
             type: "agent",
-            schemaVersion: "1.0",
-            displayName: "Dup Agent",
+            schema_version: "2.0",
+            display_name: "Dup Agent",
             description: "Duplicate",
           },
           content: "duplicate prompt",
@@ -410,8 +410,8 @@ describe("Packages API", () => {
             name: "@pkgorg/unauth-agent",
             version: "0.1.0",
             type: "agent",
-            schemaVersion: "1.0",
-            displayName: "Unauth Agent",
+            schema_version: "2.0",
+            display_name: "Unauth Agent",
             description: "No auth",
           },
           content: "no auth prompt",
@@ -430,8 +430,8 @@ describe("Packages API", () => {
             name: "@wrongorg/mismatched-agent",
             version: "0.1.0",
             type: "agent",
-            schemaVersion: "1.0",
-            displayName: "Mismatched Agent",
+            schema_version: "2.0",
+            display_name: "Mismatched Agent",
             description: "Wrong scope",
           },
           content: "wrong scope prompt",
@@ -462,19 +462,19 @@ describe("Packages API", () => {
             name: "@pkgorg/update-agent",
             version: "0.2.0",
             type: "agent",
-            schemaVersion: "1.0",
-            displayName: "Update Agent",
+            schema_version: "2.0",
+            display_name: "Update Agent",
             description: "Updated agent",
           },
           content: "Updated prompt content.",
-          lockVersion: agent.lockVersion,
+          lock_version: agent.lockVersion,
         }),
       });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.packageId).toBe("@pkgorg/update-agent");
-      expect(body.lockVersion).toBeGreaterThan(agent.lockVersion!);
+      expect(body.lock_version).toBeGreaterThan(agent.lockVersion!);
     });
 
     it("returns 400 when lockVersion is missing", async () => {
@@ -492,8 +492,8 @@ describe("Packages API", () => {
             name: "@pkgorg/no-lock-agent",
             version: "0.2.0",
             type: "agent",
-            schemaVersion: "1.0",
-            displayName: "No Lock Agent",
+            schema_version: "2.0",
+            display_name: "No Lock Agent",
             description: "No lockVersion",
           },
           content: "content",
@@ -512,12 +512,12 @@ describe("Packages API", () => {
             name: "@pkgorg/ghost-agent",
             version: "0.1.0",
             type: "agent",
-            schemaVersion: "1.0",
-            displayName: "Ghost Agent",
+            schema_version: "2.0",
+            display_name: "Ghost Agent",
             description: "Ghost",
           },
           content: "ghost",
-          lockVersion: 1,
+          lock_version: 1,
         }),
       });
 
@@ -540,12 +540,12 @@ describe("Packages API", () => {
             name: "@foreignorg/their-agent",
             version: "0.2.0",
             type: "agent",
-            schemaVersion: "1.0",
-            displayName: "Hijack Agent",
+            schema_version: "2.0",
+            display_name: "Hijack Agent",
             description: "Hijack",
           },
           content: "hijack",
-          lockVersion: 1,
+          lock_version: 1,
         }),
       });
 
@@ -568,28 +568,35 @@ describe("Packages API", () => {
         type: "integration",
         source: "local",
         draftManifest: {
-          manifestVersion: "1.1",
           type: "integration",
+          schema_version: "2.0",
           name: integrationId,
           version: "1.0.0",
-          displayName: "Gmail (test)",
-          server: { type: "python", entryPoint: "./server.py" },
+          display_name: "Gmail (test)",
+          source: { kind: "local", server: { name: "@pkgorg/gmail-server", version: "^1.0.0" } },
           auths: {
             primary: {
               type: "oauth2",
-              authorizationUrl: "https://idp/a",
-              tokenUrl: "https://idp/t",
-              authorizedUris: ["https://api/*"],
-              delivery: { http: {} },
-              availableScopes: [
+              authorization_endpoint: "https://idp/a",
+              token_endpoint: "https://idp/t",
+              authorized_uris: ["https://api/*"],
+              delivery: {
+                http: {
+                  in: "header",
+                  name: "Authorization",
+                  prefix: "Bearer ",
+                  value: "{$credential.access_token}",
+                },
+              },
+              scope_catalog: [
                 { value: "read", label: "Read" },
                 { value: "send", label: "Send" },
               ],
             },
           },
           tools: {
-            list_messages: { requiredScopes: ["read"] },
-            send_message: { requiredScopes: ["send"] },
+            list_messages: { required_scopes: ["read"] },
+            send_message: { required_scopes: ["send"] },
           },
         },
       });
@@ -604,8 +611,8 @@ describe("Packages API", () => {
         name: `@pkgorg/agent-${suffix}`,
         version: "0.1.0",
         type: "agent",
-        schemaVersion: "1.0",
-        displayName: `Agent ${suffix}`,
+        schema_version: "2.0",
+        display_name: `Agent ${suffix}`,
         dependencies: {
           integrations: { [integrationId]: isBare ? selection : selection.version },
         },
@@ -700,13 +707,13 @@ describe("Packages API", () => {
             name: "@pkgorg/agent-put",
             version: "0.2.0",
             type: "agent",
-            schemaVersion: "1.0",
-            displayName: "Updated",
+            schema_version: "2.0",
+            display_name: "Updated",
             dependencies: { integrations: { [integrationId]: "^1.0.0" } },
             integrations: { [integrationId]: { tools: ["nope"] } },
           },
           content: "Updated prompt",
-          lockVersion: agent.lockVersion,
+          lock_version: agent.lockVersion,
         }),
       });
       expect(res.status).toBe(400);
@@ -1048,8 +1055,8 @@ describe("Packages API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.activeVersion).toBe("1.2.0");
-      expect(body.latestPublishedVersion).toBeNull();
+      expect(body.active_version).toBe("1.2.0");
+      expect(body.latest_published_version).toBeNull();
     });
 
     it("returns latestPublishedVersion when a version with dist-tag exists", async () => {
@@ -1088,8 +1095,8 @@ describe("Packages API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.activeVersion).toBe("2.0.0");
-      expect(body.latestPublishedVersion).toBe("1.0.0");
+      expect(body.active_version).toBe("2.0.0");
+      expect(body.latest_published_version).toBe("1.0.0");
     });
 
     it("returns 404 for non-existent agent", async () => {

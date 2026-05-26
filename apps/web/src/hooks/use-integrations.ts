@@ -73,7 +73,7 @@ export function buildUpdateConnectionRequest(args: {
       method: "PATCH",
       body: JSON.stringify({
         ...(label !== undefined ? { label } : {}),
-        ...(sharedWithOrg !== undefined ? { sharedWithOrg } : {}),
+        ...(sharedWithOrg !== undefined ? { shared_with_org: sharedWithOrg } : {}),
       }),
       headers: {
         "Content-Type": "application/json",
@@ -234,8 +234,8 @@ export function useInitiateIntegrationOAuth() {
           method: "POST",
           body: JSON.stringify({
             scopes: scopes ?? [],
-            ...(forceAccountSelect ? { forceAccountSelect: true } : {}),
-            ...(connectionId ? { connectionId } : {}),
+            ...(forceAccountSelect ? { force_account_select: true } : {}),
+            ...(connectionId ? { connection_id: connectionId } : {}),
           }),
         },
       ),
@@ -298,9 +298,9 @@ export function useUpsertIntegrationOAuthClient() {
         {
           method: "PUT",
           body: JSON.stringify({
-            clientId,
-            clientSecret,
-            ...(redirectUri ? { redirectUri } : {}),
+            client_id: clientId,
+            client_secret: clientSecret,
+            ...(redirectUri ? { redirect_uri: redirectUri } : {}),
           }),
         },
       ),
@@ -361,7 +361,7 @@ export function useUpdateIntegrationSettings() {
     }) =>
       api<{ blocked: boolean }>(`/integrations/${encodeURI(packageId)}/settings`, {
         method: "PATCH",
-        body: JSON.stringify({ blockUserConnections }),
+        body: JSON.stringify({ block_user_connections: blockUserConnections }),
         headers: { "Content-Type": "application/json" },
       }),
     onSuccess: (_data, vars) => {
@@ -392,7 +392,7 @@ export function useUpsertIntegrationPin() {
         `/integrations/${encodeURI(packageId)}/pins/${encodeURI(agentPackageId)}`,
         {
           method: "PUT",
-          body: JSON.stringify({ connectionId }),
+          body: JSON.stringify({ connection_id: connectionId }),
           headers: { "Content-Type": "application/json" },
         },
       ),
@@ -457,7 +457,7 @@ export function useUpsertIntegrationOrgDefault() {
     }) =>
       api<IntegrationOrgDefault>(`/integrations/${encodeURI(packageId)}/default`, {
         method: "PUT",
-        body: JSON.stringify({ connectionId, enforce }),
+        body: JSON.stringify({ connection_id: connectionId, enforce }),
         headers: { "Content-Type": "application/json" },
       }),
     onSuccess: (_data, vars) => {
@@ -508,7 +508,7 @@ export function useUpdateIntegrationConnection() {
       label?: string | null;
       sharedWithOrg?: boolean;
     }) =>
-      api<{ id: string; label: string | null; sharedWithOrg: boolean; updatedAt: string }>(
+      api<{ id: string; label: string | null; shared_with_org: boolean; updatedAt: string }>(
         ...buildUpdateConnectionRequest({ packageId, connectionId, label, sharedWithOrg }),
       ),
     onSuccess: (_data, vars) => {

@@ -82,14 +82,23 @@ function apiKeyIntegrationManifest(
 ) {
   return {
     integration: {
-      apiCall: { authKey: "main" },
+      schema_version: "2.0",
+      type: "integration",
+      source: { kind: "api", api: {} },
+      _meta: { "dev.appstrate/api": { auth_key: "main" } },
       auths: {
         main: {
           type: "api_key",
-          authorizedUris: opts.authorizedUris ?? ["https://api.acme.com/**"],
-          ...(opts.allowAllUris ? { allowAllUris: true } : {}),
+          authorized_uris: opts.authorizedUris ?? ["https://api.acme.com/**"],
+          ...(opts.allowAllUris ? { allow_all_uris: true } : {}),
           credentials: { schema: {} },
-          delivery: { http: { headerName: opts.headerName ?? "X-Api-Key" } },
+          delivery: {
+            http: {
+              in: "header",
+              name: opts.headerName ?? "X-Api-Key",
+              value: "{$credential.api_key}",
+            },
+          },
         },
       },
     },
@@ -142,9 +151,22 @@ describe("readApiCallIntegrationMeta", () => {
     const root = makePackage("@acme/agent", "1.0.0", "agent", {});
     const integ = makePackage("@acme/mcp", "1.0.0", "integration", {
       "integration.json": JSON.stringify({
-        server: { type: "node", entryPoint: "index.js" },
+        schema_version: "2.0",
+        type: "integration",
+        source: { kind: "local", server: { name: "@acme/mcp-server", version: "^1.0.0" } },
         auths: {
-          main: { type: "oauth2", authorizedUris: ["https://x/**"], delivery: { http: {} } },
+          main: {
+            type: "oauth2",
+            authorized_uris: ["https://x/**"],
+            delivery: {
+              http: {
+                in: "header",
+                name: "Authorization",
+                prefix: "Bearer ",
+                value: "{$credential.access_token}",
+              },
+            },
+          },
         },
       }),
     });
@@ -156,12 +178,17 @@ describe("readApiCallIntegrationMeta", () => {
     const root = makePackage("@acme/agent", "1.0.0", "agent", {});
     const integ = makePackage("@acme/api", "1.0.0", "integration", {
       "integration.json": JSON.stringify({
-        apiCall: { authKey: "only" },
+        schema_version: "2.0",
+        type: "integration",
+        source: { kind: "api", api: {} },
+        _meta: { "dev.appstrate/api": { auth_key: "only" } },
         auths: {
           only: {
             type: "api_key",
-            authorizedUris: ["https://api.acme.com/**"],
-            delivery: { http: {} },
+            authorized_uris: ["https://api.acme.com/**"],
+            delivery: {
+              http: { in: "header", name: "X-Api-Key", value: "{$credential.api_key}" },
+            },
           },
         },
       }),
@@ -169,6 +196,112 @@ describe("readApiCallIntegrationMeta", () => {
     const bundle = makeBundle(root, [integ]);
     const meta = readApiCallIntegrationMeta(bundle, { name: "@acme/api", version: "^1" });
     expect(meta!.authKey).toBe("only");
+  });
+
+  // ── toHttpDeliveryConfig branches ──
+  // The `delivery.http.value` template is lowered onto the resolver's
+  // `HttpDeliveryConfig.valueFrom`. A single `{$credential.field}` with no
+  // encoding lowers to a bare field name; encoding or multi-ref values keep
+  // the `{{field}}` template form.
+
+  it("lowers a single {$credential.field} (no encoding) to a bare valueFrom field name", () => {
+    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+    const integ = makePackage("@acme/api", "1.0.0", "integration", {
+      "integration.json": JSON.stringify(apiKeyIntegrationManifest("@acme/api").integration),
+    });
+    const bundle = makeBundle(root, [integ]);
+    const meta = readApiCallIntegrationMeta(bundle, { name: "@acme/api", version: "^1" });
+    // Single-ref fast path: lowered to a bare field name (not a template object).
+    expect(meta!.http?.valueFrom).toBe("api_key");
+  });
+
+  it("keeps encoding=base64 as a { template, encoding } valueFrom", () => {
+    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+    const integ = makePackage("@acme/b64", "1.0.0", "integration", {
+      "integration.json": JSON.stringify({
+        schema_version: "2.0",
+        type: "integration",
+        source: { kind: "api", api: {} },
+        _meta: { "dev.appstrate/api": { auth_key: "main" } },
+        auths: {
+          main: {
+            type: "api_key",
+            authorized_uris: ["https://api.acme.com/**"],
+            delivery: {
+              http: {
+                in: "header",
+                name: "Authorization",
+                // Single credential ref BUT with base64 encoding — the single-ref
+                // fast path is skipped, so the value stays a template object that
+                // carries the encoding hint downstream.
+                value: "{$credential.api_key}",
+                encoding: "base64",
+              },
+            },
+          },
+        },
+      }),
+    });
+    const bundle = makeBundle(root, [integ]);
+    const meta = readApiCallIntegrationMeta(bundle, { name: "@acme/b64", version: "^1" });
+    expect(meta!.http?.valueFrom).toEqual({ template: "{{api_key}}", encoding: "base64" });
+  });
+
+  it("rewrites a value with two {$credential.*} refs into {{field}} template syntax", () => {
+    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+    const integ = makePackage("@acme/basic", "1.0.0", "integration", {
+      "integration.json": JSON.stringify({
+        schema_version: "2.0",
+        type: "integration",
+        source: { kind: "api", api: {} },
+        _meta: { "dev.appstrate/api": { auth_key: "main" } },
+        auths: {
+          main: {
+            type: "basic",
+            authorized_uris: ["https://api.acme.com/**"],
+            delivery: {
+              http: {
+                in: "header",
+                name: "Authorization",
+                prefix: "Basic ",
+                // Two refs → multi-ref path → template rewrite to `{{field}}`.
+                value: "{$credential.username}:{$credential.password}",
+              },
+            },
+          },
+        },
+      }),
+    });
+    const bundle = makeBundle(root, [integ]);
+    const meta = readApiCallIntegrationMeta(bundle, { name: "@acme/basic", version: "^1" });
+    expect(meta!.http?.valueFrom).toEqual({ template: "{{username}}:{{password}}" });
+  });
+
+  it("resolves the single declared auth for an api source with no _meta.auth_key", () => {
+    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+    const integ = makePackage("@acme/single", "1.0.0", "integration", {
+      "integration.json": JSON.stringify({
+        schema_version: "2.0",
+        type: "integration",
+        // api source, single auth, NO _meta["dev.appstrate/api"].auth_key —
+        // the projector falls back to the single declared auth key.
+        source: { kind: "api", api: {} },
+        auths: {
+          solo: {
+            type: "api_key",
+            authorized_uris: ["https://api.acme.com/**"],
+            delivery: {
+              http: { in: "header", name: "X-Api-Key", value: "{$credential.api_key}" },
+            },
+          },
+        },
+      }),
+    });
+    const bundle = makeBundle(root, [integ]);
+    const meta = readApiCallIntegrationMeta(bundle, { name: "@acme/single", version: "^1" });
+    expect(meta).not.toBeNull();
+    expect(meta!.authKey).toBe("solo");
+    expect(meta!.authType).toBe("api_key");
   });
 });
 
@@ -201,14 +334,24 @@ describe("LocalIntegrationResolver", () => {
     const root = makePackage("@acme/agent", "1.0.0", "agent", {});
     const integ = makePackage("@acme/oauth", "1.0.0", "integration", {
       "integration.json": JSON.stringify({
-        apiCall: { authKey: "main" },
+        schema_version: "2.0",
+        type: "integration",
+        source: { kind: "api", api: {} },
+        _meta: { "dev.appstrate/api": { auth_key: "main" } },
         auths: {
           main: {
             type: "oauth2",
-            authorizationUrl: "https://x/auth",
-            tokenUrl: "https://x/token",
-            authorizedUris: ["https://{{subdomain}}.acme.com/**", "https://eu.acme.com/**"],
-            delivery: { http: {} },
+            authorization_endpoint: "https://x/auth",
+            token_endpoint: "https://x/token",
+            authorized_uris: ["https://{{subdomain}}.acme.com/**", "https://eu.acme.com/**"],
+            delivery: {
+              http: {
+                in: "header",
+                name: "Authorization",
+                prefix: "Bearer ",
+                value: "{$credential.access_token}",
+              },
+            },
           },
         },
       }),
@@ -249,7 +392,7 @@ describe("LocalIntegrationResolver", () => {
     const { ctx } = makeCtx();
     await expect(
       tools[0]!.execute({ method: "GET", target: "https://evil.example.com/x" }, ctx),
-    ).rejects.toThrow(/not in authorizedUris/);
+    ).rejects.toThrow(/not in authorized_uris/);
   });
 
   it("strips a caller-supplied header of the same name (allowServerOverride default false)", async () => {

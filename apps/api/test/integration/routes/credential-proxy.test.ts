@@ -30,6 +30,10 @@ import { seedApiKey, seedPackage } from "../../helpers/seed.ts";
 import { applicationPackages, integrationConnections } from "@appstrate/db/schema";
 import { encryptCredentials } from "@appstrate/connect";
 import type { IntegrationManifest } from "@appstrate/core/integration";
+import {
+  localIntegrationManifest,
+  httpHeaderDelivery,
+} from "../../helpers/integration-manifests.ts";
 
 const app = getTestApp();
 
@@ -38,37 +42,40 @@ const app = getTestApp();
 // at the route boundary). Swap it per-test so a successful proxy call never
 // leaves the harness. Error-path tests assert the upstream is never hit.
 type FetchImpl = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
-let originalFetch: typeof fetch;
+// Capture the REAL global fetch exactly once at module load. Capturing it
+// afresh inside `mockUpstream` was a latent bug: a second `mockUpstream` (or an
+// interleaving with another test file that also swaps `globalThis.fetch`) would
+// snapshot a stub as the "original", so `restoreFetch` reinstalled a stub and the
+// override leaked into unrelated tests (e.g. integration-token-refresh's mock
+// OAuth server seeing a 599 stub). Pin it once so restore always returns the
+// genuine fetch.
+const realFetch: typeof fetch = globalThis.fetch;
 function mockUpstream(impl: FetchImpl): void {
-  originalFetch = globalThis.fetch;
   globalThis.fetch = impl as unknown as typeof fetch;
 }
 function restoreFetch(): void {
-  if (originalFetch) globalThis.fetch = originalFetch;
+  if (realFetch) globalThis.fetch = realFetch;
 }
 
 const INTEGRATION_ID = "@cporg/gmail";
 
 function gmailManifest(name = INTEGRATION_ID): IntegrationManifest {
-  return {
-    manifestVersion: "1.0",
-    type: "integration",
+  return localIntegrationManifest({
     name,
-    version: "1.0.0",
     displayName: "Gmail",
     description: "Gmail integration",
-    server: { type: "node", entryPoint: "main.js" },
     auths: {
       api: {
         type: "api_key",
         authorizedUris: ["https://gmail.googleapis.com/**"],
-        credentials: { schema: { type: "object", properties: { api_key: { type: "string" } } } },
-        delivery: {
-          http: { headerName: "Authorization", headerPrefix: "Bearer ", valueFrom: "api_key" },
-        },
+        delivery: httpHeaderDelivery({
+          name: "Authorization",
+          prefix: "Bearer ",
+          field: "api_key",
+        }),
       },
     },
-  };
+  });
 }
 
 async function seedIntegrationWithConnection(ctx: TestContext): Promise<void> {

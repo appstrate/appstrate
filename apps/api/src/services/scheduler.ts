@@ -7,7 +7,7 @@ import { db } from "@appstrate/db/client";
 import { schedules, endUsers } from "@appstrate/db/schema";
 import { batchLoadUserNames } from "../lib/user-helpers.ts";
 import { logger } from "../lib/logger.ts";
-import type { Schedule, EnrichedSchedule } from "@appstrate/shared-types";
+import type { ScheduleWireDto, EnrichedSchedule } from "@appstrate/shared-types";
 import { createFailedRun } from "./state/runs.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 import {
@@ -61,12 +61,33 @@ interface ScheduleJobData {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Convert a Drizzle schedule row to the Schedule type. */
-function toSchedule(row: typeof schedules.$inferSelect): Schedule {
+/**
+ * Convert a Drizzle schedule row to the wire DTO. Universal DB-convention
+ * fields (createdAt, *Id, userId) stay camelCase; domain-specific fields
+ * use snake_case.
+ */
+function toSchedule(row: typeof schedules.$inferSelect): ScheduleWireDto {
   return {
-    ...row,
+    id: row.id,
+    packageId: row.packageId,
+    userId: row.userId,
+    endUserId: row.endUserId,
+    orgId: row.orgId,
+    applicationId: row.applicationId,
+    name: row.name,
+    enabled: row.enabled,
+    cron_expression: row.cronExpression,
+    timezone: row.timezone,
     input: asRecordOrNull(row.input),
-    configOverride: asRecordOrNull(row.configOverride),
+    config_override: asRecordOrNull(row.configOverride),
+    model_id_override: row.modelIdOverride,
+    proxy_id_override: row.proxyIdOverride,
+    version_override: row.versionOverride,
+    connection_overrides: (row.connectionOverrides as Record<string, string> | null) ?? null,
+    last_run_at: row.lastRunAt ? row.lastRunAt.toISOString() : null,
+    next_run_at: row.nextRunAt ? row.nextRunAt.toISOString() : null,
+    createdAt: row.createdAt!.toISOString(),
+    updatedAt: row.updatedAt!.toISOString(),
   };
 }
 
@@ -86,7 +107,7 @@ async function getQueue(): Promise<JobQueue<ScheduleJobData>> {
 }
 
 /** Upsert a repeatable job scheduler for a schedule. */
-async function upsertScheduleJob(schedule: Schedule, orgId: string): Promise<void> {
+async function upsertScheduleJob(schedule: ScheduleWireDto, orgId: string): Promise<void> {
   const jobData: ScheduleJobData = {
     scheduleId: schedule.id,
     packageId: schedule.packageId,
@@ -95,18 +116,18 @@ async function upsertScheduleJob(schedule: Schedule, orgId: string): Promise<voi
     orgId,
     applicationId: schedule.applicationId,
     input: schedule.input ?? undefined,
-    configOverride: schedule.configOverride ?? undefined,
-    modelIdOverride: schedule.modelIdOverride ?? undefined,
-    proxyIdOverride: schedule.proxyIdOverride ?? undefined,
-    versionOverride: schedule.versionOverride ?? undefined,
-    connectionOverrides: schedule.connectionOverrides ?? undefined,
+    configOverride: schedule.config_override ?? undefined,
+    modelIdOverride: schedule.model_id_override ?? undefined,
+    proxyIdOverride: schedule.proxy_id_override ?? undefined,
+    versionOverride: schedule.version_override ?? undefined,
+    connectionOverrides: schedule.connection_overrides ?? undefined,
   };
 
   await (
     await getQueue()
   ).upsertScheduler(
     schedule.id,
-    { pattern: schedule.cronExpression, tz: schedule.timezone ?? "UTC" },
+    { pattern: schedule.cron_expression, tz: schedule.timezone ?? "UTC" },
     { name: "execute-agent", data: jobData },
   );
 }
@@ -146,7 +167,7 @@ async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> 
   // Update schedule timestamps
   const schedule = await getSchedule(scheduleId, { orgId, applicationId });
   const nextRun = schedule
-    ? computeNextRun(schedule.cronExpression, schedule.timezone ?? "UTC")
+    ? computeNextRun(schedule.cron_expression, schedule.timezone ?? "UTC")
     : null;
 
   await db
@@ -443,7 +464,10 @@ export async function getSchedule(id: string, scope?: AppScope): Promise<Enriche
  * Enrich schedules with the display name of the actor (member or end-user)
  * each schedule runs as. Batches name lookups per actor kind.
  */
-async function enrichSchedules(schedules: Schedule[], _orgId: string): Promise<EnrichedSchedule[]> {
+async function enrichSchedules(
+  schedules: ScheduleWireDto[],
+  _orgId: string,
+): Promise<EnrichedSchedule[]> {
   if (schedules.length === 0) return [];
 
   const userIds = [...new Set(schedules.map((s) => s.userId).filter((id): id is string => !!id))];
@@ -475,7 +499,7 @@ async function enrichSchedules(schedules: Schedule[], _orgId: string): Promise<E
       actorType = "end_user";
       actorName = endUserNameMap.get(schedule.endUserId) ?? null;
     }
-    return { ...schedule, actorName, actorType };
+    return { ...schedule, actor_name: actorName, actor_type: actorType };
   });
 }
 
@@ -494,7 +518,7 @@ export async function createSchedule(
     versionOverride?: string | null;
     connectionOverrides?: Record<string, string> | null;
   },
-): Promise<Schedule> {
+): Promise<ScheduleWireDto> {
   const id = `sched_${crypto.randomUUID()}`;
   const tz = data.timezone || "UTC";
 
@@ -549,11 +573,11 @@ export async function updateSchedule(
     versionOverride?: string | null;
     connectionOverrides?: Record<string, string> | null;
   },
-): Promise<Schedule | null> {
+): Promise<ScheduleWireDto | null> {
   const existing = await getSchedule(id, scope);
   if (!existing) return null;
 
-  const cronExpr = data.cronExpression ?? existing.cronExpression;
+  const cronExpr = data.cronExpression ?? existing.cron_expression;
   const tz = data.timezone ?? existing.timezone ?? "UTC";
   const enabled = data.enabled ?? existing.enabled;
 

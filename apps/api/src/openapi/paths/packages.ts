@@ -148,7 +148,7 @@ export const packagesPaths = {
                   packageId: { type: "string", description: "The imported package ID" },
                   type: {
                     type: "string",
-                    description: "Package type (agent/skill/integration)",
+                    description: "Package type (agent/skill/mcp-server/integration)",
                   },
                   version: {
                     type: "string",
@@ -181,7 +181,7 @@ export const packagesPaths = {
                         type: "object",
                         properties: {
                           packageId: { type: "string" },
-                          activeVersion: { type: ["string", "null"] },
+                          active_version: { type: ["string", "null"] },
                         },
                       },
                     },
@@ -255,7 +255,7 @@ export const packagesPaths = {
                   packageId: { type: "string", description: "The imported package ID" },
                   type: {
                     type: "string",
-                    description: "Package type (agent/skill/integration)",
+                    description: "Package type (agent/skill/mcp-server/integration)",
                   },
                   version: {
                     type: "string",
@@ -317,7 +317,7 @@ export const packagesPaths = {
                         type: "object",
                         properties: {
                           packageId: { type: "string" },
-                          activeVersion: { type: ["string", "null"] },
+                          active_version: { type: ["string", "null"] },
                         },
                       },
                     },
@@ -505,13 +505,13 @@ export const packagesPaths = {
                 type: "object",
                 properties: {
                   packageId: { type: "string" },
-                  lockVersion: { type: "integer" },
+                  lock_version: { type: "integer" },
                   message: { type: "string" },
                 },
               },
               example: {
                 packageId: "@acme/summarize",
-                lockVersion: 1,
+                lock_version: 1,
                 message: "Skill created",
               },
             },
@@ -548,8 +548,8 @@ export const packagesPaths = {
               schema: {
                 type: "object",
                 properties: {
-                  latestPublishedVersion: { type: ["string", "null"] },
-                  activeVersion: { type: ["string", "null"] },
+                  latest_published_version: { type: ["string", "null"] },
+                  active_version: { type: ["string", "null"] },
                 },
               },
             },
@@ -685,8 +685,8 @@ export const packagesPaths = {
                 type: "object",
                 properties: {
                   message: { type: "string" },
-                  restoredVersion: { type: "string" },
-                  lockVersion: { type: "integer" },
+                  restored_version: { type: "string" },
+                  lock_version: { type: "integer" },
                 },
               },
             },
@@ -736,11 +736,11 @@ export const packagesPaths = {
                   manifest: { $ref: "#/components/schemas/SkillManifest" },
                   content: { type: ["string", "null"] },
                   yanked: { type: "boolean" },
-                  yankedReason: { type: ["string", "null"] },
+                  yanked_reason: { type: ["string", "null"] },
                   integrity: { type: "string" },
-                  artifactSize: { type: "integer" },
+                  artifact_size: { type: "integer" },
                   createdAt: { type: ["string", "null"], format: "date-time" },
-                  distTags: { type: "array", items: { type: "string" } },
+                  dist_tags: { type: "array", items: { type: "string" } },
                 },
               },
             },
@@ -850,7 +850,7 @@ export const packagesPaths = {
                 type: "object",
                 properties: {
                   packageId: { type: "string" },
-                  lockVersion: { type: "integer" },
+                  lock_version: { type: "integer" },
                 },
               },
             },
@@ -902,7 +902,7 @@ export const packagesPaths = {
                     type: "array",
                     items: {
                       type: "object",
-                      properties: { id: { type: "string" }, displayName: { type: "string" } },
+                      properties: { id: { type: "string" }, display_name: { type: "string" } },
                     },
                     description: "Agents referencing this skill (for IN_USE)",
                   },
@@ -910,7 +910,7 @@ export const packagesPaths = {
                     type: "array",
                     items: {
                       type: "object",
-                      properties: { id: { type: "string" }, displayName: { type: "string" } },
+                      properties: { id: { type: "string" }, display_name: { type: "string" } },
                     },
                     description: "Packages depending on this skill (for DEPENDED_ON)",
                   },
@@ -997,7 +997,7 @@ export const packagesPaths = {
                 type: "object",
                 properties: {
                   packageId: { type: "string" },
-                  lockVersion: { type: "integer" },
+                  lock_version: { type: "integer" },
                   message: { type: "string" },
                 },
               },
@@ -1056,11 +1056,11 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["manifest", "content", "lockVersion"],
+              required: ["manifest", "content", "lock_version"],
               properties: {
                 manifest: { $ref: "#/components/schemas/AgentManifest" },
                 content: { type: "string" },
-                lockVersion: { type: "integer", description: "Optimistic lock version" },
+                lock_version: { type: "integer", description: "Optimistic lock version" },
               },
             },
           },
@@ -1079,7 +1079,7 @@ export const packagesPaths = {
                 type: "object",
                 properties: {
                   packageId: { type: "string" },
-                  lockVersion: { type: "integer" },
+                  lock_version: { type: "integer" },
                 },
               },
             },
@@ -1140,8 +1140,8 @@ export const packagesPaths = {
               schema: {
                 type: "object",
                 properties: {
-                  latestPublishedVersion: { type: ["string", "null"] },
-                  activeVersion: { type: ["string", "null"] },
+                  latest_published_version: { type: ["string", "null"] },
+                  active_version: { type: ["string", "null"] },
                 },
               },
             },
@@ -1270,8 +1270,8 @@ export const packagesPaths = {
                 type: "object",
                 properties: {
                   message: { type: "string" },
-                  restoredVersion: { type: "string" },
-                  lockVersion: { type: "integer" },
+                  restored_version: { type: "string" },
+                  lock_version: { type: "integer" },
                 },
               },
             },
@@ -1314,11 +1314,11 @@ export const packagesPaths = {
                   manifest: { $ref: "#/components/schemas/AgentManifest" },
                   content: { type: ["string", "null"] },
                   yanked: { type: "boolean" },
-                  yankedReason: { type: ["string", "null"] },
+                  yanked_reason: { type: ["string", "null"] },
                   integrity: { type: "string" },
-                  artifactSize: { type: "integer" },
+                  artifact_size: { type: "integer" },
                   createdAt: { type: ["string", "null"], format: "date-time" },
-                  distTags: { type: "array", items: { type: "string" } },
+                  dist_tags: { type: "array", items: { type: "string" } },
                 },
               },
             },
@@ -1410,14 +1410,14 @@ export const packagesPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["packageId", "type", "forkedFrom"],
+                required: ["packageId", "type", "forked_from"],
                 properties: {
                   packageId: { type: "string", description: "New package ID under org scope" },
                   type: {
                     type: "string",
-                    enum: ["agent", "skill", "integration"],
+                    enum: ["agent", "skill", "mcp-server", "integration"],
                   },
-                  forkedFrom: { type: "string", description: "Source package ID" },
+                  forked_from: { type: "string", description: "Source package ID" },
                 },
               },
             },
@@ -1562,7 +1562,7 @@ export const packagesPaths = {
                 type: "object",
                 properties: {
                   packageId: { type: "string" },
-                  lockVersion: { type: "integer" },
+                  lock_version: { type: "integer" },
                 },
               },
             },
@@ -1618,7 +1618,7 @@ export const packagesPaths = {
                     type: "array",
                     items: {
                       type: "object",
-                      properties: { id: { type: "string" }, displayName: { type: "string" } },
+                      properties: { id: { type: "string" }, display_name: { type: "string" } },
                     },
                     description: "Agents referencing this skill (for IN_USE)",
                   },
@@ -1626,7 +1626,7 @@ export const packagesPaths = {
                     type: "array",
                     items: {
                       type: "object",
-                      properties: { id: { type: "string" }, displayName: { type: "string" } },
+                      properties: { id: { type: "string" }, display_name: { type: "string" } },
                     },
                     description: "Packages depending on this skill (for DEPENDED_ON)",
                   },
@@ -1696,11 +1696,11 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["manifest", "content", "lockVersion"],
+              required: ["manifest", "content", "lock_version"],
               properties: {
                 manifest: { $ref: "#/components/schemas/AgentManifest" },
                 content: { type: "string" },
-                lockVersion: { type: "integer", description: "Optimistic lock version" },
+                lock_version: { type: "integer", description: "Optimistic lock version" },
               },
             },
           },
@@ -1719,7 +1719,7 @@ export const packagesPaths = {
                 type: "object",
                 properties: {
                   packageId: { type: "string" },
-                  lockVersion: { type: "integer" },
+                  lock_version: { type: "integer" },
                 },
               },
             },

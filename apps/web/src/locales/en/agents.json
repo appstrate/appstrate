@@ -217,6 +217,7 @@
   "editor.tabGeneral": "General",
   "editor.tabContent.agent": "prompt.md",
   "editor.tabContent.skill": "SKILL.md",
+  "editor.tabContent.mcp-server": "README.md",
   "editor.tabSchema": "Schemas",
   "editor.tabSkills": "Skills",
   "editor.tabRuntimeTools": "Runtime tools",

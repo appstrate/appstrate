@@ -54,7 +54,12 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
   useEffect(() => {
     if (!detail || getApiCallConfig(detail.manifest) === null) return;
     if (entry.tools !== undefined) return;
-    if (Object.keys(detail.manifest.tools ?? {}).length > 0) return;
+    // catalog excludes the synthetic api_call entry for the purposes of this
+    // check — we want "does the integration expose discrete MCP tools too?"
+    const nativeCount = (detail.tool_catalog ?? []).filter(
+      (t) => t.name !== API_CALL_TOOL_NAME,
+    ).length;
+    if (nativeCount > 0) return;
     onChange({ ...entry, tools: [API_CALL_TOOL_NAME] });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail, entry.tools]);
@@ -74,8 +79,16 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
     );
   }
 
-  const declaredTools = detail.manifest.tools ?? {};
-  const declaredToolNames = Object.keys(declaredTools);
+  // Effective agent-facing tool catalog. Resolved server-side from the
+  // referenced mcp-server's MCPB `tools[]` minus `hidden_tools` and
+  // auto-hidden connect.tool primitives — the integration's sparse
+  // `tools{}` policy table is no longer the source of truth for "what
+  // exists" (it only carries per-tool policy when present).
+  const fullCatalog = detail.tool_catalog ?? [];
+  // The synthetic api_call entry has its own dedicated checkbox row;
+  // exclude it from the native tools list so it doesn't render twice.
+  const nativeCatalog = fullCatalog.filter((t) => t.name !== API_CALL_TOOL_NAME);
+  const declaredToolNames = nativeCatalog.map((t) => t.name);
   const hasToolCatalog = declaredToolNames.length > 0;
 
   // apiCall integrations expose the generic `api_call` tool instead of
@@ -96,7 +109,7 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
   // keep the first occurrence's label/description.
   const scopeCatalog = new Map<string, { value: string; label: string; description?: string }>();
   for (const auth of Object.values(detail.manifest.auths ?? {})) {
-    for (const s of auth.availableScopes ?? []) {
+    for (const s of auth.scope_catalog ?? []) {
       if (!scopeCatalog.has(s.value)) scopeCatalog.set(s.value, s);
     }
   }
@@ -116,10 +129,14 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
   // will union into the OAuth kickoff. Contributes the union of
   // selected tools' requiredScopes only (`undefined`/`[]` selection
   // contributes nothing). Map keeps attribution for "required by: …".
+  // Policy lookup goes through the resolved catalog: a tool without
+  // policy contributes nothing (expected — most discoverable tools have
+  // no scope requirements).
+  const catalogByName = new Map(fullCatalog.map((t) => [t.name, t]));
   const inferredScopes = new Map<string, string[]>();
   for (const toolName of entry.tools ?? []) {
-    const meta = declaredTools[toolName];
-    for (const scope of meta?.requiredScopes ?? []) {
+    const meta = catalogByName.get(toolName);
+    for (const scope of meta?.policy?.required_scopes ?? []) {
       const existing = inferredScopes.get(scope) ?? [];
       if (!existing.includes(toolName)) existing.push(toolName);
       inferredScopes.set(scope, existing);
@@ -163,7 +180,7 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
   const selectNoTools = () => onChange({ ...entry, tools: [] });
 
   // Niveau 2 contract: when the integration manifest declares neither a
-  // `tools` block nor any `availableScopes` catalog, there is literally
+  // `tools` block nor any `scope_catalog` catalog, there is literally
   // nothing for the agent author to pick — every tool is allowed and
   // scopes default to `auths.{key}.scopes`. Render an explicit notice
   // (rather than `return null`) so the user understands why the panel
@@ -234,25 +251,28 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
               : t("agentEditor.integrations.tools.explicitNotice")}
           </p>
           <div className="grid gap-1.5">
-            {declaredToolNames.map((name) => {
-              const meta = declaredTools[name];
+            {nativeCatalog.map((entry) => {
+              const requiredScopes = entry.policy?.required_scopes ?? [];
               return (
                 <label
-                  key={name}
+                  key={entry.name}
                   className="flex cursor-pointer items-start gap-2 text-xs"
-                  data-testid={`integ-tool-${packageId}-${name}`}
+                  data-testid={`integ-tool-${packageId}-${entry.name}`}
                 >
                   <Checkbox
-                    checked={selectedTools.has(name)}
-                    onCheckedChange={() => toggleTool(name)}
+                    checked={selectedTools.has(entry.name)}
+                    onCheckedChange={() => toggleTool(entry.name)}
                     className="mt-0.5"
                   />
                   <span className="flex min-w-0 flex-col">
-                    <span className="font-mono">{name}</span>
-                    {meta?.requiredScopes && meta.requiredScopes.length > 0 && (
+                    <span className="font-mono">{entry.name}</span>
+                    {entry.description && (
+                      <span className="text-muted-foreground text-[11px]">{entry.description}</span>
+                    )}
+                    {requiredScopes.length > 0 && (
                       <span className="text-muted-foreground">
                         {t("agentEditor.integrations.tools.requires")}{" "}
-                        <span className="font-mono">{meta.requiredScopes.join(", ")}</span>
+                        <span className="font-mono">{requiredScopes.join(", ")}</span>
                       </span>
                     )}
                   </span>

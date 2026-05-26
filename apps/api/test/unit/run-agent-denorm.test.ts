@@ -25,32 +25,32 @@ function pkg(id: string, manifest: Record<string, unknown>): LoadedPackage {
 describe("extractRunAgentDenorm", () => {
   it("parses scope from a canonical @scope/name ID", () => {
     const result = extractRunAgentDenorm(
-      pkg("@acme/agent-foo", { displayName: "Foo", name: "@acme/agent-foo" }),
+      pkg("@acme/agent-foo", { display_name: "Foo", name: "@acme/agent-foo" }),
     );
     expect(result.scope).toBe("acme");
     expect(result.name).toBe("Foo");
   });
 
-  it("falls back to manifest.name when displayName is absent", () => {
+  it("falls back to manifest.name when display_name is absent", () => {
     const result = extractRunAgentDenorm(pkg("@acme/bar", { name: "@acme/bar" }));
     expect(result.name).toBe("@acme/bar");
   });
 
-  it("returns null name when both displayName and name are missing", () => {
+  it("returns null name when both display_name and name are missing", () => {
     const result = extractRunAgentDenorm(pkg("@acme/bar", {}));
     expect(result.name).toBeNull();
     expect(result.scope).toBe("acme");
   });
 
   it("returns null scope for a malformed (non-scoped) ID", () => {
-    const result = extractRunAgentDenorm(pkg("not-scoped", { displayName: "X" }));
+    const result = extractRunAgentDenorm(pkg("not-scoped", { display_name: "X" }));
     expect(result.scope).toBeNull();
     expect(result.name).toBe("X");
   });
 
   it("handles ephemeral-style shadow package IDs", () => {
     const result = extractRunAgentDenorm(
-      pkg("@inline/r-abc123", { displayName: "Inline Run", name: "@acme/real-agent" }),
+      pkg("@inline/r-abc123", { display_name: "Inline Run", name: "@acme/real-agent" }),
     );
     expect(result.scope).toBe("inline");
     expect(result.name).toBe("Inline Run");

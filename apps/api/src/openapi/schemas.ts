@@ -62,7 +62,7 @@ export const schemas = {
       enabled: { type: "boolean" },
       installedAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
-      packageType: { type: "string", enum: ["agent", "skill", "integration"] },
+      packageType: { type: "string", enum: ["agent", "skill", "mcp-server", "integration"] },
       packageSource: { type: "string", enum: ["system", "local"] },
     },
   },
@@ -156,9 +156,9 @@ export const schemas = {
     required: ["id", "source", "type"],
     properties: {
       id: { type: "string" },
-      displayName: { type: "string" },
+      display_name: { type: "string" },
       description: { type: "string" },
-      schemaVersion: { type: "string" },
+      schema_version: { type: "string" },
       author: { type: "string" },
       keywords: { type: "array", items: { type: "string" } },
       source: { type: "string", enum: ["system", "local"] },
@@ -170,13 +170,15 @@ export const schemas = {
       type: {
         type: "string",
         description: "Package type from manifest",
-        enum: ["agent", "skill", "integration"],
+        enum: ["agent", "skill", "mcp-server", "integration"],
       },
-      runningRuns: { type: "integer" },
+      running_runs: { type: "integer" },
       dependencies: {
         type: "object",
         properties: {
           skills: { type: "object", additionalProperties: { type: "string" } },
+          mcp_servers: { type: "object", additionalProperties: { type: "string" } },
+          integrations: { type: "object", additionalProperties: { type: "string" } },
         },
       },
     },
@@ -186,7 +188,7 @@ export const schemas = {
     required: ["id", "source"],
     properties: {
       id: { type: "string" },
-      displayName: { type: "string" },
+      display_name: { type: "string" },
       description: { type: "string" },
       source: { type: "string", enum: ["system", "local"] },
       scope: { type: ["string", "null"], description: "Scope from manifest name" },
@@ -201,7 +203,7 @@ export const schemas = {
         format: "date-time",
         description: "Last updated timestamp (user agents only)",
       },
-      lockVersion: {
+      lock_version: {
         type: "integer",
         description: "Optimistic lock version (user agents only)",
       },
@@ -211,9 +213,9 @@ export const schemas = {
         properties: {
           schema: { type: "object", description: "Pure JSON Schema 2020-12 object" },
           current: { type: "object", description: "Current configuration values" },
-          fileConstraints: { $ref: "#/components/schemas/FileConstraintsMap" },
-          uiHints: { $ref: "#/components/schemas/UIHintsMap" },
-          propertyOrder: {
+          file_constraints: { $ref: "#/components/schemas/FileConstraintsMap" },
+          ui_hints: { $ref: "#/components/schemas/UIHintsMap" },
+          property_order: {
             type: "array",
             items: { type: "string" },
             description: "Presentation order for schema properties",
@@ -225,9 +227,9 @@ export const schemas = {
         description: "AFPS schema wrapper for per-run input.",
         properties: {
           schema: { type: "object", description: "Pure JSON Schema 2020-12 object" },
-          fileConstraints: { $ref: "#/components/schemas/FileConstraintsMap" },
-          uiHints: { $ref: "#/components/schemas/UIHintsMap" },
-          propertyOrder: {
+          file_constraints: { $ref: "#/components/schemas/FileConstraintsMap" },
+          ui_hints: { $ref: "#/components/schemas/UIHintsMap" },
+          property_order: {
             type: "array",
             items: { type: "string" },
             description: "Presentation order for schema properties",
@@ -239,7 +241,7 @@ export const schemas = {
         description: "AFPS schema wrapper for per-run output.",
         properties: {
           schema: { type: "object", description: "Pure JSON Schema 2020-12 object" },
-          propertyOrder: {
+          property_order: {
             type: "array",
             items: { type: "string" },
             description: "Presentation order for schema properties",
@@ -273,23 +275,23 @@ export const schemas = {
           },
         },
       },
-      lastRun: {
+      last_run: {
         type: ["object", "null"],
         description: "Summary of the most recent run (null if never run)",
         properties: {
           id: { type: "string" },
           status: { type: "string" },
-          startedAt: { type: "string", format: "date-time" },
+          started_at: { type: "string", format: "date-time" },
           duration: { type: "integer" },
         },
       },
-      runningRuns: { type: "integer" },
-      versionCount: {
+      running_runs: { type: "integer" },
+      version_count: {
         type: "integer",
         description: "Number of published versions (0 for built-in agents)",
       },
-      forkedFrom: { type: ["string", "null"], description: "Source package ID if forked" },
-      hasUnarchivedChanges: {
+      forked_from: { type: ["string", "null"], description: "Source package ID if forked" },
+      has_unarchived_changes: {
         type: "boolean",
         description: "Whether the active version has changes not yet archived as a version",
       },
@@ -302,7 +304,7 @@ export const schemas = {
       packageId: { type: "string" },
       version: { type: "string", description: "Semver version string (e.g. 1.0.0)" },
       integrity: { type: "string", description: "SRI integrity hash (sha256-...)" },
-      artifactSize: { type: "integer", description: "Artifact ZIP size in bytes" },
+      artifact_size: { type: "integer", description: "Artifact ZIP size in bytes" },
       yanked: { type: "boolean", description: "Whether this version has been yanked" },
       createdBy: { type: ["string", "null"] },
       createdAt: { type: ["string", "null"], format: "date-time" },
@@ -310,13 +312,13 @@ export const schemas = {
   },
   Run: {
     type: "object",
-    required: ["id", "orgId", "applicationId", "status", "versionDirty", "startedAt"],
+    required: ["id", "orgId", "applicationId", "status", "version_dirty", "started_at"],
     properties: {
       id: { type: "string" },
       packageId: {
         type: ["string", "null"],
         description:
-          "Source agent ID. NULL when the source agent has been deleted — the run row survives via `runs.package_id ON DELETE SET NULL` (migration 0017). Read `agentScope` / `agentName` for display in that case; re-running is not possible.",
+          "Source agent ID. NULL when the source agent has been deleted — the run row survives via `runs.package_id ON DELETE SET NULL` (migration 0017). Read `agent_scope` / `agent_name` for display in that case; re-running is not possible.",
       },
       userId: {
         type: ["string", "null"],
@@ -331,7 +333,7 @@ export const schemas = {
       result: { type: "object" },
       checkpoint: { type: "object" },
       error: { type: "string" },
-      tokenUsage: {
+      token_usage: {
         type: ["object", "null"],
         description:
           "Snapshot of token consumption for the run. Snake-case keys match the AFPS wire format emitted by every runner (PiRunner / remote CLI / GitHub Action) and stored verbatim in JSONB.",
@@ -343,21 +345,21 @@ export const schemas = {
         },
         additionalProperties: false,
       },
-      startedAt: { type: "string", format: "date-time" },
-      completedAt: { type: "string", format: "date-time" },
+      started_at: { type: "string", format: "date-time" },
+      completed_at: { type: "string", format: "date-time" },
       duration: { type: "integer", description: "Duration in milliseconds" },
       scheduleId: { type: "string" },
-      versionLabel: {
+      version_label: {
         type: ["string", "null"],
         description: "Version label at run time (e.g. '1.0.0')",
       },
-      versionDirty: {
+      version_dirty: {
         type: "boolean",
         description: "Whether the draft had unpublished changes at run time",
       },
-      proxyLabel: { type: ["string", "null"], description: "Proxy label used at run time" },
-      modelLabel: { type: ["string", "null"], description: "Model label used at run time" },
-      modelSource: {
+      proxy_label: { type: ["string", "null"], description: "Proxy label used at run time" },
+      model_label: { type: ["string", "null"], description: "Model label used at run time" },
+      model_source: {
         type: ["string", "null"],
         description: "Model source: 'system' (platform-provided) or 'org' (user-configured)",
       },
@@ -384,63 +386,102 @@ export const schemas = {
         description: "Snapshot of the effective agent config (merged overrides) at run creation",
         additionalProperties: true,
       },
-      configOverride: {
+      config_override: {
         type: ["object", "null"],
         description:
-          "Per-run config delta — the raw object the caller sent in the request body. `config` is the resolved (deep-merged) snapshot; `configOverride` is the raw delta that the dashboard uses to badge 'default vs override'. Null when the run used persisted defaults verbatim.",
+          "Per-run config delta — the raw object the caller sent in the request body. `config` is the resolved (deep-merged) snapshot; `config_override` is the raw delta that the dashboard uses to badge 'default vs override'. Null when the run used persisted defaults verbatim.",
         additionalProperties: true,
       },
-      userName: {
+      user_name: {
         type: ["string", "null"],
         description:
           "Display name of the dashboard user who triggered the run (from profiles table)",
       },
-      endUserName: {
+      end_user_name: {
         type: ["string", "null"],
         description: "Display name of the end-user (name or externalId fallback)",
       },
-      apiKeyName: {
+      api_key_name: {
         type: ["string", "null"],
         description: "Name of the API key that triggered the run",
       },
-      scheduleName: {
+      schedule_name: {
         type: ["string", "null"],
         description: "Name of the schedule that triggered the run",
       },
-      runnerName: {
+      runner_name: {
         type: ["string", "null"],
         description:
           "Human-friendly label for the runner that triggered the run — CLI host (`os.hostname()`), GitHub Action workflow, or whatever the caller passes via `X-Appstrate-Runner-Name`. Stamped at INSERT and never updated.",
       },
-      runnerKind: {
+      runner_kind: {
         type: ["string", "null"],
         description:
           "Free-form classifier driving the dashboard icon (`cli`, `github-action`, …). Sourced from `X-Appstrate-Runner-Kind` or inferred from the auth context.",
       },
-      agentScope: {
+      agent_scope: {
         type: ["string", "null"],
         description:
           "Denormalized agent scope at run creation. Survives rename, delete, or shadow compaction — the global run view falls back to this when the source package is gone.",
       },
-      agentName: {
+      agent_name: {
         type: ["string", "null"],
-        description: "Denormalized agent name at run creation (see agentScope).",
+        description: "Denormalized agent name at run creation (see agent_scope).",
       },
-      packageEphemeral: {
+      package_ephemeral: {
         type: "boolean",
         description:
           "Present on enriched run responses. True when the source package is an inline-run shadow (POST /api/runs/inline).",
       },
-      inlineManifest: {
+      inline_manifest: {
         type: ["object", "null"],
         description:
           "Inline runs only. Snapshot of the manifest submitted at run time. Null once the shadow has been compacted (see INLINE_RUN_LIMITS.retention_days).",
         additionalProperties: true,
       },
-      inlinePrompt: {
+      inline_prompt: {
         type: ["string", "null"],
         description:
           "Inline runs only. Snapshot of the prompt submitted at run time. Null once the shadow has been compacted.",
+      },
+      notifiedAt: {
+        type: ["string", "null"],
+        format: "date-time",
+        description:
+          "When the user was notified of run completion (in-app notification). Null until notification fires.",
+      },
+      readAt: {
+        type: ["string", "null"],
+        format: "date-time",
+        description: "When the user marked the run notification as read. Null until acknowledged.",
+      },
+      runNumber: {
+        type: ["integer", "null"],
+        description:
+          "Per-(app, package) monotonic counter assigned at run creation. Stable identifier for UI display.",
+      },
+      runOrigin: {
+        type: ["string", "null"],
+        enum: ["platform", "remote", null],
+        description:
+          "Which runner drives this run: 'platform' (server-managed Docker container) or 'remote' (caller's host via signed events).",
+      },
+      contextSnapshot: {
+        type: ["object", "null"],
+        description:
+          "Runner-provided execution environment metadata (os, cli version, git sha, ...) stamped at run creation.",
+        additionalProperties: true,
+      },
+      modelCredentialId: {
+        type: ["string", "null"],
+        description:
+          "ID of the model_provider_credentials row resolved at run creation (audit + cost-attribution).",
+      },
+      connection_overrides: {
+        type: ["object", "null"],
+        description:
+          "Frozen per-(integration, authKey) connection picks for this run (#199 mechanism #3). Loses to admin pins.",
+        additionalProperties: true,
       },
     },
   },
@@ -466,29 +507,41 @@ export const schemas = {
   },
   Schedule: {
     type: "object",
-    required: ["id", "packageId", "orgId", "cronExpression", "createdAt", "updatedAt"],
+    required: [
+      "id",
+      "packageId",
+      "orgId",
+      "applicationId",
+      "cron_expression",
+      "createdAt",
+      "updatedAt",
+    ],
     properties: {
       id: { type: "string" },
       packageId: { type: "string" },
       userId: { type: ["string", "null"], description: "Member actor the schedule runs as" },
       endUserId: { type: ["string", "null"], description: "End-user actor the schedule runs as" },
       orgId: { type: "string" },
+      applicationId: {
+        type: "string",
+        description: "Application ID (app_ prefix) that owns this schedule",
+      },
       name: { type: ["string", "null"] },
       enabled: { type: ["boolean", "null"] },
-      cronExpression: { type: "string" },
+      cron_expression: { type: "string" },
       timezone: { type: ["string", "null"] },
       input: { type: "object" },
-      configOverride: { type: ["object", "null"] },
-      modelIdOverride: { type: ["string", "null"] },
-      proxyIdOverride: { type: ["string", "null"] },
-      versionOverride: { type: ["string", "null"] },
-      connectionOverrides: { type: ["object", "null"] },
-      lastRunAt: { type: ["string", "null"], format: "date-time" },
-      nextRunAt: { type: ["string", "null"], format: "date-time" },
+      config_override: { type: ["object", "null"] },
+      model_id_override: { type: ["string", "null"] },
+      proxy_id_override: { type: ["string", "null"] },
+      version_override: { type: ["string", "null"] },
+      connection_overrides: { type: ["object", "null"] },
+      last_run_at: { type: ["string", "null"], format: "date-time" },
+      next_run_at: { type: ["string", "null"], format: "date-time" },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
-      actorName: { type: ["string", "null"], description: "Display name of the schedule actor" },
-      actorType: { type: ["string", "null"], enum: ["user", "end_user", null] },
+      actor_name: { type: ["string", "null"], description: "Display name of the schedule actor" },
+      actor_type: { type: ["string", "null"], enum: ["user", "end_user", null] },
     },
   },
   ApiKeyInfo: {
@@ -504,7 +557,7 @@ export const schemas = {
         description: "Permission scopes granted to this API key.",
       },
       createdBy: { type: ["string", "null"] },
-      createdByName: { type: "string" },
+      created_by_name: { type: "string" },
       expiresAt: { type: ["string", "null"], format: "date-time" },
       lastUsedAt: { type: ["string", "null"], format: "date-time" },
       revokedAt: { type: ["string", "null"], format: "date-time" },
@@ -519,12 +572,16 @@ export const schemas = {
       name: { type: ["string", "null"] },
       description: { type: ["string", "null"] },
       source: { type: "string", enum: ["system", "local"] },
+      scope: {
+        type: ["string", "null"],
+        description: "Scope from manifest name (e.g. @myorg from @myorg/name)",
+      },
       createdBy: { type: ["string", "null"] },
-      createdByName: { type: "string" },
-      usedByAgents: { type: "integer" },
+      created_by_name: { type: "string" },
+      used_by_agents: { type: "integer" },
       version: { type: ["string", "null"], description: "Manifest version (semver)" },
-      autoInstalled: { type: "boolean" },
-      forkedFrom: { type: ["string", "null"], description: "Source package ID if forked" },
+      auto_installed: { type: "boolean" },
+      forked_from: { type: ["string", "null"], description: "Source package ID if forked" },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
     },
@@ -537,34 +594,42 @@ export const schemas = {
       name: { type: ["string", "null"] },
       description: { type: ["string", "null"] },
       content: { type: "string", description: "Package item content" },
+      source_code: {
+        type: ["string", "null"],
+        description: "Secondary source file content (e.g. .ts for tools)",
+      },
       source: { type: "string", enum: ["system", "local"] },
+      scope: {
+        type: ["string", "null"],
+        description: "Scope from manifest name (e.g. @myorg from @myorg/name)",
+      },
       createdBy: { type: ["string", "null"] },
-      createdByName: { type: "string" },
-      usedByAgents: { type: "integer" },
-      autoInstalled: { type: "boolean" },
-      lockVersion: { type: "integer", description: "Optimistic lock version" },
+      created_by_name: { type: "string" },
+      used_by_agents: { type: "integer" },
+      auto_installed: { type: "boolean" },
+      lock_version: { type: "integer", description: "Optimistic lock version" },
       version: { type: ["string", "null"], description: "Manifest version (semver)" },
       manifest: { type: "object", description: "Full manifest object" },
-      manifestName: {
+      manifest_name: {
         type: ["string", "null"],
         description: "Manifest name (@scope/name) — may differ from package ID",
       },
-      versionCount: {
+      version_count: {
         type: "integer",
         description: "Number of published versions",
       },
-      hasUnarchivedChanges: {
+      has_unarchived_changes: {
         type: "boolean",
         description: "Whether the active version has changes not yet archived as a version",
       },
-      forkedFrom: { type: ["string", "null"], description: "Source package ID if forked" },
+      forked_from: { type: ["string", "null"], description: "Source package ID if forked" },
       agents: {
         type: "array",
         items: {
           type: "object",
           properties: {
             id: { type: "string" },
-            displayName: { type: "string" },
+            display_name: { type: "string" },
           },
         },
       },
@@ -780,11 +845,11 @@ export const schemas = {
     description:
       "AFPS Agent manifest extended with Appstrate platform fields. " +
       "Standard fields are defined by the AFPS Agent schema; extension fields use the x- prefix per AFPS §10.",
-    allOf: [{ $ref: "https://afps.appstrate.dev/packages/schema/v1/agent.schema.json" }],
+    allOf: [{ $ref: "https://afps.appstrate.dev/packages/schema/v2/agent.schema.json" }],
   },
   SkillManifest: {
     description: "AFPS Skill manifest. See https://afps.appstrate.dev for field reference.",
-    $ref: "https://afps.appstrate.dev/packages/schema/v1/skill.schema.json",
+    $ref: "https://afps.appstrate.dev/packages/schema/v2/skill.schema.json",
   },
   FileConstraintsMap: {
     type: "object",
@@ -798,7 +863,7 @@ export const schemas = {
           type: "string",
           description: "Comma-separated accepted file extensions (e.g. .pdf,.docx)",
         },
-        maxSize: {
+        max_size: {
           type: "number",
           description: "Maximum file size in bytes",
         },
@@ -831,7 +896,7 @@ export const schemas = {
       required: ["id", "type", "source", "name", "description", "installedIn"],
       properties: {
         id: { type: "string", description: "Package id (`pkg_…`)." },
-        type: { type: "string", enum: ["agent", "skill", "integration"] },
+        type: { type: "string", enum: ["agent", "skill", "mcp-server", "integration"] },
         source: {
           type: "string",
           description:
@@ -840,7 +905,7 @@ export const schemas = {
         name: {
           type: "string",
           description:
-            "Display name from the package draft manifest (`displayName`); falls back to the package id.",
+            "Display name from the package draft manifest (`manifest.display_name`); falls back to the package id.",
         },
         description: {
           type: "string",

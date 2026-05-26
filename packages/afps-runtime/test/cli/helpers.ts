@@ -40,8 +40,8 @@ export const MINIMAL_MANIFEST = {
   name: "@acme/hello",
   version: "1.0.0",
   type: "agent",
-  schemaVersion: "1.1",
-  displayName: "Hello",
+  schema_version: "2.0",
+  display_name: "Hello",
   author: "Acme",
 };
 

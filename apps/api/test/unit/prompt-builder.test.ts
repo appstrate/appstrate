@@ -21,17 +21,24 @@ function makeTestBundle(opts: {
   schemaVersion?: string;
   schemas?: TestSchemas;
   timeout?: number;
-  tools?: ToolMeta[];
+  integrations?: ToolMeta[];
+  mcpServers?: ToolMeta[];
   skills?: ToolMeta[];
-  toolDocs?: Array<{ id: string; content: string }>;
+  /**
+   * Per-dependency doc-companion content, keyed by package id. Written to
+   * the package's type-specific companion file (`SKILL.md` / `INTEGRATION.md`
+   * / `README.md`) so the bundle mirrors what `buildBundleFromCatalog`
+   * produces in production.
+   */
+  packageDocs?: Array<{ id: string; content: string }>;
   runtimeTools?: string[];
 }): Bundle {
   const rootManifest: Record<string, unknown> = {
     name: "@test/agent",
     version: "1.0.0",
     type: "agent",
-    ...(opts.runtimeTools ? { runtimeTools: opts.runtimeTools } : {}),
-    ...(opts.schemaVersion ? { schemaVersion: opts.schemaVersion } : {}),
+    ...(opts.runtimeTools ? { runtime_tools: opts.runtimeTools } : {}),
+    ...(opts.schemaVersion ? { schema_version: opts.schemaVersion } : {}),
     ...(opts.timeout !== undefined ? { timeout: opts.timeout } : {}),
     ...(opts.schemas?.input ? { input: { schema: opts.schemas.input } } : {}),
     ...(opts.schemas?.config ? { config: { schema: opts.schemas.config } } : {}),
@@ -49,23 +56,22 @@ function makeTestBundle(opts: {
     integrity: "sha256-stub",
   });
 
-  const docsById = new Map((opts.toolDocs ?? []).map((d) => [d.id, d.content]));
-  for (const t of opts.tools ?? []) {
-    const identity = `${t.id}@1.0.0` as PackageIdentity;
-    const manifest = { name: t.name, type: "tool", description: t.description };
+  const docsById = new Map((opts.packageDocs ?? []).map((d) => [d.id, d.content]));
+  // Each AFPS 2.0 dependency type carries its own doc companion at the
+  // archive root: skill→SKILL.md, integration→INTEGRATION.md,
+  // mcp-server→README.md (the convention used across the codebase).
+  const addPackage = (meta: ToolMeta, type: string, docFile: string): void => {
+    const identity = `${meta.id}@1.0.0` as PackageIdentity;
+    const manifest = { name: meta.name, type, description: meta.description };
     const files = new Map<string, Uint8Array>();
     files.set("manifest.json", new TextEncoder().encode(JSON.stringify(manifest)));
-    const doc = docsById.get(t.id);
-    if (doc) files.set("TOOL.md", new TextEncoder().encode(doc));
+    const doc = docsById.get(meta.id);
+    if (doc) files.set(docFile, new TextEncoder().encode(doc));
     packages.set(identity, { identity, manifest, files, integrity: "sha256-stub" });
-  }
-  for (const s of opts.skills ?? []) {
-    const identity = `${s.id}@1.0.0` as PackageIdentity;
-    const manifest = { name: s.name, type: "skill", description: s.description };
-    const files = new Map<string, Uint8Array>();
-    files.set("manifest.json", new TextEncoder().encode(JSON.stringify(manifest)));
-    packages.set(identity, { identity, manifest, files, integrity: "sha256-stub" });
-  }
+  };
+  for (const i of opts.integrations ?? []) addPackage(i, "integration", "INTEGRATION.md");
+  for (const m of opts.mcpServers ?? []) addPackage(m, "mcp-server", "README.md");
+  for (const s of opts.skills ?? []) addPackage(s, "skill", "SKILL.md");
 
   return {
     bundleFormatVersion: "1.0",
@@ -95,9 +101,17 @@ interface PromptContext {
   llmConfig: AppstrateRunPlan["llmConfig"];
   proxyUrl?: string | null;
   timeout?: number;
+  /**
+   * Legacy no-op surface: the prompt no longer renders any tool list
+   * (every tool is advertised via MCP `tools/list`), so these entries
+   * never reach the bundle. Kept so existing negative assertions ("tool
+   * X never appears in the prompt") can still pass an input.
+   */
   availableTools?: ToolMeta[];
   availableSkills?: ToolMeta[];
-  toolDocs?: Array<{ id: string; content: string }>;
+  availableIntegrations?: ToolMeta[];
+  availableMcpServers?: ToolMeta[];
+  packageDocs?: Array<{ id: string; content: string }>;
   runtimeTools?: string[];
 }
 
@@ -120,9 +134,10 @@ function splitLegacy(ctx: PromptContext): {
     ...(ctx.schemaVersion !== undefined ? { schemaVersion: ctx.schemaVersion } : {}),
     schemas: ctx.schemas,
     ...(ctx.timeout !== undefined ? { timeout: ctx.timeout } : {}),
-    ...(ctx.availableTools ? { tools: ctx.availableTools } : {}),
     ...(ctx.availableSkills ? { skills: ctx.availableSkills } : {}),
-    ...(ctx.toolDocs ? { toolDocs: ctx.toolDocs } : {}),
+    ...(ctx.availableIntegrations ? { integrations: ctx.availableIntegrations } : {}),
+    ...(ctx.availableMcpServers ? { mcpServers: ctx.availableMcpServers } : {}),
+    ...(ctx.packageDocs ? { packageDocs: ctx.packageDocs } : {}),
     ...(ctx.runtimeTools ? { runtimeTools: ctx.runtimeTools } : {}),
   });
   const plan: AppstrateRunPlan = {
@@ -212,19 +227,52 @@ describe("buildEnrichedPrompt — core structure", () => {
   });
 });
 
-// ─── Tool documentation (TOOL.md) ──────────────────────────
+// ─── Dependency doc companions ─────────────────────────────
 
-describe("buildEnrichedPrompt — tool documentation", () => {
-  it("never renders TOOL.md content in the prompt (tools are self-documented via MCP tools/list)", () => {
+describe("buildEnrichedPrompt — dependency doc companions", () => {
+  // AFPS 2.0 dependencies carry a doc companion at their archive root:
+  // skill→SKILL.md, integration→INTEGRATION.md, mcp-server→README.md.
+  // None of these are rendered into the platform prompt — integrations
+  // and mcp-servers self-document via MCP `tools/list`, and a skill's
+  // SKILL.md is loaded only when the skill is activated in-container.
+  it("never renders INTEGRATION.md content in the prompt", () => {
     const ctx = baseContext({
-      availableTools: [
-        { id: "@appstrate/log", name: "Log", description: "Send progress messages" },
+      availableIntegrations: [
+        { id: "@org/github-mcp", name: "GitHub", description: "GitHub integration" },
       ],
-      toolDocs: [{ id: "@appstrate/log", content: "## User Communication\n\nUse the `log` tool." }],
+      packageDocs: [
+        { id: "@org/github-mcp", content: "## GitHub API\n\nCall `list_issues` to fetch issues." },
+      ],
     });
     const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).not.toContain("## User Communication");
-    expect(prompt).not.toContain("Use the `log` tool.");
+    expect(prompt).not.toContain("## GitHub API");
+    expect(prompt).not.toContain("Call `list_issues` to fetch issues.");
+  });
+
+  it("never renders mcp-server README.md content in the prompt", () => {
+    const ctx = baseContext({
+      availableMcpServers: [
+        { id: "@org/scraper", name: "Scraper", description: "Web scraper MCP server" },
+      ],
+      packageDocs: [{ id: "@org/scraper", content: "## Usage\n\nInvoke the `scrape` tool." }],
+    });
+    const prompt = buildEnrichedPrompt(ctx);
+    expect(prompt).not.toContain("## Usage");
+    expect(prompt).not.toContain("Invoke the `scrape` tool.");
+  });
+
+  it("never renders skill SKILL.md body content in the prompt", () => {
+    const ctx = baseContext({
+      availableSkills: [
+        { id: "@org/research", name: "Research", description: "Deep research capability" },
+      ],
+      packageDocs: [
+        { id: "@org/research", content: "## Research procedure\n\nStep 1: gather sources." },
+      ],
+    });
+    const prompt = buildEnrichedPrompt(ctx);
+    expect(prompt).not.toContain("## Research procedure");
+    expect(prompt).not.toContain("Step 1: gather sources.");
   });
 });
 

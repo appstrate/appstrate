@@ -46,8 +46,8 @@ describe("initiateIntegrationOAuth", () => {
     const result = await initiateIntegrationOAuth(store, {
       packageId: "@official/gmail",
       authKey: "primary",
-      authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth",
-      tokenUrl: "https://oauth2.googleapis.com/token",
+      authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",
+      tokenEndpoint: "https://oauth2.googleapis.com/token",
       clientId: "abc.apps.googleusercontent.com",
       clientSecret: "secret",
       scopes: ["openid", "email", "https://www.googleapis.com/auth/gmail.readonly"],
@@ -72,8 +72,8 @@ describe("initiateIntegrationOAuth", () => {
     const { state } = await initiateIntegrationOAuth(store, {
       packageId: "@org/widget",
       authKey: "github",
-      authorizationUrl: "https://github.com/login/oauth/authorize",
-      tokenUrl: "https://github.com/login/oauth/access_token",
+      authorizationEndpoint: "https://github.com/login/oauth/authorize",
+      tokenEndpoint: "https://github.com/login/oauth/access_token",
       clientId: "Iv1.x",
       clientSecret: "x",
       redirectUri: "http://localhost:3000/cb",
@@ -92,11 +92,11 @@ describe("initiateIntegrationOAuth", () => {
     const result = await initiateIntegrationOAuth(store, {
       packageId: "@official/mcp",
       authKey: "primary",
-      authorizationUrl: "https://idp.example.com/authorize",
-      tokenUrl: "https://idp.example.com/token",
+      authorizationEndpoint: "https://idp.example.com/authorize",
+      tokenEndpoint: "https://idp.example.com/token",
       clientId: "client",
       clientSecret: "secret",
-      audience: "https://api.example.com",
+      resource: "https://api.example.com",
       redirectUri: "http://localhost:3000/cb",
       orgId: "o",
       applicationId: "a",
@@ -109,8 +109,8 @@ describe("initiateIntegrationOAuth", () => {
     const result = await initiateIntegrationOAuth(store, {
       packageId: "@org/x",
       authKey: "a",
-      authorizationUrl: "https://idp.example.com/authorize?prompt=consent",
-      tokenUrl: "https://idp.example.com/token",
+      authorizationEndpoint: "https://idp.example.com/authorize?prompt=consent",
+      tokenEndpoint: "https://idp.example.com/token",
       clientId: "c",
       clientSecret: "s",
       redirectUri: "http://localhost:3000/cb",
@@ -128,8 +128,8 @@ describe("initiateIntegrationOAuth", () => {
     const result = await initiateIntegrationOAuth(store, {
       packageId: "@official/google-drive",
       authKey: "primary",
-      authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth",
-      tokenUrl: "https://oauth2.googleapis.com/token",
+      authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",
+      tokenEndpoint: "https://oauth2.googleapis.com/token",
       clientId: "abc.apps.googleusercontent.com",
       clientSecret: "secret",
       authorizationParams: { access_type: "offline", prompt: "consent" },
@@ -147,8 +147,8 @@ describe("initiateIntegrationOAuth", () => {
     const result = await initiateIntegrationOAuth(store, {
       packageId: "@official/google-drive",
       authKey: "primary",
-      authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth",
-      tokenUrl: "https://oauth2.googleapis.com/token",
+      authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",
+      tokenEndpoint: "https://oauth2.googleapis.com/token",
       clientId: "c",
       clientSecret: "s",
       authorizationParams: { access_type: "offline", prompt: "consent" },
@@ -168,8 +168,8 @@ describe("initiateIntegrationOAuth", () => {
     const { state } = await initiateIntegrationOAuth(store, {
       packageId: "@x/y",
       authKey: "a",
-      authorizationUrl: "https://idp/authorize",
-      tokenUrl: "https://idp/token",
+      authorizationEndpoint: "https://idp/authorize",
+      tokenEndpoint: "https://idp/token",
       clientId: "c",
       clientSecret: "s",
       redirectUri: "http://localhost:3000/cb",
@@ -180,6 +180,153 @@ describe("initiateIntegrationOAuth", () => {
     const stored = await store.get(state);
     expect(stored?.userId).toBeNull();
     expect(stored?.endUserId).toBe("eu_1");
+  });
+
+  it("performs PKCE-S256 when code_challenge_methods_supported includes S256", async () => {
+    const result = await initiateIntegrationOAuth(store, {
+      packageId: "@x/y",
+      authKey: "a",
+      authorizationEndpoint: "https://idp/authorize",
+      tokenEndpoint: "https://idp/token",
+      clientId: "c",
+      clientSecret: "s",
+      codeChallengeMethodsSupported: ["S256"],
+      redirectUri: "http://localhost:3000/cb",
+      orgId: "o",
+      applicationId: "a",
+      actor: { type: "user", id: "u" },
+    });
+    const url = new URL(result.authUrl);
+    expect(url.searchParams.get("code_challenge_method")).toBe("S256");
+    expect(url.searchParams.get("code_challenge")).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    const stored = await store.get(result.state);
+    expect(stored?.codeVerifier).toMatch(/^[A-Za-z0-9_-]+$/);
+  });
+
+  it("skips PKCE when code_challenge_methods_supported is empty (IdP advertises no method)", async () => {
+    const result = await initiateIntegrationOAuth(store, {
+      packageId: "@x/y",
+      authKey: "a",
+      authorizationEndpoint: "https://idp/authorize",
+      tokenEndpoint: "https://idp/token",
+      clientId: "c",
+      clientSecret: "s",
+      codeChallengeMethodsSupported: [],
+      redirectUri: "http://localhost:3000/cb",
+      orgId: "o",
+      applicationId: "a",
+      actor: { type: "user", id: "u" },
+    });
+    const url = new URL(result.authUrl);
+    expect(url.searchParams.get("code_challenge")).toBeNull();
+    expect(url.searchParams.get("code_challenge_method")).toBeNull();
+    const stored = await store.get(result.state);
+    expect(stored?.codeVerifier).toBe("");
+  });
+
+  it("resolves missing endpoints from issuer discovery (RFC 8414 / OIDC)", async () => {
+    const discover = (async () => ({
+      authorizationEndpoint: "https://disco.example.com/authorize",
+      tokenEndpoint: "https://disco.example.com/token",
+    })) as unknown as typeof import("../src/oauth-discovery.ts").resolveOAuthEndpoints;
+
+    const result = await initiateIntegrationOAuth(store, {
+      packageId: "@x/y",
+      authKey: "a",
+      issuer: "https://disco.example.com",
+      clientId: "c",
+      clientSecret: "s",
+      redirectUri: "http://localhost:3000/cb",
+      orgId: "o",
+      applicationId: "a",
+      actor: { type: "user", id: "u" },
+      discover,
+    });
+    const url = new URL(result.authUrl);
+    expect(url.origin).toBe("https://disco.example.com");
+    expect(url.pathname).toBe("/authorize");
+    const stored = await store.get(result.state);
+    expect(stored?.integration?.tokenEndpoint).toBe("https://disco.example.com/token");
+  });
+
+  it("manual endpoints override discovery — discovery never runs when both are present", async () => {
+    // Real resolver (no injected hook): when both endpoints are present the
+    // resolver short-circuits without any fetch, so discovery cannot override.
+    // We additionally fail the test if `fetch` is touched at all.
+    let fetchCalled = false;
+    const result = await withFetch(
+      (async () => {
+        fetchCalled = true;
+        return new Response("{}", { status: 200 });
+      }) as unknown as typeof fetch,
+      () =>
+        initiateIntegrationOAuth(store, {
+          packageId: "@x/y",
+          authKey: "a",
+          issuer: "https://disco.example.com",
+          authorizationEndpoint: "https://manual.example.com/authorize",
+          tokenEndpoint: "https://manual.example.com/token",
+          clientId: "c",
+          clientSecret: "s",
+          redirectUri: "http://localhost:3000/cb",
+          orgId: "o",
+          applicationId: "a",
+          actor: { type: "user", id: "u" },
+        }),
+    );
+    expect(fetchCalled).toBe(false);
+    expect(new URL(result.authUrl).origin).toBe("https://manual.example.com");
+    const stored = await store.get(result.state);
+    expect(stored?.integration?.tokenEndpoint).toBe("https://manual.example.com/token");
+  });
+
+  it("throws a transient error when no endpoint can be resolved", async () => {
+    let err: unknown = null;
+    try {
+      await initiateIntegrationOAuth(store, {
+        packageId: "@x/y",
+        authKey: "a",
+        clientId: "c",
+        clientSecret: "s",
+        redirectUri: "http://localhost:3000/cb",
+        orgId: "o",
+        applicationId: "a",
+        actor: { type: "user", id: "u" },
+      });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(OAuthCallbackError);
+    expect((err as OAuthCallbackError).kind).toBe("transient");
+  });
+
+  it("throws a transient error when the token_endpoint specifically cannot be resolved", async () => {
+    // Discovery yields an authorization_endpoint but no token_endpoint — the
+    // distinct guard for the missing token endpoint (not the authorize one).
+    const discover = (async () => ({
+      authorizationEndpoint: "https://idp.example.com/authorize",
+      tokenEndpoint: undefined,
+    })) as never;
+    let err: unknown = null;
+    try {
+      await initiateIntegrationOAuth(store, {
+        packageId: "@x/y",
+        authKey: "a",
+        clientId: "c",
+        clientSecret: "s",
+        redirectUri: "http://localhost:3000/cb",
+        orgId: "o",
+        applicationId: "a",
+        actor: { type: "user", id: "u" },
+        issuer: "https://idp.example.com",
+        discover,
+      });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(OAuthCallbackError);
+    expect((err as OAuthCallbackError).kind).toBe("transient");
+    expect((err as OAuthCallbackError).message).toContain("token_endpoint");
   });
 });
 
@@ -194,8 +341,8 @@ describe("handleIntegrationOAuthCallback", () => {
     return initiateIntegrationOAuth(store, {
       packageId: "@official/gmail",
       authKey: "primary",
-      authorizationUrl: "https://idp/authorize",
-      tokenUrl: "https://idp/token",
+      authorizationEndpoint: "https://idp/authorize",
+      tokenEndpoint: "https://idp/token",
       clientId: "client-id",
       clientSecret: "client-secret",
       scopes: ["openid", "email"],
@@ -264,7 +411,7 @@ describe("handleIntegrationOAuthCallback", () => {
     // token-exchange.test.ts. Here we only assert the callback wrapper
     // forwards `tokenAuthMethod` so the chosen scheme actually reaches the
     // wire (Basic for client_secret_basic).
-    const { state } = await seedState({ tokenAuthMethod: "client_secret_basic" });
+    const { state } = await seedState({ tokenEndpointAuthMethod: "client_secret_basic" });
     let authHeader: string | undefined;
     const stub = (async (_input: unknown, init?: RequestInit) => {
       const headers: Record<string, string> = {};
@@ -285,7 +432,7 @@ describe("handleIntegrationOAuthCallback", () => {
   });
 
   it("emits the RFC 8707 `resource` parameter on the token request when audience set", async () => {
-    const { state } = await seedState({ audience: "https://api.example.com" });
+    const { state } = await seedState({ resource: "https://api.example.com" });
     let body = "";
     const stub = (async (_input: unknown, init?: RequestInit) => {
       body = init?.body ? String(init.body) : "";

@@ -46,7 +46,7 @@ const TIMEZONES = [
 
 export interface ScheduleSaveData {
   name?: string;
-  cronExpression: string;
+  cron_expression: string;
   timezone?: string;
   input?: Record<string, unknown>;
   enabled?: boolean;
@@ -55,31 +55,31 @@ export interface ScheduleSaveData {
    * the application's persisted config every time the schedule fires.
    * `null` clears a previously-set override on edit.
    */
-  configOverride?: Record<string, unknown> | null;
-  modelIdOverride?: string | null;
-  proxyIdOverride?: string | null;
-  versionOverride?: string | null;
+  config_override?: Record<string, unknown> | null;
+  model_id_override?: string | null;
+  proxy_id_override?: string | null;
+  version_override?: string | null;
   /**
    * Per-integration connection picks frozen on the schedule row
    * (`package_schedules.connection_overrides`). Same wire shape as the
-   * run-route's `connectionOverrides`; `null` clears on edit.
+   * run-route's `connection_overrides`; `null` clears on edit.
    */
-  connectionOverrides?: Record<string, Record<string, string>> | null;
+  connection_overrides?: Record<string, Record<string, string>> | null;
 }
 
 interface ScheduleFormProps {
   mode: "create" | "edit";
   defaultValues?: {
     name?: string;
-    cronExpression?: string;
+    cron_expression?: string;
     timezone?: string;
     enabled?: boolean;
     input?: Record<string, unknown>;
-    configOverride?: Record<string, unknown> | null;
-    modelIdOverride?: string | null;
-    proxyIdOverride?: string | null;
-    versionOverride?: string | null;
-    connectionOverrides?: Record<string, Record<string, string>> | null;
+    config_override?: Record<string, unknown> | null;
+    model_id_override?: string | null;
+    proxy_id_override?: string | null;
+    version_override?: string | null;
+    connection_overrides?: Record<string, Record<string, string>> | null;
   };
   inputSchema?: JSONSchemaObject;
   /** Agent's config schema — drives the override panel's config form. */
@@ -110,7 +110,7 @@ interface ScheduleFormProps {
 
 interface FormFields {
   name: string;
-  cronExpression: string;
+  cron_expression: string;
   timezone: string;
   enabled: boolean;
 }
@@ -155,22 +155,22 @@ export function ScheduleForm({
   // every fire (vs. the Run modal which only applies them once).
   const [overrides, setOverrides] = useState<RunOverridesValue>(() => {
     const v: RunOverridesValue = {};
-    if (defaultValues?.configOverride) v.configOverride = defaultValues.configOverride;
-    if (defaultValues?.connectionOverrides)
-      v.connectionOverrides = defaultValues.connectionOverrides;
-    if (defaultValues?.modelIdOverride) v.modelIdOverride = defaultValues.modelIdOverride;
-    if (defaultValues?.proxyIdOverride) v.proxyIdOverride = defaultValues.proxyIdOverride;
-    if (defaultValues?.versionOverride) v.versionOverride = defaultValues.versionOverride;
+    if (defaultValues?.config_override) v.config_override = defaultValues.config_override;
+    if (defaultValues?.connection_overrides)
+      v.connection_overrides = defaultValues.connection_overrides;
+    if (defaultValues?.model_id_override) v.model_id_override = defaultValues.model_id_override;
+    if (defaultValues?.proxy_id_override) v.proxy_id_override = defaultValues.proxy_id_override;
+    if (defaultValues?.version_override) v.version_override = defaultValues.version_override;
     return v;
   });
   const initialOverridesNonEmpty =
-    !!(defaultValues?.configOverride && Object.keys(defaultValues.configOverride).length > 0) ||
-    !!defaultValues?.modelIdOverride ||
-    !!defaultValues?.proxyIdOverride ||
-    !!defaultValues?.versionOverride ||
+    !!(defaultValues?.config_override && Object.keys(defaultValues.config_override).length > 0) ||
+    !!defaultValues?.model_id_override ||
+    !!defaultValues?.proxy_id_override ||
+    !!defaultValues?.version_override ||
     !!(
-      defaultValues?.connectionOverrides &&
-      Object.keys(defaultValues.connectionOverrides).length > 0
+      defaultValues?.connection_overrides &&
+      Object.keys(defaultValues.connection_overrides).length > 0
     );
   const [overridesOpen, setOverridesOpen] = useState(initialOverridesNonEmpty);
 
@@ -185,7 +185,7 @@ export function ScheduleForm({
   } = useAppForm<FormFields>({
     defaultValues: {
       name: defaultValues?.name ?? "",
-      cronExpression: defaultValues?.cronExpression ?? "0 9 * * *",
+      cron_expression: defaultValues?.cron_expression ?? "0 9 * * *",
       timezone: defaultValues?.timezone ?? "UTC",
       enabled: defaultValues?.enabled ?? true,
     },
@@ -193,7 +193,7 @@ export function ScheduleForm({
 
   const [cronExpression, timezone, enabled] = useWatch({
     control,
-    name: ["cronExpression", "timezone", "enabled"],
+    name: ["cron_expression", "timezone", "enabled"],
   });
 
   const onFormSubmit = handleSubmit((data) => {
@@ -205,25 +205,29 @@ export function ScheduleForm({
     // existing override untouched per the Zod schema's optional rule.
     const overridePayload = isEdit
       ? {
-          configOverride: overrides.configOverride ?? null,
-          modelIdOverride: overrides.modelIdOverride ?? null,
-          proxyIdOverride: overrides.proxyIdOverride ?? null,
-          versionOverride: overrides.versionOverride ?? null,
-          connectionOverrides: overrides.connectionOverrides ?? null,
+          config_override: overrides.config_override ?? null,
+          model_id_override: overrides.model_id_override ?? null,
+          proxy_id_override: overrides.proxy_id_override ?? null,
+          version_override: overrides.version_override ?? null,
+          connection_overrides: overrides.connection_overrides ?? null,
         }
       : {
-          ...(overrides.configOverride ? { configOverride: overrides.configOverride } : {}),
-          ...(overrides.modelIdOverride ? { modelIdOverride: overrides.modelIdOverride } : {}),
-          ...(overrides.proxyIdOverride ? { proxyIdOverride: overrides.proxyIdOverride } : {}),
-          ...(overrides.versionOverride ? { versionOverride: overrides.versionOverride } : {}),
-          ...(overrides.connectionOverrides
-            ? { connectionOverrides: overrides.connectionOverrides }
+          ...(overrides.config_override ? { config_override: overrides.config_override } : {}),
+          ...(overrides.model_id_override
+            ? { model_id_override: overrides.model_id_override }
+            : {}),
+          ...(overrides.proxy_id_override
+            ? { proxy_id_override: overrides.proxy_id_override }
+            : {}),
+          ...(overrides.version_override ? { version_override: overrides.version_override } : {}),
+          ...(overrides.connection_overrides
+            ? { connection_overrides: overrides.connection_overrides }
             : {}),
         };
 
     onSubmit({
       name: data.name || undefined,
-      cronExpression: data.cronExpression,
+      cron_expression: data.cron_expression,
       timezone: data.timezone,
       input,
       ...(isEdit ? { enabled: data.enabled } : {}),
@@ -293,8 +297,8 @@ export function ScheduleForm({
                   : "text-muted-foreground",
               )}
               onClick={() => {
-                setValue("cronExpression", p.cron);
-                clearErrors("cronExpression");
+                setValue("cron_expression", p.cron);
+                clearErrors("cron_expression");
               }}
             >
               {p.label}
@@ -306,19 +310,19 @@ export function ScheduleForm({
           <Input
             id="sched-cron"
             type="text"
-            {...register("cronExpression", {
+            {...register("cron_expression", {
               validate: (v) => {
                 if (!v.trim()) return t("validation.required", { ns: "common" });
                 return undefined;
               },
             })}
             placeholder="*/30 * * * *"
-            aria-invalid={showError("cronExpression") ? true : undefined}
-            className={cn(showError("cronExpression") && "border-destructive")}
+            aria-invalid={showError("cron_expression") ? true : undefined}
+            className={cn(showError("cron_expression") && "border-destructive")}
           />
           <p className="text-muted-foreground text-sm">{t("schedule.cronHint")}</p>
-          {showError("cronExpression") && errors.cronExpression?.message && (
-            <p className="text-destructive text-sm">{errors.cronExpression.message}</p>
+          {showError("cron_expression") && errors.cron_expression?.message && (
+            <p className="text-destructive text-sm">{errors.cron_expression.message}</p>
           )}
         </div>
       </div>

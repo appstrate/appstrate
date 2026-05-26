@@ -41,13 +41,20 @@ import type {
 
 export class OAuth2Strategy implements IntegrationConnectStrategy {
   async begin(ctx: ConnectContext, opts: BeginOptions): Promise<BeginResult> {
-    const { auth } = await readIntegrationAuth(ctx.scope, ctx.integrationPackageId, ctx.authKey);
-    if (!auth.authorizationUrl || !auth.tokenUrl) {
-      // The manifest schema requires explicit authorizationUrl + tokenUrl for
-      // every oauth2 auth, so this is a defensive invariant (also narrows the
-      // optional types for the call below).
+    const { auth: rawAuth } = await readIntegrationAuth(
+      ctx.scope,
+      ctx.integrationPackageId,
+      ctx.authKey,
+    );
+    const auth =
+      rawAuth as unknown as import("../integration-manifest-helpers.ts").AfpsManifestAuth;
+    // AFPS 2.0 §7.3: an oauth2 auth declares EITHER an `issuer` (discovery
+    // fills the endpoints in) OR explicit `authorization_endpoint` +
+    // `token_endpoint`. Defensive guard — the manifest schema already enforces
+    // this, but it also narrows the optional types for the initiate call.
+    if (!auth.issuer && (!auth.authorization_endpoint || !auth.token_endpoint)) {
       throw invalidRequest(
-        "oauth2 auth must declare explicit authorizationUrl + tokenUrl for marketplace connect.",
+        "oauth2 auth must declare an issuer (for discovery) or explicit authorization_endpoint + token_endpoint for marketplace connect.",
       );
     }
     const client = await getIntegrationOAuthClient(
@@ -60,19 +67,37 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
         `Administrator must register OAuth client credentials for '${ctx.integrationPackageId}' auth '${ctx.authKey}' before connection`,
       );
     }
-    const redirectUri = client.redirectUri ?? `${getEnv().APP_URL}/api/integrations/callback`;
+    const redirectUri = client.redirect_uri ?? `${getEnv().APP_URL}/api/integrations/callback`;
+    // AFPS 2.0 §7.3 / §7.4 (Appendix D renames): `authorization_endpoint`,
+    // `token_endpoint`, `resource` (was audience), `token_endpoint_auth_method`
+    // (was tokenAuthMethod), `default_scopes`, `code_challenge_methods_supported`
+    // (PKCE; was pkceEnabled), `issuer` (new — discovery). `scope_separator`
+    // moved under `_meta["dev.appstrate/oauth"]`.
+    const oauthMeta = (auth._meta?.["dev.appstrate/oauth"] ?? undefined) as
+      | { scope_separator?: string }
+      | undefined;
     const result = await initiateIntegrationOAuth(oauthStateStore, {
       packageId: ctx.integrationPackageId,
       authKey: ctx.authKey,
-      authorizationUrl: auth.authorizationUrl,
-      tokenUrl: auth.tokenUrl,
-      clientId: client.clientId,
+      ...(auth.issuer ? { issuer: auth.issuer } : {}),
+      ...(auth.authorization_endpoint
+        ? { authorizationEndpoint: auth.authorization_endpoint }
+        : {}),
+      ...(auth.token_endpoint ? { tokenEndpoint: auth.token_endpoint } : {}),
+      clientId: client.client_id,
       clientSecret: client.clientSecret,
-      tokenAuthMethod: auth.tokenAuthMethod,
+      ...(auth.token_endpoint_auth_method
+        ? { tokenEndpointAuthMethod: auth.token_endpoint_auth_method }
+        : {}),
       scopes: opts.scopes,
-      scopeSeparator: auth.scopeSeparator,
-      audience: auth.audience,
-      ...(auth.authorizationParams ? { authorizationParams: auth.authorizationParams } : {}),
+      ...(oauthMeta?.scope_separator ? { scopeSeparator: oauthMeta.scope_separator } : {}),
+      ...(auth.resource ? { resource: auth.resource } : {}),
+      ...(auth.code_challenge_methods_supported
+        ? { codeChallengeMethodsSupported: auth.code_challenge_methods_supported }
+        : {}),
+      ...(auth.authorization_params
+        ? { authorizationParams: auth.authorization_params as Record<string, string> }
+        : {}),
       redirectUri,
       orgId: ctx.scope.orgId,
       applicationId: ctx.scope.applicationId,
@@ -115,7 +140,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
         }
       }
     }
-    const userinfoUrl = auth.userinfoUrl;
+    const userinfoUrl = (auth as { userinfo_endpoint?: string }).userinfo_endpoint;
     if (userinfoUrl && isBlockedUrl(userinfoUrl)) {
       // SSRF guard: `userinfoUrl` is manifest-declared and fetched with the
       // user's access token. Refuse loopback / RFC1918 / link-local / metadata

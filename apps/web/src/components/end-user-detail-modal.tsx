@@ -173,7 +173,7 @@ export function EndUserDetailModal({ open, onClose, endUser }: Props) {
             className="space-y-4"
           >
             <div className="space-y-2">
-              <Label htmlFor="eu-edit-name">{t("applications.endUserName")}</Label>
+              <Label htmlFor="eu-edit-name">{t("applications.end_user_name")}</Label>
               <Input
                 id="eu-edit-name"
                 value={editName}
@@ -273,7 +273,7 @@ export function EndUserDetailModal({ open, onClose, endUser }: Props) {
       >
         <div className="space-y-4">
           <CopyableField label="ID" value={endUser.id} />
-          <ReadOnlyField label={t("applications.endUserName")} value={endUser.name} />
+          <ReadOnlyField label={t("applications.end_user_name")} value={endUser.name} />
           <ReadOnlyField label={t("applications.endUserEmail")} value={endUser.email} />
           <ReadOnlyField label={t("applications.endUserExternalId")} value={endUser.externalId} />
           <ReadOnlyField

@@ -51,9 +51,9 @@ export async function tryParseSkillOnlyZip(
     name: packageId,
     version,
     type: "skill" as const,
-    schemaVersion: "1.1",
+    schema_version: "2.0",
     description: meta.description || undefined,
-    displayName: meta.name,
+    display_name: meta.name,
   });
   if (!validation.valid) return { ok: false, reason: "not_a_skill" };
 
@@ -62,6 +62,6 @@ export async function tryParseSkillOnlyZip(
 
   return {
     ok: true,
-    parsed: { manifest: validatedManifest, content: skillMd, files, type: "skill" },
+    parsed: { manifest: validatedManifest, content: skillMd, files, type: "skill", packageId },
   };
 }

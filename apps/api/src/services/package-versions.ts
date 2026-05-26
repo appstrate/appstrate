@@ -138,7 +138,7 @@ export async function listPackageVersions(packageId: string) {
       id: packageVersions.id,
       version: packageVersions.version,
       integrity: packageVersions.integrity,
-      artifactSize: packageVersions.artifactSize,
+      artifact_size: packageVersions.artifactSize,
       yanked: packageVersions.yanked,
       createdBy: packageVersions.createdBy,
       createdAt: packageVersions.createdAt,
@@ -430,7 +430,7 @@ export async function getMatchingDistTags(packageId: string, version: string): P
 export async function getVersionInfo(
   packageId: string,
   orgId: string,
-): Promise<{ latestPublishedVersion: string | null; activeVersion: string | null }> {
+): Promise<{ latest_published_version: string | null; active_version: string | null }> {
   const [[pkg], [latestTag]] = await Promise.all([
     db
       .select({ draftManifest: packages.draftManifest })
@@ -457,7 +457,7 @@ export async function getVersionInfo(
     latestPublishedVersion = row?.version ?? null;
   }
 
-  return { latestPublishedVersion, activeVersion };
+  return { latest_published_version: latestPublishedVersion, active_version: activeVersion };
 }
 
 // ─────────────────────────────────────────────

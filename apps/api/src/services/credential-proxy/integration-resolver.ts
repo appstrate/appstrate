@@ -9,7 +9,7 @@
  * surface — `integration_connections` rows + the manifest's `delivery.http`
  * plan — and synthesises a {@link ProxyCredentialsPayload} that
  * {@link proxyCall} consumes verbatim (header injection +
- * `{{var}}` substitution + `authorizedUris` allowlist).
+ * `{{var}}` substitution + `authorized_uris` allowlist).
  *
  * `X-Integration` carries the integration package id (`@scope/name`). The
  * actor (dashboard user, CLI/JWT user, or impersonated end-user) selects
@@ -24,10 +24,12 @@
 
 import {
   RefreshError,
-  resolveHttpDelivery,
+  resolveAfpsHttpDelivery,
   buildProxyCredentialsPayload,
+  type AfpsHttpDelivery as ConnectAfpsHttpDelivery,
   type ProxyCredentialsPayload,
 } from "@appstrate/connect";
+import type { AfpsManifestAuth } from "../integration-manifest-helpers.ts";
 import type { Actor } from "../../lib/actor.ts";
 import { logger } from "../../lib/logger.ts";
 import {
@@ -238,17 +240,19 @@ function buildPayloadFromFields(
   authKey: string,
   fields: Record<string, string>,
 ): ProxyCredentialsPayload | null {
-  const authDef = manifest.auths?.[authKey];
+  const authDef = manifest.auths?.[authKey] as AfpsManifestAuth | undefined;
   if (!authDef) return null;
 
   const http = authDef.delivery?.http;
-  const plan = http ? resolveHttpDelivery(authDef.type, fields, http) : null;
+  const plan = http
+    ? resolveAfpsHttpDelivery(authDef.type, fields, http as ConnectAfpsHttpDelivery)
+    : null;
 
-  // Integrations always declare ≥1 authorizedUri unless allowAllUris is set.
+  // Integrations always declare ≥1 authorized_uri unless allow_all_uris is set.
   return buildProxyCredentialsPayload({
     fields,
     plan,
-    authorizedUris: authDef.authorizedUris,
-    allowAllUris: authDef.allowAllUris === true,
+    authorizedUris: authDef.authorized_uris ?? [],
+    allowAllUris: authDef.allow_all_uris === true,
   });
 }

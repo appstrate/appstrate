@@ -1,31 +1,26 @@
 {
-  "$schema": "https://afps.appstrate.dev/packages/schema/v1/integration.schema.json",
-  "manifestVersion": "1.1",
-  "type": "integration",
   "name": "@appstrate/zoom",
   "version": "1.0.0",
-  "displayName": "Zoom (API)",
+  "type": "integration",
+  "schema_version": "2.0",
+  "display_name": "Zoom (API)",
   "description": "Video conferencing and online meetings platform",
-  "license": "Apache-2.0",
-  "author": "Appstrate",
-  "icon": "zoom",
   "keywords": ["video", "meetings"],
-  "apiCall": {
-    "authKey": "primary"
+  "license": "Apache-2.0",
+  "icon": "zoom",
+  "source": {
+    "kind": "api",
+    "api": {}
   },
   "auths": {
     "primary": {
       "type": "oauth2",
-      "required": true,
-      "authorizedUris": ["https://api.zoom.us/**"],
-      "authorizationUrl": "https://zoom.us/oauth/authorize",
-      "tokenUrl": "https://zoom.us/oauth/token",
-      "refreshUrl": "https://zoom.us/oauth/token",
-      "scopes": ["user:read:user", "meeting:read:list_meetings", "meeting:read:meeting"],
-      "scopeSeparator": " ",
-      "pkceEnabled": true,
-      "tokenAuthMethod": "client_secret_basic",
-      "availableScopes": [
+      "authorization_endpoint": "https://zoom.us/oauth/authorize",
+      "token_endpoint": "https://zoom.us/oauth/token",
+      "default_scopes": ["user:read:user", "meeting:read:list_meetings", "meeting:read:meeting"],
+      "token_endpoint_auth_method": "client_secret_basic",
+      "code_challenge_methods_supported": ["S256"],
+      "scope_catalog": [
         {
           "value": "user:read:user",
           "label": "Read user profile"
@@ -67,13 +62,31 @@
           "label": "Read meeting participants report"
         }
       ],
+      "authorized_uris": ["https://api.zoom.us/**"],
       "delivery": {
         "http": {
-          "headerName": "Authorization",
-          "headerPrefix": "Bearer",
-          "valueFrom": "access_token"
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": " "
+        },
+        "dev.appstrate/auth": {
+          "required": true
         }
       }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/api": {
+      "auth_key": "primary"
     }
   }
 }

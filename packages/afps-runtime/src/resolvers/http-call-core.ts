@@ -10,7 +10,7 @@
  * to {@link makeApiCallTool}. The local + remote integration resolvers in
  * `integration-api-call.ts` reuse this module verbatim.
  *
- * Body streaming, redirect/cookie/SSRF hardening, `authorizedUris`
+ * Body streaming, redirect/cookie/SSRF hardening, `authorized_uris`
  * matching, and response serialisation all live here so every transport
  * shares one implementation.
  *
@@ -1580,8 +1580,8 @@ function enforceAuthorizedUris(meta: ApiCallMeta, target: string): void {
   if (patterns.length === 0) {
     throw new AuthorizedUrisError(
       "AUTHORIZED_URIS_EMPTY",
-      `Integration ${meta.name}: authorizedUris allowlist is empty; every target is forbidden. ` +
-        `Declare authorizedUris in the integration manifest or set allowAllUris: true.`,
+      `Integration ${meta.name}: authorized_uris allowlist is empty; every target is forbidden. ` +
+        `Declare authorized_uris in the integration manifest or set allow_all_uris: true.`,
       { integration: meta.name, target },
     );
   }
@@ -1590,7 +1590,7 @@ function enforceAuthorizedUris(meta: ApiCallMeta, target: string): void {
   }
   throw new AuthorizedUrisError(
     "AUTHORIZED_URIS_MISMATCH",
-    `Integration ${meta.name}: target ${target} is not in authorizedUris allowlist`,
+    `Integration ${meta.name}: target ${target} is not in authorized_uris allowlist`,
     { integration: meta.name, target, allowlist: patterns },
   );
 }
