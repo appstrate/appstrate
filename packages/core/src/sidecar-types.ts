@@ -162,6 +162,27 @@ export interface IntegrationSpawnSpec {
   integrationId: string;
   /** McpHost namespace — tool names are prefixed with `{namespace}__`. */
   namespace: string;
+  /**
+   * AFPS 2.0 source kind — peer discriminant for the sidecar's spawn-mode
+   * dispatch. Mirrors `manifest.source.kind` from the integration manifest
+   * and is the authoritative selector for the local/remote/api branches in
+   * `integrations-boot.ts`.
+   *
+   * Lives at the spawn-spec top level (not on `manifest.server.type`) to
+   * keep `manifest.server.type` aligned with the AFPS `mcpServerTypeEnum`
+   * (`node|python|binary|uv`) — the previous `manifest.server.type = "http"`
+   * sentinel collided with that enum and was an Appstrate-internal protocol
+   * field that never appears in a real manifest.
+   *
+   *   - `"local"`  → spawn a runner container/subprocess from a referenced
+   *                  mcp-server bundle.
+   *   - `"remote"` → open a Streamable HTTP MCP client against
+   *                  `manifest.server.url`; no bundle, no MITM.
+   *   - `"api"`    → serverless; the sidecar skips spawn and wires the
+   *                  generic `api_call` tool only (`manifest.server` is
+   *                  undefined in this case).
+   */
+  sourceKind: "local" | "remote" | "api";
   /** Validated `type: integration` manifest (server, auths). */
   manifest: {
     name: string;
@@ -171,9 +192,20 @@ export interface IntegrationSpawnSpec {
      * resolver omits it for serverless integrations (`source.kind: "api"`,
      * no `server`), which expose only the generic `api_call` tool. The
      * sidecar skips spawn entirely for such specs.
+     *
+     * NOTE: `server.type` here carries the AFPS `mcpServerTypeEnum` value
+     * (`node|python|binary|uv`) for local sources only. For remote sources
+     * (`sourceKind === "remote"`) it is omitted — the spawn-mode dispatch
+     * uses {@link IntegrationSpawnSpec.sourceKind}, NOT `server.type`.
      */
     server?: {
-      type: string;
+      /**
+       * Runner type, sourced from the referenced mcp-server's
+       * `server.type` (AFPS `mcpServerTypeEnum`: `node|python|binary|uv`)
+       * or the Appstrate `_meta` runtime override. Omitted for remote
+       * sources.
+       */
+      type?: string;
       /**
        * Path (relative to bundle root) of the spawned server's entry. AFPS
        * 2.0 §7.4 / MCPB calls this field `entry_point` — snake_case on the
@@ -187,15 +219,16 @@ export interface IntegrationSpawnSpec {
        * `source.kind: "local"` references (`source.server.name`). The sidecar
        * fetches THIS package's `.afps` bundle (the runnable server code) from
        * `GET /internal/mcp-server-bundle/:scope/:name`, NOT the integration's
-       * own bundle. Set for local sources; omitted for remote (`http`) and
-       * serverless (`api`) integrations.
+       * own bundle. Set for local sources; omitted for remote and serverless
+       * integrations.
        */
       serverPackageId?: string;
       /**
-       * Phase 7 — remote MCP endpoint URL. Required when `server.type` is
-       * `"http"`. The sidecar opens a Streamable HTTP MCP client against
-       * this URL instead of spawning a runner. Mutually exclusive with
-       * `entry_point` (enforced by `integrationManifestSchema`).
+       * Phase 7 — remote MCP endpoint URL. Required when
+       * {@link IntegrationSpawnSpec.sourceKind} is `"remote"`. The sidecar
+       * opens a Streamable HTTP MCP client against this URL instead of
+       * spawning a runner. Mutually exclusive with `entry_point` (enforced
+       * by `integrationManifestSchema`).
        */
       url?: string;
       /**
@@ -203,7 +236,7 @@ export interface IntegrationSpawnSpec {
        * manifest's `source.remote.transport` enum (`"streamable-http" |
        * "sse"`). Defaults to `"streamable-http"` on the sidecar side when
        * absent (back-compat for v2.0.0 manifests). Only meaningful when
-       * `server.type === "http"`.
+       * {@link IntegrationSpawnSpec.sourceKind} is `"remote"`.
        */
       transport?: "streamable-http" | "sse";
     };
@@ -283,11 +316,14 @@ export interface IntegrationSpawnSpec {
    */
   hiddenTools?: readonly string[];
   /**
-   * Niveau 2 Phase 3 — agent-declared MCP tool allowlist. The sidecar's
-   * `McpHost` filters `tools/list` to only expose these tools to the
-   * agent and rejects `tools/call` for any tool outside the set
-   * (returning a structured "tool_not_authorized" error without ever
-   * forwarding to the integration).
+   * Niveau 2 Phase 3 — agent-declared MCP tool allowlist. When
+   * non-undefined, restricts the set of tools the namespace advertises
+   * via `tools/list`. Tools not in the allowlist are silently omitted
+   * from `tools/list` and consequently unreachable via `tools/call`
+   * (the agent's MCP client never learns of them, so they cannot be
+   * named in a call; the sidecar's `McpHost` has no mapping for them
+   * either, so a forged call would fail as an unknown tool). An empty
+   * array disables the namespace entirely (no tools surfaced).
    *
    * Always an array (never undefined): the platform builds it from
    * `manifest.integrations[id].tools` and defaults to `[]` when the

@@ -59,10 +59,11 @@ export const libraryPaths = {
                     type: "object",
                     description:
                       "Packages grouped by type. Every group is always present (possibly empty).",
-                    required: ["agent", "skill", "integration"],
+                    required: ["agent", "skill", "mcp-server", "integration"],
                     properties: {
                       agent: { $ref: "#/components/schemas/LibraryPackageList" },
                       skill: { $ref: "#/components/schemas/LibraryPackageList" },
+                      "mcp-server": { $ref: "#/components/schemas/LibraryPackageList" },
                       integration: { $ref: "#/components/schemas/LibraryPackageList" },
                     },
                   },
@@ -86,6 +87,7 @@ export const libraryPaths = {
                     },
                   ],
                   skill: [],
+                  "mcp-server": [],
                   integration: [
                     {
                       id: "pkg_gmail",

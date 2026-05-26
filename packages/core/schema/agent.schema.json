@@ -302,6 +302,9 @@
               "type": "string"
             }
           },
+          "auth_key": {
+            "type": "string"
+          },
           "tools": {
             "type": "array",
             "items": {

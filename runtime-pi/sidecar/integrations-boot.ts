@@ -315,7 +315,7 @@ export async function connectRemoteHttpIntegration(
   const serverUrl = spec.manifest.server?.url;
   if (!serverUrl) {
     throw new Error(
-      `integration ${spec.integrationId} declares server.type="http" but no server.url`,
+      `integration ${spec.integrationId} declares sourceKind="remote" but no server.url`,
     );
   }
   // AFPS 2.0 §7.1 — pick the MCP client transport from the manifest.
@@ -337,6 +337,10 @@ export async function connectRemoteHttpIntegration(
     );
   }
 
+  // TODO(AFPS 2.0 migration): drop camelCase fallback after one release window.
+  // `fetchInitial` normalizes the wire payload (snake_case primary, camelCase
+  // fallback) via `normalizeIntegrationCredentialsWire`, so the consumer code
+  // below sees a stable typed shape during the dual-emit window.
   const initial = await fetchInitial(spec.integrationId, bundleFetchOpts);
 
   // Pick the auth whose header we'll inject. OAuth2 wins (refresh-aware);
@@ -353,7 +357,7 @@ export async function connectRemoteHttpIntegration(
   const pickedAuth = oauthAuth ?? fallbackAuth;
   if (!pickedAuth) {
     throw new Error(
-      `integration ${spec.integrationId} server.type="http" has no auth with a resolvable delivery.http plan`,
+      `integration ${spec.integrationId} (sourceKind="remote") has no auth with a resolvable delivery.http plan`,
     );
   }
   const authKey = pickedAuth.authKey;
@@ -897,7 +901,9 @@ export async function bootIntegrations(
 
       // Serverless integration (api_call-only, no MCP server) — the in-process
       // api_call server is its entire surface (registered as the primary).
-      if (!spec.manifest.server) {
+      // Dispatch on `sourceKind === "api"`; the resolver also leaves
+      // `manifest.server` undefined for this branch.
+      if (spec.sourceKind === "api" || !spec.manifest.server) {
         const apiCallToolCount = await attachApiCall();
         spawned.push({
           integrationId: spec.integrationId,
@@ -920,14 +926,14 @@ export async function bootIntegrations(
       const server = spec.manifest.server;
 
       // ─── Phase 7 — remote HTTP MCP path ───
-      // When the manifest declares `server.type: "http"` the integration
+      // When the spawn-spec declares `sourceKind: "remote"` the integration
       // is a managed remote MCP (e.g. Google's gmailmcp.googleapis.com).
       // No bundle to fetch, no runner to spawn, no MITM listener — the
       // sidecar opens a Streamable HTTP client directly and injects the
       // Bearer token per-request from the credentials source. Trade-off:
       // Phase 4 URL-envelope enforcement is N/A (we can't enforce per-tool
       // upstream URLs through a hosted MCP — the upstream decides).
-      if (server.type === "http") {
+      if (spec.sourceKind === "remote") {
         const { client, authKey } = await connectRemoteHttpIntegration(spec, bundleFetchOpts);
         // Register on the caller-owned teardown collector BEFORE host.register
         // so a register failure (namespace collision / suffix exhaustion,
@@ -1173,7 +1179,7 @@ export async function runConnectOnce(
   if (!server) {
     throw new Error("runConnectOnce: spec has no manifest.server to spawn");
   }
-  if (server.type === "http") {
+  if (spec.sourceKind === "remote") {
     throw new Error("runConnectOnce: remote http MCP integrations cannot run connect-login");
   }
 

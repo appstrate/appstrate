@@ -934,12 +934,20 @@ function ConnectionRow({
 
 function MetadataBlock({ manifest }: { manifest: IntegrationManifestView }) {
   const { t } = useTranslation("settings");
-  // AFPS 2.0: author moved under `_meta["dev.appstrate/package"].author`,
-  // repository is now a top-level string, and the old `server`/`compatibility`
-  // fields are gone — server type is expressed by the `source.kind` discriminant.
-  const pkgMeta = manifest._meta?.["dev.appstrate/package"] as { author?: unknown } | undefined;
-  const author = typeof pkgMeta?.author === "string" ? pkgMeta.author : "";
-  const repo = typeof manifest.repository === "string" ? manifest.repository : "";
+  const authorRaw = (manifest as { author?: unknown }).author;
+  const author =
+    typeof authorRaw === "string"
+      ? authorRaw
+      : authorRaw && typeof authorRaw === "object" && "name" in authorRaw
+        ? (((authorRaw as { name?: unknown }).name as string | undefined) ?? "")
+        : "";
+  const repoRaw = (manifest as { repository?: unknown }).repository;
+  const repo =
+    typeof repoRaw === "string"
+      ? repoRaw
+      : repoRaw && typeof repoRaw === "object" && "url" in repoRaw
+        ? (((repoRaw as { url?: unknown }).url as string | undefined) ?? "")
+        : "";
   const sourceKind = manifest.source?.kind ?? "api";
   const rows: Array<[string, React.ReactNode]> = [
     [t("integration.field.version"), <span className="font-mono">{manifest.version}</span>],

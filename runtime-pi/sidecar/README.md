@@ -155,7 +155,7 @@ Files larger than `MAX_REQUEST_BODY_SIZE` (default 10 MB) cannot fit in a single
 
 Critically, **the sidecar is not modified**: each chunk transits through the existing `{ns}__api_call` MCP tool. Credential injection, `authorizedUris` enforcement, and SSRF protection apply per chunk identically. The chunking state machine lives in [`runtime-pi/mcp/upload-adapters/`](../mcp/upload-adapters/) — one ~150 LoC file per protocol — and never sees credentials.
 
-An integration declares `apiCall.uploadProtocols: string[]` in its manifest to opt into `api_upload`. The tool is registered by the runtime only when ≥1 declared integration supports a known protocol; absent declarations, the tool isn't advertised.
+An integration declares `source.api.upload_protocols: string[]` in its manifest (AFPS 2.0 §7.1) to opt into `api_upload`. The tool is registered by the runtime only when ≥1 declared integration supports a known protocol; absent declarations, the tool isn't advertised.
 
 The resolver streams the file off disk via `Bun.file().stream()`, slices it into `partSizeBytes`-sized chunks, computes a streaming SHA-256 over the bytes committed to the wire, and surfaces it in the result so post-upload byte-equivalence is verifiable. End-to-end memory ceiling is one chunk in the runtime + one chunk in the sidecar — bounded by `MAX_REQUEST_BODY_SIZE` regardless of file size.
 
@@ -166,4 +166,4 @@ Cancellation honours `ctx.signal` between chunks; on abort, the resolver issues 
 - The resolver-side contract — file resolution, `responseMode` logic, `byteLength` thresholds — is documented next to the code in [`packages/afps-runtime/src/resolvers/http-call-core.ts`](../../packages/afps-runtime/src/resolvers/http-call-core.ts).
 - The `api_upload` adapter contracts, chunker semantics, and per-protocol error surfaces are documented next to the code in [`runtime-pi/mcp/api-upload-resolver.ts`](../mcp/api-upload-resolver.ts) and [`runtime-pi/mcp/upload-adapters/`](../mcp/upload-adapters/).
 - Sidecar lifecycle, network isolation, parallel container startup, and credential reporting paths are documented in the platform-level [`CLAUDE.md`](../../CLAUDE.md) under "Sidecar Protocol".
-- Integration auth modes (`oauth2` / `api_key` / `basic` / `custom`) and the `credentialHeaderName` / `credentialHeaderPrefix` injection contract live in `@appstrate/connect`.
+- Integration auth modes (`oauth2` / `api_key` / `basic` / `mtls` / `custom` — AFPS 2.0.1 §7.2) and the `auths.{key}.delivery.{http | env | files}` injection contract live in `@appstrate/connect`.

@@ -35,7 +35,10 @@ import {
   forceRefreshOAuthModelProviderToken,
   resolveOAuthTokenForSidecar,
 } from "../services/model-providers/token-resolver.ts";
-import { resolveLiveIntegrationCredentials } from "../services/integration-credentials-resolver.ts";
+import {
+  resolveLiveIntegrationCredentials,
+  serializeIntegrationCredentialsWire,
+} from "../services/integration-credentials-resolver.ts";
 import { fetchIntegrationManifest } from "../services/integration-service.ts";
 import { getLocalServerRef } from "../services/integration-manifest-helpers.ts";
 
@@ -334,7 +337,7 @@ export function createInternalRouter() {
       authCount: result.auths.length,
       deliveryPlanCount: Object.keys(result.deliveryPlans).length,
     });
-    return c.json(result);
+    return c.json(serializeIntegrationCredentialsWire(result));
   });
 
   // POST /internal/integration-credentials/:scope/:name/refresh
@@ -363,7 +366,7 @@ export function createInternalRouter() {
       packageId,
       authCount: result.auths.length,
     });
-    return c.json(result);
+    return c.json(serializeIntegrationCredentialsWire(result));
   });
 
   // GET /internal/mcp-server-bundle/:scope/:name

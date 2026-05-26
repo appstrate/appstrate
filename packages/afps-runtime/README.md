@@ -120,7 +120,7 @@ if (sig) {
 }
 
 // Render the prompt — memories / state / history travel on the
-// ExecutionContext; no provider bridge is involved.
+// ExecutionContext; no integration bridge is involved.
 const prompt = await renderPrompt({
   template: bundle.prompt,
   context: {

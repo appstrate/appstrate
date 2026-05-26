@@ -156,6 +156,10 @@ export async function buildConnectLoginSpec(
     // McpHost.normaliseNamespace slugs/caps this — the package id is the same
     // namespace the spawn resolver uses for the agent-run path.
     namespace: execution.integrationPackageId,
+    // connect-run only spawns local mcp-server bundles (the connect-login
+    // tool can't run against a remote managed MCP — `runConnectOnce`
+    // hard-rejects `sourceKind === "remote"`).
+    sourceKind: "local",
     manifest: {
       name: execution.manifest.name,
       version: execution.manifest.version,

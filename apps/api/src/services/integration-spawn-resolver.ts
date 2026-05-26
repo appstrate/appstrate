@@ -191,7 +191,8 @@ async function resolveOne(
 
   // ── Resolve the sidecar server spec from the AFPS 2.0 `source`
   // discriminant (replaces the 1.x inline `manifest.server`). ──
-  //   - remote → Streamable HTTP MCP (`{ type: "http", url }`).
+  //   - remote → Streamable HTTP MCP (`{ url, transport }`; spawn-mode is
+  //              selected by `spec.sourceKind`, not `server.type`).
   //   - local  → resolve the referenced mcp-server package's MCPB manifest
   //              and emit `{ type, entry_point }` from `server.{type, entry_point}`.
   //   - api    → serverless (no `server` in the spec; sidecar skips spawn).
@@ -204,7 +205,7 @@ async function resolveOne(
   const isRemoteHttp = sourceKind === "remote";
   let serverSpec:
     | {
-        type: string;
+        type?: string;
         entry_point?: string;
         url?: string;
         transport?: "streamable-http" | "sse";
@@ -224,9 +225,13 @@ async function resolveOne(
     // client transport. Default to `"streamable-http"` only as a defensive
     // back-compat fallback for any manifest that somehow shipped without
     // the field.
+    //
+    // `server.type` is intentionally omitted — the sidecar dispatches on
+    // `spec.sourceKind === "remote"`. Carrying `"http"` here would collide
+    // with the AFPS `mcpServerTypeEnum` (`node|python|binary|uv`).
     const transport: "streamable-http" | "sse" =
       remote.transport === "sse" ? "sse" : "streamable-http";
-    serverSpec = { type: "http", url: remote.url, transport };
+    serverSpec = { url: remote.url, transport };
   } else if (sourceKind === "local") {
     const ref = getLocalServerRef(manifest);
     if (!ref) {
@@ -303,22 +308,31 @@ async function resolveOne(
     ? baseAllowlist.filter((t) => t !== deliveries.connectLogin!.toolName)
     : baseAllowlist;
 
+  // Peer discriminant for the sidecar's spawn-mode dispatch. Mirrors
+  // `source.kind`; defaults to `"api"` when the manifest didn't declare a
+  // recognised source (serverless fall-back — matches the legacy behaviour
+  // of leaving `server` undefined and only wiring `api_call`).
+  const specSourceKind: "local" | "remote" | "api" = sourceKind ?? "api";
+
   return {
     integrationId,
     namespace,
+    sourceKind: specSourceKind,
     manifest: {
       name: manifest.name,
       version: manifest.version,
-      // Serverless integrations (`source.kind: "api"`) omit `server` in the
+      // Serverless integrations (`sourceKind: "api"`) omit `server` in the
       // spec — the sidecar's serverless path (no spec.manifest.server) skips
       // spawn and only wires the generic api_call tool. Local runners
-      // (node|python|binary|uv, resolved from the referenced mcp-server) and
-      // remote MCP (`source.kind: "remote"` → `{ type: "http", url }`)
-      // propagate normally.
+      // (node|python|binary|uv, resolved from the referenced mcp-server) emit
+      // `{ type, entry_point, serverPackageId }`. Remote MCP
+      // (`sourceKind: "remote"`) emits `{ url, transport }` only — `server.type`
+      // is intentionally absent because the spawn-mode discriminant lives on
+      // `spec.sourceKind`, not in the AFPS `mcpServerTypeEnum` slot.
       ...(serverSpec
         ? {
             server: {
-              type: serverSpec.type,
+              ...(serverSpec.type ? { type: serverSpec.type } : {}),
               ...(serverSpec.entry_point ? { entry_point: serverSpec.entry_point } : {}),
               // AFPS 2.0 — the referenced mcp-server package id, so the sidecar
               // fetches the runnable server bundle from
@@ -331,7 +345,7 @@ async function resolveOne(
               // `entry_point` (enforced by `integrationManifestSchema`).
               ...(serverSpec.url ? { url: serverSpec.url } : {}),
               // AFPS 2.0 §7.1 — `streamable-http` (default) | `sse`. Only
-              // emitted on remote `http` sources.
+              // emitted on remote sources.
               ...(serverSpec.transport ? { transport: serverSpec.transport } : {}),
             },
           }

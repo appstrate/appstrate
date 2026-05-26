@@ -511,6 +511,90 @@ export function extractIdentity(
   return { accountId, identityClaims: claims };
 }
 
+/**
+ * AFPS 2.0 §7.4 — enforce `auth.required_identity_claims`.
+ *
+ * Per spec §7.4 line 931, `required_identity_claims` enumerates **OIDC
+ * source-side claim names** that MUST be present on the resolved identity
+ * (e.g. `["sub"]`). The resolved `identityClaims` bag passed in here is keyed
+ * by **AFPS internal keys** (the keys of `auth.identity_claims`), because
+ * `extractIdentity` walks `identity_claims: { <afps_key>: "<source_path>" }`
+ * and writes the extracted value under `<afps_key>`. The two keyspaces differ,
+ * so we resolve OIDC → AFPS via reverse-lookup on the mapping before checking
+ * the bag.
+ *
+ * Resolution rules:
+ *   1. If `auth.identity_claims` declares a mapping whose value (after
+ *      stripping the `$.` JSONPath prefix) equals the required OIDC claim
+ *      name, the claim is satisfied iff the bag carries a non-empty value
+ *      under any AFPS key that maps to it. Multiple AFPS keys MAY reference
+ *      the same OIDC claim — any one of them satisfying is enough.
+ *   2. If no mapping references the required OIDC claim (or
+ *      `identity_claims` is undefined entirely — typically a login strategy
+ *      promoting engine-output names directly), fall back to a direct lookup
+ *      on the bag by the OIDC claim name. This preserves the legacy
+ *      semantics for strategies whose claim bag is already keyed by the
+ *      source-side name (login engine `identity_outputs` are merged into
+ *      the bag verbatim — see `login-strategy.ts`).
+ *
+ * Throws `invalidRequest` listing every missing claim in a single error so
+ * the connect UX surfaces the full gap (not just the first one).
+ */
+export function assertRequiredIdentityClaims(
+  manifest: IntegrationManifest,
+  authKey: string,
+  identityClaims: Record<string, unknown>,
+): void {
+  const auth = lookupAuth(manifest, authKey) as AfpsManifestAuth;
+  const required = auth.required_identity_claims;
+  if (!Array.isArray(required) || required.length === 0) return;
+
+  const mapping = auth.identity_claims ?? {};
+  // Build a reverse index OIDC-claim-name → AFPS keys that reference it.
+  // The mapping value is either a bare claim name (`"sub"`) or a JSONPath
+  // (`"$.sub"`, `"$.user.email"`). For the OIDC keyspace check we only
+  // care about leaf single-segment names — that's the canonical form of
+  // an OIDC claim. A deeper path like `"$.user.email"` is by definition
+  // not an OIDC claim, so we don't index it (the spec example in §7.4
+  // line 931 shows OIDC standard claims only).
+  const oidcToAfpsKeys = new Map<string, string[]>();
+  for (const [afpsKey, accessor] of Object.entries(mapping)) {
+    const path = accessor.startsWith("$.") ? accessor.slice(2) : accessor;
+    if (path.length === 0 || path.includes(".")) continue;
+    const list = oidcToAfpsKeys.get(path);
+    if (list) list.push(afpsKey);
+    else oidcToAfpsKeys.set(path, [afpsKey]);
+  }
+
+  const isPresent = (value: unknown): boolean =>
+    value !== undefined && value !== null && value !== "";
+
+  const missing: string[] = [];
+  for (const oidcClaim of required) {
+    const afpsKeys = oidcToAfpsKeys.get(oidcClaim);
+    if (afpsKeys && afpsKeys.length > 0) {
+      // Mapped: any AFPS key referencing this OIDC claim being non-empty
+      // satisfies the requirement (multi-mapping → first-non-empty wins).
+      if (afpsKeys.some((k) => isPresent(identityClaims[k]))) continue;
+      missing.push(oidcClaim);
+      continue;
+    }
+    // Unmapped: fall back to a direct hit on the bag. Covers (a) strategies
+    // that promote source-keyed claims into the bag (login engine), and (b)
+    // manifests that omit `identity_claims` entirely yet still require a
+    // standard claim be present.
+    if (isPresent(identityClaims[oidcClaim])) continue;
+    missing.push(oidcClaim);
+  }
+
+  if (missing.length === 0) return;
+  const list = missing.map((n) => `'${n}'`).join(", ");
+  const plural = missing.length === 1 ? "claim" : "claims";
+  throw invalidRequest(
+    `Integration auth requires identity ${plural} ${list} but the IdP did not return ${missing.length === 1 ? "it" : "them"}.`,
+  );
+}
+
 function readPath(source: Record<string, unknown>, accessor: string): unknown {
   const path = accessor.startsWith("$.") ? accessor.slice(2) : accessor;
   const parts = path.split(".");

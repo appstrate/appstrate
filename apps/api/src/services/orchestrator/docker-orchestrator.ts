@@ -182,7 +182,7 @@ export class DockerOrchestrator implements ContainerOrchestrator {
     //
     // When the run declares AFPS integrations, the sidecar needs to spawn
     // per-integration runner containers (`appstrate-mcp-runner-{node,python,
-    // binary}`). It shells out to the Docker daemon via the mounted socket
+    // binary,bun,uv}`). It shells out to the Docker daemon via the mounted socket
     // + `docker-cli` baked into the sidecar image. Running as root is the
     // simplest portable way to access the socket (group GIDs vary across
     // hosts: Docker Desktop on macOS exposes a 0-owned socket, Linux a

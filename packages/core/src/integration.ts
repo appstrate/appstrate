@@ -11,8 +11,13 @@
  * cross-field MUST rules that AFPS leaves to the consumer (scope-catalog
  * subset, per-tool auth-key disambiguation, connect.login output gating).
  *
- * Field vocabulary is snake_case (§Appendix D). Appstrate is AFPS 2.0 only —
- * there is no 1.x camelCase reading path.
+ * Field vocabulary is snake_case (§Appendix D). The integration manifest
+ * itself is read as AFPS 2.0 canonical only — there is no 1.x camelCase
+ * reading path on this schema. (Note: a one-release-window back-compat for
+ * pre-2.0 camelCase aliases on the *agent* manifest still exists in
+ * `dependencies.ts` / `form.ts` for stored manifests written before the 2.0
+ * migration; see {@link import("./back-compat.ts").AFPS_1X_READ_FALLBACK_REMOVAL}
+ * for the removal milestone. Writes everywhere are AFPS 2.0 canonical.)
  *
  * SCOPE NOTE — runtime vs manifest:
  *   The MANIFEST schema below is snake_case AFPS 2.0. The PURE RUNTIME
@@ -424,7 +429,7 @@ export function resolveIntegrationToolCatalog(
  * has no per-source auth pointer: an `api`-source integration draws from its
  * (typically single) declared auth. When the integration declares exactly one
  * auth we return it; when it declares several we return the first key
- * (callers needing disambiguation use `tools.{name}.required_auth_key`). The
+ * (callers needing disambiguation use `tools_policy.{name}.required_auth_key`). The
  * export name is kept stable for consumers; "api call config" now means "the
  * api-source credential surface".
  */

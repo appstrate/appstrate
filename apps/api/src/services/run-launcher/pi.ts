@@ -84,7 +84,7 @@ export async function runPlatformContainer(
   const { runId, context, plan, sinkCredentials, signal } = input;
   const orch = input.orchestrator ?? getOrchestrator();
 
-  const prompt = buildPlatformSystemPrompt(context, plan);
+  const prompt = await buildPlatformSystemPrompt(context, plan);
   const { llmConfig } = plan;
   const modelId = llmConfig.modelId;
 

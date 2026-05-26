@@ -84,7 +84,7 @@
       }
     }
   },
-  "tools": {
+  "tools_policy": {
     "search_threads": {
       "required_scopes": ["https://www.googleapis.com/auth/gmail.readonly"]
     },

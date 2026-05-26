@@ -199,7 +199,7 @@ export function createIntegrationsRouter() {
       return {
         ...s,
         active: row !== undefined && row.enabled,
-        blockUserConnections: row?.blockUserConnections ?? false,
+        block_user_connections: row?.blockUserConnections ?? false,
       };
     });
     return c.json(listResponse(enriched));

@@ -17,6 +17,7 @@
 import { runLogin, type LoginConfig } from "@appstrate/connect/connect";
 import { invalidRequest } from "../../lib/errors.ts";
 import {
+  assertRequiredIdentityClaims,
   extractIdentity,
   readIntegrationAuth,
   saveIntegrationConnection,
@@ -65,6 +66,12 @@ export class LoginStrategy implements IntegrationConnectStrategy {
     // run through the same extractTokenIdentity mapping the other strategies use.
     const identitySource = { ...outputs, ...identityClaims };
     const identity = extractIdentity(manifest, ctx.authKey, identitySource);
+    // AFPS 2.0 §7.4 — refuse the connection if any `required_identity_claims`
+    // came back missing/empty. The combined claim set is the engine-promoted
+    // `identityClaims` ⊕ the manifest-mapped `identity.identityClaims` — same
+    // bag we persist below, so the gate matches what would land on the row.
+    const combinedClaims = { ...identityClaims, ...identity.identityClaims };
+    assertRequiredIdentityClaims(manifest, ctx.authKey, combinedClaims);
 
     return saveIntegrationConnection(ctx.scope, {
       packageId: ctx.integrationPackageId,

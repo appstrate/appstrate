@@ -42,7 +42,7 @@
           "in": "header",
           "name": "Authorization",
           "prefix": "Basic",
-          "value": "{{consumer_key}}:{{consumer_secret}}",
+          "value": "{$credential.consumer_key}:{$credential.consumer_secret}",
           "encoding": "base64"
         }
       },

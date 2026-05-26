@@ -84,6 +84,7 @@ export {
   renderPlatformPrompt,
   type PlatformPromptOptions,
   type PlatformPromptTool,
+  type PlatformPromptIntegration,
   type PlatformPromptSchema,
 } from "./platform-prompt.ts";
 export {

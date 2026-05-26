@@ -73,7 +73,8 @@
     "./platform-types": "./src/platform-types.ts",
     "./sidecar-types": "./src/sidecar-types.ts",
     "./pairing-token": "./src/pairing-token.ts",
-    "./jwt": "./src/jwt.ts"
+    "./jwt": "./src/jwt.ts",
+    "./back-compat": "./src/back-compat.ts"
   },
   "dependencies": {
     "@afps-spec/schema": "^2.0.3",

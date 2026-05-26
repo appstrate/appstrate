@@ -1,6 +1,9 @@
 # ADR-014 — `provider_upload`: chunked resumable uploads with credential isolation preserved
 
-- **Status:** Accepted
+> [!WARNING]
+> **Superseded by ADR-015 (2026-05-26)** — describes the retired `provider_call` / `provider_upload` surface from AFPS 1.x. The current AFPS 2.0 sidecar surface uses per-integration namespaced tools (`{ns}__api_call`, `{ns}__api_upload`). The chunked-orchestration design described here survives unchanged — only the dispatcher tool name and the gating manifest field (`definition.uploadProtocols` → `source.api.upload_protocols`) changed. Kept for historical record. See [ADR-015](./ADR-015-afps-2.0-sidecar-mcp-surface.md).
+
+- **Status:** Accepted (superseded by ADR-015)
 - **Date:** 2026-05-08
 - **Author:** Pierre Cabriere (driven by issue #283)
 - **Supersedes:** —

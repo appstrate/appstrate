@@ -95,7 +95,7 @@ LABEL org.opencontainers.image.title="Appstrate Sidecar" \
 #   - libstdc++, libgcc  glibc-like symbols the Bun-compiled binary links against
 #   - ca-certificates    TLS trust store for outbound provider calls
 #   - docker-cli         used to spawn per-integration runner containers
-#                        (`appstrate-mcp-runner-{node,python,binary}`) when
+#                        (`appstrate-mcp-runner-{node,python,binary,bun,uv}`) when
 #                        a manifest declares `server.type: <runtime>`. The
 #                        sidecar shells out to `docker run -i ...` and pipes
 #                        stdio through to the runner; the runner image carries

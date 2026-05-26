@@ -19,7 +19,12 @@
 // ─── JSON Schema Types (from @types/json-schema, draft-07 — compatible with 2020-12) ─
 
 import type { JSONSchema7, JSONSchema7Type, JSONSchema7TypeName } from "json-schema";
+import { AFPS_1X_READ_FALLBACK_REMOVAL } from "./back-compat.ts";
 export type { JSONSchema7, JSONSchema7Type, JSONSchema7TypeName };
+
+// See back-compat.ts — referencing the constant so removal is a one-line
+// tsc error away when the deprecation window closes.
+void AFPS_1X_READ_FALLBACK_REMOVAL;
 
 /** A JSON Schema object with typed properties — the root of input/config/output schemas. */
 export interface JSONSchemaObject {
@@ -172,8 +177,9 @@ export function mapAfpsToRjsf(rawWrapper: SchemaWrapper): {
 } {
   // AFPS 1.x compat: legacy camelCase wrappers are still on disk for
   // manifests saved before the 2.0 migration. Read both shapes (canonical
-  // snake_case wins), always write canonical snake_case. Drop once a backfill
-  // re-saves every persisted manifest.
+  // snake_case wins), always write canonical snake_case. Scheduled for
+  // removal in AFPS_1X_READ_FALLBACK_REMOVAL — see back-compat.ts for the
+  // one-time DB backfill query that MUST run before this fallback is deleted.
   const wrapper = rawWrapper as SchemaWrapper & {
     fileConstraints?: SchemaWrapper["file_constraints"];
     uiHints?: SchemaWrapper["ui_hints"];
@@ -201,7 +207,8 @@ export function mapAfpsToRjsf(rawWrapper: SchemaWrapper): {
     const hint = uiHints?.[key];
     const rawConstraint = fileConstraints?.[key];
     // Same legacy compat as the wrapper: a constraint object written by the
-    // pre-2.0 editor carries `maxSize` instead of `max_size`.
+    // pre-2.0 editor carries `maxSize` instead of `max_size`. Removal tracked
+    // by AFPS_1X_READ_FALLBACK_REMOVAL (see back-compat.ts).
     const constraint = rawConstraint as (FileConstraint & { maxSize?: number }) | undefined;
     const constraintMaxSize = constraint?.max_size ?? constraint?.maxSize;
     const items = getItems(prop);

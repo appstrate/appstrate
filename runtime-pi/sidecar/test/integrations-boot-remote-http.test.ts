@@ -20,7 +20,8 @@ function spec(): IntegrationSpawnSpec {
   return {
     integrationId: "@vendor/remote",
     namespace: "remote",
-    manifest: { name: "remote", version: "1.0.0", server: { type: "http", url: SERVER_URL } },
+    sourceKind: "remote",
+    manifest: { name: "remote", version: "1.0.0", server: { url: SERVER_URL } },
     toolAllowlist: [],
   } as unknown as IntegrationSpawnSpec;
 }
@@ -164,7 +165,8 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
     const noUrl = {
       integrationId: "@vendor/remote",
       namespace: "remote",
-      manifest: { name: "remote", version: "1.0.0", server: { type: "http" } },
+      sourceKind: "remote",
+      manifest: { name: "remote", version: "1.0.0", server: {} },
       toolAllowlist: [],
     } as unknown as IntegrationSpawnSpec;
     const initial = wire([{ authKey: "oauth", authType: "oauth2" }], {

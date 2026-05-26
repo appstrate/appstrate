@@ -44,15 +44,10 @@ const RUNNER_IMAGE_BY_TYPE: Record<string, string> = {
   bun: "appstrate-mcp-runner-bun:latest",
   python: "appstrate-mcp-runner-python:latest",
   // MCPB 0.4 / AFPS 2.0.2 §3.4 — `uv` runs Python through Astral's `uv`
-  // resolver. We pragmatically route `uv` through the python runner image
-  // for now: `uv` is a Python launcher, and the python image already
-  // carries `python3` on PATH. The container entrypoint is the bundle
-  // path verbatim; if a real `uv run` invocation is needed (lockfile-driven
-  // dep install on cold start) the bundle's entry_point can shebang-invoke
-  // `uv run` itself. A dedicated `appstrate-mcp-runner-uv` image is the
-  // longer-term landing — tracked as TODO; the routing here lets `uv`
-  // manifests boot without an immediate image build.
-  uv: "appstrate-mcp-runner-python:latest",
+  // resolver. Dedicated image built on `ghcr.io/astral-sh/uv:python3.12-alpine`
+  // so `uv run` is on PATH and can materialise per-bundle venvs from
+  // pyproject.toml / requirements.txt / PEP-723 inline metadata.
+  uv: "appstrate-mcp-runner-uv:latest",
   binary: "appstrate-mcp-runner-binary:latest",
 };
 
@@ -109,6 +104,11 @@ function planContainer(spec: IntegrationSpawnSpec, bundleRoot: string): Containe
     throw new Error("integration-runtime-adapter-docker: spec has no server to spawn");
   }
   const t = server.type;
+  if (!t) {
+    throw new Error(
+      "integration-runtime-adapter-docker: server.type required for local-source spawn",
+    );
+  }
   const image = RUNNER_IMAGE_BY_TYPE[t];
   if (!image) {
     throw new Error(

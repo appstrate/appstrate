@@ -252,6 +252,18 @@ export const schemas = {
         type: "object",
         properties: {
           skills: { type: "array", items: { $ref: "#/components/schemas/AgentSkillRef" } },
+          mcp_servers: {
+            type: "array",
+            items: {
+              type: "object",
+              required: ["id", "version"],
+              properties: {
+                id: { type: "string" },
+                version: { type: "string" },
+              },
+            },
+            description: "AFPS 2.0 §4.1 mcp_servers dependency group",
+          },
           integrations: {
             type: "array",
             items: {
@@ -746,19 +758,38 @@ export const schemas = {
   IntegrationCredentialsResponse: {
     type: "object",
     description:
-      "Live credentials + per-auth HTTP delivery plans + per-auth expiries for an installed integration. Returned by both `GET /internal/integration-credentials/{scope}/{name}` and `POST .../refresh` (identical shape). Feeds the sidecar's MITM `MitmCredentialSource.current()` + `.deliveryPlans()`.",
-    required: ["auths", "deliveryPlans", "expiresAtEpochMs"],
+      "Live credentials + per-auth HTTP delivery plans + per-auth expiries for an installed integration. Returned by both `GET /internal/integration-credentials/{scope}/{name}` and `POST .../refresh` (identical shape). Feeds the sidecar's MITM `MitmCredentialSource.current()` + `.deliveryPlans()`. AFPS 2.0 wire keys are snake_case; the camelCase aliases (`deliveryPlans`, `expiresAtEpochMs`, `authKey`, etc.) are dual-emitted for one release window for back-compat.",
+    required: ["auths", "delivery_plans", "expires_at_epoch_ms"],
     properties: {
       auths: {
         type: "array",
         items: {
           type: "object",
-          required: ["authKey", "authType", "fields", "authorizedUris"],
+          required: ["auth_key", "auth_type", "fields", "authorized_uris"],
           properties: {
-            authKey: { type: "string" },
-            authType: { type: "string" },
+            auth_key: { type: "string" },
+            authKey: {
+              type: "string",
+              deprecated: true,
+              description:
+                "Deprecated alias — use `auth_key` instead. Will be removed after the AFPS 2.0 migration window.",
+            },
+            auth_type: { type: "string" },
+            authType: {
+              type: "string",
+              deprecated: true,
+              description:
+                "Deprecated alias — use `auth_type` instead. Will be removed after the AFPS 2.0 migration window.",
+            },
             fields: { type: "object", additionalProperties: { type: "string" } },
-            authorizedUris: { type: "array", items: { type: "string" } },
+            authorized_uris: { type: "array", items: { type: "string" } },
+            authorizedUris: {
+              type: "array",
+              items: { type: "string" },
+              deprecated: true,
+              description:
+                "Deprecated alias — use `authorized_uris` instead. Will be removed after the AFPS 2.0 migration window.",
+            },
             resource: {
               type: "string",
               description:
@@ -771,15 +802,68 @@ export const schemas = {
                 "Deprecated alias for `resource`. AFPS 2.0 §7.3 (RFC 8707) renamed the wire field; `audience` is kept for one release window for back-compat.",
             },
             expiresAt: { type: "string", format: "date-time" },
-            scopesGranted: { type: "array", items: { type: "string" } },
+            scopes_granted: { type: "array", items: { type: "string" } },
+            scopesGranted: {
+              type: "array",
+              items: { type: "string" },
+              deprecated: true,
+              description:
+                "Deprecated alias — use `scopes_granted` instead. Will be removed after the AFPS 2.0 migration window.",
+            },
+            identity_claims: {
+              type: "object",
+              additionalProperties: { type: "string" },
+              description:
+                "Identity claims captured at connect time (e.g. OIDC `sub`, `email`). AFPS 2.0 §7 name.",
+            },
+            identityClaims: {
+              type: "object",
+              additionalProperties: { type: "string" },
+              deprecated: true,
+              description:
+                "Deprecated alias — use `identity_claims` instead. Will be removed after the AFPS 2.0 migration window.",
+            },
+          },
+        },
+      },
+      delivery_plans: {
+        type: "object",
+        additionalProperties: {
+          type: "object",
+          required: ["header_name", "header_prefix", "value", "allow_server_override"],
+          properties: {
+            header_name: { type: "string" },
+            headerName: {
+              type: "string",
+              deprecated: true,
+              description:
+                "Deprecated alias — use `header_name` instead. Will be removed after the AFPS 2.0 migration window.",
+            },
+            header_prefix: { type: "string" },
+            headerPrefix: {
+              type: "string",
+              deprecated: true,
+              description:
+                "Deprecated alias — use `header_prefix` instead. Will be removed after the AFPS 2.0 migration window.",
+            },
+            value: { type: "string" },
+            allow_server_override: { type: "boolean" },
+            allowServerOverride: {
+              type: "boolean",
+              deprecated: true,
+              description:
+                "Deprecated alias — use `allow_server_override` instead. Will be removed after the AFPS 2.0 migration window.",
+            },
           },
         },
       },
       deliveryPlans: {
         type: "object",
+        deprecated: true,
+        description:
+          "Deprecated alias — use `delivery_plans` instead. Will be removed after the AFPS 2.0 migration window.",
         additionalProperties: {
           type: "object",
-          required: ["headerName", "headerPrefix", "value", "allowServerOverride"],
           properties: {
             headerName: { type: "string" },
             headerPrefix: { type: "string" },
@@ -788,8 +872,15 @@ export const schemas = {
           },
         },
       },
+      expires_at_epoch_ms: {
+        type: "object",
+        additionalProperties: { type: ["integer", "null"] },
+      },
       expiresAtEpochMs: {
         type: "object",
+        deprecated: true,
+        description:
+          "Deprecated alias — use `expires_at_epoch_ms` instead. Will be removed after the AFPS 2.0 migration window.",
         additionalProperties: { type: ["integer", "null"] },
       },
     },

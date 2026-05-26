@@ -1,6 +1,9 @@
 # ADR-013 — Letta-style `pin` + `note` tool surface
 
-**Status**: Accepted
+> [!WARNING]
+> **Partial drift — see ADR-015 (2026-05-26)** — the `pin` / `note` agent vocabulary and storage model remain accurate, but the migration mentions in this ADR (e.g. "AFPS bundles that imported `@appstrate/add-memory` / `@appstrate/set-checkpoint` system packages need to update `dependencies.tools[]` to `@appstrate/note` / `@appstrate/pin`") are obsolete: with AFPS 2.0, `note`, `pin`, `log`, `report`, and `output` are no longer AFPS packages at all — they are built-in in-process runtime tools registered by `prepareBundleForPi`, opt-in per agent via the manifest's top-level `runtime_tools: string[]` field. There is no `dependencies.tools[]` entry to update. See [ADR-015](./ADR-015-afps-2.0-sidecar-mcp-surface.md).
+
+**Status**: Accepted (migration-mention drift noted above)
 **Date**: 2026-04-25
 **Supersedes**: tool-naming aspects of ADR-012
 

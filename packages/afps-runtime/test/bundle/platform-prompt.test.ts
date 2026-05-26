@@ -79,6 +79,56 @@ describe("renderPlatformPrompt", () => {
     expect(out).toContain("**x-skill**");
   });
 
+  it("omits the API Documentation subsection when an integration has no INTEGRATION.md", () => {
+    const out = renderPlatformPrompt({
+      template: "T",
+      context: ctx(),
+      integrations: [
+        {
+          id: "@org/github-mcp",
+          description: "GitHub integration",
+        },
+      ],
+    });
+    expect(out).toContain("## Integration: @org/github-mcp");
+    expect(out).toContain("GitHub integration");
+    expect(out).not.toContain("### API Documentation");
+  });
+
+  it("inlines INTEGRATION.md content under an API Documentation subsection when present", () => {
+    const out = renderPlatformPrompt({
+      template: "T",
+      context: ctx(),
+      integrations: [
+        {
+          id: "@org/github-mcp",
+          description: "GitHub integration",
+          doc: "## GitHub API\n\nCall `list_issues` to fetch issues.",
+        },
+      ],
+    });
+    expect(out).toContain("## Integration: @org/github-mcp");
+    expect(out).toContain("### API Documentation");
+    expect(out).toContain("## GitHub API");
+    expect(out).toContain("Call `list_issues` to fetch issues.");
+  });
+
+  it("treats whitespace-only INTEGRATION.md as absent (no API Documentation subsection)", () => {
+    const out = renderPlatformPrompt({
+      template: "T",
+      context: ctx(),
+      integrations: [{ id: "@org/github-mcp", doc: "   \n\n  " }],
+    });
+    expect(out).toContain("## Integration: @org/github-mcp");
+    expect(out).not.toContain("### API Documentation");
+  });
+
+  it("omits every integration section when none are passed in", () => {
+    const out = renderPlatformPrompt({ template: "T", context: ctx() });
+    expect(out).not.toContain("## Integration:");
+    expect(out).not.toContain("### API Documentation");
+  });
+
   it("never emits a Connected Providers section or provider_call instructions", () => {
     // Outbound API access is surfaced via integration MCP tools
     // (`{ns}__api_call`), self-documented through MCP tools/list — never

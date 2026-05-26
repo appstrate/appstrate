@@ -59,6 +59,25 @@ export interface PlatformPromptTool {
   description?: string;
 }
 
+/**
+ * Per-integration prompt entry. The integration is identified by its
+ * package id; the optional human-readable description comes from the
+ * integration manifest, and `doc` carries the raw `INTEGRATION.md`
+ * content (AFPS 2.0 §3.5) — when present, the runtime SHOULD surface it
+ * to the agent. We inline it directly into the platform prompt so the
+ * LLM can read it without an extra workspace lookup.
+ */
+export interface PlatformPromptIntegration {
+  id: string;
+  description?: string;
+  /**
+   * Raw `INTEGRATION.md` content (markdown). When non-empty, renders a
+   * `### API Documentation` subsection under the integration's section.
+   * Caller-side truncation is applied before passing this in.
+   */
+  doc?: string;
+}
+
 export interface PlatformPromptSchema {
   properties?: Record<string, unknown>;
   required?: readonly string[];
@@ -83,6 +102,16 @@ export interface PlatformPromptOptions {
    * MCP `tools/list` and are deliberately NOT listed in the prompt).
    */
   availableSkills?: ReadonlyArray<PlatformPromptTool>;
+
+  /**
+   * Integrations resolved for this run — one entry per declared,
+   * installed, and connected integration. Each entry surfaces the
+   * integration's description (from its manifest) and, when present,
+   * its `INTEGRATION.md` content inlined into the prompt so the agent
+   * can read the integration's API documentation alongside the
+   * `{ns}__*` tools advertised via MCP `tools/list`. AFPS 2.0 §3.5.
+   */
+  integrations?: ReadonlyArray<PlatformPromptIntegration>;
 
   /** Input schema — drives the `## User Input` section. */
   inputSchema?: PlatformPromptSchema;
@@ -205,6 +234,27 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
       sections.push(`- **${skill.name || skill.id}**${desc}`);
     }
     sections.push("");
+  }
+
+  // --- Integrations ---
+  // One section per integration resolved for this run. The integration's
+  // tools are advertised via MCP `tools/list` under the `{ns}__*` prefix —
+  // we deliberately do NOT list them here. The `### API Documentation`
+  // subsection surfaces the integration's `INTEGRATION.md` (AFPS 2.0 §3.5)
+  // verbatim so the LLM can read its API contract without a workspace
+  // lookup. Subsection omitted when `doc` is absent / empty.
+  if (opts.integrations && opts.integrations.length > 0) {
+    for (const integ of opts.integrations) {
+      sections.push(`## Integration: ${integ.id}\n`);
+      if (integ.description) {
+        sections.push(`${integ.description}\n`);
+      }
+      if (integ.doc && integ.doc.trim().length > 0) {
+        sections.push("### API Documentation\n");
+        sections.push(integ.doc);
+        sections.push("");
+      }
+    }
   }
 
   // --- User input ---

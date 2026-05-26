@@ -1,8 +1,11 @@
 # ADR-007: npm-style Naming for AFPS Packages
 
+> [!WARNING]
+> **Partial drift — see ADR-015 (2026-05-26)** — the `@scope/name` identifier shape and registry-readiness rationale remain accurate, but the package-type enumeration drifted with AFPS 2.0: the 1.x `tool` type became `mcp-server` (MCPB-conformant manifests) and the 1.x `provider` type became `integration` (multi-method `auths` map). System packages once cited as examples (`@appstrate/add-memory`, `@appstrate/output`, `@appstrate/report`, `@appstrate/set-state`, `@appstrate/log`) are no longer AFPS packages at all — they are built-in in-process runtime tools (see ADR-013 final state). See [ADR-015](./ADR-015-afps-2.0-sidecar-mcp-surface.md).
+
 ## Status
 
-Accepted
+Accepted (taxonomy drift noted above)
 
 ## Context
 

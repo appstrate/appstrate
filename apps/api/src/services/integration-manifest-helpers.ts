@@ -55,6 +55,7 @@ export interface AfpsManifestAuth {
   // Scopes (§7.4)
   default_scopes?: string[];
   identity_claims?: Record<string, string>;
+  required_identity_claims?: string[];
   // Credentials (§7.5)
   credentials?: { schema: Record<string, unknown> };
   // Connect (§7.7)

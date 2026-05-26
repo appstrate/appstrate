@@ -153,7 +153,7 @@ function splitLegacy(ctx: PromptContext): {
   return { context, plan };
 }
 
-function buildEnrichedPrompt(ctx: PromptContext): string {
+function buildEnrichedPrompt(ctx: PromptContext): Promise<string> {
   const { context, plan } = splitLegacy(ctx);
   return buildPlatformSystemPrompt(context, plan);
 }
@@ -199,30 +199,30 @@ function contextWithSystemTools(overrides?: Partial<PromptContext>): PromptConte
 // ─── Core structure ─────────────────────────────────────────
 
 describe("buildEnrichedPrompt — core structure", () => {
-  it("includes system identity section", () => {
-    const prompt = buildEnrichedPrompt(baseContext());
+  it("includes system identity section", async () => {
+    const prompt = await buildEnrichedPrompt(baseContext());
     expect(prompt).toContain("## System");
     expect(prompt).toContain("Appstrate platform");
     expect(prompt).toContain("ephemeral container");
   });
 
-  it("appends raw prompt at the end after separator", () => {
+  it("appends raw prompt at the end after separator", async () => {
     const ctx = baseContext({ rawPrompt: "My custom task instruction." });
-    const prompt = buildEnrichedPrompt(ctx);
+    const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).toContain("---\n\nMy custom task instruction.");
     // Raw prompt should be at the very end
     expect(prompt.endsWith("My custom task instruction.")).toBe(true);
   });
 
-  it("includes timeout when specified", () => {
+  it("includes timeout when specified", async () => {
     const ctx = baseContext({ timeout: 120 });
-    const prompt = buildEnrichedPrompt(ctx);
+    const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).toContain("120 seconds");
   });
 
-  it("omits timeout when not specified", () => {
+  it("omits timeout when not specified", async () => {
     const ctx = baseContext({ timeout: undefined });
-    const prompt = buildEnrichedPrompt(ctx);
+    const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("**Timeout**");
   });
 });
@@ -235,7 +235,7 @@ describe("buildEnrichedPrompt — dependency doc companions", () => {
   // None of these are rendered into the platform prompt — integrations
   // and mcp-servers self-document via MCP `tools/list`, and a skill's
   // SKILL.md is loaded only when the skill is activated in-container.
-  it("never renders INTEGRATION.md content in the prompt", () => {
+  it("never renders INTEGRATION.md content in the prompt", async () => {
     const ctx = baseContext({
       availableIntegrations: [
         { id: "@org/github-mcp", name: "GitHub", description: "GitHub integration" },
@@ -244,24 +244,24 @@ describe("buildEnrichedPrompt — dependency doc companions", () => {
         { id: "@org/github-mcp", content: "## GitHub API\n\nCall `list_issues` to fetch issues." },
       ],
     });
-    const prompt = buildEnrichedPrompt(ctx);
+    const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("## GitHub API");
     expect(prompt).not.toContain("Call `list_issues` to fetch issues.");
   });
 
-  it("never renders mcp-server README.md content in the prompt", () => {
+  it("never renders mcp-server README.md content in the prompt", async () => {
     const ctx = baseContext({
       availableMcpServers: [
         { id: "@org/scraper", name: "Scraper", description: "Web scraper MCP server" },
       ],
       packageDocs: [{ id: "@org/scraper", content: "## Usage\n\nInvoke the `scrape` tool." }],
     });
-    const prompt = buildEnrichedPrompt(ctx);
+    const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("## Usage");
     expect(prompt).not.toContain("Invoke the `scrape` tool.");
   });
 
-  it("never renders skill SKILL.md body content in the prompt", () => {
+  it("never renders skill SKILL.md body content in the prompt", async () => {
     const ctx = baseContext({
       availableSkills: [
         { id: "@org/research", name: "Research", description: "Deep research capability" },
@@ -270,7 +270,7 @@ describe("buildEnrichedPrompt — dependency doc companions", () => {
         { id: "@org/research", content: "## Research procedure\n\nStep 1: gather sources." },
       ],
     });
-    const prompt = buildEnrichedPrompt(ctx);
+    const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("## Research procedure");
     expect(prompt).not.toContain("Step 1: gather sources.");
   });
@@ -279,11 +279,11 @@ describe("buildEnrichedPrompt — dependency doc companions", () => {
 // ─── User input ─────────────────────────────────────────────
 
 describe("buildEnrichedPrompt — user input", () => {
-  it("includes user input values", () => {
+  it("includes user input values", async () => {
     const ctx = baseContext({
       input: { topic: "AI safety", depth: "detailed" },
     });
-    const prompt = buildEnrichedPrompt(ctx);
+    const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).toContain("## User Input");
     expect(prompt).toContain("topic");
     expect(prompt).toContain("AI safety");
@@ -291,7 +291,7 @@ describe("buildEnrichedPrompt — user input", () => {
     expect(prompt).toContain("detailed");
   });
 
-  it("includes schema descriptions for input fields", () => {
+  it("includes schema descriptions for input fields", async () => {
     const ctx = baseContext({
       input: { topic: "AI" },
       schemas: {
@@ -304,18 +304,18 @@ describe("buildEnrichedPrompt — user input", () => {
         },
       },
     });
-    const prompt = buildEnrichedPrompt(ctx);
+    const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).toContain("Main research topic");
     expect(prompt).toContain("required");
   });
 
-  it("omits input section when no input provided", () => {
+  it("omits input section when no input provided", async () => {
     const ctx = baseContext({ input: {} });
-    const prompt = buildEnrichedPrompt(ctx);
+    const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("## User Input");
   });
 
-  it("excludes file-type input fields from user input section", () => {
+  it("excludes file-type input fields from user input section", async () => {
     const ctx = baseContext({
       input: { text: "hello", document: "file-ref" },
       schemas: {
@@ -332,7 +332,7 @@ describe("buildEnrichedPrompt — user input", () => {
         },
       },
     });
-    const prompt = buildEnrichedPrompt(ctx);
+    const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).toContain("text");
     // file type should be excluded from User Input
   });
@@ -341,18 +341,18 @@ describe("buildEnrichedPrompt — user input", () => {
 // ─── Configuration ──────────────────────────────────────────
 
 describe("buildEnrichedPrompt — configuration", () => {
-  it("includes config values", () => {
+  it("includes config values", async () => {
     const ctx = baseContext({
       config: { language: "fr", maxResults: 10 },
     });
-    const prompt = buildEnrichedPrompt(ctx);
+    const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).toContain("## Configuration");
     expect(prompt).toContain("language");
     expect(prompt).toContain("fr");
     expect(prompt).toContain("maxResults");
   });
 
-  it("includes schema descriptions for config fields", () => {
+  it("includes schema descriptions for config fields", async () => {
     const ctx = baseContext({
       config: { language: "fr" },
       schemas: {
@@ -365,14 +365,14 @@ describe("buildEnrichedPrompt — configuration", () => {
         },
       },
     });
-    const prompt = buildEnrichedPrompt(ctx);
+    const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).toContain("Output language");
     expect(prompt).toContain("required");
   });
 
-  it("omits configuration section when no config", () => {
+  it("omits configuration section when no config", async () => {
     const ctx = baseContext({ config: {} });
-    const prompt = buildEnrichedPrompt(ctx);
+    const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("## Configuration");
   });
 });
@@ -380,29 +380,29 @@ describe("buildEnrichedPrompt — configuration", () => {
 // ─── Previous state ─────────────────────────────────────────
 
 describe("buildEnrichedPrompt — checkpoint", () => {
-  it("includes checkpoint when set-checkpoint tool is available", () => {
+  it("includes checkpoint when set-checkpoint tool is available", async () => {
     const ctx = contextWithSystemTools({
       previousCheckpoint: { cursor: "abc123", processedCount: 42 },
     });
-    const prompt = buildEnrichedPrompt(ctx);
+    const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).toContain("## Checkpoint");
     expect(prompt).toContain("```json");
     expect(prompt).toContain('"cursor": "abc123"');
     expect(prompt).toContain('"processedCount": 42');
   });
 
-  it("omits checkpoint when null", () => {
+  it("omits checkpoint when null", async () => {
     const ctx = contextWithSystemTools({ previousCheckpoint: null });
-    const prompt = buildEnrichedPrompt(ctx);
+    const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("## Checkpoint");
   });
 
-  it("includes checkpoint regardless of available tools", () => {
+  it("includes checkpoint regardless of available tools", async () => {
     const ctx = baseContext({
       previousCheckpoint: { cursor: "abc123" },
       availableTools: [],
     });
-    const prompt = buildEnrichedPrompt(ctx);
+    const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).toContain("## Checkpoint");
     expect(prompt).toContain("abc123");
   });
@@ -411,38 +411,38 @@ describe("buildEnrichedPrompt — checkpoint", () => {
 // ─── Memories ───────────────────────────────────────────────
 
 describe("buildEnrichedPrompt — memories", () => {
-  it("includes memories section when add-memory tool is available", () => {
+  it("includes memories section when add-memory tool is available", async () => {
     const ctx = contextWithSystemTools({
       memories: [
         { id: 1, content: "Gmail API paginates at 100 results", createdAt: "2025-01-15" },
         { id: 2, content: "Use batch endpoint for efficiency", createdAt: "2025-01-16" },
       ],
     });
-    const prompt = buildEnrichedPrompt(ctx);
+    const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).toContain("## Memory");
     expect(prompt).toContain("Gmail API paginates at 100 results");
     expect(prompt).toContain("Use batch endpoint for efficiency");
     expect(prompt).toContain("2025-01-15");
   });
 
-  it("omits the Memory section with no memories — recall_memory is discoverable via tools/list", () => {
+  it("omits the Memory section with no memories — recall_memory is discoverable via tools/list", async () => {
     // With no pinned memories the `## Memory` header is suppressed
     // entirely. `recall_memory` is no longer named in the prompt at all:
     // the agent discovers it (and its calling convention) from the MCP
     // tool advertised via `tools/list`, not from any in-prompt listing.
     const ctx = contextWithSystemTools({ memories: [] });
-    const prompt = buildEnrichedPrompt(ctx);
+    const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("## Memory\n");
     expect(prompt).not.toContain("No memories are currently pinned");
     expect(prompt).not.toContain("recall_memory");
   });
 
-  it("includes memories regardless of available tools", () => {
+  it("includes memories regardless of available tools", async () => {
     const ctx = baseContext({
       memories: [{ id: 1, content: "Some memory", createdAt: "2025-01-15" }],
       availableTools: [],
     });
-    const prompt = buildEnrichedPrompt(ctx);
+    const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).toContain("## Memory");
     expect(prompt).toContain("Some memory");
   });
@@ -457,16 +457,16 @@ describe("buildEnrichedPrompt — run history is tool-wired, never in the prompt
   // Phase D); the prompt MUST NEVER mention the sidecar, regardless of
   // whether a signed `runToken` is present.
 
-  it("does not render a Run History section when runToken is present", () => {
+  it("does not render a Run History section when runToken is present", async () => {
     const ctx = baseContext({ runToken: "exec_token_123" });
-    const prompt = buildEnrichedPrompt(ctx);
+    const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("## Run History");
     expect(prompt).not.toContain("$SIDECAR_URL");
   });
 
-  it("does not render a Run History section when runToken is absent", () => {
+  it("does not render a Run History section when runToken is absent", async () => {
     const ctx = baseContext({ runToken: undefined });
-    const prompt = buildEnrichedPrompt(ctx);
+    const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("## Run History");
     expect(prompt).not.toContain("$SIDECAR_URL");
   });
@@ -475,11 +475,11 @@ describe("buildEnrichedPrompt — run history is tool-wired, never in the prompt
 // ─── No provider prompt dimension ───────────────────────────
 
 describe("buildEnrichedPrompt — provider dimension fully removed", () => {
-  it("never emits a Connected Providers section or provider_call instructions", () => {
+  it("never emits a Connected Providers section or provider_call instructions", async () => {
     // Outbound API access is surfaced via integration MCP tools
     // (`{ns}__api_call`), self-documented through MCP tools/list — never
     // through the prompt. The provider prompt dimension is fully removed.
-    const prompt = buildEnrichedPrompt(baseContext());
+    const prompt = await buildEnrichedPrompt(baseContext());
     expect(prompt).not.toContain("## Connected Providers");
     expect(prompt).not.toContain("provider_call");
     expect(prompt).not.toContain("$SIDECAR_URL");
@@ -489,7 +489,7 @@ describe("buildEnrichedPrompt — provider dimension fully removed", () => {
 // ─── Documents/files ────────────────────────────────────────
 
 describe("buildEnrichedPrompt — documents", () => {
-  it("includes documents section when files provided", () => {
+  it("includes documents section when files provided", async () => {
     const ctx = baseContext({
       files: [
         { fieldName: "doc", name: "report.pdf", type: "application/pdf", size: 102400 },
@@ -497,16 +497,16 @@ describe("buildEnrichedPrompt — documents", () => {
       ],
     });
 
-    const prompt = buildEnrichedPrompt(ctx);
+    const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).toContain("## Documents");
     expect(prompt).toContain("report.pdf");
     expect(prompt).toContain("./documents/");
     expect(prompt).toContain("data.csv");
   });
 
-  it("omits documents section when no files", () => {
+  it("omits documents section when no files", async () => {
     const ctx = baseContext({ files: [] });
-    const prompt = buildEnrichedPrompt(ctx);
+    const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("## Documents");
   });
 });
@@ -514,7 +514,7 @@ describe("buildEnrichedPrompt — documents", () => {
 // ─── Tools and skills ───────────────────────────────────────
 
 describe("buildEnrichedPrompt — tools and skills", () => {
-  it("never renders a Tools section — tools are advertised via MCP tools/list", () => {
+  it("never renders a Tools section — tools are advertised via MCP tools/list", async () => {
     // The prompt no longer lists tools (a partial/stale in-prompt list
     // would contradict the live tool set). The agent discovers every tool
     // — bundle, integration, runtime (output/log/note/pin/report), and the
@@ -525,29 +525,29 @@ describe("buildEnrichedPrompt — tools and skills", () => {
       ],
       runtimeTools: ["report"],
     });
-    const prompt = buildEnrichedPrompt(ctx);
+    const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("### Tools");
     expect(prompt).not.toContain("Web Scraper");
     expect(prompt).not.toContain("run_history");
     expect(prompt).not.toContain("report");
   });
 
-  it("includes available skills", () => {
+  it("includes available skills", async () => {
     const ctx = baseContext({
       availableSkills: [
         { id: "@org/research", name: "Research", description: "Deep research capability" },
       ],
     });
 
-    const prompt = buildEnrichedPrompt(ctx);
+    const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).toContain("### Skills");
     expect(prompt).toContain("Research");
     expect(prompt).toContain(".pi/skills/");
   });
 
-  it("omits skills section when no skills", () => {
+  it("omits skills section when no skills", async () => {
     const ctx = baseContext({ availableSkills: [] });
-    const prompt = buildEnrichedPrompt(ctx);
+    const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("### Skills");
   });
 });
@@ -555,42 +555,42 @@ describe("buildEnrichedPrompt — tools and skills", () => {
 // ─── schemaVersion template rendering ──────────────────────
 
 describe("buildEnrichedPrompt — schemaVersion 1.1 template rendering", () => {
-  it("does NOT interpolate {{…}} in legacy schemaVersion 1.0 (verbatim append)", () => {
+  it("does NOT interpolate {{…}} in legacy schemaVersion 1.0 (verbatim append)", async () => {
     const ctx = baseContext({
       schemaVersion: "1.0",
       runId: "run_abc",
       input: { topic: "physics" },
       rawPrompt: "Topic is {{input.topic}}, run {{runId}}.",
     });
-    const prompt = buildEnrichedPrompt(ctx);
+    const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).toContain("Topic is {{input.topic}}, run {{runId}}.");
     expect(prompt).not.toContain("Topic is physics");
   });
 
-  it("does NOT interpolate when schemaVersion is undefined (defaults to legacy)", () => {
+  it("does NOT interpolate when schemaVersion is undefined (defaults to legacy)", async () => {
     const ctx = baseContext({
       schemaVersion: undefined,
       runId: "r",
       input: { x: "y" },
       rawPrompt: "raw {{input.x}}",
     });
-    const prompt = buildEnrichedPrompt(ctx);
+    const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).toContain("raw {{input.x}}");
   });
 
-  it("renders {{runId}} and {{input.*}} on schemaVersion 1.1", () => {
+  it("renders {{runId}} and {{input.*}} on schemaVersion 1.1", async () => {
     const ctx = baseContext({
       schemaVersion: "1.1",
       runId: "run_abc",
       input: { topic: "quantum" },
       rawPrompt: "Investigate {{input.topic}} for {{runId}}.",
     });
-    const prompt = buildEnrichedPrompt(ctx);
+    const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).toContain("Investigate quantum for run_abc.");
     expect(prompt).not.toContain("{{");
   });
 
-  it("renders memory sections on schemaVersion 1.1", () => {
+  it("renders memory sections on schemaVersion 1.1", async () => {
     const ctx = baseContext({
       schemaVersion: "1.1",
       memories: [
@@ -599,47 +599,47 @@ describe("buildEnrichedPrompt — schemaVersion 1.1 template rendering", () => {
       ],
       rawPrompt: "Past:\n{{#memories}}- {{content}}\n{{/memories}}End.",
     });
-    const prompt = buildEnrichedPrompt(ctx);
+    const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).toContain("Past:\n- alpha\n- beta\nEnd.");
   });
 
-  it("inverted section renders when memories are empty on 1.1", () => {
+  it("inverted section renders when memories are empty on 1.1", async () => {
     const ctx = baseContext({
       schemaVersion: "1.1",
       memories: [],
       rawPrompt: "{{^memories}}No prior memories.{{/memories}}",
     });
-    const prompt = buildEnrichedPrompt(ctx);
+    const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).toContain("No prior memories.");
   });
 
-  it("renders higher minor (1.2) and future majors (2.0) through the template path", () => {
+  it("renders higher minor (1.2) and future majors (2.0) through the template path", async () => {
     const tpl = "Hello {{input.who}}";
-    const forVersion = (v: string): string =>
+    const forVersion = (v: string): Promise<string> =>
       buildEnrichedPrompt(
         baseContext({ schemaVersion: v, input: { who: "World" }, rawPrompt: tpl }),
       );
-    expect(forVersion("1.2")).toContain("Hello World");
-    expect(forVersion("2.0")).toContain("Hello World");
+    expect(await forVersion("1.2")).toContain("Hello World");
+    expect(await forVersion("2.0")).toContain("Hello World");
   });
 
-  it("treats a malformed schemaVersion as legacy (verbatim)", () => {
+  it("treats a malformed schemaVersion as legacy (verbatim)", async () => {
     const ctx = baseContext({
       schemaVersion: "not-a-version",
       input: { x: 1 },
       rawPrompt: "{{input.x}}",
     });
-    const prompt = buildEnrichedPrompt(ctx);
+    const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).toContain("{{input.x}}");
   });
 
-  it("preserves the enrichment sections when schemaVersion is 1.1", () => {
+  it("preserves the enrichment sections when schemaVersion is 1.1", async () => {
     const ctx = baseContext({
       schemaVersion: "1.1",
       input: { task: "hello" },
       rawPrompt: "Run: {{input.task}}",
     });
-    const prompt = buildEnrichedPrompt(ctx);
+    const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).toContain("## System");
     expect(prompt).toContain("Appstrate platform");
     expect(prompt).toMatch(/Run: hello$/);

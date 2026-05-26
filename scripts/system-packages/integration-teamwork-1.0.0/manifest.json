@@ -37,7 +37,7 @@
           "in": "header",
           "name": "Authorization",
           "prefix": "Basic",
-          "value": "{{api_key}}:X",
+          "value": "{$credential.api_key}:X",
           "encoding": "base64"
         }
       },

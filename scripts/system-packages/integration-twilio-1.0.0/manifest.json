@@ -41,7 +41,7 @@
           "in": "header",
           "name": "Authorization",
           "prefix": "Basic",
-          "value": "{{account_sid}}:{{auth_token}}",
+          "value": "{$credential.account_sid}:{$credential.auth_token}",
           "encoding": "base64"
         }
       },

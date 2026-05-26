@@ -2,12 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { z } from "zod";
-import { SLUG_PATTERN, TOOL_NAME_INNER_PATTERN } from "./naming.ts";
+import { TOOL_NAME_INNER_PATTERN } from "./naming.ts";
 import {
   agentManifestSchema as afpsAgentManifestSchema,
   skillManifestSchema as afpsSkillManifestSchema,
   tokenEndpointAuthMethodEnum as afpsTokenEndpointAuthMethodEnum,
   dependenciesSchema as afpsDependenciesSchema,
+  scopedName as afpsScopedName,
+  packageTypeEnum as afpsPackageTypeEnum,
+  metaSchema as afpsMetaSchema,
+  integrationConfiguration as afpsIntegrationConfiguration,
 } from "@afps-spec/schema";
 import { integrationManifestSchema, type IntegrationManifest } from "./integration.ts";
 import { mcpServerManifestSchema, type McpServerManifest } from "./mcp-server.ts";
@@ -20,11 +24,29 @@ export { mcpServerManifestSchema, type McpServerManifest };
 // Base manifest schema — common fields for all package types
 // ─────────────────────────────────────────────
 
-/** Regex matching scoped package names in the format `@scope/package-name`. */
-export const scopedNameRegex = new RegExp(`^@${SLUG_PATTERN}\\/${SLUG_PATTERN}$`);
+/**
+ * Regex matching scoped package names in the format `@scope/package-name`.
+ * Derived from the canonical AFPS `scopedName` Zod schema at module-load time
+ * so the regex source can never drift from the spec. The schema package
+ * exposes `scopedName` (a Zod schema) but not the raw regex constant — we
+ * extract it from the schema's internal regex check. Falls back to a
+ * structurally-equivalent literal if the internal shape changes (defensive;
+ * a unit test asserts the extraction stays sound).
+ */
+export const scopedNameRegex: RegExp = (() => {
+  // Zod 4 internal: scopedName._zod.def.checks[0]._zod.def.pattern : RegExp
+  type ZodInternalCheck = { _zod?: { def?: { pattern?: RegExp } } };
+  type ZodInternalSchema = { _zod?: { def?: { checks?: ZodInternalCheck[] } } };
+  const internal = afpsScopedName as unknown as ZodInternalSchema;
+  const pattern = internal._zod?.def?.checks?.[0]?._zod?.def?.pattern;
+  if (pattern instanceof RegExp) return pattern;
+  // Defensive fallback — keep validation working if Zod's internal shape changes.
+  // Matches the canonical AFPS SCOPED_NAME_REGEX (spec.md §2.2 / schema package).
+  return /^@[a-z0-9]([a-z0-9-]*[a-z0-9])?\/[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
+})();
 
-/** Zod enum for supported AFPS 2.0 package types (`tool`/`provider` removed; `mcp-server` added). */
-export const packageTypeEnum = z.enum(["agent", "skill", "mcp-server", "integration"]);
+/** Zod enum for supported AFPS 2.0 package types (`tool`/`provider` removed; `mcp-server` added). Canonical export re-exposed from `@afps-spec/schema`. */
+export const packageTypeEnum = afpsPackageTypeEnum;
 /** Union type of supported package types. */
 export type PackageType = z.infer<typeof packageTypeEnum>;
 /** Array of all valid package type strings. */
@@ -39,11 +61,13 @@ export const AFPS_SCHEMA_URLS: Record<PackageType, string> = {
 };
 
 // ── AFPS 2.0 v2 common-field shapes (§3.1) ──
-// Locally redeclared (not exported from `@afps-spec/schema`) because the
-// canonical `commonFields` is an internal closure inside `createSchemas`.
-// Shape MUST stay byte-compatible with the spec's `authorObject` /
-// `repositoryObject` / `iconObject` / `compatibilityObject` — any divergence
-// is a v2.0 conformance gap.
+// TODO(audit 1.15): Upstream these shapes to `@afps-spec/schema`. The canonical
+// `commonFields` table (authorObject / repositoryObject / iconObject /
+// compatibilityObject) lives inside `createSchemas` as a closure-private const;
+// promoting them to named exports would let consumers like appstrate-core import
+// them directly instead of redeclaring (drift risk). A parity snapshot test
+// below pins these locals against the canonical agent manifest schema — any
+// divergence breaks the suite.
 
 /** MCPB/npm-aligned author object (§3.1). */
 const authorObjectSchema = z.looseObject({
@@ -81,11 +105,14 @@ const compatibilityObjectSchema = z.looseObject({
 });
 
 /**
- * `_meta` reverse-DNS extension namespace (§10). The AFPS spec defines this
- * as a record of reverse-DNS-namespaced keys carrying opaque payloads — kept
- * permissive (consumers MUST NOT reject unknown `_meta` keys).
+ * `_meta` reverse-DNS extension namespace (§10). Imported from `@afps-spec/schema`
+ * — the spec mandates `MUST be a JSON object per namespace key` (§10.1). The
+ * canonical schema is `z.record(z.string(), z.record(z.string(), z.unknown()))`:
+ * strict enough to reject scalars under a namespace key (was previously accepted
+ * by a local laxer copy), permissive about the value structure so consumers
+ * never reject unknown payloads (§10).
  */
-const metaSchema = z.record(z.string(), z.unknown());
+const metaSchema = afpsMetaSchema;
 
 /** Base Zod schema for package manifests — common fields shared by all package types (AFPS 2.0 snake_case). */
 export const manifestSchema = z.looseObject({
@@ -168,8 +195,13 @@ const agentManifestObjectSchema = afpsAgentManifestSchema.extend({
   integrations_configuration: z
     .record(
       z.string().regex(scopedNameRegex),
-      z.looseObject({
-        scopes: z.array(z.string()).optional(),
+      // Compose with the canonical `integrationConfiguration` (§4.4 + Appendix D)
+      // so publisher-set fields (`auth_key`, `scopes`) round-trip explicitly
+      // instead of relying on looseObject passthrough — and append the
+      // Appstrate-specific `tools[]` allowlist that drives the sidecar's
+      // McpHost. Both sides are looseObject, so future spec additions still
+      // round-trip without code changes here.
+      afpsIntegrationConfiguration.extend({
         tools: z
           .array(
             z.string().regex(TOOL_NAME_INNER_PATTERN, {

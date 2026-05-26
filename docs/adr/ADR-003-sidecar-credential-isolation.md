@@ -1,8 +1,11 @@
 # ADR-003: Sidecar Proxy for Credential Isolation
 
+> [!WARNING]
+> **Superseded by ADR-015 (2026-05-26)** — describes the retired `provider_call` / `provider_upload` surface from AFPS 1.x. The current AFPS 2.0 sidecar surface uses per-integration namespaced tools (`{ns}__api_call`, `{ns}__api_upload`). Kept for historical record. See [ADR-015](./ADR-015-afps-2.0-sidecar-mcp-surface.md).
+
 ## Status
 
-Accepted
+Accepted (superseded by ADR-015)
 
 ## Context
 

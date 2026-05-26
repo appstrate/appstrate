@@ -46,6 +46,8 @@ function integrationProviderIdSentinel(packageId: string, authKey: string): stri
 
 /** PKCE-S256 marker as it appears in `code_challenge_methods_supported`. */
 const PKCE_S256 = "S256";
+/** PKCE-plain marker. RFC 7636 §4.2 — only used when the IdP does not advertise S256. */
+const PKCE_PLAIN = "plain";
 
 export interface InitiateIntegrationOAuthInput {
   /** Integration package id (e.g. `@official/gmail`). */
@@ -95,11 +97,13 @@ export interface InitiateIntegrationOAuthInput {
   /** RFC 8707 `resource` parameter (`auths.{key}.resource`). */
   resource?: string;
   /**
-   * Endpoint methods the IdP advertises for PKCE (`code_challenge_methods_supported`).
-   * When the array includes `"S256"`, PKCE-S256 is performed; otherwise PKCE is
-   * skipped. Defaults to `["S256"]` so the secure path is the default for the
-   * integration OAuth surface (MCP authorization-spec parity + public-client
-   * code-binding).
+   * Manifest-declared PKCE methods the IdP advertises
+   * (`code_challenge_methods_supported`).
+   *
+   * Precedence: manifest (this field) > RFC 8414 discovery projection >
+   * default `["S256"]`. Method selection within the effective list prefers
+   * `"S256"` and falls back to `"plain"` only when `"S256"` is unavailable
+   * (RFC 7636 §4.2). Empty array `[]` disables PKCE entirely.
    */
   codeChallengeMethodsSupported?: string[];
   /**
@@ -183,15 +187,30 @@ export async function initiateIntegrationOAuth(
     );
   }
 
-  // PKCE-S256 is gated on `code_challenge_methods_supported`. The integration
-  // OAuth surface defaults to S256-on (spec §7.3 parity with the MCP
-  // authorization spec, plus public-client code-binding for `none` clients).
-  const pkceMethods = input.codeChallengeMethodsSupported ?? [PKCE_S256];
-  const usePkce = pkceMethods.includes(PKCE_S256);
+  // PKCE-method precedence (AFPS 2.0 §7.3 + RFC 8414 §2):
+  //   1. Manifest-declared `code_challenge_methods_supported` (authoritative).
+  //   2. Discovery-projected `code_challenge_methods_supported` (RFC 8414 — a
+  //      manifest that only declares an `issuer` rides on whatever the IdP
+  //      advertises).
+  //   3. Default `["S256"]` — MCP-spec parity + public-client code-binding.
+  // Within the effective list, prefer S256; fall back to plain only when S256
+  // is unavailable (RFC 7636 §4.2 — should be rare for modern IdPs).
+  const pkceMethods = input.codeChallengeMethodsSupported ??
+    endpoints.codeChallengeMethodsSupported ?? [PKCE_S256];
+  const pkceMethod = pkceMethods.includes(PKCE_S256)
+    ? PKCE_S256
+    : pkceMethods.includes(PKCE_PLAIN)
+      ? PKCE_PLAIN
+      : null;
+  const usePkce = pkceMethod !== null;
 
   const state = crypto.randomUUID();
   const codeVerifier = usePkce ? randomBase64Url(32) : "";
-  const codeChallenge = usePkce ? sha256Base64Url(codeVerifier) : "";
+  const codeChallenge = !usePkce
+    ? ""
+    : pkceMethod === PKCE_S256
+      ? sha256Base64Url(codeVerifier)
+      : codeVerifier;
 
   const now = new Date();
   const record: OAuthStateRecord = {
@@ -224,7 +243,7 @@ export async function initiateIntegrationOAuth(
     redirect_uri: input.redirectUri,
     response_type: "code",
     state,
-    ...(usePkce ? { code_challenge: codeChallenge, code_challenge_method: PKCE_S256 } : {}),
+    ...(usePkce ? { code_challenge: codeChallenge, code_challenge_method: pkceMethod! } : {}),
     ...(scopeString ? { scope: scopeString } : {}),
     // RFC 8707 — bind the resulting token to a specific resource server.
     // Some IdPs require this on the authorize URL too (not just on the

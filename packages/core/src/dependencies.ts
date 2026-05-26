@@ -3,6 +3,12 @@
 
 import { parseScopedName } from "./naming.ts";
 import { getErrorMessage } from "./errors";
+import { AFPS_1X_READ_FALLBACK_REMOVAL } from "./back-compat.ts";
+
+// Silence unused-warning when this file is consumed without referencing the
+// constant — the import exists so removal of the back-compat block is one
+// `tsc` error away once the deprecation milestone ships.
+void AFPS_1X_READ_FALLBACK_REMOVAL;
 
 // ─────────────────────────────────────────────
 // Dependencies shape (manifest format)
@@ -166,7 +172,12 @@ function toStringArray(value: unknown): string[] | undefined {
  *      Appstrate 1.x name for what AFPS 2.0 §4.4 calls
  *      `integrations_configuration`. Read-only fallback for manifests
  *      stored before the snake_case migration; writers emit the canonical
- *      form (which migrates the manifest forward on next save).
+ *      form (which migrates the manifest forward on next save). Scheduled
+ *      for removal in {@link AFPS_1X_READ_FALLBACK_REMOVAL} — at that point
+ *      a one-time DB backfill on `package_versions.manifest` MUST rewrite
+ *      any remaining `providersConfiguration` payloads into
+ *      `integrations_configuration` (see `back-compat.ts` for the query
+ *      shape), and this fallback read MUST be deleted.
  *
  * Version range always comes from `dependencies.integrations.<id>`
  * (string form OR `.version` on the object). An integration with no
@@ -180,7 +191,8 @@ export function parseManifestIntegrations(
   const versionMap = deps.integrations ?? {};
   const deprecatedAlias = (manifest.integrations_configuration ?? {}) as Record<string, unknown>;
   const legacyTopLevel = (manifest.integrations ?? {}) as Record<string, unknown>;
-  // 1.x camelCase alias of `integrations_configuration` — read-only.
+  // 1.x camelCase alias of `integrations_configuration` — read-only fallback,
+  // scheduled for removal in AFPS_1X_READ_FALLBACK_REMOVAL (see back-compat.ts).
   const v1CamelAlias = (manifest.providersConfiguration ?? {}) as Record<string, unknown>;
 
   const out: ManifestIntegrationEntry[] = [];
@@ -277,6 +289,7 @@ export function writeManifestIntegrations(
   delete manifest.integrations;
   delete manifest.integrations_configuration;
   // 1.x camelCase alias — same back-compat read path, single writer migrates.
+  // Removal tracked by AFPS_1X_READ_FALLBACK_REMOVAL (see back-compat.ts).
   delete (manifest as Record<string, unknown>).providersConfiguration;
 }
 

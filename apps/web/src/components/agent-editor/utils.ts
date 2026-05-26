@@ -17,6 +17,12 @@ import {
 } from "@appstrate/core/form";
 import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
 import { parseManifestIntegrations, writeManifestIntegrations } from "@appstrate/core/dependencies";
+import { AFPS_1X_READ_FALLBACK_REMOVAL } from "@appstrate/core/back-compat";
+
+// Silence unused-warning — the import exists so removal of the back-compat
+// reads below in `manifestToSchemaFields` is one `tsc` error away once the
+// deprecation milestone ships.
+void AFPS_1X_READ_FALLBACK_REMOVAL;
 
 // ─── Version ranges ─────────────────────────────────────────
 
@@ -236,8 +242,9 @@ export function manifestToSchemaFields(
   // `uiHints` / `propertyOrder` / `maxSize`) are still on disk for
   // manifests saved before the 2.0 migration. Accept both shapes, prefer
   // canonical snake_case. `fieldsToSchema` always writes canonical so
-  // re-saving migrates the manifest forward. Drop the legacy fields once a
-  // backfill re-saves every persisted manifest.
+  // re-saving migrates the manifest forward. Removal milestone:
+  // AFPS_1X_READ_FALLBACK_REMOVAL (see @appstrate/core/back-compat). The
+  // top-level `void` reference makes removal a tsc error.
   type LegacyConstraint = { accept?: string; max_size?: number; maxSize?: number };
   type ManifestWrapper = {
     schema?: JSONSchemaObject;

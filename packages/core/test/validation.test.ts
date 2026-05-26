@@ -3,6 +3,7 @@
 import { describe, expect, it } from "bun:test";
 import { validateManifest, extractSkillMeta, extractManifestMetadata } from "../src/validation.ts";
 import type { Manifest } from "../src/validation.ts";
+import { agentManifestSchema as afpsAgentManifestSchema } from "@afps-spec/schema";
 
 // ─────────────────────────────────────────────
 // Helpers — minimal valid manifests
@@ -781,6 +782,115 @@ describe("validateManifest — v2 common fields (§3.1)", () => {
       }),
     );
     expect(result.valid).toBe(true);
+  });
+
+  it("_meta — rejects scalar values under a namespace key (§10.1 strictness)", () => {
+    // AFPS §10.1: `_meta.<reverse-dns-key>` MUST be a JSON object. The canonical
+    // schema enforces this — the previous appstrate-local laxer copy accepted
+    // strings/numbers/booleans which was a spec gap. Audit finding 1.15.
+    const result = validateManifest(
+      validSkillManifest({
+        _meta: {
+          "dev.appstrate/foo": "string-not-object",
+        },
+      }),
+    );
+    expect(result.valid).toBe(false);
+  });
+
+  it("_meta — rejects arrays and other non-object values under a namespace key", () => {
+    const result = validateManifest(
+      validSkillManifest({
+        _meta: {
+          "com.example.x": [1, 2, 3],
+        },
+      }),
+    );
+    expect(result.valid).toBe(false);
+  });
+
+  it("common-field shapes — accept the canonical agent-full example (drift snapshot)", () => {
+    // Audit 1.15 drift gate: the local common-field shapes (authorObject /
+    // repositoryObject / iconObject / compatibilityObject) must accept anything
+    // the canonical AFPS `agentManifestSchema` accepts. We pin a representative
+    // sample derived from `afps-spec/examples/agent-full/manifest.json` and
+    // assert BOTH schemas validate it. If `@afps-spec/schema` ever tightens one
+    // of these shapes (e.g. requires `repository.directory`), the local copy
+    // will silently keep accepting the looser shape and this test will catch
+    // the divergence on the next CI run.
+    const sample = {
+      name: "@example/customer-intake",
+      version: "1.2.0",
+      type: "agent",
+      schema_version: "2.0",
+      display_name: "Customer Intake Assistant",
+      description: "Collects inbound requests and prepares a structured summary.",
+      keywords: ["workflow", "intake", "support"],
+      license: "MIT",
+      repository: "https://example.com/afps/customer-intake",
+      author: "AFPS Examples",
+      icons: [{ src: "icon-128.png", size: "128x128", theme: "dark" as const }],
+      compatibility: {
+        platforms: ["darwin", "linux"] as Array<"darwin" | "linux">,
+        runtimes: { node: ">=18" },
+      },
+    };
+
+    // Canonical schema must accept it.
+    const canonical = afpsAgentManifestSchema.safeParse(sample);
+    expect(canonical.success).toBe(true);
+
+    // Local schema (via validateManifest dispatch) must accept it too.
+    const local = validateManifest(sample);
+    expect(local.valid).toBe(true);
+  });
+
+  it("common-field shapes — author/repository object forms parity (drift snapshot)", () => {
+    const sample = {
+      name: "@example/pkg",
+      version: "1.0.0",
+      type: "agent" as const,
+      schema_version: "2.0",
+      display_name: "Pkg",
+      author: { name: "Jane", email: "jane@example.com", url: "https://jane.example" },
+      repository: {
+        type: "git",
+        url: "https://github.com/test/repo.git",
+        directory: "packages/pkg",
+      },
+    };
+    const canonical = afpsAgentManifestSchema.safeParse(sample);
+    expect(canonical.success).toBe(true);
+
+    const local = validateManifest(sample);
+    expect(local.valid).toBe(true);
+  });
+
+  it("agent integrations_configuration — auth_key round-trips alongside tools/scopes", () => {
+    // Per AFPS Appendix D, `auth_key` is a publisher-set field inside
+    // `integrations_configuration.<id>`. The local schema now composes with the
+    // canonical `integrationConfiguration` shape so `auth_key` is part of the
+    // declared schema (was previously surviving only via looseObject passthrough).
+    const result = validateManifest(
+      validAgentManifest({
+        dependencies: { integrations: { "@scope/foo": "^1.0.0" } },
+        integrations_configuration: {
+          "@scope/foo": {
+            auth_key: "primary",
+            scopes: ["read"],
+            tools: ["list"],
+          },
+        },
+      }),
+    );
+    expect(result.valid).toBe(true);
+    const m = result.manifest as Record<string, unknown>;
+    const cfg = m.integrations_configuration as Record<string, Record<string, unknown>>;
+    expect(cfg["@scope/foo"]).toEqual({
+      auth_key: "primary",
+      scopes: ["read"],
+      tools: ["list"],
+    });
   });
 });
 

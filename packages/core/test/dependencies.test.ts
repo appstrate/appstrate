@@ -411,6 +411,98 @@ describe("writeManifestIntegrations", () => {
     const deps = m.dependencies as Record<string, unknown>;
     expect(deps.integrations).toBeUndefined();
   });
+
+  // AFPS 1.x back-compat — removal tracked by AFPS_1X_READ_FALLBACK_REMOVAL
+  // (see `packages/core/src/back-compat.ts`). These tests pin the contract:
+  // read pre-2.0 camelCase aliases, write AFPS 2.0 canonical snake_case.
+  it("reads `providersConfiguration` (1.x camelCase alias) as fallback", () => {
+    const out = parseManifestIntegrations({
+      dependencies: { integrations: { "@acme/gmail-mcp": "^1.0.0" } },
+      providersConfiguration: {
+        "@acme/gmail-mcp": { tools: ["legacy_tool"], scopes: ["legacy_scope"] },
+      },
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0]!.tools).toEqual(["legacy_tool"]);
+    expect(out[0]!.scopes).toEqual(["legacy_scope"]);
+  });
+
+  it("canonical wins over `providersConfiguration` on conflict", () => {
+    const out = parseManifestIntegrations({
+      dependencies: {
+        integrations: {
+          "@acme/gmail-mcp": { version: "^1.0.0", tools: ["canonical"] },
+        },
+      },
+      providersConfiguration: {
+        "@acme/gmail-mcp": { tools: ["legacy"] },
+      },
+    });
+    expect(out[0]!.tools).toEqual(["canonical"]);
+  });
+
+  it("1.x camelCase manifest round-trips to AFPS 2.0 canonical snake_case", () => {
+    // Simulate a manifest stored before the 2.0 migration. read → write
+    // upgrades it to the canonical shape; the camelCase alias is gone.
+    const legacy: Record<string, unknown> = {
+      dependencies: { integrations: { "@acme/gmail-mcp": "^1.0.0" } },
+      providersConfiguration: {
+        "@acme/gmail-mcp": {
+          tools: ["list_messages"],
+          scopes: ["gmail.readonly"],
+        },
+      },
+    };
+    const entries = parseManifestIntegrations(legacy);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.tools).toEqual(["list_messages"]);
+    expect(entries[0]!.scopes).toEqual(["gmail.readonly"]);
+
+    writeManifestIntegrations(legacy, entries);
+
+    // Writer emits canonical AFPS 2.0 only.
+    expect(legacy.dependencies).toEqual({
+      integrations: {
+        "@acme/gmail-mcp": {
+          version: "^1.0.0",
+          scopes: ["gmail.readonly"],
+          tools: ["list_messages"],
+        },
+      },
+    });
+    // The 1.x alias and the legacy top-level + deprecated alias are gone.
+    expect(legacy.providersConfiguration).toBeUndefined();
+    expect(legacy.integrations).toBeUndefined();
+    expect(legacy.integrations_configuration).toBeUndefined();
+  });
+
+  it("pure AFPS 2.0 snake_case manifest round-trips identity", () => {
+    const canonical: Record<string, unknown> = {
+      dependencies: {
+        integrations: {
+          "@acme/gmail-mcp": {
+            version: "^1.0.0",
+            scopes: ["gmail.readonly"],
+            tools: ["list_messages"],
+          },
+        },
+      },
+    };
+    const entries = parseManifestIntegrations(canonical);
+    writeManifestIntegrations(canonical, entries);
+    expect(canonical.dependencies).toEqual({
+      integrations: {
+        "@acme/gmail-mcp": {
+          version: "^1.0.0",
+          scopes: ["gmail.readonly"],
+          tools: ["list_messages"],
+        },
+      },
+    });
+    expect(canonical.providersConfiguration).toBeUndefined();
+    expect(canonical.integrations).toBeUndefined();
+    expect(canonical.integrations_configuration).toBeUndefined();
+  });
 });
 
 describe("detectCycle", () => {

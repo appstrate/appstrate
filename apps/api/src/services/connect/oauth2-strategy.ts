@@ -20,11 +20,12 @@
 import { getEnv } from "@appstrate/env";
 import { decodeJwtPayload } from "@appstrate/core/jwt";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
-import { initiateIntegrationOAuth } from "@appstrate/connect";
+import { initiateIntegrationOAuth, resolveOAuthEndpoints } from "@appstrate/connect";
 import { forbidden, invalidRequest } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import { oauthStateStore } from "./oauth-state-store.ts";
 import {
+  assertRequiredIdentityClaims,
   extractIdentity,
   getIntegrationOAuthClient,
   readIntegrationAuth,
@@ -140,7 +141,34 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
         }
       }
     }
-    const userinfoUrl = (auth as { userinfo_endpoint?: string }).userinfo_endpoint;
+    // Userinfo URL precedence (AFPS 2.0 §7.3): mirror the same fallback chain
+    // we apply for `code_challenge_methods_supported` —
+    //   1. Manifest-declared `userinfo_endpoint` (authoritative).
+    //   2. Discovery-projected `userinfo_endpoint` (a manifest that only
+    //      declares an `issuer` rides on whatever the IdP advertises).
+    //   3. undefined — caller skips userinfo enrichment.
+    const manifestUserinfo = (auth as { userinfo_endpoint?: string }).userinfo_endpoint;
+    let discoveredUserinfo: string | undefined;
+    if (!manifestUserinfo && auth.issuer) {
+      try {
+        const discovered = await resolveOAuthEndpoints({
+          issuer: auth.issuer,
+          ...(auth.authorization_endpoint
+            ? { authorizationEndpoint: auth.authorization_endpoint }
+            : {}),
+          ...(auth.token_endpoint ? { tokenEndpoint: auth.token_endpoint } : {}),
+        });
+        discoveredUserinfo = discovered.userinfoEndpoint;
+      } catch (err) {
+        // Best-effort: discovery failures fall through to "no userinfo".
+        logger.warn("Integration userinfo discovery failed", {
+          packageId: result.packageId,
+          authKey: result.authKey,
+          err: String(err),
+        });
+      }
+    }
+    const userinfoUrl = manifestUserinfo ?? discoveredUserinfo;
     if (userinfoUrl && isBlockedUrl(userinfoUrl)) {
       // SSRF guard: `userinfoUrl` is manifest-declared and fetched with the
       // user's access token. Refuse loopback / RFC1918 / link-local / metadata
@@ -183,6 +211,10 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     }
 
     const { accountId, identityClaims } = extractIdentity(manifest, result.authKey, identitySource);
+    // AFPS 2.0 §7.4 — refuse the connection if any `required_identity_claims`
+    // came back missing/empty from the IdP. Fail BEFORE persistence so a
+    // half-identified connection never lands in `integration_connections`.
+    assertRequiredIdentityClaims(manifest, result.authKey, identityClaims);
     const credentials: Record<string, unknown> = {
       access_token: result.accessToken,
       ...(result.refreshToken ? { refresh_token: result.refreshToken } : {}),

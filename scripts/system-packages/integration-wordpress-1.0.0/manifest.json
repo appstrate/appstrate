@@ -42,7 +42,7 @@
           "in": "header",
           "name": "Authorization",
           "prefix": "Basic",
-          "value": "{{username}}:{{application_password}}",
+          "value": "{$credential.username}:{$credential.application_password}",
           "encoding": "base64"
         }
       },

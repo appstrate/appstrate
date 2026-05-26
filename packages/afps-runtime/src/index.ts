@@ -87,6 +87,7 @@ export {
   renderPlatformPrompt,
   type PlatformPromptOptions,
   type PlatformPromptTool,
+  type PlatformPromptIntegration,
   type PlatformPromptSchema,
 } from "./bundle/index.ts";
 

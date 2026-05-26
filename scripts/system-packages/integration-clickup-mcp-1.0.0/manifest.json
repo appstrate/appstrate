@@ -39,7 +39,7 @@
       }
     }
   },
-  "tools": {
+  "tools_policy": {
     "search_workspace": {
       "required_auth_key": "oauth"
     },

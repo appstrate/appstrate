@@ -45,6 +45,7 @@ function spec(): IntegrationSpawnSpec {
   return {
     integrationId: INTEG_ID,
     namespace: NAMESPACE,
+    sourceKind: "local",
     manifest: {
       name: INTEG_ID,
       version: "1.0.0",

@@ -36,6 +36,60 @@ import { logger } from "./logger.ts";
 // for the sidecar's consumers + tests.
 export type { IntegrationCredentialsWire };
 
+/**
+ * Normalize an HTTP-parsed credentials payload, preferring the AFPS 2.0
+ * snake_case keys and falling back to the deprecated camelCase aliases for
+ * the migration window.
+ *
+ * TODO(AFPS 2.0 migration): drop camelCase fallback after one release window.
+ */
+export function normalizeIntegrationCredentialsWire(raw: unknown): IntegrationCredentialsWire {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  const rawAuths = Array.isArray(r.auths) ? (r.auths as Record<string, unknown>[]) : [];
+  const auths: ResolvedAuthCredentials[] = rawAuths.map((a) => {
+    const authKey = (a.auth_key ?? a.authKey) as string;
+    const authType = (a.auth_type ?? a.authType) as string;
+    const authorizedUris = (a.authorized_uris ?? a.authorizedUris ?? []) as readonly string[];
+    const scopesGranted = (a.scopes_granted ?? a.scopesGranted) as readonly string[] | undefined;
+    const out: ResolvedAuthCredentials = {
+      authKey,
+      authType,
+      fields: (a.fields ?? {}) as Readonly<Record<string, string>>,
+      authorizedUris,
+    };
+    if (a.resource !== undefined) out.resource = a.resource as string;
+    if (a.audience !== undefined) out.audience = a.audience as string;
+    if (a.expiresAt !== undefined) out.expiresAt = a.expiresAt as string;
+    if (scopesGranted !== undefined) out.scopesGranted = scopesGranted;
+    const identityClaims = a.identity_claims ?? a.identityClaims;
+    if (identityClaims !== undefined) {
+      out.identityClaims = identityClaims as Readonly<Record<string, string>>;
+    }
+    return out;
+  });
+
+  const rawPlans = (r.delivery_plans ?? r.deliveryPlans ?? {}) as Record<
+    string,
+    Record<string, unknown>
+  >;
+  const deliveryPlans: Record<string, HttpDeliveryPlan> = {};
+  for (const [k, p] of Object.entries(rawPlans)) {
+    deliveryPlans[k] = {
+      headerName: (p.header_name ?? p.headerName) as string,
+      headerPrefix: (p.header_prefix ?? p.headerPrefix) as string,
+      value: p.value as string,
+      allowServerOverride: (p.allow_server_override ?? p.allowServerOverride) as boolean,
+    };
+  }
+
+  const expiresAtEpochMs = (r.expires_at_epoch_ms ?? r.expiresAtEpochMs ?? {}) as Record<
+    string,
+    number | null
+  >;
+
+  return { auths, deliveryPlans, expiresAtEpochMs };
+}
+
 export interface CreateIntegrationCredentialsSourceOptions {
   /** Package id (e.g. `@vendor/integration`). */
   integrationId: string;
@@ -292,7 +346,8 @@ export function createIntegrationCredentialsSource(
     }
     let next: IntegrationCredentialsWire;
     try {
-      next = (await res.json()) as IntegrationCredentialsWire;
+      // TODO(AFPS 2.0 migration): drop camelCase fallback after one release window.
+      next = normalizeIntegrationCredentialsWire(await res.json());
     } catch (err) {
       logger.warn("integration credential refresh malformed JSON", {
         integrationId: options.integrationId,
@@ -388,5 +443,6 @@ export async function fetchInitialIntegrationCredentials(
       detail || `Failed to fetch integration credentials for ${integrationId}: HTTP ${res.status}`,
     );
   }
-  return (await res.json()) as IntegrationCredentialsWire;
+  // TODO(AFPS 2.0 migration): drop camelCase fallback after one release window.
+  return normalizeIntegrationCredentialsWire(await res.json());
 }

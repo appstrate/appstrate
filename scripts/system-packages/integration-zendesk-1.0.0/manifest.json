@@ -41,7 +41,7 @@
           "in": "header",
           "name": "Authorization",
           "prefix": "Basic",
-          "value": "{{email}}/token:{{api_key}}",
+          "value": "{$credential.email}/token:{$credential.api_key}",
           "encoding": "base64"
         }
       },

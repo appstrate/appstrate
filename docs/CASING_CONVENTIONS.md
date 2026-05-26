@@ -169,6 +169,8 @@ If unsure: "universal" means "appears on >5 different types". Otherwise snake_ca
 
 #### Carve-out 4e — ModelProviderDefinition + provider DTOs
 
+> **Vocabulary note**: "provider" here refers to **model providers** — Appstrate's internal LLM-credential registry (OpenAI, Anthropic, Codex, Claude Code, …). Not to be confused with the retired AFPS 1.x `provider` package type, which became `integration` in AFPS 2.0 (Appendix D). Model providers are a distinct Appstrate subsystem with its own DTO surface.
+
 **Files**:
 
 - `apps/api/src/modules/core-providers/index.ts`
@@ -322,7 +324,7 @@ Treat any new management-CRUD route on a BA plugin table the same way (mirror th
 - `file_constraints.{key}`: `accept`, `max_size`
 - `ui_hints.{key}`: `placeholder`
 
-**MCP-server (MCPB)**: `manifest_version`, `server.{type, entry_point, mcp_config}`, `mcp_config.{command, args, env, platform_overrides}`, `tools[].{name, description}`, `user_config`, `_meta["dev.afps/mcp-server"]`, `_meta["dev.appstrate/mcp-server"].runtime`
+**MCP-server (MCPB)**: `manifest_version`, `server.{type, entry_point, mcp_config}`, `mcp_config.{command, args, env, platform_overrides}`, `tools[].{name, description}`, `user_config`, `_meta["dev.appstrate/mcp-server"].runtime` (Appstrate Bun override; per AFPS 2.0.2 the mcp-server manifest is AFPS-native at the root — no `_meta["dev.afps/mcp-server"]` identity wrapper)
 
 **Integration**:
 

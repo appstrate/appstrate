@@ -224,6 +224,91 @@ describe("initiateIntegrationOAuth", () => {
     expect(stored?.codeVerifier).toBe("");
   });
 
+  it("infers PKCE-S256 from discovery when the manifest only declares an issuer (AFPS §7.3, RFC 8414 §2)", async () => {
+    // Manifest: only `issuer`, no `code_challenge_methods_supported`.
+    // IdP discovery: advertises S256. Expected: request uses S256.
+    const discover = (async () => ({
+      authorizationEndpoint: "https://idp.example.com/authorize",
+      tokenEndpoint: "https://idp.example.com/token",
+      codeChallengeMethodsSupported: ["S256"],
+    })) as unknown as typeof import("../src/oauth-discovery.ts").resolveOAuthEndpoints;
+
+    const result = await initiateIntegrationOAuth(store, {
+      packageId: "@x/y",
+      authKey: "a",
+      issuer: "https://idp.example.com",
+      clientId: "c",
+      clientSecret: "s",
+      redirectUri: "http://localhost:3000/cb",
+      orgId: "o",
+      applicationId: "a",
+      actor: { type: "user", id: "u" },
+      discover,
+    });
+    const url = new URL(result.authUrl);
+    expect(url.searchParams.get("code_challenge_method")).toBe("S256");
+    expect(url.searchParams.get("code_challenge")).toMatch(/^[A-Za-z0-9_-]{43}$/);
+  });
+
+  it("falls back to the S256 default when the manifest only declares an issuer and discovery is silent on PKCE", async () => {
+    // Manifest: only `issuer`. Discovery: returns endpoints but NO
+    // `code_challenge_methods_supported`. Expected: AFPS-conformant default
+    // → S256.
+    const discover = (async () => ({
+      authorizationEndpoint: "https://idp.example.com/authorize",
+      tokenEndpoint: "https://idp.example.com/token",
+      // codeChallengeMethodsSupported intentionally absent
+    })) as unknown as typeof import("../src/oauth-discovery.ts").resolveOAuthEndpoints;
+
+    const result = await initiateIntegrationOAuth(store, {
+      packageId: "@x/y",
+      authKey: "a",
+      issuer: "https://idp.example.com",
+      clientId: "c",
+      clientSecret: "s",
+      redirectUri: "http://localhost:3000/cb",
+      orgId: "o",
+      applicationId: "a",
+      actor: { type: "user", id: "u" },
+      discover,
+    });
+    const url = new URL(result.authUrl);
+    expect(url.searchParams.get("code_challenge_method")).toBe("S256");
+    expect(url.searchParams.get("code_challenge")).toMatch(/^[A-Za-z0-9_-]{43}$/);
+  });
+
+  it("honours an explicit manifest code_challenge_methods_supported over any discovery hint", async () => {
+    // Manifest: `code_challenge_methods_supported: ["plain"]`. Discovery
+    // (defensive — even if it returned S256, manifest wins).
+    // Expected: request uses plain.
+    const discover = (async () => ({
+      authorizationEndpoint: "https://idp.example.com/authorize",
+      tokenEndpoint: "https://idp.example.com/token",
+      codeChallengeMethodsSupported: ["S256"],
+    })) as unknown as typeof import("../src/oauth-discovery.ts").resolveOAuthEndpoints;
+
+    const result = await initiateIntegrationOAuth(store, {
+      packageId: "@x/y",
+      authKey: "a",
+      issuer: "https://idp.example.com",
+      clientId: "c",
+      clientSecret: "s",
+      codeChallengeMethodsSupported: ["plain"],
+      redirectUri: "http://localhost:3000/cb",
+      orgId: "o",
+      applicationId: "a",
+      actor: { type: "user", id: "u" },
+      discover,
+    });
+    const url = new URL(result.authUrl);
+    expect(url.searchParams.get("code_challenge_method")).toBe("plain");
+    // RFC 7636 §4.2 — plain challenge equals the verifier verbatim.
+    const challenge = url.searchParams.get("code_challenge");
+    const stored = await store.get(result.state);
+    expect(challenge).toBe(stored?.codeVerifier ?? "");
+    expect(challenge).toMatch(/^[A-Za-z0-9_-]+$/);
+  });
+
   it("resolves missing endpoints from issuer discovery (RFC 8414 / OIDC)", async () => {
     const discover = (async () => ({
       authorizationEndpoint: "https://disco.example.com/authorize",

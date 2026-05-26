@@ -64,6 +64,11 @@ function planSubprocess(spec: IntegrationSpawnSpec, bundleRoot: string): Subproc
     throw new Error("integration-runtime-adapter-process: spec has no server to spawn");
   }
   const t = server.type;
+  if (!t) {
+    throw new Error(
+      "integration-runtime-adapter-process: server.type required for local-source spawn",
+    );
+  }
   const cfg = HOST_INTERPRETER_BY_TYPE[t];
   if (!cfg) {
     throw new Error(

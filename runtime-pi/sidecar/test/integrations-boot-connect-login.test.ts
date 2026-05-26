@@ -121,6 +121,7 @@ function spec(overrides?: Partial<IntegrationSpawnSpec>): IntegrationSpawnSpec {
   return {
     integrationId: "@orga/wajax",
     namespace: "@orga/wajax",
+    sourceKind: "local",
     manifest: {
       name: "@orga/wajax",
       version: "0.1.0",

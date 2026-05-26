@@ -2,10 +2,12 @@
 
 /**
  * Spawn resolver — `source.kind: "remote"` (Phase 7 Streamable HTTP MCP) and
- * the source-discriminant error guards. A remote integration emits a server
- * spec of `{ type: "http", url }` and deliberately drops `httpDeliveryAuths`
- * (the sidecar injects the token directly, no MITM listener). A remote source
- * missing its `source.remote` block yields no spawn.
+ * the source-discriminant error guards. A remote integration sets the spec's
+ * `sourceKind: "remote"`, emits a server spec of `{ url, transport }` (no
+ * `type` sentinel — dispatch keys on `sourceKind`), and deliberately drops
+ * `httpDeliveryAuths` (the sidecar injects the token directly, no MITM
+ * listener). A remote source missing its `source.remote` block yields no
+ * spawn.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -94,7 +96,7 @@ describe("resolveIntegrationSpawns — remote source", () => {
     ctx = await createTestContext({ orgSlug: "orga" });
   });
 
-  it("emits a { type: http, url } server spec and drops httpDeliveryAuths", async () => {
+  it("emits sourceKind=remote with a { url, transport } server spec and drops httpDeliveryAuths", async () => {
     await seed(true);
     const specs = await resolveIntegrationSpawns({
       applicationId: ctx.defaultAppId,
@@ -103,8 +105,8 @@ describe("resolveIntegrationSpawns — remote source", () => {
     });
     expect(specs.length).toBe(1);
     const spec = specs[0]!;
+    expect(spec.sourceKind).toBe("remote");
     expect(spec.manifest.server).toEqual({
-      type: "http",
       url: "https://mcp.example.com/mcp/v1",
       transport: "streamable-http",
     });

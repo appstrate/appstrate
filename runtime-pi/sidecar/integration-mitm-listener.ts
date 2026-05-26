@@ -53,6 +53,10 @@
  */
 
 import { createServer as netCreateServer, connect as netConnect, type Socket } from "node:net";
+// TODO(AFPS 2.0 migration): drop camelCase fallback after one release window.
+// The listener consumes the typed `MitmCredentialSource` only — wire-level
+// snake_case / camelCase normalization happens upstream in
+// `integration-credentials-source.normalizeIntegrationCredentialsWire`.
 import type {
   HttpDeliveryPlan,
   IntegrationCredentialsPayload,

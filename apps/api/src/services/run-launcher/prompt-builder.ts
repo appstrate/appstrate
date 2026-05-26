@@ -25,13 +25,18 @@
 
 import type { AppstrateRunPlan } from "./types.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
-import { buildPlatformPromptInputs, renderPlatformPrompt } from "@appstrate/afps-runtime/bundle";
+import {
+  buildPlatformPromptInputs,
+  renderPlatformPrompt,
+  type PlatformPromptIntegration,
+} from "@appstrate/afps-runtime/bundle";
 import { sanitizeStorageKey } from "../file-storage.ts";
+import { fetchIntegrationPromptDocs } from "../integration-service.ts";
 
-export function buildPlatformSystemPrompt(
+export async function buildPlatformSystemPrompt(
   context: ExecutionContext,
   plan: AppstrateRunPlan,
-): string {
+): Promise<string> {
   const uploads = plan.files?.map((f) => ({
     name: f.name,
     path: `./documents/${sanitizeStorageKey(f.name)}`,
@@ -39,10 +44,30 @@ export function buildPlatformSystemPrompt(
     ...(f.type ? { type: f.type } : {}),
   }));
 
+  // Phase 1.4 — inline each resolved integration's manifest description +
+  // INTEGRATION.md (AFPS 2.0 §3.5) so the LLM can read the integration's
+  // API contract alongside the `{ns}__*` tools advertised via MCP
+  // `tools/list`. Docs are pulled from `packages.draftContent` (captured
+  // at install time by `core/zip.ts`) — never re-fetched from storage.
+  let integrations: PlatformPromptIntegration[] | undefined;
+  if (plan.integrations && plan.integrations.length > 0) {
+    const docs = await fetchIntegrationPromptDocs(plan.integrations.map((i) => i.integrationId));
+    const docsById = new Map(docs.map((d) => [d.packageId, d]));
+    integrations = plan.integrations.map((spec) => {
+      const found = docsById.get(spec.integrationId);
+      return {
+        id: spec.integrationId,
+        ...(found?.description ? { description: found.description } : {}),
+        ...(found?.doc ? { doc: found.doc } : {}),
+      };
+    });
+  }
+
   const inputs = buildPlatformPromptInputs(plan.bundle, context, {
     platformName: "Appstrate",
     timeoutSeconds: plan.timeout,
     ...(uploads ? { uploads } : {}),
+    ...(integrations && integrations.length > 0 ? { integrations } : {}),
   });
 
   // The agent's tools — runtime-wired (`run_history`, `recall_memory`),

@@ -55,6 +55,8 @@ export const agentsPaths = {
                     running_runs: 1,
                     dependencies: {
                       skills: {},
+                      mcp_servers: {},
+                      integrations: {},
                     },
                   },
                   {
@@ -71,6 +73,8 @@ export const agentsPaths = {
                     running_runs: 0,
                     dependencies: {
                       skills: { "@appstrate/summarize": "^1.0.0" },
+                      mcp_servers: { "@appstrate/filesystem-mcp": "^1.0.0" },
+                      integrations: { "@appstrate/github": "^2.0.0" },
                     },
                   },
                 ],

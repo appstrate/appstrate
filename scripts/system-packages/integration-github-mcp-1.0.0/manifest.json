@@ -185,7 +185,7 @@
       }
     }
   },
-  "tools": {
+  "tools_policy": {
     "get_me": {
       "required_scopes": ["read:user"],
       "required_auth_key": "oauth"

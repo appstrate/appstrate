@@ -27,6 +27,7 @@ function fakeIntegration(id: string): IntegrationSpawnSpec {
   return {
     integrationId: id,
     namespace: id.replace(/[^a-z]/gi, ""),
+    sourceKind: "local",
     manifest: { name: id, version: "1.0.0" },
     spawnEnv: {},
     toolAllowlist: [],
