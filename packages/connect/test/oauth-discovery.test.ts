@@ -1,8 +1,13 @@
 // Copyright 2025-2026 Appstrate
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect } from "bun:test";
-import { resolveOAuthEndpoints } from "../src/oauth-discovery.ts";
+import { describe, it, expect, beforeEach } from "bun:test";
+import { resolveOAuthEndpoints, __clearOAuthDiscoveryCache } from "../src/oauth-discovery.ts";
+
+beforeEach(() => {
+  // Reset the per-issuer discovery cache so each test sees a clean slate.
+  __clearOAuthDiscoveryCache();
+});
 
 function withFetch<T>(impl: typeof fetch, fn: () => Promise<T>): Promise<T> {
   const orig = globalThis.fetch;
@@ -20,13 +25,17 @@ function jsonResponse(obj: unknown, status = 200): Response {
 }
 
 describe("resolveOAuthEndpoints — discovery vs manual", () => {
-  it("returns manual endpoints unchanged without any fetch when both are present", async () => {
-    let called = false;
+  it("returns manual endpoints unchanged (manual wins over discovery — AFPS §7.3)", async () => {
+    // Per AFPS §7.3 + M4 enrichment: discovery DOES run when issuer is
+    // declared (to project userinfo / PKCE caps), but manual endpoints are
+    // authoritative — the discovered values must never override them.
     const result = await withFetch(
-      (async () => {
-        called = true;
-        return jsonResponse({});
-      }) as unknown as typeof fetch,
+      (async () =>
+        jsonResponse({
+          issuer: "https://idp.example.com",
+          authorization_endpoint: "https://disco/authorize",
+          token_endpoint: "https://disco/token",
+        })) as unknown as typeof fetch,
       () =>
         resolveOAuthEndpoints({
           issuer: "https://idp.example.com",
@@ -34,7 +43,6 @@ describe("resolveOAuthEndpoints — discovery vs manual", () => {
           tokenEndpoint: "https://idp.example.com/token",
         }),
     );
-    expect(called).toBe(false);
     expect(result.authorizationEndpoint).toBe("https://idp.example.com/authorize");
     expect(result.tokenEndpoint).toBe("https://idp.example.com/token");
   });
@@ -306,5 +314,87 @@ describe("resolveOAuthEndpoints — discovery vs manual", () => {
     );
     expect(result.tokenEndpoint).toBe("https://manual/token");
     expect(result.authorizationEndpoint).toBeUndefined();
+  });
+
+  // ─── M4 — enrichment when both endpoints are manually declared ───
+  // AFPS §7.3 keeps discovery as enrichment. When the manifest declares both
+  // endpoints AND the issuer, discovery MUST still run so callers learn the
+  // IdP's `userinfo_endpoint` + `code_challenge_methods_supported`. Manual
+  // endpoints stay authoritative.
+
+  it("enriches with userinfo_endpoint when both endpoints are manual + discovery succeeds", async () => {
+    const result = await withFetch(
+      (async () =>
+        jsonResponse({
+          issuer: "https://idp.example.com",
+          // Discovery declares its own endpoints — the manual ones MUST win.
+          authorization_endpoint: "https://disco/authorize",
+          token_endpoint: "https://disco/token",
+          userinfo_endpoint: "https://idp.example.com/userinfo",
+          code_challenge_methods_supported: ["S256"],
+        })) as unknown as typeof fetch,
+      () =>
+        resolveOAuthEndpoints({
+          issuer: "https://idp.example.com",
+          authorizationEndpoint: "https://manual/authorize",
+          tokenEndpoint: "https://manual/token",
+        }),
+    );
+    // Manual endpoints win.
+    expect(result.authorizationEndpoint).toBe("https://manual/authorize");
+    expect(result.tokenEndpoint).toBe("https://manual/token");
+    // Enrichment fields surface from discovery.
+    expect(result.userinfoEndpoint).toBe("https://idp.example.com/userinfo");
+    expect(result.codeChallengeMethodsSupported).toEqual(["S256"]);
+  });
+
+  it("falls back silently to manual endpoints when discovery fails", async () => {
+    const result = await withFetch(
+      (async () => {
+        throw new TypeError("ConnectionRefused");
+      }) as unknown as typeof fetch,
+      () =>
+        resolveOAuthEndpoints({
+          issuer: "https://idp.example.com",
+          authorizationEndpoint: "https://manual/authorize",
+          tokenEndpoint: "https://manual/token",
+        }),
+    );
+    // No error thrown; manual endpoints preserved unchanged.
+    expect(result.authorizationEndpoint).toBe("https://manual/authorize");
+    expect(result.tokenEndpoint).toBe("https://manual/token");
+    // No enrichment available — fields undefined.
+    expect(result.userinfoEndpoint).toBeUndefined();
+    expect(result.codeChallengeMethodsSupported).toBeUndefined();
+  });
+
+  it("caches discovery results per issuer — second call hits cache, no further fetches", async () => {
+    let fetchCountBeforeSecondCall = 0;
+    let fetchCountAfterSecondCall = 0;
+    let secondCallStarted = false;
+    await withFetch(
+      (async () => {
+        if (secondCallStarted) fetchCountAfterSecondCall += 1;
+        else fetchCountBeforeSecondCall += 1;
+        return jsonResponse({
+          issuer: "https://idp.example.com",
+          authorization_endpoint: "https://idp.example.com/oauth/authorize",
+          token_endpoint: "https://idp.example.com/oauth/token",
+          userinfo_endpoint: "https://idp.example.com/userinfo",
+          code_challenge_methods_supported: ["S256"],
+        });
+      }) as unknown as typeof fetch,
+      async () => {
+        const r1 = await resolveOAuthEndpoints({ issuer: "https://idp.example.com" });
+        secondCallStarted = true;
+        const r2 = await resolveOAuthEndpoints({ issuer: "https://idp.example.com" });
+        expect(r1.userinfoEndpoint).toBe("https://idp.example.com/userinfo");
+        expect(r2.userinfoEndpoint).toBe("https://idp.example.com/userinfo");
+      },
+    );
+    // First call: at least one fetch (could be 1+ if probes 404 first).
+    expect(fetchCountBeforeSecondCall).toBeGreaterThanOrEqual(1);
+    // Second call: served entirely from cache, zero further fetches.
+    expect(fetchCountAfterSecondCall).toBe(0);
   });
 });

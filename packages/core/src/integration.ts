@@ -79,6 +79,34 @@ export type IntegrationUploadProtocol = string;
  *      declares `required_scopes` on a multi-auth integration MUST disambiguate
  *      with `required_auth_key`.
  */
+/**
+ * Walk an arbitrary JSON-Schema-like object tree and emit the path of every
+ * `$ref` whose string value does NOT start with `#`. Used by the §7.5 / §8.7
+ * SSRF guard to forbid non-fragment `$ref` inside `credentials.schema` —
+ * external `$ref` would otherwise let a malicious manifest steer the validator
+ * into a network fetch at install time.
+ */
+function walkForNonFragmentRefs(
+  node: unknown,
+  path: (string | number)[],
+  emit: (path: (string | number)[]) => void,
+): void {
+  if (Array.isArray(node)) {
+    node.forEach((item, i) => walkForNonFragmentRefs(item, [...path, i], emit));
+    return;
+  }
+  if (node && typeof node === "object") {
+    const obj = node as Record<string, unknown>;
+    if (typeof obj.$ref === "string" && !obj.$ref.startsWith("#")) {
+      emit([...path, "$ref"]);
+    }
+    for (const [k, v] of Object.entries(obj)) {
+      if (k === "$ref") continue;
+      walkForNonFragmentRefs(v, [...path, k], emit);
+    }
+  }
+}
+
 export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefine((m, ctx) => {
   const manifest = m as unknown as IntegrationManifest;
   const auths = manifest.auths ?? {};
@@ -93,6 +121,53 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
           "auths.{key}.authorized_uris must declare at least one URI pattern (or set allow_all_uris)",
         path: ["auths", authKey, "authorized_uris"],
       });
+    }
+
+    // (1b) §7.5 / §8.7 SSRF guard — credentials.schema $ref MUST be a local
+    // fragment-only pointer. External `$ref` would let a malicious manifest
+    // trigger validator-side fetches at install/validation time.
+    const credentialsSchema = (auth as { credentials?: { schema?: unknown } }).credentials?.schema;
+    if (credentialsSchema && typeof credentialsSchema === "object") {
+      walkForNonFragmentRefs(credentialsSchema, [], (detectedPath) => {
+        ctx.addIssue({
+          code: "custom",
+          message:
+            "Non-fragment $ref in credentials.schema is forbidden (AFPS §7.5 / §8.7 SSRF guard)",
+          path: ["auths", authKey, "credentials", "schema", ...detectedPath],
+        });
+      });
+    }
+
+    // (1c) §7.6 install gate — `delivery.http.in` other than "header" is not
+    // yet implemented by the Appstrate sidecar MITM injector (only "header"
+    // dispatch exists in `packages/connect/src/afps-delivery.ts`). Rejecting
+    // at install time gives manifest authors a loud error instead of a
+    // silent runtime no-op.
+    const httpDelivery = (auth as { delivery?: { http?: { in?: string } } }).delivery?.http;
+    if (httpDelivery?.in !== undefined && httpDelivery.in !== "header") {
+      ctx.addIssue({
+        code: "custom",
+        message: `delivery.http.in "${httpDelivery.in}" is not yet supported by the Appstrate runtime — only "header" is implemented. Track in CHANGELOG.`,
+        path: ["auths", authKey, "delivery", "http", "in"],
+      });
+    }
+
+    // (1d) §7.2 + §7.6 install gate — `mtls` + `delivery.http` cannot be
+    // honoured: the MITM proxy terminates upstream TLS and re-fetches, so
+    // there is no first-class way to drive a client-cert handshake on the
+    // upstream leg. Reject at install time; the integration author should
+    // use `delivery.files` to deliver the cert + key to the spawned runner
+    // and let the runner's own HTTP client perform the mtls handshake.
+    if (auth.type === "mtls") {
+      const mtlsHttp = (auth as { delivery?: { http?: unknown } }).delivery?.http;
+      if (mtlsHttp !== undefined) {
+        ctx.addIssue({
+          code: "custom",
+          message:
+            "mtls + delivery.http is not supported — the MITM proxy cannot perform mtls on the upstream handshake. Use delivery.files instead.",
+          path: ["auths", authKey, "delivery", "http"],
+        });
+      }
     }
 
     // connect.login output gating (§7.7): a delivery.* value template may
@@ -732,7 +807,8 @@ export type ConnectionResolutionErrorCode =
   | "pinned_connection_unavailable"
   | "override_connection_unavailable"
   | "must_choose_connection"
-  | "insufficient_scopes";
+  | "insufficient_scopes"
+  | "auth_key_mismatch";
 
 /** One unresolved integration plus structured detail. */
 export interface ConnectionResolutionError {
@@ -746,6 +822,17 @@ export interface ConnectionResolutionError {
   missingScopes?: string[];
   /** True when the resolved connection belongs to the current actor. */
   ownedByActor?: boolean;
+  /**
+   * AFPS 2.0 §4.1 — agent dep's pinned `auth_key` when
+   * `code === "auth_key_mismatch"`.
+   */
+  requiredAuthKey?: string;
+  /**
+   * The `auth_key` values present on the actor's candidate connections
+   * for this integration when `code === "auth_key_mismatch"`. Empty when
+   * the actor has no connections at all on this integration.
+   */
+  availableAuthKeys?: string[];
   message: string;
 }
 

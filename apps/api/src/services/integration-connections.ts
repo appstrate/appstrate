@@ -272,13 +272,21 @@ async function loadAccessibleConnectionById(
  * Multi-candidate ambiguity is resolved by iteration order (declared-auth
  * precedence); call sites needing deterministic disambiguation go through
  * `resolveConnectionsForRun`.
+ *
+ * `requiredAuthKey` (AFPS 2.0 §4.1) — when set, narrows iteration to that
+ * single auth key. The dep's `auth_key` pin must beat the manifest's
+ * declared-auth precedence on the live-credentials path; this is the
+ * non-snapshot mirror of the resolver's pre-cascade filter.
  */
 async function pickAnyAccessibleConnection(
   packageId: string,
   declaredAuthKeys: string[],
-  context: { applicationId: string; actor: Actor },
+  context: { applicationId: string; actor: Actor; requiredAuthKey?: string },
 ): Promise<ResolvedConnectionRow | null> {
-  for (const authKey of declaredAuthKeys) {
+  const keys = context.requiredAuthKey
+    ? declaredAuthKeys.filter((k) => k === context.requiredAuthKey)
+    : declaredAuthKeys;
+  for (const authKey of keys) {
     const row = await loadActorConnection(packageId, authKey, context);
     if (row) return { ...row, authKey };
   }
@@ -296,7 +304,7 @@ export async function selectAccessibleConnection(
   packageId: string,
   declaredAuthKeys: string[],
   snapshotConnectionId: string | null,
-  context: { applicationId: string; actor: Actor },
+  context: { applicationId: string; actor: Actor; requiredAuthKey?: string },
 ): Promise<ResolvedConnectionRow | null> {
   return snapshotConnectionId
     ? loadAccessibleConnectionById(snapshotConnectionId, context)

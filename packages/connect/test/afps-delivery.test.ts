@@ -133,4 +133,27 @@ describe("resolveAfpsHttpDelivery — value-template resolution", () => {
       allowServerOverride: false,
     });
   });
+
+  it("Zendesk-style basic vendor pattern — prefix kept uncoded, value base64'd (§7.6)", () => {
+    // §7.6 spec-text reads "applied to the rendered prefix+value before
+    // placement", but the §7.6 commented example shows the output as
+    // `Basic <base64(email/token:apikey)>` — prefix unencoded, value
+    // base64'd. We resolve the ambiguity in favour of the example (matches
+    // RFC 7617 HTTP Basic). This test pins that behaviour so a future
+    // refactor doesn't silently flip the encoding scope.
+    const plan = resolveAfpsHttpDelivery(
+      "basic",
+      { email: "alice@example.com", api_key: "ABC" },
+      {
+        in: "header",
+        name: "Authorization",
+        prefix: "Basic ",
+        value: "{$credential.email}/token:{$credential.api_key}",
+        encoding: "base64",
+      },
+    );
+    expect(plan!.headerName).toBe("Authorization");
+    expect(plan!.headerPrefix).toBe("Basic ");
+    expect(plan!.value).toBe(Buffer.from("alice@example.com/token:ABC", "utf8").toString("base64"));
+  });
 });

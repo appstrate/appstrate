@@ -9,6 +9,9 @@
  * minimal MCP stdio handshake (`initialize` → `tools/list`). The probe
  * tells the publish pipeline whether the server actually runs under
  * Bun — which is the platform's chosen Node-compatible runtime (D31).
+ * Operates on the AFPS-native mcp-server manifest (MCPB-vocabulary
+ * `server` / `tools` / `user_config` fields lifted to the root alongside
+ * AFPS identity — see AFPS §3.4).
  * When the probe fails, the bundle is marked `_meta.bunCompat: false`
  * and the caller can fall back to `server.type: "docker"` against a
  * Node-on-Docker image.

@@ -60,26 +60,38 @@ describe("validateManifest", () => {
     expect(result.errors.length).toBeGreaterThan(0);
   });
 
-  it("missing type field surfaces all base-schema errors", () => {
-    // Without a `type`, validateManifest falls through to the base schema and
-    // lets Zod aggregate every missing/invalid field in one pass, instead of
-    // short-circuiting on `type` alone.
+  it("missing type field rejects with a typed Unknown package type error", () => {
+    // Without a `type`, validateManifest fails fast with a single typed Zod
+    // issue keyed on `type` rather than running the permissive base schema.
+    // This makes the dispatcher's contract explicit: `type` is the AFPS 2.0
+    // discriminator and MUST be one of agent|skill|mcp-server|integration.
     const { type: _, ...noType } = validAgentManifest();
     const result = validateManifest(noType);
     expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.startsWith("type:"))).toBe(true);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toMatch(/^type:.*Unknown package type/);
   });
 
-  it("empty manifest surfaces every missing base field at once", () => {
-    // The base `manifestSchema` requires name/version/type. Without `type`,
-    // dispatch falls through to the base schema and Zod emits all three
-    // missing-field errors together instead of stopping on `type`.
+  it("empty manifest emits the single dispatcher-level Unknown package type error", () => {
+    // The dispatcher fails fast before the base schema runs, so we get one
+    // typed error instead of an aggregate of name/version/type misses.
     const result = validateManifest({});
     expect(result.valid).toBe(false);
-    const fields = result.errors.map((e) => e.split(":")[0]);
-    expect(fields).toContain("type");
-    expect(fields).toContain("name");
-    expect(fields).toContain("version");
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toMatch(/^type:.*Unknown package type/);
+  });
+
+  it("legacy `tool` / `provider` types produce the typed Unknown package type error", () => {
+    // AFPS 2.0 Appendix D removed `tool` (→ `mcp-server`) and `provider` (→
+    // `integration`). Manifests carrying the old strings must fail with the
+    // single typed dispatcher error rather than a list of partial errors from
+    // the permissive base schema.
+    for (const legacy of ["tool", "provider"]) {
+      const result = validateManifest({ name: "@x/y", version: "1.0.0", type: legacy });
+      expect(result.valid).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toMatch(/^type:.*Unknown package type/);
+    }
   });
 
   it("invalid scoped name format", () => {
@@ -521,15 +533,15 @@ describe("validateManifest — package-type dispatch", () => {
         mcp_config: { command: "node" },
       },
     });
-    // No root `type` → falls through to base manifest schema which rejects it.
+    // No root `type` → dispatcher fails fast with the typed Unknown-package-type
+    // error (AFPS 2.0 requires `type` as the discriminator).
     expect(r.valid).toBe(false);
   });
 
   it("rejects an mcp-server carrying only the legacy _meta identity (AFPS 2.0.2 removed it)", () => {
     // Pre-2.0.2 producers may still emit `_meta["dev.afps/mcp-server"]`. The
     // new dispatch ignores it entirely — without a root `type: "mcp-server"`,
-    // the manifest is not routed to the mcp-server schema and the base
-    // manifest schema must reject the now-unrecognised shape.
+    // the dispatcher fails fast with the typed Unknown-package-type error.
     const r = validateManifest({
       manifest_version: "0.3",
       name: "fetch-json",

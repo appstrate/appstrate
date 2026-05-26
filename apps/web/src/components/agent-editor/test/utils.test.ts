@@ -11,7 +11,9 @@ import {
   fieldsToSchema,
   manifestToSchemaFields,
   manifestToMetadata,
+  metadataToManifestPatch,
   getRuntimeTools,
+  setRuntimeTools,
 } from "../utils";
 import type { SchemaField } from "../schema-section";
 import type { JSONSchemaObject } from "@appstrate/core/form";
@@ -659,5 +661,150 @@ describe("getResourceEntries — providersConfiguration v1 alias", () => {
       version: "^1.0.0",
       tools: ["new_canonical"],
     });
+  });
+});
+
+// ─── T10 (Wave 3) — M8 writer strips legacy camelCase siblings ──
+//
+// Pin the M8 fix: `metadataToManifestPatch` and `setRuntimeTools` MUST drop
+// the legacy 1.x camelCase sibling on every write so re-saving a 1.x manifest
+// migrates it forward. `metadataToManifestPatch` emits `displayName: undefined`
+// alongside canonical `display_name`; under JSON.stringify (the persistence
+// boundary), `undefined` properties are omitted so the persisted manifest
+// carries only the canonical key. `setRuntimeTools` calls `delete` directly.
+
+describe("T10 — M8 writer drops legacy camelCase siblings", () => {
+  it("metadataToManifestPatch — `displayName` drops out of JSON.stringify(merge(m, patch))", () => {
+    const legacy: Record<string, unknown> = {
+      name: "@test/agent",
+      version: "1.0.0",
+      type: "agent",
+      displayName: "Legacy Name",
+      display_name: "Legacy Name",
+    };
+    const patch = metadataToManifestPatch({
+      id: "agent",
+      scope: "test",
+      version: "1.0.0",
+      displayName: "New Canonical",
+      description: "",
+      author: "",
+      keywords: [],
+    });
+    // Shallow-merge (matches the editor's `updateManifest({ ...m, ...patch })`)
+    const merged = { ...legacy, ...patch };
+    // displayName is set to undefined in the patch → drops on JSON.stringify
+    const serialized = JSON.parse(JSON.stringify(merged)) as Record<string, unknown>;
+    expect(serialized.display_name).toBe("New Canonical");
+    expect(serialized).not.toHaveProperty("displayName");
+  });
+
+  it("setRuntimeTools — DELETES `runtimeTools` when writing snake_case", () => {
+    const legacy: Record<string, unknown> = {
+      runtimeTools: ["output", "log"],
+    };
+    setRuntimeTools(legacy, ["output"]);
+    expect(legacy.runtime_tools).toEqual(["output"]);
+    expect(legacy).not.toHaveProperty("runtimeTools");
+  });
+
+  it("setRuntimeTools — drops `runtimeTools` even when canonical was already present", () => {
+    const mixed: Record<string, unknown> = {
+      runtime_tools: ["output"],
+      runtimeTools: ["note"],
+    };
+    setRuntimeTools(mixed, ["output", "log"]);
+    expect(mixed.runtime_tools).toEqual(["output", "log"]);
+    expect(mixed).not.toHaveProperty("runtimeTools");
+  });
+
+  it("setRuntimeTools — empty selection drops BOTH keys", () => {
+    const mixed: Record<string, unknown> = {
+      runtime_tools: ["output"],
+      runtimeTools: ["note"],
+    };
+    setRuntimeTools(mixed, []);
+    expect(mixed).not.toHaveProperty("runtime_tools");
+    expect(mixed).not.toHaveProperty("runtimeTools");
+  });
+
+  it("fieldsToSchema — wrapper output has NO camelCase keys (legacy fileConstraints/uiHints/propertyOrder/maxSize)", () => {
+    const fields: SchemaField[] = [
+      {
+        _id: "1",
+        key: "doc",
+        type: "string",
+        isFile: true,
+        description: "Document",
+        required: false,
+        accept: ".pdf",
+        maxSize: "10485760",
+        multiple: false,
+        maxFiles: "",
+        placeholder: "",
+        default: "",
+      },
+      {
+        _id: "2",
+        key: "q",
+        type: "string",
+        description: "Query",
+        required: true,
+        placeholder: "type…",
+        default: "",
+      },
+    ];
+    const wrapper = fieldsToSchema(fields, "input");
+    expect(wrapper).not.toBeNull();
+    // Canonical snake_case keys present
+    expect(wrapper).toHaveProperty("file_constraints");
+    expect(wrapper).toHaveProperty("ui_hints");
+    expect(wrapper).toHaveProperty("property_order");
+    // Legacy camelCase keys absent at the wrapper level
+    expect(wrapper).not.toHaveProperty("fileConstraints");
+    expect(wrapper).not.toHaveProperty("uiHints");
+    expect(wrapper).not.toHaveProperty("propertyOrder");
+    // And per-property maxSize is NOT in any FileConstraint
+    for (const fc of Object.values(wrapper!.file_constraints ?? {})) {
+      expect(fc).not.toHaveProperty("maxSize");
+      expect(fc).toHaveProperty("max_size");
+    }
+  });
+
+  it("fieldsToSchema — when caller replaces the wrapper wholesale, legacy keys vanish from the persisted manifest", () => {
+    // Simulates: previous manifest carries legacy wrapper keys; editor
+    // computes a fresh wrapper via `fieldsToSchema` and the caller does
+    // `updateManifest({ input: wrapper })` (replace, not merge).
+    const legacyManifest: Record<string, unknown> = {
+      input: {
+        schema: { type: "object", properties: { x: { type: "string" } } },
+        fileConstraints: { x: { accept: ".pdf", maxSize: 1000 } },
+        uiHints: { x: { placeholder: "legacy" } },
+        propertyOrder: ["x"],
+      },
+    };
+    const wrapper = fieldsToSchema(
+      [
+        {
+          _id: "1",
+          key: "x",
+          type: "string",
+          description: "X",
+          required: false,
+          placeholder: "new",
+          default: "",
+        },
+      ],
+      "input",
+    );
+    legacyManifest.input = wrapper;
+    // Round-trip via JSON to mimic persistence
+    const persisted = JSON.parse(JSON.stringify(legacyManifest)) as Record<string, unknown>;
+    const input = persisted.input as Record<string, unknown>;
+    expect(input).not.toHaveProperty("fileConstraints");
+    expect(input).not.toHaveProperty("uiHints");
+    expect(input).not.toHaveProperty("propertyOrder");
+    expect(input).toHaveProperty("ui_hints");
+    expect(input).toHaveProperty("property_order");
   });
 });

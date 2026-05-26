@@ -197,16 +197,16 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      auths: Array<{ authKey: string; authType: string; fields: Record<string, string> }>;
-      deliveryPlans: Record<string, unknown>;
+      auths: Array<{ auth_key: string; auth_type: string; fields: Record<string, string> }>;
+      delivery_plans: Record<string, unknown>;
     };
     expect(body.auths).toHaveLength(1);
-    expect(body.auths[0]!.authKey).toBe("primary");
-    expect(body.auths[0]!.authType).toBe("api_key");
+    expect(body.auths[0]!.auth_key).toBe("primary");
+    expect(body.auths[0]!.auth_type).toBe("api_key");
     // Decrypted credential payload reaches the sidecar — this IS the surface.
     expect(body.auths[0]!.fields.api_key).toBe("live-secret-value");
     // Delivery plan derived from manifest.auths.primary.delivery.http.
-    expect(body.deliveryPlans.primary).toBeDefined();
+    expect(body.delivery_plans.primary).toBeDefined();
   });
 
   it("ALLOW: returns empty auths when the integration declares no auths", async () => {
@@ -226,10 +226,10 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       auths: unknown[];
-      deliveryPlans: Record<string, unknown>;
+      delivery_plans: Record<string, unknown>;
     };
     expect(body.auths).toEqual([]);
-    expect(body.deliveryPlans).toEqual({});
+    expect(body.delivery_plans).toEqual({});
   });
 });
 
@@ -342,7 +342,7 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      auths: Array<{ authKey: string; fields: Record<string, string> }>;
+      auths: Array<{ auth_key: string; fields: Record<string, string> }>;
     };
     expect(body.auths).toHaveLength(1);
     expect(body.auths[0]!.fields.api_key).toBe("live-secret-value");

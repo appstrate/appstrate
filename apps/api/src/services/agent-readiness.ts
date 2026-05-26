@@ -197,6 +197,17 @@ export function translateResolutionError(e: ConnectionResolutionError): Validati
           ...(e.ownedByActor !== undefined ? { owned_by_actor: e.ownedByActor } : {}),
         }
       : {}),
+    // AFPS 2.0 §4.1 — surface the pinned `auth_key` (the agent dep's choice)
+    // and which auth_keys the actor's existing connections use, so the UI
+    // can guide the user to connect via the right auth method.
+    ...(e.code === "auth_key_mismatch"
+      ? {
+          ...(e.requiredAuthKey ? { required_auth_key: e.requiredAuthKey } : {}),
+          ...(e.availableAuthKeys && e.availableAuthKeys.length > 0
+            ? { available_auth_keys: e.availableAuthKeys }
+            : {}),
+        }
+      : {}),
   } as ValidationFieldError;
 }
 
@@ -208,6 +219,7 @@ const TITLE_BY_CODE: Record<ConnectionResolutionError["code"], string> = {
   override_connection_unavailable: "Override Connection Unavailable",
   must_choose_connection: "Multiple Connections Available — Pick One",
   insufficient_scopes: "Insufficient Permissions",
+  auth_key_mismatch: "Connection Auth Method Mismatch",
 };
 
 /**

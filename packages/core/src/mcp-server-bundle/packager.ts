@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Deterministic ZIP packager for mcp-server bundles.
+ * Deterministic ZIP packager for AFPS-native mcp-server bundles (the
+ * manifest carries MCPB-vocabulary `server` / `tools` / `user_config`
+ * fields lifted to the root alongside AFPS identity — not a strict-MCPB
+ * bundle; see AFPS §3.4).
  *
  * Plain `zipArtifact` (and fflate by default) embeds the current time
  * in each entry's mtime field, which breaks bit-for-bit

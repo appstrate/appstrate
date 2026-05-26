@@ -60,6 +60,9 @@
     },
     "//#build:system-packages:check": {
       "cache": false
+    },
+    "//#lint:afps-1x": {
+      "cache": false
     }
   }
 }

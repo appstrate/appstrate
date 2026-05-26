@@ -334,16 +334,22 @@ describe("initiateIntegrationOAuth", () => {
     expect(stored?.integration?.tokenEndpoint).toBe("https://disco.example.com/token");
   });
 
-  it("manual endpoints override discovery — discovery never runs when both are present", async () => {
-    // Real resolver (no injected hook): when both endpoints are present the
-    // resolver short-circuits without any fetch, so discovery cannot override.
-    // We additionally fail the test if `fetch` is touched at all.
-    let fetchCalled = false;
+  it("manual endpoints override discovery (AFPS §7.3 — manual wins, discovery enriches)", async () => {
+    // Per M4 / AFPS §7.3: when `issuer` is declared, discovery DOES run (to
+    // project userinfo / PKCE caps), but manual endpoints are authoritative
+    // and the discovered values must never override them. The resolver may
+    // touch `fetch`; what matters is that the resulting endpoints are the
+    // manual ones.
     const result = await withFetch(
-      (async () => {
-        fetchCalled = true;
-        return new Response("{}", { status: 200 });
-      }) as unknown as typeof fetch,
+      (async () =>
+        new Response(
+          JSON.stringify({
+            issuer: "https://disco.example.com",
+            authorization_endpoint: "https://disco.example.com/authorize",
+            token_endpoint: "https://disco.example.com/token",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        )) as unknown as typeof fetch,
       () =>
         initiateIntegrationOAuth(store, {
           packageId: "@x/y",
@@ -359,7 +365,6 @@ describe("initiateIntegrationOAuth", () => {
           actor: { type: "user", id: "u" },
         }),
     );
-    expect(fetchCalled).toBe(false);
     expect(new URL(result.authUrl).origin).toBe("https://manual.example.com");
     const stored = await store.get(result.state);
     expect(stored?.integration?.tokenEndpoint).toBe("https://manual.example.com/token");

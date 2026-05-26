@@ -85,10 +85,17 @@ function OAuthClientForm({
   packageId,
   authKey,
   authDecl,
+  legacyCallbackUrlHint,
 }: {
   packageId: string;
   authKey: string;
   authDecl?: IntegrationManifestAuth;
+  /**
+   * Deprecated top-level `setup_guide.callback_url_hint` fallback. AFPS §7.10
+   * moved this hint under `auths.<key>.callback_url_hint`, but consumers MUST
+   * keep accepting the old top-level form for manifests in the wild.
+   */
+  legacyCallbackUrlHint?: string;
 }) {
   const { t } = useTranslation("settings");
   const { data: client, isLoading } = useIntegrationOAuthClient(packageId, authKey);
@@ -197,11 +204,13 @@ function OAuthClientForm({
                 onChange={(e) => setRedirectUri(e.target.value)}
                 placeholder={client?.redirect_uri ?? ""}
               />
-              {/* AFPS 2.0 §7.10 — surface `auths.<key>.callback_url_hint` when
-                  the integration manifest declares one (publisher tip on
-                  what to register at the IdP). Read-only display; the actual
-                  redirectUri value lives in the input above. */}
-              {authDecl?.callback_url_hint && (
+              {/* AFPS 2.0 §7.10 — surface `auths.<key>.callback_url_hint`,
+                  falling back to the deprecated top-level
+                  `setup_guide.callback_url_hint` (consumers MUST keep
+                  accepting the legacy form for manifests in the wild).
+                  Read-only display; the actual redirectUri value lives in
+                  the input above. */}
+              {(authDecl?.callback_url_hint ?? legacyCallbackUrlHint) && (
                 <p
                   className="text-muted-foreground text-[0.7rem]"
                   data-testid={`callback-url-hint-${authKey}`}
@@ -209,7 +218,9 @@ function OAuthClientForm({
                   <span className="font-semibold">
                     {t("integration.oauthClient.callbackUrlHint")}:
                   </span>{" "}
-                  <span className="font-mono">{authDecl.callback_url_hint}</span>
+                  <span className="font-mono">
+                    {authDecl?.callback_url_hint ?? legacyCallbackUrlHint}
+                  </span>
                 </p>
               )}
             </div>
@@ -284,11 +295,14 @@ function AuthSection({
   status,
   authDecl,
   isAdmin,
+  legacyCallbackUrlHint,
 }: {
   packageId: string;
   status: IntegrationAuthStatus;
   authDecl: IntegrationManifestAuth;
   isAdmin: boolean;
+  /** Deprecated `setup_guide.callback_url_hint` fallback per AFPS §7.10. */
+  legacyCallbackUrlHint?: string;
 }) {
   const { t } = useTranslation("settings");
   const isOAuth = status.type === "oauth2";
@@ -340,12 +354,23 @@ function AuthSection({
           a fix that's right here, not in another tab. */}
       {isOAuth && isAdmin && (
         <div className="mb-3">
-          <OAuthClientForm packageId={packageId} authKey={status.auth_key} authDecl={authDecl} />
+          <OAuthClientForm
+            packageId={packageId}
+            authKey={status.auth_key}
+            authDecl={authDecl}
+            legacyCallbackUrlHint={legacyCallbackUrlHint}
+          />
         </div>
       )}
 
       {/* Connect button / locked state. A missing oauth2 client blocks
-          connecting: admins see the form above, members get a pointer. */}
+          connecting: admins see the form above, members get a pointer.
+          M11 — the integration detail page is admin-leaning per CLAUDE.md
+          "Integrations — connection model". User-facing connect lives on
+          agent surfaces (`AgentIntegrationsBlock` + `MissingConnectionsModal`)
+          where the per-agent scope context is known; here we only show the
+          "+ Ajouter" CTA to admins. Non-admins still see the auth metadata
+          (label, scopes, authorized_uris) as read-only context. */}
       {clientMissing ? (
         <p
           className="text-muted-foreground mb-2 text-xs"
@@ -353,7 +378,7 @@ function AuthSection({
         >
           {isAdmin ? t("integration.auth.noClientHintAdmin") : t("integration.auth.noClientHint")}
         </p>
-      ) : (
+      ) : isAdmin ? (
         <div className="mb-2 flex items-center justify-end">
           <InlineConnectButton
             packageId={packageId}
@@ -364,7 +389,7 @@ function AuthSection({
             lockToAuthKey
           />
         </div>
-      )}
+      ) : null}
       {status.connections.length === 0 ? (
         <p className="text-muted-foreground text-sm">{t("integration.auth.noConnection")}</p>
       ) : (
@@ -929,6 +954,50 @@ function ConnectionRow({
 }
 
 // ─────────────────────────────────────────────
+// Setup guide (admin-only)
+// ─────────────────────────────────────────────
+
+/**
+ * AFPS §7.10 — `setup_guide.steps` is the canonical place for integration
+ * publishers to describe IdP-side prerequisites (create an OAuth app, add a
+ * redirect URI, …). Rendered as an ordered list on the admin view next to
+ * the OAuth client form so the operator has the publisher's instructions at
+ * eye level. Each step is `{ label: string, url?: string }`; the `url`
+ * surfaces as a clickable link when present.
+ */
+function SetupGuideSteps({ steps }: { steps: ReadonlyArray<{ label: string; url?: string }> }) {
+  const { t } = useTranslation("settings");
+  if (steps.length === 0) return null;
+  return (
+    <section
+      className="bg-muted/20 mb-4 rounded-md border p-4"
+      data-testid="setup-guide-steps"
+      aria-label={t("integration.setup_guide.step_label")}
+    >
+      <h3 className="mb-2 text-sm font-semibold">{t("integration.setup_guide.title")}</h3>
+      <ol className="text-muted-foreground list-decimal space-y-1 pl-5 text-xs">
+        {steps.map((step, i) => (
+          <li key={i} data-testid={`setup-guide-step-${i}`}>
+            {step.url ? (
+              <a
+                href={step.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary underline"
+              >
+                {step.label}
+              </a>
+            ) : (
+              <span>{step.label}</span>
+            )}
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+// ─────────────────────────────────────────────
 // About + metadata blocks
 // ─────────────────────────────────────────────
 
@@ -1117,6 +1186,24 @@ export function IntegrationDetailPage() {
             <ActivationHint onActivate={onActivate} pending={activate.isPending} />
           ) : (
             <>
+              {/* AFPS §7.10 — admin-only setup_guide rendering. Surfaces
+                  publisher-authored prerequisites (OAuth app creation,
+                  redirect URI registration, …) next to the auth cards. */}
+              {isAdmin &&
+                (m as { setup_guide?: { steps?: Array<{ label: string; url?: string }> } })
+                  .setup_guide?.steps &&
+                (m as { setup_guide?: { steps?: Array<{ label: string; url?: string }> } })
+                  .setup_guide!.steps!.length > 0 && (
+                  <SetupGuideSteps
+                    steps={
+                      (
+                        m as {
+                          setup_guide?: { steps?: Array<{ label: string; url?: string }> };
+                        }
+                      ).setup_guide!.steps!
+                    }
+                  />
+                )}
               {detail.auths.length === 0 ? (
                 <p className="text-muted-foreground text-sm">{t("integration.auth.none")}</p>
               ) : (
@@ -1130,6 +1217,15 @@ export function IntegrationDetailPage() {
                       status={authStatus}
                       authDecl={declared}
                       isAdmin={isAdmin}
+                      legacyCallbackUrlHint={
+                        // AFPS §7.10 — legacy top-level fallback. Consumers MUST
+                        // keep accepting the deprecated form for old manifests.
+                        (
+                          m as {
+                            setup_guide?: { callback_url_hint?: string };
+                          }
+                        ).setup_guide?.callback_url_hint
+                      }
                     />
                   );
                 })

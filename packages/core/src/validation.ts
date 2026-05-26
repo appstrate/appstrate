@@ -33,6 +33,16 @@ export { mcpServerManifestSchema, type McpServerManifest };
  * structurally-equivalent literal if the internal shape changes (defensive;
  * a unit test asserts the extraction stays sound).
  */
+/**
+ * Regex matching AFPS `schema_version` values (Appendix B): `MAJOR.MINOR` with
+ * no leading zeros on either component. The canonical `schemaVersionField` in
+ * `@afps-spec/schema` is parameterized by major version and lives as a closure
+ * private inside `createSchemas` — it is not exported as a raw constant. We
+ * inline the spec-mandated pattern here so the base manifest schema can enforce
+ * it without binding to a specific major.
+ */
+export const SCHEMA_VERSION_REGEX: RegExp = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
+
 export const scopedNameRegex: RegExp = (() => {
   // Zod 4 internal: scopedName._zod.def.checks[0]._zod.def.pattern : RegExp
   type ZodInternalCheck = { _zod?: { def?: { pattern?: RegExp } } };
@@ -105,21 +115,70 @@ const compatibilityObjectSchema = z.looseObject({
 });
 
 /**
- * `_meta` reverse-DNS extension namespace (§10). Imported from `@afps-spec/schema`
- * — the spec mandates `MUST be a JSON object per namespace key` (§10.1). The
- * canonical schema is `z.record(z.string(), z.record(z.string(), z.unknown()))`:
- * strict enough to reject scalars under a namespace key (was previously accepted
- * by a local laxer copy), permissive about the value structure so consumers
- * never reject unknown payloads (§10).
+ * Canonical AFPS Appendix B `META_NAMESPACE_KEY` regex — reverse-DNS namespace
+ * (lowercase, hyphenated, with at least one dot) followed by `/` then an
+ * identifier (alphanumeric + `._-`). The namespace prefix is optional only for
+ * bare identifiers (reserved for MCP per §10).
  */
-const metaSchema = afpsMetaSchema;
+export const META_NAMESPACE_KEY_REGEX: RegExp = /^([a-z0-9-]+(\.[a-z0-9-]+)+\/)?[A-Za-z0-9._-]+$/;
+
+/**
+ * `_meta` key prefixes reserved by the MCP specification per AFPS §10. Manifests
+ * MUST NOT author keys under these namespaces — they are vendor-controlled by
+ * the MCP project. The transitional `dev.appstrate.afps/` alias is accepted
+ * until the `afps.dev` domain is operationally controlled (per spec editorial
+ * note in §10).
+ */
+const RESERVED_META_PREFIXES = ["mcp/", "modelcontextprotocol/"] as const;
+
+/**
+ * `_meta` reverse-DNS extension namespace (§10). Wraps the upstream
+ * `@afps-spec/schema` `metaSchema` (which validates the value shape — `MUST be a
+ * JSON object per namespace key`, §10.1) with a local `.superRefine` that
+ * enforces the Appendix B `META_NAMESPACE_KEY` regex on the keys AND rejects
+ * the reserved MCP prefixes (§10). Upstream `@afps-spec/schema@2.0.3` does not
+ * enforce either rule; this local refine keeps appstrate compliant until the
+ * upstream fix lands (tracked as M1 in /tmp/afps-audit/FINAL-REPORT.md).
+ */
+export const metaSchema = afpsMetaSchema.superRefine((meta, ctx) => {
+  if (!meta || typeof meta !== "object") return;
+  for (const key of Object.keys(meta)) {
+    // Reserved-prefix check first — MCP-reserved keys are by definition not
+    // authorable, even if they would otherwise match the namespace pattern.
+    let isReserved = false;
+    for (const reserved of RESERVED_META_PREFIXES) {
+      if (key.startsWith(reserved)) {
+        ctx.addIssue({
+          code: "custom",
+          path: [key],
+          message: `_meta key "${key}" uses a reserved prefix — "mcp/" and "modelcontextprotocol/" are reserved by MCP per AFPS §10`,
+        });
+        isReserved = true;
+        break;
+      }
+    }
+    if (isReserved) continue;
+    if (!META_NAMESPACE_KEY_REGEX.test(key)) {
+      ctx.addIssue({
+        code: "custom",
+        path: [key],
+        message: `_meta key "${key}" does not match the AFPS Appendix B META_NAMESPACE_KEY pattern`,
+      });
+    }
+  }
+});
 
 /** Base Zod schema for package manifests — common fields shared by all package types (AFPS 2.0 snake_case). */
 export const manifestSchema = z.looseObject({
   name: z.string().regex(scopedNameRegex, { error: "Must follow the format @scope/package-name" }),
   version: z.string().min(1),
   type: packageTypeEnum,
-  schema_version: z.string().optional(),
+  schema_version: z
+    .string()
+    .regex(SCHEMA_VERSION_REGEX, {
+      error: 'schema_version must follow MAJOR.MINOR format with no leading zeros (e.g. "2.0")',
+    })
+    .optional(),
   display_name: z.string().optional(),
   description: z.string().optional(),
   long_description: z.string().optional(),
@@ -192,6 +251,7 @@ const agentManifestObjectSchema = afpsAgentManifestSchema.extend({
   // sidecar's McpHost — an extension key on the otherwise loose
   // `integration_configuration` object (AFPS `integrations_configuration`
   // values are looseObjects, so the extra key round-trips per §10).
+  // @deprecated AFPS 2.0 §4.4 — read-fallback only
   integrations_configuration: z
     .record(
       z.string().regex(scopedNameRegex),
@@ -211,7 +271,11 @@ const agentManifestObjectSchema = afpsAgentManifestSchema.extend({
           .optional(),
       }),
     )
-    .optional(),
+    .optional()
+    .describe(
+      "Deprecated in AFPS 2.0 — superseded by dependencies.integrations.<id> object form. Accepted on read for backward compatibility.",
+    )
+    .meta({ deprecated: true }),
 });
 
 /**
@@ -322,33 +386,45 @@ function parseWithSchema(
  * @returns Validation result with parsed manifest on success, or error messages on failure
  */
 export function validateManifest(raw: unknown): ValidateManifestResult {
-  if (raw && typeof raw === "object") {
-    const obj = raw as Record<string, unknown>;
-    // AFPS 2.0.2 (§3.4 / §11.2): mcp-server identity was lifted from
-    // `_meta["dev.afps/mcp-server"]` to the manifest root. `type: "mcp-server"`,
-    // `name`, `schema_version`, and `dependencies` now live at the root; the
-    // `_meta["dev.afps/mcp-server"]` block was removed entirely. Dispatch
-    // purely on the root `type` discriminator.
-    if (obj.type === "mcp-server") {
-      return parseWithSchema(mcpServerManifestSchema, raw);
-    }
-
-    if ("type" in obj) {
-      const type = obj.type;
-      const schema =
-        type === "agent"
-          ? agentManifestSchema
-          : type === "skill"
-            ? skillManifestSchema
-            : type === "integration"
-              ? integrationManifestSchema
-              : manifestSchema;
-      return parseWithSchema(schema, raw);
-    }
+  // AFPS 2.0 (Appendix D): `type` is the canonical discriminator and MUST be
+  // one of `agent | skill | mcp-server | integration`. Legacy strings (`tool`,
+  // `provider`) and a missing `type` are dispatcher-level errors, not partial
+  // base-schema validation failures — fail fast with a single structured Zod
+  // issue keyed on `["type"]` so callers/UI get a typed signal rather than a
+  // permissive list of base-schema field errors.
+  if (!raw || typeof raw !== "object") {
+    return {
+      valid: false,
+      errors: [
+        "type: Unknown package type — manifest must declare type as one of: agent, skill, mcp-server, integration",
+      ],
+    };
   }
-  // No `type` field — run the base schema so every missing-field error is
-  // surfaced in a single pass (instead of short-circuiting on `type` alone).
-  return parseWithSchema(manifestSchema, raw);
+  const obj = raw as Record<string, unknown>;
+  const type = obj.type;
+
+  // AFPS 2.0.2 (§3.4 / §11.2): mcp-server identity was lifted from
+  // `_meta["dev.afps/mcp-server"]` to the manifest root. `type: "mcp-server"`,
+  // `name`, `schema_version`, and `dependencies` now live at the root; the
+  // `_meta["dev.afps/mcp-server"]` block was removed entirely. Dispatch
+  // purely on the root `type` discriminator.
+  if (type === "mcp-server") return parseWithSchema(mcpServerManifestSchema, raw);
+  if (type === "agent") return parseWithSchema(agentManifestSchema, raw);
+  if (type === "skill") return parseWithSchema(skillManifestSchema, raw);
+  if (type === "integration") return parseWithSchema(integrationManifestSchema, raw);
+
+  // Unknown / missing type: emit a single typed issue and stop. The legacy
+  // `tool` / `provider` strings (AFPS 2.0 Appendix D — `tool → mcp-server`,
+  // `provider → integration`) land here and produce the same typed error
+  // rather than a confusing list of partial base-schema errors.
+  const received =
+    typeof type === "string" ? `"${type}"` : type === undefined ? "missing" : String(type);
+  return {
+    valid: false,
+    errors: [
+      `type: Unknown package type ${received} — manifest must declare type as one of: agent, skill, mcp-server, integration`,
+    ],
+  };
 }
 
 function stripQuotes(value: string): string {

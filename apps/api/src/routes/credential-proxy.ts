@@ -26,7 +26,7 @@
  *   - Audit log on every call (requestId, authMethod, apiKeyId, userId,
  *     endUserId, integrationId, target, status)
  *   - URL allowlist enforced via the integration manifest
- *     (`authorizedUris` / `allowAllUris`)
+ *     (`authorized_uris` / `allow_all_uris`)
  *   - Request / response size caps
  */
 

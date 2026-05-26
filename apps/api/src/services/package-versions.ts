@@ -13,8 +13,9 @@ import {
 } from "./package-storage.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { computeIntegrity } from "@appstrate/core/integrity";
-import { extractDependencies } from "@appstrate/core/dependencies";
+import { extractDependencies, detectCycle, type DepEntry } from "@appstrate/core/dependencies";
 import { storeVersionDependencies, clearVersionDependencies } from "./package-version-deps.ts";
+import { packageVersionDependencies } from "@appstrate/db/schema";
 import {
   isValidVersion,
   resolveVersionFromCatalog,
@@ -632,6 +633,54 @@ export async function createVersionFromDraft(params: {
 // Replace existing version content
 // ─────────────────────────────────────────────
 
+// ─────────────────────────────────────────────
+// AFPS §4.3 — circular dependency detection
+// ─────────────────────────────────────────────
+
+/**
+ * Resolver for {@link detectCycle}: returns the direct dependencies of the
+ * latest published version of `@scope/name` by reading the flattened
+ * `package_version_dependencies` rows. Used at publish time to walk the
+ * transitive dep graph and reject cycles before persistence. The graph is a
+ * conservative snapshot — yanked versions are excluded by
+ * {@link getLatestVersionId}'s preference for "latest" dist-tag.
+ */
+async function resolvePublishedDeps(scope: string, name: string): Promise<DepEntry[]> {
+  const packageId = `${scope}/${name}`;
+  const versionId = await getLatestVersionId(packageId);
+  if (!versionId) return [];
+  const rows = await db
+    .select({
+      depScope: packageVersionDependencies.depScope,
+      depName: packageVersionDependencies.depName,
+      depType: packageVersionDependencies.depType,
+      versionRange: packageVersionDependencies.versionRange,
+    })
+    .from(packageVersionDependencies)
+    .where(eq(packageVersionDependencies.versionId, versionId));
+  return rows.map((r) => ({
+    depScope: r.depScope,
+    depName: r.depName,
+    depType: r.depType as DepEntry["depType"],
+    versionRange: r.versionRange,
+  }));
+}
+
+/**
+ * Walk the dep graph rooted at `packageId` with `directDeps`, rejecting any
+ * cycle with a structured error carrying the cycle path. Wraps
+ * {@link detectCycle} for the publish path; the self-dep fast-path (a package
+ * declaring itself in its own deps) is handled by `detectCycle` directly.
+ */
+async function assertNoCycle(packageId: string, directDeps: DepEntry[]): Promise<void> {
+  // AFPS §4.3 — circular dependency detection.
+  const result = await detectCycle(packageId, directDeps, resolvePublishedDeps);
+  if (result.hasCycle) {
+    const path = result.cyclePath?.join(" → ") ?? packageId;
+    throw new Error(`Circular dependency detected: ${path}`);
+  }
+}
+
 /** Replace the content of an existing version (integrity, artifactSize, manifest) and re-upload ZIP. */
 export async function replaceVersionContent(params: {
   packageId: string;
@@ -642,6 +691,13 @@ export async function replaceVersionContent(params: {
   const { packageId, version, zipBuffer, manifest } = params;
   const integrity = computeIntegrity(new Uint8Array(zipBuffer));
   const artifactSize = zipBuffer.byteLength;
+
+  // Validate dep shape + reject cycles BEFORE uploading or mutating DB so a
+  // bad manifest can't leave a partial side-effect (uploaded ZIP, stale row).
+  // `extractDependencies` itself rejects invalid scoped names and invalid
+  // semver ranges (see H5 — invalid ranges are rejected upstream here).
+  const deps = extractDependencies(manifest);
+  await assertNoCycle(packageId, deps);
 
   // Upload ZIP first to avoid integrity mismatch if upload fails after DB update
   await uploadPackageZip(packageId, version, zipBuffer);
@@ -657,9 +713,9 @@ export async function replaceVersionContent(params: {
     return;
   }
 
-  // Clear old deps and re-store from new manifest
+  // Clear old deps and re-store from new manifest. Invalid ranges are
+  // rejected upstream by `extractDependencies` (see H5).
   await clearVersionDependencies(row.id);
-  const deps = extractDependencies(manifest);
   if (deps.length > 0) {
     await storeVersionDependencies(row.id, deps);
   }
@@ -684,6 +740,13 @@ export async function createVersionAndUpload(params: {
   const integrity = computeIntegrity(new Uint8Array(zipBuffer));
   const artifactSize = zipBuffer.byteLength;
 
+  // Validate dep shape + reject cycles BEFORE uploading or persisting the
+  // version row. `extractDependencies` rejects invalid scoped names and
+  // invalid semver ranges (see H5 — invalid ranges are rejected upstream
+  // here, so the throw propagates and no ZIP / row is created).
+  const deps = extractDependencies(manifest);
+  await assertNoCycle(packageId, deps);
+
   // Upload ZIP first — a ZIP without a DB row is safer than a DB row without a ZIP
   await uploadPackageZip(packageId, version, zipBuffer);
 
@@ -698,7 +761,6 @@ export async function createVersionAndUpload(params: {
     });
 
     if (result) {
-      const deps = extractDependencies(manifest);
       if (deps.length > 0) {
         await storeVersionDependencies(result.id, deps);
       }

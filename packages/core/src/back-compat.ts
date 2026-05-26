@@ -22,9 +22,23 @@
  *      `providersConfiguration` / `fileConstraints` / `uiHints` /
  *      `propertyOrder` / `maxSize` to the canonical snake_case shape.
  *   2. The fallback reads in `packages/core/src/dependencies.ts`
- *      ({@link import("./dependencies.ts").parseManifestIntegrations}) and
+ *      ({@link import("./dependencies.ts").parseManifestIntegrations} +
+ *      the `dependencies.providers` / `dependencies.tools` 1.x→2.0
+ *      Appendix-D projection in
+ *      {@link import("./dependencies.ts").extractDependencies}) and
  *      `packages/core/src/form.ts`
  *      ({@link import("./form.ts").mapAfpsToRjsf}) MUST be removed.
+ *   3. The frontend agent-editor fallback sites in
+ *      `apps/web/src/components/agent-editor/utils.ts` MUST be removed:
+ *      - line ~145: `m.display_name ?? m.displayName` in `manifestToMetadata`.
+ *      - lines ~261-283: the legacy camelCase wrapper readers
+ *        (`fileConstraints` / `uiHints` / `propertyOrder` / per-property
+ *        `maxSize`) in `manifestToSchemaFields`.
+ *      The writers in that same file (M8 — `metadataToManifestPatch`,
+ *      `setRuntimeTools`, and `fieldsToSchema`) now strip the legacy
+ *      camelCase siblings on every save, so these read-fallbacks remain the
+ *      only tolerance layer for stored manifests that have not been
+ *      re-saved since the 2.0 cutover.
  *
  * Writers are already AFPS 2.0 canonical only — see
  * {@link import("./dependencies.ts").writeManifestIntegrations} and the

@@ -10,12 +10,14 @@ import { createTestOrg } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import {
   createPackageVersion,
+  createVersionAndUpload,
   listPackageVersions,
   getLatestVersionId,
   getVersionCount,
   getVersionInfo,
   getLatestVersionCreatedAt,
 } from "../../../src/services/package-versions.ts";
+import { buildMinimalZip } from "../../../src/services/package-storage.ts";
 describe("package-versions service", () => {
   let userId: string;
   let orgId: string;
@@ -335,6 +337,34 @@ describe("package-versions service", () => {
       // The latest createdAt should be very recent (within 5s)
       const diff = Date.now() - result!.getTime();
       expect(diff).toBeLessThan(5000);
+    });
+  });
+
+  // ── AFPS §4.3 — circular dependency detection at publish ─────
+  describe("createVersionAndUpload — cycle detection", () => {
+    it("rejects a self-dependency at publish (H4 fast-path)", async () => {
+      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/self-dep` });
+      const manifest: Record<string, unknown> = {
+        name: pkg.id,
+        version: "1.0.0",
+        type: "agent",
+        // Self-reference — same package id appears in its own deps.
+        dependencies: { skills: { [pkg.id]: "^1.0.0" } },
+      };
+      const zip = Buffer.from(buildMinimalZip(manifest, "prompt"));
+
+      await expect(
+        createVersionAndUpload({
+          packageId: pkg.id,
+          version: "1.0.0",
+          createdBy: userId,
+          zipBuffer: zip,
+          manifest,
+        }),
+      ).rejects.toThrow(/Circular dependency/);
+
+      // No version row created.
+      expect(await getVersionCount(pkg.id)).toBe(0);
     });
   });
 });

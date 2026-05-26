@@ -91,6 +91,25 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
   const declaredToolNames = nativeCatalog.map((t) => t.name);
   const hasToolCatalog = declaredToolNames.length > 0;
 
+  // Multi-auth surface (AFPS 2.0 §4.1 `auth_key`): when the integration
+  // declares >1 auth method, the agent author can pin which `auths.<key>`
+  // this dep uses at runtime. `undefined` keeps the resolver cascade's
+  // default behaviour (any accessible connection wins).
+  const authEntries = Object.entries(detail.manifest.auths ?? {});
+  const hasMultipleAuths = authEntries.length > 1;
+  const authMethodLabel = (key: string, auth: (typeof authEntries)[number][1]): string => {
+    const a = auth as { title?: unknown; display_name?: unknown; type?: unknown };
+    const title = typeof a.title === "string" ? a.title : undefined;
+    const display = typeof a.display_name === "string" ? a.display_name : undefined;
+    const type = typeof a.type === "string" ? a.type : undefined;
+    const label = title ?? display ?? key;
+    return type && type !== label ? `${label} (${type})` : label;
+  };
+  const onAuthKeyChange = (value: string) => {
+    const next = value === "" ? undefined : value;
+    onChange({ ...entry, auth_key: next });
+  };
+
   // apiCall integrations expose the generic `api_call` tool instead of
   // discrete MCP tools. Surface it as a selectable tool so the agent author
   // can opt in (the runtime gates injection on it).
@@ -188,7 +207,7 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
   // without grepping the codebase — typical root cause is a DB
   // manifest that predates the niveau 2 fields and needs a server
   // reboot to drift-heal.
-  if (!hasToolCatalog && !hasScopeCatalog && !isApiCall) {
+  if (!hasToolCatalog && !hasScopeCatalog && !isApiCall && !hasMultipleAuths) {
     return (
       <div className="bg-muted/30 text-muted-foreground mt-2 rounded-md border p-3 text-[11px]">
         {t("agentEditor.integrations.tools.noCatalog")}
@@ -201,6 +220,28 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
       className="bg-muted/30 mt-2 space-y-3 rounded-md border p-3"
       onClick={(e) => e.stopPropagation()}
     >
+      {hasMultipleAuths && (
+        <div>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-semibold">
+              {t("agentEditor.integrations.authKey.label")}
+            </span>
+            <select
+              className="bg-background rounded border px-2 py-1 text-xs"
+              value={entry.auth_key ?? ""}
+              onChange={(e) => onAuthKeyChange(e.target.value)}
+              data-testid={`integ-auth-key-${packageId}`}
+            >
+              <option value="">{t("agentEditor.integrations.authKey.default")}</option>
+              {authEntries.map(([key, auth]) => (
+                <option key={key} value={key}>
+                  {authMethodLabel(key, auth)}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
       {isApiCall && (
         <label className="flex cursor-pointer items-start gap-2">
           <Checkbox

@@ -262,6 +262,8 @@ export async function resolveLiveIntegrationCredentials(
     // `{ resource, audience: resource }` for one release window so sidecars /
     // external consumers built against the pre-rename wire keep working.
     // `audience` is the deprecated alias — drop in a future release.
+    // TODO(AFPS 2.1): drop `audience` alias after sidecar consumers fully
+    // migrate to `resource` (RFC 8707).
     ...(authDef.resource !== undefined
       ? { resource: authDef.resource, audience: authDef.resource }
       : {}),
@@ -301,83 +303,61 @@ function isWithinLeadWindow(expiresAt: Date | null): boolean {
 }
 
 /**
- * Serialize the resolver's typed wire payload to the HTTP response shape with
- * dual-emit keys for the AFPS 2.0 snake_case migration window. Each renamed
- * field appears under both its snake_case (primary, AFPS 2.0) and camelCase
- * (deprecated, kept for one release) key so existing sidecar consumers that
- * still read the camelCase form keep working.
+ * Serialize the resolver's typed wire payload to the AFPS 2.0 snake_case
+ * HTTP response shape. The TS `IntegrationCredentialsWire` source-of-truth
+ * type (in `@appstrate/connect/integration-credentials`) stays camelCase as
+ * a TS-internal naming convention; this function is the JSON serialization
+ * boundary that flips the field names to AFPS 2.0 snake_case before they
+ * cross the wire to the sidecar.
  *
- * Field mapping:
- *   auth_key            ← authKey
- *   auth_type           ← authType
- *   authorized_uris     ← authorizedUris
- *   scopes_granted      ← scopesGranted
- *   delivery_plans      ← deliveryPlans
- *   expires_at_epoch_ms ← expiresAtEpochMs
- *   header_name         ← headerName             (per delivery plan)
- *   header_prefix       ← headerPrefix           (per delivery plan)
- *   allow_server_override ← allowServerOverride  (per delivery plan)
+ * Field mapping (TS internal camelCase → AFPS 2.0 snake_case wire):
+ *   authKey               → auth_key
+ *   authType              → auth_type
+ *   authorizedUris        → authorized_uris
+ *   scopesGranted         → scopes_granted
+ *   identityClaims        → identity_claims
+ *   expiresAt             → expires_at
+ *   deliveryPlans         → delivery_plans
+ *   expiresAtEpochMs      → expires_at_epoch_ms
+ *   headerName            → header_name           (per delivery plan)
+ *   headerPrefix          → header_prefix         (per delivery plan)
+ *   allowServerOverride   → allow_server_override (per delivery plan)
  *
- * `resource` / `audience` (RFC 8707) is dual-emitted upstream in the resolver
- * itself; this serializer leaves those keys untouched.
- *
- * TODO(AFPS 2.0 migration): drop camelCase emission after one release window.
+ * `resource` / `audience` (RFC 8707) pass through unchanged. `audience` is
+ * the legacy alias dual-emitted upstream in the resolver itself — see the
+ * `TODO(AFPS 2.1)` marker there.
  */
 export function serializeIntegrationCredentialsWire(
   wire: IntegrationCredentialsWire,
 ): Record<string, unknown> {
   const auths = wire.auths.map((a) => {
     const out: Record<string, unknown> = {
-      // Snake_case (AFPS 2.0 primary)
       auth_key: a.authKey,
       auth_type: a.authType,
       fields: a.fields,
       authorized_uris: a.authorizedUris,
-      // CamelCase aliases (deprecated, dual-emit window)
-      authKey: a.authKey,
-      authType: a.authType,
-      authorizedUris: a.authorizedUris,
     };
     if (a.resource !== undefined) out.resource = a.resource;
     if (a.audience !== undefined) out.audience = a.audience;
-    if (a.expiresAt !== undefined) out.expiresAt = a.expiresAt;
-    if (a.scopesGranted !== undefined) {
-      out.scopes_granted = a.scopesGranted;
-      out.scopesGranted = a.scopesGranted;
-    }
-    if (a.identityClaims !== undefined) {
-      out.identity_claims = a.identityClaims;
-      out.identityClaims = a.identityClaims;
-    }
+    if (a.expiresAt !== undefined) out.expires_at = a.expiresAt;
+    if (a.scopesGranted !== undefined) out.scopes_granted = a.scopesGranted;
+    if (a.identityClaims !== undefined) out.identity_claims = a.identityClaims;
     return out;
   });
 
   const delivery_plans: Record<string, unknown> = {};
-  const deliveryPlans: Record<string, unknown> = {};
   for (const [k, plan] of Object.entries(wire.deliveryPlans)) {
     delivery_plans[k] = {
       header_name: plan.headerName,
       header_prefix: plan.headerPrefix,
       value: plan.value,
       allow_server_override: plan.allowServerOverride,
-      // Dual-emit camelCase
-      headerName: plan.headerName,
-      headerPrefix: plan.headerPrefix,
-      allowServerOverride: plan.allowServerOverride,
-    };
-    deliveryPlans[k] = {
-      headerName: plan.headerName,
-      headerPrefix: plan.headerPrefix,
-      value: plan.value,
-      allowServerOverride: plan.allowServerOverride,
     };
   }
 
   return {
     auths,
     delivery_plans,
-    deliveryPlans,
     expires_at_epoch_ms: wire.expiresAtEpochMs,
-    expiresAtEpochMs: wire.expiresAtEpochMs,
   };
 }

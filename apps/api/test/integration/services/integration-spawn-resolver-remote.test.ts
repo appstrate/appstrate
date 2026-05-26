@@ -215,8 +215,8 @@ describe("resolveIntegrationSpawns — local source error guards", () => {
       source: "local",
       draftManifest: localManifest(SERVER),
     });
-    // The mcp-server stays MCPB-conformant (server.type "node") and declares the
-    // real runtime under _meta — the resolver must surface `bun`, not `node`.
+    // The mcp-server keeps an MCPB-vocabulary server.type "node" and declares
+    // the real runtime under _meta — the resolver must surface `bun`, not `node`.
     await seedPackage({
       id: SERVER,
       orgId: ctx.orgId,

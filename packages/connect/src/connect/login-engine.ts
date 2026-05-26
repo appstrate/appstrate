@@ -12,10 +12,29 @@
  * redirect chains) belong on the Orchestrated `connect.tool` path, not here.
  *
  * The `connect` block is consumed in AFPS 2.0 shape (snake_case). Each
- * `outputs[name]` is either an Arazzo
- * runtime-expression string (`$response.body#/<json-pointer>`,
- * `$response.header.<name>`, `$statusCode`) or an AFPS extractor object
- * (`{ from: "cookie"|"jwt"|"regex", ... }`).
+ * `outputs[name]` is one of:
+ *   - an Arazzo runtime-expression string (`$response.body#/<json-pointer>`,
+ *     `$response.header.<name>`, `$statusCode`);
+ *   - an AFPS extractor object (`{ from: "cookie"|"jwt"|"regex", ... }`);
+ *   - an Arazzo Selector Object
+ *     (`{ context, selector, type: "jsonpath"|"xpath"|"jsonpointer" }`).
+ *
+ * KNOWN LIMITATIONS (documented for manifest authors, deliberately not
+ * reported as install-blocking errors so spec-valid manifests still install):
+ *   - `success_criteria` evaluation only supports the equality form
+ *     `$statusCode == <n>` (and the default 2xx range when no criteria are
+ *     declared). Arazzo's broader Criterion vocabulary
+ *     (`type: simple|regex|jsonpath|xpath`) is NOT yet evaluated — manifests
+ *     declaring those forms will fall through to the conservative-fail branch
+ *     in `passesSuccessCriteria`. See finding L7 in
+ *     `/tmp/afps-audit/FINAL-REPORT.md`.
+ *   - The Arazzo Selector Object `type: "xpath"` is parsed but raises a
+ *     runtime `LoginError` at extraction time — there is no XPath evaluator
+ *     in this engine yet.
+ *   - The Arazzo Selector Object `type: "jsonpath"` supports only the
+ *     single-value RFC 9535 subset `$.foo.bar` / `$.foo[0].bar` (no filters,
+ *     no slices, no wildcards). More complex queries raise a
+ *     `LoginError`.
  *
  * This is a manifest-author-driven HTTP request → an SSRF / exfil / DoS
  * surface. It is bounded by construction:
@@ -56,13 +75,26 @@ export const DEFAULT_LOGIN_LIMITS: LoginLimits = {
 
 /**
  * An AFPS 2.0 `connect.login.outputs` entry. Either an Arazzo runtime
- * expression string, or an extractor object.
+ * expression string, an AFPS extractor object, or an Arazzo Selector Object
+ * (`{ context, selector, type }`).
  */
 export type LoginOutput =
   | string
   | { from: "cookie"; name: string }
   | { from: "jwt"; token: string; path: string }
-  | { from: "regex"; source?: string; pattern: string; group?: number };
+  | { from: "regex"; source?: string; pattern: string; group?: number }
+  | ArazzoSelectorObject;
+
+/**
+ * Arazzo Selector Object (§7.7, AFPS 2.0). `context` is an Arazzo runtime
+ * expression yielding the document to query (typically `$response.body`);
+ * `selector` is the type-specific query string.
+ */
+export interface ArazzoSelectorObject {
+  context: string;
+  selector: string;
+  type: "jsonpath" | "xpath" | "jsonpointer";
+}
 
 export interface LoginRequest {
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -212,10 +244,116 @@ function resolveTokenRef(token: string, scope: Record<string, string>): string |
   return scope[field];
 }
 
+/** Type guard for the Arazzo Selector Object form. */
+function isSelectorObject(out: LoginOutput): out is ArazzoSelectorObject {
+  return (
+    typeof out === "object" &&
+    out !== null &&
+    typeof (out as Record<string, unknown>).selector === "string" &&
+    typeof (out as Record<string, unknown>).type === "string" &&
+    typeof (out as Record<string, unknown>).context === "string"
+  );
+}
+
 /** Whether an output expression must consume the response body to resolve. */
 function outputNeedsBody(out: LoginOutput): boolean {
   if (typeof out === "string") return out.startsWith("$response.body");
+  if (isSelectorObject(out)) return out.context.startsWith("$response.body");
   return out.from === "regex"; // jwt resolves from another (already-extracted) value
+}
+
+/**
+ * Resolve an Arazzo runtime-expression `context` against the response.
+ * Today we only resolve `$response.body` (consumers MAY extend to
+ * `$response.headers.<name>`, etc.).
+ */
+function resolveSelectorContext(context: string, bodyText: string, name: string): unknown {
+  if (context === "$response.body") {
+    try {
+      return JSON.parse(bodyText);
+    } catch {
+      throw new LoginError(`'${name}' json parse failed`, "extract_failed");
+    }
+  }
+  // Bare runtime expressions other than $response.body are intentionally
+  // unsupported in this engine — fail closed.
+  throw new LoginError(
+    `'${name}' selector context '${context}' is not yet supported (only $response.body)`,
+    "invalid_config",
+  );
+}
+
+/**
+ * Minimal RFC 9535 single-value JSONPath evaluator. Supports the subset
+ * `$.foo.bar`, `$.foo[0].bar`, `$['foo bar']`. No filters, no slices, no
+ * wildcards, no recursive descent — those forms fail with `invalid_config`
+ * so manifest authors get a clear error instead of a silent miss.
+ */
+function evaluateJsonPath(root: unknown, path: string): unknown {
+  if (path === "$" || path === "") return root;
+  if (!path.startsWith("$")) {
+    throw new LoginError(`jsonpath '${path}' must start with '$'`, "invalid_config");
+  }
+  // Tokenize: walk segments separated by `.` or `[…]`.
+  const tokens: (string | number)[] = [];
+  let i = 1;
+  while (i < path.length) {
+    const ch = path[i]!;
+    if (ch === ".") {
+      i++;
+      let end = i;
+      while (end < path.length && path[end] !== "." && path[end] !== "[") end++;
+      const key = path.slice(i, end);
+      if (key.length === 0) {
+        throw new LoginError(`empty jsonpath segment in '${path}'`, "invalid_config");
+      }
+      if (key === "*" || key.includes("..")) {
+        throw new LoginError(
+          `jsonpath '${path}' uses an unsupported form (wildcards/recursive descent not implemented)`,
+          "invalid_config",
+        );
+      }
+      tokens.push(key);
+      i = end;
+    } else if (ch === "[") {
+      const close = path.indexOf("]", i);
+      if (close === -1) {
+        throw new LoginError(`unterminated '[' in jsonpath '${path}'`, "invalid_config");
+      }
+      const inner = path.slice(i + 1, close).trim();
+      if (/^-?\d+$/.test(inner)) {
+        tokens.push(Number(inner));
+      } else if (
+        (inner.startsWith("'") && inner.endsWith("'")) ||
+        (inner.startsWith('"') && inner.endsWith('"'))
+      ) {
+        tokens.push(inner.slice(1, -1));
+      } else if (inner === "*" || inner.startsWith("?")) {
+        throw new LoginError(
+          `jsonpath '${path}' uses an unsupported form (wildcards/filters not implemented)`,
+          "invalid_config",
+        );
+      } else {
+        throw new LoginError(
+          `unsupported jsonpath segment '[${inner}]' in '${path}'`,
+          "invalid_config",
+        );
+      }
+      i = close + 1;
+    } else {
+      throw new LoginError(`unexpected character '${ch}' in jsonpath '${path}'`, "invalid_config");
+    }
+  }
+  let cur: unknown = root;
+  for (const tok of tokens) {
+    if (cur == null || typeof cur !== "object") return undefined;
+    if (typeof tok === "number") {
+      cur = (cur as unknown[])[tok];
+    } else {
+      cur = (cur as Record<string, unknown>)[tok];
+    }
+  }
+  return cur;
 }
 
 /**
@@ -252,6 +390,29 @@ function applyOutput(
     }
     // Unrecognised runtime expression → fail closed.
     throw new LoginError(`'${name}' unsupported output expression`, "invalid_config");
+  }
+
+  // Arazzo Selector Object form (`{ context, selector, type }`).
+  if (isSelectorObject(out)) {
+    // Reject xpath up-front — there is no XML/HTML parser in this engine and
+    // attempting to JSON.parse() a body that's likely XML would surface as
+    // a misleading `extract_failed`. The right error is `invalid_config`.
+    if (out.type === "xpath") {
+      throw new LoginError(
+        `'${name}' xpath selector is not yet supported by the Appstrate login engine (AFPS §7.7)`,
+        "invalid_config",
+      );
+    }
+    const doc = resolveSelectorContext(out.context, bodyText, name);
+    if (out.type === "jsonpointer") {
+      const v = readJsonPointer(doc, out.selector);
+      return v === undefined ? undefined : stringifyValue(v);
+    }
+    if (out.type === "jsonpath") {
+      const v = evaluateJsonPath(doc, out.selector);
+      return v === undefined ? undefined : stringifyValue(v);
+    }
+    throw new LoginError(`'${name}' unsupported selector type`, "invalid_config");
   }
 
   switch (out.from) {
@@ -382,7 +543,8 @@ export async function runLogin(config: LoginConfig, ctx: LoginContext): Promise<
   // every self-contained expression (body/header/cookie/regex/statusCode);
   // pass 2 runs `jwt`, whose `token` names another extracted value.
   const extracted: Record<string, string> = {};
-  const isJwt = (out: LoginOutput): boolean => typeof out !== "string" && out.from === "jwt";
+  const isJwt = (out: LoginOutput): boolean =>
+    typeof out !== "string" && !isSelectorObject(out) && (out as { from?: string }).from === "jwt";
   for (const [name, out] of outputEntries) {
     if (isJwt(out)) continue;
     const v = applyOutput(out, bodyText, res.status, res.headers, extracted, name);

@@ -577,7 +577,9 @@
                       "type": "agent",
                       "running_runs": 1,
                       "dependencies": {
-                        "skills": {}
+                        "skills": {},
+                        "mcp_servers": {},
+                        "integrations": {}
                       }
                     },
                     {
@@ -595,6 +597,12 @@
                       "dependencies": {
                         "skills": {
                           "@appstrate/summarize": "^1.0.0"
+                        },
+                        "mcp_servers": {
+                          "@appstrate/filesystem-mcp": "^1.0.0"
+                        },
+                        "integrations": {
+                          "@appstrate/github": "^2.0.0"
                         }
                       }
                     }
@@ -3650,7 +3658,7 @@
         "operationId": "listIntegrations",
         "tags": ["Integrations"],
         "summary": "List available integrations",
-        "description": "List every AFPS integration accessible to the current org (own + system), enriched with `active` + `blockUserConnections` flags for the current application.",
+        "description": "List every AFPS integration accessible to the current org (own + system), enriched with `active` + `block_user_connections` flags for the current application.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -3829,6 +3837,7 @@
                           "type",
                           "required",
                           "scopes",
+                          "resource",
                           "audience",
                           "connections",
                           "has_oauth_client"
@@ -3839,7 +3848,8 @@
                           },
                           "type": {
                             "type": "string",
-                            "enum": ["oauth2", "api_key", "basic", "custom"]
+                            "enum": ["oauth2", "api_key", "basic", "mtls", "custom"],
+                            "description": "Auth method type (AFPS 2.0.2 §7.2). `mtls` was added in v2.0.1 — client cert + key are supplied via `credentials.schema` and injected at runtime through `delivery.files`."
                           },
                           "required": {
                             "type": "boolean"
@@ -3850,8 +3860,14 @@
                               "type": "string"
                             }
                           },
+                          "resource": {
+                            "type": ["string", "null"],
+                            "description": "RFC 8707 resource indicator declared by the manifest (`auths.{key}.resource`). AFPS 2.0 §7.3 name — matches the RFC."
+                          },
                           "audience": {
-                            "type": ["string", "null"]
+                            "type": ["string", "null"],
+                            "deprecated": true,
+                            "description": "Deprecated alias for `resource`. AFPS 2.0 §7.3 (RFC 8707) renamed the wire field; `audience` is kept for one release window for back-compat."
                           },
                           "connections": {
                             "type": "array",
@@ -14569,7 +14585,7 @@
             "name": "X-Target",
             "in": "header",
             "required": true,
-            "description": "Absolute URL of the upstream endpoint. Must match the integration manifest auth's `authorizedUris` unless `allowAllUris: true`.",
+            "description": "Absolute URL of the upstream endpoint. Must match the integration manifest auth's `authorized_uris` unless `allow_all_uris: true`.",
             "schema": {
               "type": "string",
               "format": "uri"
@@ -14663,7 +14679,7 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "description": "Forbidden — principal lacks `credential-proxy:call`, target not in `authorizedUris`, session bound to a different principal, or cookie session used."
+            "description": "Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, session bound to a different principal, or cookie session used."
           },
           "404": {
             "description": "No credentials or connection for the requested integration."
@@ -14709,7 +14725,7 @@
             "name": "X-Target",
             "in": "header",
             "required": true,
-            "description": "Absolute URL of the upstream endpoint. Must match the integration manifest auth's `authorizedUris` unless `allowAllUris: true`.",
+            "description": "Absolute URL of the upstream endpoint. Must match the integration manifest auth's `authorized_uris` unless `allow_all_uris: true`.",
             "schema": {
               "type": "string",
               "format": "uri"
@@ -14803,7 +14819,7 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "description": "Forbidden — principal lacks `credential-proxy:call`, target not in `authorizedUris`, session bound to a different principal, or cookie session used."
+            "description": "Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, session bound to a different principal, or cookie session used."
           },
           "404": {
             "description": "No credentials or connection for the requested integration."
@@ -14856,7 +14872,7 @@
             "name": "X-Target",
             "in": "header",
             "required": true,
-            "description": "Absolute URL of the upstream endpoint. Must match the integration manifest auth's `authorizedUris` unless `allowAllUris: true`.",
+            "description": "Absolute URL of the upstream endpoint. Must match the integration manifest auth's `authorized_uris` unless `allow_all_uris: true`.",
             "schema": {
               "type": "string",
               "format": "uri"
@@ -14950,7 +14966,7 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "description": "Forbidden — principal lacks `credential-proxy:call`, target not in `authorizedUris`, session bound to a different principal, or cookie session used."
+            "description": "Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, session bound to a different principal, or cookie session used."
           },
           "404": {
             "description": "No credentials or connection for the requested integration."
@@ -15003,7 +15019,7 @@
             "name": "X-Target",
             "in": "header",
             "required": true,
-            "description": "Absolute URL of the upstream endpoint. Must match the integration manifest auth's `authorizedUris` unless `allowAllUris: true`.",
+            "description": "Absolute URL of the upstream endpoint. Must match the integration manifest auth's `authorized_uris` unless `allow_all_uris: true`.",
             "schema": {
               "type": "string",
               "format": "uri"
@@ -15097,7 +15113,7 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "description": "Forbidden — principal lacks `credential-proxy:call`, target not in `authorizedUris`, session bound to a different principal, or cookie session used."
+            "description": "Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, session bound to a different principal, or cookie session used."
           },
           "404": {
             "description": "No credentials or connection for the requested integration."
@@ -15150,7 +15166,7 @@
             "name": "X-Target",
             "in": "header",
             "required": true,
-            "description": "Absolute URL of the upstream endpoint. Must match the integration manifest auth's `authorizedUris` unless `allowAllUris: true`.",
+            "description": "Absolute URL of the upstream endpoint. Must match the integration manifest auth's `authorized_uris` unless `allow_all_uris: true`.",
             "schema": {
               "type": "string",
               "format": "uri"
@@ -15244,7 +15260,7 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "description": "Forbidden — principal lacks `credential-proxy:call`, target not in `authorizedUris`, session bound to a different principal, or cookie session used."
+            "description": "Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, session bound to a different principal, or cookie session used."
           },
           "404": {
             "description": "No credentials or connection for the requested integration."
@@ -15620,12 +15636,15 @@
                     "packages": {
                       "type": "object",
                       "description": "Packages grouped by type. Every group is always present (possibly empty).",
-                      "required": ["agent", "skill", "integration"],
+                      "required": ["agent", "skill", "mcp-server", "integration"],
                       "properties": {
                         "agent": {
                           "$ref": "#/components/schemas/LibraryPackageList"
                         },
                         "skill": {
+                          "$ref": "#/components/schemas/LibraryPackageList"
+                        },
+                        "mcp-server": {
                           "$ref": "#/components/schemas/LibraryPackageList"
                         },
                         "integration": {
@@ -15661,6 +15680,7 @@
                       }
                     ],
                     "skill": [],
+                    "mcp-server": [],
                     "integration": [
                       {
                         "id": "pkg_gmail",
@@ -16325,6 +16345,22 @@
                 "items": {
                   "$ref": "#/components/schemas/AgentSkillRef"
                 }
+              },
+              "mcp_servers": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["id", "version"],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "description": "AFPS 2.0 §4.1 mcp_servers dependency group"
               },
               "integrations": {
                 "type": "array",
@@ -17135,19 +17171,19 @@
       },
       "IntegrationCredentialsResponse": {
         "type": "object",
-        "description": "Live credentials + per-auth HTTP delivery plans + per-auth expiries for an installed integration. Returned by both `GET /internal/integration-credentials/{scope}/{name}` and `POST .../refresh` (identical shape). Feeds the sidecar's MITM `MitmCredentialSource.current()` + `.deliveryPlans()`.",
-        "required": ["auths", "deliveryPlans", "expiresAtEpochMs"],
+        "description": "Live credentials + per-auth HTTP delivery plans + per-auth expiries for an installed integration. Returned by both `GET /internal/integration-credentials/{scope}/{name}` and `POST .../refresh` (identical shape). Feeds the sidecar's MITM `MitmCredentialSource.current()` + `.deliveryPlans()`. All wire keys are snake_case per AFPS 2.0 (see `docs/CASING_CONVENTIONS.md` — internal sidecar↔platform endpoints share the Zone 1 default).",
+        "required": ["auths", "delivery_plans", "expires_at_epoch_ms"],
         "properties": {
           "auths": {
             "type": "array",
             "items": {
               "type": "object",
-              "required": ["authKey", "authType", "fields", "authorizedUris"],
+              "required": ["auth_key", "auth_type", "fields", "authorized_uris"],
               "properties": {
-                "authKey": {
+                "auth_key": {
                   "type": "string"
                 },
-                "authType": {
+                "auth_type": {
                   "type": "string"
                 },
                 "fields": {
@@ -17156,50 +17192,63 @@
                     "type": "string"
                   }
                 },
-                "authorizedUris": {
+                "authorized_uris": {
                   "type": "array",
                   "items": {
                     "type": "string"
                   }
                 },
-                "audience": {
-                  "type": "string"
+                "resource": {
+                  "type": "string",
+                  "description": "RFC 8707 resource indicator declared by the manifest (`auths.{key}.resource`). AFPS 2.0 §7.3 name — matches the RFC."
                 },
-                "expiresAt": {
+                "audience": {
+                  "type": "string",
+                  "deprecated": true,
+                  "description": "Deprecated alias for `resource`. AFPS 2.0 §7.3 (RFC 8707) renamed the wire field; `audience` is kept for one release window for back-compat — see the `TODO(AFPS 2.1)` marker in `integration-credentials-resolver.ts`."
+                },
+                "expires_at": {
                   "type": "string",
                   "format": "date-time"
                 },
-                "scopesGranted": {
+                "scopes_granted": {
                   "type": "array",
                   "items": {
                     "type": "string"
                   }
+                },
+                "identity_claims": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "description": "Identity claims captured at connect time (e.g. OIDC `sub`, `email`). AFPS 2.0 §7 name."
                 }
               }
             }
           },
-          "deliveryPlans": {
+          "delivery_plans": {
             "type": "object",
             "additionalProperties": {
               "type": "object",
-              "required": ["headerName", "headerPrefix", "value", "allowServerOverride"],
+              "required": ["header_name", "header_prefix", "value", "allow_server_override"],
               "properties": {
-                "headerName": {
+                "header_name": {
                   "type": "string"
                 },
-                "headerPrefix": {
+                "header_prefix": {
                   "type": "string"
                 },
                 "value": {
                   "type": "string"
                 },
-                "allowServerOverride": {
+                "allow_server_override": {
                   "type": "boolean"
                 }
               }
             }
           },
-          "expiresAtEpochMs": {
+          "expires_at_epoch_ms": {
             "type": "object",
             "additionalProperties": {
               "type": ["integer", "null"]

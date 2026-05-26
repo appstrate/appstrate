@@ -9,7 +9,7 @@ export function isValidVersion(v: string): boolean {
 }
 
 /** Check whether `v` is a valid semver range string. */
-function isValidRange(v: string): boolean {
+export function isValidRange(v: string): boolean {
   return semver.validRange(v) !== null;
 }
 

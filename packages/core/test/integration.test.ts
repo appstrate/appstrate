@@ -28,7 +28,7 @@ import {
   validateAgentIntegrationScopes,
   RESERVED_INTEGRATION_UPLOAD_PROTOCOLS,
 } from "../src/integration.ts";
-import { validateManifest } from "../src/validation.ts";
+import { validateManifest, metaSchema } from "../src/validation.ts";
 
 // ─────────────────────────────────────────────
 // Fixture helpers
@@ -377,6 +377,234 @@ describe("integrationManifestSchema — authorized_uris", () => {
     const auths = m.auths as Record<string, Record<string, unknown>>;
     delete auths.oauth!.authorized_uris;
     auths.oauth!.allow_all_uris = true;
+    expect(integrationManifestSchema.safeParse(m).success).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────
+// credentials.schema $ref guard (§7.5 / §8.7 SSRF)
+// ─────────────────────────────────────────────
+
+describe("integrationManifestSchema — credentials.schema $ref SSRF guard", () => {
+  it("rejects an external https $ref nested in credentials.schema (§7.5 / §8.7)", () => {
+    // Note: AFPS requires credentials.schema to be a JSON Schema 2020-12
+    // object schema (`type: "object" + properties`), so the $ref must live
+    // inside a property (not at the root) to reach the SSRF guard at all.
+    const m = baseManifest({
+      source: { kind: "api", api: {} },
+      auths: {
+        foo: {
+          type: "api_key",
+          credentials: {
+            schema: {
+              type: "object",
+              properties: {
+                token: { $ref: "https://evil.example.com/schema.json" },
+              },
+            },
+          },
+          authorized_uris: ["https://api.example.com/**"],
+          delivery: { env: { API_KEY: { value: "{$credential.token}" } } },
+        },
+      },
+    });
+    const r = integrationManifestSchema.safeParse(m);
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      const onRef = r.error.issues.find((i) => i.message.includes("Non-fragment $ref"));
+      expect(onRef).toBeDefined();
+      expect(onRef!.path.join(".")).toBe("auths.foo.credentials.schema.properties.token.$ref");
+    }
+  });
+
+  it("rejects a nested external $ref inside credentials.schema", () => {
+    const m = baseManifest({
+      source: { kind: "api", api: {} },
+      auths: {
+        foo: {
+          type: "api_key",
+          credentials: {
+            schema: {
+              type: "object",
+              properties: {
+                token: { $ref: "http://attacker/token.json" },
+              },
+            },
+          },
+          authorized_uris: ["https://api.example.com/**"],
+          delivery: { env: { API_KEY: { value: "{$credential.token}" } } },
+        },
+      },
+    });
+    expect(integrationManifestSchema.safeParse(m).success).toBe(false);
+  });
+
+  it("accepts a local fragment $ref (#/$defs/Foo)", () => {
+    const m = baseManifest({
+      source: { kind: "api", api: {} },
+      auths: {
+        foo: {
+          type: "api_key",
+          credentials: {
+            schema: {
+              type: "object",
+              properties: { token: { $ref: "#/$defs/Token" } },
+              $defs: { Token: { type: "string" } },
+            },
+          },
+          authorized_uris: ["https://api.example.com/**"],
+          delivery: { env: { API_KEY: { value: "{$credential.token}" } } },
+        },
+      },
+    });
+    expect(integrationManifestSchema.safeParse(m).success).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────
+// delivery.http.in install gate (§7.6)
+// ─────────────────────────────────────────────
+
+describe("integrationManifestSchema — delivery.http.in install gate", () => {
+  it("rejects delivery.http.in = 'query' (runtime only supports 'header')", () => {
+    const m = baseManifest({
+      source: { kind: "api", api: {} },
+      auths: {
+        key: {
+          type: "api_key",
+          credentials: { schema: { type: "object", properties: {} } },
+          authorized_uris: ["https://api.example.com/**"],
+          delivery: {
+            http: {
+              in: "query",
+              name: "api_key",
+              value: "{$credential.api_key}",
+            },
+          },
+        },
+      },
+    });
+    const r = integrationManifestSchema.safeParse(m);
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      const onHttpIn = r.error.issues.find(
+        (i) => i.path.join(".") === "auths.key.delivery.http.in",
+      );
+      expect(onHttpIn).toBeDefined();
+      expect(onHttpIn!.message).toMatch(/only "header" is implemented/);
+    }
+  });
+
+  it("rejects delivery.http.in = 'cookie'", () => {
+    const m = baseManifest({
+      source: { kind: "api", api: {} },
+      auths: {
+        key: {
+          type: "api_key",
+          credentials: { schema: { type: "object", properties: {} } },
+          authorized_uris: ["https://api.example.com/**"],
+          delivery: {
+            http: { in: "cookie", name: "sid", value: "{$credential.api_key}" },
+          },
+        },
+      },
+    });
+    expect(integrationManifestSchema.safeParse(m).success).toBe(false);
+  });
+
+  it("accepts delivery.http.in = 'header'", () => {
+    // Sanity — the existing baseManifest declares delivery.http.in: "header"
+    // implicitly via the oauth2 default; assert explicit header still parses.
+    const m = baseManifest({
+      source: { kind: "api", api: {} },
+      auths: {
+        key: {
+          type: "api_key",
+          credentials: { schema: { type: "object", properties: {} } },
+          authorized_uris: ["https://api.example.com/**"],
+          delivery: {
+            http: {
+              in: "header",
+              name: "X-Api-Key",
+              value: "{$credential.api_key}",
+            },
+          },
+        },
+      },
+    });
+    expect(integrationManifestSchema.safeParse(m).success).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────
+// mtls + delivery.http install gate (§7.6)
+// ─────────────────────────────────────────────
+
+describe("integrationManifestSchema — mtls + delivery.http install gate", () => {
+  it("rejects mtls auth combined with delivery.http", () => {
+    const m = baseManifest({
+      source: { kind: "api", api: {} },
+      auths: {
+        client_cert: {
+          type: "mtls",
+          credentials: {
+            schema: {
+              type: "object",
+              properties: {
+                cert: { type: "string" },
+                key: { type: "string" },
+              },
+              required: ["cert", "key"],
+            },
+          },
+          authorized_uris: ["https://api.example.com/**"],
+          delivery: {
+            http: {
+              in: "header",
+              name: "X-Client-Cert",
+              value: "{$credential.cert}",
+            },
+          },
+        },
+      },
+    });
+    const r = integrationManifestSchema.safeParse(m);
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      const onHttp = r.error.issues.find(
+        (i) => i.path.join(".") === "auths.client_cert.delivery.http",
+      );
+      expect(onHttp).toBeDefined();
+      expect(onHttp!.message).toMatch(/mtls \+ delivery\.http/);
+    }
+  });
+
+  it("accepts mtls auth with delivery.files", () => {
+    const m = baseManifest({
+      source: { kind: "api", api: {} },
+      auths: {
+        client_cert: {
+          type: "mtls",
+          credentials: {
+            schema: {
+              type: "object",
+              properties: {
+                cert: { type: "string" },
+                key: { type: "string" },
+              },
+              required: ["cert", "key"],
+            },
+          },
+          authorized_uris: ["https://api.example.com/**"],
+          delivery: {
+            files: {
+              "/etc/cert.pem": { value: "{$credential.cert}" },
+              "/etc/key.pem": { value: "{$credential.key}" },
+            },
+          },
+        },
+      },
+    });
     expect(integrationManifestSchema.safeParse(m).success).toBe(true);
   });
 });
@@ -1037,5 +1265,63 @@ describe("validateAgentIntegrationScopes", () => {
     expect(
       validateAgentIntegrationScopes({ id: "@official/gmail", tools: [API_CALL_TOOL_NAME] }, api),
     ).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────
+// T7 (Wave 3 + Wave 5) — `_meta` namespace key validation
+// ─────────────────────────────────────────────
+//
+// AFPS 2.0 Appendix B defines META_NAMESPACE_KEY as a strict regex
+// (reverse-DNS namespace + `/` + identifier). Upstream `@afps-spec/schema@2.0.3`
+// types `_meta` as `z.record(z.string(), z.record(z.string(), z.unknown()))` —
+// any string key passes, including uppercase + whitespace + reserved
+// `mcp/` / `modelcontextprotocol/` prefixes per §10. The Wave 5 local refine in
+// `validation.ts` wraps the upstream `metaSchema` with a `.superRefine` that
+// enforces Appendix B + rejects reserved prefixes until the upstream fix lands.
+//
+// Final-report cross-reference: M1.
+describe("T7 — _meta namespace key validation (local refine)", () => {
+  it("rejects _meta keys that do not match META_NAMESPACE_KEY regex", () => {
+    const r = metaSchema.safeParse({ "BAD KEY": {} });
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      expect(r.error.issues.some((i) => i.path.includes("BAD KEY"))).toBe(true);
+    }
+  });
+
+  it("rejects _meta keys using the reserved `mcp/` prefix per AFPS §10", () => {
+    const r = metaSchema.safeParse({ "mcp/reserved": {} });
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      expect(
+        r.error.issues.some(
+          (i) => i.path.includes("mcp/reserved") && /reserved prefix/i.test(i.message),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("rejects _meta keys using the reserved `modelcontextprotocol/` prefix per AFPS §10", () => {
+    const r = metaSchema.safeParse({ "modelcontextprotocol/x": {} });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects _meta keys whose namespace contains uppercase letters (Appendix B regex)", () => {
+    const r = metaSchema.safeParse({ "dev.AFPS/x": {} });
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      expect(r.error.issues.some((i) => i.path.includes("dev.AFPS/x"))).toBe(true);
+    }
+  });
+
+  it("accepts the transitional `dev.appstrate.afps/` alias (spec editorial note §10)", () => {
+    const r = metaSchema.safeParse({ "dev.appstrate.afps/x": {} });
+    expect(r.success).toBe(true);
+  });
+
+  it("accepts a vendor reverse-DNS _meta key (`dev.appstrate/foo`)", () => {
+    const r = metaSchema.safeParse({ "dev.appstrate/foo": {} });
+    expect(r.success).toBe(true);
   });
 });

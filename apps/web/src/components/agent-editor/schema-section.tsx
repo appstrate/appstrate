@@ -255,7 +255,7 @@ function SortableFieldCard({
                 type="text"
                 placeholder={t("editor.fieldMaxSize")}
                 value={field.maxSize ?? ""}
-                onChange={(e) => onUpdate(index, { maxSize: e.target.value })}
+                onChange={(e) => onUpdate(index, { maxSize: e.target.value })} // afps-1x-lint-ok: SchemaField TS-internal (carve-out); manifest write via fieldsToSchema → `max_size`
                 className="h-7 min-w-[100px] flex-1 text-xs"
                 disabled={readOnly}
               />

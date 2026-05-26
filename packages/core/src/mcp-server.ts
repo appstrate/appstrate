@@ -4,24 +4,75 @@
 /**
  * AFPS 2.0.2 mcp-server manifest — re-exported from `@afps-spec/schema`.
  *
- * An `mcp-server` package's `manifest.json` IS a verbatim MCP Bundle (MCPB)
- * manifest extended with the AFPS identity contract lifted to the root:
- * `type: "mcp-server"`, the scoped `name`, `schema_version`, and
+ * An `mcp-server` package's `manifest.json` is an AFPS-native manifest that
+ * carries MCPB-vocabulary fields (`manifest_version`, `server`, `tools`,
+ * `user_config`) verbatim, alongside the AFPS identity contract lifted to
+ * the root: `type: "mcp-server"`, the scoped `name`, `schema_version`, and
  * `dependencies` (AFPS 2.0.2 §3.4 / §11.2). The previous
  * `_meta["dev.afps/mcp-server"]` identity block was removed in 2.0.2. The
  * Appstrate-specific runtime hints stay under `_meta["dev.appstrate/mcp-server"]`
- * (the blessed vendor extension point) so a built `mcp-server` still runs
- * unmodified in any MCPB host.
+ * (the blessed vendor extension point).
+ *
+ * Strict-MCPB host interoperability is not a goal of AFPS 2.0; the manifest
+ * carries AFPS-native top-level fields (name, type, schema_version,
+ * dependencies) outside the MCPB schema. A publish-time projection to a
+ * strict MCPB bundle is reserved for a future minor (AFPS §10.2).
  */
 
+import { z } from "zod";
 import {
-  mcpServerManifestSchema,
+  mcpServerManifestSchema as afpsMcpServerManifestSchema,
   mcpServerTypeEnum,
   type McpServerManifest,
 } from "@afps-spec/schema";
 
-export { mcpServerManifestSchema, mcpServerTypeEnum };
+export { mcpServerTypeEnum };
 export type { McpServerManifest };
+
+/**
+ * MCPB `user_config` entry shape (Appendix C / MCPB spec). Upstream
+ * `@afps-spec/schema@2.0.3` types `user_config` as
+ * `z.record(z.string(), z.unknown())` — any value passes. This local refine
+ * enforces the MCPB inner shape until the upstream tightening lands (tracked
+ * as M2 in /tmp/afps-audit/FINAL-REPORT.md). `.passthrough()` preserves
+ * forward-compatibility with future MCPB additions.
+ */
+const userConfigEntrySchema = z
+  .object({
+    type: z.enum(["string", "number", "boolean", "directory", "file"]),
+    title: z.string().min(1),
+    description: z.string().optional(),
+    required: z.boolean().optional(),
+    default: z.unknown().optional(),
+    multiple: z.boolean().optional(),
+    sensitive: z.boolean().optional(),
+    min: z.number().optional(),
+    max: z.number().optional(),
+  })
+  .loose();
+
+/**
+ * Wraps the upstream `mcpServerManifestSchema` with a `.superRefine` that
+ * validates each `user_config` entry against the MCPB inner shape. Entries
+ * that don't match (missing `type`, invalid `type`, missing `title`, …)
+ * surface Zod issues under `["user_config", <key>, …]`.
+ */
+export const mcpServerManifestSchema = afpsMcpServerManifestSchema.superRefine((m, ctx) => {
+  const userConfig = (m as { user_config?: unknown }).user_config;
+  if (!userConfig || typeof userConfig !== "object" || Array.isArray(userConfig)) return;
+  for (const [key, entry] of Object.entries(userConfig as Record<string, unknown>)) {
+    const result = userConfigEntrySchema.safeParse(entry);
+    if (!result.success) {
+      for (const issue of result.error.issues) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["user_config", key, ...issue.path],
+          message: issue.message,
+        });
+      }
+    }
+  }
+});
 
 /** The `_meta` key carrying Appstrate-specific mcp-server runtime hints. */
 export const MCP_SERVER_APPSTRATE_META_KEY = "dev.appstrate/mcp-server";
@@ -29,10 +80,10 @@ export const MCP_SERVER_APPSTRATE_META_KEY = "dev.appstrate/mcp-server";
 /**
  * Read the Appstrate runtime override from `_meta["dev.appstrate/mcp-server"]
  * .runtime`. MCPB's `server.type` enum is `node|python|binary|uv` — it has no
- * `bun`. A bun-native server therefore stays MCPB-conformant (e.g.
- * `server.type: "node"`, `mcp_config.command: "bun"`) and declares `bun` here
- * so the platform's runner picks the bun interpreter/image. Returns `undefined`
- * when absent, in which case callers fall back to `server.type`.
+ * `bun`. A bun-native server therefore keeps an MCPB-vocabulary
+ * `server.type: "node"` (with `mcp_config.command: "bun"`) and declares `bun`
+ * here so the platform's runner picks the bun interpreter/image. Returns
+ * `undefined` when absent, in which case callers fall back to `server.type`.
  */
 export function getMcpServerRuntime(manifest: McpServerManifest): string | undefined {
   const meta = (manifest as { _meta?: Record<string, unknown> })._meta;

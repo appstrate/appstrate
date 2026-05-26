@@ -3,10 +3,12 @@
 /**
  * First-class `mcp-server` package routes (AFPS 2.0.2 §3.4).
  *
- * An `mcp-server` package's `manifest.json` is a verbatim MCPB manifest with
- * the AFPS identity contract (`type: "mcp-server"`, scoped `name`,
- * `schema_version`, `dependencies`) lifted to the manifest root in AFPS 2.0.2
- * §3.4 / §11.2. They are import-only (no editor), but otherwise have full parity with the other
+ * An `mcp-server` package's `manifest.json` is AFPS-native at the root with
+ * MCPB-vocabulary fields embedded — the AFPS identity contract
+ * (`type: "mcp-server"`, scoped `name`, `schema_version`, `dependencies`) is
+ * lifted to the manifest root alongside MCPB-vocabulary fields (`server`,
+ * `tools`, `user_config`) in AFPS 2.0.2 §3.4 / §11.2. They are import-only
+ * (no editor), but otherwise have full parity with the other
  * package types: importable via `POST /api/packages/import`, listable via
  * `GET /api/packages/mcp-servers`, and fetchable via
  * `GET /api/packages/mcp-servers/{scope}/{name}`.

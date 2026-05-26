@@ -99,6 +99,15 @@ export function resolveAfpsHttpDelivery(
   const valueTemplate = http?.value ?? defaults.value;
 
   let value = valueTemplate.length === 0 ? "" : renderCredentialTemplate(valueTemplate, fields);
+  // §7.6 spec-text reads "applied to the rendered prefix+value string before
+  // placement". The §7.6 commented example, however, shows the output for
+  // `prefix: "Basic ", value: "{$credential.email}/token:{$credential.api_key}",
+  // encoding: "base64"` as `Basic <base64(email/token:apikey)>` — i.e. prefix
+  // placed UNENCODED, value base64'd. We resolve the ambiguity in favour of
+  // the commented example (and the HTTP Basic interop convention RFC 7617
+  // defines as `Basic <base64(user:pass)>`): the prefix stays uncoded and only
+  // the rendered `value` is base64'd. The `afps-delivery.test.ts:Zendesk-style`
+  // case pins this behaviour.
   if (http?.encoding === "base64" && value.length > 0) {
     value = Buffer.from(value, "utf8").toString("base64");
   }

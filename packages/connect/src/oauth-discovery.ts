@@ -104,9 +104,43 @@ function buildDiscoveryProbes(issuer: string): string[] {
 }
 
 /**
+ * Per-issuer discovery result cache (AFPS §7.3 enrichment).
+ *
+ * Discovery documents are stable IdP configuration that rotates on the order
+ * of weeks/months — we cache the projected fields per issuer URL so a connect
+ * burst doesn't hammer the IdP's well-known endpoints. Process-lifetime is
+ * the conservative ceiling (no neighbouring TTL cache pattern exists in this
+ * package, and tests reset state by reloading the module); operators who need
+ * a refresh roll the process. `null` cached entries represent "discovery
+ * attempted and failed" so we don't retry on every connect during an outage.
+ *
+ * Cache is keyed by the trimmed-trailing-slash issuer string — the exact same
+ * normalisation used for the §7.3 issuer-equality check below.
+ */
+interface CachedDiscovery {
+  codeChallengeMethodsSupported?: string[];
+  userinfoEndpoint?: string;
+  /** Discovered endpoints (NOT applied unless manifest leaves them undeclared). */
+  discoveredAuthorizationEndpoint?: string;
+  discoveredTokenEndpoint?: string;
+}
+const discoveryCache = new Map<string, CachedDiscovery | null>();
+
+/** Test-only hook so unit tests can run with a clean cache state. */
+export function __clearOAuthDiscoveryCache(): void {
+  discoveryCache.clear();
+}
+
+/**
  * Resolve OAuth endpoints, preferring explicit values and falling back to
  * issuer discovery for any that are missing. Best-effort: returns whatever
  * could be resolved (explicit fields are always preserved).
+ *
+ * AFPS §7.3 enrichment: when `issuer` is declared, discovery ALWAYS runs (even
+ * when both endpoints are manually declared) so we can project the IdP's
+ * `userinfo_endpoint` and `code_challenge_methods_supported`. Manual endpoints
+ * still win — discovery is enrichment, not override. Results are cached per
+ * issuer to amortise the extra well-known fetch.
  */
 export async function resolveOAuthEndpoints(
   input: ResolveOAuthEndpointsInput,
@@ -116,25 +150,44 @@ export async function resolveOAuthEndpoints(
   let codeChallengeMethodsSupported: string[] | undefined;
   let userinfoEndpoint: string | undefined;
 
-  // Discovery is also useful when both endpoints are explicit but we still
-  // want to learn PKCE-method capability from the IdP — but the historical
-  // contract here was "only fetch when an endpoint is missing", so we keep
-  // that to avoid an extra network hop on every connect. When the manifest
-  // ships explicit endpoints, the caller should also declare the PKCE method
-  // list (or accept the S256 default downstream).
-  const needsDiscovery = !!input.issuer && (!authorizationEndpoint || !tokenEndpoint);
-  if (!needsDiscovery) {
+  // No issuer — nothing to discover.
+  if (!input.issuer) {
     return { authorizationEndpoint, tokenEndpoint };
   }
 
-  const configuredIssuer = trimTrailingSlash(input.issuer!);
-  const candidates = buildDiscoveryProbes(input.issuer!);
+  const configuredIssuer = trimTrailingSlash(input.issuer);
+
+  // Cache hit — apply enrichment without any network I/O.
+  if (discoveryCache.has(configuredIssuer)) {
+    const cached = discoveryCache.get(configuredIssuer);
+    if (cached) {
+      if (!authorizationEndpoint && cached.discoveredAuthorizationEndpoint) {
+        authorizationEndpoint = cached.discoveredAuthorizationEndpoint;
+      }
+      if (!tokenEndpoint && cached.discoveredTokenEndpoint) {
+        tokenEndpoint = cached.discoveredTokenEndpoint;
+      }
+      codeChallengeMethodsSupported = cached.codeChallengeMethodsSupported;
+      userinfoEndpoint = cached.userinfoEndpoint;
+    }
+    return {
+      authorizationEndpoint,
+      tokenEndpoint,
+      ...(codeChallengeMethodsSupported !== undefined ? { codeChallengeMethodsSupported } : {}),
+      ...(userinfoEndpoint !== undefined ? { userinfoEndpoint } : {}),
+    };
+  }
+
+  const candidates = buildDiscoveryProbes(input.issuer);
+  let discoveredAuthorizationEndpoint: string | undefined;
+  let discoveredTokenEndpoint: string | undefined;
 
   for (const url of candidates) {
     const doc = await fetchDiscoveryDocument(url);
     if (!doc) continue;
     // AFPS §7.3 line 803: validate that the document's `issuer` matches the
     // configured issuer string. Reject + try the next probe on mismatch.
+    // This MUST happen before any field is trusted from the document.
     if (typeof doc.issuer !== "string" || trimTrailingSlash(doc.issuer) !== configuredIssuer) {
       // Discovery is best-effort — log and continue.
       void extractErrorMessage(
@@ -144,12 +197,14 @@ export async function resolveOAuthEndpoints(
       );
       continue;
     }
-    // Manual endpoints win; only fill the gaps from discovery.
-    if (!authorizationEndpoint && typeof doc.authorization_endpoint === "string") {
-      authorizationEndpoint = doc.authorization_endpoint;
+    if (
+      discoveredAuthorizationEndpoint === undefined &&
+      typeof doc.authorization_endpoint === "string"
+    ) {
+      discoveredAuthorizationEndpoint = doc.authorization_endpoint;
     }
-    if (!tokenEndpoint && typeof doc.token_endpoint === "string") {
-      tokenEndpoint = doc.token_endpoint;
+    if (discoveredTokenEndpoint === undefined && typeof doc.token_endpoint === "string") {
+      discoveredTokenEndpoint = doc.token_endpoint;
     }
     // RFC 8414 §2 — project the first defined-and-well-shaped array we find.
     // Don't synthesise a default when absent (caller's job).
@@ -172,13 +227,41 @@ export async function resolveOAuthEndpoints(
       }
     }
     if (
-      authorizationEndpoint &&
-      tokenEndpoint &&
+      discoveredAuthorizationEndpoint &&
+      discoveredTokenEndpoint &&
       codeChallengeMethodsSupported !== undefined &&
       userinfoEndpoint !== undefined
     ) {
       break;
     }
+  }
+
+  // Cache the projection (or null on total failure) so subsequent connects on
+  // the same issuer don't re-fetch. A null cache entry still short-circuits
+  // — silent fallback to manual values is the spec-mandated behaviour.
+  const anyDiscovered =
+    discoveredAuthorizationEndpoint !== undefined ||
+    discoveredTokenEndpoint !== undefined ||
+    codeChallengeMethodsSupported !== undefined ||
+    userinfoEndpoint !== undefined;
+  discoveryCache.set(
+    configuredIssuer,
+    anyDiscovered
+      ? {
+          discoveredAuthorizationEndpoint,
+          discoveredTokenEndpoint,
+          codeChallengeMethodsSupported,
+          userinfoEndpoint,
+        }
+      : null,
+  );
+
+  // Manual endpoints always win — discovery fills only the gaps.
+  if (!authorizationEndpoint && discoveredAuthorizationEndpoint) {
+    authorizationEndpoint = discoveredAuthorizationEndpoint;
+  }
+  if (!tokenEndpoint && discoveredTokenEndpoint) {
+    tokenEndpoint = discoveredTokenEndpoint;
   }
 
   return {

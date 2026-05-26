@@ -112,6 +112,7 @@ export async function resolveIntegrationSpawns(
         actor,
         entry.tools,
         resolvedConnections?.[entry.id] ?? null,
+        entry.auth_key,
       );
       if (spec) out.push(spec);
     } catch (err) {
@@ -131,6 +132,7 @@ async function resolveOne(
   actor: Actor,
   agentToolSelection: readonly string[] | undefined,
   resolvedConnection: ResolvedConnection | null,
+  requiredAuthKey: string | undefined,
 ): Promise<IntegrationSpawnSpec | null> {
   // (a) Package exists + integration type — read the latest manifest
   // straight off `packages.draft_manifest`. System integrations have
@@ -260,7 +262,7 @@ async function resolveOne(
     }
     // The Appstrate runtime override (`_meta["dev.appstrate/mcp-server"].runtime`)
     // wins over the MCPB `server.type`. MCPB has no `bun` type, so a bun-native
-    // server stays MCPB-conformant (e.g. `server.type: "node"`) and declares
+    // server keeps an MCPB-vocabulary `server.type: "node"` and declares
     // `bun` in _meta; the runner then picks the bun interpreter/image.
     const effectiveType = getMcpServerRuntime(mcpServer) ?? run.type;
     serverSpec = { type: effectiveType, entry_point: run.entry_point, serverPackageId: ref.name };
@@ -281,6 +283,7 @@ async function resolveOne(
     resolvedConnection,
     exposeApiCall,
     referencedMcpServer,
+    requiredAuthKey,
   );
   if (!deliveries) {
     // resolveDeliveries already logged the reason (missing connection,
@@ -492,6 +495,7 @@ async function resolveDeliveries(
   resolvedConnection: ResolvedConnection | null,
   hasApiCall: boolean,
   referencedMcpServer: Awaited<ReturnType<typeof fetchMcpServerManifest>> | null,
+  requiredAuthKey: string | undefined,
 ): Promise<ResolvedDeliveries | null> {
   const auths = (manifest.auths ?? {}) as Record<string, AfpsManifestAuth>;
   if (Object.keys(auths).length === 0) {
@@ -499,12 +503,16 @@ async function resolveDeliveries(
     return { spawnEnv: {} };
   }
 
-  // Load the one connection chosen by the cascade.
+  // Load the one connection chosen by the cascade. When the agent dep
+  // pins an `auth_key` (AFPS 2.0 §4.1), narrow the live-credentials
+  // auto-pick to that single auth — the resolver snapshot already
+  // honoured the pin, this is the parity guarantee for the no-snapshot
+  // path (e.g. legacy callers that don't run the cascade upstream).
   const row = await selectAccessibleConnection(
     integrationId,
     Object.keys(auths),
     resolvedConnection?.connectionId ?? null,
-    { applicationId, actor },
+    { applicationId, actor, ...(requiredAuthKey ? { requiredAuthKey } : {}) },
   );
 
   if (!row) {

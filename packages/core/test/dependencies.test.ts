@@ -195,6 +195,90 @@ describe("extractDependencies", () => {
     expect(deps).toHaveLength(1);
     expect(deps[0]!.versionRange).toBe("^1.0.0");
   });
+
+  // H5 — invalid semver range rejected upstream at extract time.
+  it("throws on invalid semver range (string form)", () => {
+    const manifest = {
+      dependencies: { skills: { "@acme/skill": "not-a-range" } },
+    };
+    expect(() => extractDependencies(manifest)).toThrow(/Invalid semver range/);
+  });
+
+  it("throws on invalid semver range (object form)", () => {
+    const manifest = {
+      dependencies: {
+        integrations: { "@acme/x": { version: "definitely-not-a-range" } },
+      },
+    };
+    expect(() => extractDependencies(manifest)).toThrow(/Invalid semver range/);
+  });
+
+  it("accepts standard semver range forms", () => {
+    // Sanity guard that the H5 validator doesn't over-reject (caret, tilde,
+    // range, wildcard, exact, and the npm-style "*" are all valid).
+    const manifest = {
+      dependencies: {
+        skills: {
+          "@acme/a": "^1.0.0",
+          "@acme/b": "~1.2.3",
+          "@acme/c": ">=1.0.0 <2.0.0",
+          "@acme/d": "1.x",
+          "@acme/e": "1.0.0",
+          "@acme/f": "*",
+        },
+      },
+    };
+    expect(() => extractDependencies(manifest)).not.toThrow();
+  });
+
+  // M7 — AFPS 1.x→2.0 read fallback (Appendix D).
+  it("projects 1.x dependencies.providers into integrations", () => {
+    const manifest = {
+      dependencies: {
+        providers: { "@acme/gmail": "^1.0.0" },
+      },
+    };
+    const deps = extractDependencies(manifest);
+    expect(deps).toHaveLength(1);
+    expect(deps[0]!.depType).toBe("integration");
+    expect(deps[0]!.depScope).toBe("@acme");
+    expect(deps[0]!.depName).toBe("gmail");
+  });
+
+  it("projects 1.x dependencies.tools into mcp_servers", () => {
+    const manifest = {
+      dependencies: {
+        tools: { "@acme/git-tool": "^2.0.0" },
+      },
+    };
+    const deps = extractDependencies(manifest);
+    expect(deps).toHaveLength(1);
+    expect(deps[0]!.depType).toBe("mcp-server");
+  });
+
+  it("canonical integrations win over 1.x providers projection on collision", () => {
+    const manifest = {
+      dependencies: {
+        integrations: { "@acme/gmail": "^2.0.0" },
+        providers: { "@acme/gmail": "^1.0.0" },
+      },
+    };
+    const deps = extractDependencies(manifest);
+    expect(deps).toHaveLength(1);
+    expect(deps[0]!.versionRange).toBe("^2.0.0");
+  });
+
+  it("canonical mcp_servers win over 1.x tools projection on collision", () => {
+    const manifest = {
+      dependencies: {
+        mcp_servers: { "@acme/srv": "^2.0.0" },
+        tools: { "@acme/srv": "^1.0.0" },
+      },
+    };
+    const deps = extractDependencies(manifest);
+    expect(deps).toHaveLength(1);
+    expect(deps[0]!.versionRange).toBe("^2.0.0");
+  });
 });
 
 describe("parseManifestIntegrations", () => {
@@ -502,6 +586,115 @@ describe("writeManifestIntegrations", () => {
     expect(canonical.providersConfiguration).toBeUndefined();
     expect(canonical.integrations).toBeUndefined();
     expect(canonical.integrations_configuration).toBeUndefined();
+  });
+
+  // ───────────────────────────────────────────────────────────────────
+  // AFPS 2.0 §4.1 `auth_key` (C2) — multi-auth selector threading.
+  // ───────────────────────────────────────────────────────────────────
+
+  it("parseManifestIntegrations extracts `auth_key` from canonical dep object form (§4.1)", () => {
+    const out = parseManifestIntegrations({
+      dependencies: {
+        integrations: {
+          "@acme/github-mcp": { version: "^1.0.0", auth_key: "pat" },
+        },
+      },
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0]!.auth_key).toBe("pat");
+  });
+
+  it("parseManifestIntegrations extracts `auth_key` from deprecated `integrations_configuration` alias (§4.4)", () => {
+    const out = parseManifestIntegrations({
+      dependencies: { integrations: { "@acme/github-mcp": "^1.0.0" } },
+      integrations_configuration: {
+        "@acme/github-mcp": { auth_key: "pat" },
+      },
+    });
+    expect(out[0]!.auth_key).toBe("pat");
+  });
+
+  it("parseManifestIntegrations extracts `auth_key` from legacy top-level `integrations` block", () => {
+    const out = parseManifestIntegrations({
+      dependencies: { integrations: { "@acme/github-mcp": "^1.0.0" } },
+      integrations: {
+        "@acme/github-mcp": { auth_key: "legacy-pat" },
+      },
+    });
+    expect(out[0]!.auth_key).toBe("legacy-pat");
+  });
+
+  it("canonical `auth_key` wins over deprecated alias + legacy top-level on conflict", () => {
+    const out = parseManifestIntegrations({
+      dependencies: {
+        integrations: {
+          "@acme/github-mcp": { version: "^1.0.0", auth_key: "canonical" },
+        },
+      },
+      integrations_configuration: {
+        "@acme/github-mcp": { auth_key: "alias" },
+      },
+      integrations: {
+        "@acme/github-mcp": { auth_key: "legacy" },
+      },
+    });
+    expect(out[0]!.auth_key).toBe("canonical");
+  });
+
+  it("writeManifestIntegrations emits `auth_key` in canonical object form", () => {
+    const m: Record<string, unknown> = {};
+    writeManifestIntegrations(m, [{ id: "@acme/github-mcp", version: "^1.0.0", auth_key: "pat" }]);
+    expect(m.dependencies).toEqual({
+      integrations: {
+        "@acme/github-mcp": { version: "^1.0.0", auth_key: "pat" },
+      },
+    });
+  });
+
+  it("writeManifestIntegrations prevents collapse-to-string when `auth_key` is set", () => {
+    // Even without tools/scopes, an entry carrying `auth_key` MUST stay in
+    // object form — otherwise the pin would be lost on save.
+    const m: Record<string, unknown> = {};
+    writeManifestIntegrations(m, [{ id: "@acme/github-mcp", version: "^1.0.0", auth_key: "pat" }]);
+    const deps = m.dependencies as { integrations: Record<string, unknown> };
+    expect(typeof deps.integrations["@acme/github-mcp"]).toBe("object");
+  });
+
+  it("round-trips: parse(write({ id, version, auth_key })) equals input", () => {
+    const m: Record<string, unknown> = {};
+    const entries = [{ id: "@acme/github-mcp", version: "^1.0.0", auth_key: "pat" }];
+    writeManifestIntegrations(m, entries);
+    const parsed = parseManifestIntegrations(m);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]!.id).toBe("@acme/github-mcp");
+    expect(parsed[0]!.version).toBe("^1.0.0");
+    expect(parsed[0]!.auth_key).toBe("pat");
+  });
+
+  it("round-trips the full triple (tools + scopes + auth_key)", () => {
+    const m: Record<string, unknown> = {};
+    const entries = [
+      {
+        id: "@acme/github-mcp",
+        version: "^1.0.0",
+        tools: ["list_issues"],
+        scopes: ["repo"],
+        auth_key: "oauth",
+      },
+    ];
+    writeManifestIntegrations(m, entries);
+    const parsed = parseManifestIntegrations(m);
+    expect(parsed[0]!.tools).toEqual(["list_issues"]);
+    expect(parsed[0]!.scopes).toEqual(["repo"]);
+    expect(parsed[0]!.auth_key).toBe("oauth");
+  });
+
+  it("empty / missing `auth_key` still collapses to bare semver string", () => {
+    const m: Record<string, unknown> = {};
+    writeManifestIntegrations(m, [{ id: "@acme/github-mcp", version: "^1.0.0" }]);
+    expect(m.dependencies).toEqual({
+      integrations: { "@acme/github-mcp": "^1.0.0" },
+    });
   });
 });
 

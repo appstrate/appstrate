@@ -693,3 +693,96 @@ describe("resolveConnections — org default", () => {
     expect(result.errors[0]!.code).toBe("insufficient_scopes");
   });
 });
+
+// ─────────────────────── AFPS 2.0 §4.1 `auth_key` (C2) ────────────────────────
+
+describe("resolveConnections — agent dep `auth_key` (AFPS 2.0 §4.1)", () => {
+  function reqWithAuthKey(authKey: string): IntegrationRequirement {
+    return {
+      integrationId: INTEG,
+      manifest: oauth2Manifest(),
+      hasSelectedTools: true,
+      agentTools: [],
+      agentScopes: [],
+      requiredAuthKey: authKey,
+    };
+  }
+
+  it("picks the matching-auth connection when the agent dep pins `auth_key: 'pat'`", () => {
+    const oauthConn = conn({ authKey: "oauth" });
+    const patConn = conn({ authKey: "pat" });
+    const result = resolveConnections({
+      requirements: [reqWithAuthKey("pat")],
+      accessibleConnections: [oauthConn, patConn],
+      pins: [],
+      actorUserId: USER_ID,
+    });
+    expect(result.errors).toEqual([]);
+    expect(result.resolved[INTEG]!.connectionId).toBe(patConn.id);
+    expect(result.resolved[INTEG]!.source).toBe("fallback_auto");
+  });
+
+  it("falls back to existing cascade when no `auth_key` is pinned (parity with pre-C2)", () => {
+    const oauthConn = conn({ authKey: "oauth" });
+    const patConn = conn({ authKey: "pat" });
+    const result = resolveConnections({
+      requirements: [req(oauth2Manifest())],
+      accessibleConnections: [oauthConn, patConn],
+      pins: [],
+      actorUserId: USER_ID,
+    });
+    // No pin/override + 2 candidates ⇒ must_choose. The point: the resolver
+    // SAW both candidates (no auth_key filter pre-narrowed them).
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]!.code).toBe("must_choose_connection");
+    expect(result.errors[0]!.candidateConnectionIds).toEqual(
+      expect.arrayContaining([oauthConn.id, patConn.id]),
+    );
+  });
+
+  it("surfaces `auth_key_mismatch` when the agent dep pins a nonexistent auth_key", () => {
+    const oauthConn = conn({ authKey: "oauth" });
+    const result = resolveConnections({
+      requirements: [reqWithAuthKey("nonexistent")],
+      accessibleConnections: [oauthConn],
+      pins: [],
+      actorUserId: USER_ID,
+    });
+    expect(result.resolved[INTEG]).toBeUndefined();
+    expect(result.errors).toHaveLength(1);
+    const err = result.errors[0]!;
+    expect(err.code).toBe("auth_key_mismatch");
+    expect(err.integrationId).toBe(INTEG);
+    expect(err.requiredAuthKey).toBe("nonexistent");
+    expect(err.availableAuthKeys).toEqual(["oauth"]);
+  });
+
+  it("surfaces `not_connected` (not auth_key_mismatch) when actor has no connections at all", () => {
+    const result = resolveConnections({
+      requirements: [reqWithAuthKey("pat")],
+      accessibleConnections: [],
+      pins: [],
+      actorUserId: USER_ID,
+    });
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]!.code).toBe("not_connected");
+  });
+
+  it("filters BEFORE the cascade — admin pin pointing at off-auth connection is dropped", () => {
+    // The pin points at oauth, but the dep requires pat. The pre-filter removes
+    // the oauth row from the candidate set, so the admin pin can't be resolved
+    // ⇒ pinned_connection_unavailable (not a happy-path resolve).
+    const oauthConn = conn({ authKey: "oauth" });
+    const patConn = conn({ authKey: "pat" });
+    const result = resolveConnections({
+      requirements: [reqWithAuthKey("pat")],
+      accessibleConnections: [oauthConn, patConn],
+      pins: [pin(oauthConn.id)],
+      actorUserId: USER_ID,
+    });
+    // The pin pointed at the now-filtered-out oauth row, so it resolves
+    // as `pinned_connection_unavailable`.
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]!.code).toBe("pinned_connection_unavailable");
+  });
+});

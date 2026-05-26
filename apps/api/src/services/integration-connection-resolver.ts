@@ -81,6 +81,13 @@ export interface IntegrationRequirement {
    * the only scope signal for them. Empty when none selected.
    */
   agentScopes: readonly string[];
+  /**
+   * AFPS 2.0 §4.1 `auth_key` — when set, restricts the candidate
+   * connection set to rows whose `authKey === requiredAuthKey`
+   * BEFORE the cascade runs. `undefined` keeps the existing flat-model
+   * semantics (any connection on the integration is a valid pick).
+   */
+  requiredAuthKey?: string;
 }
 
 export interface ResolveConnectionsInput {
@@ -162,6 +169,44 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
     // integrations expose no tools, so scope selection keeps them active.
     if (!req.hasSelectedTools && req.agentScopes.length === 0) continue;
 
+    // AFPS 2.0 §4.1 `auth_key`: when the agent dep pins an auth method,
+    // restrict the candidate connection set to rows on that auth BEFORE
+    // running the cascade. The chosen connection's authKey carries through
+    // to credential injection downstream; pre-filtering here means every
+    // cascade layer (pins / overrides / fallback) honours the pin uniformly.
+    const integrationCandidates = input.accessibleConnections.filter(
+      (c) => c.integrationPackageId === req.integrationId,
+    );
+    let filteredConnections = input.accessibleConnections;
+    let filteredIndex = connectionIndex;
+    if (req.requiredAuthKey !== undefined) {
+      const matchingOnAuth = integrationCandidates.filter((c) => c.authKey === req.requiredAuthKey);
+      if (matchingOnAuth.length === 0 && integrationCandidates.length > 0) {
+        // The actor has connections on this integration but none on the
+        // requested auth — surface a structured mismatch error rather than
+        // letting the cascade fall through to `not_connected` (which would
+        // hide the real cause).
+        errors.push({
+          integrationId: req.integrationId,
+          code: "auth_key_mismatch",
+          requiredAuthKey: req.requiredAuthKey,
+          availableAuthKeys: [...new Set(integrationCandidates.map((c) => c.authKey))],
+          message: `Integration '${req.integrationId}' requires auth '${req.requiredAuthKey}' but the actor's accessible connections use [${[
+            ...new Set(integrationCandidates.map((c) => c.authKey)),
+          ].join(", ")}].`,
+        });
+        continue;
+      }
+      // Build a restricted view so the cascade only sees matching connections.
+      // Other integrations' rows are untouched.
+      const otherRows = input.accessibleConnections.filter(
+        (c) => c.integrationPackageId !== req.integrationId,
+      );
+      filteredConnections = [...otherRows, ...matchingOnAuth];
+      filteredIndex = new Map<string, ConnectionRow>();
+      for (const c of filteredConnections) filteredIndex.set(c.id, c);
+    }
+
     const result = resolveOne({
       integrationId: req.integrationId,
       manifest: req.manifest,
@@ -172,8 +217,8 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
       runOverrideId: input.runOverrides?.[req.integrationId] ?? null,
       scheduleOverrideId: input.scheduleOverrides?.[req.integrationId] ?? null,
       memberPinId: memberPins.get(req.integrationId) ?? null,
-      accessibleConnections: input.accessibleConnections,
-      connectionIndex,
+      accessibleConnections: filteredConnections,
+      connectionIndex: filteredIndex,
       actorUserId: input.actorUserId ?? null,
       actorEndUserId: input.actorEndUserId ?? null,
     });
@@ -473,6 +518,7 @@ async function buildRequirement(
     hasSelectedTools: !!entry.tools && entry.tools.length > 0,
     agentTools: entry.tools ?? [],
     agentScopes: entry.scopes ?? [],
+    ...(entry.auth_key !== undefined ? { requiredAuthKey: entry.auth_key } : {}),
   };
 }
 

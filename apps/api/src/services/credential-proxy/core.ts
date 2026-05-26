@@ -226,17 +226,20 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     );
   }
 
-  // authorizedUris gate (AFPS spec: `*` = one segment, `**` = any substring).
-  // When `allowAllUris` is set we still block private/internal network
+  // authorized_uris gate (AFPS spec: `*` = one segment, `**` = any substring).
+  // When `allow_all_uris` is set we still block private/internal network
   // targets — mirror of the sidecar's SSRF safety net so the public
   // route can't be turned into an SSRF primitive by flipping a single
-  // flag on an integration manifest.
+  // flag on an integration manifest. (Internal TS field names stay
+  // camelCase per the documented Zone 3 carve-out — see
+  // docs/CASING_CONVENTIONS.md — but user-facing error strings refer
+  // to the AFPS wire vocabulary.)
   if (!resolved.allowAllUris) {
     const allowlist = resolved.authorizedUris ?? [];
     const ok = allowlist.some((p) => matchesAuthorizedUriSpec(p, target));
     if (!ok) {
       throw new ProxyAuthorizationError(
-        `Target ${target} is not in the authorizedUris allowlist for ${input.integrationId}`,
+        `Target ${target} is not in the authorized_uris allowlist for ${input.integrationId}`,
       );
     }
     if (allowlist.length === 0 && isBlockedUrl(target)) {

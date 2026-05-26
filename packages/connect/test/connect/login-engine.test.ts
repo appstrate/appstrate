@@ -354,3 +354,135 @@ describe("runLogin — security limits", () => {
     expect((err as LoginError).reason).toBe("extract_failed");
   });
 });
+
+describe("runLogin — Arazzo Selector Object outputs (AFPS §7.7)", () => {
+  it("jsonpointer selector extracts from $response.body", async () => {
+    const { impl } = fakeFetch([
+      {
+        status: 200,
+        body: JSON.stringify({ data: { token: "ABC123" } }),
+      },
+    ]);
+    const config: LoginConfig = {
+      login: {
+        request: { method: "POST", url: "https://idp.example.com/token" },
+        outputs: {
+          access_token: {
+            context: "$response.body",
+            selector: "/data/token",
+            type: "jsonpointer",
+          },
+        },
+      },
+    };
+    const res = await runLogin(config, {
+      inputs: {},
+      authorizedUris: ALLOW,
+      allowAllUris: false,
+      fetchImpl: impl,
+    });
+    expect(res.outputs.access_token).toBe("ABC123");
+  });
+
+  it("jsonpath selector extracts $.data.token from $response.body", async () => {
+    const { impl } = fakeFetch([
+      { status: 200, body: JSON.stringify({ data: { token: "TOK-XYZ" } }) },
+    ]);
+    const config: LoginConfig = {
+      login: {
+        request: { method: "POST", url: "https://idp.example.com/token" },
+        outputs: {
+          access_token: {
+            context: "$response.body",
+            selector: "$.data.token",
+            type: "jsonpath",
+          },
+        },
+      },
+    };
+    const res = await runLogin(config, {
+      inputs: {},
+      authorizedUris: ALLOW,
+      allowAllUris: false,
+      fetchImpl: impl,
+    });
+    expect(res.outputs.access_token).toBe("TOK-XYZ");
+  });
+
+  it("jsonpath selector with array index $.items[0].id", async () => {
+    const { impl } = fakeFetch([
+      {
+        status: 200,
+        body: JSON.stringify({ items: [{ id: "first" }, { id: "second" }] }),
+      },
+    ]);
+    const config: LoginConfig = {
+      login: {
+        request: { method: "POST", url: "https://idp.example.com/token" },
+        outputs: {
+          access_token: {
+            context: "$response.body",
+            selector: "$.items[0].id",
+            type: "jsonpath",
+          },
+        },
+      },
+    };
+    const res = await runLogin(config, {
+      inputs: {},
+      authorizedUris: ALLOW,
+      allowAllUris: false,
+      fetchImpl: impl,
+    });
+    expect(res.outputs.access_token).toBe("first");
+  });
+
+  it("xpath selector raises a structured 'not supported' LoginError", async () => {
+    const { impl } = fakeFetch([{ status: 200, body: "<root><tok>X</tok></root>" }]);
+    const config: LoginConfig = {
+      login: {
+        request: { method: "POST", url: "https://idp.example.com/token" },
+        outputs: {
+          access_token: {
+            context: "$response.body",
+            selector: "/root/tok/text()",
+            type: "xpath",
+          },
+        },
+      },
+    };
+    const err = await runLogin(config, {
+      inputs: {},
+      authorizedUris: ALLOW,
+      allowAllUris: false,
+      fetchImpl: impl,
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(LoginError);
+    expect((err as LoginError).reason).toBe("invalid_config");
+    expect((err as LoginError).message).toMatch(/xpath/);
+  });
+
+  it("jsonpath with unsupported wildcard fails with invalid_config", async () => {
+    const { impl } = fakeFetch([{ status: 200, body: JSON.stringify({ a: [1, 2] }) }]);
+    const config: LoginConfig = {
+      login: {
+        request: { method: "POST", url: "https://idp.example.com/token" },
+        outputs: {
+          access_token: {
+            context: "$response.body",
+            selector: "$.a[*]",
+            type: "jsonpath",
+          },
+        },
+      },
+    };
+    const err = await runLogin(config, {
+      inputs: {},
+      authorizedUris: ALLOW,
+      allowAllUris: false,
+      fetchImpl: impl,
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(LoginError);
+    expect((err as LoginError).reason).toBe("invalid_config");
+  });
+});

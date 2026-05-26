@@ -149,7 +149,7 @@ export interface AppConfig {
 
 // --- Package Types ---
 
-/** A reference to a skill, tool, or integration dependency with optional metadata. */
+/** A reference to a skill, mcp-server, or integration dependency with optional metadata. */
 export interface ResourceEntry {
   id: string;
   version?: string;
@@ -169,6 +169,14 @@ export interface ResourceEntry {
    * non-integration resource types.
    */
   scopes?: string[];
+  /**
+   * When the depended-on integration declares multiple auth methods,
+   * selects which `auths.<key>` entry this agent dependency uses.
+   * AFPS 2.0 §4.1. `undefined` keeps the runtime's existing resolver
+   * cascade behaviour (any accessible connection on the integration).
+   * Ignored for non-integration resource types.
+   */
+  auth_key?: string;
 }
 
 // --- Run Types ---

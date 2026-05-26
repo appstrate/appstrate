@@ -3,6 +3,7 @@
 
 import { parseScopedName } from "./naming.ts";
 import { getErrorMessage } from "./errors";
+import { isValidRange } from "./semver.ts";
 import { AFPS_1X_READ_FALLBACK_REMOVAL } from "./back-compat.ts";
 
 // Silence unused-warning when this file is consumed without referencing the
@@ -98,6 +99,24 @@ export function extractDependencies(manifest: Record<string, unknown>): DepEntry
   const deps: DepEntry[] = [];
   const { skills = {}, mcp_servers = {}, integrations = {} } = dependencies;
 
+  // AFPS 1.x → 2.0 read fallback (see AFPS_1X_READ_FALLBACK_REMOVAL in
+  // back-compat.ts). Appendix D of the AFPS 2.0 spec maps the retired 1.x
+  // dependency keys to their 2.0 equivalents:
+  //   - `dependencies.providers` → `dependencies.integrations`
+  //   - `dependencies.tools`     → `dependencies.mcp_servers`
+  // Mirrors the `providersConfiguration` precedence pattern in
+  // `parseManifestIntegrations` — canonical reads run first; legacy
+  // projections are appended AFTER so canonical entries win on collision.
+  const legacy = dependencies as Record<string, unknown>;
+  const legacyProviders =
+    legacy.providers && typeof legacy.providers === "object"
+      ? (legacy.providers as Record<string, IntegrationDependencyValue>)
+      : {};
+  const legacyTools =
+    legacy.tools && typeof legacy.tools === "object"
+      ? (legacy.tools as Record<string, DependencyValue>)
+      : {};
+
   const maps: [
     Record<string, DependencyValue | IntegrationDependencyValue>,
     DepEntry["depType"],
@@ -105,7 +124,15 @@ export function extractDependencies(manifest: Record<string, unknown>): DepEntry
     [skills, "skill"],
     [mcp_servers, "mcp-server"],
     [integrations, "integration"],
+    // 1.x back-compat projections (canonical wins on collision — these are
+    // de-duplicated by the seen-set below).
+    [legacyTools, "mcp-server"],
+    [legacyProviders, "integration"],
   ];
+
+  // Track canonical entries so the 1.x projections can't double-emit a dep
+  // already declared on the canonical key.
+  const seen = new Set<string>();
 
   for (const [map, depType] of maps) {
     for (const [fullName, raw] of Object.entries(map)) {
@@ -119,6 +146,14 @@ export function extractDependencies(manifest: Record<string, unknown>): DepEntry
           `Invalid dependency value for ${fullName}: expected string or { version: string, ... }, got ${typeof raw}`,
         );
       }
+      if (!isValidRange(versionRange)) {
+        throw new Error(
+          `Invalid semver range for ${depType} dependency "${fullName}": "${versionRange}"`,
+        );
+      }
+      const key = `${depType}:@${parsed.scope}/${parsed.name}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
       deps.push({ depScope: `@${parsed.scope}`, depName: parsed.name, depType, versionRange });
     }
   }
@@ -146,11 +181,22 @@ export interface ManifestIntegrationEntry {
   version: string;
   tools?: string[];
   scopes?: string[];
+  /**
+   * AFPS 2.0 §4.1 — selects which `auths.<key>` entry on the depended-on
+   * integration this agent dependency uses, when the integration declares
+   * multiple auth methods. `undefined` lets the runtime pick per existing
+   * resolver cascade (any accessible connection on the integration).
+   */
+  auth_key?: string;
 }
 
 function toStringArray(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
   return value.filter((s): s is string => typeof s === "string");
+}
+
+function pickString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 /**
@@ -230,8 +276,17 @@ export function parseManifestIntegrations(
       toStringArray(aliasObj?.tools) ??
       toStringArray(legacyObj?.tools) ??
       toStringArray(v1Obj?.tools);
+    // `auth_key` (§4.1) — string pointing at one of the integration's
+    // `auths.<key>` entries. Mirrors the same precedence cascade as
+    // `scopes` / `tools`: canonical dep object > deprecated alias > legacy
+    // top-level block > v1 camelCase alias.
+    const auth_key =
+      pickString(depObj?.auth_key) ??
+      pickString(aliasObj?.auth_key) ??
+      pickString(legacyObj?.auth_key) ??
+      pickString(v1Obj?.auth_key);
 
-    out.push({ id, version: version || "*", tools, scopes });
+    out.push({ id, version: version || "*", tools, scopes, auth_key });
   }
   return out;
 }
@@ -266,8 +321,9 @@ export function writeManifestIntegrations(
     const version = e.version || "*";
     const hasTools = e.tools !== undefined;
     const hasScopes = Array.isArray(e.scopes) && e.scopes.length > 0;
+    const hasAuthKey = typeof e.auth_key === "string" && e.auth_key.length > 0;
 
-    if (!hasTools && !hasScopes) {
+    if (!hasTools && !hasScopes && !hasAuthKey) {
       // Minimal entry — collapse to bare version string per §4.1.
       integrationMap[e.id] = version;
     } else {
@@ -275,6 +331,7 @@ export function writeManifestIntegrations(
         version,
         ...(hasScopes ? { scopes: [...e.scopes!] } : {}),
         ...(hasTools ? { tools: [...e.tools!] } : {}),
+        ...(hasAuthKey ? { auth_key: e.auth_key! } : {}),
       };
     }
   }

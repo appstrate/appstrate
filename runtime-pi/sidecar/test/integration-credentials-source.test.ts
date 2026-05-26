@@ -48,6 +48,35 @@ function makePayload(token: string): IntegrationCredentialsWire {
   };
 }
 
+/**
+ * Build the snake_case JSON shape the platform emits over the wire (per AFPS
+ * 2.0). The sidecar's `normalizeIntegrationCredentialsWire` is the
+ * deserialization boundary that flips these snake_case keys back to the TS
+ * camelCase `IntegrationCredentialsWire` shape — tests must mock the wire,
+ * not the TS shape.
+ */
+function makeWireJson(token: string): Record<string, unknown> {
+  return {
+    auths: [
+      {
+        auth_key: "primary",
+        auth_type: "api_key",
+        fields: { apiKey: token },
+        authorized_uris: ["https://api.test.appstrate.dev/**"],
+      },
+    ],
+    delivery_plans: {
+      primary: {
+        header_name: "X-Test-Token",
+        header_prefix: "",
+        value: token,
+        allow_server_override: false,
+      },
+    },
+    expires_at_epoch_ms: { primary: null },
+  };
+}
+
 describe("createIntegrationCredentialsSource", () => {
   it("exposes the initial payload via current() and deliveryPlans()", () => {
     const initial = makePayload("tok-1");
@@ -75,7 +104,7 @@ describe("createIntegrationCredentialsSource", () => {
         for (const [k, v] of Object.entries(rawHeaders)) headers[k] = v;
       }
       calls.push({ url, headers, method: init.method ?? "GET" });
-      return new Response(JSON.stringify(makePayload("tok-2")), { status: 200 });
+      return new Response(JSON.stringify(makeWireJson("tok-2")), { status: 200 });
     }) as unknown as typeof fetch;
 
     const source = createIntegrationCredentialsSource({
@@ -176,7 +205,7 @@ describe("createIntegrationCredentialsSource", () => {
     const p2 = source.refreshOnUnauthorized("primary");
     const p3 = source.refreshOnUnauthorized("primary");
     expect(calls).toBe(1);
-    resolvePending!(new Response(JSON.stringify(makePayload("tok-2")), { status: 200 }));
+    resolvePending!(new Response(JSON.stringify(makeWireJson("tok-2")), { status: 200 }));
     expect(await p1).toBe(true);
     expect(await p2).toBe(true);
     expect(await p3).toBe(true);
@@ -232,7 +261,7 @@ describe("createIntegrationCredentialsSource — connect.tool re-login (P3)", ()
     let postCalls = 0;
     const fetchFn = (async () => {
       postCalls += 1;
-      return new Response(JSON.stringify(makePayload("tok-platform")), { status: 200 });
+      return new Response(JSON.stringify(makeWireJson("tok-platform")), { status: 200 });
     }) as unknown as typeof fetch;
     const source = createIntegrationCredentialsSource({
       integrationId: "@test/integ",
@@ -263,7 +292,7 @@ describe("createIntegrationCredentialsSource — connect.tool re-login (P3)", ()
     let postCalls = 0;
     const fetchFn = (async () => {
       postCalls += 1;
-      return new Response(JSON.stringify(makePayload("tok-2")), { status: 200 });
+      return new Response(JSON.stringify(makeWireJson("tok-2")), { status: 200 });
     }) as unknown as typeof fetch;
     const source = createIntegrationCredentialsSource({
       integrationId: "@test/integ",
@@ -345,7 +374,7 @@ describe("createIntegrationCredentialsSource — connect.tool re-login (P3)", ()
 
 describe("fetchInitialIntegrationCredentials", () => {
   it("GETs the right URL with the bearer and returns the body", async () => {
-    const payload = makePayload("tok-x");
+    const payload = makeWireJson("tok-x");
     const seen: { url?: string; auth?: string } = {};
     const fetchFn = (async (url: string, init: RequestInit) => {
       seen.url = url;

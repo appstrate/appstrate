@@ -51,7 +51,7 @@ const proxyParameters = [
     required: true,
     description:
       "Absolute URL of the upstream endpoint. Must match the integration manifest auth's " +
-      "`authorizedUris` unless `allowAllUris: true`.",
+      "`authorized_uris` unless `allow_all_uris: true`.",
     schema: { type: "string", format: "uri" },
   },
   {
@@ -144,7 +144,7 @@ const proxyResponses = {
   "403": {
     description:
       "Forbidden — principal lacks `credential-proxy:call`, target not in " +
-      "`authorizedUris`, session bound to a different principal, or cookie session used.",
+      "`authorized_uris`, session bound to a different principal, or cookie session used.",
   },
   "404": {
     description: "No credentials or connection for the requested integration.",

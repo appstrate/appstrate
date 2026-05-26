@@ -85,9 +85,11 @@ export async function postInstallPackage(params: {
   }
 
   if (packageType === "mcp-server" && Object.keys(files).length > 0) {
-    // AFPS 2.0 §3.4 — the verbatim MCPB manifest plus any vendored server
-    // tree. Stored under mcp-servers/ so the spawn resolver can serve the
-    // bundle to an integration whose `source.kind: "local"` references it.
+    // AFPS-native manifest (with MCPB-vocabulary `server` / `tools` /
+    // `user_config` lifted to the root alongside AFPS identity — NOT
+    // strict-MCPB; see §3.4) plus any vendored server tree. Stored under
+    // mcp-servers/ so the spawn resolver can serve the bundle to an
+    // integration whose `source.kind: "local"` references it.
     await uploadPackageFiles("mcp-servers", orgId, packageId, files);
   }
 

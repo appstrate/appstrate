@@ -288,6 +288,8 @@
       }
     },
     "integrations_configuration": {
+      "description": "Deprecated in AFPS 2.0 — superseded by dependencies.integrations.<id> object form. Accepted on read for backward compatibility.",
+      "deprecated": true,
       "type": "object",
       "propertyNames": {
         "type": "string",

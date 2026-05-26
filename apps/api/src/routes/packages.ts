@@ -369,10 +369,11 @@ const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
     storageFileName: () => "manifest.json",
     jsonBodyCreate: false,
   },
-  // AFPS 2.0 §3.4 — standalone MCP Bundle (MCPB) packages. Import-only like
-  // integrations (no editor): authored externally, the manifest is a verbatim
-  // MCPB manifest. Listable, viewable, and importable as `.afps` like the
-  // other types. Referenced by an integration's `source.kind: "local"`.
+  // AFPS 2.0 §3.4 — standalone mcp-server packages. Import-only like
+  // integrations (no editor): authored externally.
+  // AFPS-native manifest carrying MCPB vocabulary fields (server / tools / user_config) verbatim — NOT a strict-MCPB manifest. See AFPS spec §3.4 (v2.0.2).
+  // Listable, viewable, and importable as `.afps` like the other types.
+  // Referenced by an integration's `source.kind: "local"`.
   "mcp-server": {
     cfg: CONFIG_BY_TYPE["mcp-server"],
     path: "mcp-servers",

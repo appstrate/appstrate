@@ -64,8 +64,9 @@ export interface CoreResources {
   agents: "read" | "write" | "configure" | "delete" | "run";
   skills: "read" | "write" | "delete";
   // AFPS 2.0 §3.4 — standalone MCP Bundle (MCPB) packages. Browse/import/delete
-  // like skills; no editor surface (an mcp-server manifest is a verbatim MCPB
-  // manifest, authored externally and imported as a `.afps`).
+  // like skills; no editor surface (an mcp-server manifest is an AFPS-native
+  // manifest (MCPB vocabulary lifted to the root), authored externally and
+  // imported as a `.afps`).
   "mcp-servers": "read" | "write" | "delete";
   runs: "read" | "cancel" | "delete";
   schedules: "read" | "write" | "delete";

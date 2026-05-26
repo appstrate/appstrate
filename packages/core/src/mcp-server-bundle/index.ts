@@ -6,8 +6,11 @@
  * bundler.
  *
  * In AFPS 2.0, the runnable MCP server lives in a separate `mcp-server`
- * (MCPB) package; an integration whose `source.kind: "local"` references it
- * via `source.server`. This bundler operates on the mcp-server manifest.
+ * package whose manifest is AFPS-native at the root (carrying MCPB-vocabulary
+ * `server` / `tools` / `user_config` fields lifted alongside the AFPS identity
+ * fields — see AFPS §3.4); an integration whose `source.kind: "local"`
+ * references it via `source.server`. This bundler operates on the mcp-server
+ * manifest.
  *
  * Pipeline:
  *
@@ -39,7 +42,12 @@ import {
 } from "./types.ts";
 
 export interface BundleMcpServerInput {
-  /** Source mcp-server (MCPB) manifest (already parsed JSON). */
+  /**
+   * Source AFPS-native mcp-server manifest (already parsed JSON). Carries
+   * MCPB-vocabulary `server` / `tools` / `user_config` fields lifted to the
+   * root alongside AFPS identity (`name`, `type`, `schema_version`,
+   * `dependencies`).
+   */
   manifest: unknown;
 
   /**

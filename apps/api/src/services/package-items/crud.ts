@@ -99,7 +99,7 @@ export async function createOrgItem(
   finalManifest.$schema = AFPS_SCHEMA_URLS[cfg.type];
   finalManifest.type = cfg.type;
   if (!finalManifest.name) finalManifest.name = packageId;
-  if (item.name) finalManifest.displayName = item.name;
+  if (item.name) finalManifest.display_name = item.name;
   if (item.description) finalManifest.description = item.description;
 
   try {

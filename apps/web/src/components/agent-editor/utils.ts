@@ -105,6 +105,9 @@ export function setRuntimeTools(m: Record<string, unknown>, tools: string[]): vo
   } else {
     delete m.runtime_tools;
   }
+  // M8 — drop the legacy 1.x camelCase sibling on every write. Idempotent:
+  // re-running on a manifest that already has only snake_case is a no-op.
+  delete m.runtimeTools;
 }
 
 // ─── Manifest accessors ─────────────────────────────────────
@@ -142,7 +145,7 @@ export function manifestToMetadata(m: Record<string, unknown>): MetadataState {
     id,
     scope,
     version: (m.version as string) ?? "1.0.0",
-    displayName: (m.display_name as string) ?? (m.displayName as string) ?? "",
+    displayName: (m.display_name as string) ?? (m.displayName as string) ?? "", // afps-1x-lint-ok: MetadataState TS-internal field (CASING_CONVENTIONS.md carve-out); manifest write is via metadataToManifestPatch's snake_case `display_name`.
     description: (m.description as string) ?? "",
     author: authorText,
     keywords: Array.isArray(m.keywords) ? (m.keywords as string[]) : [],
@@ -150,12 +153,23 @@ export function manifestToMetadata(m: Record<string, unknown>): MetadataState {
   };
 }
 
-/** Apply MetadataState changes back into a manifest patch. */
+/** Apply MetadataState changes back into a manifest patch.
+ *
+ * M8 — emits canonical snake_case (`display_name`) AND nulls the legacy 1.x
+ * camelCase sibling (`displayName: undefined`) in the same patch. When the
+ * patch is shallow-merged into the manifest, the resulting JSON
+ * serialization drops `displayName`; idempotent against manifests that
+ * already have only snake_case keys.
+ */
 export function metadataToManifestPatch(m: MetadataState): Record<string, unknown> {
   return {
     name: m.scope ? `@${m.scope}/${m.id}` : m.id,
     version: m.version,
     display_name: m.displayName,
+    // M8 — strip the legacy 1.x camelCase sibling on every write. `undefined`
+    // collapses on JSON.stringify so the persisted manifest carries only
+    // the canonical `display_name`.
+    displayName: undefined,
     description: m.description,
     author: m.author,
     keywords: m.keywords,
@@ -173,6 +187,8 @@ export function getResourceEntries(
 ): ResourceEntry[] {
   // Integrations: AFPS 2.0.2 §4.1 canonical inline object form —
   // `dependencies.integrations.<id>` is `{ version, scopes?, tools?, auth_key? }`.
+  // `auth_key` (§4.1) selects which `auths.<key>` entry on the depended-on
+  // integration this dep uses, when the integration declares multiple auths.
   // `parseManifestIntegrations` merges canonical + the deprecated
   // `integrations_configuration` alias + a legacy top-level `integrations`
   // block (back-compat for manifests saved before AFPS 2.0.2).
@@ -182,6 +198,7 @@ export function getResourceEntries(
       version: e.version,
       ...(e.tools !== undefined ? { tools: [...e.tools] } : {}),
       ...(e.scopes !== undefined ? { scopes: [...e.scopes] } : {}),
+      ...(e.auth_key !== undefined ? { auth_key: e.auth_key } : {}),
     }));
   }
   const deps = getDeps(m);
@@ -206,6 +223,7 @@ export function setResourceEntries(
           version: e.version ?? "*",
           ...(e.tools !== undefined ? { tools: [...e.tools] } : {}),
           ...(e.scopes !== undefined ? { scopes: [...e.scopes] } : {}),
+          ...(e.auth_key !== undefined ? { auth_key: e.auth_key } : {}),
         })),
     );
     return;
@@ -347,7 +365,7 @@ export function schemaToFields(
         ? {
             isFile: true,
             accept: constraints?.accept || "",
-            maxSize: constraints?.max_size != null ? String(constraints.max_size) : "",
+            maxSize: constraints?.max_size != null ? String(constraints.max_size) : "", // afps-1x-lint-ok: SchemaField TS-internal field (carve-out); manifest write is via fieldsToSchema's snake_case `max_size`.
             multiple: isMultipleFileField(prop),
             maxFiles: prop.maxItems != null ? String(prop.maxItems) : "",
           }
@@ -386,6 +404,18 @@ export function schemaToFields(
   });
 }
 
+/**
+ * Build a fresh AFPS 2.0 canonical `SchemaWrapper` from editor field state.
+ *
+ * M8 — emits only canonical snake_case keys (`schema`, `file_constraints`,
+ * `ui_hints`, `property_order`). Every per-property entry is constructed
+ * from scratch, so legacy 1.x camelCase siblings (`fileConstraints`,
+ * `uiHints`, `propertyOrder`, per-property `maxSize`) cannot leak through.
+ * The caller replaces the wrapper wholesale (`updateManifest({ input:
+ * wrapper })`); the shallow-merge semantics drop any pre-existing camelCase
+ * keys carried by the previous wrapper value. Idempotent against
+ * already-canonical manifests.
+ */
 export function fieldsToSchema(
   fields: SchemaField[],
   mode: "input" | "output" | "config" | "credentials",

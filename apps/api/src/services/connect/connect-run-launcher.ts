@@ -91,10 +91,13 @@ export interface ConnectRunExecutorOptions {
 
 /**
  * Build the single {@link IntegrationSpawnSpec} the connect-run sidecar boots.
- * Derives `authType` / `authorizedUris` / `deliveryHttp` from the execution's
- * manifest auth — the same fields the spawn resolver emits for the run-start
- * path. Throws (mapped onto a structured strategy error) when the manifest
- * auth is mis-declared (missing auth or `delivery.http`).
+ * Derives the spawn spec's TS-internal `authType` / `authorizedUris` /
+ * `deliveryHttp` fields from the execution's manifest auth — the same fields
+ * the spawn resolver emits for the run-start path. These names are
+ * TS-internal (camelCase per the documented Zone 3 carve-out); the
+ * snake_case-on-wire mapping (`authorized_uris`, `delivery.http`) happens at
+ * serialization. Throws (mapped onto a structured strategy error) when the
+ * manifest auth is mis-declared (missing auth or `delivery.http`).
  */
 /**
  * Resolver for the mcp-server MCPB manifest a local-source integration
