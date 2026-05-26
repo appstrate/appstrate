@@ -346,7 +346,6 @@ export interface AgentDetail {
   source: "system" | "local";
   dependencies: {
     skills: { id: string; version: string; name?: string; description?: string }[];
-    tools: { id: string; version: string; name?: string; description?: string }[];
     /**
      * Niveau 2 — agent's `dependencies.integrations` flattened by
      * `parseManifestIntegrations`. Always populated (system + user

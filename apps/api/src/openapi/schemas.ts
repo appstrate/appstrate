@@ -177,6 +177,8 @@ export const schemas = {
         type: "object",
         properties: {
           skills: { type: "object", additionalProperties: { type: "string" } },
+          mcp_servers: { type: "object", additionalProperties: { type: "string" } },
+          integrations: { type: "object", additionalProperties: { type: "string" } },
         },
       },
     },
@@ -442,6 +444,45 @@ export const schemas = {
         description:
           "Inline runs only. Snapshot of the prompt submitted at run time. Null once the shadow has been compacted.",
       },
+      notifiedAt: {
+        type: ["string", "null"],
+        format: "date-time",
+        description:
+          "When the user was notified of run completion (in-app notification). Null until notification fires.",
+      },
+      readAt: {
+        type: ["string", "null"],
+        format: "date-time",
+        description: "When the user marked the run notification as read. Null until acknowledged.",
+      },
+      runNumber: {
+        type: ["integer", "null"],
+        description:
+          "Per-(app, package) monotonic counter assigned at run creation. Stable identifier for UI display.",
+      },
+      runOrigin: {
+        type: ["string", "null"],
+        enum: ["platform", "remote", null],
+        description:
+          "Which runner drives this run: 'platform' (server-managed Docker container) or 'remote' (caller's host via signed events).",
+      },
+      contextSnapshot: {
+        type: ["object", "null"],
+        description:
+          "Runner-provided execution environment metadata (os, cli version, git sha, ...) stamped at run creation.",
+        additionalProperties: true,
+      },
+      modelCredentialId: {
+        type: ["string", "null"],
+        description:
+          "ID of the model_provider_credentials row resolved at run creation (audit + cost-attribution).",
+      },
+      connection_overrides: {
+        type: ["object", "null"],
+        description:
+          "Frozen per-(integration, authKey) connection picks for this run (#199 mechanism #3). Loses to admin pins.",
+        additionalProperties: true,
+      },
     },
   },
   RunLog: {
@@ -466,13 +507,25 @@ export const schemas = {
   },
   Schedule: {
     type: "object",
-    required: ["id", "packageId", "orgId", "cron_expression", "createdAt", "updatedAt"],
+    required: [
+      "id",
+      "packageId",
+      "orgId",
+      "applicationId",
+      "cron_expression",
+      "createdAt",
+      "updatedAt",
+    ],
     properties: {
       id: { type: "string" },
       packageId: { type: "string" },
       userId: { type: ["string", "null"], description: "Member actor the schedule runs as" },
       endUserId: { type: ["string", "null"], description: "End-user actor the schedule runs as" },
       orgId: { type: "string" },
+      applicationId: {
+        type: "string",
+        description: "Application ID (app_ prefix) that owns this schedule",
+      },
       name: { type: ["string", "null"] },
       enabled: { type: ["boolean", "null"] },
       cron_expression: { type: "string" },
@@ -519,6 +572,10 @@ export const schemas = {
       name: { type: ["string", "null"] },
       description: { type: ["string", "null"] },
       source: { type: "string", enum: ["system", "local"] },
+      scope: {
+        type: ["string", "null"],
+        description: "Scope from manifest name (e.g. @myorg from @myorg/name)",
+      },
       createdBy: { type: ["string", "null"] },
       created_by_name: { type: "string" },
       used_by_agents: { type: "integer" },
@@ -537,7 +594,15 @@ export const schemas = {
       name: { type: ["string", "null"] },
       description: { type: ["string", "null"] },
       content: { type: "string", description: "Package item content" },
+      source_code: {
+        type: ["string", "null"],
+        description: "Secondary source file content (e.g. .ts for tools)",
+      },
       source: { type: "string", enum: ["system", "local"] },
+      scope: {
+        type: ["string", "null"],
+        description: "Scope from manifest name (e.g. @myorg from @myorg/name)",
+      },
       createdBy: { type: ["string", "null"] },
       created_by_name: { type: "string" },
       used_by_agents: { type: "integer" },
