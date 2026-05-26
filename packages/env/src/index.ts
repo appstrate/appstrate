@@ -4,6 +4,15 @@ import { z } from "zod";
 import { createEnvGetter } from "@appstrate/core/env";
 
 // ─── Schema ──────────────────────────────────────────────────
+//
+// MAINTAINER NOTE: this Zod schema is the single source of truth for env
+// defaults. When adding or changing a `.default(...)` value below, mirror
+// the entry in `scripts/verify-compose-defaults.ts:CODE_DEFAULTS` so the
+// compose-drift guard can still detect duplicated/stale YAML defaults
+// (root cause of #513 — MODULES drifted in compose vs. schema, every CLI
+// self-host shipped with zero model providers for weeks). The script's
+// hand-maintained table is intentional: Zod defaults are entangled with
+// transforms/refinements that don't extract cleanly via static analysis.
 
 const envSchema = z
   .object({
