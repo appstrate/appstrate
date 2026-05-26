@@ -27,16 +27,16 @@ export interface BillingPlanDetail {
   id: string;
   name: string;
   price: number;
-  creditQuota: number;
+  credit_quota: number;
 }
 
 export interface BillingInfo {
   plan: BillingPlan;
   plans: BillingPlanDetail[];
-  usagePercent: number;
-  creditsUsed: number;
-  creditQuota: number;
-  periodEnd: string | null;
+  usage_percent: number;
+  credits_used: number;
+  credit_quota: number;
+  period_end: string | null;
   status:
     | "active"
     | "trialing"
@@ -71,7 +71,7 @@ export function useCheckout() {
     mutationFn: async ({ planId, returnUrl }: { planId: string; returnUrl?: string }) => {
       const res = await api<{ url: string }>("/billing/checkout", {
         method: "POST",
-        body: JSON.stringify({ planId, ...(returnUrl && { returnUrl }) }),
+        body: JSON.stringify({ plan_id: planId, ...(returnUrl && { return_url: returnUrl }) }),
       });
       return res.url;
     },
