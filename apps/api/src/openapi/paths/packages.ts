@@ -42,7 +42,7 @@ export const packagesPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["imported", "rootInstalled", "rootPackageId", "rootVersion"],
+                required: ["imported", "root_installed", "root_package_id", "root_version"],
                 properties: {
                   imported: {
                     type: "array",
@@ -60,20 +60,20 @@ export const packagesPaths = {
                           description:
                             "`inserted` means the version is new; `reused` means the version already existed with matching integrity.",
                         },
-                        versionId: {
+                        version_id: {
                           type: ["integer", "null"],
                           description: "DB row id for the version; null for system packages.",
                         },
                       },
                     },
                   },
-                  rootInstalled: {
+                  root_installed: {
                     type: "boolean",
                     description:
                       "Whether the root was installed in the calling application (false if it was already installed).",
                   },
-                  rootPackageId: { type: "string" },
-                  rootVersion: { type: "string" },
+                  root_package_id: { type: "string" },
+                  root_version: { type: "string" },
                 },
               },
             },
@@ -828,10 +828,6 @@ export const packagesPaths = {
                 description: { type: "string" },
                 content: { type: "string" },
                 version: { type: "string", description: "Semver version (X.Y.Z)" },
-                scopedName: {
-                  type: "string",
-                  description: "Registry scoped name (@scope/name)",
-                },
               },
             },
           },
@@ -1540,10 +1536,6 @@ export const packagesPaths = {
                 description: { type: "string" },
                 content: { type: "string" },
                 version: { type: "string", description: "Semver version (X.Y.Z)" },
-                scopedName: {
-                  type: "string",
-                  description: "Registry scoped name (@scope/name)",
-                },
               },
             },
           },

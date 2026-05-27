@@ -87,11 +87,11 @@ describe("handleImportBundle — integration packages", () => {
     const afps = buildIntegrationAfps({ manifest: validManifest() });
     const result = await handleImportBundle(afps, scope, ctx.user.id);
 
-    expect(result.rootPackageId).toBe("@official/gmail");
-    expect(result.rootVersion).toBe("1.0.0");
+    expect(result.root_package_id).toBe("@official/gmail");
+    expect(result.root_version).toBe("1.0.0");
     expect(result.imported.length).toBe(1);
     expect(result.imported[0]!.status).toBe("inserted");
-    expect(result.imported[0]!.versionId).toBeGreaterThan(0);
+    expect(result.imported[0]!.version_id).toBeGreaterThan(0);
 
     // The package row exists, typed as `integration`.
     const [row] = await db

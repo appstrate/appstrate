@@ -211,14 +211,14 @@ export async function detectBundleConflicts(
 export interface ImportedPackageResult {
   identity: string;
   status: "inserted" | "reused";
-  versionId: number | null;
+  version_id: number | null;
 }
 
 export interface ImportBundleResult {
   imported: ImportedPackageResult[];
-  rootInstalled: boolean;
-  rootPackageId: string;
-  rootVersion: string;
+  root_installed: boolean;
+  root_package_id: string;
+  root_version: string;
   /**
    * Non-blocking install-time warnings (AFPS §7.7 / audit P2 #12) — surfaces
    * `connect.login` selector/criteria patterns the Appstrate runtime engine
@@ -251,7 +251,7 @@ export async function importBundle(
     const version = parsedIdentity.version;
 
     if (isSystemPackage(packageId)) {
-      imported.push({ identity, status: "reused", versionId: null });
+      imported.push({ identity, status: "reused", version_id: null });
       continue;
     }
 
@@ -267,7 +267,7 @@ export async function importBundle(
       .where(and(eq(packageVersions.packageId, packageId), eq(packageVersions.version, version)))
       .limit(1);
     if (existingVer) {
-      imported.push({ identity, status: "reused", versionId: existingVer.id });
+      imported.push({ identity, status: "reused", version_id: existingVer.id });
       continue;
     }
 
@@ -337,7 +337,7 @@ export async function importBundle(
     imported.push({
       identity,
       status: "inserted",
-      versionId: newVer?.id ?? null,
+      version_id: newVer?.id ?? null,
     });
   }
 
@@ -360,9 +360,9 @@ export async function importBundle(
 
   return {
     imported,
-    rootInstalled,
-    rootPackageId: rootParsed.packageId,
-    rootVersion: rootParsed.version,
+    root_installed: rootInstalled,
+    root_package_id: rootParsed.packageId,
+    root_version: rootParsed.version,
     warnings,
   };
 }

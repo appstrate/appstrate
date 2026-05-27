@@ -178,7 +178,7 @@ describe("POST /api/integrations/:packageId/activate + DELETE .../deactivate", (
       body: JSON.stringify({}),
     });
     expect(activate.status).toBe(201);
-    const body = (await activate.json()) as { active: boolean; activatedAt: string };
+    const body = (await activate.json()) as { active: boolean; activated_at: string };
     expect(body.active).toBe(true);
 
     const activeRow = await db

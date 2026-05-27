@@ -112,13 +112,13 @@ const installedPackageSelect = {
   config: applicationPackages.config,
   modelId: applicationPackages.modelId,
   proxyId: applicationPackages.proxyId,
-  versionId: applicationPackages.versionId,
+  version_id: applicationPackages.versionId,
   enabled: applicationPackages.enabled,
-  installedAt: applicationPackages.installedAt,
+  installed_at: applicationPackages.installedAt,
   updatedAt: applicationPackages.updatedAt,
-  packageType: packages.type,
-  packageSource: packages.source,
-  draftManifest: packages.draftManifest,
+  package_type: packages.type,
+  package_source: packages.source,
+  draft_manifest: packages.draftManifest,
 };
 
 export async function listInstalledPackages(scope: AppScope, type?: PackageType) {

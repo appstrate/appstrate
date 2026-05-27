@@ -241,16 +241,16 @@ describe("POST /api/packages/import-bundle — import", () => {
       throw new Error(`unexpected ${res.status}: ${await res.text()}`);
     }
     const body = (await res.json()) as {
-      imported: Array<{ identity: string; status: string; versionId: number | null }>;
-      rootInstalled: boolean;
-      rootPackageId: string;
-      rootVersion: string;
+      imported: Array<{ identity: string; status: string; version_id: number | null }>;
+      root_installed: boolean;
+      root_package_id: string;
+      root_version: string;
     };
     expect(body.imported).toHaveLength(3);
     expect(body.imported.every((i) => i.status === "inserted" || i.status === "reused")).toBe(true);
-    expect(body.rootPackageId).toBe("@srcorg/agent-root");
-    expect(body.rootVersion).toBe("1.0.0");
-    expect(body.rootInstalled).toBe(true);
+    expect(body.root_package_id).toBe("@srcorg/agent-root");
+    expect(body.root_version).toBe("1.0.0");
+    expect(body.root_installed).toBe(true);
 
     // Verify DB state — 3 packages registered + root installed in
     // the importing app.
@@ -327,9 +327,9 @@ describe("POST /api/packages/import-bundle — import", () => {
     expect(res.status).toBe(201);
     const body = (await res.json()) as {
       imported: Array<{ identity: string; status: string }>;
-      rootPackageId: string;
+      root_package_id: string;
     };
-    expect(body.rootPackageId).toBe(agentId);
+    expect(body.root_package_id).toBe(agentId);
     expect(body.imported).toHaveLength(1);
   });
 

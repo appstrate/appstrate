@@ -306,7 +306,7 @@ export function createIntegrationsRouter() {
         resourceType: "integration",
         resourceId: packageId,
       });
-      return c.json({ active: true, activatedAt: row.installedAt.toISOString() }, 201);
+      return c.json({ active: true, activated_at: row.installedAt.toISOString() }, 201);
     },
   );
 

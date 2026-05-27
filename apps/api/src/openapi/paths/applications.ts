@@ -386,7 +386,7 @@ export const applicationsPaths = {
                 config: { type: "object" },
                 modelId: { type: ["string", "null"] },
                 proxyId: { type: ["string", "null"] },
-                versionId: { type: ["integer", "null"] },
+                version_id: { type: ["integer", "null"] },
                 enabled: { type: "boolean" },
               },
             },

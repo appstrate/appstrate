@@ -152,7 +152,7 @@ export function useActivateIntegration() {
   const applicationId = useCurrentApplicationId();
   return useMutation({
     mutationFn: (packageId: string) =>
-      api<{ active: boolean; activatedAt: string }>(
+      api<{ active: boolean; activated_at: string }>(
         `/integrations/${encodeURI(packageId)}/activate`,
         { method: "POST", body: "{}" },
       ),

@@ -346,10 +346,10 @@ export const integrationsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["active", "activatedAt"],
+                required: ["active", "activated_at"],
                 properties: {
                   active: { type: "boolean" },
-                  activatedAt: { type: "string", format: "date-time" },
+                  activated_at: { type: "string", format: "date-time" },
                 },
               },
             },

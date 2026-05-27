@@ -4049,12 +4049,12 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["active", "activatedAt"],
+                  "required": ["active", "activated_at"],
                   "properties": {
                     "active": {
                       "type": "boolean"
                     },
-                    "activatedAt": {
+                    "activated_at": {
                       "type": "string",
                       "format": "date-time"
                     }
@@ -10639,7 +10639,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["imported", "rootInstalled", "rootPackageId", "rootVersion"],
+                  "required": ["imported", "root_installed", "root_package_id", "root_version"],
                   "properties": {
                     "imported": {
                       "type": "array",
@@ -10656,21 +10656,21 @@
                             "enum": ["inserted", "reused"],
                             "description": "`inserted` means the version is new; `reused` means the version already existed with matching integrity."
                           },
-                          "versionId": {
+                          "version_id": {
                             "type": ["integer", "null"],
                             "description": "DB row id for the version; null for system packages."
                           }
                         }
                       }
                     },
-                    "rootInstalled": {
+                    "root_installed": {
                       "type": "boolean",
                       "description": "Whether the root was installed in the calling application (false if it was already installed)."
                     },
-                    "rootPackageId": {
+                    "root_package_id": {
                       "type": "string"
                     },
-                    "rootVersion": {
+                    "root_version": {
                       "type": "string"
                     }
                   }
@@ -11757,10 +11757,6 @@
                   "version": {
                     "type": "string",
                     "description": "Semver version (X.Y.Z)"
-                  },
-                  "scopedName": {
-                    "type": "string",
-                    "description": "Registry scoped name (@scope/name)"
                   }
                 }
               }
@@ -12850,10 +12846,6 @@
                   "version": {
                     "type": "string",
                     "description": "Semver version (X.Y.Z)"
-                  },
-                  "scopedName": {
-                    "type": "string",
-                    "description": "Registry scoped name (@scope/name)"
                   }
                 }
               }
@@ -13748,7 +13740,7 @@
                   "proxyId": {
                     "type": ["string", "null"]
                   },
-                  "versionId": {
+                  "version_id": {
                     "type": ["integer", "null"]
                   },
                   "enabled": {
@@ -15953,7 +15945,7 @@
       "ApplicationPackage": {
         "type": "object",
         "description": "A package installed in an application with its config and overrides.",
-        "required": ["packageId", "enabled", "installedAt", "updatedAt"],
+        "required": ["packageId", "enabled", "installed_at", "updatedAt"],
         "properties": {
           "object": {
             "type": "string",
@@ -15975,14 +15967,14 @@
             "type": ["string", "null"],
             "description": "Proxy override for this app"
           },
-          "versionId": {
+          "version_id": {
             "type": ["integer", "null"],
             "description": "Pinned version (null = latest)"
           },
           "enabled": {
             "type": "boolean"
           },
-          "installedAt": {
+          "installed_at": {
             "type": "string",
             "format": "date-time"
           },
@@ -15990,11 +15982,11 @@
             "type": "string",
             "format": "date-time"
           },
-          "packageType": {
+          "package_type": {
             "type": "string",
             "enum": ["agent", "skill", "mcp-server", "integration"]
           },
-          "packageSource": {
+          "package_source": {
             "type": "string",
             "enum": ["system", "local"]
           }

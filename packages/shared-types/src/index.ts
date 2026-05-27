@@ -712,12 +712,12 @@ export interface InstalledPackage {
   config: Record<string, unknown>;
   modelId: string | null;
   proxyId: string | null;
-  versionId: number | null;
+  version_id: number | null;
   enabled: boolean;
-  installedAt: string;
+  installed_at: string;
   updatedAt: string;
-  packageType: string;
-  packageSource: string;
+  package_type: string;
+  package_source: string;
   draft_manifest: Record<string, unknown> | null;
 }
 

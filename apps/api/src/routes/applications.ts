@@ -52,7 +52,7 @@ export const updatePackageSchema = z.object({
   config: z.record(z.string(), z.unknown()).optional(),
   modelId: z.string().nullable().optional(),
   proxyId: z.string().nullable().optional(),
-  versionId: z.number().int().nullable().optional(),
+  version_id: z.number().int().nullable().optional(),
   enabled: z.boolean().optional(),
 });
 
@@ -206,11 +206,8 @@ export function createApplicationsRouter() {
     const body = await c.req.json();
     const data = parseBody(installPackageSchema, body);
 
-    const row = await installPackage(
-      { orgId, applicationId: applicationId },
-      data.packageId,
-      data.config,
-    );
+    await installPackage({ orgId, applicationId: applicationId }, data.packageId, data.config);
+    const row = await getInstalledPackage({ orgId, applicationId: applicationId }, data.packageId);
     return c.json({ object: "application_package", ...row }, 201);
   });
 
@@ -243,7 +240,8 @@ export function createApplicationsRouter() {
       const body = await c.req.json();
       const data = parseBody(updatePackageSchema, body);
 
-      await updateInstalledPackage(scope, packageId, data);
+      const { version_id, ...rest } = data;
+      await updateInstalledPackage(scope, packageId, { ...rest, versionId: version_id });
       const updated = await getInstalledPackage(scope, packageId);
       return c.json({ object: "application_package", ...updated });
     },

@@ -82,12 +82,12 @@ export function useImportPackage() {
       // extension so users can drag both kinds into the same modal.
       if (file.name.toLowerCase().endsWith(".afps-bundle")) {
         const res = await uploadFormData<{
-          rootPackageId: string;
-          rootVersion: string;
+          root_package_id: string;
+          root_version: string;
           warnings?: string[];
         }>("/packages/import-bundle", fd);
         return {
-          packageId: res.rootPackageId,
+          packageId: res.root_package_id,
           type: "agent" as const,
           warnings: res.warnings,
         };
