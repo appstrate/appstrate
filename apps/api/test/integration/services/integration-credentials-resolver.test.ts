@@ -147,7 +147,7 @@ describe("resolveLiveIntegrationCredentials", () => {
     // Per-app OAuth client → makes the auth refreshable (buildIntegrationOAuthRefreshContext).
     await db.insert(integrationOauthClients).values({
       applicationId: ctx.defaultAppId,
-      integrationPackageId: INTEGRATION_ID,
+      integrationId: INTEGRATION_ID,
       authKey: "primary",
       clientId: "cid",
       clientSecretEncrypted: encryptCredentials({ client_secret: "csec" }),
@@ -174,7 +174,7 @@ describe("resolveLiveIntegrationCredentials", () => {
     const [row] = await db
       .insert(integrationConnections)
       .values({
-        integrationPackageId: INTEGRATION_ID,
+        integrationId: INTEGRATION_ID,
         authKey: "primary",
         accountId: opts.accountId ?? "acct-1",
         applicationId: ctx.defaultAppId,

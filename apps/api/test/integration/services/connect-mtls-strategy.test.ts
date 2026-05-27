@@ -72,7 +72,7 @@ describe("mtls connect strategy", () => {
       {
         scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
         actor: { type: "user", id: ctx.user.id },
-        integrationPackageId: INTEG,
+        integrationId: INTEG,
         authKey: "primary",
       },
       { kind: "fields", credentials: { client_cert: cert, client_key: key } },
@@ -105,7 +105,7 @@ describe("mtls connect strategy", () => {
         {
           scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
           actor: { type: "user", id: ctx.user.id },
-          integrationPackageId: INTEG,
+          integrationId: INTEG,
           authKey: "primary",
         },
         { kind: "fields", credentials: {} },
@@ -146,7 +146,7 @@ describe("mtls connect strategy", () => {
         {
           scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
           actor: { type: "user", id: ctx.user.id },
-          integrationPackageId: INTEG,
+          integrationId: INTEG,
           authKey: "primary",
         },
         // Only cert, no key — schema validation must catch this.

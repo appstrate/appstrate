@@ -69,7 +69,7 @@ function execution(): ConnectToolExecution {
   return {
     scope: { orgId: "o", applicationId: "a" },
     actor: { type: "user", id: "u" },
-    integrationPackageId: "@scope/connect-it",
+    integrationId: "@scope/connect-it",
     authKey: "session",
     manifest: MANIFEST,
     toolName: "login",

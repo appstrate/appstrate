@@ -68,7 +68,7 @@ describe("integration-org-defaults-service", () => {
     const [row] = await db
       .insert(integrationConnections)
       .values({
-        integrationPackageId: INTEGRATION_ID,
+        integrationId: INTEGRATION_ID,
         authKey: "primary",
         accountId: "acct-shared",
         applicationId,

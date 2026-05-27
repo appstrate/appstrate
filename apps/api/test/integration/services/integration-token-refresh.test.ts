@@ -122,7 +122,7 @@ describe("forceRefreshIntegrationConnection — Phase 6 scope-shrink awareness",
     const [row] = await db
       .insert(integrationConnections)
       .values({
-        integrationPackageId: PACKAGE_ID,
+        integrationId: PACKAGE_ID,
         authKey: "primary",
         accountId: "acct-1",
         applicationId: ctx.defaultAppId,

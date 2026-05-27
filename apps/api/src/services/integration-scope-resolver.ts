@@ -50,7 +50,7 @@ export interface ComputeRequiredScopesResult {
 
 export interface ScopeResolverInput {
   scope: AppScope;
-  integrationPackageId: string;
+  integrationId: string;
   /** Auth key on the integration manifest — drives `requiredAuthKey` filtering. */
   authKey: string;
 }
@@ -68,7 +68,7 @@ export interface ScopeResolverInput {
 export async function computeRequiredScopes(
   input: ScopeResolverInput,
 ): Promise<ComputeRequiredScopesResult> {
-  const integration = await getIntegration(input.scope.orgId, input.integrationPackageId);
+  const integration = await getIntegration(input.scope.orgId, input.integrationId);
   if (!integration) {
     return { required: [] };
   }
@@ -98,7 +98,7 @@ export async function computeRequiredScopes(
   for (const agent of installed) {
     if (!agent.draftManifest || typeof agent.draftManifest !== "object") continue;
     const integEntries = parseManifestIntegrations(agent.draftManifest as Record<string, unknown>);
-    const entry = integEntries.find((e) => e.id === input.integrationPackageId);
+    const entry = integEntries.find((e) => e.id === input.integrationId);
     if (!entry) continue;
 
     const viaTools = scopesContributedByTools({
@@ -133,7 +133,7 @@ export async function computeRequiredScopes(
  */
 export async function getCurrentScopesGranted(input: {
   scope: AppScope;
-  integrationPackageId: string;
+  integrationId: string;
   authKey: string;
   actor: Actor;
   connectionId: string;
@@ -144,7 +144,7 @@ export async function getCurrentScopesGranted(input: {
     .where(
       and(
         eq(integrationConnections.id, input.connectionId),
-        eq(integrationConnections.integrationPackageId, input.integrationPackageId),
+        eq(integrationConnections.integrationId, input.integrationId),
         eq(integrationConnections.authKey, input.authKey),
         eq(integrationConnections.applicationId, input.scope.applicationId),
         actorFilter(input.actor, {

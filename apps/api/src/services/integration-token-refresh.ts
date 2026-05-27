@@ -277,7 +277,7 @@ export async function buildIntegrationOAuthRefreshContext(
     .where(
       and(
         eq(integrationOauthClients.applicationId, applicationId),
-        eq(integrationOauthClients.integrationPackageId, packageId),
+        eq(integrationOauthClients.integrationId, packageId),
         eq(integrationOauthClients.authKey, authKey),
       ),
     )

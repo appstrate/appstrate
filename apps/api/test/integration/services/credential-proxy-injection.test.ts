@@ -53,7 +53,7 @@ async function installAndConnect(
     config: {},
   });
   await db.insert(integrationConnections).values({
-    integrationPackageId: packageId,
+    integrationId: packageId,
     authKey,
     accountId: "acct-1",
     applicationId: ctx.defaultAppId,

@@ -72,7 +72,7 @@ function conn(input: Partial<ConnectionRow> & { authKey?: string }): ConnectionR
   connId += 1;
   return {
     id: `conn_${connId}`,
-    integrationPackageId: INTEG,
+    integrationId: INTEG,
     authKey: input.authKey ?? "oauth",
     accountId: "acc_x",
     applicationId: APP_ID,
@@ -98,7 +98,7 @@ function pin(connectionId: string, opts?: { userId?: string | null }): PinRow {
     id: `pin_${pinSeq}`,
     applicationId: APP_ID,
     packageId: AGENT_ID,
-    integrationPackageId: INTEG,
+    integrationId: INTEG,
     userId: opts?.userId ?? null,
     connectionId,
     createdBy: null,
@@ -411,7 +411,7 @@ describe("resolveConnections — multi-integration", () => {
   it("handles each integration independently", () => {
     const INTEG2 = "@vendor/other-integ";
     const c1 = conn({});
-    const c2 = conn({ integrationPackageId: INTEG2 });
+    const c2 = conn({ integrationId: INTEG2 });
     const m2: IntegrationManifest = {
       ...oauth2Manifest(),
       name: INTEG2,

@@ -116,7 +116,7 @@ export async function buildConnectLoginSpec(
   const auth = auths[execution.authKey];
   if (!auth) {
     throw new Error(
-      `connect-run: auth '${execution.authKey}' not declared on '${execution.integrationPackageId}'`,
+      `connect-run: auth '${execution.authKey}' not declared on '${execution.integrationId}'`,
     );
   }
   const deliveryHttp = auth.delivery?.http;
@@ -133,13 +133,13 @@ export async function buildConnectLoginSpec(
   const sourceKind = getIntegrationSourceKind(execution.manifest);
   if (sourceKind !== "local") {
     throw new Error(
-      `connect-run: integration '${execution.integrationPackageId}' has no spawnable server (connect.tool requires a local node|python|binary|uv runner)`,
+      `connect-run: integration '${execution.integrationId}' has no spawnable server (connect.tool requires a local node|python|binary|uv runner)`,
     );
   }
   const ref = getLocalServerRef(execution.manifest);
   if (!ref) {
     throw new Error(
-      `connect-run: integration '${execution.integrationPackageId}' local source is missing source.server`,
+      `connect-run: integration '${execution.integrationId}' local source is missing source.server`,
     );
   }
   const mcpServer = await resolveMcpServer(ref.name);
@@ -155,10 +155,10 @@ export async function buildConnectLoginSpec(
   const authorizedUris = auth.authorized_uris ?? [];
 
   return {
-    integrationId: execution.integrationPackageId,
+    integrationId: execution.integrationId,
     // McpHost.normaliseNamespace slugs/caps this — the package id is the same
     // namespace the spawn resolver uses for the agent-run path.
-    namespace: execution.integrationPackageId,
+    namespace: execution.integrationId,
     // connect-run only spawns local mcp-server bundles (the connect-login
     // tool can't run against a remote managed MCP — `runConnectOnce`
     // hard-rejects `sourceKind === "remote"`).
@@ -276,7 +276,7 @@ class ConnectRunExecutor implements ConnectToolExecutor {
       const bundle = await this.captureBundle(orch, sidecar);
       logger.info("connect-run completed", {
         connectId,
-        integrationPackageId: execution.integrationPackageId,
+        integrationId: execution.integrationId,
         authKey: execution.authKey,
       });
       return bundle;

@@ -75,7 +75,7 @@ describe("resolveIntegrationSpawns — remote source", () => {
     // An api_key connection so resolveDeliveries finds a row and the resolver
     // proceeds to the source-discriminant block.
     await db.insert(integrationConnections).values({
-      integrationPackageId: INTEG,
+      integrationId: INTEG,
       authKey: "primary",
       accountId: "default",
       applicationId: ctx.defaultAppId,
@@ -166,7 +166,7 @@ describe("resolveIntegrationSpawns — local source error guards", () => {
 
   async function seedConnection() {
     await db.insert(integrationConnections).values({
-      integrationPackageId: LOCAL,
+      integrationId: LOCAL,
       authKey: "primary",
       accountId: "default",
       applicationId: ctx.defaultAppId,

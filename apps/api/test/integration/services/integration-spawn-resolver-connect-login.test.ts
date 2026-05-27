@@ -100,7 +100,7 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
     return {
       scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
       actor: { type: "user", id: ctx.user.id },
-      integrationPackageId: INTEG,
+      integrationId: INTEG,
       authKey: "session",
     } as ConnectContext;
   }
@@ -158,7 +158,7 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
     // A connect.tool run-start row with an EMPTY inputs plane (e.g. a stale
     // row, or one created out-of-band) is treated as not-connected.
     await db.insert(integrationConnections).values({
-      integrationPackageId: INTEG,
+      integrationId: INTEG,
       authKey: "session",
       accountId: "default",
       applicationId: ctx.defaultAppId,

@@ -36,11 +36,7 @@ export class LoginStrategy implements IntegrationConnectStrategy {
     input: ConnectCompleteInput,
   ): Promise<IntegrationConnectionSummary> {
     const credentials = assertFieldsInput(input, "LoginStrategy");
-    const { manifest, auth } = await readIntegrationAuth(
-      ctx.scope,
-      ctx.integrationPackageId,
-      ctx.authKey,
-    );
+    const { manifest, auth } = await readIntegrationAuth(ctx.scope, ctx.integrationId, ctx.authKey);
     if (!auth.connect) {
       throw invalidRequest(`Auth '${ctx.authKey}' has no connect.login declaration`);
     }
@@ -74,7 +70,7 @@ export class LoginStrategy implements IntegrationConnectStrategy {
     assertRequiredIdentityClaims(manifest, ctx.authKey, combinedClaims);
 
     return saveIntegrationConnection(ctx.scope, {
-      packageId: ctx.integrationPackageId,
+      packageId: ctx.integrationId,
       authKey: ctx.authKey,
       accountId: identity.accountId,
       credentials: outputs,

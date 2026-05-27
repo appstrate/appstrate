@@ -51,7 +51,7 @@ export interface ConnectToolExecution {
   scope: AppScope;
   /** Acquiring actor on first connect; absent on a system re-bootstrap (reacquire). */
   actor?: Actor;
-  integrationPackageId: string;
+  integrationId: string;
   authKey: string;
   manifest: IntegrationManifest;
   /** MCP tool name from `connect.tool`. */
@@ -86,11 +86,7 @@ export class OrchestratedStrategy implements IntegrationConnectStrategy {
     input: ConnectCompleteInput,
   ): Promise<IntegrationConnectionSummary> {
     const credentials = assertFieldsInput(input, "OrchestratedStrategy");
-    const { manifest, auth } = await readIntegrationAuth(
-      ctx.scope,
-      ctx.integrationPackageId,
-      ctx.authKey,
-    );
+    const { manifest, auth } = await readIntegrationAuth(ctx.scope, ctx.integrationId, ctx.authKey);
     // AFPS 2.0: `connect.tool` is the marker object `{}`; the orchestrated-tool
     // name + run policy (`tool`, `run_at`, `produces`, `persist_login_secret`)
     // live under `connect._meta["dev.appstrate/connect"]`.
@@ -105,7 +101,7 @@ export class OrchestratedStrategy implements IntegrationConnectStrategy {
     const bundle = await this.executor.run({
       scope: ctx.scope,
       actor: ctx.actor,
-      integrationPackageId: ctx.integrationPackageId,
+      integrationId: ctx.integrationId,
       authKey: ctx.authKey,
       manifest,
       toolName: tool,
@@ -133,7 +129,7 @@ export class OrchestratedStrategy implements IntegrationConnectStrategy {
       scopesGranted: bundle.scopesGranted ?? [],
       expiresAt: bundle.expiresAt ? new Date(bundle.expiresAt) : null,
       needsReconnection: false,
-      ...(ctx.connectionId ? {} : { packageId: ctx.integrationPackageId, authKey: ctx.authKey }),
+      ...(ctx.connectionId ? {} : { packageId: ctx.integrationId, authKey: ctx.authKey }),
     });
     // insert / update-owned always return a summary (or throw).
     return summary!;

@@ -68,7 +68,7 @@ describe("OrchestratedStrategy.complete — persistLoginSecret gating (§4.6)", 
     return {
       scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
       actor: { type: "user", id: ctx.user.id },
-      integrationPackageId: packageId,
+      integrationId: packageId,
       authKey: "session",
     } as ConnectContext;
   }

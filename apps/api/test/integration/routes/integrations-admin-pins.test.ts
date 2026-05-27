@@ -94,7 +94,7 @@ describe("/api/integrations/:packageId admin surface", () => {
     const [row] = await db
       .insert(integrationConnections)
       .values({
-        integrationPackageId: INTEGRATION,
+        integrationId: INTEGRATION,
         authKey: "primary",
         accountId: `acct-shared`,
         applicationId: ctx.defaultAppId,
@@ -112,7 +112,7 @@ describe("/api/integrations/:packageId admin surface", () => {
     const [row] = await db
       .insert(integrationConnections)
       .values({
-        integrationPackageId: INTEGRATION,
+        integrationId: INTEGRATION,
         authKey: "primary",
         accountId: `acct-private-${userId.slice(0, 6)}`,
         applicationId: ctx.defaultAppId,

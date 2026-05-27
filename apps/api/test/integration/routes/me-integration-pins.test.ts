@@ -80,7 +80,7 @@ describe("/api/me/integration-pins", () => {
     const [row] = await db
       .insert(integrationConnections)
       .values({
-        integrationPackageId: INTEGRATION,
+        integrationId: INTEGRATION,
         authKey: "primary",
         accountId: `acct-${userId.slice(0, 6)}`,
         applicationId: ctx.defaultAppId,
@@ -147,7 +147,7 @@ describe("/api/me/integration-pins", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           agentPackageId: AGENT,
-          integrationPackageId: INTEGRATION,
+          integrationId: INTEGRATION,
           connectionId,
         }),
       });

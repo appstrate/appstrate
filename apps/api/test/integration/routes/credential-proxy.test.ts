@@ -94,7 +94,7 @@ async function seedIntegrationWithConnection(ctx: TestContext): Promise<void> {
   });
   // A live connection owned by the API key's owner (the resolved actor).
   await db.insert(integrationConnections).values({
-    integrationPackageId: INTEGRATION_ID,
+    integrationId: INTEGRATION_ID,
     authKey: "api",
     accountId: "acct-1",
     applicationId: ctx.defaultAppId,

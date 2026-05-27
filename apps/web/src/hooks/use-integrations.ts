@@ -125,7 +125,7 @@ export function useIntegrationConnections(packageId: string | undefined) {
  * cascade and scope diff live server-side (single source of truth).
  */
 export function useIntegrationAgentResolution(
-  integrationPackageId: string | undefined,
+  integrationId: string | undefined,
   agentPackageId: string | undefined,
 ) {
   const orgId = useCurrentOrgId();
@@ -134,13 +134,13 @@ export function useIntegrationAgentResolution(
     queryKey: [
       ...KEY(orgId, applicationId),
       "agent-resolution",
-      integrationPackageId,
+      integrationId,
       agentPackageId,
     ] as const,
-    enabled: Boolean(orgId && applicationId && integrationPackageId && agentPackageId),
+    enabled: Boolean(orgId && applicationId && integrationId && agentPackageId),
     queryFn: () =>
       api<IntegrationAgentResolution>(
-        `/integrations/${encodeURI(integrationPackageId!)}/agent-resolution/${encodeURI(agentPackageId!)}`,
+        `/integrations/${encodeURI(integrationId!)}/agent-resolution/${encodeURI(agentPackageId!)}`,
       ),
   });
 }

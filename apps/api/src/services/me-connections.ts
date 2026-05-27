@@ -39,7 +39,7 @@ async function listAllActorIntegrationConnections(
   const rows = await db
     .select({
       connectionId: integrationConnections.id,
-      packageId: integrationConnections.integrationPackageId,
+      packageId: integrationConnections.integrationId,
       authKey: integrationConnections.authKey,
       accountId: integrationConnections.accountId,
       applicationId: integrationConnections.applicationId,

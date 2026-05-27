@@ -195,7 +195,7 @@ router.put("/integration-pins", requireAppContext(), async (c) => {
   const input = parseBody(upsertMemberPinSchema, body);
   const result = await upsertMemberPin(scope, {
     agentPackageId: input.agent_package_id,
-    integrationPackageId: input.integration_package_id,
+    integrationId: input.integration_package_id,
     connectionId: input.connection_id,
     userId: user.id,
   });
@@ -216,16 +216,16 @@ router.delete("/integration-pins", requireAppContext(), async (c) => {
   }
   const scope = getAppScope(c);
   const agentPackageId = c.req.query("agentPackageId");
-  const integrationPackageId = c.req.query("integrationPackageId");
-  if (!agentPackageId || !integrationPackageId) {
+  const integrationId = c.req.query("integrationPackageId");
+  if (!agentPackageId || !integrationId) {
     throw unauthorized("agentPackageId and integrationPackageId query params are required");
   }
-  const result = await deleteMemberPin(scope, agentPackageId, integrationPackageId, user.id);
+  const result = await deleteMemberPin(scope, agentPackageId, integrationId, user.id);
   if (result.deleted) {
     await recordAuditFromContext(c, {
       action: "integration.member_pin.deleted",
       resourceType: "integration_pin",
-      resourceId: `${agentPackageId}|${integrationPackageId}`,
+      resourceId: `${agentPackageId}|${integrationId}`,
     });
   }
   return c.body(null, 204);

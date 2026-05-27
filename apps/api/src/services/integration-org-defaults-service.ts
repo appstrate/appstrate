@@ -41,7 +41,7 @@ export interface UpsertOrgDefaultInput {
 /** The org default for (application, integration), or null when unset. */
 export async function getOrgDefault(
   scope: AppScope,
-  integrationPackageId: string,
+  integrationId: string,
 ): Promise<OrgDefaultSummary | null> {
   const [row] = await db
     .select({
@@ -59,13 +59,13 @@ export async function getOrgDefault(
     .where(
       and(
         eq(integrationOrgDefaults.applicationId, scope.applicationId),
-        eq(integrationOrgDefaults.integrationPackageId, integrationPackageId),
+        eq(integrationOrgDefaults.integrationId, integrationId),
       ),
     )
     .limit(1);
   if (!row) return null;
   return {
-    integration_package_id: integrationPackageId,
+    integration_package_id: integrationId,
     connection_id: row.connectionId,
     auth_key: row.authKey,
     enforce: row.enforce,
@@ -83,25 +83,24 @@ export async function listOrgDefaultsForResolver(
 ): Promise<Record<string, { connectionId: string; enforce: boolean }>> {
   const rows = await db
     .select({
-      integrationPackageId: integrationOrgDefaults.integrationPackageId,
+      integrationId: integrationOrgDefaults.integrationId,
       connectionId: integrationOrgDefaults.connectionId,
       enforce: integrationOrgDefaults.enforce,
     })
     .from(integrationOrgDefaults)
     .where(eq(integrationOrgDefaults.applicationId, applicationId));
   const out: Record<string, { connectionId: string; enforce: boolean }> = {};
-  for (const r of rows)
-    out[r.integrationPackageId] = { connectionId: r.connectionId, enforce: r.enforce };
+  for (const r of rows) out[r.integrationId] = { connectionId: r.connectionId, enforce: r.enforce };
   return out;
 }
 
 /** Set or replace the org default for (application, integration). */
 export async function upsertOrgDefault(
   scope: AppScope,
-  integrationPackageId: string,
+  integrationId: string,
   input: UpsertOrgDefaultInput,
 ): Promise<OrgDefaultSummary> {
-  const conn = await validatePinTarget(scope, integrationPackageId, input.connectionId, {
+  const conn = await validatePinTarget(scope, integrationId, input.connectionId, {
     requireShared: true,
   });
 
@@ -113,7 +112,7 @@ export async function upsertOrgDefault(
     .insert(integrationOrgDefaults)
     .values({
       applicationId: scope.applicationId,
-      integrationPackageId,
+      integrationId,
       connectionId: input.connectionId,
       enforce: input.enforce,
       createdBy: input.createdBy,
@@ -121,7 +120,7 @@ export async function upsertOrgDefault(
       updatedAt: now,
     })
     .onConflictDoUpdate({
-      target: [integrationOrgDefaults.applicationId, integrationOrgDefaults.integrationPackageId],
+      target: [integrationOrgDefaults.applicationId, integrationOrgDefaults.integrationId],
       set: {
         connectionId: input.connectionId,
         enforce: input.enforce,
@@ -131,7 +130,7 @@ export async function upsertOrgDefault(
     });
 
   return {
-    integration_package_id: integrationPackageId,
+    integration_package_id: integrationId,
     connection_id: input.connectionId,
     auth_key: conn.authKey,
     enforce: input.enforce,
@@ -142,14 +141,14 @@ export async function upsertOrgDefault(
 
 export async function deleteOrgDefault(
   scope: AppScope,
-  integrationPackageId: string,
+  integrationId: string,
 ): Promise<{ deleted: boolean }> {
   const result = await db
     .delete(integrationOrgDefaults)
     .where(
       and(
         eq(integrationOrgDefaults.applicationId, scope.applicationId),
-        eq(integrationOrgDefaults.integrationPackageId, integrationPackageId),
+        eq(integrationOrgDefaults.integrationId, integrationId),
       ),
     )
     .returning({ id: integrationOrgDefaults.id });

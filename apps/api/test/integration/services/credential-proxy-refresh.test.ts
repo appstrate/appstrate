@@ -75,7 +75,7 @@ async function setup(
     config: {},
   });
   await db.insert(integrationConnections).values({
-    integrationPackageId: packageId,
+    integrationId: packageId,
     authKey: "google",
     accountId: "acct-1",
     applicationId: ctx.defaultAppId,
@@ -87,7 +87,7 @@ async function setup(
   });
   await db.insert(integrationOauthClients).values({
     applicationId: ctx.defaultAppId,
-    integrationPackageId: packageId,
+    integrationId: packageId,
     authKey: "google",
     clientId: "client_abc",
     clientSecretEncrypted: encryptCredentials({ client_secret: "secret_xyz" }),

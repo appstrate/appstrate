@@ -42,11 +42,7 @@ import type {
 
 export class OAuth2Strategy implements IntegrationConnectStrategy {
   async begin(ctx: ConnectContext, opts: BeginOptions): Promise<BeginResult> {
-    const { auth: rawAuth } = await readIntegrationAuth(
-      ctx.scope,
-      ctx.integrationPackageId,
-      ctx.authKey,
-    );
+    const { auth: rawAuth } = await readIntegrationAuth(ctx.scope, ctx.integrationId, ctx.authKey);
     const auth =
       rawAuth as unknown as import("../integration-manifest-helpers.ts").AfpsManifestAuth;
     // AFPS 2.0 §7.3: an oauth2 auth declares EITHER an `issuer` (discovery
@@ -58,14 +54,10 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
         "oauth2 auth must declare an issuer (for discovery) or explicit authorization_endpoint + token_endpoint for marketplace connect.",
       );
     }
-    const client = await getIntegrationOAuthClient(
-      ctx.scope,
-      ctx.integrationPackageId,
-      ctx.authKey,
-    );
+    const client = await getIntegrationOAuthClient(ctx.scope, ctx.integrationId, ctx.authKey);
     if (!client) {
       throw forbidden(
-        `Administrator must register OAuth client credentials for '${ctx.integrationPackageId}' auth '${ctx.authKey}' before connection`,
+        `Administrator must register OAuth client credentials for '${ctx.integrationId}' auth '${ctx.authKey}' before connection`,
       );
     }
     const redirectUri = client.redirect_uri ?? `${getEnv().APP_URL}/api/integrations/callback`;
@@ -78,7 +70,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       | { scope_separator?: string }
       | undefined;
     const result = await initiateIntegrationOAuth(oauthStateStore, {
-      packageId: ctx.integrationPackageId,
+      packageId: ctx.integrationId,
       authKey: ctx.authKey,
       ...(auth.issuer ? { issuer: auth.issuer } : {}),
       ...(auth.authorization_endpoint
@@ -117,11 +109,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       throw new Error(`OAuth2Strategy.complete: unexpected input kind '${input.kind}'`);
     }
     const result = input.result;
-    const { manifest, auth } = await readIntegrationAuth(
-      ctx.scope,
-      ctx.integrationPackageId,
-      ctx.authKey,
-    );
+    const { manifest, auth } = await readIntegrationAuth(ctx.scope, ctx.integrationId, ctx.authKey);
 
     // Build the identity source for `extractIdentity`. Three layers, applied
     // in order so later layers don't overwrite earlier ones:

@@ -31,7 +31,7 @@ const KEY = (
 
 export interface UpsertMemberPinInput {
   agentPackageId: string;
-  integrationPackageId: string;
+  integrationId: string;
   connectionId: string;
 }
 
@@ -43,13 +43,13 @@ export function useUpsertMemberIntegrationPin() {
     mutationFn: (input: UpsertMemberPinInput) =>
       api<{
         packageId: string;
-        integrationPackageId: string;
+        integrationId: string;
         connectionId: string;
       }>("/me/integration-pins", {
         method: "PUT",
         body: JSON.stringify({
           agent_package_id: input.agentPackageId,
-          integration_package_id: input.integrationPackageId,
+          integration_package_id: input.integrationId,
           connection_id: input.connectionId,
         }),
         headers: { "Content-Type": "application/json" },
@@ -64,7 +64,7 @@ export function useUpsertMemberIntegrationPin() {
 
 export interface DeleteMemberPinInput {
   agentPackageId: string;
-  integrationPackageId: string;
+  integrationId: string;
 }
 
 export function useDeleteMemberIntegrationPin() {
@@ -75,7 +75,7 @@ export function useDeleteMemberIntegrationPin() {
     mutationFn: (input: DeleteMemberPinInput) => {
       const qs = new URLSearchParams({
         agentPackageId: input.agentPackageId,
-        integrationPackageId: input.integrationPackageId,
+        integrationPackageId: input.integrationId,
       }).toString();
       return api<void>(`/me/integration-pins?${qs}`, { method: "DELETE" });
     },

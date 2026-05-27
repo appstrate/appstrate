@@ -34,7 +34,7 @@ const INTEGRATION = "@official/gmail";
 const OTHER_INTEGRATION = "@official/clickup";
 
 async function seedConnection(opts: {
-  integrationPackageId?: string;
+  integrationId?: string;
   applicationId: string;
   authKey?: string;
   accountId?: string;
@@ -46,7 +46,7 @@ async function seedConnection(opts: {
   const [row] = await db
     .insert(integrationConnections)
     .values({
-      integrationPackageId: opts.integrationPackageId ?? INTEGRATION,
+      integrationId: opts.integrationId ?? INTEGRATION,
       authKey: opts.authKey ?? "google",
       accountId: opts.accountId ?? `acct-${crypto.randomUUID().slice(0, 8)}`,
       applicationId: opts.applicationId,
@@ -99,7 +99,7 @@ describe("integration-pins-service — DB access/ownership", () => {
 
     it("rejects a connection belonging to a different integration", async () => {
       const id = await seedConnection({
-        integrationPackageId: OTHER_INTEGRATION,
+        integrationId: OTHER_INTEGRATION,
         applicationId: scope.applicationId,
         userId: ctx.user.id,
       });
@@ -182,7 +182,7 @@ describe("integration-pins-service — DB access/ownership", () => {
         userId: ctx.user.id,
       });
       await seedConnection({
-        integrationPackageId: OTHER_INTEGRATION,
+        integrationId: OTHER_INTEGRATION,
         applicationId: scope.applicationId,
         userId: ctx.user.id,
       });

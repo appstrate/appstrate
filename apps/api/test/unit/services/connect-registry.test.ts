@@ -88,7 +88,7 @@ describe("FieldsStrategy.complete", () => {
         {
           scope: { orgId: "o", applicationId: "a" },
           actor: { type: "user", id: "u" },
-          integrationPackageId: "@x/y",
+          integrationId: "@x/y",
           authKey: "k",
         },
         { kind: "oauth2-result", result: {} as never },

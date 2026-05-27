@@ -102,7 +102,7 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
   async function seedConnection(integrationId: string) {
     const ciphertext = encryptCredentials({ api_key: "live-secret-value" });
     await db.insert(integrationConnections).values({
-      integrationPackageId: integrationId,
+      integrationId: integrationId,
       authKey: "primary",
       accountId: "acct-test",
       applicationId: ctx.defaultAppId,
@@ -254,7 +254,7 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
   async function seedConnection(integrationId: string) {
     const ciphertext = encryptCredentials({ api_key: "live-secret-value" });
     await db.insert(integrationConnections).values({
-      integrationPackageId: integrationId,
+      integrationId: integrationId,
       authKey: "primary",
       accountId: "acct-test",
       applicationId: ctx.defaultAppId,

@@ -158,7 +158,7 @@ describe("block_user_connections workflow", () => {
     const rows = await db
       .select()
       .from(integrationConnections)
-      .where(eq(integrationConnections.integrationPackageId, "@myorg/gmail"));
+      .where(eq(integrationConnections.integrationId, "@myorg/gmail"));
     expect(rows).toHaveLength(0);
   });
 
@@ -185,7 +185,7 @@ describe("block_user_connections workflow", () => {
     const rows = await db
       .select()
       .from(integrationConnections)
-      .where(eq(integrationConnections.integrationPackageId, "@myorg/gmail"));
+      .where(eq(integrationConnections.integrationId, "@myorg/gmail"));
     expect(rows).toHaveLength(1);
   });
 
@@ -226,7 +226,7 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
     const [row] = await db
       .insert(integrationConnections)
       .values({
-        integrationPackageId: "@myorg/gmail",
+        integrationId: "@myorg/gmail",
         authKey: "google",
         accountId: "acct-1",
         applicationId: opts.applicationId ?? ctx.defaultAppId,
@@ -333,7 +333,7 @@ describe("assertOrgAdmin defense-in-depth (api-key role/scope intersection)", ()
     const [row] = await db
       .insert(integrationConnections)
       .values({
-        integrationPackageId: "@myorg/gmail",
+        integrationId: "@myorg/gmail",
         authKey: "google",
         accountId: "acct-1",
         applicationId: ctx.defaultAppId,
@@ -423,7 +423,7 @@ describe("connect/oauth2 reconnect scope-union (incremental consent)", () => {
     const [row] = await db
       .insert(integrationConnections)
       .values({
-        integrationPackageId: "@myorg/gmail",
+        integrationId: "@myorg/gmail",
         authKey: "google",
         accountId: "acct-1",
         applicationId: ctx.defaultAppId,

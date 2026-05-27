@@ -126,7 +126,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     const [row] = await db
       .insert(integrationConnections)
       .values({
-        integrationPackageId: integrationId,
+        integrationId: integrationId,
         authKey: "primary",
         accountId: `acct-${userId.slice(0, 6)}`,
         applicationId: ctx.defaultAppId,

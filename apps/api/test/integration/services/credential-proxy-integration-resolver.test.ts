@@ -118,7 +118,7 @@ describe("credential-proxy integration-resolver", () => {
     await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, INTEGRATION_ID);
     await db.insert(integrationOauthClients).values({
       applicationId: ctx.defaultAppId,
-      integrationPackageId: INTEGRATION_ID,
+      integrationId: INTEGRATION_ID,
       authKey: "primary",
       clientId: "cid",
       clientSecretEncrypted: encryptCredentials({ client_secret: "csec" }),
@@ -139,7 +139,7 @@ describe("credential-proxy integration-resolver", () => {
     const [row] = await db
       .insert(integrationConnections)
       .values({
-        integrationPackageId: INTEGRATION_ID,
+        integrationId: INTEGRATION_ID,
         authKey: "primary",
         accountId: "acct-1",
         applicationId: ctx.defaultAppId,

@@ -22,7 +22,7 @@ import type { Actor } from "../types.ts";
 export interface ConnectContext {
   scope: { orgId: string; applicationId: string };
   actor: Actor;
-  integrationPackageId: string;
+  integrationId: string;
   authKey: string;
   /** Reconnect / scope-upgrade target. Absent on a fresh connect. */
   connectionId?: string;

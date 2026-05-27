@@ -342,7 +342,7 @@ describe("api_key credentials schema validation (delivery.http silent-no-op guar
     const rows = await db
       .select()
       .from(integrationConnections)
-      .where(eq(integrationConnections.integrationPackageId, "@myorg/strict"));
+      .where(eq(integrationConnections.integrationId, "@myorg/strict"));
     expect(rows).toHaveLength(0);
   });
 
@@ -484,7 +484,7 @@ describe("OAuth client CRUD", () => {
       .where(
         and(
           eq(integrationOauthClients.applicationId, ctx.defaultAppId),
-          eq(integrationOauthClients.integrationPackageId, "@myorg/gmail"),
+          eq(integrationOauthClients.integrationId, "@myorg/gmail"),
           eq(integrationOauthClients.authKey, "google"),
         ),
       );
@@ -499,7 +499,7 @@ describe("OAuth client CRUD", () => {
     const after = await db
       .select()
       .from(integrationOauthClients)
-      .where(eq(integrationOauthClients.integrationPackageId, "@myorg/gmail"));
+      .where(eq(integrationOauthClients.integrationId, "@myorg/gmail"));
     expect(after).toHaveLength(0);
   });
 
@@ -534,7 +534,7 @@ describe("OAuth client CRUD", () => {
     const rows = await db
       .select()
       .from(integrationOauthClients)
-      .where(eq(integrationOauthClients.integrationPackageId, "@myorg/gmail"));
+      .where(eq(integrationOauthClients.integrationId, "@myorg/gmail"));
     expect(rows).toHaveLength(0);
   });
 });
@@ -666,7 +666,7 @@ describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default conne
     const [row] = await db
       .insert(integrationConnections)
       .values({
-        integrationPackageId: "@myorg/gmail",
+        integrationId: "@myorg/gmail",
         authKey: "google",
         accountId: "acct-1",
         applicationId: ctx.defaultAppId,

@@ -50,7 +50,7 @@ export const integrationConnections = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     /** FK to the installed integration package (`packages.id`). */
-    integrationPackageId: text("integration_package_id")
+    integrationId: text("integration_package_id")
       .notNull()
       .references(() => packages.id, { onDelete: "cascade" }),
     /** Auth key as declared in `manifest.auths.{key}` (e.g. `"primary"`, `"github"`). */
@@ -96,14 +96,14 @@ export const integrationConnections = pgTable(
     // keep duplicates or clean up). Reconnect / upgrade flows target a
     // specific row via its `id` (threaded through the OAuth state).
     // Covering lookup index so the resolver's per-actor queries stay fast.
-    // Column order is (integrationPackageId, applicationId, authKey): the hot
-    // reads filter (integrationPackageId, applicationId) — with or without
+    // Column order is (integrationId, applicationId, authKey): the hot
+    // reads filter (integrationId, applicationId) — with or without
     // authKey — so applicationId must precede authKey for both shapes to get
-    // a full prefix match. Its leftmost prefix (integrationPackageId) also
+    // a full prefix match. Its leftmost prefix (integrationId) also
     // serves package-only scans + the package FK cascade, so no separate
     // single-column package index is needed.
     index("idx_integration_conn_lookup").on(
-      table.integrationPackageId,
+      table.integrationId,
       table.applicationId,
       table.authKey,
     ),
@@ -114,14 +114,14 @@ export const integrationConnections = pgTable(
       .on(table.endUserId)
       .where(sql`${table.endUserId} IS NOT NULL`),
     // applicationId-only scans (FK cascade on app delete) — not covered by
-    // the lookup index (which leads with integrationPackageId).
+    // the lookup index (which leads with integrationId).
     index("idx_integration_conn_app").on(table.applicationId),
     // Hot path for the fallback resolution: when an actor has no pin
     // and no override, the resolver enumerates own + shared connections
     // for (app, integration, authKey). Partial index keeps the sharing
     // set small.
     index("idx_integration_conn_shared")
-      .on(table.applicationId, table.integrationPackageId, table.authKey)
+      .on(table.applicationId, table.integrationId, table.authKey)
       .where(sql`${table.sharedWithOrg} = true`),
     check(
       "integration_conn_exactly_one_owner",
@@ -162,7 +162,7 @@ export const integrationOauthClients = pgTable(
     applicationId: text("application_id")
       .notNull()
       .references(() => applications.id, { onDelete: "cascade" }),
-    integrationPackageId: text("integration_package_id")
+    integrationId: text("integration_package_id")
       .notNull()
       .references(() => packages.id, { onDelete: "cascade" }),
     authKey: text("auth_key").notNull(),
@@ -177,10 +177,10 @@ export const integrationOauthClients = pgTable(
   (table) => [
     uniqueIndex("idx_integration_oauth_clients_unique").on(
       table.applicationId,
-      table.integrationPackageId,
+      table.integrationId,
       table.authKey,
     ),
     index("idx_integration_oauth_clients_app").on(table.applicationId),
-    index("idx_integration_oauth_clients_package").on(table.integrationPackageId),
+    index("idx_integration_oauth_clients_package").on(table.integrationId),
   ],
 );

@@ -56,7 +56,7 @@ export const integrationPins = pgTable(
       .notNull()
       .references(() => packages.id, { onDelete: "cascade" }),
     /** Integration package this pin governs. */
-    integrationPackageId: text("integration_package_id")
+    integrationId: text("integration_package_id")
       .notNull()
       .references(() => packages.id, { onDelete: "cascade" }),
     /**
@@ -83,7 +83,7 @@ export const integrationPins = pgTable(
     uniqueIndex("idx_integration_pins_unique").on(
       table.applicationId,
       table.packageId,
-      table.integrationPackageId,
+      table.integrationId,
       sql`coalesce(${table.userId}, '')`,
     ),
     // Resolver hot path: fetch all pins for (app, agent) in one round trip,

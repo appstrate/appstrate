@@ -62,7 +62,7 @@ describe("LoginSecretStrategy.complete — store the secret, session pending", (
     return {
       scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
       actor: { type: "user", id: ctx.user.id },
-      integrationPackageId: packageId,
+      integrationId: packageId,
       authKey: "session",
     } as ConnectContext;
   }
@@ -123,7 +123,7 @@ describe("LoginSecretStrategy.complete — store the secret, session pending", (
         {
           scope: { orgId: "o", applicationId: "a" },
           actor: { type: "user", id: "u" },
-          integrationPackageId: "@x/y",
+          integrationId: "@x/y",
           authKey: "session",
         } as ConnectContext,
         { kind: "oauth2-result", result: {} as never },

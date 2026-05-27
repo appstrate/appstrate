@@ -69,7 +69,7 @@ type ConnectionRow = InferSelectModel<typeof integrationConnections>;
  */
 export async function setBlockUserConnections(
   scope: AppScope,
-  integrationPackageId: string,
+  integrationId: string,
   blocked: boolean,
 ): Promise<{ blocked: boolean }> {
   const result = await db
@@ -78,12 +78,12 @@ export async function setBlockUserConnections(
     .where(
       and(
         eq(applicationPackages.applicationId, scope.applicationId),
-        eq(applicationPackages.packageId, integrationPackageId),
+        eq(applicationPackages.packageId, integrationId),
       ),
     )
     .returning({ blockUserConnections: applicationPackages.blockUserConnections });
   if (result.length === 0) {
-    throw notFound(`Integration '${integrationPackageId}' is not installed in this application`);
+    throw notFound(`Integration '${integrationId}' is not installed in this application`);
   }
   return { blocked: result[0]!.blockUserConnections };
 }
@@ -98,7 +98,7 @@ interface PinJoinRow {
 function toPinSummary(row: PinJoinRow): PinSummary {
   return {
     packageId: row.pin.packageId,
-    integration_package_id: row.pin.integrationPackageId,
+    integration_package_id: row.pin.integrationId,
     auth_key: row.conn?.authKey ?? "",
     connection_id: row.pin.connectionId,
     createdAt: row.pin.createdAt.toISOString(),
@@ -123,11 +123,11 @@ async function listPinsBy(conditions: Parameters<typeof and>): Promise<PinSummar
  */
 export async function listIntegrationPins(
   scope: AppScope,
-  integrationPackageId: string,
+  integrationId: string,
 ): Promise<PinSummary[]> {
   return listPinsBy([
     eq(integrationPins.applicationId, scope.applicationId),
-    eq(integrationPins.integrationPackageId, integrationPackageId),
+    eq(integrationPins.integrationId, integrationId),
     isNull(integrationPins.userId),
   ]);
 }
@@ -140,7 +140,7 @@ export async function listIntegrationPins(
  */
 export async function listAgentsConsumingIntegration(
   scope: AppScope,
-  integrationPackageId: string,
+  integrationId: string,
 ): Promise<ConsumingAgentSummary[]> {
   const rows = await db.execute(sql`
     SELECT p.id AS package_id,
@@ -149,7 +149,7 @@ export async function listAgentsConsumingIntegration(
     INNER JOIN ${packages} p ON p.id = ap.package_id
     WHERE ap.application_id = ${scope.applicationId}
       AND p.type = 'agent'
-      AND (p.draft_manifest -> 'dependencies' -> 'integrations') ? ${integrationPackageId}
+      AND (p.draft_manifest -> 'dependencies' -> 'integrations') ? ${integrationId}
     ORDER BY p.id ASC
   `);
   return (
@@ -183,13 +183,13 @@ export interface SetPinInput {
  */
 export async function upsertIntegrationPin(
   scope: AppScope,
-  integrationPackageId: string,
+  integrationId: string,
   input: SetPinInput,
 ): Promise<PinSummary> {
   return upsertPin({
     scope,
     agentPackageId: input.agentPackageId,
-    integrationPackageId,
+    integrationId,
     connectionId: input.connectionId,
     userIdValue: null,
     validateOpts: { requireShared: true },
@@ -207,7 +207,7 @@ export async function upsertIntegrationPin(
 async function upsertPin(args: {
   scope: AppScope;
   agentPackageId: string;
-  integrationPackageId: string;
+  integrationId: string;
   connectionId: string;
   userIdValue: string | null;
   validateOpts: { requireShared?: boolean; allowOwnedBy?: string };
@@ -219,14 +219,8 @@ async function upsertPin(args: {
    */
   updateCreatedBy: boolean;
 }): Promise<PinSummary> {
-  const { scope, agentPackageId, integrationPackageId, connectionId, userIdValue, createdBy } =
-    args;
-  const conn = await validatePinTarget(
-    scope,
-    integrationPackageId,
-    connectionId,
-    args.validateOpts,
-  );
+  const { scope, agentPackageId, integrationId, connectionId, userIdValue, createdBy } = args;
+  const conn = await validatePinTarget(scope, integrationId, connectionId, args.validateOpts);
   await assertAgentInstalled(scope, agentPackageId);
 
   const now = new Date();
@@ -239,7 +233,7 @@ async function upsertPin(args: {
       and(
         eq(integrationPins.applicationId, scope.applicationId),
         eq(integrationPins.packageId, agentPackageId),
-        eq(integrationPins.integrationPackageId, integrationPackageId),
+        eq(integrationPins.integrationId, integrationId),
         userPredicate,
       ),
     )
@@ -258,7 +252,7 @@ async function upsertPin(args: {
     await db.insert(integrationPins).values({
       applicationId: scope.applicationId,
       packageId: agentPackageId,
-      integrationPackageId,
+      integrationId,
       userId: userIdValue,
       connectionId,
       createdBy,
@@ -269,7 +263,7 @@ async function upsertPin(args: {
 
   return {
     packageId: agentPackageId,
-    integration_package_id: integrationPackageId,
+    integration_package_id: integrationId,
     auth_key: conn.authKey,
     connection_id: connectionId,
     createdAt: now.toISOString(),
@@ -279,7 +273,7 @@ async function upsertPin(args: {
 
 export async function deleteIntegrationPin(
   scope: AppScope,
-  integrationPackageId: string,
+  integrationId: string,
   agentPackageId: string,
 ): Promise<{ deleted: boolean }> {
   const result = await db
@@ -287,7 +281,7 @@ export async function deleteIntegrationPin(
     .where(
       and(
         eq(integrationPins.applicationId, scope.applicationId),
-        eq(integrationPins.integrationPackageId, integrationPackageId),
+        eq(integrationPins.integrationId, integrationId),
         eq(integrationPins.packageId, agentPackageId),
         isNull(integrationPins.userId),
       ),
@@ -312,7 +306,7 @@ async function assertAgentInstalled(scope: AppScope, agentPackageId: string): Pr
 
 export async function validatePinTarget(
   scope: AppScope,
-  integrationPackageId: string,
+  integrationId: string,
   connectionId: string,
   opts: { requireShared?: boolean; allowOwnedBy?: string },
 ): Promise<ConnectionRow> {
@@ -325,9 +319,9 @@ export async function validatePinTarget(
   if (conn.applicationId !== scope.applicationId) {
     throw invalidRequest("Pinned connection belongs to a different application");
   }
-  if (conn.integrationPackageId !== integrationPackageId) {
+  if (conn.integrationId !== integrationId) {
     throw invalidRequest(
-      `Pinned connection belongs to integration '${conn.integrationPackageId}', not '${integrationPackageId}'`,
+      `Pinned connection belongs to integration '${conn.integrationId}', not '${integrationId}'`,
     );
   }
   if (opts.requireShared) {
@@ -351,7 +345,7 @@ export async function validatePinTarget(
 
 export interface UpsertMemberPinInput {
   agentPackageId: string;
-  integrationPackageId: string;
+  integrationId: string;
   connectionId: string;
   userId: string;
 }
@@ -370,7 +364,7 @@ export async function upsertMemberPin(
   return upsertPin({
     scope,
     agentPackageId: input.agentPackageId,
-    integrationPackageId: input.integrationPackageId,
+    integrationId: input.integrationId,
     connectionId: input.connectionId,
     userIdValue: input.userId,
     validateOpts: { allowOwnedBy: input.userId },
@@ -382,7 +376,7 @@ export async function upsertMemberPin(
 export async function deleteMemberPin(
   scope: AppScope,
   agentPackageId: string,
-  integrationPackageId: string,
+  integrationId: string,
   userId: string,
 ): Promise<{ deleted: boolean }> {
   const result = await db
@@ -391,7 +385,7 @@ export async function deleteMemberPin(
       and(
         eq(integrationPins.applicationId, scope.applicationId),
         eq(integrationPins.packageId, agentPackageId),
-        eq(integrationPins.integrationPackageId, integrationPackageId),
+        eq(integrationPins.integrationId, integrationId),
         eq(integrationPins.userId, userId),
       ),
     )
@@ -405,7 +399,7 @@ export async function deleteMemberPin(
  * renders the collapsed "Using: X" row pointing at the pinned connection.
  */
 export interface MemberPinSummary {
-  integrationPackageId: string;
+  integrationId: string;
   connectionId: string;
 }
 
@@ -416,7 +410,7 @@ export async function listMemberPinsForAgent(
 ): Promise<MemberPinSummary[]> {
   const rows = await db
     .select({
-      integrationPackageId: integrationPins.integrationPackageId,
+      integrationId: integrationPins.integrationId,
       connectionId: integrationPins.connectionId,
     })
     .from(integrationPins)
@@ -521,12 +515,12 @@ export async function loadConnectionOwnership(connectionId: string): Promise<{
  */
 export async function listAccessibleConnections(
   scope: AppScope,
-  integrationPackageId: string,
+  integrationId: string,
   actorFilter: { userId?: string; endUserId?: string },
 ): Promise<SharedConnectionSummary[]> {
   const baseConditions = [
     eq(integrationConnections.applicationId, scope.applicationId),
-    eq(integrationConnections.integrationPackageId, integrationPackageId),
+    eq(integrationConnections.integrationId, integrationId),
   ];
 
   const [own, shared] = await Promise.all([
@@ -619,22 +613,20 @@ async function attachOwnerNames(rows: ConnectionRow[]): Promise<SharedConnection
 export async function resolveAgentIntegrationPick(args: {
   scope: AppScope;
   agentPackageId: string;
-  integrationPackageId: string;
+  integrationId: string;
   actor: Actor;
   isAdmin: boolean;
 }): Promise<IntegrationAgentResolution> {
-  const { scope, agentPackageId, integrationPackageId, actor, isAdmin } = args;
+  const { scope, agentPackageId, integrationId, actor, isAdmin } = args;
 
   const agent = await getPackage(agentPackageId, scope.orgId);
   if (!agent) throw notFound(`Agent '${agentPackageId}' not found in this organization`);
   const agentManifest = agent.manifest as unknown as Record<string, unknown>;
-  const agentEntry = parseManifestIntegrations(agentManifest).find(
-    (e) => e.id === integrationPackageId,
-  );
+  const agentEntry = parseManifestIntegrations(agentManifest).find((e) => e.id === integrationId);
   const agentTools = agentEntry?.tools ?? [];
   const agentScopes = agentEntry?.scopes ?? [];
 
-  const manifestRes = await fetchIntegrationManifest(integrationPackageId);
+  const manifestRes = await fetchIntegrationManifest(integrationId);
   const manifest = manifestRes.ok ? manifestRes.manifest : null;
 
   const actorFilter = actor.type === "user" ? { userId: actor.id } : { endUserId: actor.id };
@@ -642,13 +634,13 @@ export async function resolveAgentIntegrationPick(args: {
 
   const [candidatesRaw, adminPins, memberPins, blocked, orgDefault, resolution] = await Promise.all(
     [
-      listAccessibleConnections(scope, integrationPackageId, actorFilter),
-      listIntegrationPins(scope, integrationPackageId),
+      listAccessibleConnections(scope, integrationId, actorFilter),
+      listIntegrationPins(scope, integrationId),
       userId
         ? listMemberPinsForAgent(scope, agentPackageId, userId)
         : Promise.resolve([] as MemberPinSummary[]),
-      isUserConnectionCreationBlocked(scope.applicationId, integrationPackageId),
-      getOrgDefault(scope, integrationPackageId),
+      isUserConnectionCreationBlocked(scope.applicationId, integrationId),
+      getOrgDefault(scope, integrationId),
       resolveConnectionsForRun({
         agentManifest,
         packageId: agentPackageId,
@@ -661,7 +653,7 @@ export async function resolveAgentIntegrationPick(args: {
   const adminPinnedConnectionId =
     adminPins.find((p) => p.packageId === agentPackageId)?.connection_id ?? null;
   const memberPinnedConnectionId =
-    memberPins.find((p) => p.integrationPackageId === integrationPackageId)?.connectionId ?? null;
+    memberPins.find((p) => p.integrationId === integrationId)?.connectionId ?? null;
   const orgDefaultConnectionId = orgDefault?.connection_id ?? null;
   const orgDefaultEnforced = orgDefault?.enforce ?? false;
 
@@ -679,8 +671,8 @@ export async function resolveAgentIntegrationPick(args: {
     is_own: actor.type === "user" ? c.owner_user_id === actor.id : c.owner_end_user_id === actor.id,
   }));
 
-  const resolved = resolution.resolved[integrationPackageId] ?? null;
-  const err = resolution.errors.find((e) => e.integrationId === integrationPackageId) ?? null;
+  const resolved = resolution.resolved[integrationId] ?? null;
+  const err = resolution.errors.find((e) => e.integrationId === integrationId) ?? null;
 
   let status: IntegrationPickStatus;
   let resolvedConnectionId: string | null = null;

@@ -53,7 +53,7 @@ export const integrationOrgDefaults = pgTable(
       .notNull()
       .references(() => applications.id, { onDelete: "cascade" }),
     /** Integration package this default governs. */
-    integrationPackageId: text("integration_package_id")
+    integrationId: text("integration_package_id")
       .notNull()
       .references(() => packages.id, { onDelete: "cascade" }),
     /** The connection every agent will use by default. Must be sharedWithOrg=true. */
@@ -69,10 +69,7 @@ export const integrationOrgDefaults = pgTable(
   },
   (table) => [
     // One default per (application, integration).
-    uniqueIndex("idx_integration_org_defaults_unique").on(
-      table.applicationId,
-      table.integrationPackageId,
-    ),
+    uniqueIndex("idx_integration_org_defaults_unique").on(table.applicationId, table.integrationId),
     // Resolver hot path: load all defaults for an application in one query.
     index("idx_integration_org_defaults_app").on(table.applicationId),
     // Reverse lookup for the unshare / destructive-delete impact guard.

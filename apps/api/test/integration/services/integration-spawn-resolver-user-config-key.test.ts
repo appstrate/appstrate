@@ -78,7 +78,7 @@ async function seedAll(ctx: TestContext, opts: SeedOpts, credBag: Record<string,
     }),
   });
   await db.insert(integrationConnections).values({
-    integrationPackageId: INTEG,
+    integrationId: INTEG,
     authKey: "primary",
     accountId: "default",
     applicationId: ctx.defaultAppId,

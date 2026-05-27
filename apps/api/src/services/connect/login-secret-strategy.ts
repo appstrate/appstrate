@@ -45,7 +45,7 @@ export class LoginSecretStrategy implements IntegrationConnectStrategy {
     requireNonEmptyCredentials(credentials);
     // Read the auth (validates the manifest declares it). The session is
     // minted at run-start, so we don't run the tool or extract identity here.
-    await readIntegrationAuth(ctx.scope, ctx.integrationPackageId, ctx.authKey);
+    await readIntegrationAuth(ctx.scope, ctx.integrationId, ctx.authKey);
 
     const target = connectionTarget(ctx);
 
@@ -59,7 +59,7 @@ export class LoginSecretStrategy implements IntegrationConnectStrategy {
       scopesGranted: [],
       expiresAt: null,
       needsReconnection: false,
-      ...(ctx.connectionId ? {} : { packageId: ctx.integrationPackageId, authKey: ctx.authKey }),
+      ...(ctx.connectionId ? {} : { packageId: ctx.integrationId, authKey: ctx.authKey }),
     });
     // insert / update-owned always return a summary (or throw).
     return summary!;

@@ -32,11 +32,7 @@ export class FieldsStrategy implements IntegrationConnectStrategy {
     input: ConnectCompleteInput,
   ): Promise<IntegrationConnectionSummary> {
     const credentials = assertFieldsInput(input, "FieldsStrategy");
-    const { manifest, auth } = await readIntegrationAuth(
-      ctx.scope,
-      ctx.integrationPackageId,
-      ctx.authKey,
-    );
+    const { manifest, auth } = await readIntegrationAuth(ctx.scope, ctx.integrationId, ctx.authKey);
     requireNonEmptyCredentials(credentials);
 
     // Validate the pasted bag against the auth's declared credentials.schema.
@@ -59,7 +55,7 @@ export class FieldsStrategy implements IntegrationConnectStrategy {
 
     const { accountId, identityClaims } = extractIdentity(manifest, ctx.authKey, credentials);
     return saveIntegrationConnection(ctx.scope, {
-      packageId: ctx.integrationPackageId,
+      packageId: ctx.integrationId,
       authKey: ctx.authKey,
       accountId,
       credentials,

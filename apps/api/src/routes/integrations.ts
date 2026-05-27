@@ -147,17 +147,17 @@ export const oauthClientSchema = z.object({
 async function assertConnectionCreationAllowed(
   c: import("hono").Context<AppEnv>,
   applicationId: string,
-  integrationPackageId: string,
+  integrationId: string,
 ): Promise<void> {
   const role = c.get("orgRole");
   if (role === "owner" || role === "admin") return;
-  const blocked = await isUserConnectionCreationBlocked(applicationId, integrationPackageId);
+  const blocked = await isUserConnectionCreationBlocked(applicationId, integrationId);
   if (blocked) {
     throw new ApiError({
       status: 403,
       code: "connection_blocked_by_admin",
       title: "Connection Blocked by Admin",
-      detail: `Creation of personal connections to '${integrationPackageId}' is disabled by the organization admin. Use the shared connection instead.`,
+      detail: `Creation of personal connections to '${integrationId}' is disabled by the organization admin. Use the shared connection instead.`,
     });
   }
 }
@@ -251,7 +251,7 @@ export function createIntegrationsRouter() {
         {
           scope,
           actor: result.actor,
-          integrationPackageId: result.packageId,
+          integrationId: result.packageId,
           authKey: result.authKey,
           ...(result.connectionId ? { connectionId: result.connectionId } : {}),
         },
@@ -409,7 +409,7 @@ export function createIntegrationsRouter() {
         const conn = await resolveStrategy(auth, {
           connectToolExecutor: createConnectRunExecutor(),
         }).complete(
-          { scope, actor, integrationPackageId: packageId, authKey },
+          { scope, actor, integrationId: packageId, authKey },
           { kind: "fields", credentials: body.credentials },
         );
         await recordAuditFromContext(c, {
@@ -463,7 +463,7 @@ export function createIntegrationsRouter() {
       const granted = body.connection_id
         ? await getCurrentScopesGranted({
             scope,
-            integrationPackageId: packageId,
+            integrationId: packageId,
             authKey,
             actor,
             connectionId: body.connection_id,
@@ -480,7 +480,7 @@ export function createIntegrationsRouter() {
         {
           scope,
           actor,
-          integrationPackageId: packageId,
+          integrationId: packageId,
           authKey,
           ...(body.connection_id ? { connectionId: body.connection_id } : {}),
         },
@@ -532,7 +532,7 @@ export function createIntegrationsRouter() {
       const result = await resolveAgentIntegrationPick({
         scope,
         agentPackageId,
-        integrationPackageId: packageId,
+        integrationId: packageId,
         actor,
         isAdmin: role === "owner" || role === "admin",
       });

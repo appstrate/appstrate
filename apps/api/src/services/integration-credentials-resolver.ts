@@ -182,7 +182,7 @@ export async function resolveLiveIntegrationCredentials(
           const granted = refreshed.scopesGranted;
           const { required } = await computeRequiredScopes({
             scope: { orgId: context.orgId, applicationId: context.applicationId },
-            integrationPackageId: integrationId,
+            integrationId: integrationId,
             authKey,
           });
           // Expand the granted set through the manifest `implies` hierarchy

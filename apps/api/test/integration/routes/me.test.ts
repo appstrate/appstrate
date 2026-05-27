@@ -44,7 +44,7 @@ async function seedConnectionFor(opts: {
   const [row] = await db
     .insert(integrationConnections)
     .values({
-      integrationPackageId: opts.integrationId,
+      integrationId: opts.integrationId,
       authKey: "google",
       accountId: `acct-${crypto.randomUUID().slice(0, 8)}`,
       applicationId: opts.applicationId,

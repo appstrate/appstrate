@@ -178,7 +178,7 @@ function IntegrationConnectionCard({
     return (
       <CardShell title={displayName} subtitle={packageId}>
         <MemberConnectionPicker
-          integrationPackageId={packageId}
+          integrationId={packageId}
           agentPackageId={agentPackageId!}
           manifest={detail.manifest}
           authStatuses={detail.auths}
@@ -373,7 +373,7 @@ function buildReuseInfo(
  * disabled and shows the pinned connection with a lock badge.
  */
 function MemberConnectionPicker({
-  integrationPackageId,
+  integrationId,
   agentPackageId,
   manifest,
   authStatuses,
@@ -381,7 +381,7 @@ function MemberConnectionPicker({
   agentTools,
   agentScopes,
 }: {
-  integrationPackageId: string;
+  integrationId: string;
   agentPackageId: string;
   manifest: IntegrationManifestView;
   authStatuses: IntegrationAuthStatus[];
@@ -391,7 +391,7 @@ function MemberConnectionPicker({
 }) {
   const { t } = useTranslation(["agents", "settings"]);
   const { data: resolution, isPending } = useIntegrationAgentResolution(
-    integrationPackageId,
+    integrationId,
     agentPackageId,
   );
   const upsertPin = useUpsertMemberIntegrationPin();
@@ -418,7 +418,7 @@ function MemberConnectionPicker({
 
   if (isPending || !resolution) {
     return (
-      <div data-testid={`member-picker-${integrationPackageId}`}>
+      <div data-testid={`member-picker-${integrationId}`}>
         <Button variant="outline" size="sm" disabled className="h-7 gap-1.5 text-xs">
           <Loader2 className="size-3 animate-spin" />
         </Button>
@@ -452,13 +452,13 @@ function MemberConnectionPicker({
     const pinned = candidates.find((c) => c.id === lockedConnectionId);
     const label = pinned ? connectionDisplayLabel(pinned) : lockedConnectionId;
     return (
-      <div data-testid={`member-picker-${integrationPackageId}`}>
+      <div data-testid={`member-picker-${integrationId}`}>
         <Button
           variant="outline"
           size="sm"
           disabled
           className="h-7 justify-start gap-1.5 text-xs"
-          data-testid={`member-pick-locked-${integrationPackageId}`}
+          data-testid={`member-pick-locked-${integrationId}`}
         >
           <Lock className="size-3" />
           <span className="truncate">{label}</span>
@@ -481,7 +481,7 @@ function MemberConnectionPicker({
   // "must_choose". Only when the member hasn't already pinned an explicit
   // choice — an existing pin is respected, not overridden.
   const selectConnection = async (connectionId: string) => {
-    await upsertPin.mutateAsync({ agentPackageId, integrationPackageId, connectionId });
+    await upsertPin.mutateAsync({ agentPackageId, integrationId, connectionId });
     await refresh();
   };
 
@@ -499,7 +499,7 @@ function MemberConnectionPicker({
       // integration detail page is the surface that connects at defaults).
       const scopes = requiredScopesForAgent({ manifest, authKey, agentTools, agentScopes });
       await openPopup({
-        packageId: integrationPackageId,
+        packageId: integrationId,
         authKey,
         ...(scopes.length ? { scopes } : {}),
         forceAccountSelect: true,
@@ -509,7 +509,7 @@ function MemberConnectionPicker({
         return;
       }
       const fresh = await api<IntegrationAgentResolution>(
-        `/integrations/${encodeURI(integrationPackageId)}/agent-resolution/${encodeURI(agentPackageId)}`,
+        `/integrations/${encodeURI(integrationId)}/agent-resolution/${encodeURI(agentPackageId)}`,
       );
       const added = fresh.candidates.find((c) => !before.has(c.id));
       if (added) await selectConnection(added.id);
@@ -535,13 +535,13 @@ function MemberConnectionPicker({
   // disabled, explanatory button instead of an empty dropdown.
   if (!canAddConnection && !hasCandidates) {
     return (
-      <div data-testid={`member-picker-${integrationPackageId}`}>
+      <div data-testid={`member-picker-${integrationId}`}>
         <Button
           variant="outline"
           size="sm"
           disabled
           className="h-7 justify-start gap-1.5 text-xs"
-          data-testid={`member-pick-blocked-${integrationPackageId}`}
+          data-testid={`member-pick-blocked-${integrationId}`}
         >
           <Lock className="size-3" />
           <span className="truncate">{t("detail.integrationMemberPicker.blockedByAdmin")}</span>
@@ -555,10 +555,10 @@ function MemberConnectionPicker({
   // admin setup instead of an empty dropdown that would only 403.
   if (!hasCandidates && authKeys.length === 0) {
     return (
-      <div data-testid={`member-picker-${integrationPackageId}`}>
+      <div data-testid={`member-picker-${integrationId}`}>
         <span
           className="text-muted-foreground text-xs"
-          data-testid={`member-pick-no-client-${integrationPackageId}`}
+          data-testid={`member-pick-no-client-${integrationId}`}
         >
           {t("settings:integration.auth.noClientHint")}
         </span>
@@ -567,14 +567,14 @@ function MemberConnectionPicker({
   }
 
   return (
-    <div data-testid={`member-picker-${integrationPackageId}`}>
+    <div data-testid={`member-picker-${integrationId}`}>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
             variant="outline"
             size="sm"
             className={`h-7 justify-start gap-1.5 text-xs ${triggerWarn ? "text-amber-600 dark:text-amber-400" : ""}`}
-            data-testid={`member-pick-${integrationPackageId}`}
+            data-testid={`member-pick-${integrationId}`}
           >
             <TriggerIcon className="size-3" />
             <span className="max-w-[14rem] truncate">{triggerLabel}</span>
@@ -598,7 +598,7 @@ function MemberConnectionPicker({
                 key={c.id}
                 onSelect={() =>
                   upsertPin.mutate(
-                    { agentPackageId, integrationPackageId, connectionId: c.id },
+                    { agentPackageId, integrationId, connectionId: c.id },
                     { onSuccess: refresh },
                   )
                 }
@@ -641,9 +641,9 @@ function MemberConnectionPicker({
           {current && (
             <DropdownMenuItem
               onSelect={() =>
-                deletePin.mutate({ agentPackageId, integrationPackageId }, { onSuccess: refresh })
+                deletePin.mutate({ agentPackageId, integrationId }, { onSuccess: refresh })
               }
-              data-testid={`member-pick-reset-${integrationPackageId}`}
+              data-testid={`member-pick-reset-${integrationId}`}
             >
               <Check className="size-3.5 opacity-0" />
               <span className="text-muted-foreground">
@@ -659,7 +659,7 @@ function MemberConnectionPicker({
                 <DropdownMenuItem
                   key={`add-${k}`}
                   onSelect={() => void triggerConnect(k)}
-                  data-testid={`member-pick-add-${integrationPackageId}-${k}`}
+                  data-testid={`member-pick-add-${integrationId}-${k}`}
                 >
                   <Plus className="size-3.5" />
                   <span>
@@ -674,8 +674,8 @@ function MemberConnectionPicker({
           {/* Escape hatch to the integration page for the full connection
               management surface (rename, share-with-org, delete, OAuth client). */}
           <DropdownMenuItem
-            onSelect={() => navigate(`/integrations/${integrationPackageId}`)}
-            data-testid={`member-pick-manage-${integrationPackageId}`}
+            onSelect={() => navigate(`/integrations/${integrationId}`)}
+            data-testid={`member-pick-manage-${integrationId}`}
           >
             <Settings className="size-3.5" />
             <span>{t("detail.integrationMemberPicker.manageConnections")}</span>
@@ -688,7 +688,7 @@ function MemberConnectionPicker({
       {underScoped && resolvedConn && (
         <div
           className="mt-1.5 flex flex-col gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-[0.7rem] text-amber-700 dark:text-amber-300"
-          data-testid={`member-pick-scope-warning-${integrationPackageId}`}
+          data-testid={`member-pick-scope-warning-${integrationId}`}
         >
           <div className="flex items-center gap-1.5">
             <AlertTriangle className="size-3 shrink-0" />
@@ -711,7 +711,7 @@ function MemberConnectionPicker({
                   disabled={oauthPending}
                   onClick={async () => {
                     await openPopup({
-                      packageId: integrationPackageId,
+                      packageId: integrationId,
                       authKey: resolvedConn.auth_key,
                       scopes: resolvedMissingScopes,
                       connectionId: resolvedConn.id,
@@ -721,7 +721,7 @@ function MemberConnectionPicker({
                     // instead of waiting for a window-focus refetch.
                     await refresh();
                   }}
-                  data-testid={`member-pick-upgrade-${integrationPackageId}`}
+                  data-testid={`member-pick-upgrade-${integrationId}`}
                 >
                   <RefreshCw className="mr-1 size-3" />
                   {t("detail.integrationMemberPicker.upgradeButton")}
@@ -734,7 +734,7 @@ function MemberConnectionPicker({
         <FieldsConnectModal
           open={true}
           onClose={() => setFieldsAuthKey(null)}
-          packageId={integrationPackageId}
+          packageId={integrationId}
           authKey={fieldsAuthKey}
           auth={fieldsAuth}
           displayName={displayName}

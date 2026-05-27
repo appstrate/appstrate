@@ -175,7 +175,7 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
     // to credential injection downstream; pre-filtering here means every
     // cascade layer (pins / overrides / fallback) honours the pin uniformly.
     const integrationCandidates = input.accessibleConnections.filter(
-      (c) => c.integrationPackageId === req.integrationId,
+      (c) => c.integrationId === req.integrationId,
     );
     let filteredConnections = input.accessibleConnections;
     let filteredIndex = connectionIndex;
@@ -200,7 +200,7 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
       // Build a restricted view so the cascade only sees matching connections.
       // Other integrations' rows are untouched.
       const otherRows = input.accessibleConnections.filter(
-        (c) => c.integrationPackageId !== req.integrationId,
+        (c) => c.integrationId !== req.integrationId,
       );
       filteredConnections = [...otherRows, ...matchingOnAuth];
       filteredIndex = new Map<string, ConnectionRow>();
@@ -328,7 +328,7 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
   // 7. Fallback — actor's accessible connections on this integration,
   // any auth shape. The chosen connection carries its own authKey.
   const candidates = args.accessibleConnections.filter(
-    (c) => c.integrationPackageId === args.integrationId,
+    (c) => c.integrationId === args.integrationId,
   );
 
   if (candidates.length === 0) {
@@ -419,9 +419,9 @@ function indexPins(
   const memberPins = new Map<string, string>();
   for (const p of pins) {
     if (p.userId === null) {
-      adminPins.set(p.integrationPackageId, p.connectionId);
+      adminPins.set(p.integrationId, p.connectionId);
     } else if (actorUserId !== null && p.userId === actorUserId) {
-      memberPins.set(p.integrationPackageId, p.connectionId);
+      memberPins.set(p.integrationId, p.connectionId);
     }
   }
   return { adminPins, memberPins };
@@ -536,7 +536,7 @@ async function loadAccessibleConnections(
     .from(integrationConnections)
     .where(
       and(
-        inArray(integrationConnections.integrationPackageId, integrationIds),
+        inArray(integrationConnections.integrationId, integrationIds),
         eq(integrationConnections.applicationId, applicationId),
         or(
           actorFilter(actor, {
@@ -571,7 +571,7 @@ async function loadPins(
       and(
         eq(integrationPins.applicationId, applicationId),
         eq(integrationPins.packageId, packageId),
-        inArray(integrationPins.integrationPackageId, integrationIds),
+        inArray(integrationPins.integrationId, integrationIds),
         scopeFilter,
       ),
     );
@@ -589,7 +589,7 @@ async function loadPins(
  */
 export async function isUserConnectionCreationBlocked(
   applicationId: string,
-  integrationPackageId: string,
+  integrationId: string,
 ): Promise<boolean> {
   const rows = await db
     .select({ blocked: applicationPackages.blockUserConnections })
@@ -597,7 +597,7 @@ export async function isUserConnectionCreationBlocked(
     .where(
       and(
         eq(applicationPackages.applicationId, applicationId),
-        eq(applicationPackages.packageId, integrationPackageId),
+        eq(applicationPackages.packageId, integrationId),
       ),
     )
     .limit(1);

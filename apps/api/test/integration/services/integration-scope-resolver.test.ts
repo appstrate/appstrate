@@ -102,7 +102,7 @@ describe("integration-scope-resolver", () => {
     it("returns empty when no agent depends on the integration", async () => {
       const out = await computeRequiredScopes({
         scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        integrationPackageId: INTEGRATION_ID,
+        integrationId: INTEGRATION_ID,
         authKey: "primary",
       });
       expect(out.required).toEqual([]);
@@ -111,7 +111,7 @@ describe("integration-scope-resolver", () => {
     it("returns empty when the integration package itself isn't visible", async () => {
       const out = await computeRequiredScopes({
         scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        integrationPackageId: "@nothing/here",
+        integrationId: "@nothing/here",
         authKey: "primary",
       });
       expect(out.required).toEqual([]);
@@ -134,7 +134,7 @@ describe("integration-scope-resolver", () => {
 
       const out = await computeRequiredScopes({
         scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        integrationPackageId: INTEGRATION_ID,
+        integrationId: INTEGRATION_ID,
         authKey: "primary",
       });
       expect(out.required).toEqual(["read"]);
@@ -157,7 +157,7 @@ describe("integration-scope-resolver", () => {
       }
       const out = await computeRequiredScopes({
         scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        integrationPackageId: INTEGRATION_ID,
+        integrationId: INTEGRATION_ID,
         authKey: "primary",
       });
       expect(out.required.sort()).toEqual(["read", "send"]);
@@ -177,7 +177,7 @@ describe("integration-scope-resolver", () => {
 
       const out = await computeRequiredScopes({
         scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        integrationPackageId: INTEGRATION_ID,
+        integrationId: INTEGRATION_ID,
         authKey: "primary",
       });
       expect(out.required).toEqual([]);
@@ -201,7 +201,7 @@ describe("integration-scope-resolver", () => {
 
       const out = await computeRequiredScopes({
         scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        integrationPackageId: INTEGRATION_ID,
+        integrationId: INTEGRATION_ID,
         authKey: "primary",
       });
       expect(out.required.sort()).toEqual(["delete", "read"]);
@@ -225,7 +225,7 @@ describe("integration-scope-resolver", () => {
 
       const out = await computeRequiredScopes({
         scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        integrationPackageId: INTEGRATION_ID,
+        integrationId: INTEGRATION_ID,
         authKey: "primary",
       });
       expect(out.required).toEqual(["read"]);
@@ -252,7 +252,7 @@ describe("integration-scope-resolver", () => {
 
       const out = await computeRequiredScopes({
         scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        integrationPackageId: INTEGRATION_ID,
+        integrationId: INTEGRATION_ID,
         authKey: "primary",
       });
       expect(out.required).toEqual([]);
@@ -263,7 +263,7 @@ describe("integration-scope-resolver", () => {
     it("returns empty when the connection id doesn't exist", async () => {
       const granted = await getCurrentScopesGranted({
         scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        integrationPackageId: INTEGRATION_ID,
+        integrationId: INTEGRATION_ID,
         authKey: "primary",
         actor: { type: "user", id: ctx.user.id },
         connectionId: "00000000-0000-0000-0000-000000000000",
@@ -275,7 +275,7 @@ describe("integration-scope-resolver", () => {
       const [target] = await db
         .insert(integrationConnections)
         .values({
-          integrationPackageId: INTEGRATION_ID,
+          integrationId: INTEGRATION_ID,
           authKey: "primary",
           accountId: "acct-1",
           applicationId: ctx.defaultAppId,
@@ -287,7 +287,7 @@ describe("integration-scope-resolver", () => {
       // A second account the actor owns must NOT leak into the target's set —
       // incremental consent is per-account, scoped to connectionId.
       await db.insert(integrationConnections).values({
-        integrationPackageId: INTEGRATION_ID,
+        integrationId: INTEGRATION_ID,
         authKey: "primary",
         accountId: "acct-2",
         applicationId: ctx.defaultAppId,
@@ -297,7 +297,7 @@ describe("integration-scope-resolver", () => {
       });
       const granted = await getCurrentScopesGranted({
         scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        integrationPackageId: INTEGRATION_ID,
+        integrationId: INTEGRATION_ID,
         authKey: "primary",
         actor: { type: "user", id: ctx.user.id },
         connectionId: target!.id,
@@ -310,7 +310,7 @@ describe("integration-scope-resolver", () => {
       const [foreign] = await db
         .insert(integrationConnections)
         .values({
-          integrationPackageId: INTEGRATION_ID,
+          integrationId: INTEGRATION_ID,
           authKey: "primary",
           accountId: "acct-foreign",
           applicationId: ctx.defaultAppId,
@@ -321,7 +321,7 @@ describe("integration-scope-resolver", () => {
         .returning({ id: integrationConnections.id });
       const granted = await getCurrentScopesGranted({
         scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        integrationPackageId: INTEGRATION_ID,
+        integrationId: INTEGRATION_ID,
         authKey: "primary",
         actor: { type: "user", id: ctx.user.id },
         connectionId: foreign!.id,

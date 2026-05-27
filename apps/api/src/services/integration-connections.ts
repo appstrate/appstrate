@@ -192,7 +192,7 @@ async function loadActorConnection(
     .from(integrationConnections)
     .where(
       and(
-        eq(integrationConnections.integrationPackageId, packageId),
+        eq(integrationConnections.integrationId, packageId),
         eq(integrationConnections.authKey, authKey),
         eq(integrationConnections.applicationId, context.applicationId),
         or(ownerPredicate, eq(integrationConnections.sharedWithOrg, true)),
@@ -377,7 +377,7 @@ export async function upsertIntegrationOAuthClient(
     .insert(integrationOauthClients)
     .values({
       applicationId: scope.applicationId,
-      integrationPackageId: packageId,
+      integrationId: packageId,
       authKey,
       clientId: input.clientId,
       clientSecretEncrypted: ciphertext,
@@ -388,7 +388,7 @@ export async function upsertIntegrationOAuthClient(
     .onConflictDoUpdate({
       target: [
         integrationOauthClients.applicationId,
-        integrationOauthClients.integrationPackageId,
+        integrationOauthClients.integrationId,
         integrationOauthClients.authKey,
       ],
       set: {
@@ -406,7 +406,7 @@ export async function upsertIntegrationOAuthClient(
 
   return {
     applicationId: row.applicationId,
-    integration_package_id: row.integrationPackageId,
+    integration_package_id: row.integrationId,
     auth_key: row.authKey,
     client_id: row.clientId,
     has_client_secret: (input.clientSecret ?? "").length > 0,
@@ -432,7 +432,7 @@ export async function getIntegrationOAuthClient(
     .where(
       and(
         eq(integrationOauthClients.applicationId, scope.applicationId),
-        eq(integrationOauthClients.integrationPackageId, packageId),
+        eq(integrationOauthClients.integrationId, packageId),
         eq(integrationOauthClients.authKey, authKey),
       ),
     )
@@ -451,7 +451,7 @@ export async function getIntegrationOAuthClient(
   }
   return {
     applicationId: row.applicationId,
-    integration_package_id: row.integrationPackageId,
+    integration_package_id: row.integrationId,
     auth_key: row.authKey,
     client_id: row.clientId,
     clientSecret: secret,
@@ -472,7 +472,7 @@ export async function deleteIntegrationOAuthClient(
     .where(
       and(
         eq(integrationOauthClients.applicationId, scope.applicationId),
-        eq(integrationOauthClients.integrationPackageId, packageId),
+        eq(integrationOauthClients.integrationId, packageId),
         eq(integrationOauthClients.authKey, authKey),
       ),
     )
@@ -745,7 +745,7 @@ export async function persistCredentialBundle(
     const inserted = await db
       .insert(integrationConnections)
       .values({
-        integrationPackageId: input.packageId,
+        integrationId: input.packageId,
         authKey: input.authKey,
         accountId: input.accountId,
         applicationId: target.scope.applicationId,
@@ -894,7 +894,7 @@ export async function listIntegrationConnections(
     .from(integrationConnections)
     .where(
       and(
-        eq(integrationConnections.integrationPackageId, packageId),
+        eq(integrationConnections.integrationId, packageId),
         eq(integrationConnections.applicationId, scope.applicationId),
         ownerPredicate,
       ),
@@ -939,7 +939,7 @@ function rowToSummary(
   }
   return {
     id: row.id,
-    packageId: row.integrationPackageId,
+    packageId: row.integrationId,
     auth_key: row.authKey,
     account_id: row.accountId,
     identity_claims: (row.identityClaims as Record<string, unknown> | null) ?? null,
@@ -1041,7 +1041,7 @@ export async function getIntegrationAuthStatuses(
     .where(
       and(
         eq(integrationOauthClients.applicationId, scope.applicationId),
-        eq(integrationOauthClients.integrationPackageId, packageId),
+        eq(integrationOauthClients.integrationId, packageId),
       ),
     );
   const oauthClientKeys = new Set(oauthClients.map((r) => r.authKey));

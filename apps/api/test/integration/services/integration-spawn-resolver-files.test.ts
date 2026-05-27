@@ -78,7 +78,7 @@ function agentManifest(): Record<string, unknown> {
 
 async function seedConnection(ctx: TestContext, fields: Record<string, string>) {
   await db.insert(integrationConnections).values({
-    integrationPackageId: INTEG,
+    integrationId: INTEG,
     authKey: "primary",
     accountId: "default",
     applicationId: ctx.defaultAppId,
