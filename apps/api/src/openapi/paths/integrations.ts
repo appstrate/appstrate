@@ -7,7 +7,7 @@
  * platform-level `requireAppContext()` middleware.
  */
 
-const integrationPackageIdParam = {
+const packageIdParam = {
   name: "packageId",
   in: "path",
   required: true,
@@ -308,7 +308,7 @@ export const integrationsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        integrationPackageIdParam,
+        packageIdParam,
       ],
       responses: {
         "200": {
@@ -328,7 +328,7 @@ export const integrationsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        integrationPackageIdParam,
+        packageIdParam,
       ],
       requestBody: {
         required: false,
@@ -375,7 +375,7 @@ export const integrationsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        integrationPackageIdParam,
+        packageIdParam,
       ],
       responses: {
         "200": {
@@ -403,7 +403,7 @@ export const integrationsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        integrationPackageIdParam,
+        packageIdParam,
         authKeyParam,
       ],
       responses: {
@@ -422,7 +422,7 @@ export const integrationsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        integrationPackageIdParam,
+        packageIdParam,
         authKeyParam,
       ],
       requestBody: {
@@ -457,7 +457,7 @@ export const integrationsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        integrationPackageIdParam,
+        packageIdParam,
         authKeyParam,
       ],
       responses: {
@@ -486,7 +486,7 @@ export const integrationsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        integrationPackageIdParam,
+        packageIdParam,
         authKeyParam,
       ],
       requestBody: {
@@ -525,7 +525,7 @@ export const integrationsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        integrationPackageIdParam,
+        packageIdParam,
         authKeyParam,
       ],
       requestBody: {
@@ -573,7 +573,7 @@ export const integrationsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        integrationPackageIdParam,
+        packageIdParam,
       ],
       responses: {
         "200": {
@@ -611,7 +611,7 @@ export const integrationsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        integrationPackageIdParam,
+        packageIdParam,
         agentPackageIdParam,
       ],
       responses: {
@@ -703,7 +703,7 @@ export const integrationsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        integrationPackageIdParam,
+        packageIdParam,
         connectionIdParam,
       ],
       requestBody: {
@@ -761,7 +761,7 @@ export const integrationsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        integrationPackageIdParam,
+        packageIdParam,
       ],
       requestBody: {
         required: true,
@@ -802,7 +802,7 @@ export const integrationsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        integrationPackageIdParam,
+        packageIdParam,
       ],
       responses: {
         "200": {
@@ -836,7 +836,7 @@ export const integrationsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        integrationPackageIdParam,
+        packageIdParam,
       ],
       responses: {
         "200": {
@@ -877,7 +877,7 @@ export const integrationsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        integrationPackageIdParam,
+        packageIdParam,
         agentPackageIdParam,
       ],
       requestBody: {
@@ -910,7 +910,7 @@ export const integrationsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        integrationPackageIdParam,
+        packageIdParam,
         agentPackageIdParam,
       ],
       responses: {
@@ -943,7 +943,7 @@ export const integrationsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        integrationPackageIdParam,
+        packageIdParam,
       ],
       responses: {
         "200": {
@@ -970,7 +970,7 @@ export const integrationsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        integrationPackageIdParam,
+        packageIdParam,
       ],
       requestBody: {
         required: true,
@@ -1005,7 +1005,7 @@ export const integrationsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        integrationPackageIdParam,
+        packageIdParam,
       ],
       responses: {
         "200": {
