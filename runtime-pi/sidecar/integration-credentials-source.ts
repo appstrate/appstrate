@@ -19,6 +19,21 @@
  * per-integration in `IntegrationToSpawn.credentialSource`), so the
  * source's `current()` already scopes naturally to one integration's
  * auths.
+ *
+ * Source/Sink model (design principle — do NOT violate):
+ *   - ONE canonical credentials Source per (integration × run). It owns the
+ *     cache, the refresh/re-login lifecycle, the substitution window, and
+ *     `setSessionOutputs`. `bootIntegrations` creates it once and threads the
+ *     SAME instance into every consumer.
+ *   - N Sinks read from that one Source, one per transport boundary:
+ *       · the MITM listener (TLS-intercept header injection),
+ *       · the `api_call` credential adapter (explicit proxy tool),
+ *       · the remote-HTTP `customFetch` Bearer wrapper.
+ *   Sharing the Source is what makes a connect.tool session minted at
+ *   run-start visible to `api_call` on the same authKey, and what keeps the
+ *   refresh dedup / cooldown / re-login handler correct across consumers.
+ *   The Sinks are deliberately NOT unified — they sit on genuinely different
+ *   transports. Resist the urge to collapse them; they share only the Source.
  */
 
 import type {
@@ -29,6 +44,26 @@ import type {
 } from "@appstrate/connect/integration-credentials";
 import type { MitmCredentialSource } from "./integration-mitm-listener.ts";
 import { logger } from "./logger.ts";
+
+/**
+ * Machine-readable categories for credential-failure signals (W3). Two
+ * orthogonal failure classes the agent/operator must act on DIFFERENTLY:
+ *
+ *   - `reconnect_required` — the stored credential itself is dead and the user
+ *     must reconnect the integration. Emitted here when the platform reports
+ *     the refresh token revoked (HTTP 410). Distinct from a transient refresh
+ *     error (network / 5xx), which is retryable and NOT tagged.
+ *   - `request_forbidden` — the credential is fine, but THIS request was
+ *     refused by policy (URL outside `authorized_uris` / the tool URL
+ *     envelope). That class is already surfaced structurally by the MITM
+ *     listener as `MitmListenerEvent { kind: "request-refused" }`.
+ *
+ * Tagging the source-side reconnect signal with a stable `category` makes the
+ * two classes machine-distinguishable in the sidecar log stream (and is the
+ * seam a future run_logs relay would key on). Streaming these to run_logs is
+ * deliberately deferred — this only categorises the existing log lines.
+ */
+export const CREDENTIAL_FAILURE_RECONNECT_REQUIRED = "reconnect_required" as const;
 
 // Wire-level payload returned by both `/internal/integration-credentials`
 // endpoints — canonical definition lives in `@appstrate/connect` (single
@@ -335,6 +370,8 @@ export function createIntegrationCredentialsSource(
       logger.warn("integration credential refresh revoked", {
         integrationId: options.integrationId,
         authKey,
+        // W3 — definitive: the refresh token is dead, the user must reconnect.
+        category: CREDENTIAL_FAILURE_RECONNECT_REQUIRED,
       });
       // Mark cooldown so we don't retry for at least the full interval.
       lastRefreshAt.set(authKey, Date.now());
@@ -374,11 +411,15 @@ export function createIntegrationCredentialsSource(
 
   const setSessionOutputs = (auth: ResolvedAuthCredentials, plan: HttpDeliveryPlan): void => {
     // Re-build the immutable wire payload around the freshly-captured
-    // session. The auth becomes the only injectable auth; its delivery
-    // plan + expiry are keyed by authKey so the planner / listener pick
-    // them up on the next request.
+    // session. Replace ONLY this authKey's entry — sibling auths survive
+    // untouched. The source is shared across consumers (MITM listener +
+    // api_call adapter + connect-login), so a multi-auth integration whose
+    // connect.tool auth mints a session here must NOT lose the other auths'
+    // credentials (e.g. an api_key auth that also exposes api_call). The
+    // captured auth's delivery plan + expiry are keyed by authKey so the
+    // planner / listener / api_call adapter pick them up on the next request.
     payload = {
-      auths: [auth],
+      auths: [...payload.auths.filter((a) => a.authKey !== auth.authKey), auth],
       deliveryPlans: { ...payload.deliveryPlans, [auth.authKey]: plan },
       expiresAtEpochMs: {
         ...payload.expiresAtEpochMs,

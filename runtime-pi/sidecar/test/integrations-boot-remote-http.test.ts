@@ -26,8 +26,6 @@ function spec(): IntegrationSpawnSpec {
   } as unknown as IntegrationSpawnSpec;
 }
 
-const bundleFetchOpts = { platformApiUrl: "http://platform", runToken: "rt" };
-
 function wire(
   auths: Array<{ authKey: string; authType: string }>,
   deliveryPlans: Record<string, { headerName: string; headerPrefix: string; value: string }>,
@@ -46,29 +44,29 @@ function wire(
 }
 
 /**
- * Build deps whose `createClient` captures the `customFetch` the function
- * hands the transport, so the test can invoke it directly. `refreshOnUnauthorized`
- * is a counting stub.
+ * Build a fake shared source (passed as the 2nd positional arg) + deps whose
+ * `createClient` captures the `customFetch` the function hands the transport,
+ * so the test can invoke it directly. `refreshOnUnauthorized` is a counting
+ * stub. The credentials source is no longer a DI dep — the caller hoists ONE
+ * source and passes it in, so the test injects a fake source directly.
  */
 function makeDeps(initial: IntegrationCredentialsWire, refresh: () => Promise<boolean>) {
   let captured: typeof fetch | undefined;
   let refreshCalls = 0;
+  const source = {
+    snapshot: () => initial,
+    refreshOnUnauthorized: async (_authKey: string) => {
+      refreshCalls += 1;
+      return refresh();
+    },
+  } as unknown as IntegrationCredentialsSource;
   const deps: ConnectRemoteHttpDeps = {
-    fetchInitial: async () => initial,
-    createSource: () =>
-      ({
-        snapshot: () => initial,
-        refreshOnUnauthorized: async (_authKey: string) => {
-          refreshCalls += 1;
-          return refresh();
-        },
-      }) as unknown as IntegrationCredentialsSource,
     createClient: (async (_url: string | URL, opts: { fetch?: typeof fetch }) => {
       captured = opts.fetch;
       return {} as AppstrateMcpClient;
     }) as unknown as ConnectRemoteHttpDeps["createClient"],
   };
-  return { deps, getFetch: () => captured!, getRefreshCalls: () => refreshCalls };
+  return { deps, source, getFetch: () => captured!, getRefreshCalls: () => refreshCalls };
 }
 
 async function withGlobalFetch<T>(impl: typeof fetch, fn: () => Promise<T>): Promise<T> {
@@ -93,9 +91,9 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
         oauth: { headerName: "Authorization", headerPrefix: "Bearer ", value: "TOKEN" },
       },
     );
-    const { deps, getFetch } = makeDeps(initial, async () => true);
+    const { deps, source, getFetch } = makeDeps(initial, async () => true);
 
-    const { authKey } = await connectRemoteHttpIntegration(spec(), bundleFetchOpts, deps);
+    const { authKey } = await connectRemoteHttpIntegration(spec(), source, deps);
     expect(authKey).toBe("oauth"); // oauth2 wins over api_key
 
     let seen: string | null = null;
@@ -115,8 +113,8 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
     const initial = wire([{ authKey: "oauth", authType: "oauth2" }], {
       oauth: { headerName: "Authorization", headerPrefix: "Bearer ", value: "TOKEN" },
     });
-    const { deps, getFetch, getRefreshCalls } = makeDeps(initial, async () => true);
-    await connectRemoteHttpIntegration(spec(), bundleFetchOpts, deps);
+    const { deps, source, getFetch, getRefreshCalls } = makeDeps(initial, async () => true);
+    await connectRemoteHttpIntegration(spec(), source, deps);
 
     let calls = 0;
     const status = await withGlobalFetch(
@@ -136,8 +134,8 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
     const initial = wire([{ authKey: "oauth", authType: "oauth2" }], {
       oauth: { headerName: "Authorization", headerPrefix: "Bearer ", value: "TOKEN" },
     });
-    const { deps, getFetch, getRefreshCalls } = makeDeps(initial, async () => false);
-    await connectRemoteHttpIntegration(spec(), bundleFetchOpts, deps);
+    const { deps, source, getFetch, getRefreshCalls } = makeDeps(initial, async () => false);
+    await connectRemoteHttpIntegration(spec(), source, deps);
 
     let calls = 0;
     const status = await withGlobalFetch(
@@ -155,8 +153,8 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
 
   it("throws when no auth has a resolvable delivery plan", async () => {
     const initial = wire([{ authKey: "oauth", authType: "oauth2" }], {}); // no plans
-    const { deps } = makeDeps(initial, async () => true);
-    await expect(connectRemoteHttpIntegration(spec(), bundleFetchOpts, deps)).rejects.toThrow(
+    const { deps, source } = makeDeps(initial, async () => true);
+    await expect(connectRemoteHttpIntegration(spec(), source, deps)).rejects.toThrow(
       /no auth with a resolvable delivery\.http plan/,
     );
   });
@@ -172,8 +170,8 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
     const initial = wire([{ authKey: "oauth", authType: "oauth2" }], {
       oauth: { headerName: "Authorization", headerPrefix: "Bearer ", value: "T" },
     });
-    const { deps } = makeDeps(initial, async () => true);
-    await expect(connectRemoteHttpIntegration(noUrl, bundleFetchOpts, deps)).rejects.toThrow(
+    const { deps, source } = makeDeps(initial, async () => true);
+    await expect(connectRemoteHttpIntegration(noUrl, source, deps)).rejects.toThrow(
       /no server\.url/,
     );
   });

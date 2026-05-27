@@ -48,6 +48,7 @@ import { logger } from "../lib/logger.ts";
 import {
   collectConnectLoginWarnings,
   collectMetaWarnings,
+  collectRemoteUrlPatternWarnings,
 } from "./integration-install-warnings.ts";
 
 // Pinned mtime — must match the bundle writer exactly for cross-format
@@ -288,6 +289,11 @@ export async function importBundle(
     // non-blocking warnings (AFPS §7.7 / audit P2 #12).
     if (parsedZip.type === "integration") {
       for (const w of collectConnectLoginWarnings(parsedZip.manifest)) {
+        warnings.push(`${identity}: ${w}`);
+      }
+      // Surface unenforceable per-tool URL patterns on remote integrations
+      // (niveau 2 Phase 4 is local-runner-only) as non-blocking warnings.
+      for (const w of collectRemoteUrlPatternWarnings(parsedZip.manifest)) {
         warnings.push(`${identity}: ${w}`);
       }
     }

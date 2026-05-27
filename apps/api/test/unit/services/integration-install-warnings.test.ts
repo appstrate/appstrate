@@ -15,6 +15,7 @@ import { describe, it, expect } from "bun:test";
 import {
   collectConnectLoginWarnings,
   collectMetaWarnings,
+  collectRemoteUrlPatternWarnings,
 } from "../../../src/services/integration-install-warnings.ts";
 
 function makeIntegrationManifest(authBody: unknown): Record<string, unknown> {
@@ -276,5 +277,52 @@ describe("collectMetaWarnings", () => {
     expect(collectMetaWarnings({ _meta: "string" })).toEqual([]);
     expect(collectMetaWarnings({ _meta: null })).toEqual([]);
     expect(collectMetaWarnings({ _meta: 42 })).toEqual([]);
+  });
+});
+
+describe("collectRemoteUrlPatternWarnings", () => {
+  const remoteManifest = (toolsPolicy: unknown): Record<string, unknown> => ({
+    type: "integration",
+    source: { kind: "remote", remote: { url: "https://m/mcp/v1" } },
+    ...(toolsPolicy !== undefined ? { tools_policy: toolsPolicy } : {}),
+  });
+
+  it("warns once per tool declaring url_patterns on a remote integration", () => {
+    const w = collectRemoteUrlPatternWarnings(
+      remoteManifest({
+        list_issues: { url_patterns: [{ pattern: "https://api/issues" }] },
+        send: { url_patterns: [{ pattern: "https://api/send" }] },
+      }),
+    );
+    expect(w.length).toBe(2);
+    expect(w[0]).toContain("tools_policy.list_issues.url_patterns");
+    expect(w[0]).toContain("NOT enforced");
+  });
+
+  it("is silent for a local-source integration (Phase 4 enforced there)", () => {
+    expect(
+      collectRemoteUrlPatternWarnings({
+        type: "integration",
+        source: { kind: "local", server: { name: "@x/s", version: "^1.0.0" } },
+        tools_policy: { t: { url_patterns: [{ pattern: "https://api/x" }] } },
+      }),
+    ).toEqual([]);
+  });
+
+  it("is silent for a remote integration with no url_patterns", () => {
+    expect(
+      collectRemoteUrlPatternWarnings(remoteManifest({ t: { required_scopes: ["a:b"] } })),
+    ).toEqual([]);
+    expect(collectRemoteUrlPatternWarnings(remoteManifest(undefined))).toEqual([]);
+  });
+
+  it("handles non-integration / malformed inputs defensively", () => {
+    expect(collectRemoteUrlPatternWarnings(null)).toEqual([]);
+    expect(collectRemoteUrlPatternWarnings("x")).toEqual([]);
+    expect(collectRemoteUrlPatternWarnings({ type: "skill" })).toEqual([]);
+    expect(collectRemoteUrlPatternWarnings({ type: "integration" })).toEqual([]);
+    expect(
+      collectRemoteUrlPatternWarnings({ type: "integration", source: { kind: "remote" } }),
+    ).toEqual([]);
   });
 });

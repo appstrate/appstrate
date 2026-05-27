@@ -115,6 +115,52 @@ export function collectConnectLoginWarnings(manifest: unknown): string[] {
 }
 
 /**
+ * Install-time warning for `source.kind: "remote"` integrations that declare
+ * per-tool `tools_policy.{name}.url_patterns`.
+ *
+ * Why: the niveau-2 Phase-4 MITM URL envelope is enforced ONLY on the local
+ * stdio-runner path. A remote HTTP MCP integration transits every tool call
+ * through the single `/mcp/v1` endpoint, so the sidecar can't discriminate
+ * per-tool upstream URLs — the `url_patterns` are silently UNENFORCEABLE (the
+ * upstream MCP's own RBAC + OAuth scope are the only gates). An author who
+ * declares them likely believes they have an enforcement layer they don't.
+ *
+ * Non-blocking (the manifest is still installable + functional) — we surface
+ * the trade-off at the publish/install decision point rather than rejecting.
+ *
+ * Pure function. Returns `[]` for non-integration manifests, non-remote
+ * sources, or when no tool declares `url_patterns`.
+ */
+export function collectRemoteUrlPatternWarnings(manifest: unknown): string[] {
+  const warnings: string[] = [];
+  if (typeof manifest !== "object" || manifest === null) return warnings;
+  const m = manifest as Record<string, unknown>;
+  if (m.type !== "integration") return warnings;
+
+  const source = m.source;
+  if (typeof source !== "object" || source === null) return warnings;
+  if ((source as Record<string, unknown>).kind !== "remote") return warnings;
+
+  const toolsPolicy = m.tools_policy;
+  if (typeof toolsPolicy !== "object" || toolsPolicy === null) return warnings;
+
+  for (const [toolName, policyRaw] of Object.entries(toolsPolicy as Record<string, unknown>)) {
+    if (typeof policyRaw !== "object" || policyRaw === null) continue;
+    const patterns = (policyRaw as Record<string, unknown>).url_patterns;
+    if (Array.isArray(patterns) && patterns.length > 0) {
+      warnings.push(
+        `tools_policy.${toolName}.url_patterns: declared on a \`source.kind: "remote"\` integration, ` +
+          `but per-tool URL-envelope enforcement (niveau 2 Phase 4) applies ONLY to local runners. ` +
+          `For remote HTTP MCP every tool transits the same \`/mcp/v1\` endpoint, so these patterns are NOT enforced — ` +
+          `the upstream MCP's own RBAC + OAuth scope are the only gates.`,
+      );
+    }
+  }
+
+  return warnings;
+}
+
+/**
  * Walk a package manifest's top-level `_meta` block and collect install-time
  * warnings for namespace keys that don't match the AFPS Appendix B
  * `META_NAMESPACE_KEY` regex (per re-audit 2A observation — surface the

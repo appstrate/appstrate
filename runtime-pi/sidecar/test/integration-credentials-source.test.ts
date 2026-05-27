@@ -236,6 +236,94 @@ describe("createIntegrationCredentialsSource", () => {
   });
 });
 
+describe("createIntegrationCredentialsSource — setSessionOutputs (per-auth)", () => {
+  // Two-auth payload: `session` (connect.tool, empty at rest) + `apikey`
+  // (a static api_key auth that ALSO exposes api_call). Proves that minting
+  // the connect.tool session does NOT wipe the sibling api_key auth from the
+  // shared source — the regression guard for the W0 source-unification.
+  function twoAuthPayload(): IntegrationCredentialsWire {
+    return {
+      auths: [
+        { authKey: "session", authType: "custom", fields: {}, authorizedUris: ["https://x/**"] },
+        {
+          authKey: "apikey",
+          authType: "api_key",
+          fields: { apiKey: "KEEP" },
+          authorizedUris: ["https://x/**"],
+        },
+      ],
+      deliveryPlans: {
+        apikey: {
+          headerName: "X-Api-Key",
+          headerPrefix: "",
+          value: "KEEP",
+          allowServerOverride: false,
+        },
+      },
+      expiresAtEpochMs: { apikey: null },
+    };
+  }
+
+  it("replaces only the matching authKey, preserving sibling auths + plans", () => {
+    const source = createIntegrationCredentialsSource({
+      integrationId: "@test/integ",
+      platformApiUrl: "http://api",
+      runToken: "run-tok",
+      initialPayload: twoAuthPayload(),
+    });
+
+    source.setSessionOutputs(
+      {
+        authKey: "session",
+        authType: "custom",
+        fields: { session_token: "SESS" },
+        authorizedUris: ["https://x/**"],
+      },
+      { headerName: "Cookie", headerPrefix: "session=", value: "SESS", allowServerOverride: false },
+    );
+
+    const cur = source.current();
+    const byKey = Object.fromEntries(cur.auths.map((a) => [a.authKey, a]));
+    // Sibling api_key auth survives untouched.
+    expect(byKey.apikey?.fields.apiKey).toBe("KEEP");
+    // Captured session replaced the connect.tool auth entry.
+    expect(byKey.session?.fields.session_token).toBe("SESS");
+    expect(cur.auths.length).toBe(2);
+
+    // Both delivery plans are injectable — the api_call adapter on either
+    // authKey reads its own plan from the shared source.
+    const plans = source.deliveryPlans();
+    expect(plans.apikey?.value).toBe("KEEP");
+    expect(plans.session?.value).toBe("SESS");
+    expect(plans.session?.headerName).toBe("Cookie");
+  });
+
+  it("does not duplicate the auth entry on a re-mint (re-login)", () => {
+    const source = createIntegrationCredentialsSource({
+      integrationId: "@test/integ",
+      platformApiUrl: "http://api",
+      runToken: "run-tok",
+      initialPayload: twoAuthPayload(),
+    });
+    const mint = (val: string) =>
+      source.setSessionOutputs(
+        {
+          authKey: "session",
+          authType: "custom",
+          fields: { session_token: val },
+          authorizedUris: ["https://x/**"],
+        },
+        { headerName: "Cookie", headerPrefix: "session=", value: val, allowServerOverride: false },
+      );
+    mint("FIRST");
+    mint("SECOND");
+    const cur = source.current();
+    expect(cur.auths.filter((a) => a.authKey === "session").length).toBe(1);
+    expect(cur.auths.length).toBe(2);
+    expect(source.deliveryPlans().session?.value).toBe("SECOND");
+  });
+});
+
 describe("createIntegrationCredentialsSource — connect.tool re-login (P3)", () => {
   it("shouldReauth is true only for a registered authKey + declared status", () => {
     const source = createIntegrationCredentialsSource({

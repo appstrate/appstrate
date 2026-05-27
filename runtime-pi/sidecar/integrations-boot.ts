@@ -243,22 +243,28 @@ export async function extractBundle(bytes: Uint8Array, namespace: string): Promi
  *      credentials — the source's per-authKey cooldown protects the
  *      platform endpoint from refresh storms) and retry once.
  *
- * Auth selection: prefers an oauth2 auth (canonical Bearer + refresh),
- * otherwise picks the first auth that has a non-null delivery plan.
- * Throws when no auth produces an injectable header — Phase 7 can't run
- * an MCP client without authentication (every public hosted MCP today
- * gates `tools/call` behind some credential).
+ * Auth selection: in practice the credentials payload carries EXACTLY ONE
+ * auth — the platform's 5-layer connection cascade resolves a single
+ * `integration_connections` row per run, and the resolver returns only that
+ * row's auth (see `integration-credentials-resolver.ts`, asserted by its
+ * `auths.length === 1` test). So this is a trivial pick, not a second policy
+ * site: the oauth2-first / first-with-a-plan ordering is just a defensive
+ * tie-breaker should the payload ever surface more than one. Throws when no
+ * auth produces an injectable header — Phase 7 can't run an MCP client
+ * without authentication (every public hosted MCP today gates `tools/call`
+ * behind some credential).
  */
 /**
  * Dependency seam for {@link connectRemoteHttpIntegration} — production
- * callers omit it (defaults wire the real platform-fetch + credentials
- * source + Streamable HTTP client). Unit tests inject stubs to exercise
- * the per-request Bearer injection + 401-refresh-retry closure without
- * standing up the platform endpoints. See CLAUDE.md "Mocking Policy".
+ * callers omit it (the default wires the real Streamable HTTP client). The
+ * credentials source is no longer a dep: the caller hoists ONE source per
+ * integration and passes it in directly, so tests inject a fake source as the
+ * second positional argument instead. Unit tests still override `createClient`
+ * / `createSseClient` to exercise the per-request Bearer injection +
+ * 401-refresh-retry closure without standing up a real MCP server. See
+ * CLAUDE.md "Mocking Policy".
  */
 export interface ConnectRemoteHttpDeps {
-  fetchInitial?: typeof fetchInitialIntegrationCredentials;
-  createSource?: typeof createIntegrationCredentialsSource;
   createClient?: typeof createMcpHttpClient;
   /**
    * Optional override for the SSE transport path (AFPS §7.1
@@ -315,11 +321,9 @@ async function defaultCreateSseClient(
 
 export async function connectRemoteHttpIntegration(
   spec: IntegrationSpawnSpec,
-  bundleFetchOpts: BundleFetchOptions,
+  source: IntegrationCredentialsSource,
   deps: ConnectRemoteHttpDeps = {},
 ): Promise<{ client: AppstrateMcpClient; authKey: string }> {
-  const fetchInitial = deps.fetchInitial ?? fetchInitialIntegrationCredentials;
-  const createSource = deps.createSource ?? createIntegrationCredentialsSource;
   const createClient = deps.createClient ?? createMcpHttpClient;
   const createSseClient = deps.createSseClient ?? defaultCreateSseClient;
 
@@ -348,12 +352,16 @@ export async function connectRemoteHttpIntegration(
     );
   }
 
-  const initial = await fetchInitial(spec.integrationId, bundleFetchOpts);
+  // Read the hoisted source's current payload for auth-selection. The source
+  // was created (and its initial credentials fetched) once by the caller.
+  const initial = source.snapshot();
 
-  // Pick the auth whose header we'll inject. OAuth2 wins (refresh-aware);
-  // otherwise the first auth with a resolved plan. The credentials
-  // resolver populates `deliveryPlans[authKey]` for every auth declaring
-  // `delivery.http` — including `{}` (empty), which defaults per
+  // Pick the auth whose header we'll inject. The payload normally carries a
+  // SINGLE auth (the cascade-resolved connection), so this resolves to that
+  // one auth — NOT a policy decision. OAuth2-first / first-with-a-plan is only
+  // a defensive tie-breaker if the payload ever surfaces more than one. The
+  // credentials resolver populates `deliveryPlans[authKey]` for every auth
+  // declaring `delivery.http` — including `{}` (empty), which defaults per
   // `AUTH_TYPE_HTTP_DEFAULTS` (oauth2 → Bearer, api_key → X-Api-Key, …).
   const oauthAuth = initial.auths.find(
     (a) => a.authType === "oauth2" && initial.deliveryPlans[a.authKey],
@@ -368,13 +376,6 @@ export async function connectRemoteHttpIntegration(
     );
   }
   const authKey = pickedAuth.authKey;
-
-  const source = createSource({
-    integrationId: spec.integrationId,
-    platformApiUrl: bundleFetchOpts.platformApiUrl,
-    runToken: bundleFetchOpts.runToken,
-    initialPayload: initial,
-  });
 
   // Per-request header reader. Reading from the snapshot on every call
   // means an OAuth refresh (which swaps `payload` in place) is picked up
@@ -578,9 +579,18 @@ async function spawnAndConnectLocalIntegration(params: {
   adapterCtx: RuntimeAdapterRunContext;
   host: McpHost;
   bundleFetchOpts: BundleFetchOptions;
+  /**
+   * The integration's single shared credentials Source, hoisted by the caller
+   * ({@link bootIntegrations} / {@link runConnectOnce}). The MITM listener
+   * reads/refreshes through it; the SAME instance is also handed to the
+   * connect-login hook + the api_call adapter so a run-start session is
+   * visible everywhere. `null` only when the integration needs no source
+   * (no MITM, no api_call) — then no listener is mounted.
+   */
+  source: IntegrationCredentialsSource | null;
   /** Per-run CA materials; null disables MITM (env-delivery-only path). */
   ca: RunCaMaterials | null;
-  /** Front this integration with a MITM listener (also needs `ca`). */
+  /** Front this integration with a MITM listener (also needs `ca` + `source`). */
   wantsMitm: boolean;
   /** Phase 4 tool-URL envelope to enforce; omitted for connect-run. */
   toolUrlEnvelope?: IntegrationSpawnSpec["toolUrlEnvelope"];
@@ -603,16 +613,14 @@ async function spawnAndConnectLocalIntegration(params: {
   const { spec, runId, adapter, adapterCtx, host, bundleFetchOpts, ca, logLabel } = params;
 
   let mitmCtx: RuntimeMitmContext | null = null;
-  let mitmSource: IntegrationCredentialsSource | null = null;
-  if (params.wantsMitm && ca !== null) {
-    const initial = await fetchInitialIntegrationCredentials(spec.integrationId, bundleFetchOpts);
-    const source = createIntegrationCredentialsSource({
-      integrationId: spec.integrationId,
-      platformApiUrl: bundleFetchOpts.platformApiUrl,
-      runToken: bundleFetchOpts.runToken,
-      initialPayload: initial,
-    });
-    mitmSource = source;
+  // The listener is mounted only when this integration wants MITM, a CA came
+  // up, AND the caller hoisted a source. When mounted, the shared `source` is
+  // what the connect-login hook drives — surfaced back to the caller as
+  // `mitmSource` (kept null when no listener exists, so the hook's "MITM
+  // required" guard still fires on a CA-bring-up failure).
+  let mitmMounted = false;
+  if (params.wantsMitm && ca !== null && params.source !== null) {
+    const source = params.source;
     const listener = createIntegrationMitmListener({
       caBundle: ca.bundle,
       minter: ca.minter,
@@ -640,6 +648,7 @@ async function spawnAndConnectLocalIntegration(params: {
     });
     await listener.ready;
     params.mitmListeners.push(listener);
+    mitmMounted = true;
     const port = listener.address().port;
     mitmCtx = { proxyUrl: adapterCtx.proxyUrlFor(port), caCertHostPath: ca.certHostPath };
     logger.info(`${logLabel} MITM listener ready`, {
@@ -704,7 +713,7 @@ async function spawnAndConnectLocalIntegration(params: {
   return {
     wrapped,
     allocatedNs,
-    mitmSource,
+    mitmSource: mitmMounted ? params.source : null,
     toolCount,
     spawnMs,
     connectMs,
@@ -830,10 +839,34 @@ export async function bootIntegrations(
   for (const spec of specs) {
     const specStart = performance.now();
     try {
+      // ─── ONE shared credentials source per integration ───
+      // The Source/Sink model (see integration-credentials-source.ts header):
+      // a single source feeds every consumer of this integration's credentials
+      // — the MITM listener, the api_call adapter, and the connect-login hook.
+      // Sharing it is what makes a connect.tool run-start session (installed via
+      // `setSessionOutputs`) visible to api_call on the same authKey, and keeps
+      // the refresh dedup / cooldown / re-login handler coherent across sinks.
+      // Created (and its initial credentials fetched) exactly once here.
+      const hasApiCall = (spec.apiCalls?.length ?? 0) > 0;
+      const hasHttpDelivery =
+        spec.httpDeliveryAuths !== undefined && Object.keys(spec.httpDeliveryAuths).length > 0;
+      const needsSource = hasHttpDelivery || hasApiCall || spec.sourceKind === "remote";
+      const source = needsSource
+        ? createIntegrationCredentialsSource({
+            integrationId: spec.integrationId,
+            platformApiUrl: bundleFetchOpts.platformApiUrl,
+            runToken: bundleFetchOpts.runToken,
+            initialPayload: await fetchInitialIntegrationCredentials(
+              spec.integrationId,
+              bundleFetchOpts,
+            ),
+          })
+        : null;
+
       // ─── generic api_call tool ───
       // Independent of how (or whether) the integration spawns a server:
-      // build the credential adapter from a dedicated credentials source,
-      // then host the generic `api_call` (+ optional `api_upload`) tools as
+      // read the SHARED source above, then host the generic `api_call` (+
+      // optional `api_upload`) tools as
       // a TRUSTED in-process MCP server on the same McpHost as every
       // spawned/remote integration — OUTSIDE any spawned container, so the
       // server code never sees the credential. One pipeline → McpHost owns
@@ -854,18 +887,17 @@ export async function bootIntegrations(
           });
           return 0;
         }
-        // One credentials source per integration (it serves every auth); each
-        // api_call entry binds its own auth via a per-auth adapter.
-        const initial = await fetchInitialIntegrationCredentials(
-          spec.integrationId,
-          bundleFetchOpts,
-        );
-        const source = createIntegrationCredentialsSource({
-          integrationId: spec.integrationId,
-          platformApiUrl: bundleFetchOpts.platformApiUrl,
-          runToken: bundleFetchOpts.runToken,
-          initialPayload: initial,
-        });
+        if (!source) {
+          // Unreachable: `hasApiCall` forces `needsSource`, so the source always
+          // exists when there are api_calls. Guard narrows the type + fails loud
+          // if that invariant ever breaks.
+          logger.warn("integration declares api_call but no credentials source was hoisted", {
+            integrationId: spec.integrationId,
+          });
+          return 0;
+        }
+        // The SHARED source serves every auth; each api_call entry binds its own
+        // auth via a per-auth adapter reading from that same source.
         let total = 0;
         for (const apiCall of apiCalls) {
           const credAdapter = createApiCallCredentialAdapter({
@@ -954,7 +986,14 @@ export async function bootIntegrations(
       // Phase 4 URL-envelope enforcement is N/A (we can't enforce per-tool
       // upstream URLs through a hosted MCP — the upstream decides).
       if (spec.sourceKind === "remote") {
-        const { client, authKey } = await connectRemoteHttpIntegration(spec, bundleFetchOpts);
+        if (!source) {
+          // Unreachable: `sourceKind === "remote"` forces `needsSource`. Guard
+          // narrows the type + fails loud if that invariant ever breaks.
+          throw new Error(
+            `remote integration ${spec.integrationId} has no hoisted credentials source`,
+          );
+        }
+        const { client, authKey } = await connectRemoteHttpIntegration(spec, source);
         // Register on the caller-owned teardown collector BEFORE host.register
         // so a register failure (namespace collision / suffix exhaustion,
         // which throw before McpHost adds the client to its own set) still
@@ -1027,6 +1066,7 @@ export async function bootIntegrations(
         adapterCtx,
         host,
         bundleFetchOpts,
+        source,
         ca: runCa,
         wantsMitm,
         ...(spec.toolUrlEnvelope ? { toolUrlEnvelope: spec.toolUrlEnvelope } : {}),
@@ -1234,11 +1274,22 @@ export async function runConnectOnce(
     const ca = await prepareRunCa(runId, "afps-ca-connect-");
     runCaCertHostPath = ca.certHostPath;
 
+    // Hoist the single credentials source for this connect-run (mirrors
+    // `bootIntegrations`). connect-login ALWAYS needs the MITM, so the source
+    // is mandatory here — its initial payload is a placeholder session with an
+    // empty value; the real session is what `runConnectLogin` captures via
+    // `setSessionOutputs` on this same source.
+    const source = createIntegrationCredentialsSource({
+      integrationId: spec.integrationId,
+      platformApiUrl: bundleFetchOpts.platformApiUrl,
+      runToken: bundleFetchOpts.runToken,
+      initialPayload: await fetchInitialIntegrationCredentials(spec.integrationId, bundleFetchOpts),
+    });
+
     // Same spawn→connect→register pipeline the agent-run path uses, but
     // `allowedTools: []` (connect-run never serves an agent; register() is only
     // needed so `getUpstreamClient` resolves the login tool) and `wantsMitm`
-    // forced on. The initial credential payload is a placeholder session with
-    // an empty value — the real session is what `runConnectLogin` captures.
+    // forced on.
     const { allocatedNs, mitmSource } = await spawnAndConnectLocalIntegration({
       spec,
       runId,
@@ -1246,6 +1297,7 @@ export async function runConnectOnce(
       adapterCtx,
       host,
       bundleFetchOpts,
+      source,
       ca,
       wantsMitm: true,
       allowedTools: [],
