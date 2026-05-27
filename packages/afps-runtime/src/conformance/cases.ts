@@ -648,57 +648,59 @@ const L1_INTEGRATION_MUTUAL_EXCLUSION: ConformanceCase = {
   },
 };
 
-// L1.8 — polymorphic `dependencies` values (§4.1). A dependency entry MAY
-// be a bare semver string OR an object carrying per-dep configuration
-// (e.g. integrations declare `scopes`/`auth_key`). The agent schema MUST
-// accept both shapes.
-const L1_POLYMORPHIC_DEPENDENCIES: ConformanceCase = {
+// L1.8 — flat `dependencies` maps + `integrations_configuration` (§4.1/§4.4).
+// Every dependency value is a bare semver range string; per-integration agent
+// configuration (`tools`/`scopes`/`auth_key`) lives in the top-level
+// `integrations_configuration` map. The agent schema MUST accept this shape
+// and preserve the configuration.
+const L1_DEPENDENCIES_AND_CONFIG: ConformanceCase = {
   id: "L1.8",
   level: "L1",
-  title: "polymorphic dependencies — bare string AND object form (§4.1)",
+  title: "flat dependencies + integrations_configuration (§4.1/§4.4)",
   run: () => {
     const manifest = {
       name: "@afps/conformance-agent",
       version: "1.0.0",
       type: "agent",
-      schema_version: "0.1",
+      schema_version: "0.2",
       display_name: "Conformance Agent",
       author: "AFPS",
       dependencies: {
         skills: {
-          "@afps/skill-bare": "^1.0.0",
-          "@afps/skill-object": { version: "^1.0.0" },
+          "@afps/skill-a": "^1.0.0",
+          "@afps/skill-b": "~1.2.0",
         },
         integrations: {
           "@afps/integration-bare": "^2.0.0",
-          "@afps/integration-object": {
-            version: "^2.0.0",
-            scopes: ["read", "write"],
-            auth_key: "primary",
-          },
+          "@afps/integration-configured": "^2.0.0",
+        },
+      },
+      integrations_configuration: {
+        "@afps/integration-configured": {
+          tools: ["search"],
+          scopes: ["read", "write"],
+          auth_key: "primary",
         },
       },
     };
     const result = agentManifestSchema.safeParse(manifest);
     if (!result.success) {
       return fail(
-        `polymorphic dependencies rejected: ${result.error.issues
+        `flat dependencies + integrations_configuration rejected: ${result.error.issues
           .map((i) => `${i.path.join(".")}: ${i.message}`)
           .join("; ")}`,
       );
     }
     const parsed = result.data as {
-      dependencies?: {
-        integrations?: Record<string, unknown>;
-      };
+      integrations_configuration?: Record<string, unknown>;
     };
-    const integrationsDep = parsed.dependencies?.integrations?.["@afps/integration-object"];
-    if (!integrationsDep || typeof integrationsDep !== "object") {
-      return fail("object-form integration dep dropped during parse");
+    const config = parsed.integrations_configuration?.["@afps/integration-configured"];
+    if (!config || typeof config !== "object") {
+      return fail("integrations_configuration entry dropped during parse");
     }
-    const obj = integrationsDep as { version?: string; scopes?: unknown; auth_key?: string };
-    if (obj.version !== "^2.0.0" || obj.auth_key !== "primary" || !Array.isArray(obj.scopes)) {
-      return fail(`object-form payload not preserved: ${JSON.stringify(obj)}`);
+    const obj = config as { tools?: unknown; scopes?: unknown; auth_key?: string };
+    if (obj.auth_key !== "primary" || !Array.isArray(obj.scopes) || !Array.isArray(obj.tools)) {
+      return fail(`integrations_configuration payload not preserved: ${JSON.stringify(obj)}`);
     }
     return pass();
   },
@@ -1213,7 +1215,7 @@ export const BUILT_IN_CASES: readonly ConformanceCase[] = Object.freeze([
   L1_STRIP_WRAPPER,
   L1_MCP_SERVER_ROOT_IDENTITY,
   L1_INTEGRATION_MUTUAL_EXCLUSION,
-  L1_POLYMORPHIC_DEPENDENCIES,
+  L1_DEPENDENCIES_AND_CONFIG,
   L1_TOOLS_POLICY,
   L1_SKILL_MISSING_SKILL_MD,
   L1_SKILL_MISSING_FRONTMATTER_NAME,
