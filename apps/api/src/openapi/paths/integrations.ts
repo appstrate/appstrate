@@ -158,7 +158,6 @@ const authStatusSchema = {
     "required",
     "scopes",
     "resource",
-    "audience",
     "connections",
     "has_oauth_client",
   ],
@@ -176,12 +175,6 @@ const authStatusSchema = {
       type: ["string", "null"],
       description:
         "RFC 8707 resource indicator declared by the manifest (`auths.{key}.resource`). AFPS 2.0 §7.3 name — matches the RFC.",
-    },
-    audience: {
-      type: ["string", "null"],
-      deprecated: true,
-      description:
-        "Deprecated alias for `resource`. AFPS 2.0 §7.3 (RFC 8707) renamed the wire field; `audience` is kept for one release window for back-compat.",
     },
     connections: { type: "array", items: integrationConnectionSchema },
     has_oauth_client: { type: "boolean" },

@@ -1048,8 +1048,8 @@ export async function getIntegrationAuthStatuses(
 
   const auths: IntegrationAuthStatus[] = Object.entries(authsMap).map(([key, rawAuth]) => {
     // AFPS 2.0 (Appendix D): `scopes` → `default_scopes`, `audience` →
-    // `resource`; the Appstrate run-policy `required` flag moved under
-    // `_meta["dev.appstrate/auth"].required`.
+    // `resource` (RFC 8707); the Appstrate run-policy `required` flag moved
+    // under `_meta["dev.appstrate/auth"].required`.
     const auth = rawAuth as AfpsManifestAuth;
     const authMeta = (auth._meta?.["dev.appstrate/auth"] ?? undefined) as
       | { required?: boolean }
@@ -1060,11 +1060,8 @@ export async function getIntegrationAuthStatuses(
       type: auth.type,
       required: authMeta?.required ?? true,
       scopes: auth.default_scopes ?? [],
-      // AFPS 2.0 §7.3 (RFC 8707) names this field `resource`. Emitted under both
-      // names for one release window so existing API consumers keep working.
+      // AFPS 2.0 §7.3 (RFC 8707) names this field `resource`.
       resource,
-      /** @deprecated AFPS 2.0 §7.3 — use `resource` (RFC 8707). `audience` kept for back-compat. */
-      audience: resource,
       connections: allConnections.filter((c) => c.auth_key === key),
       has_oauth_client: oauthClientKeys.has(key),
     };
@@ -1075,7 +1072,7 @@ export async function getIntegrationAuthStatuses(
 
 /**
  * Surfaces the manifest's `auth` declaration verbatim — used by the
- * OAuth initiate handler to read endpoints + audience + scopes without
+ * OAuth initiate handler to read endpoints + resource + scopes without
  * a second DB round-trip. Returns the full manifest too so callers that
  * need the wider catalog don't re-fetch.
  */

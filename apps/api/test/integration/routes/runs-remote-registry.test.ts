@@ -64,7 +64,7 @@ async function seedPublishedAgent(ctx: TestContext, version = "1.2.3") {
   await db
     .insert(packageDistTags)
     .values({ packageId: "@acme/briefing", tag: "latest", versionId: versionRow.id });
-  // Upload the artefact so getVersionDetail can extract textContent.
+  // Upload the artefact so getVersionDetail can extract the prompt.
   const zip = buildMinimalZip(
     publishedManifest(version) as unknown as Record<string, unknown>,
     PROMPT,

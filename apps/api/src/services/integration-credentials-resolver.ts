@@ -258,15 +258,8 @@ export async function resolveLiveIntegrationCredentials(
     authType: authDef.type,
     fields: Object.freeze({ ...fields }),
     authorizedUris: Object.freeze([...(authDef.authorized_uris ?? [])]),
-    // AFPS 2.0 §7.3 (RFC 8707) names this field `resource`. We dual-emit
-    // `{ resource, audience: resource }` for one release window so sidecars /
-    // external consumers built against the pre-rename wire keep working.
-    // `audience` is the deprecated alias — drop in a future release.
-    // TODO(AFPS 2.1): drop `audience` alias after sidecar consumers fully
-    // migrate to `resource` (RFC 8707).
-    ...(authDef.resource !== undefined
-      ? { resource: authDef.resource, audience: authDef.resource }
-      : {}),
+    // AFPS 2.0 §7.3 (RFC 8707) names this field `resource`.
+    ...(authDef.resource !== undefined ? { resource: authDef.resource } : {}),
     ...(connection.expiresAt ? { expiresAt: connection.expiresAt.toISOString() } : {}),
     ...(connection.scopesGranted.length > 0
       ? { scopesGranted: Object.freeze([...connection.scopesGranted]) }
@@ -323,9 +316,7 @@ function isWithinLeadWindow(expiresAt: Date | null): boolean {
  *   headerPrefix          → header_prefix         (per delivery plan)
  *   allowServerOverride   → allow_server_override (per delivery plan)
  *
- * `resource` / `audience` (RFC 8707) pass through unchanged. `audience` is
- * the legacy alias dual-emitted upstream in the resolver itself — see the
- * `TODO(AFPS 2.1)` marker there.
+ * `resource` (RFC 8707) passes through unchanged.
  */
 export function serializeIntegrationCredentialsWire(
   wire: IntegrationCredentialsWire,
@@ -338,7 +329,6 @@ export function serializeIntegrationCredentialsWire(
       authorized_uris: a.authorizedUris,
     };
     if (a.resource !== undefined) out.resource = a.resource;
-    if (a.audience !== undefined) out.audience = a.audience;
     if (a.expiresAt !== undefined) out.expires_at = a.expiresAt;
     if (a.scopesGranted !== undefined) out.scopes_granted = a.scopesGranted;
     if (a.identityClaims !== undefined) out.identity_claims = a.identityClaims;

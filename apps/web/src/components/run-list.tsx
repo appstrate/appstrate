@@ -55,7 +55,7 @@ export function RunList({
     offset: page * pageSize,
   });
 
-  const runs = (data?.data ?? []) as unknown as EnrichedRun[];
+  const runs: EnrichedRun[] = data?.data ?? [];
   const total = data?.total ?? 0;
   const totalPages = Math.ceil(total / pageSize);
 

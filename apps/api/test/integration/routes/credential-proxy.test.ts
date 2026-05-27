@@ -8,7 +8,7 @@
  * `proxyCall()` directly) does NOT exercise:
  *
  *   - missing / malformed control headers → 400
- *     (`X-Integration`, `X-Target`, non-UUIDv4 `X-Session-Id`)
+ *     (`X-Integration-Id`, `X-Target`, non-UUIDv4 `X-Session-Id`)
  *   - the session-principal rebind guard → 403
  *     (a session bound to principal A, replayed by principal B)
  *   - `ProxyAuthorizationError` (target off the `authorizedUris` allowlist)
@@ -135,7 +135,7 @@ describe("POST /api/credential-proxy/proxy — header validation", () => {
   });
   afterEach(() => restoreFetch());
 
-  it("returns 400 when X-Integration is missing", async () => {
+  it("returns 400 when X-Integration-Id is missing", async () => {
     const res = await app.request("/api/credential-proxy/proxy", {
       method: "POST",
       headers: {
@@ -148,7 +148,7 @@ describe("POST /api/credential-proxy/proxy — header validation", () => {
     });
     expect(res.status).toBe(400);
     const body = (await res.json()) as { detail?: string };
-    expect(body.detail ?? "").toMatch(/X-Integration/i);
+    expect(body.detail ?? "").toMatch(/X-Integration-Id/i);
   });
 
   it("returns 400 when X-Target is missing", async () => {
@@ -158,7 +158,7 @@ describe("POST /api/credential-proxy/proxy — header validation", () => {
         Authorization: `Bearer ${apiKey}`,
         "X-Org-Id": ctx.orgId,
         "X-Application-Id": ctx.defaultAppId,
-        "X-Integration": INTEGRATION_ID,
+        "X-Integration-Id": INTEGRATION_ID,
         "X-Session-Id": uuidV4(),
       },
     });
@@ -174,7 +174,7 @@ describe("POST /api/credential-proxy/proxy — header validation", () => {
         Authorization: `Bearer ${apiKey}`,
         "X-Org-Id": ctx.orgId,
         "X-Application-Id": ctx.defaultAppId,
-        "X-Integration": INTEGRATION_ID,
+        "X-Integration-Id": INTEGRATION_ID,
         "X-Target": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
         "X-Session-Id": "not-a-uuid",
       },
@@ -216,7 +216,7 @@ describe("POST /api/credential-proxy/proxy — session-principal rebind guard", 
       Authorization: `Bearer ${apiKey}`,
       "X-Org-Id": ctx.orgId,
       "X-Application-Id": ctx.defaultAppId,
-      "X-Integration": INTEGRATION_ID,
+      "X-Integration-Id": INTEGRATION_ID,
       "X-Target": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
       "X-Session-Id": sessionId,
     });
@@ -259,7 +259,7 @@ describe("POST /api/credential-proxy/proxy — session-principal rebind guard", 
       Authorization: `Bearer ${apiKey}`,
       "X-Org-Id": ctx.orgId,
       "X-Application-Id": ctx.defaultAppId,
-      "X-Integration": INTEGRATION_ID,
+      "X-Integration-Id": INTEGRATION_ID,
       "X-Target": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
       "X-Session-Id": sessionId,
     };
@@ -299,7 +299,7 @@ describe("POST /api/credential-proxy/proxy — error→status mapping", () => {
         "X-Application-Id": ctx.defaultAppId,
         // Integration is never seeded / installed → resolver throws
         // IntegrationCredentialNotFoundError → ProxyCredentialError → 404.
-        "X-Integration": "@cporg/missing",
+        "X-Integration-Id": "@cporg/missing",
         "X-Target": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
         "X-Session-Id": uuidV4(),
       },
@@ -335,7 +335,7 @@ describe("POST /api/credential-proxy/proxy — error→status mapping", () => {
         Authorization: `Bearer ${apiKey}`,
         "X-Org-Id": ctx.orgId,
         "X-Application-Id": ctx.defaultAppId,
-        "X-Integration": INTEGRATION_ID,
+        "X-Integration-Id": INTEGRATION_ID,
         "X-Target": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
         "X-Session-Id": uuidV4(),
       },
@@ -359,7 +359,7 @@ describe("POST /api/credential-proxy/proxy — error→status mapping", () => {
         Authorization: `Bearer ${apiKey}`,
         "X-Org-Id": ctx.orgId,
         "X-Application-Id": ctx.defaultAppId,
-        "X-Integration": INTEGRATION_ID,
+        "X-Integration-Id": INTEGRATION_ID,
         // Off the `https://gmail.googleapis.com/**` allowlist → blocked.
         "X-Target": "https://evil.example.com/exfil",
         "X-Session-Id": uuidV4(),
@@ -405,7 +405,7 @@ describe("POST /api/credential-proxy/proxy — cookie-session rejection (ACCEPTE
         Cookie: ctx.cookie,
         "X-Org-Id": ctx.orgId,
         "X-Application-Id": ctx.defaultAppId,
-        "X-Integration": INTEGRATION_ID,
+        "X-Integration-Id": INTEGRATION_ID,
         "X-Target": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
         "X-Session-Id": uuidV4(),
       },

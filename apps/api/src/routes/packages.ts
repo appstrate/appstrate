@@ -1029,7 +1029,7 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
     }
 
     // Extract content from version ZIP
-    let content = detail.textContent ?? "";
+    let content = detail.prompt ?? "";
     if (detail.content) {
       const fileName = rcfg.storageFileName(itemId);
       const fileData = detail.content[fileName];

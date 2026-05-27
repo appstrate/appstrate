@@ -22,7 +22,7 @@
  *     air-gapped dev — no refresh, no rotation).
  *   - {@link RemoteAppstrateIntegrationResolver} forwards every call through
  *     a pinned Appstrate instance's `/api/credential-proxy/proxy` route, with
- *     the integration id as the `X-Integration` scope marker. Credentials never
+ *     the integration id as the `X-Integration-Id` scope marker. Credentials never
  *     leave the platform.
  *
  * Tool surface: one AFPS `Tool` per api-source integration, named
@@ -468,7 +468,7 @@ export interface RemoteAppstrateIntegrationResolverOptions {
 /**
  * BYOI integration resolver — forwards every `api_call` through
  * `POST /api/credential-proxy/proxy` on a remote Appstrate instance, with
- * the integration id as the `X-Integration` scope marker. The platform owns
+ * the integration id as the `X-Integration-Id` scope marker. The platform owns
  * credential injection server-side; the local agent never sees credentials.
  *
  * The credential-proxy route is provider/integration-agnostic — it gates on
@@ -533,7 +533,7 @@ export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallRes
         "X-Application-Id": this.applicationId,
         ...(this.orgId ? { "X-Org-Id": this.orgId } : {}),
         "X-Session-Id": this.sessionId,
-        "X-Integration": meta.name,
+        "X-Integration-Id": meta.name,
         "X-Target": req.target,
         ...(this.endUserId ? { "Appstrate-User": this.endUserId } : {}),
         ...this.extraHeaders,

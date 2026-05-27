@@ -68,7 +68,6 @@ export function normalizeIntegrationCredentialsWire(raw: unknown): IntegrationCr
       authorizedUris: (a.authorized_uris ?? []) as readonly string[],
     };
     if (a.resource !== undefined) out.resource = a.resource as string;
-    if (a.audience !== undefined) out.audience = a.audience as string;
     if (a.expires_at !== undefined) out.expiresAt = a.expires_at as string;
     if (a.scopes_granted !== undefined) {
       out.scopesGranted = a.scopes_granted as readonly string[];

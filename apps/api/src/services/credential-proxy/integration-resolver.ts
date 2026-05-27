@@ -11,7 +11,7 @@
  * {@link proxyCall} consumes verbatim (header injection +
  * `{{var}}` substitution + `authorized_uris` allowlist).
  *
- * `X-Integration` carries the integration package id (`@scope/name`). The
+ * `X-Integration-Id` carries the integration package id (`@scope/name`). The
  * actor (dashboard user, CLI/JWT user, or impersonated end-user) selects
  * which `integration_connections` row is decrypted; an optional
  * connection id (from `X-Connection-Id`) pins a specific row.
@@ -64,7 +64,7 @@ export class IntegrationCredentialRevokedError extends Error {
 }
 
 export interface ResolveIntegrationProxyInput {
-  /** Integration package id from `X-Integration` (`@scope/name`). */
+  /** Integration package id from `X-Integration-Id` (`@scope/name`). */
   integrationId: string;
   applicationId: string;
   actor: Actor;

@@ -3838,7 +3838,6 @@
                           "required",
                           "scopes",
                           "resource",
-                          "audience",
                           "connections",
                           "has_oauth_client"
                         ],
@@ -3863,11 +3862,6 @@
                           "resource": {
                             "type": ["string", "null"],
                             "description": "RFC 8707 resource indicator declared by the manifest (`auths.{key}.resource`). AFPS 2.0 §7.3 name — matches the RFC."
-                          },
-                          "audience": {
-                            "type": ["string", "null"],
-                            "deprecated": true,
-                            "description": "Deprecated alias for `resource`. AFPS 2.0 §7.3 (RFC 8707) renamed the wire field; `audience` is kept for one release window for back-compat."
                           },
                           "connections": {
                             "type": "array",
@@ -14573,7 +14567,7 @@
             }
           },
           {
-            "name": "X-Integration",
+            "name": "X-Integration-Id",
             "in": "header",
             "required": true,
             "description": "Scoped integration package name (e.g. `@afps/gmail`).",
@@ -14713,7 +14707,7 @@
             }
           },
           {
-            "name": "X-Integration",
+            "name": "X-Integration-Id",
             "in": "header",
             "required": true,
             "description": "Scoped integration package name (e.g. `@afps/gmail`).",
@@ -14860,7 +14854,7 @@
             }
           },
           {
-            "name": "X-Integration",
+            "name": "X-Integration-Id",
             "in": "header",
             "required": true,
             "description": "Scoped integration package name (e.g. `@afps/gmail`).",
@@ -15007,7 +15001,7 @@
             }
           },
           {
-            "name": "X-Integration",
+            "name": "X-Integration-Id",
             "in": "header",
             "required": true,
             "description": "Scoped integration package name (e.g. `@afps/gmail`).",
@@ -15154,7 +15148,7 @@
             }
           },
           {
-            "name": "X-Integration",
+            "name": "X-Integration-Id",
             "in": "header",
             "required": true,
             "description": "Scoped integration package name (e.g. `@afps/gmail`).",
@@ -17201,11 +17195,6 @@
                 "resource": {
                   "type": "string",
                   "description": "RFC 8707 resource indicator declared by the manifest (`auths.{key}.resource`). AFPS 2.0 §7.3 name — matches the RFC."
-                },
-                "audience": {
-                  "type": "string",
-                  "deprecated": true,
-                  "description": "Deprecated alias for `resource`. AFPS 2.0 §7.3 (RFC 8707) renamed the wire field; `audience` is kept for one release window for back-compat — see the `TODO(AFPS 2.1)` marker in `integration-credentials-resolver.ts`."
                 },
                 "expires_at": {
                   "type": "string",

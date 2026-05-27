@@ -260,7 +260,7 @@ interface VersionDetail {
   id: number;
   version: string;
   manifest: Record<string, unknown>;
-  textContent: string | null;
+  prompt: string | null;
   content: Record<string, Uint8Array> | null;
   yanked: boolean;
   yankedReason: string | null;
@@ -298,7 +298,7 @@ export async function getVersionDetail(
   if (!row) return null;
 
   // Try to download and extract ZIP content
-  let textContent: string | null = null;
+  let prompt: string | null = null;
   let content: Record<string, Uint8Array> | null = null;
 
   try {
@@ -309,7 +309,7 @@ export async function getVersionDetail(
       // Extract prompt.md from ZIP
       const promptData = files["prompt.md"];
       if (promptData) {
-        textContent = new TextDecoder().decode(promptData);
+        prompt = new TextDecoder().decode(promptData);
       }
     }
   } catch (err) {
@@ -324,7 +324,7 @@ export async function getVersionDetail(
     id: row.id,
     version: row.version,
     manifest: asRecord(row.manifest),
-    textContent,
+    prompt,
     content,
     yanked: row.yanked,
     yankedReason: row.yankedReason,

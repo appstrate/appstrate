@@ -236,7 +236,7 @@ export function createRunsRouter() {
         effectiveAgent = {
           ...agent,
           manifest: versionDetail.manifest as typeof agent.manifest,
-          prompt: versionDetail.textContent ?? agent.prompt,
+          prompt: versionDetail.prompt ?? agent.prompt,
         };
       }
 

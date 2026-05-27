@@ -85,7 +85,7 @@ describe("initiateIntegrationOAuth", () => {
     expect(stored).not.toBeNull();
     expect(stored?.integration?.packageId).toBe("@org/widget");
     expect(stored?.integration?.authKey).toBe("github");
-    expect(stored?.providerId).toBe("__integration__:@org/widget:github");
+    expect(stored?.subjectId).toBe("__integration__:@org/widget:github");
   });
 
   it("emits the RFC 8707 `resource` parameter when the auth declares an audience", async () => {
@@ -654,7 +654,7 @@ describe("handleIntegrationOAuthCallback", () => {
       orgId: "o",
       userId: "u",
       applicationId: "a",
-      providerId: "@official/gmail",
+      subjectId: "@official/gmail",
       codeVerifier: "v",
       scopesRequested: [],
       redirectUri: "http://localhost/cb",
@@ -669,7 +669,7 @@ describe("handleIntegrationOAuthCallback", () => {
       err = e;
     }
     expect(err).toBeInstanceOf(OAuthCallbackError);
-    expect((err as OAuthCallbackError).providerId).toBe("@official/gmail");
+    expect((err as OAuthCallbackError).subjectId).toBe("@official/gmail");
     // Dispatcher mismatch is a `transient` failure — the routes layer maps it
     // to a retryable error, NOT a "reconnect" prompt.
     expect((err as OAuthCallbackError).kind).toBe("transient");

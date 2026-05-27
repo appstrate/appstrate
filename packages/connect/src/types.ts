@@ -9,7 +9,14 @@ export interface OAuthStateRecord {
   userId: string | null;
   endUserId?: string | null;
   applicationId: string;
-  providerId: string;
+  /**
+   * Honest name for the OAuth-state subject across both branches:
+   * a real model-provider id OR an integration-auth sentinel
+   * (`integrationSubjectIdSentinel(packageId, authKey)`). For integration
+   * flows the authoritative exchange details live in `integration` below;
+   * this field is only used for self-describing audit logging.
+   */
+  subjectId: string;
   codeVerifier: string;
   scopesRequested: string[];
   redirectUri: string;
@@ -18,7 +25,7 @@ export interface OAuthStateRecord {
   /**
    * Integration-specific exchange parameters, carried from
    * `POST /api/integrations/:pkgId/auths/:authKey/connect/oauth2` through
-   * to `handleIntegrationOAuthCallback`. `providerId` carries a sentinel
+   * to `handleIntegrationOAuthCallback`. `subjectId` carries a sentinel
    * string for integration flows; the authoritative details live here.
    */
   integration?: {

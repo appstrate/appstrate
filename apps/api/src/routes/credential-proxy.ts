@@ -108,7 +108,10 @@ export function createCredentialProxyRouter() {
         );
       }
 
-      const integrationId = c.req.header("X-Integration");
+      // Preferred header is `X-Integration-Id` (suffix parity with `X-Connection-Id`).
+      // `X-Integration` is accepted as a fallback during the rename window so older
+      // runner/CLI images that still send the legacy name keep working.
+      const integrationId = c.req.header("X-Integration-Id") ?? c.req.header("X-Integration");
       const target = c.req.header("X-Target");
       const sessionId = c.req.header("X-Session-Id");
       const substituteBody = c.req.header("X-Substitute-Body") === "true";
@@ -127,7 +130,7 @@ export function createCredentialProxyRouter() {
           ? explicitConnectionHeader
           : null;
 
-      if (!integrationId) throw invalidRequest("Missing X-Integration header");
+      if (!integrationId) throw invalidRequest("Missing X-Integration-Id header");
       if (!target) throw invalidRequest("Missing X-Target header");
       if (!sessionId) throw invalidRequest("Missing X-Session-Id header");
       if (!isValidSessionId(sessionId)) {

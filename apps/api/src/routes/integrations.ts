@@ -226,7 +226,7 @@ export function createIntegrationsRouter() {
             ? "The authorization expired before it could be exchanged. Please retry the connection."
             : "Could not complete the connection. Please try again in a moment.";
         logger.error("Integration OAuth callback failed", {
-          providerId: err.providerId,
+          subjectId: err.subjectId,
           kind: err.kind,
           status: err.status,
           oauthError: err.oauthError,

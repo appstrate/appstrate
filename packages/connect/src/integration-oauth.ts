@@ -35,12 +35,12 @@ import { resolveOAuthEndpoints, type OAuthEndpointResolution } from "./oauth-dis
 const OAUTH_STATE_TTL_SECONDS = 10 * 60;
 
 /**
- * Provider identifier sentinel embedded in the {@link OAuthStateRecord}
+ * Subject-id sentinel embedded in the {@link OAuthStateRecord} `subjectId`
  * for integration auth states. The callback reads the `integration`
  * field for the authoritative exchange params; this sentinel just makes
  * the state record self-describing for audit logging.
  */
-function integrationProviderIdSentinel(packageId: string, authKey: string): string {
+function integrationSubjectIdSentinel(packageId: string, authKey: string): string {
   return `__integration__:${packageId}:${authKey}`;
 }
 
@@ -176,14 +176,14 @@ export async function initiateIntegrationOAuth(
     throw new OAuthCallbackError(
       "No authorization_endpoint resolved (declare it on the auth or supply a discoverable issuer)",
       "transient",
-      integrationProviderIdSentinel(input.packageId, input.authKey),
+      integrationSubjectIdSentinel(input.packageId, input.authKey),
     );
   }
   if (!endpoints.tokenEndpoint) {
     throw new OAuthCallbackError(
       "No token_endpoint resolved (declare it on the auth or supply a discoverable issuer)",
       "transient",
-      integrationProviderIdSentinel(input.packageId, input.authKey),
+      integrationSubjectIdSentinel(input.packageId, input.authKey),
     );
   }
 
@@ -219,7 +219,7 @@ export async function initiateIntegrationOAuth(
     userId: input.actor.type === "user" ? input.actor.id : null,
     endUserId: input.actor.type === "end_user" ? input.actor.id : null,
     applicationId: input.applicationId,
-    providerId: integrationProviderIdSentinel(input.packageId, input.authKey),
+    subjectId: integrationSubjectIdSentinel(input.packageId, input.authKey),
     codeVerifier,
     scopesRequested: uniqueScopes,
     redirectUri: input.redirectUri,
@@ -303,7 +303,7 @@ export async function handleIntegrationOAuthCallback(
     throw new OAuthCallbackError(
       "Invalid or expired OAuth state",
       "transient",
-      // OAuthCallbackError carries a `providerId`; use the sentinel
+      // OAuthCallbackError carries a `subjectId`; use the sentinel
       // pattern so audit logs make sense.
       "__integration__:unknown",
     );
@@ -312,12 +312,12 @@ export async function handleIntegrationOAuthCallback(
     throw new OAuthCallbackError(
       "OAuth state is not an integration state — dispatcher mismatch",
       "transient",
-      stateRow.providerId,
+      stateRow.subjectId,
     );
   }
 
   const integration = stateRow.integration;
-  const sentinel = integrationProviderIdSentinel(integration.packageId, integration.authKey);
+  const sentinel = integrationSubjectIdSentinel(integration.packageId, integration.authKey);
 
   const { parsed, raw: tokenData } = await exchangeAuthorizationCode({
     tokenEndpoint: integration.tokenEndpoint,

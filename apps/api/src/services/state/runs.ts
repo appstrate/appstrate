@@ -42,6 +42,7 @@ import {
 } from "../../lib/jsonb-schemas.ts";
 import { invalidRequest } from "../../lib/errors.ts";
 import type { AppScope, OrgScope } from "../../lib/scope.ts";
+import type { RunWireDto, EnrichedRun } from "@appstrate/shared-types";
 
 export const RUN_HISTORY_FIELDS = ["checkpoint", "result"] as const;
 export type RunHistoryField = (typeof RUN_HISTORY_FIELDS)[number];
@@ -131,60 +132,22 @@ type EnrichedRunRow = {
 };
 
 /**
- * Wire-shape Run DTO returned to API consumers. The Drizzle `Run` row keeps
- * camelCase field names internally (Better Auth blocker); this is the
- * single bridge between internal storage and external JSON. Universal
- * DB-convention fields (id, *Id, *At) stay camelCase per Phase 3 scope.
- */
-type RunWireDto = {
-  id: string;
-  packageId: string | null;
-  userId: string | null;
-  endUserId: string | null;
-  apiKeyId: string | null;
-  orgId: string;
-  applicationId: string;
-  scheduleId: string | null;
-  status: string;
-  input: unknown;
-  result: unknown;
-  checkpoint: unknown;
-  error: string | null;
-  metadata: unknown;
-  config: unknown;
-  config_override: unknown;
-  started_at: Date | null;
-  completed_at: Date | null;
-  duration: number | null;
-  cost: number | null;
-  notifiedAt: Date | null;
-  readAt: Date | null;
-  runNumber: number | null;
-  token_usage: unknown;
-  version_label: string | null;
-  version_dirty: boolean | null;
-  proxy_label: string | null;
-  model_label: string | null;
-  model_source: string | null;
-  runner_name: string | null;
-  runner_kind: string | null;
-  agent_scope: string | null;
-  agent_name: string | null;
-  runOrigin: string | null;
-  contextSnapshot: unknown;
-  sinkSecretEncrypted: string | null;
-  sinkExpiresAt: Date | null;
-  sinkClosedAt: Date | null;
-  lastHeartbeatAt: Date | null;
-  modelCredentialId: string | null;
-  connection_overrides: unknown;
-  resolvedConnections: unknown;
-};
-
-/**
- * Translate a raw Drizzle `runs` row into its snake_case wire DTO. The DB
- * TS field names stay camelCase (Better Auth blocker) so this function is
- * the single bridge between internal storage and external JSON.
+ * Translate a raw Drizzle `runs` row into its public snake_case wire DTO
+ * (`@appstrate/shared-types` `RunWireDto`). This is the single bridge
+ * between internal storage and external JSON, and it is responsible for
+ * two things `c.json()` used to do implicitly/incorrectly:
+ *
+ *  1. Date → ISO string conversion happens HERE (`d?.toISOString() ?? null`)
+ *     so the returned value's TS type matches the wire shape end-to-end
+ *     instead of being erased at Hono's untyped `c.json()` boundary.
+ *  2. DB-only columns are intentionally NOT projected. In particular
+ *     `sinkSecretEncrypted` (an AES-256-GCM credential ciphertext),
+ *     `sinkExpiresAt`, `sinkClosedAt`, `lastHeartbeatAt`, and
+ *     `resolvedConnections` are internal server state that must never reach
+ *     a client. The previous spread-the-whole-row mapper leaked all five.
+ *
+ * The DB TS field names stay camelCase (Better Auth blocker); universal
+ * DB-convention fields (id, *Id, *At) stay camelCase on the wire per Phase 3.
  */
 function runRowToWireDto(row: typeof runs.$inferSelect): RunWireDto {
   return {
@@ -204,12 +167,12 @@ function runRowToWireDto(row: typeof runs.$inferSelect): RunWireDto {
     metadata: row.metadata,
     config: row.config,
     config_override: row.configOverride,
-    started_at: row.startedAt,
-    completed_at: row.completedAt,
+    started_at: row.startedAt?.toISOString() ?? null,
+    completed_at: row.completedAt?.toISOString() ?? null,
     duration: row.duration,
     cost: row.cost,
-    notifiedAt: row.notifiedAt,
-    readAt: row.readAt,
+    notifiedAt: row.notifiedAt?.toISOString() ?? null,
+    readAt: row.readAt?.toISOString() ?? null,
     runNumber: row.runNumber,
     token_usage: row.tokenUsage,
     version_label: row.versionLabel,
@@ -223,17 +186,12 @@ function runRowToWireDto(row: typeof runs.$inferSelect): RunWireDto {
     agent_name: row.agentName,
     runOrigin: row.runOrigin,
     contextSnapshot: row.contextSnapshot,
-    sinkSecretEncrypted: row.sinkSecretEncrypted,
-    sinkExpiresAt: row.sinkExpiresAt,
-    sinkClosedAt: row.sinkClosedAt,
-    lastHeartbeatAt: row.lastHeartbeatAt,
     modelCredentialId: row.modelCredentialId,
     connection_overrides: row.connectionOverrides,
-    resolvedConnections: row.resolvedConnections,
   };
 }
 
-function mapEnrichedRun(r: EnrichedRunRow) {
+function mapEnrichedRun(r: EnrichedRunRow): EnrichedRun {
   return {
     ...runRowToWireDto(r.run),
     user_name: r.userName ?? null,
@@ -695,7 +653,7 @@ export async function deletePackageRuns(scope: AppScope, packageId: string): Pro
   return deleted.length;
 }
 
-export type RunListPage = ListResponse<Record<string, unknown>> & { total: number };
+export type RunListPage = ListResponse<EnrichedRun> & { total: number };
 
 export async function listRunsWithFilter(
   filter: SQL,
@@ -717,7 +675,7 @@ export async function listRunsWithFilter(
     .limit(limit)
     .offset(offset);
 
-  const data = rows.map(mapEnrichedRun) as unknown as Record<string, unknown>[];
+  const data = rows.map(mapEnrichedRun);
   const total = countRow?.count ?? 0;
   return {
     ...listResponse(data, { hasMore: offset + data.length < total }),
@@ -814,7 +772,7 @@ export async function listGlobalRuns(
     .limit(limit)
     .offset(offset);
 
-  const data = rows.map(mapEnrichedRun) as unknown as Record<string, unknown>[];
+  const data = rows.map(mapEnrichedRun);
   const total = countRow?.count ?? 0;
   return {
     ...listResponse(data, { hasMore: offset + data.length < total }),

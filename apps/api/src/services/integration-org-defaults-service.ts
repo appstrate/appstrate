@@ -19,18 +19,12 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { integrationConnections, integrationOrgDefaults } from "@appstrate/db/schema";
+import type { IntegrationOrgDefault } from "@appstrate/shared-types";
 import type { AppScope } from "../lib/scope.ts";
 import { validatePinTarget } from "./integration-pins-service.ts";
 
-export interface OrgDefaultSummary {
-  integration_package_id: string;
-  connection_id: string;
-  /** The default connection's own authKey — surfaced for UI parity with pins. */
-  auth_key: string;
-  enforce: boolean;
-  createdAt: string;
-  updatedAt: string;
-}
+/** Identical wire shape to {@link IntegrationOrgDefault}; aliased for the canonical pattern (cf. `PinSummary`). */
+export type OrgDefaultSummary = IntegrationOrgDefault;
 
 export interface UpsertOrgDefaultInput {
   connectionId: string;

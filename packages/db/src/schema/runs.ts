@@ -477,7 +477,7 @@ export const credentialProxyUsage = pgTable(
       onDelete: "set null",
     }),
     // Integration id the call hit (e.g. "@appstrate/gmail"). Matches the
-    // credential-proxy `X-Integration` request header.
+    // credential-proxy `X-Integration-Id` request header.
     integrationId: text("integration_id").notNull(),
     // Upstream host for audit (no path/query — avoid logging secrets).
     targetHost: text("target_host"),

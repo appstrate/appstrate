@@ -61,7 +61,7 @@ export interface ExchangeAuthorizationCodeInput {
    */
   extraTokenParams?: Record<string, string>;
   /**
-   * Identifier surfaced in error messages and as `OAuthCallbackError.providerId`.
+   * Identifier surfaced in error messages and as `OAuthCallbackError.subjectId`.
    * For integration flows this is the sentinel `__integration__:<package>:<authKey>`.
    */
   errorLabel: string;

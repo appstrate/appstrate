@@ -4,7 +4,7 @@
  * Shared primitives used by the credential-proxy server route
  * (`apps/api/src/routes/credential-proxy.ts`) and the in-container
  * sidecar (`runtime-pi/sidecar/app.ts`). Both code paths implement the
- * same wire protocol (X-Integration/X-Target/Set-Cookie passthrough) and
+ * same wire protocol (X-Integration-Id/X-Target/Set-Cookie passthrough) and
  * share the AFPS 1.3 spec-compliant URL allowlist matcher so drift is
  * impossible by construction.
  */

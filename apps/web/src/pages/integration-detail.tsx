@@ -279,8 +279,7 @@ function OAuthClientForm({
 /**
  * Per-auth card, grouped by authKey. Self-contained setup + connections:
  *   - Auth metadata: type, required flag, default scopes, resource
- *     (RFC 8707 — `resource` in AFPS 2.0 §7.3; `audience` is back-compat alias),
- *     authorized URIs.
+ *     (RFC 8707 — `resource` in AFPS 2.0 §7.3), authorized URIs.
  *   - For oauth2 + admin: the OAuth client registration form sits INSIDE
  *     the card, directly above the connection list — a missing client
  *     locks connecting, so the cause and the fix are co-located.
@@ -321,8 +320,8 @@ function AuthSection({
         )}
       </div>
 
-      {/* Scopes / resource (RFC 8707 — `resource` in AFPS 2.0 §7.3; `audience` is back-compat alias) */}
-      {(status.scopes.length > 0 || status.resource || status.audience) && (
+      {/* Scopes / resource (RFC 8707 — `resource` in AFPS 2.0 §7.3) */}
+      {(status.scopes.length > 0 || status.resource) && (
         <div className="text-muted-foreground mb-3 grid gap-1 text-xs">
           {status.scopes.length > 0 && (
             <p>
@@ -330,10 +329,10 @@ function AuthSection({
               <span className="font-mono">{status.scopes.join(", ")}</span>
             </p>
           )}
-          {(status.resource ?? status.audience) && (
+          {status.resource && (
             <p>
               <span className="font-semibold">{t("integration.auth.resource")}:</span>{" "}
-              <span className="font-mono">{status.resource ?? status.audience}</span>
+              <span className="font-mono">{status.resource}</span>
             </p>
           )}
           {(authDecl.authorized_uris?.length ?? 0) > 0 && (

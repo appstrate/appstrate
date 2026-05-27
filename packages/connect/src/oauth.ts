@@ -23,7 +23,7 @@ export class OAuthCallbackError extends Error {
   constructor(
     message: string,
     public readonly kind: TokenErrorKind,
-    public readonly providerId: string,
+    public readonly subjectId: string,
     public readonly status?: number,
     public readonly body?: string,
     public readonly oauthError?: string,

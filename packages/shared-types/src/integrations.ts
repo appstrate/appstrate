@@ -73,13 +73,6 @@ export interface IntegrationAuthStatus {
    * (`auths.{key}.resource`). AFPS 2.0 §7.3 name — matches the RFC.
    */
   resource: string | null;
-  /**
-   * @deprecated AFPS 2.0 §7.3 — use `resource` (RFC 8707).
-   * `audience` is the legacy wire alias, dual-emitted for one release window
-   * for back-compat. Optional on the type so callers reading new payloads
-   * after the alias is dropped continue to compile.
-   */
-  audience?: string | null;
   /** Connections the calling actor has for this auth (multi-account = >1). */
   connections: IntegrationConnection[];
   /** True when this auth has an admin-registered OAuth2 client (oauth2 only). */

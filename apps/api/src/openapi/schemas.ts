@@ -776,12 +776,6 @@ export const schemas = {
               description:
                 "RFC 8707 resource indicator declared by the manifest (`auths.{key}.resource`). AFPS 2.0 §7.3 name — matches the RFC.",
             },
-            audience: {
-              type: "string",
-              deprecated: true,
-              description:
-                "Deprecated alias for `resource`. AFPS 2.0 §7.3 (RFC 8707) renamed the wire field; `audience` is kept for one release window for back-compat — see the `TODO(AFPS 2.1)` marker in `integration-credentials-resolver.ts`.",
-            },
             expires_at: { type: "string", format: "date-time" },
             scopes_granted: { type: "array", items: { type: "string" } },
             identity_claims: {
