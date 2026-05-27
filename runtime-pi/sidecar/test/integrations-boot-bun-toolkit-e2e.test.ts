@@ -171,7 +171,7 @@ describe("@appstrate/bun-toolkit fixtures", () => {
     expect(m.auths.primary!.type).toBe("api_key");
     expect(m.auths.primary!.delivery.http.name).toBe("X-Toolkit-Token");
     expect(m.auths.primary!.delivery.http.value).toBe("{$credential.api_key}");
-    expect(m.tools_policy.fetch_echo!.required_scopes).toEqual(["read"]);
+    expect(m.tools_policy.fetch_echo!.required_scopes).toEqual({ primary: ["read"] });
   });
 
   it("the mcp-server manifest is a valid MCPB manifest referencing the server code", () => {

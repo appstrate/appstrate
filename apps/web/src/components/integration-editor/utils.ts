@@ -252,39 +252,21 @@ export function emptyAuth(key: string): AuthState {
 
 export interface ToolPolicyState {
   name: string;
-  requiredAuthKey: string;
-  requiredScopes: string[];
-  urlPatterns: string[];
+  /** Per-auth scopes the tool requires: `{ <auth_key>: scopes[] }`. */
+  requiredScopes: Record<string, string[]>;
 }
 
 export function getToolsPolicy(manifest: Rec): ToolPolicyState[] {
   const tp = asRec(manifest.tools_policy);
   return Object.entries(tp).map(([name, raw]) => {
     const entry = asRec(raw);
-    return {
-      name,
-      requiredAuthKey: typeof entry.required_auth_key === "string" ? entry.required_auth_key : "",
-      requiredScopes: asStringArray(entry.required_scopes),
-      urlPatterns: Array.isArray(entry.url_patterns)
-        ? entry.url_patterns
-            .map((p) => (typeof p === "string" ? p : asRec(p).pattern))
-            .filter((p): p is string => typeof p === "string")
-        : [],
-    };
+    const rawScopes = asRec(entry.required_scopes);
+    const requiredScopes: Record<string, string[]> = {};
+    for (const [authKey, scopes] of Object.entries(rawScopes)) {
+      requiredScopes[authKey] = asStringArray(scopes);
+    }
+    return { name, requiredScopes };
   });
-}
-
-/** Preserve per-pattern `methods` (+ other fields) by merging the form's
- * pattern strings onto matching base entries by `pattern`. */
-function mergeUrlPatterns(baseRaw: unknown, patterns: string[]): Rec[] {
-  const baseArr = Array.isArray(baseRaw) ? baseRaw : [];
-  const byPattern = new Map<string, Rec>();
-  for (const p of baseArr) {
-    const r = asRec(p);
-    if (typeof r.pattern === "string") byPattern.set(r.pattern, r);
-  }
-  // AFPS §7.x — url_patterns items are objects `{ pattern, methods? }`.
-  return patterns.map((pattern) => ({ ...(byPattern.get(pattern) ?? {}), pattern }));
 }
 
 export function setToolsPolicy(manifest: Rec, list: ToolPolicyState[]): Rec {
@@ -298,13 +280,12 @@ export function setToolsPolicy(manifest: Rec, list: ToolPolicyState[]): Rec {
   for (const t of list) {
     if (!t.name.trim()) continue;
     const entry: Rec = { ...asRec(existing[t.name]) };
-    if (t.requiredAuthKey) entry.required_auth_key = t.requiredAuthKey;
-    else delete entry.required_auth_key;
-    if (t.requiredScopes.length > 0) entry.required_scopes = t.requiredScopes;
+    const scopes: Rec = {};
+    for (const [authKey, list] of Object.entries(t.requiredScopes)) {
+      if (list.length > 0) scopes[authKey] = list;
+    }
+    if (Object.keys(scopes).length > 0) entry.required_scopes = scopes;
     else delete entry.required_scopes;
-    if (t.urlPatterns.length > 0)
-      entry.url_patterns = mergeUrlPatterns(entry.url_patterns, t.urlPatterns);
-    else delete entry.url_patterns;
     tp[t.name] = entry;
   }
   next.tools_policy = tp;

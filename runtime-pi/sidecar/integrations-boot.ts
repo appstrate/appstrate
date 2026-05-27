@@ -592,8 +592,6 @@ async function spawnAndConnectLocalIntegration(params: {
   ca: RunCaMaterials | null;
   /** Front this integration with a MITM listener (also needs `ca` + `source`). */
   wantsMitm: boolean;
-  /** Phase 4 tool-URL envelope to enforce; omitted for connect-run. */
-  toolUrlEnvelope?: IntegrationSpawnSpec["toolUrlEnvelope"];
   /** Allowlist for `host.register`. `[]` exposes nothing (connect-run). */
   allowedTools: readonly string[] | undefined;
   /**
@@ -628,10 +626,6 @@ async function spawnAndConnectLocalIntegration(params: {
       // Adapter decides where the listener binds so the runner can reach it
       // (0.0.0.0 for bridged networks, 127.0.0.1 when it shares the parent NS).
       host: adapterCtx.listenerBindHost,
-      // Phase 4 — narrow the per-request URL surface to the union of
-      // agent-selected tool urlPatterns. `undefined` leaves enforcement on the
-      // per-auth `authorizedUris` only (connect-run omits it entirely).
-      ...(params.toolUrlEnvelope ? { toolUrlEnvelope: params.toolUrlEnvelope } : {}),
       onEvent: (event) => {
         // Filter sensitive bits (URLs may carry signed query params).
         const safe =
@@ -1102,7 +1096,6 @@ export async function bootIntegrations(
         source,
         ca: runCa,
         wantsMitm,
-        ...(spec.toolUrlEnvelope ? { toolUrlEnvelope: spec.toolUrlEnvelope } : {}),
         allowedTools: spec.toolAllowlist,
         // R8a — propagate `hidden_tools` so the host filters them out at
         // runtime, regardless of whether install-time validation removed them.

@@ -86,34 +86,54 @@
   },
   "tools_policy": {
     "search_threads": {
-      "required_scopes": ["https://www.googleapis.com/auth/gmail.readonly"]
+      "required_scopes": {
+        "primary": ["https://www.googleapis.com/auth/gmail.readonly"]
+      }
     },
     "get_thread": {
-      "required_scopes": ["https://www.googleapis.com/auth/gmail.readonly"]
+      "required_scopes": {
+        "primary": ["https://www.googleapis.com/auth/gmail.readonly"]
+      }
     },
     "list_drafts": {
-      "required_scopes": ["https://www.googleapis.com/auth/gmail.readonly"]
+      "required_scopes": {
+        "primary": ["https://www.googleapis.com/auth/gmail.readonly"]
+      }
     },
     "list_labels": {
-      "required_scopes": ["https://www.googleapis.com/auth/gmail.readonly"]
+      "required_scopes": {
+        "primary": ["https://www.googleapis.com/auth/gmail.readonly"]
+      }
     },
     "create_draft": {
-      "required_scopes": ["https://www.googleapis.com/auth/gmail.compose"]
+      "required_scopes": {
+        "primary": ["https://www.googleapis.com/auth/gmail.compose"]
+      }
     },
     "create_label": {
-      "required_scopes": ["https://www.googleapis.com/auth/gmail.labels"]
+      "required_scopes": {
+        "primary": ["https://www.googleapis.com/auth/gmail.labels"]
+      }
     },
     "label_message": {
-      "required_scopes": ["https://www.googleapis.com/auth/gmail.modify"]
+      "required_scopes": {
+        "primary": ["https://www.googleapis.com/auth/gmail.modify"]
+      }
     },
     "unlabel_message": {
-      "required_scopes": ["https://www.googleapis.com/auth/gmail.modify"]
+      "required_scopes": {
+        "primary": ["https://www.googleapis.com/auth/gmail.modify"]
+      }
     },
     "label_thread": {
-      "required_scopes": ["https://www.googleapis.com/auth/gmail.modify"]
+      "required_scopes": {
+        "primary": ["https://www.googleapis.com/auth/gmail.modify"]
+      }
     },
     "unlabel_thread": {
-      "required_scopes": ["https://www.googleapis.com/auth/gmail.modify"]
+      "required_scopes": {
+        "primary": ["https://www.googleapis.com/auth/gmail.modify"]
+      }
     }
   },
   "_meta": {

@@ -89,9 +89,7 @@ export interface IntegrationToolCatalogEntry {
   name: string;
   description?: string;
   policy?: {
-    required_scopes?: readonly string[];
-    required_auth_key?: string;
-    url_patterns?: ReadonlyArray<{ pattern: string; methods?: readonly string[] }>;
+    required_scopes?: Readonly<Record<string, readonly string[]>>;
   };
 }
 

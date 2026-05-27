@@ -190,18 +190,9 @@ const toolCatalogEntrySchema = {
     policy: {
       type: "object",
       properties: {
-        required_scopes: { type: "array", items: { type: "string" } },
-        required_auth_key: { type: "string" },
-        url_patterns: {
-          type: "array",
-          items: {
-            type: "object",
-            required: ["pattern"],
-            properties: {
-              pattern: { type: "string" },
-              methods: { type: "array", items: { type: "string" } },
-            },
-          },
+        required_scopes: {
+          type: "object",
+          additionalProperties: { type: "array", items: { type: "string" } },
         },
       },
     },

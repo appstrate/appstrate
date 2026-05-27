@@ -10,7 +10,10 @@
   "keywords": ["bun", "reference", "test", "toolkit"],
   "source": {
     "kind": "local",
-    "server": { "name": "@appstrate/bun-toolkit-server", "version": "^1.0.0" }
+    "server": {
+      "name": "@appstrate/bun-toolkit-server",
+      "version": "^1.0.0"
+    }
   },
   "auths": {
     "primary": {
@@ -52,12 +55,16 @@
   },
   "tools_policy": {
     "fetch_echo": {
-      "required_auth_key": "primary",
-      "required_scopes": ["read"],
-      "url_patterns": [{ "pattern": "https://httpbin.org/anything/**", "methods": ["GET"] }]
+      "required_scopes": {
+        "primary": ["read"]
+      }
     }
   },
   "_meta": {
-    "dev.appstrate/api": { "auths": { "primary": {} } }
+    "dev.appstrate/api": {
+      "auths": {
+        "primary": {}
+      }
+    }
   }
 }

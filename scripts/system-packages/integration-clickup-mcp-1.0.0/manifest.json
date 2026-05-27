@@ -40,150 +40,54 @@
     }
   },
   "tools_policy": {
-    "search_workspace": {
-      "required_auth_key": "oauth"
-    },
-    "search_tasks_by_task_type": {
-      "required_auth_key": "oauth"
-    },
-    "search_tasks_by_tag": {
-      "required_auth_key": "oauth"
-    },
-    "create_task": {
-      "required_auth_key": "oauth"
-    },
-    "get_task": {
-      "required_auth_key": "oauth"
-    },
-    "update_task": {
-      "required_auth_key": "oauth"
-    },
-    "delete_task": {
-      "required_auth_key": "oauth"
-    },
-    "set_custom_fields": {
-      "required_auth_key": "oauth"
-    },
-    "create_bulk_tasks": {
-      "required_auth_key": "oauth"
-    },
-    "update_bulk_tasks": {
-      "required_auth_key": "oauth"
-    },
-    "attach_file_to_task": {
-      "required_auth_key": "oauth"
-    },
-    "get_task_comments": {
-      "required_auth_key": "oauth"
-    },
-    "get_threaded_replies": {
-      "required_auth_key": "oauth"
-    },
-    "create_task_comment": {
-      "required_auth_key": "oauth"
-    },
-    "add_tag_to_task": {
-      "required_auth_key": "oauth"
-    },
-    "remove_tag_from_task": {
-      "required_auth_key": "oauth"
-    },
-    "add_task_link": {
-      "required_auth_key": "oauth"
-    },
-    "remove_task_link": {
-      "required_auth_key": "oauth"
-    },
-    "add_dependency": {
-      "required_auth_key": "oauth"
-    },
-    "remove_dependency": {
-      "required_auth_key": "oauth"
-    },
-    "move_task_to_list": {
-      "required_auth_key": "oauth"
-    },
-    "add_task_to_list": {
-      "required_auth_key": "oauth"
-    },
-    "get_task_time_entries": {
-      "required_auth_key": "oauth"
-    },
-    "get_time_entries_for_tasks": {
-      "required_auth_key": "oauth"
-    },
-    "start_time_tracking": {
-      "required_auth_key": "oauth"
-    },
-    "stop_time_tracking": {
-      "required_auth_key": "oauth"
-    },
-    "add_time_entry": {
-      "required_auth_key": "oauth"
-    },
-    "get_current_time_entry": {
-      "required_auth_key": "oauth"
-    },
-    "get_workspace_hierarchy": {
-      "required_auth_key": "oauth"
-    },
-    "create_list": {
-      "required_auth_key": "oauth"
-    },
-    "create_list_in_folder": {
-      "required_auth_key": "oauth"
-    },
-    "get_list": {
-      "required_auth_key": "oauth"
-    },
-    "update_list": {
-      "required_auth_key": "oauth"
-    },
-    "get_folder": {
-      "required_auth_key": "oauth"
-    },
-    "create_folder": {
-      "required_auth_key": "oauth"
-    },
-    "update_folder": {
-      "required_auth_key": "oauth"
-    },
-    "get_workspace_members": {
-      "required_auth_key": "oauth"
-    },
-    "find_member_by_name": {
-      "required_auth_key": "oauth"
-    },
-    "resolve_assignees": {
-      "required_auth_key": "oauth"
-    },
-    "get_chat_channels": {
-      "required_auth_key": "oauth"
-    },
-    "send_chat_message": {
-      "required_auth_key": "oauth"
-    },
-    "create_document": {
-      "required_auth_key": "oauth"
-    },
-    "list_document_pages": {
-      "required_auth_key": "oauth"
-    },
-    "get_document_pages": {
-      "required_auth_key": "oauth"
-    },
-    "create_document_page": {
-      "required_auth_key": "oauth"
-    },
-    "update_document_page": {
-      "required_auth_key": "oauth"
-    },
-    "get_time_in_status_for_task": {
-      "required_auth_key": "oauth"
-    },
-    "get_time_in_status_for_list": {
-      "required_auth_key": "oauth"
-    }
+    "search_workspace": {},
+    "search_tasks_by_task_type": {},
+    "search_tasks_by_tag": {},
+    "create_task": {},
+    "get_task": {},
+    "update_task": {},
+    "delete_task": {},
+    "set_custom_fields": {},
+    "create_bulk_tasks": {},
+    "update_bulk_tasks": {},
+    "attach_file_to_task": {},
+    "get_task_comments": {},
+    "get_threaded_replies": {},
+    "create_task_comment": {},
+    "add_tag_to_task": {},
+    "remove_tag_from_task": {},
+    "add_task_link": {},
+    "remove_task_link": {},
+    "add_dependency": {},
+    "remove_dependency": {},
+    "move_task_to_list": {},
+    "add_task_to_list": {},
+    "get_task_time_entries": {},
+    "get_time_entries_for_tasks": {},
+    "start_time_tracking": {},
+    "stop_time_tracking": {},
+    "add_time_entry": {},
+    "get_current_time_entry": {},
+    "get_workspace_hierarchy": {},
+    "create_list": {},
+    "create_list_in_folder": {},
+    "get_list": {},
+    "update_list": {},
+    "get_folder": {},
+    "create_folder": {},
+    "update_folder": {},
+    "get_workspace_members": {},
+    "find_member_by_name": {},
+    "resolve_assignees": {},
+    "get_chat_channels": {},
+    "send_chat_message": {},
+    "create_document": {},
+    "list_document_pages": {},
+    "get_document_pages": {},
+    "create_document_page": {},
+    "update_document_page": {},
+    "get_time_in_status_for_task": {},
+    "get_time_in_status_for_list": {}
   },
   "_meta": {
     "dev.appstrate/package": {

@@ -107,9 +107,7 @@ describe("resolveIntegrationToolCatalog", () => {
       integration: localSourceManifest({
         tools: {
           fetch_echo: {
-            required_auth_key: "primary",
-            required_scopes: ["read"],
-            url_patterns: [{ pattern: "https://httpbin.org/**", methods: ["GET"] }],
+            required_scopes: { primary: ["read"] },
           },
         },
       }),
@@ -117,11 +115,7 @@ describe("resolveIntegrationToolCatalog", () => {
     });
     expect(out).toHaveLength(2);
     const fetchEcho = out.find((e) => e.name === "fetch_echo")!;
-    expect(fetchEcho.policy?.requiredScopes).toEqual(["read"]);
-    expect(fetchEcho.policy?.requiredAuthKey).toBe("primary");
-    expect(fetchEcho.policy?.urlPatterns).toEqual([
-      { pattern: "https://httpbin.org/**", methods: ["GET"] },
-    ]);
+    expect(fetchEcho.policy?.requiredScopes).toEqual({ primary: ["read"] });
     const kvSet = out.find((e) => e.name === "kv_set")!;
     expect(kvSet.policy).toBeUndefined();
   });
@@ -167,11 +161,11 @@ describe("resolveIntegrationToolCatalog", () => {
   it("local source without mcp-server tools: falls back to integration.tools_policy keys", () => {
     const out = resolveIntegrationToolCatalog({
       integration: localSourceManifest({
-        tools: { policy_only: { required_scopes: ["read"] } },
+        tools: { policy_only: { required_scopes: { primary: ["read"] } } },
       }),
     });
     expect(out.map((e) => e.name)).toEqual(["policy_only"]);
-    expect(out[0]!.policy?.requiredScopes).toEqual(["read"]);
+    expect(out[0]!.policy?.requiredScopes).toEqual({ primary: ["read"] });
   });
 });
 
@@ -193,7 +187,7 @@ describe("validateAgentIntegrationScopes — uses the catalog, not the policy ta
     const errors = validateAgentIntegrationScopes(
       { id: "@me/integ", tools: ["kv_set"] },
       localSourceManifest({
-        tools: { fetch_echo: { required_scopes: ["read"] } }, // policy only for one tool
+        tools: { fetch_echo: { required_scopes: { primary: ["read"] } } }, // policy only for one tool
       }),
       [{ name: "kv_set" }, { name: "fetch_echo" }],
     );

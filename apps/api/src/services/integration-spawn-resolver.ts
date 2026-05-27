@@ -32,7 +32,7 @@ import {
   resolveAfpsHttpDelivery,
 } from "@appstrate/connect";
 import type { AfpsHttpDelivery as ConnectAfpsHttpDelivery } from "@appstrate/connect";
-import { getToolUrlPatterns, getApiCallConfigs } from "@appstrate/core/integration";
+import { getApiCallConfigs } from "@appstrate/core/integration";
 import type {
   IntegrationManifest,
   ResolvedConnection,
@@ -306,12 +306,6 @@ async function resolveOne(
   // the slug + length cap.
   const namespace = integrationId;
 
-  // Phase 4 — narrow the MITM URL envelope to the union of `url_patterns`
-  // declared on the agent-selected tools (skipped for remote HTTP MCP).
-  const toolUrlEnvelope = isRemoteHttp
-    ? undefined
-    : computeToolUrlEnvelope(manifest, agentToolSelection);
-
   // The connect-login tool is a credential-acquisition primitive, never an
   // agent-facing capability — exclude it from the allowlist so the agent's
   // LLM can never invoke it directly. (It is normally not in the selection
@@ -387,68 +381,11 @@ async function resolveOne(
     // The agent author has to explicitly opt into each tool via the
     // editor UI.
     toolAllowlist,
-    ...(toolUrlEnvelope !== undefined ? { toolUrlEnvelope } : {}),
     ...(deliveries.connectLogin ? { connectLogin: deliveries.connectLogin } : {}),
     ...(deliveries.fileMounts && Object.keys(deliveries.fileMounts).length > 0
       ? { fileMounts: deliveries.fileMounts }
       : {}),
   };
-}
-
-/**
- * Build the {@link IntegrationSpawnSpec.toolUrlEnvelope} from the agent's
- * tool selection × the integration manifest's `tools.{name}.url_patterns`.
- *
- * Returns `undefined` (no extra MITM URL enforcement) when:
- *  - The agent didn't restrict tools (`agentToolSelection === undefined`).
- *  - The agent restricted to an empty set (handled by toolAllowlist alone).
- *  - ANY selected tool lacks a `url_patterns` declaration — we can't
- *    safely narrow the envelope without blocking that tool's legitimate
- *    traffic, so we fall back to per-auth `authorized_uris`.
- *
- * When every selected tool declares patterns, returns the deduplicated
- * union. Methods are unioned per pattern (a pattern declared twice with
- * different methods collapses to the merged set; pattern declared once
- * with methods + once without keeps methods omitted = "any method").
- *
- * Exported for unit testing; production callers go through
- * {@link resolveIntegrationSpawns}.
- */
-export function computeToolUrlEnvelope(
-  manifest: IntegrationManifest,
-  agentToolSelection: readonly string[] | undefined,
-): ReadonlyArray<{ pattern: string; methods?: readonly string[] }> | undefined {
-  if (agentToolSelection === undefined) return undefined;
-  if (agentToolSelection.length === 0) return undefined;
-  const merged = new Map<string, { pattern: string; methods?: Set<string>; anyMethod: boolean }>();
-  for (const toolName of agentToolSelection) {
-    const patterns = getToolUrlPatterns(manifest, toolName);
-    if (!patterns || patterns.length === 0) {
-      // Under-declared tool — bail out rather than over-restrict.
-      return undefined;
-    }
-    for (const entry of patterns) {
-      const existing = merged.get(entry.pattern);
-      if (!existing) {
-        const hasMethods = !!entry.methods && entry.methods.length > 0;
-        merged.set(entry.pattern, {
-          pattern: entry.pattern,
-          anyMethod: !hasMethods,
-          ...(hasMethods ? { methods: new Set(entry.methods) } : {}),
-        });
-      } else if (!existing.anyMethod && entry.methods && entry.methods.length > 0) {
-        for (const m of entry.methods) (existing.methods ??= new Set()).add(m);
-      } else {
-        existing.anyMethod = true;
-        delete existing.methods;
-      }
-    }
-  }
-  return [...merged.values()].map((e) =>
-    e.anyMethod || !e.methods
-      ? { pattern: e.pattern }
-      : { pattern: e.pattern, methods: [...e.methods].sort() },
-  );
 }
 
 interface ResolvedDeliveries {

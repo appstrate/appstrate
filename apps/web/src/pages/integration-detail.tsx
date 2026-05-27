@@ -1248,8 +1248,9 @@ export function IntegrationDetailPage() {
             ) : (
               <div className="grid gap-2">
                 {(detail.tool_catalog ?? []).map((tool) => {
-                  const scopes = tool.policy?.required_scopes ?? [];
-                  const patterns = tool.policy?.url_patterns ?? [];
+                  const scopesByAuth = Object.entries(tool.policy?.required_scopes ?? {}).filter(
+                    ([, s]) => s.length > 0,
+                  );
                   return (
                     <div
                       key={tool.name}
@@ -1258,18 +1259,16 @@ export function IntegrationDetailPage() {
                     >
                       <div className="flex flex-wrap items-baseline gap-2">
                         <span className="font-mono text-sm font-semibold">{tool.name}</span>
-                        {tool.policy?.required_auth_key && (
-                          <Badge variant="outline" className="text-[0.65rem]">
-                            auth: {tool.policy.required_auth_key}
-                          </Badge>
-                        )}
                       </div>
                       {tool.description && (
                         <p className="text-muted-foreground mt-1">{tool.description}</p>
                       )}
-                      {scopes.length > 0 && (
-                        <p className="text-muted-foreground mt-2">
+                      {scopesByAuth.map(([authKey, scopes]) => (
+                        <p key={authKey} className="text-muted-foreground mt-2">
                           {t("integration.tools.requires")}{" "}
+                          <Badge variant="outline" className="mr-1 font-mono text-[0.65rem]">
+                            {authKey}
+                          </Badge>
                           {scopes.map((s) => (
                             <Badge
                               key={s}
@@ -1280,22 +1279,7 @@ export function IntegrationDetailPage() {
                             </Badge>
                           ))}
                         </p>
-                      )}
-                      {patterns.length > 0 && (
-                        <details className="mt-2">
-                          <summary className="text-muted-foreground cursor-pointer text-[11px]">
-                            {t("integration.tools.urlPatterns", { count: patterns.length })}
-                          </summary>
-                          <ul className="text-muted-foreground mt-1 ml-3 list-disc font-mono text-[11px]">
-                            {patterns.map((p, i) => (
-                              <li key={i}>
-                                {p.methods?.length ? `${p.methods.join("|")} ` : ""}
-                                {p.pattern}
-                              </li>
-                            ))}
-                          </ul>
-                        </details>
-                      )}
+                      ))}
                     </div>
                   );
                 })}

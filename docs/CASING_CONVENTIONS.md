@@ -339,8 +339,7 @@ Treat any new management-CRUD route on a BA plugin table the same way (mirror th
 - `auths.{key}.delivery.http.{in, name, prefix, value, encoding, allow_server_override}`
 - `auths.{key}.delivery.env.{key}.{value, sensitive}`
 - `auths.{key}.delivery.files.{key}.{value, mode}`
-- `tools.{name}.{required_scopes, required_auth_key, url_patterns}`
-- `url_patterns[].{pattern, methods}`
+- `tools.{name}.{required_scopes}`
 - `hidden_tools`
 - `setup_guide.{callback_url_hint, steps[{label, url}]}`
 - `icon`
@@ -356,7 +355,7 @@ Treat any new management-CRUD route on a BA plugin table the same way (mirror th
 
 **Import-bundle response domain fields** (snake_case — `POST /api/packages/import-bundle` 201): `root_installed`, `root_package_id`, `root_version`, and per-item `imported[].version_id`.
 
-**Integration DTO domain fields** (snake_case, post Phase 4): `scopes_granted`, `needs_reconnection`, `owner_type`, `owner_name`, `auth_key`, `account_id`, `shared_with_org`, `identity_claims`, `block_user_connections`, `has_oauth_client`, `has_client_secret`, `redirect_uri`, `missing_scopes`, `resolved_missing_scopes`, `resolved_owned_by_actor`, `org_default_enforced`, `can_add_connection`, `tool_catalog`, `required_scopes`, `required_auth_key`, `url_patterns`, `source_id`, `source_type`, `client_id`, `client_secret`, `client_secret_hash`, `client_type`, `allowed_scopes`, `connected_at`, `force_account_select`, `connection_id`, `integration_package_id`, `agent_package_id`, `admin_pinned_connection_id`, `member_pinned_connection_id`, `org_default_connection_id`, `resolved_connection_id`, `owner_id`, `owner_user_id`, `owner_end_user_id`, `is_own`
+**Integration DTO domain fields** (snake_case, post Phase 4): `scopes_granted`, `needs_reconnection`, `owner_type`, `owner_name`, `auth_key`, `account_id`, `shared_with_org`, `identity_claims`, `block_user_connections`, `has_oauth_client`, `has_client_secret`, `redirect_uri`, `missing_scopes`, `resolved_missing_scopes`, `resolved_owned_by_actor`, `org_default_enforced`, `can_add_connection`, `tool_catalog`, `required_scopes`, `source_id`, `source_type`, `client_id`, `client_secret`, `client_secret_hash`, `client_type`, `allowed_scopes`, `connected_at`, `force_account_select`, `connection_id`, `integration_package_id`, `agent_package_id`, `admin_pinned_connection_id`, `member_pinned_connection_id`, `org_default_connection_id`, `resolved_connection_id`, `owner_id`, `owner_user_id`, `owner_end_user_id`, `is_own`
 
 **Internal sidecar↔platform wire fields** (snake_case, AFPS): the `/internal/integration-credentials/{scope}/{name}` GET + refresh endpoints emit all keys snake_case — `auth_key`, `auth_type`, `authorized_uris`, `scopes_granted`, `identity_claims`, `expires_at`, `delivery_plans`, `expires_at_epoch_ms`, and per-plan `header_name`, `header_prefix`, `allow_server_override`. The TS-internal source-of-truth type `IntegrationCredentialsWire` (in `@appstrate/connect/integration-credentials`) stays camelCase per the Zone 3 TS-internal convention; field-name translation happens at the JSON boundary via `serializeIntegrationCredentialsWire` (platform-side) and `normalizeIntegrationCredentialsWire` (sidecar-side). The legacy camelCase dual-emit was retired with AFPS — there is no carve-out for these endpoints. `audience` remains as a back-compat alias for `resource` (RFC 8707) and is dual-emitted for one release window with a `TODO(AFPS 2.1)` removal marker.
 

@@ -700,8 +700,8 @@ describe("Packages API", () => {
             },
           },
           tools_policy: {
-            list_messages: { required_scopes: ["read"] },
-            send_message: { required_scopes: ["send"] },
+            list_messages: { required_scopes: { primary: ["read"] } },
+            send_message: { required_scopes: { primary: ["send"] } },
           },
         },
       });

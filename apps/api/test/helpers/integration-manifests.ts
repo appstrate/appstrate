@@ -151,9 +151,7 @@ export function localIntegrationManifest(opts: {
   tools_policy?: Record<
     string,
     {
-      required_scopes?: string[];
-      required_auth_key?: string;
-      url_patterns?: Array<{ pattern: string; methods?: string[] }>;
+      required_scopes?: Record<string, string[]>;
     }
   >;
 }): IntegrationManifest {

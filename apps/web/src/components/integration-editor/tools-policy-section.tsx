@@ -6,13 +6,6 @@ import { Trash2, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { SectionCard } from "../section-card";
 import { StringListInput } from "./string-list-input";
 import { getToolsPolicy, setToolsPolicy, getAuths, type ToolPolicyState } from "./utils";
@@ -21,9 +14,6 @@ interface ToolsPolicySectionProps {
   manifest: Record<string, unknown>;
   onChange: (manifest: Record<string, unknown>) => void;
 }
-
-// Radix Select forbids an empty-string item value — sentinel for "no auth key".
-const NONE_AUTH_KEY = "__none__";
 
 export function ToolsPolicySection({ manifest, onChange }: ToolsPolicySectionProps) {
   const { t } = useTranslation(["agents", "common"]);
@@ -42,8 +32,10 @@ export function ToolsPolicySection({ manifest, onChange }: ToolsPolicySectionPro
   const update = (idx: number, patch: Partial<ToolPolicyState>) =>
     commit(rows.map((p, i) => (i === idx ? { ...p, ...patch } : p)));
 
-  const addPolicy = () =>
-    commit([...rows, { name: "", requiredAuthKey: "", requiredScopes: [], urlPatterns: [] }]);
+  const setAuthScopes = (idx: number, authKey: string, scopes: string[]) =>
+    update(idx, { requiredScopes: { ...rows[idx]!.requiredScopes, [authKey]: scopes } });
+
+  const addPolicy = () => commit([...rows, { name: "", requiredScopes: {} }]);
 
   return (
     <SectionCard
@@ -83,47 +75,27 @@ export function ToolsPolicySection({ manifest, onChange }: ToolsPolicySectionPro
             </Button>
           </div>
 
-          <div className="space-y-1">
-            <Label htmlFor={`tp-authkey-${idx}`}>
-              {t("integrationEditor.toolsPolicy.requiredAuthKey")}
-            </Label>
-            <Select
-              value={policy.requiredAuthKey || NONE_AUTH_KEY}
-              onValueChange={(v) => update(idx, { requiredAuthKey: v === NONE_AUTH_KEY ? "" : v })}
-            >
-              <SelectTrigger id={`tp-authkey-${idx}`}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NONE_AUTH_KEY}>
-                  {t("integrationEditor.toolsPolicy.authKeyNone")}
-                </SelectItem>
-                {authKeys.map((k) => (
-                  <SelectItem key={k} value={k}>
-                    {k}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="space-y-2">
+            <Label>{t("integrationEditor.toolsPolicy.requiredScopes")}</Label>
             <p className="text-muted-foreground text-xs">
-              {t("integrationEditor.toolsPolicy.requiredAuthKeyDesc")}
+              {t("integrationEditor.toolsPolicy.requiredScopesDesc")}
             </p>
+            {authKeys.length === 0 ? (
+              <p className="text-muted-foreground text-xs italic">
+                {t("integrationEditor.toolsPolicy.noAuths")}
+              </p>
+            ) : (
+              authKeys.map((k) => (
+                <StringListInput
+                  key={k}
+                  label={k}
+                  values={policy.requiredScopes[k] ?? []}
+                  onChange={(scopes) => setAuthScopes(idx, k, scopes)}
+                  placeholder="read"
+                />
+              ))
+            )}
           </div>
-
-          <StringListInput
-            label={t("integrationEditor.toolsPolicy.requiredScopes")}
-            values={policy.requiredScopes}
-            onChange={(requiredScopes) => update(idx, { requiredScopes })}
-            placeholder="read"
-          />
-
-          <StringListInput
-            label={t("integrationEditor.toolsPolicy.urlPatterns")}
-            values={policy.urlPatterns}
-            onChange={(urlPatterns) => update(idx, { urlPatterns })}
-            placeholder="https://api.example.com/issues/**"
-            description={t("integrationEditor.toolsPolicy.urlPatternsDesc")}
-          />
         </div>
       ))}
     </SectionCard>

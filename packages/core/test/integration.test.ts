@@ -18,9 +18,9 @@ import {
   getConnectToolNames,
   getDeclaredToolNames,
   getApiCallConfigs,
-  getToolUrlPatterns,
   getAvailableScopes,
   requiredAuthKeysForAgent,
+  connectableAuthKeysForAgent,
   requiredScopesForAgent,
   scopesContributedByTools,
   expandScopesGranted,
@@ -810,12 +810,11 @@ function multiAuthManifest(toolsPolicy: Record<string, unknown>): Record<string,
 }
 
 describe("integrationManifestSchema — tools_policy metadata", () => {
-  it("accepts a tool with required_scopes + url_patterns (single auth)", () => {
+  it("accepts a tool with per-auth required_scopes (single auth)", () => {
     const m = baseManifest({
       tools_policy: {
         list_messages: {
-          required_scopes: ["read"],
-          url_patterns: [{ pattern: "https://gmail.googleapis.com/**", methods: ["GET"] }],
+          required_scopes: { oauth: ["read"] },
         },
       },
     });
@@ -828,31 +827,33 @@ describe("integrationManifestSchema — tools_policy metadata", () => {
     expect(
       errorPaths(
         multiAuthManifest({
-          list_issues: { required_scopes: ["bogus"], required_auth_key: "oauth" },
+          list_issues: { required_scopes: { oauth: ["bogus"] } },
         }),
       ),
-    ).toContain("tools_policy.list_issues.required_scopes");
+    ).toContain("tools_policy.list_issues.required_scopes.oauth");
   });
 
-  it("rejects required_scopes on a multi-auth integration without required_auth_key", () => {
-    expect(errorPaths(multiAuthManifest({ list_issues: { required_scopes: ["repo"] } }))).toContain(
-      "tools_policy.list_issues.required_auth_key",
-    );
-  });
-
-  it("rejects a required_auth_key that matches no auth", () => {
+  it("rejects a required_scopes key that matches no auth", () => {
     expect(
       errorPaths(
         multiAuthManifest({
-          list_issues: { required_scopes: ["repo"], required_auth_key: "nope" },
+          list_issues: { required_scopes: { nope: ["repo"] } },
         }),
       ),
-    ).toContain("tools_policy.list_issues.required_auth_key");
+    ).toContain("tools_policy.list_issues.required_scopes.nope");
   });
 
   it("accepts a well-formed multi-auth tool", () => {
     const r = integrationManifestSchema.safeParse(
-      multiAuthManifest({ list_issues: { required_scopes: ["repo"], required_auth_key: "oauth" } }),
+      multiAuthManifest({ list_issues: { required_scopes: { oauth: ["repo"] } } }),
+    );
+    expect(r.success).toBe(true);
+  });
+
+  it("accepts scopes declared under multiple auths", () => {
+    // pat has no scope_catalog, so only declare an empty set there; oauth scoped.
+    const r = integrationManifestSchema.safeParse(
+      multiAuthManifest({ list_issues: { required_scopes: { oauth: ["repo"], pat: [] } } }),
     );
     expect(r.success).toBe(true);
   });
@@ -860,7 +861,7 @@ describe("integrationManifestSchema — tools_policy metadata", () => {
   it("accepts a tool without required_scopes (default behaviour)", () => {
     const r = integrationManifestSchema.safeParse(
       baseManifest({
-        tools_policy: { list_messages: { url_patterns: [{ pattern: "https://x/**" }] } },
+        tools_policy: { list_messages: {} },
       }),
     );
     expect(r.success).toBe(true);
@@ -961,12 +962,12 @@ describe("getApiCallConfigs", () => {
   });
 });
 
-describe("getDeclaredToolNames / getAvailableScopes / getToolUrlPatterns", () => {
+describe("getDeclaredToolNames / getAvailableScopes", () => {
   function withTools(): IntegrationManifest {
     const m = baseManifest({
       tools_policy: {
-        list_messages: { required_scopes: ["read"], url_patterns: [{ pattern: "https://x/**" }] },
-        send_message: { required_scopes: ["write"] },
+        list_messages: { required_scopes: { oauth: ["read"] } },
+        send_message: { required_scopes: { oauth: ["write"] } },
       },
     });
     const auths = m.auths as Record<string, Record<string, unknown>>;
@@ -991,13 +992,6 @@ describe("getDeclaredToolNames / getAvailableScopes / getToolUrlPatterns", () =>
 
   it("getAvailableScopes returns [] with no catalog", () => {
     expect(getAvailableScopes(parse(baseManifest()))).toEqual([]);
-  });
-
-  it("getToolUrlPatterns returns declared patterns / undefined", () => {
-    const m = withTools();
-    expect(getToolUrlPatterns(m, "list_messages")).toEqual([{ pattern: "https://x/**" }]);
-    expect(getToolUrlPatterns(m, "send_message")).toBeUndefined();
-    expect(getToolUrlPatterns(m, "absent")).toBeUndefined();
   });
 });
 
@@ -1046,8 +1040,8 @@ describe("getConnectToolNames — AFPS spec-natural", () => {
 function scopedManifest(): IntegrationManifest {
   const m = baseManifest({
     tools_policy: {
-      read_tool: { required_scopes: ["read:org"], required_auth_key: "oauth" },
-      admin_tool: { required_scopes: ["admin:org"], required_auth_key: "oauth" },
+      read_tool: { required_scopes: { oauth: ["read:org"] } },
+      admin_tool: { required_scopes: { oauth: ["admin:org"] } },
     },
   });
   const auths = m.auths as Record<string, Record<string, unknown>>;
@@ -1174,10 +1168,8 @@ describe("requiredAuthKeysForAgent", () => {
     expect(requiredAuthKeysForAgent(scopedManifest(), ["read_tool"], undefined)).toEqual(["oauth"]);
   });
 
-  it("multi-auth: routes a tool to its required_auth_key", () => {
-    const m = parse(
-      multiAuthManifest({ list_issues: { required_scopes: ["repo"], required_auth_key: "oauth" } }),
-    );
+  it("multi-auth: routes a tool to the auth keys in its required_scopes map", () => {
+    const m = parse(multiAuthManifest({ list_issues: { required_scopes: { oauth: ["repo"] } } }));
     expect(requiredAuthKeysForAgent(m, ["list_issues"], undefined)).toEqual(["oauth"]);
   });
 
@@ -1211,6 +1203,42 @@ describe("requiredAuthKeysForAgent", () => {
     expect(requiredAuthKeysForAgent(m, undefined, ["repo"])).toEqual(["oauth"]);
   });
 });
+
+// ─────────────────────────────────────────────
+// connectableAuthKeysForAgent
+// ─────────────────────────────────────────────
+
+describe("connectableAuthKeysForAgent", () => {
+  it("returns [] when the agent picked nothing", () => {
+    expect(connectableAuthKeysForAgent(multiAuthManifest_(), undefined, undefined)).toEqual([]);
+    expect(connectableAuthKeysForAgent(multiAuthManifest_(), [], [])).toEqual([]);
+  });
+
+  it("offers EVERY declared auth as a candidate, not just the scope-anchored one", () => {
+    // The scope-anchor pins list_issues to oauth, but a pat connection serves
+    // it equally — the picker must offer both (this is the schedule-override bug).
+    const m = parse(multiAuthManifest({ list_issues: { required_scopes: { oauth: ["repo"] } } }));
+    expect(connectableAuthKeysForAgent(m, ["list_issues"], undefined).sort()).toEqual([
+      "oauth",
+      "pat",
+    ]);
+  });
+
+  it("offers all declared auths on scope-only selection too", () => {
+    const m = parse(multiAuthManifest({}));
+    expect(connectableAuthKeysForAgent(m, undefined, ["repo"]).sort()).toEqual(["oauth", "pat"]);
+  });
+
+  it("single-auth integration returns the lone auth", () => {
+    expect(connectableAuthKeysForAgent(scopedManifest(), ["read_tool"], undefined)).toEqual([
+      "oauth",
+    ]);
+  });
+});
+
+function multiAuthManifest_(): IntegrationManifest {
+  return parse(multiAuthManifest({}));
+}
 
 // ─────────────────────────────────────────────
 // validateAgentIntegrationScopes
@@ -1256,7 +1284,7 @@ describe("validateAgentIntegrationScopes", () => {
             delivery: { env: { K: { value: "{$credential.k}" } } },
           },
         },
-        tools_policy: { real_tool: { required_scopes: [] } },
+        tools_policy: { real_tool: { required_scopes: {} } },
         _meta: { "dev.appstrate/api": { auths: { key: {} } } },
       }),
     );

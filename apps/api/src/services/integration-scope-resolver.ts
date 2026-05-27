@@ -8,8 +8,8 @@
  * unions the scopes contributed by each:
  *
  *   - `tools[]` declared by the agent → look up
- *     `integration.tools_policy[t].requiredScopes` (filtered by `requiredAuthKey`
- *     when multi-auth) and union them.
+ *     `integration.tools_policy[t].requiredScopes[authKey]` (the per-auth map)
+ *     and union them.
  *   - `scopes[]` declared by the agent → unioned as-is.
  *   - Agent declared the integration with no `integrations_configuration`
  *     entry (or one without `tools[]`) → contribute the union of *every*
@@ -51,7 +51,7 @@ export interface ComputeRequiredScopesResult {
 export interface ScopeResolverInput {
   scope: AppScope;
   integrationId: string;
-  /** Auth key on the integration manifest — drives `requiredAuthKey` filtering. */
+  /** Auth key on the integration manifest — selects the `required_scopes[authKey]` slice. */
   authKey: string;
 }
 

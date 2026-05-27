@@ -112,7 +112,6 @@ describe("resolveIntegrationSpawns — remote source", () => {
     });
     // Remote HTTP MCP bypasses the per-integration MITM listener.
     expect(spec.httpDeliveryAuths).toBeUndefined();
-    expect(spec.toolUrlEnvelope).toBeUndefined();
   });
 
   it("yields no spawn when a remote source omits source.remote.url", async () => {

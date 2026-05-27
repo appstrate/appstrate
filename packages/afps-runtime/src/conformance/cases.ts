@@ -744,8 +744,8 @@ const L1_TOOLS_POLICY: ConformanceCase = {
         },
       },
       tools_policy: {
-        list_things: { required_scopes: ["read"] },
-        write_thing: { required_scopes: ["write"] },
+        list_things: { required_scopes: { primary: ["read"] } },
+        write_thing: { required_scopes: { primary: ["write"] } },
       },
     };
     const result = integrationManifestSchema.safeParse(manifest);
@@ -756,14 +756,14 @@ const L1_TOOLS_POLICY: ConformanceCase = {
           .join("; ")}`,
       );
     }
-    const parsed = result.data as { tools_policy?: Record<string, { required_scopes?: string[] }> };
+    const parsed = result.data as {
+      tools_policy?: Record<string, { required_scopes?: Record<string, string[]> }>;
+    };
     if (!parsed.tools_policy || !parsed.tools_policy["list_things"]) {
       return fail("tools_policy not preserved on parsed manifest");
     }
-    if (
-      !Array.isArray(parsed.tools_policy["list_things"]!.required_scopes) ||
-      parsed.tools_policy["list_things"]!.required_scopes![0] !== "read"
-    ) {
+    // `required_scopes` is a per-auth map `{ <auth_key>: scopes[] }`.
+    if (parsed.tools_policy["list_things"]!.required_scopes?.["primary"]?.[0] !== "read") {
       return fail("tools_policy.required_scopes payload not preserved");
     }
     return pass();

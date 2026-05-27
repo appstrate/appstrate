@@ -21,7 +21,7 @@ import { useProvidersRegistry } from "../hooks/use-model-provider-credentials";
 import { findProviderByApiShapeAndBaseUrl } from "../lib/provider-registry-helpers";
 import { getProviderIcon } from "./icons";
 import { useIntegrationDetail, useIntegrationConnections } from "../hooks/use-integrations";
-import { requiredAuthKeysForAgent } from "@appstrate/core/integration";
+import { connectableAuthKeysForAgent } from "@appstrate/core/integration";
 import { connectionDisplayLabel } from "./integration-connect/connection-label";
 
 const INHERIT = "__inherit__";
@@ -350,16 +350,16 @@ function IntegrationOverrideRow({
   const { data: detail } = useIntegrationDetail(integration.id);
   const { data: connections } = useIntegrationConnections(integration.id);
   const displayName = detail?.manifest.display_name ?? integration.id;
-  const requiredAuthKeys = detail
-    ? requiredAuthKeysForAgent(detail.manifest, integration.tools)
+  const connectableAuthKeys = detail
+    ? connectableAuthKeysForAgent(detail.manifest, integration.tools)
     : [];
 
-  if (requiredAuthKeys.length === 0) return null;
+  if (connectableAuthKeys.length === 0) return null;
 
   return (
     <div className="space-y-1.5" data-testid={`schedule-conn-row-${integration.id}`}>
       <div className="text-xs font-medium">{displayName}</div>
-      {requiredAuthKeys.map((authKey) => {
+      {connectableAuthKeys.map((authKey) => {
         const candidates = (connections ?? []).filter((c) => c.auth_key === authKey);
         if (candidates.length === 0) {
           return (

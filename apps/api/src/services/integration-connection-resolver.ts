@@ -56,7 +56,7 @@ type PinRow = InferSelectModel<typeof integrationPins>;
 /**
  * Per-integration requirement compiled from the agent manifest. With the
  * flat model the resolver only needs to know "this integration is
- * needed" — the per-tool `requiredAuthKey` survives as input to OAuth
+ * needed" — the per-tool `required_scopes` map survives as input to OAuth
  * consent (which scopes to request at first-connect), not as a runtime
  * selector. Any connection on the integration is a valid runtime pick.
  */

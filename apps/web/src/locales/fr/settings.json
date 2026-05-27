@@ -713,8 +713,6 @@
   "integration.tools.intro": "Catalogue effectif des outils exposés à l'agent. Issu du mcp-server (MCPB) référencé, moins les outils explicitement cachés et les primitives connect.tool (run-start).",
   "integration.tools.none": "Aucun outil exposé.",
   "integration.tools.requires": "Scopes requis :",
-  "integration.tools.urlPatterns_one": "{{count}} pattern d'URL autorisé",
-  "integration.tools.urlPatterns_other": "{{count}} patterns d'URL autorisés",
   "integration.auth.none": "Cette intégration ne déclare aucune authentification — rien à connecter.",
   "integration.section.oauthClient": "Client OAuth (admin)",
   "integration.oauthClient.configured": "Configuré",

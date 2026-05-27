@@ -181,7 +181,7 @@ describe("resolveConnections — admin pin (cascade layer 1)", () => {
 
   it("pin on a DIFFERENT auth shape still wins (oauth pin overrides agent's pat default)", () => {
     // The reason the flat model exists: a PAT-pinned connection MUST win
-    // even when the agent's tools nominally declare requiredAuthKey: oauth.
+    // even when the agent's tools nominally scope their required_scopes to oauth.
     const patConn = conn({ authKey: "pat" });
     const oauthConn = conn({ authKey: "oauth" });
     const result = resolveConnections({
@@ -518,7 +518,7 @@ describe("resolveConnections — insufficient scopes on resolved connection", ()
           },
         },
       },
-      tools_policy: { t1: { required_scopes: ["repo"] } },
+      tools_policy: { t1: { required_scopes: { oauth: ["repo"] } } },
     } as unknown as IntegrationManifest;
   }
 
@@ -680,7 +680,7 @@ describe("resolveConnections — org default", () => {
           },
         },
       },
-      tools_policy: { t1: { required_scopes: ["repo"] } },
+      tools_policy: { t1: { required_scopes: { oauth: ["repo"] } } },
     } as unknown as IntegrationManifest;
     const def = conn({ sharedWithOrg: true, scopesGranted: [] });
     const result = resolveConnections({

@@ -169,19 +169,16 @@ describe("integration-editor tools_policy", () => {
     const m = setToolsPolicy({}, [
       {
         name: "list_issues",
-        requiredAuthKey: "primary",
-        requiredScopes: ["read"],
-        urlPatterns: ["https://api.x.test/issues/**"],
+        requiredScopes: { primary: ["read"], pat: [] },
       },
     ]);
     const tp = (m.tools_policy as any).list_issues;
-    expect(tp.required_auth_key).toBe("primary");
-    expect(tp.required_scopes).toEqual(["read"]);
-    expect(tp.url_patterns).toEqual([{ pattern: "https://api.x.test/issues/**" }]);
+    // Empty per-auth arrays are dropped; only non-empty kept.
+    expect(tp.required_scopes).toEqual({ primary: ["read"] });
 
     const back = getToolsPolicy(m)[0]!;
     expect(back.name).toBe("list_issues");
-    expect(back.urlPatterns).toEqual(["https://api.x.test/issues/**"]);
+    expect(back.requiredScopes).toEqual({ primary: ["read"] });
   });
 
   it("removes tools_policy entirely when the list is empty", () => {

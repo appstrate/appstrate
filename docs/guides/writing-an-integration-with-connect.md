@@ -539,29 +539,22 @@ introspection of the MCP endpoint; for `api`, there is no MCP-tool catalog and
 ```jsonc
 "tools_policy": {
   "list_issues": {
-    "required_scopes":   ["repo"],
-    "required_auth_key": "oauth",
-    "url_patterns": [
-      { "pattern": "https://api.github.com/repos/**", "methods": ["GET"] }
-    ]
+    "required_scopes": { "oauth": ["repo"] }
   },
   "create_issue": {
-    "required_scopes":   ["repo", "issues:write"],
-    "required_auth_key": "oauth",
-    "url_patterns": [
-      { "pattern": "https://api.github.com/repos/**/issues", "methods": ["POST"] }
-    ]
+    "required_scopes": { "oauth": ["repo", "issues:write"] }
   }
 }
 ```
 
-- `required_scopes` (array of strings) — scopes the tool requires; unions into the
-  agent-install scope set (§7.4).
-- `required_auth_key` (string) — selects which `auths.<key>` entry the tool uses
-  (multi-auth integrations).
-- `url_patterns` (array of `{ pattern, methods? }`) — defence-in-depth allowlist,
-  matched per request by the MITM proxy before credential injection. Glob grammar:
-  `*` (single segment), `**` (multi-segment).
+- `required_scopes` (per-auth map `{ <authKey>: string[] }`) — scopes the tool
+  requires, keyed by the `auths.<key>` entry that grants them. Each key MUST be a
+  declared `auths` entry, and its scopes MUST be ⊆ that auth's `scope_catalog`. A
+  tool MAY list scopes under multiple auths. The selected scopes union into the
+  agent-install scope set (§7.4) per auth. This is consent inference only — an auth
+  absent from the map serves the tool with no scope requirement, and it is NOT an
+  exclusivity lock: any connected auth (e.g. a `pat` alongside `oauth`) may still
+  serve the tool at runtime.
 
 ### `hidden_tools`
 

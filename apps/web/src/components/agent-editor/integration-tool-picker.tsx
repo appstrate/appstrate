@@ -147,7 +147,7 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
   const inferredScopes = new Map<string, string[]>();
   for (const toolName of entry.tools ?? []) {
     const meta = catalogByName.get(toolName);
-    for (const scope of meta?.policy?.required_scopes ?? []) {
+    for (const scope of Object.values(meta?.policy?.required_scopes ?? {}).flat()) {
       const existing = inferredScopes.get(scope) ?? [];
       if (!existing.includes(toolName)) existing.push(toolName);
       inferredScopes.set(scope, existing);
@@ -291,7 +291,9 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
           </p>
           <div className="grid gap-1.5">
             {nativeCatalog.map((entry) => {
-              const requiredScopes = entry.policy?.required_scopes ?? [];
+              const requiredScopes = [
+                ...new Set(Object.values(entry.policy?.required_scopes ?? {}).flat()),
+              ];
               return (
                 <label
                   key={entry.name}

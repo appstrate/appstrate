@@ -74,7 +74,7 @@ interface AgentIntegrationsBlockProps {
  *   ✅ ok
  *
  * Per-tool scope inference (required = ⋃ tools.{t}.required_scopes for selected
- * tools, filtered by requiredAuthKey) is recomputed client-side so the badge
+ * tools, from the per-auth required_scopes map) is recomputed client-side so the badge
  * never lags the agent's editor state. The exact same logic powers the 412
  * server-side; the modal (Phase C) is the recovery path when this block is
  * stale or the actor hits Run before refreshing.

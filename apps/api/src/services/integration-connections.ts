@@ -1023,12 +1023,6 @@ export async function getIntegrationAuthStatuses(
             ...(entry.policy.requiredScopes !== undefined
               ? { required_scopes: entry.policy.requiredScopes }
               : {}),
-            ...(entry.policy.requiredAuthKey !== undefined
-              ? { required_auth_key: entry.policy.requiredAuthKey }
-              : {}),
-            ...(entry.policy.urlPatterns !== undefined
-              ? { url_patterns: entry.policy.urlPatterns }
-              : {}),
           },
         }
       : {}),

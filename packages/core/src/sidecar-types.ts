@@ -366,33 +366,6 @@ export interface IntegrationSpawnSpec {
    */
   toolAllowlist: readonly string[];
   /**
-   * Niveau 2 Phase 4 — URL-pattern envelope enforced by the sidecar
-   * MITM proxy. Defence-in-depth on top of `toolAllowlist`: even if a
-   * registered tool somehow issues a request outside its declared URL
-   * surface (compromised integration code, prompt-injection coercing
-   * the integration to talk to an unrelated endpoint), the MITM refuses
-   * the request before the credential is injected upstream.
-   *
-   * Resolved by the platform as `⋃ manifest.tools_policy[t].url_patterns` for
-   * every `t` in {@link toolAllowlist}. Only emitted when EVERY tool in
-   * the allowlist declares non-empty `url_patterns` — a single tool
-   * without patterns means we can't safely enforce (we'd block legit
-   * traffic), so the field is left `undefined` (no extra enforcement).
-   *
-   * `undefined` preserves the historical behaviour where only the
-   * per-auth `authorized_uris` allowlist gates outbound traffic. The
-   * envelope is narrower than `authorized_uris` and is checked first;
-   * `authorized_uris` still applies (via {@link httpDeliveryAuths}) for
-   * deciding which credential to inject.
-   *
-   * `methods` (when present) constrains the HTTP verb; omitted means
-   * any method matches.
-   */
-  toolUrlEnvelope?: ReadonlyArray<{
-    pattern: string;
-    methods?: readonly string[];
-  }>;
-  /**
    * connect.tool substrate — `runAt: "run-start"` acquisition (P2). When
    * set, the integration's session is NOT pre-resolved at spawn: only the
    * login secret (`inputs`) was stored at dashboard connect. The sidecar

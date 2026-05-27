@@ -187,344 +187,429 @@
   },
   "tools_policy": {
     "get_me": {
-      "required_scopes": ["read:user"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["read:user"]
+      }
     },
     "get_teams": {
-      "required_scopes": ["read:org"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["read:org"]
+      }
     },
     "get_team_members": {
-      "required_scopes": ["read:org"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["read:org"]
+      }
     },
     "search_repositories": {
-      "required_scopes": ["public_repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
     },
     "search_code": {
-      "required_scopes": ["public_repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
     },
     "list_branches": {
-      "required_scopes": ["public_repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
     },
     "list_commits": {
-      "required_scopes": ["public_repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
     },
     "get_commit": {
-      "required_scopes": ["public_repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
     },
     "list_tags": {
-      "required_scopes": ["public_repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
     },
     "get_tag": {
-      "required_scopes": ["public_repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
     },
     "get_file_contents": {
-      "required_scopes": ["public_repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
     },
     "list_releases": {
-      "required_scopes": ["public_repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
     },
     "get_latest_release": {
-      "required_scopes": ["public_repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
     },
     "get_release_by_tag": {
-      "required_scopes": ["public_repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
     },
     "list_repository_collaborators": {
-      "required_scopes": ["repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
     },
     "create_branch": {
-      "required_scopes": ["repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
     },
     "create_or_update_file": {
-      "required_scopes": ["repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
     },
     "create_repository": {
-      "required_scopes": ["repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
     },
     "delete_file": {
-      "required_scopes": ["repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
     },
     "fork_repository": {
-      "required_scopes": ["public_repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
     },
     "push_files": {
-      "required_scopes": ["repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
     },
     "search_issues": {
-      "required_scopes": ["public_repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
     },
     "list_issues": {
-      "required_scopes": ["public_repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
     },
     "issue_read": {
-      "required_scopes": ["public_repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
     },
     "list_issue_types": {
-      "required_scopes": ["public_repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
     },
     "issue_write": {
-      "required_scopes": ["repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
     },
     "add_issue_comment": {
-      "required_scopes": ["repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
     },
     "sub_issue_write": {
-      "required_scopes": ["repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
     },
     "search_pull_requests": {
-      "required_scopes": ["public_repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
     },
     "list_pull_requests": {
-      "required_scopes": ["public_repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
     },
     "pull_request_read": {
-      "required_scopes": ["public_repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
     },
     "create_pull_request": {
-      "required_scopes": ["repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
     },
     "update_pull_request": {
-      "required_scopes": ["repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
     },
     "update_pull_request_branch": {
-      "required_scopes": ["repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
     },
     "merge_pull_request": {
-      "required_scopes": ["repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
     },
     "pull_request_review_write": {
-      "required_scopes": ["repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
     },
     "add_comment_to_pending_review": {
-      "required_scopes": ["repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
     },
     "add_reply_to_pull_request_comment": {
-      "required_scopes": ["repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
     },
     "actions_list": {
-      "required_scopes": ["workflow"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["workflow"]
+      }
     },
     "actions_get": {
-      "required_scopes": ["workflow"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["workflow"]
+      }
     },
     "get_job_logs": {
-      "required_scopes": ["workflow"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["workflow"]
+      }
     },
     "actions_run_trigger": {
-      "required_scopes": ["workflow"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["workflow"]
+      }
     },
     "list_code_scanning_alerts": {
-      "required_scopes": ["security_events"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["security_events"]
+      }
     },
     "get_code_scanning_alert": {
-      "required_scopes": ["security_events"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["security_events"]
+      }
     },
     "list_secret_scanning_alerts": {
-      "required_scopes": ["security_events"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["security_events"]
+      }
     },
     "get_secret_scanning_alert": {
-      "required_scopes": ["security_events"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["security_events"]
+      }
     },
     "list_dependabot_alerts": {
-      "required_scopes": ["security_events"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["security_events"]
+      }
     },
     "get_dependabot_alert": {
-      "required_scopes": ["security_events"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["security_events"]
+      }
     },
     "list_notifications": {
-      "required_scopes": ["notifications"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["notifications"]
+      }
     },
     "get_notification_details": {
-      "required_scopes": ["notifications"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["notifications"]
+      }
     },
     "mark_all_notifications_read": {
-      "required_scopes": ["notifications"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["notifications"]
+      }
     },
     "dismiss_notification": {
-      "required_scopes": ["notifications"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["notifications"]
+      }
     },
     "manage_notification_subscription": {
-      "required_scopes": ["notifications"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["notifications"]
+      }
     },
     "manage_repository_notification_subscription": {
-      "required_scopes": ["notifications"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["notifications"]
+      }
     },
     "search_users": {
-      "required_scopes": [],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": []
+      }
     },
     "search_orgs": {
-      "required_scopes": [],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": []
+      }
     },
     "projects_list": {
-      "required_scopes": ["read:project"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["read:project"]
+      }
     },
     "projects_get": {
-      "required_scopes": ["read:project"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["read:project"]
+      }
     },
     "projects_write": {
-      "required_scopes": ["project"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["project"]
+      }
     },
     "list_gists": {
-      "required_scopes": ["gist"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["gist"]
+      }
     },
     "get_gist": {
-      "required_scopes": ["gist"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["gist"]
+      }
     },
     "create_gist": {
-      "required_scopes": ["gist"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["gist"]
+      }
     },
     "update_gist": {
-      "required_scopes": ["gist"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["gist"]
+      }
     },
     "list_discussions": {
-      "required_scopes": ["read:discussion"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["read:discussion"]
+      }
     },
     "list_discussion_categories": {
-      "required_scopes": ["read:discussion"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["read:discussion"]
+      }
     },
     "get_discussion": {
-      "required_scopes": ["read:discussion"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["read:discussion"]
+      }
     },
     "get_discussion_comments": {
-      "required_scopes": ["read:discussion"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["read:discussion"]
+      }
     },
     "discussion_comment_write": {
-      "required_scopes": ["write:discussion"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["write:discussion"]
+      }
     },
     "assign_copilot_to_issue": {
-      "required_scopes": ["repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
     },
     "request_copilot_review": {
-      "required_scopes": ["repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
     },
     "create_pull_request_with_copilot": {
-      "required_scopes": ["repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
     },
     "list_copilot_spaces": {
-      "required_scopes": ["read:user"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["read:user"]
+      }
     },
     "get_copilot_space": {
-      "required_scopes": ["read:user"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["read:user"]
+      }
     },
     "get_repository_tree": {
-      "required_scopes": ["public_repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
     },
     "list_label": {
-      "required_scopes": ["public_repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
     },
     "get_label": {
-      "required_scopes": ["public_repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
     },
     "label_write": {
-      "required_scopes": ["repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
     },
     "list_starred_repositories": {
-      "required_scopes": ["public_repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
     },
     "star_repository": {
-      "required_scopes": ["public_repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
     },
     "unstar_repository": {
-      "required_scopes": ["public_repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
     },
     "list_global_security_advisories": {
-      "required_scopes": [],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": []
+      }
     },
     "get_global_security_advisory": {
-      "required_scopes": [],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": []
+      }
     },
     "list_repository_security_advisories": {
-      "required_scopes": ["repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
     },
     "list_org_repository_security_advisories": {
-      "required_scopes": ["repo"],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
     },
     "github_support_docs_search": {
-      "required_scopes": [],
-      "required_auth_key": "oauth"
+      "required_scopes": {
+        "oauth": []
+      }
     }
   },
   "_meta": {

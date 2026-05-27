@@ -81,10 +81,12 @@ export type IntegrationUploadProtocol = string;
  *   2. `default_scopes` ⊆ `scope_catalog` (when both declared).
  *   3. `scope_catalog[].implies` targets MUST exist in the catalog; no
  *      self-imply.
- *   4. `tools_policy.{name}.required_auth_key` MUST match an `auths` key, and
- *      `required_scopes` ⊆ the targeted auth's `scope_catalog`; a tool that
- *      declares `required_scopes` on a multi-auth integration MUST disambiguate
- *      with `required_auth_key`.
+ *   4. `tools_policy.{name}.required_scopes` is a per-auth map
+ *      `{ <auth_key>: string[] }`: every key MUST be a declared `auths` entry
+ *      and its scopes MUST be ⊆ that auth's `scope_catalog`. Keying by auth
+ *      binds scopes to an auth for consent inference only — NOT an exclusivity
+ *      lock (any connected auth may serve the tool at runtime; see
+ *      {@link connectableAuthKeysForAgent}).
  */
 /**
  * Walk an arbitrary JSON-Schema-like object tree and emit the path of every
@@ -261,44 +263,33 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
     }
   }
 
-  // (4) tools_policy.{name} cross-field validation.
+  // (4) tools_policy.{name} cross-field validation. `required_scopes` is a
+  // per-auth map `{ <auth_key>: string[] }` — every key MUST be a declared
+  // auth, and each auth's scopes MUST be ⊆ that auth's `scope_catalog`.
   if (manifest.tools_policy) {
-    const authKeys = Object.keys(auths);
+    const authKeys = new Set(Object.keys(auths));
     for (const [toolName, tool] of Object.entries(manifest.tools_policy)) {
-      let targetAuthKey: string | undefined;
-      if (tool.required_auth_key) {
-        if (!authKeys.includes(tool.required_auth_key)) {
+      const requiredScopes = tool.required_scopes;
+      if (!requiredScopes) continue;
+      for (const [authKey, scopes] of Object.entries(requiredScopes)) {
+        if (!authKeys.has(authKey)) {
           ctx.addIssue({
             code: "custom",
-            message: `tools_policy.${toolName}.required_auth_key "${tool.required_auth_key}" does not match any auths.{key}`,
-            path: ["tools_policy", toolName, "required_auth_key"],
+            message: `tools_policy.${toolName}.required_scopes key "${authKey}" does not match any auths.{key}`,
+            path: ["tools_policy", toolName, "required_scopes", authKey],
           });
           continue;
         }
-        targetAuthKey = tool.required_auth_key;
-      } else if (authKeys.length === 1) {
-        targetAuthKey = authKeys[0];
-      } else if (authKeys.length > 1 && tool.required_scopes && tool.required_scopes.length > 0) {
-        ctx.addIssue({
-          code: "custom",
-          message: `tools_policy.${toolName}.required_scopes declared but the integration has multiple auths; add required_auth_key to disambiguate`,
-          path: ["tools_policy", toolName, "required_auth_key"],
-        });
-        continue;
-      }
-
-      if (targetAuthKey && tool.required_scopes && tool.required_scopes.length > 0) {
-        const auth = auths[targetAuthKey];
-        if (auth?.scope_catalog) {
-          const catalog = new Set(auth.scope_catalog.map((s) => s.value));
-          for (const s of tool.required_scopes) {
-            if (!catalog.has(s)) {
-              ctx.addIssue({
-                code: "custom",
-                message: `tools_policy.${toolName}.required_scopes contains "${s}" not declared in auths.${targetAuthKey}.scope_catalog`,
-                path: ["tools_policy", toolName, "required_scopes"],
-              });
-            }
+        const auth = auths[authKey];
+        if (!auth?.scope_catalog) continue;
+        const catalog = new Set(auth.scope_catalog.map((s) => s.value));
+        for (const s of scopes) {
+          if (!catalog.has(s)) {
+            ctx.addIssue({
+              code: "custom",
+              message: `tools_policy.${toolName}.required_scopes contains "${s}" not declared in auths.${authKey}.scope_catalog`,
+              path: ["tools_policy", toolName, "required_scopes", authKey],
+            });
           }
         }
       }
@@ -442,9 +433,8 @@ export function getConnectToolNames(manifest: IntegrationManifest): string[] {
 
 /** Effective per-tool policy as carried in `integration.tools_policy[name]`. */
 export interface IntegrationToolPolicy {
-  requiredScopes?: readonly string[];
-  requiredAuthKey?: string;
-  urlPatterns?: ReadonlyArray<{ pattern: string; methods?: readonly string[] }>;
+  /** Per-auth scopes the tool requires: `{ <auth_key>: scopes[] }`. */
+  requiredScopes?: Readonly<Record<string, readonly string[]>>;
 }
 
 /** One entry in the resolved agent-facing tool catalog. */
@@ -514,9 +504,7 @@ export function resolveIntegrationToolCatalog(
     out.push({
       ...entry,
       policy: {
-        requiredScopes: raw.required_scopes as readonly string[] | undefined,
-        requiredAuthKey: raw.required_auth_key as string | undefined,
-        urlPatterns: raw.url_patterns as IntegrationToolPolicy["urlPatterns"],
+        requiredScopes: raw.required_scopes as IntegrationToolPolicy["requiredScopes"],
       },
     });
   }
@@ -589,22 +577,6 @@ export function isApiCallToolName(name: string): boolean {
 }
 
 /**
- * URL patterns a single tool will reach upstream, looked up against
- * `tools_policy.{name}.url_patterns`. Returns `undefined` when the tool isn't
- * declared or didn't declare patterns. The distinction between "no entry" and
- * "empty array" matters: an explicit empty array means "tool talks to
- * nothing".
- */
-export function getToolUrlPatterns(
-  manifest: IntegrationManifest,
-  toolName: string,
-): ReadonlyArray<{ pattern: string; methods?: readonly string[] }> | undefined {
-  return manifest.tools_policy?.[toolName]?.url_patterns as
-    | ReadonlyArray<{ pattern: string; methods?: readonly string[] }>
-    | undefined;
-}
-
-/**
  * Which auth keys an agent actually needs connected, given its declared
  * `tools[]` selection on the integration. Returns `[]` when the agent picked
  * zero tools and zero scopes — the integration is then declared-but-inert and
@@ -626,8 +598,10 @@ export function requiredAuthKeysForAgent(
   const out = new Set<string>();
   for (const toolName of agentTools ?? []) {
     const tool = toolsRecord[toolName];
-    if (!tool || typeof tool.required_auth_key !== "string") continue;
-    if (declaredAuths.includes(tool.required_auth_key)) out.add(tool.required_auth_key);
+    if (!tool?.required_scopes) continue;
+    for (const authKey of Object.keys(tool.required_scopes)) {
+      if (declaredAuths.includes(authKey)) out.add(authKey);
+    }
   }
   // The `api_call` tool(s) aren't in `manifest.tools_policy`; pin each one's
   // auth (from `_meta["dev.appstrate/api"]`) when the matching tool is selected.
@@ -649,6 +623,29 @@ export function requiredAuthKeysForAgent(
 }
 
 /**
+ * Which auth keys a connection COULD satisfy for the agent's tool selection —
+ * the candidate set for a connection *picker* (run/schedule override UI), as
+ * opposed to {@link requiredAuthKeysForAgent} which returns the auths that
+ * MUST be connected (install-gating, OAuth scope union, runtime resolver).
+ *
+ * `tools_policy.{tool}.required_scopes` only *binds a tool's scopes to an auth*
+ * (per-auth map) for consent inference — it is NOT an exclusivity lock. No
+ * tool→auth hard-lock is modelled today, so any declared auth (e.g. a `pat`
+ * alternative alongside `oauth`) can serve any selected tool. The picker must
+ * therefore offer every declared auth, not just a scope-referenced one. Returns
+ * `[]` when the agent picked zero tools and zero scopes (declared-but-inert).
+ */
+export function connectableAuthKeysForAgent(
+  manifest: IntegrationManifest,
+  agentTools: readonly string[] | undefined,
+  agentScopes?: readonly string[] | undefined,
+): string[] {
+  const hasSelection = (agentTools?.length ?? 0) > 0 || (agentScopes?.length ?? 0) > 0;
+  if (!hasSelection) return [];
+  return manifest.auths ? Object.keys(manifest.auths) : [];
+}
+
+/**
  * Required oauth scopes for an agent's use of (integration, authKey): the
  * union of tool-inferred scopes ({@link scopesContributedByTools}) and the
  * agent's explicitly-selected scopes.
@@ -665,9 +662,11 @@ export function requiredScopesForAgent(input: {
 }
 
 /**
- * Union of `required_scopes` across the agent's selected tools, filtered by
- * `required_auth_key` so multi-auth integrations stay scoped to the current
- * auth. Returns `[]` when the agent picked zero tools.
+ * Union of `required_scopes[authKey]` across the agent's selected tools — the
+ * scopes the given auth must be granted for the selected tools. With the
+ * per-auth `required_scopes` map this is a direct lookup by `authKey`; tools
+ * that declare no scopes under `authKey` contribute nothing. Returns `[]` when
+ * the agent picked zero tools.
  */
 export function scopesContributedByTools(input: {
   manifest: IntegrationManifest;
@@ -678,18 +677,11 @@ export function scopesContributedByTools(input: {
   const toolsRecord = input.manifest.tools_policy;
   if (!toolsRecord) return [];
 
-  const authKeys = input.manifest.auths ? Object.keys(input.manifest.auths) : [];
-  const isSingleAuth = authKeys.length === 1;
-
   const out = new Set<string>();
   for (const toolName of input.agentTools) {
-    const tool = toolsRecord[toolName];
-    const requiredScopes = tool?.required_scopes as string[] | undefined;
-    if (!tool || !requiredScopes || requiredScopes.length === 0) continue;
-    if (isSingleAuth) {
-      if (authKeys[0] !== input.authKey) continue;
-    } else if (tool.required_auth_key !== input.authKey) continue;
-    for (const s of requiredScopes) out.add(s);
+    const scopesForAuth = toolsRecord[toolName]?.required_scopes?.[input.authKey];
+    if (!scopesForAuth) continue;
+    for (const s of scopesForAuth) out.add(s);
   }
   return [...out];
 }

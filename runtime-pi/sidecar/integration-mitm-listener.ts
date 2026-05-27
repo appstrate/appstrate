@@ -64,7 +64,6 @@ import {
 import type { CaBundle } from "@appstrate/connect/proxy-ca-planner";
 import {
   HOP_BY_HOP_HEADERS,
-  matchesAuthorizedUriSpec,
   substituteVars,
   findUnresolvedPlaceholders,
 } from "@appstrate/connect/proxy-primitives";
@@ -99,21 +98,6 @@ export interface MitmCredentialSource {
   activeInputs?(): Record<string, string> | null;
 }
 
-/**
- * Niveau 2 Phase 4 — defence-in-depth URL envelope. When provided, every
- * upstream request must match at least one entry (pattern + optional
- * method set) before the MITM proxy injects credentials and forwards.
- * Patterns share the same glob grammar (`*` / `**`) as the per-auth
- * `authorizedUris`. Omitted on a pattern = any method matches.
- *
- * `undefined` (or an empty array) skips this check entirely — the
- * legacy per-auth `authorizedUris` still applies via the planner.
- */
-export interface ToolUrlEnvelopeEntry {
-  pattern: string;
-  methods?: readonly string[];
-}
-
 export interface CreateMitmListenerOptions {
   caBundle: CaBundle;
   minter: CertMinter;
@@ -128,8 +112,6 @@ export interface CreateMitmListenerOptions {
   fetch?: typeof fetch;
   /** Telemetry sink — non-fatal events surface here. */
   onEvent?: (event: MitmListenerEvent) => void;
-  /** See {@link ToolUrlEnvelopeEntry}. */
-  toolUrlEnvelope?: readonly ToolUrlEnvelopeEntry[];
 }
 
 export type MitmListenerEvent =
@@ -171,8 +153,6 @@ export function createIntegrationMitmListener(
   const maxRequestBytes = options.maxRequestBytes ?? 10 * 1024 * 1024;
   const fetchFn = options.fetch ?? globalThis.fetch;
   const emit = options.onEvent ?? (() => {});
-  const envelope =
-    options.toolUrlEnvelope && options.toolUrlEnvelope.length > 0 ? options.toolUrlEnvelope : null;
 
   // Per-SNI cache of Bun.serve instances.
   const tlsServers = new Map<string, Promise<BunServerHandle>>();
@@ -202,15 +182,7 @@ export function createIntegrationMitmListener(
         hostname: "127.0.0.1",
         tls: { cert: leaf.certPem, key: leaf.keyPem },
         fetch: (req) =>
-          handleInnerRequest(
-            req,
-            sniHost,
-            options.credentials,
-            fetchFn,
-            maxRequestBytes,
-            emit,
-            envelope,
-          ),
+          handleInnerRequest(req, sniHost, options.credentials, fetchFn, maxRequestBytes, emit),
       });
     })();
     tlsServers.set(sniHost, p);
@@ -592,7 +564,6 @@ async function handleInnerRequest(
   fetchFn: typeof fetch,
   maxRequestBytes: number,
   emit: (event: MitmListenerEvent) => void,
-  envelope: readonly ToolUrlEnvelopeEntry[] | null,
 ): Promise<Response> {
   // Re-build the upstream URL from the SNI host + request path. Bun
   // gives us the absolute URL but it points at our local 127.0.0.1
@@ -601,8 +572,8 @@ async function handleInnerRequest(
   let targetUrl = `https://${sniHost}${incoming.pathname}${incoming.search}`;
 
   // Read the body up-front. Connect-login substitution (below) may need
-  // to rewrite it, and the envelope/planner checks must run on the
-  // SUBSTITUTED url, so the body read can no longer be deferred past them.
+  // to rewrite it, and the planner check must run on the SUBSTITUTED url,
+  // so the body read can no longer be deferred past it.
   let body: Buffer = Buffer.alloc(0);
   if (req.body) {
     try {
@@ -628,11 +599,10 @@ async function handleInnerRequest(
   // and never a tool result.
   let headersForOutbound = req.headers;
 
-  // Connect-login transient-input substitution (P1). Runs BEFORE the
-  // envelope check and before `planMitmAction`, so the envelope is enforced
-  // against the substituted URL and the credential header only materialises
-  // for a request that will actually be forwarded. Fail-closed: an
-  // unresolved placeholder refuses the request rather than forwarding a
+  // Connect-login transient-input substitution (P1). Runs BEFORE
+  // `planMitmAction`, so the credential header only materialises for a
+  // request that will actually be forwarded. Fail-closed: an unresolved
+  // placeholder refuses the request rather than forwarding a
   // half-substituted literal upstream.
   const inputs = credentials.activeInputs?.() ?? null;
   if (inputs) {
@@ -654,27 +624,6 @@ async function handleInnerRequest(
     const subbed = new Headers();
     for (const [k, v] of Object.entries(result.headers)) subbed.set(k, v);
     headersForOutbound = subbed;
-  }
-
-  // Phase 4 — envelope check happens BEFORE credential injection (and now
-  // AFTER connect-login substitution, so the post-substitution URL is what
-  // gets matched). A request that won't be forwarded must never see the
-  // credential header materialise, even briefly. Per-auth `authorizedUris`
-  // still runs downstream via `planMitmAction`; envelope is the tighter
-  // tool-derived restriction.
-  //
-  // The envelope is derived from the AGENT's selected tools (their
-  // `urlPatterns`). It must NOT gate the connect-login (`login` tool) phase:
-  // the login tool runs at run-start, is never agent-selected, and walks its
-  // own URLs (csrf → signin → CAS → session) which the agent's data-tool
-  // envelope deliberately excludes. While a connect-login is in flight
-  // (`inputs` set), the per-auth `authorizedUris` floor — enforced downstream
-  // by `planMitmAction` — remains the bound; the agent-tool envelope does not
-  // apply. Without this, the login tool's first request (e.g. `/api/auth/csrf`)
-  // is 403'd by the envelope and the session is never minted.
-  if (!inputs && envelope && !matchesEnvelope(envelope, targetUrl, req.method)) {
-    emit({ kind: "request-refused", url: targetUrl, reason: "tool url envelope" });
-    return new Response("MITM listener: URL outside tool envelope", { status: 403 });
   }
 
   const callerHeaderNames: string[] = [];
@@ -797,27 +746,6 @@ function passthroughResponse(response: Response): Response {
 // ─────────────────────────────────────────────
 // CONNECT preamble parsing
 // ─────────────────────────────────────────────
-
-/**
- * Phase 4 — check whether `url` (with the given `method`) matches any
- * envelope entry. Pattern grammar mirrors the AFPS 1.3 `authorizedUris`
- * matcher exposed by `@appstrate/connect/proxy-primitives` (`*` per
- * segment, `**` for arbitrary substrings). Methods are case-insensitive;
- * an entry with no `methods` field matches any verb.
- */
-function matchesEnvelope(
-  envelope: readonly ToolUrlEnvelopeEntry[],
-  url: string,
-  method: string,
-): boolean {
-  const upper = method.toUpperCase();
-  for (const entry of envelope) {
-    if (!matchesAuthorizedUriSpec(entry.pattern, url)) continue;
-    if (!entry.methods || entry.methods.length === 0) return true;
-    if (entry.methods.some((m) => m.toUpperCase() === upper)) return true;
-  }
-  return false;
-}
 
 function parseHostPort(target: string): { host: string; port: number } | null {
   if (!target) return null;

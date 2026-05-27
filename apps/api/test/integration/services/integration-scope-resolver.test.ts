@@ -51,10 +51,10 @@ function gmailManifest(): Record<string, unknown> {
       },
     },
     tools_policy: {
-      list_messages: { required_scopes: ["read"] },
-      get_message: { required_scopes: ["read"] },
-      send_message: { required_scopes: ["send"] },
-      delete_message: { required_scopes: ["delete"] },
+      list_messages: { required_scopes: { primary: ["read"] } },
+      get_message: { required_scopes: { primary: ["read"] } },
+      send_message: { required_scopes: { primary: ["send"] } },
+      delete_message: { required_scopes: { primary: ["delete"] } },
     },
   }) as unknown as Record<string, unknown>;
 }
