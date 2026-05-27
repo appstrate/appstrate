@@ -16,12 +16,14 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { Boxes, Puzzle, Search } from "lucide-react";
+import { Boxes, Plus, Puzzle, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { useIntegrations, type IntegrationSummary } from "../hooks/use-integrations";
+import { usePermissions } from "../hooks/use-permissions";
 
 function matchesQuery(integration: IntegrationSummary, query: string): boolean {
   if (!query) return true;
@@ -101,6 +103,7 @@ function IntegrationCard({ integration }: { integration: IntegrationSummary }) {
 
 export function IntegrationsPage() {
   const { t } = useTranslation("settings");
+  const { isAdmin } = usePermissions();
   const [tab, setTab] = useState<"active" | "all">("active");
   const [query, setQuery] = useState("");
   const { data: integrations, isLoading, error } = useIntegrations();
@@ -122,6 +125,16 @@ export function IntegrationsPage() {
           { label: t("nav.orgSection", { ns: "common" }), href: "/" },
           { label: t("integrations.title") },
         ]}
+        actions={
+          isAdmin ? (
+            <Link to="/integrations/new">
+              <Button>
+                <Plus size={14} />
+                {t("integrations.create")}
+              </Button>
+            </Link>
+          ) : undefined
+        }
       >
         <p className="text-muted-foreground mt-1 text-sm">{t("integrations.subtitle")}</p>
       </PageHeader>

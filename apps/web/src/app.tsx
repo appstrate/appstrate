@@ -378,6 +378,11 @@ export function App() {
             <Route path="/schedules/:id/edit" element={<ScheduleEditPage />} />
             <Route path="/skills" element={<SkillsPage />} />
             <Route path="/integrations" element={<IntegrationsPage />} />
+            <Route path="/integrations/new" element={<PackageEditorPage type="integration" />} />
+            <Route
+              path="/integrations/:scope/:name/edit"
+              element={<PackageEditorPage type="integration" />}
+            />
             <Route path="/integrations/:scope/:name" element={<IntegrationDetailPage />} />
             <Route path="/skills/new" element={<PackageEditorPage type="skill" />} />
             <Route path="/skills/:scope/:name/edit" element={<PackageEditorPage type="skill" />} />

@@ -20,6 +20,9 @@ import { RuntimeToolsGroup } from "../components/agent-editor/runtime-tools-grou
 import { PromptEditor } from "../components/agent-editor/prompt-editor";
 import { JsonEditor } from "../components/json-editor";
 import { ContentEditor } from "../components/package-editor/content-editor";
+import { SourceSection } from "../components/integration-editor/source-section";
+import { AuthsSection } from "../components/integration-editor/auths-section";
+import { ToolsPolicySection } from "../components/integration-editor/tools-policy-section";
 import { Spinner } from "../components/spinner";
 import { EditorShell } from "../components/editor-shell";
 
@@ -28,6 +31,7 @@ import type { MetadataState } from "../components/agent-editor/metadata-section"
 import {
   defaultEditorState,
   defaultSkillManifest,
+  defaultIntegrationManifest,
   DEFAULT_SKILL_CONTENT,
   getManifestName,
   manifestToMetadata,
@@ -41,12 +45,13 @@ import {
   fieldsToSchema,
 } from "../components/agent-editor/utils";
 import type { SchemaField } from "../components/agent-editor/schema-section";
-import { agentSchema, skillSchema } from "@appstrate/core/schemas";
+import { agentSchema, skillSchema, integrationSchema } from "@appstrate/core/schemas";
 import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
 
 const PACKAGE_SCHEMAS: Record<string, object | undefined> = {
   agent: agentSchema,
   skill: skillSchema,
+  integration: integrationSchema,
 };
 
 type GenericEditorTab =
@@ -55,6 +60,9 @@ type GenericEditorTab =
   | "schema"
   | "skills"
   | "integrations"
+  | "source"
+  | "auths"
+  | "tools"
   | "content"
   | "json";
 
@@ -388,6 +396,124 @@ function PackageEditorInner({
   );
 }
 
+// ─── Integration Editor Inner Form ──────────────────────────────────
+
+function IntegrationEditorInner({
+  initialState,
+  packageId,
+  isEdit,
+}: {
+  initialState: EditorStateBase;
+  packageId: string | undefined;
+  isEdit: boolean;
+}) {
+  const { t } = useTranslation(["agents", "common"]);
+  const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState<GenericEditorTab>("general");
+
+  const {
+    state,
+    setState,
+    updateManifest,
+    blocker,
+    error,
+    jsonEditorKey,
+    bumpJsonKey,
+    saveDraft,
+    handleSubmit,
+    isPending,
+  } = useEditorState<EditorStateBase>({
+    initialState,
+    packageType: "integration",
+    packageId,
+    isEdit,
+    // The manifest is the source of truth; `manifest.json` storage content
+    // mirrors it for export/bundle portability (runtime reads the DB manifest).
+    toWireBody: (s) => ({
+      manifest: s.manifest,
+      content: JSON.stringify(s.manifest, null, 2),
+    }),
+    validate: (s) => {
+      const { id } = getManifestName(s.manifest);
+      if (!id || !s.manifest.display_name) {
+        return { error: t("editor.errorRequired"), tab: "general" };
+      }
+      return null;
+    },
+  });
+
+  const metadata = useMemo(() => manifestToMetadata(state.manifest), [state.manifest]);
+  const onMetadataChange = (m: MetadataState) => updateManifest(metadataToManifestPatch(m));
+
+  const onSubmit = () =>
+    handleSubmit(undefined, (tab) => tab && setActiveTab(tab as GenericEditorTab));
+
+  const onManifestChange = (manifest: Record<string, unknown>) =>
+    setState((s) => ({ ...s, manifest }));
+
+  const integrationTabs: Array<{ id: GenericEditorTab; label: string }> = [
+    { id: "general", label: t("editor.tabGeneral") },
+    { id: "source", label: t("integrationEditor.tabSource") },
+    { id: "auths", label: t("integrationEditor.tabAuths") },
+    { id: "tools", label: t("integrationEditor.tabTools") },
+    { id: "json", label: t("editor.tabJson") },
+  ];
+
+  return (
+    <EditorShell
+      type="integration"
+      packageId={packageId}
+      isEdit={isEdit}
+      displayName={(state.manifest.display_name as string) || packageId}
+      tabs={integrationTabs}
+      activeTab={activeTab}
+      onTabChange={(v) => {
+        if (v === "json") bumpJsonKey();
+        setActiveTab(v as GenericEditorTab);
+      }}
+      error={error}
+      isPending={isPending}
+      onSubmit={onSubmit}
+      onCancel={() =>
+        navigate(
+          isEdit ? packageDetailPath("integration", packageId!) : packageListPath("integration"),
+        )
+      }
+      hideSubmitBar={activeTab === "json"}
+    >
+      {activeTab === "general" && (
+        <MetadataSection value={metadata} onChange={onMetadataChange} isEdit={isEdit} />
+      )}
+
+      {activeTab === "source" && (
+        <SourceSection manifest={state.manifest} onChange={onManifestChange} />
+      )}
+
+      {activeTab === "auths" && (
+        <AuthsSection manifest={state.manifest} onChange={onManifestChange} />
+      )}
+
+      {activeTab === "tools" && (
+        <ToolsPolicySection manifest={state.manifest} onChange={onManifestChange} />
+      )}
+
+      {activeTab === "json" && (
+        <JsonEditor
+          key={jsonEditorKey}
+          value={state.manifest}
+          onApply={(manifest) => {
+            setState((s) => ({ ...s, manifest }));
+            setActiveTab("general");
+          }}
+          schema={{ uri: AFPS_SCHEMA_URLS.integration, schema: PACKAGE_SCHEMAS.integration! }}
+        />
+      )}
+
+      <UnsavedChangesModal blocker={blocker} onSaveDraft={isEdit ? saveDraft : undefined} />
+    </EditorShell>
+  );
+}
+
 // ─── Page Wrapper ───────────────────────────────────────────────────
 
 export function PackageEditorPage({ type }: { type: PackageType }) {
@@ -451,11 +577,27 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
     );
   }
 
-  // Phase 1.0 — integration editor lands in Phase 1.3. Until then,
-  // bounce edit attempts back to the home page (integrations are
-  // import-only via `POST /api/packages/import-bundle`).
+  // Integration editor — manifest-only (General + raw JSON tabs). Bundle-backed
+  // `source.kind: "local"` integrations still arrive via import; this editor
+  // authors `remote`/`none` sources.
   if (type === "integration") {
-    return <Navigate to="/" replace />;
+    const intDetail = pkgQuery.data as OrgPackageItemDetail | undefined;
+    const initialState: EditorStateBase =
+      isEdit && intDetail
+        ? {
+            manifest: intDetail.manifest ?? {},
+            lock_version: intDetail.lock_version,
+          }
+        : { manifest: defaultIntegrationManifest(currentOrg?.slug, user?.email) };
+
+    return (
+      <IntegrationEditorInner
+        key={packageId ?? "new"}
+        initialState={initialState}
+        packageId={packageId}
+        isEdit={isEdit}
+      />
+    );
   }
 
   // Skill editor (agent/integration returned early above — pkgQuery is always OrgPackageItemDetail here)

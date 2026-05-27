@@ -233,6 +233,7 @@ export function useCreatePackage(type: PackageType) {
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["packages"] });
       if (type === "agent") qc.invalidateQueries({ queryKey: ["agents"] });
+      if (type === "integration") qc.invalidateQueries({ queryKey: ["integrations"] });
       if (data.packageId) {
         navigate(packageDetailPath(type, data.packageId));
       }
@@ -260,6 +261,7 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["packages"] });
       if (type === "agent") qc.invalidateQueries({ queryKey: ["agents"] });
+      if (type === "integration") qc.invalidateQueries({ queryKey: ["integrations"] });
       qc.invalidateQueries({ queryKey: ["version-info"] });
       navigate(packageDetailPath(type, packageId));
     },

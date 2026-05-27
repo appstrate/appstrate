@@ -362,16 +362,19 @@ const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
     requireMutableForVersionOps: true,
     getHandler: agentDetailHandler,
   },
-  // Phase 1.0 — no CRUD routes yet; integrations land via the bundle
-  // import pipeline (`POST /api/packages/import-bundle`). This entry
-  // keeps the Record exhaustive so the type system catches missing
-  // wiring as soon as Phase 1.3 starts adding routes.
+  // Integrations are authored via a JSON-body manifest editor (parity with
+  // agents/skills). The stored `manifest.json` content mirrors the DB
+  // `draft_manifest` — the runtime reads the manifest from the DB
+  // (`fetchIntegrationManifest`), the storage file exists for export/bundle
+  // portability. Bundle-backed (`source.kind: "local"`) integrations still
+  // arrive via the import pipeline; the editor authors `remote`/`none`
+  // sources that need no server bundle.
   integration: {
     cfg: CONFIG_BY_TYPE.integration,
     path: "integrations",
     parseOpts: { requiredFile: null, contentFileExt: null },
     storageFileName: () => "manifest.json",
-    jsonBodyCreate: false,
+    jsonBodyCreate: true,
   },
   // AFPS §3.4 — standalone mcp-server packages. Import-only like
   // integrations (no editor): authored externally.

@@ -71,6 +71,59 @@ export function defaultSkillManifest(
 
 export const DEFAULT_SKILL_CONTENT = "---\nname: \ndescription: \n---\n\n";
 
+// ─── Default manifest for integration ───────────────────────
+
+/**
+ * Minimal valid AFPS 2.0 integration skeleton for the "new" editor. Uses a
+ * `remote` Streamable-HTTP source (no mcp-server bundle dependency, authorable
+ * end-to-end via the editor) + a single api_key auth that injects the key as a
+ * Bearer header. The author edits the URL, auth, and tools from here — the raw
+ * JSON tab exposes the full manifest for the fields the structured form doesn't
+ * cover yet.
+ */
+export function defaultIntegrationManifest(
+  orgSlug?: string,
+  userEmail?: string,
+): Record<string, unknown> {
+  return {
+    $schema: AFPS_SCHEMA_URLS.integration,
+    schema_version: "0.1",
+    type: "integration",
+    name: orgSlug ? `@${orgSlug}/` : "",
+    version: "1.0.0",
+    display_name: "",
+    description: "",
+    author: userEmail ?? "",
+    source: {
+      kind: "remote",
+      remote: { url: "https://", transport: "streamable-http" },
+    },
+    auths: {
+      primary: {
+        type: "api_key",
+        authorized_uris: ["https://**"],
+        credentials: {
+          schema: {
+            type: "object",
+            required: ["api_key"],
+            properties: {
+              api_key: { type: "string", description: "API key for this integration." },
+            },
+          },
+        },
+        delivery: {
+          http: {
+            in: "header",
+            name: "Authorization",
+            prefix: "Bearer ",
+            value: "{$credential.api_key}",
+          },
+        },
+      },
+    },
+  };
+}
+
 // ─── Runtime tools (manifest.runtime_tools) ──────────────────
 
 /**

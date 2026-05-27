@@ -690,6 +690,7 @@
   "webhooks.eventsRequired": "Please select at least one event.",
   "integrations.title": "Integrations",
   "integrations.subtitle": "AFPS integration catalogue — connect third-party services to your agents.",
+  "integrations.create": "New integration",
   "integrations.tabs.active": "Active",
   "integrations.tabs.all": "Installed",
   "integrations.empty.active": "No active integrations. Activate one from the \"Installed\" tab.",

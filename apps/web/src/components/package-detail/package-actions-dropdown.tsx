@@ -174,8 +174,8 @@ export function PackageActionsDropdown({
             </DropdownMenuItem>
           )}
 
-          {/* ── Edit (no in-app editor for integrations — import-only) ── */}
-          {isMutable && type !== "integration" && (
+          {/* ── Edit ── */}
+          {isMutable && (
             <DropdownMenuItem onSelect={() => navigate(packageEditPath(type, packageId))}>
               <Pencil size={14} />
               {t("btn.edit")}

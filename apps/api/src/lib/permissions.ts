@@ -137,6 +137,8 @@ const OWNER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "llm-proxy:call",
   // Integrations (INTEGRATIONS_PROPOSAL Phase 1.3 — marketplace UI)
   "integrations:read",
+  "integrations:write",
+  "integrations:delete",
   "integrations:install",
   "integrations:uninstall",
   "integrations:connect",
@@ -250,9 +252,12 @@ export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permissio
   "proxies:read",
   "proxies:write",
   "proxies:delete",
-  // Integrations (browse catalog + install/connect via API key for headless
-  // flows, incl. end-user OAuth via Appstrate-User header)
+  // Integrations (author/edit the manifest + browse catalog + install/connect
+  // via API key for headless flows, incl. end-user OAuth via Appstrate-User
+  // header)
   "integrations:read",
+  "integrations:write",
+  "integrations:delete",
   "integrations:install",
   "integrations:uninstall",
   "integrations:connect",

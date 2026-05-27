@@ -443,6 +443,111 @@ describe("Packages API", () => {
   });
 
   // ═══════════════════════════════════════════════
+  // POST/PUT /api/packages/integrations — JSON-body manifest editor
+  // ═══════════════════════════════════════════════
+
+  describe("POST /api/packages/integrations", () => {
+    const remoteIntegrationManifest = (name: string) => ({
+      name,
+      version: "1.0.0",
+      type: "integration",
+      schema_version: "0.1",
+      display_name: "Remote Integration",
+      description: "A remote HTTP MCP integration",
+      source: {
+        kind: "remote",
+        remote: { url: "https://example.com/mcp/v1", transport: "streamable-http" },
+      },
+      auths: {
+        primary: {
+          type: "api_key",
+          authorized_uris: ["https://example.com/**"],
+          credentials: {
+            schema: {
+              type: "object",
+              required: ["api_key"],
+              properties: { api_key: { type: "string" } },
+            },
+          },
+          delivery: {
+            http: {
+              in: "header",
+              name: "Authorization",
+              prefix: "Bearer ",
+              value: "{$credential.api_key}",
+            },
+          },
+        },
+      },
+    });
+
+    it("creates an integration from a JSON manifest", async () => {
+      const res = await app.request("/api/packages/integrations", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          manifest: remoteIntegrationManifest("@pkgorg/new-integration"),
+        }),
+      });
+
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as any;
+      expect(body.packageId).toBe("@pkgorg/new-integration");
+      expect(body.lock_version).toBeNumber();
+
+      await assertDbHas(packages, eq(packages.id, "@pkgorg/new-integration"));
+    });
+
+    it("returns 400 for an invalid integration manifest", async () => {
+      const res = await app.request("/api/packages/integrations", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          manifest: {
+            name: "@pkgorg/bad-integration",
+            version: "1.0.0",
+            type: "integration",
+            schema_version: "0.1",
+            display_name: "Bad",
+            description: "No auths declared",
+            source: {
+              kind: "remote",
+              remote: { url: "https://example.com/mcp/v1", transport: "streamable-http" },
+            },
+          },
+        }),
+      });
+
+      expect(res.status).toBe(400);
+    });
+
+    it("updates an integration manifest with lock_version", async () => {
+      const createRes = await app.request("/api/packages/integrations", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ manifest: remoteIntegrationManifest("@pkgorg/edit-integration") }),
+      });
+      const created = (await createRes.json()) as any;
+
+      const res = await app.request("/api/packages/integrations/@pkgorg/edit-integration", {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          manifest: {
+            ...remoteIntegrationManifest("@pkgorg/edit-integration"),
+            display_name: "Renamed Integration",
+          },
+          lock_version: created.lock_version,
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.lock_version).toBeGreaterThan(created.lock_version);
+    });
+  });
+
+  // ═══════════════════════════════════════════════
   // PUT /api/packages/agents/:scope/:name — update agent (admin only)
   // ═══════════════════════════════════════════════
 

@@ -9,21 +9,24 @@ import { PageHeader, type BreadcrumbEntry } from "./page-header";
 import { packageDetailPath, packageListPath } from "../lib/package-paths";
 
 // Only agent + skill have an editor route (see app.tsx).
-type EditablePackageType = "agent" | "skill";
+type EditablePackageType = "agent" | "skill" | "integration";
 
 const emojiMap: Record<EditablePackageType, string> = {
   agent: "⚡",
   skill: "🧠",
+  integration: "🧩",
 };
 
 const breadcrumbNewKeys: Record<EditablePackageType, string> = {
   agent: "editor.breadcrumbNew",
   skill: "editor.breadcrumbNewSkill",
+  integration: "editor.breadcrumbNewIntegration",
 };
 
 const listLabelKeys: Record<EditablePackageType, { key: string; ns?: string }> = {
   agent: { key: "detail.breadcrumb" },
   skill: { key: "packages.type.skills", ns: "settings" },
+  integration: { key: "packages.type.integrations", ns: "settings" },
 };
 
 interface EditorTab {

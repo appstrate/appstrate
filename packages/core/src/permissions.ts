@@ -83,9 +83,11 @@ export interface CoreResources {
   "llm-proxy": "call";
   // AFPS integrations (INTEGRATIONS_PROPOSAL Phase 1.3 — marketplace UI).
   // Read = browse catalog + view the actor's connection inventory.
-  // Install/uninstall = manage per-app installation. Connect/disconnect =
-  // manage credentials (connections) per declared `auths.{key}`.
-  integrations: "read" | "install" | "uninstall" | "connect" | "disconnect";
+  // Write/delete = author/edit/remove the integration manifest (JSON-body
+  // editor, parity with agents/skills). Install/uninstall = manage per-app
+  // installation. Connect/disconnect = manage credentials (connections) per
+  // declared `auths.{key}`.
+  integrations: "read" | "write" | "delete" | "install" | "uninstall" | "connect" | "disconnect";
 }
 
 /** Core resource names. */
