@@ -2,7 +2,7 @@
   "name": "@appstrate/freshsales",
   "version": "1.0.0",
   "type": "integration",
-  "schema_version": "2.0",
+  "schema_version": "0.1",
   "display_name": "Freshsales (API)",
   "description": "CRM platform for sales teams with AI-powered lead scoring",
   "keywords": ["crm", "sales"],

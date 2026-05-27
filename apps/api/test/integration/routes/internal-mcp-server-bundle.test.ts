@@ -3,7 +3,7 @@
 /**
  * GET /internal/mcp-server-bundle/:scope/:name — fail-closed authorization.
  *
- * In AFPS 2.0 a `source.kind: "local"` integration references a SEPARATE
+ * In AFPS a `source.kind: "local"` integration references a SEPARATE
  * mcp-server package via `source.server.name`. The sidecar fetches that
  * package's `.afps` bundle bytes here before spawning a runner. The endpoint
  * is authorised by the per-run Bearer token AND `assertAgentReferencesMcpServer`,
@@ -117,7 +117,7 @@ describe("GET /internal/mcp-server-bundle/:scope/:name", () => {
         name: AGENT,
         version: "1.0.0",
         type: "agent",
-        schema_version: "2.0",
+        schema_version: "0.1",
         display_name: "Test Agent",
         dependencies: { integrations: { [INTEGRATION]: "^1.0.0" } },
         integrations: { [INTEGRATION]: { tools: ["search"] } },

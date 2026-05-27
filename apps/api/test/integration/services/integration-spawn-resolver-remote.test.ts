@@ -50,7 +50,7 @@ function manifest(withRemote = true) {
 
 function agentManifest(): Record<string, unknown> {
   return {
-    schema_version: "2.0",
+    schema_version: "0.1",
     type: "agent",
     name: "@orga/agent",
     version: "0.1.0",
@@ -154,7 +154,7 @@ describe("resolveIntegrationSpawns — local source error guards", () => {
 
   function localAgent(): Record<string, unknown> {
     return {
-      schema_version: "2.0",
+      schema_version: "0.1",
       type: "agent",
       name: "@orga/agent",
       version: "0.1.0",

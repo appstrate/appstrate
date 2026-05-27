@@ -204,7 +204,7 @@ function OAuthClientForm({
                 onChange={(e) => setRedirectUri(e.target.value)}
                 placeholder={client?.redirect_uri ?? ""}
               />
-              {/* AFPS 2.0 §7.10 — surface `auths.<key>.callback_url_hint`,
+              {/* AFPS §7.10 — surface `auths.<key>.callback_url_hint`,
                   falling back to the deprecated top-level
                   `setup_guide.callback_url_hint` (consumers MUST keep
                   accepting the legacy form for manifests in the wild).
@@ -279,7 +279,7 @@ function OAuthClientForm({
 /**
  * Per-auth card, grouped by authKey. Self-contained setup + connections:
  *   - Auth metadata: type, required flag, default scopes, resource
- *     (RFC 8707 — `resource` in AFPS 2.0 §7.3), authorized URIs.
+ *     (RFC 8707 — `resource` in AFPS §7.3), authorized URIs.
  *   - For oauth2 + admin: the OAuth client registration form sits INSIDE
  *     the card, directly above the connection list — a missing client
  *     locks connecting, so the cause and the fix are co-located.
@@ -320,7 +320,7 @@ function AuthSection({
         )}
       </div>
 
-      {/* Scopes / resource (RFC 8707 — `resource` in AFPS 2.0 §7.3) */}
+      {/* Scopes / resource (RFC 8707 — `resource` in AFPS §7.3) */}
       {(status.scopes.length > 0 || status.resource) && (
         <div className="text-muted-foreground mb-3 grid gap-1 text-xs">
           {status.scopes.length > 0 && (

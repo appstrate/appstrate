@@ -22,7 +22,7 @@ function makeIntegrationManifest(authBody: unknown): Record<string, unknown> {
     type: "integration",
     name: "@test/example",
     version: "1.0.0",
-    schema_version: "2.0",
+    schema_version: "0.1",
     source: { kind: "local" },
     auths: { primary: authBody },
   };
@@ -176,7 +176,7 @@ describe("collectConnectLoginWarnings", () => {
       type: "integration",
       name: "@test/multi",
       version: "1.0.0",
-      schema_version: "2.0",
+      schema_version: "0.1",
       source: { kind: "local" },
       auths: {
         primary: {

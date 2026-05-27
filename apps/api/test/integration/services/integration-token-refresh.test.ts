@@ -81,7 +81,7 @@ describe("forceRefreshIntegrationConnection — Phase 6 scope-shrink awareness",
       type: "integration",
       source: "local",
       draftManifest: {
-        schema_version: "2.0",
+        schema_version: "0.1",
         type: "integration",
         name: PACKAGE_ID,
         version: "1.0.0",

@@ -68,7 +68,7 @@ function agentManifest(
     name,
     version: "1.0.0",
     type: "agent",
-    schema_version: "2.0",
+    schema_version: "0.1",
     display_name: name,
     dependencies: { integrations: { [INTEGRATION_ID]: version } },
   };
@@ -240,7 +240,7 @@ describe("integration-scope-resolver", () => {
           name: "@scope/agent-other",
           version: "1.0.0",
           type: "agent",
-          schema_version: "2.0",
+          schema_version: "0.1",
           display_name: "Other",
           dependencies: { integrations: { "@some/other": "^1.0.0" } },
         },

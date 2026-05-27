@@ -446,7 +446,7 @@ describe("handleIntegrationOAuthCallback", () => {
 
   it("exchanges the code, deletes state, and returns the parsed token shape", async () => {
     // Pin `client_secret_post` so the test exercises the body-credential
-    // path independent of the default-auth-method flip (AFPS 2.0.1
+    // path independent of the default-auth-method flip (AFPS
     // changed the default-when-missing from POST to BASIC).
     const { state } = await seedState({ tokenEndpointAuthMethod: "client_secret_post" });
     let captured: { url: string; body: string; headers: Record<string, string> } | null = null;
@@ -499,7 +499,7 @@ describe("handleIntegrationOAuthCallback", () => {
     expect(await store.get(state)).toBeNull();
   });
 
-  // AFPS 2.0.1 (CC-10, §7.3): when the manifest omits
+  // AFPS (CC-10, §7.3): when the manifest omits
   // `token_endpoint_auth_method`, the runtime now defaults to
   // `client_secret_basic` — the RFC 8414 §2 / RFC 7591 §2 default.
   // Manifest-explicit values still win.

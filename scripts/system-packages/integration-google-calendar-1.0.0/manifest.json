@@ -2,7 +2,7 @@
   "name": "@appstrate/google-calendar",
   "version": "1.0.0",
   "type": "integration",
-  "schema_version": "2.0",
+  "schema_version": "0.1",
   "display_name": "Google Calendar (API)",
   "description": "Calendar and scheduling service by Google",
   "keywords": ["calendar", "productivity"],

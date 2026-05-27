@@ -167,14 +167,14 @@ const authStatusSchema = {
       type: "string",
       enum: ["oauth2", "api_key", "basic", "mtls", "custom"],
       description:
-        "Auth method type (AFPS 2.0.2 §7.2). `mtls` was added in v2.0.1 — client cert + key are supplied via `credentials.schema` and injected at runtime through `delivery.files`.",
+        "Auth method type (AFPS §7.2). For `mtls`, client cert + key are supplied via `credentials.schema` and injected at runtime through `delivery.files`.",
     },
     required: { type: "boolean" },
     scopes: { type: "array", items: { type: "string" } },
     resource: {
       type: ["string", "null"],
       description:
-        "RFC 8707 resource indicator declared by the manifest (`auths.{key}.resource`). AFPS 2.0 §7.3 name — matches the RFC.",
+        "RFC 8707 resource indicator declared by the manifest (`auths.{key}.resource`). AFPS §7.3 name — matches the RFC.",
     },
     connections: { type: "array", items: integrationConnectionSchema },
     has_oauth_client: { type: "boolean" },

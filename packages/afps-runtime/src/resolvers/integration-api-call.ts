@@ -74,7 +74,7 @@ export interface ApiCallIntegrationMeta {
    */
   namespace: string;
   /**
-   * Auth key supplying credentials. For AFPS 2.0 `source.kind: "api"` integrations,
+   * Auth key supplying credentials. For AFPS `source.kind: "api"` integrations,
    * resolved from `_meta["dev.appstrate/api"].auth_key`, or the single declared
    * auth when only one exists.
    */
@@ -97,7 +97,7 @@ export interface ApiCallIntegrationMeta {
 export function readIntegrationRefs(bundle: Bundle): IntegrationRef[] {
   const root = bundle.packages.get(bundle.root);
   if (!root) return [];
-  // AFPS 2.0.2 §4.1 — dependency value is polymorphic: bare semver range
+  // AFPS §4.1 — dependency value is polymorphic: bare semver range
   // OR object `{ version, scopes?, auth_key?, ... }`. Extract just the
   // version range here; per-integration configuration is consumed by the
   // platform-side `parseManifestIntegrations` pass against the same manifest.
@@ -152,7 +152,7 @@ export function readApiCallIntegrationMeta(
 /** A single `{$credential.<field>}` reference, lowered to a bare field name. */
 const SINGLE_CREDENTIAL_REF = /^\{\$credential\.([A-Za-z0-9_]+)\}$/;
 
-/** AFPS 2.0 `delivery.http` block (snake_case). */
+/** AFPS `delivery.http` block (snake_case). */
 interface AfpsDeliveryHttp {
   name?: string;
   prefix?: string;
@@ -162,7 +162,7 @@ interface AfpsDeliveryHttp {
 }
 
 /**
- * Project an AFPS 2.0 `delivery.http` block (snake_case) onto the internal
+ * Project an AFPS `delivery.http` block (snake_case) onto the internal
  * {@link HttpDeliveryConfig} the `resolveHttpDelivery` plan layer consumes.
  * Mirrors the sidecar's `toHttpDeliveryConfig` — a single `{$credential.field}`
  * value lowers to a bare `valueFrom` field name; anything richer is rewritten
@@ -207,7 +207,7 @@ function projectApiCallMeta(name: string, parsed: unknown): ApiCallIntegrationMe
       }
     >;
   };
-  // AFPS 2.0: the generic api_call surface is the api-source credential plane.
+  // AFPS: the generic api_call surface is the api-source credential plane.
   // The auth it draws from is declared under `_meta["dev.appstrate/api"].auth_key`
   // (the platform's `getApiCallConfig` convention); fall back to the single
   // declared auth. Integrations without an api-call association expose no

@@ -45,7 +45,7 @@ import { SELECTABLE_RUNTIME_TOOLS, type SelectableRuntimeTool } from "./runtime-
  * `pinned.set`, `report.appended`). The agent-side bridge reads this key
  * and re-emits each event into the run's event sink.
  *
- * AFPS 2.0.2 (Phase F1): reverse-DNS namespace — `_meta` keys must be
+ * AFPS (Phase F1): reverse-DNS namespace — `_meta` keys must be
  * either a single bare token or a reverse-DNS prefix (RFC §2.2 / Appendix
  * B). The canonical form is `"dev.appstrate/events"`.
  */

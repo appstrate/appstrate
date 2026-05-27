@@ -70,7 +70,7 @@ export function rewriteManifestForDistribution(
 
 /**
  * Tiny helper used by the CLI to compute the canonical output file
- * name for an mcp-server bundle. AFPS 2.0.2 lifted the scoped identity
+ * name for an mcp-server bundle. AFPS lifted the scoped identity
  * `name` to the manifest root (§3.4), so the top-level `name` IS the
  * AFPS scoped identity. Scoped names like `@official/gmail` become
  * `official__gmail@1.0.0.afps` (filesystem-safe).

@@ -2,7 +2,7 @@
   "name": "@appstrate/webhooks",
   "version": "1.0.0",
   "type": "integration",
-  "schema_version": "2.0",
+  "schema_version": "0.1",
   "display_name": "Webhooks (API)",
   "description": "Generic webhook provider — send HTTP requests to any URL with optional authentication",
   "keywords": ["integration", "automation"],

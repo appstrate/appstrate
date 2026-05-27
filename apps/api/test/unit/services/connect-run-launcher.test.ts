@@ -170,7 +170,7 @@ describe("buildConnectLoginSpec", () => {
       inputs: { email: "a@b.c", password: "pw" },
       reauthOn: [401],
     });
-    // AFPS 2.0 delivery.http shape (snake_case header block).
+    // AFPS delivery.http shape (snake_case header block).
     expect(spec.connectLogin!.deliveryHttp).toMatchObject({
       in: "header",
       name: "Authorization",

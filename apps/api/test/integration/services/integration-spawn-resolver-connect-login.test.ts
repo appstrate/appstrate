@@ -62,7 +62,7 @@ function runStartManifest(name = INTEG): IntegrationManifest {
  */
 function agentManifest(): Record<string, unknown> {
   return {
-    schema_version: "2.0",
+    schema_version: "0.1",
     type: "agent",
     name: "@orga/agent",
     version: "0.1.0",
@@ -184,7 +184,7 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
   });
 
   it("copies manifest auth.connect reauth_on into connectLogin", async () => {
-    // Re-seed the integration with a manifest that declares reauth_on (AFPS 2.0:
+    // Re-seed the integration with a manifest that declares reauth_on (AFPS:
     // under connect._meta["dev.appstrate/connect"].reauth_on).
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "orga" });

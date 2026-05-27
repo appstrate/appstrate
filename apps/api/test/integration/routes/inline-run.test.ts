@@ -32,7 +32,7 @@ function validManifest() {
     version: "0.0.0",
     type: "agent",
     description: "Inline run",
-    schema_version: "2.0",
+    schema_version: "0.1",
     dependencies: {
       skills: {},
     },

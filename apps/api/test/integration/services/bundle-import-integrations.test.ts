@@ -51,7 +51,7 @@ function buildIntegrationAfps(opts: {
 }
 
 function validManifest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-  // AFPS 2.0 serverless `api`-source integration (no separate mcp-server to
+  // AFPS serverless `api`-source integration (no separate mcp-server to
   // bundle), so a bundle-of-one imports cleanly.
   return {
     ...(apiIntegrationManifest({
@@ -134,7 +134,7 @@ describe("handleImportBundle — integration packages", () => {
   });
 
   it("rejects an .afps whose integration manifest declares no auth method (AFPS §7)", async () => {
-    // AFPS 2.0 requires an integration to declare ≥1 auth method; an empty
+    // AFPS requires an integration to declare ≥1 auth method; an empty
     // `auths` map fails schema validation at bundle read time.
     const broken = validManifest({ auths: {} });
     const afps = buildIntegrationAfps({ manifest: broken });

@@ -17,7 +17,7 @@ export const CONFIG_BY_TYPE: Record<PackageType, PackageTypeConfig> = {
   skill: { type: "skill", storageFolder: "skills", label: "Skills" },
   // Phase 1.0 — INTEGRATIONS_PROPOSAL §4.1.
   integration: { type: "integration", storageFolder: "integrations", label: "Integrations" },
-  // AFPS 2.0 §3.4 — standalone MCP Bundle (MCPB) packages referenced by an
+  // AFPS §3.4 — standalone MCP Bundle (MCPB) packages referenced by an
   // integration's `source.kind: "local"`.
   "mcp-server": { type: "mcp-server", storageFolder: "mcp-servers", label: "MCP Servers" },
 };

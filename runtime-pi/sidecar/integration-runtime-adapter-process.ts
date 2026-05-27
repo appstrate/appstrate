@@ -42,7 +42,7 @@ const HOST_INTERPRETER_BY_TYPE: Record<string, { command: string; argsBefore: st
   // adapter runs bun in the `appstrate-mcp-runner-bun` container instead.
   bun: { command: "bun", argsBefore: [] },
   python: { command: "python3", argsBefore: ["-u"] },
-  // MCPB 0.4 / AFPS 2.0.2 §3.4 — `uv run <entry>` resolves a project's
+  // MCPB 0.4 / AFPS §3.4 — `uv run <entry>` resolves a project's
   // virtualenv + dependencies on the fly. Requires `uv` on PATH; we fail
   // fast at spawn-time with a clear error if it's missing (see
   // `planSubprocess`). The `-u` would only apply to a direct Python
@@ -93,7 +93,7 @@ function planSubprocess(spec: IntegrationSpawnSpec, bundleRoot: string): Subproc
 }
 
 /**
- * AFPS 2.0.2 §7.6 (CC-5) — materialise `delivery.files` for the process
+ * AFPS §7.6 (CC-5) — materialise `delivery.files` for the process
  * adapter. Subprocesses share the host filesystem, so we attempt to write
  * each entry at the manifest-declared absolute path with the requested
  * mode. When that fails (typically a dev machine without write permission
@@ -235,7 +235,7 @@ export function createProcessIntegrationRuntimeAdapter(): IntegrationRuntimeAdap
         // unchanged (no docker cp).
         Object.assign(procEnv, buildMitmEnvBlock(mitm.proxyUrl, mitm.caCertHostPath));
       }
-      // AFPS 2.0.2 §7.6 (CC-5) — materialise `delivery.files` entries
+      // AFPS §7.6 (CC-5) — materialise `delivery.files` entries
       // before the subprocess starts so the entrypoint sees them at boot.
       if (spec.fileMounts && Object.keys(spec.fileMounts).length > 0) {
         const { createdPaths: paths, envOverrides } = await materializeFileMountsOnHost(
@@ -261,7 +261,7 @@ export function createProcessIntegrationRuntimeAdapter(): IntegrationRuntimeAdap
       // and tears it down on `transport.close()` (called by the MCP client's
       // `client.close()` in `bootIntegrations.shutdown`).
       //
-      // AFPS 2.0.2 §7.6 (CC-5) — clean up the per-run `delivery.files`
+      // AFPS §7.6 (CC-5) — clean up the per-run `delivery.files`
       // material so it doesn't outlive the run. Best-effort: a file already
       // gone (deleted by the integration, parent dir wiped, …) is fine.
       for (const path of createdPaths) {

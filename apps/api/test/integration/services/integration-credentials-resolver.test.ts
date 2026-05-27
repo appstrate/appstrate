@@ -80,7 +80,7 @@ function startTokenServer(): TokenServer {
 
 function gmailManifest(tokenUrl: string): Record<string, unknown> {
   return {
-    schema_version: "2.0",
+    schema_version: "0.1",
     type: "integration",
     name: INTEGRATION_ID,
     version: "1.0.0",
@@ -121,7 +121,7 @@ function agentManifest(name: string, tools: string[]): Record<string, unknown> {
     name,
     version: "1.0.0",
     type: "agent",
-    schema_version: "2.0",
+    schema_version: "0.1",
     display_name: name,
     dependencies: { integrations: { [INTEGRATION_ID]: "^1.0.0" } },
     integrations: { [INTEGRATION_ID]: { tools } },

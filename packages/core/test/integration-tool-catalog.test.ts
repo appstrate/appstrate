@@ -48,7 +48,7 @@ function localSourceManifest(opts: {
     };
   }
   return {
-    schema_version: "2.0",
+    schema_version: "0.1",
     type: "integration",
     name: "@me/integ",
     version: "1.0.0",
@@ -62,7 +62,7 @@ function localSourceManifest(opts: {
 
 function apiSourceManifest(): IntegrationManifest {
   return {
-    schema_version: "2.0",
+    schema_version: "0.1",
     type: "integration",
     name: "@me/api-integ",
     version: "1.0.0",

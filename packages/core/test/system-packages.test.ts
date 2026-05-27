@@ -24,7 +24,7 @@ function agentManifest(name: string, version = "1.0.0") {
     name,
     version,
     type: "agent",
-    schema_version: "2.0",
+    schema_version: "0.1",
     display_name: "Test Agent",
     author: "test",
   });
@@ -43,7 +43,7 @@ function integrationManifest(name: string, version = "1.0.0") {
     type: "integration",
     name,
     version,
-    schema_version: "2.0",
+    schema_version: "0.1",
     display_name: "Test Integration",
     source: { kind: "local", server: { name: `${name}-server`, version: "^1.0.0" } },
     auths: {

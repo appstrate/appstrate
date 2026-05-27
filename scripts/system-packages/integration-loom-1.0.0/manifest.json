@@ -2,7 +2,7 @@
   "name": "@appstrate/loom",
   "version": "1.0.0",
   "type": "integration",
-  "schema_version": "2.0",
+  "schema_version": "0.1",
   "display_name": "Loom (API)",
   "description": "Video messaging platform — access video metadata, transcripts, and embed information",
   "keywords": ["video", "communication"],

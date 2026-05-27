@@ -2,7 +2,7 @@
   "name": "@appstrate/github-mcp",
   "version": "1.0.0",
   "type": "integration",
-  "schema_version": "2.0",
+  "schema_version": "0.1",
   "display_name": "GitHub",
   "description": "GitHub integration backed by GitHub's official remote MCP server (api.githubcopilot.com/mcp/). Full ~80-tool catalog spanning every documented toolset (context, repos, issues, pull_requests, actions, code_security, secret_protection, dependabot, notifications, users, orgs, projects, gists, discussions, copilot, copilot_spaces, git, labels, stargazers, security_advisories, github_support_docs_search). Two interchangeable auth paths: (1) OAuth — full OAuth App flow with per-tool scope inference; (2) PAT — Personal Access Token Bearer. GitHub MCP does not support Dynamic Client Registration: OAuth requires an OAuth App registered in the user's GitHub account. The selected access token is Bearer-injected on every MCP request by the sidecar.",
   "license": "Apache-2.0",

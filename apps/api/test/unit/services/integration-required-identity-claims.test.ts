@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for AFPS 2.0 §7.4 `auth.required_identity_claims` enforcement.
+ * Unit tests for AFPS §7.4 `auth.required_identity_claims` enforcement.
  *
  * `assertRequiredIdentityClaims` is the gate the OAuth2 + Login connect
  * strategies invoke between identity extraction and persistence. It refuses
@@ -30,7 +30,7 @@ function manifestWith({
 }): IntegrationManifest {
   return {
     type: "integration",
-    schema_version: "2.0",
+    schema_version: "0.1",
     source: { kind: "api", api: {} },
     auths: {
       session: {
@@ -53,7 +53,7 @@ function manifestWithRequired(required: string[] | undefined): IntegrationManife
   });
 }
 
-describe("assertRequiredIdentityClaims (AFPS 2.0 §7.4)", () => {
+describe("assertRequiredIdentityClaims (AFPS §7.4)", () => {
   it("passes when manifest declares no required claims", () => {
     const m = manifestWithRequired(undefined);
     expect(() => assertRequiredIdentityClaims(m, "session", {})).not.toThrow();

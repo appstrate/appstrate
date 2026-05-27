@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Appstrate Skill Manifest",
-  "description": "Appstrate skill manifest — AFPS 2.0 skill with relaxed optional metadata.",
+  "description": "Appstrate skill manifest — AFPS skill with relaxed optional metadata.",
   "type": "object",
   "properties": {
     "name": {
@@ -178,7 +178,7 @@
     },
     "schema_version": {
       "type": "string",
-      "pattern": "^2\\.(0|[1-9]\\d*)$"
+      "pattern": "^0\\.(0|[1-9]\\d*)$"
     },
     "dependencies": {
       "type": "object",
@@ -277,7 +277,8 @@
     "_meta": {
       "type": "object",
       "propertyNames": {
-        "type": "string"
+        "type": "string",
+        "pattern": "^(?!(?:mcp|modelcontextprotocol)(?:[./]|$))(?:[a-z0-9-]+(?:\\.[a-z0-9-]+)+\\/)?[A-Za-z0-9._-]+$"
       },
       "additionalProperties": {
         "type": "object",

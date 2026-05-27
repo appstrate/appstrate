@@ -16,7 +16,7 @@
  *    to the production manifest-mutation path (`finalManifest.<key> = …`).
  *  - `writeManifestIntegrations` round-trip (the canonical writer for the
  *    `dependencies.integrations.<id>` object form + the top-level
- *    `integrations` block per AFPS 2.0.2 §4.1).
+ *    `integrations` block per AFPS §4.1).
  *  - `metadataToManifestPatch` is covered by
  *    `apps/web/src/components/agent-editor/test/utils.test.ts` — already
  *    asserts `displayName: undefined` is emitted alongside canonical
@@ -135,7 +135,7 @@ describe("T1 — createOrgItem writer never emits AFPS-1.x camelCase keys", () =
           name: "@acme/test",
           version: "2.0.0",
           display_name: "Existing Canonical",
-          schema_version: "2.0",
+          schema_version: "0.1",
           icon_url: "https://example.com/icon.png",
         },
       );
@@ -169,7 +169,7 @@ describe("T1 — createOrgItem writer never emits AFPS-1.x camelCase keys", () =
 // T1 — writeManifestIntegrations round-trip
 // ─────────────────────────────────────────────
 
-describe("T1 — writeManifestIntegrations emits canonical AFPS 2.0.2 §4.1 keys only", () => {
+describe("T1 — writeManifestIntegrations emits canonical AFPS §4.1 keys only", () => {
   it("round-trips tools + scopes + auth_key through canonical keys only", () => {
     const m: Record<string, unknown> = {};
     writeManifestIntegrations(m, [
@@ -232,7 +232,7 @@ describe("T1 — banned-key walker (test infrastructure)", () => {
       name: "@x/y",
       version: "1.0.0",
       display_name: "Y",
-      schema_version: "2.0",
+      schema_version: "0.1",
       icon_url: "https://x.example/icon.png",
       input: {
         schema: { properties: { x: { type: "string" } } },

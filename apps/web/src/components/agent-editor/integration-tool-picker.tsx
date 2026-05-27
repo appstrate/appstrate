@@ -91,7 +91,7 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
   const declaredToolNames = nativeCatalog.map((t) => t.name);
   const hasToolCatalog = declaredToolNames.length > 0;
 
-  // Multi-auth surface (AFPS 2.0 §4.1 `auth_key`): when the integration
+  // Multi-auth surface (AFPS §4.1 `auth_key`): when the integration
   // declares >1 auth method, the agent author can pin which `auths.<key>`
   // this dep uses at runtime. `undefined` keeps the resolver cascade's
   // default behaviour (any accessible connection wins).

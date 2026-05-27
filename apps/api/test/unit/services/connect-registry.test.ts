@@ -29,7 +29,7 @@ describe("resolveStrategy", () => {
   });
 
   it("maps api_key / basic / mtls / bare custom → FieldsStrategy (no begin)", () => {
-    // AFPS 2.0.2 §7.2 — mtls (added in v2.0.1) reuses FieldsStrategy: the user
+    // AFPS §7.2 — mtls reuses FieldsStrategy: the user
     // pastes a cert + key bag, the manifest's credentials.schema validates it,
     // and the spawn resolver materialises the fields into `delivery.files`
     // entries at runtime. No interactive step (no `begin`) beyond the bag.

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AFPS 2.0 integration-manifest builders for tests.
+ * AFPS integration-manifest builders for tests.
  *
- * After the AFPS 2.0 migration the integration manifest is snake_case with a
+ * After the AFPS migration the integration manifest is snake_case with a
  * `source` discriminant (`local` | `remote` | `api`), per-auth `delivery.http`
  * value templates (`{$credential.<field>}`), `authorized_uris`, and OAuth
  * endpoint fields (`authorization_endpoint`, `token_endpoint`, `default_scopes`,
@@ -13,7 +13,7 @@
 
 import type { IntegrationManifest } from "@appstrate/core/integration";
 
-/** AFPS 2.0 `delivery.http` header block with a `{$credential.<field>}` value template. */
+/** AFPS `delivery.http` header block with a `{$credential.<field>}` value template. */
 export function httpHeaderDelivery(opts: { name: string; prefix?: string; field: string }): {
   http: { in: "header"; name: string; prefix?: string; value: string };
 } {
@@ -27,7 +27,7 @@ export function httpHeaderDelivery(opts: { name: string; prefix?: string; field:
   };
 }
 
-/** AFPS 2.0 `delivery.env` map with `{$credential.<field>}` value templates. */
+/** AFPS `delivery.env` map with `{$credential.<field>}` value templates. */
 export function envDelivery(entries: Record<string, string>): {
   env: Record<string, { value: string }>;
 } {
@@ -37,7 +37,7 @@ export function envDelivery(entries: Record<string, string>): {
 }
 
 /**
- * AFPS 2.0.2 §7.6 `delivery.env` map with `user_config_key` bridge — exercises
+ * AFPS §7.6 `delivery.env` map with `user_config_key` bridge — exercises
  * the CC-4 substitution path where a local-source integration's env var also
  * flows into the referenced mcp-server's `mcp_config.env` template via
  * `${user_config.<key>}`. Each entry: `{ envVar: { field, userConfigKey } }`.
@@ -56,7 +56,7 @@ export function envDeliveryWithUserConfigKey(
 }
 
 /**
- * AFPS 2.0.2 §7.6 `delivery.files` map — entries are
+ * AFPS §7.6 `delivery.files` map — entries are
  * `{ absolutePath: { credentialField, mode? } }`. The value template uses the
  * standard `{$credential.<field>}` grammar so the spawn resolver renders the
  * file body from the decrypted credential bag. Used by mtls integrations
@@ -137,7 +137,7 @@ function buildAuth(spec: AuthSpec): Record<string, unknown> {
 }
 
 /**
- * Build an AFPS 2.0 integration manifest with a `local` source (referencing an
+ * Build an AFPS integration manifest with a `local` source (referencing an
  * mcp-server package of the same name) and the given auths.
  */
 export function localIntegrationManifest(opts: {
@@ -162,7 +162,7 @@ export function localIntegrationManifest(opts: {
   for (const [k, spec] of Object.entries(opts.auths)) auths[k] = buildAuth(spec);
   return {
     type: "integration",
-    schema_version: "2.0",
+    schema_version: "0.1",
     name: opts.name,
     version,
     display_name: opts.displayName ?? opts.name,
@@ -177,7 +177,7 @@ export function localIntegrationManifest(opts: {
 }
 
 /**
- * Build an AFPS 2.0 integration manifest with a `remote` source (Streamable
+ * Build an AFPS integration manifest with a `remote` source (Streamable
  * HTTP MCP). `source.remote = { url, transport }`; the sidecar opens an HTTP
  * MCP client rather than spawning a runner.
  */
@@ -198,7 +198,7 @@ export function remoteIntegrationManifest(opts: {
   const withRemote = opts.withRemote ?? true;
   return {
     type: "integration",
-    schema_version: "2.0",
+    schema_version: "0.1",
     name: opts.name,
     version,
     display_name: opts.displayName ?? opts.name,
@@ -218,7 +218,7 @@ export function remoteIntegrationManifest(opts: {
   } as unknown as IntegrationManifest;
 }
 
-/** Build an AFPS 2.0 integration manifest with a serverless `api` source. */
+/** Build an AFPS integration manifest with a serverless `api` source. */
 export function apiIntegrationManifest(opts: {
   name: string;
   version?: string;
@@ -232,7 +232,7 @@ export function apiIntegrationManifest(opts: {
   for (const [k, spec] of Object.entries(opts.auths)) auths[k] = buildAuth(spec);
   return {
     type: "integration",
-    schema_version: "2.0",
+    schema_version: "0.1",
     name: opts.name,
     version,
     display_name: opts.displayName ?? opts.name,
@@ -246,7 +246,7 @@ export function apiIntegrationManifest(opts: {
 }
 
 /**
- * AFPS 2.0 orchestrated `connect.tool` block: the marker object `{}` plus the
+ * AFPS orchestrated `connect.tool` block: the marker object `{}` plus the
  * Appstrate run-policy fields (`tool`, `run_at`, `produces`, `persist_login_secret`,
  * `reauth_on`) under `_meta["dev.appstrate/connect"]`.
  */
@@ -266,7 +266,7 @@ export function connectToolBlock(opts: {
 }
 
 /**
- * AFPS 2.0 declarative `connect.login` block. `outputs` values are Arazzo
+ * AFPS declarative `connect.login` block. `outputs` values are Arazzo
  * runtime-expression strings or extractor objects; `success_criteria` is the
  * Arazzo criterion array (was the 1.x `okStatus`).
  */
@@ -290,10 +290,10 @@ export function connectLoginBlock(opts: {
   return { login };
 }
 
-/** Build a minimal AFPS 2.0.2 mcp-server (MCPB) manifest for the local-source path. */
+/** Build a minimal AFPS mcp-server (MCPB) manifest for the local-source path. */
 export function mcpServerManifest(opts: {
   /**
-   * Scoped AFPS identity at the manifest root (AFPS 2.0.2 §3.4 lifted it from
+   * Scoped AFPS identity at the manifest root (AFPS §3.4 lifted it from
    * `_meta["dev.afps/mcp-server"].name`). Must follow `@scope/name`.
    */
   name: string;
@@ -309,7 +309,7 @@ export function mcpServerManifest(opts: {
   appstrateRuntime?: string;
   /**
    * MCPB `server.mcp_config.env` map — typically literal strings or
-   * `"${user_config.<key>}"` placeholders. Used to exercise the AFPS 2.0.2
+   * `"${user_config.<key>}"` placeholders. Used to exercise the AFPS
    * §7.6 `user_config_key` substitution path (CC-4) — the integration's
    * `delivery.env.<var>.user_config_key` names the placeholder key here.
    */
@@ -327,7 +327,7 @@ export function mcpServerManifest(opts: {
     name: opts.name,
     version: opts.version ?? "1.0.0",
     type: "mcp-server",
-    schema_version: "2.0",
+    schema_version: "0.1",
     display_name: opts.name,
     server: {
       type,

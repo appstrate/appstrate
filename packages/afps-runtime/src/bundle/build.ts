@@ -244,7 +244,7 @@ export function extractRootFromAfps(
 
   const manifest = parseAfpsManifestBytes(manifestBytes) as AfpsManifest;
 
-  // AFPS 2.0.2 (§3.4 / §11.2) lifted the mcp-server scoped identity to the
+  // AFPS (§3.4 / §11.2) lifted the mcp-server scoped identity to the
   // manifest root, so every package type — including mcp-server — now
   // declares its `@scope/name` identity at the top-level `name`. The previous
   // `_meta["dev.afps/mcp-server"].name` slot is gone.
@@ -303,7 +303,7 @@ function extractDependencies(manifest: AfpsManifest, depTypes: DepRequest["type"
     const section = depsObj[type];
     if (!section || typeof section !== "object" || Array.isArray(section)) continue;
     for (const [name, spec] of Object.entries(section as Record<string, unknown>)) {
-      // AFPS 2.0.2 §4.1 — dependency value is polymorphic: bare semver
+      // AFPS §4.1 — dependency value is polymorphic: bare semver
       // string OR object `{ version, ... }` carrying per-dep configuration.
       // The bundle walker only needs the version range; object-form extras
       // (scopes / auth_key for integrations) are consumed downstream by

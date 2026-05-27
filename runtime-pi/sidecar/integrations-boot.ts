@@ -171,7 +171,7 @@ export function readIntegrationSpecsFromEnv(env = process.env): IntegrationSpawn
 
 /**
  * Fetch a referenced mcp-server package's bundle from the platform's internal
- * surface. AFPS 2.0: a local-source integration references a SEPARATE
+ * surface. AFPS: a local-source integration references a SEPARATE
  * mcp-server package (`source.server.name`); its bundle carries the runnable
  * server code. The endpoint authorises with the same Bearer run-token as the
  * credentials surface and verifies that the run's agent declares an installed
@@ -261,7 +261,7 @@ export interface ConnectRemoteHttpDeps {
   createSource?: typeof createIntegrationCredentialsSource;
   createClient?: typeof createMcpHttpClient;
   /**
-   * Optional override for the SSE transport path (AFPS 2.0 §7.1
+   * Optional override for the SSE transport path (AFPS §7.1
    * `source.remote.transport: "sse"`). Production callers omit it — the
    * default wires `SSEClientTransport` from `@modelcontextprotocol/sdk`.
    * Tests inject a stub to exercise the SSE branch without binding a
@@ -283,7 +283,7 @@ export interface ConnectRemoteHttpDeps {
  * stream and `requestInit` for outbound POSTs; we route both through the
  * same custom fetch so credential headers are injected on every hop.
  *
- * AFPS 2.0 §7.1 — `"sse"` is the SDK's deprecated-but-supported legacy
+ * AFPS §7.1 — `"sse"` is the SDK's deprecated-but-supported legacy
  * transport, kept here for manifests targeting older remote MCP servers
  * (some hosted MCP providers still default to SSE).
  */
@@ -329,9 +329,9 @@ export async function connectRemoteHttpIntegration(
       `integration ${spec.integrationId} declares sourceKind="remote" but no server.url`,
     );
   }
-  // AFPS 2.0 §7.1 — pick the MCP client transport from the manifest.
+  // AFPS §7.1 — pick the MCP client transport from the manifest.
   // Default to `streamable-http` when the field is absent (back-compat
-  // for v2.0.0 manifests that predated the enum). Anything else is a
+  // for manifests that predated the enum). Anything else is a
   // hard-fail at boot — the platform validates the enum at install time,
   // so reaching this branch means the manifest carries a value the
   // sidecar doesn't (yet) know how to dispatch to.
@@ -348,7 +348,7 @@ export async function connectRemoteHttpIntegration(
     );
   }
 
-  // TODO(AFPS 2.0 migration): drop camelCase fallback after one release window.
+  // TODO(AFPS migration): drop camelCase fallback after one release window.
   // `fetchInitial` normalizes the wire payload (snake_case primary, camelCase
   // fallback) via `normalizeIntegrationCredentialsWire`, so the consumer code
   // below sees a stable typed shape during the dual-emit window.
@@ -409,7 +409,7 @@ export async function connectRemoteHttpIntegration(
     name: "appstrate-sidecar-remote-integration",
     version: "0.1.0",
   };
-  // AFPS 2.0 §7.1 — dispatch on the manifest's declared transport. Both
+  // AFPS §7.1 — dispatch on the manifest's declared transport. Both
   // branches share the same per-request Bearer + 401-retry closure
   // (`customFetch` above), so credential injection + refresh semantics
   // are identical across Streamable HTTP and SSE.
@@ -653,7 +653,7 @@ async function spawnAndConnectLocalIntegration(params: {
     });
   }
 
-  // AFPS 2.0 — fetch the referenced mcp-server package's bundle (the runnable
+  // AFPS — fetch the referenced mcp-server package's bundle (the runnable
   // server code), NOT the integration's own bundle. Local-source integrations
   // always carry `server.serverPackageId`; fall back to the integration id only
   // if a spec somehow omits it (defensive).
@@ -978,7 +978,7 @@ export async function bootIntegrations(
           integrationId: spec.integrationId,
           namespace: spec.namespace,
           serverUrl: server.url,
-          // AFPS 2.0 §7.1 — surface the actual transport the sidecar
+          // AFPS §7.1 — surface the actual transport the sidecar
           // dispatched to so operators can audit which path executed.
           transport: server.transport ?? "streamable-http",
           authKey,

@@ -33,7 +33,7 @@
  * status + response headers. Namespaced to avoid colliding with
  * vendor-specific or future SDK-defined `_meta` keys.
  *
- * AFPS 2.0.2 (Phase F1): reverse-DNS namespace — `_meta` keys must be
+ * AFPS (Phase F1): reverse-DNS namespace — `_meta` keys must be
  * either a single bare token or a reverse-DNS prefix (RFC §2.2 / Appendix
  * B). The canonical form is `"dev.appstrate/upstream"`.
  */

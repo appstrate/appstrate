@@ -2,7 +2,7 @@
   "name": "@appstrate/dynamics365",
   "version": "1.0.0",
   "type": "integration",
-  "schema_version": "2.0",
+  "schema_version": "0.1",
   "display_name": "Microsoft Dynamics 365 (API)",
   "description": "Enterprise CRM and ERP platform by Microsoft",
   "keywords": ["crm", "sales", "erp"],

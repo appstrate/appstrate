@@ -148,7 +148,7 @@ describe("@appstrate/bun-toolkit — complex bun integration (e2e)", () => {
 });
 
 describe("@appstrate/bun-toolkit fixtures", () => {
-  it("the integration manifest is a native AFPS 2.0 local-source integration", () => {
+  it("the integration manifest is a native AFPS local-source integration", () => {
     const raw = readFileSync(path.join(FIXTURE_DIR, "manifest.json"), "utf-8");
     const result = validateManifest(JSON.parse(raw));
     expect(result.valid).toBe(true);
@@ -184,7 +184,7 @@ describe("@appstrate/bun-toolkit fixtures", () => {
     };
     expect(mcp.server.type).toBe("node");
     expect(mcp.server.entry_point).toBe("./server.ts");
-    // AFPS 2.0.2 (§3.4): scoped identity lives at the manifest root.
+    // AFPS (§3.4): scoped identity lives at the manifest root.
     expect(mcp.name).toBe(SERVER_ID);
     expect(mcp.type).toBe("mcp-server");
   });

@@ -7,9 +7,9 @@
  * Output:   system-packages/{type}-{name}-{version}.afps
  *
  * Discovers every package source directory regardless of type — both
- * `integration-*` (AFPS 2.0 integration manifests) and `mcp-server-*` (MCPB
- * manifests with the AFPS identity contract lifted to the root in AFPS
- * 2.0.2 §3.4 — `type: "mcp-server"`, `name`, `schema_version` all at the
+ * `integration-*` (AFPS integration manifests) and `mcp-server-*` (MCPB
+ * manifests with the AFPS identity contract lifted to the root per AFPS
+ * §3.4 — `type: "mcp-server"`, `name`, `schema_version` all at the
  * top level). `validateManifest` dispatches by root `type`, so the loop
  * below is type-agnostic.
  *
@@ -80,7 +80,7 @@ async function main() {
     }
 
     const manifest = result.manifest;
-    // AFPS 2.0.2 (§3.4) lifted mcp-server identity to the manifest root, so
+    // AFPS (§3.4) lifted mcp-server identity to the manifest root, so
     // every package type now declares its `type` at the top level.
     const type = (manifest.type as string | undefined) ?? "unknown";
     byType[type] = (byType[type] ?? 0) + 1;

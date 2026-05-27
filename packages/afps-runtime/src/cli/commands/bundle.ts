@@ -5,7 +5,7 @@
  * `afps bundle <manifest.json>` — produce a runnable `.afps` mcp-server
  * archive from an author-time MCPB manifest.
  *
- * In AFPS 2.0 the runnable MCP server lives in a separate `mcp-server` (MCPB)
+ * In AFPS the runnable MCP server lives in a separate `mcp-server` (MCPB)
  * package. This command vendors that server's npm/pypi deps into `./server/`
  * and rewrites the manifest to a runnable form. The actual bundling pipeline
  * lives in `@appstrate/core/mcp-server-bundle` (which depends on Zod + the

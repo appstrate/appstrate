@@ -18,7 +18,7 @@ const PDF_MAGIC = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34
 
 async function createAgentWithFileInput(client: ApiClient, scope: string, name: string) {
   const manifest = {
-    schema_version: "2.0",
+    schema_version: "0.1",
     name: `${scope}/${name}`,
     display_name: `Upload Test ${name}`,
     version: "0.1.0",

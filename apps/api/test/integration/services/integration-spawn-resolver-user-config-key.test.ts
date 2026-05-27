@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Spawn resolver — `delivery.env.<var>.user_config_key` binding (AFPS 2.0.2
+ * Spawn resolver — `delivery.env.<var>.user_config_key` binding (AFPS
  * §7.6, CC-4).
  *
  * The integration's `delivery.env.<var>` carries a `user_config_key` that names
@@ -96,7 +96,7 @@ async function seedAll(ctx: TestContext, opts: SeedOpts, credBag: Record<string,
 
 function agentManifest(): Record<string, unknown> {
   return {
-    schema_version: "2.0",
+    schema_version: "0.1",
     type: "agent",
     name: "@orga/agent",
     version: "0.1.0",
@@ -141,7 +141,7 @@ describe("resolveIntegrationSpawns — delivery.env.user_config_key (CC-4)", () 
     expect(env.SOMETHING).toBe("secret-123");
   });
 
-  it("defaults user_config_key to the env-variable name when omitted (AFPS 2.0.2 §7.6)", async () => {
+  it("defaults user_config_key to the env-variable name when omitted (AFPS §7.6)", async () => {
     await seedAll(
       ctx,
       {

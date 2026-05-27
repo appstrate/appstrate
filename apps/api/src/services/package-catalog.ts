@@ -242,7 +242,7 @@ export async function searchPackages(args: {
     extra: or(
       sql`${packages.id} ILIKE ${pattern}`,
       sql`${packages.draftManifest}->>'name' ILIKE ${pattern}`,
-      // AFPS 2.0 snake_case (`display_name`); legacy rows carrying the 1.x
+      // AFPS snake_case (`display_name`); legacy rows carrying the 1.x
       // `displayName` key are upgraded in place by the data migration.
       sql`${packages.draftManifest}->>'display_name' ILIKE ${pattern}`,
       sql`${packages.draftManifest}->>'description' ILIKE ${pattern}`,

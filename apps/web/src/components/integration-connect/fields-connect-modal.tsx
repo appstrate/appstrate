@@ -27,7 +27,7 @@ export function deriveFieldNames(auth: IntegrationManifestAuth): string[] {
   }
   if (auth.type === "api_key") return ["api_key"];
   if (auth.type === "basic") return ["username", "password"];
-  // AFPS 2.0 §7.5 — mtls credential schema SHOULD describe client cert
+  // AFPS §7.5 — mtls credential schema SHOULD describe client cert
   // and private key (chain optional). When the manifest omits an
   // explicit `credentials.schema.properties`, fall back to these two
   // canonical fields so the modal still renders input fields.

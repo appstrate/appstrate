@@ -13,7 +13,7 @@ import { extractErrorMessage } from "./utils.ts";
 
 export interface RefreshContext {
   /**
-   * Token endpoint (`auths.{key}.token_endpoint`). AFPS 2.0 DROPS the 1.x
+   * Token endpoint (`auths.{key}.token_endpoint`). AFPS DROPS the 1.x
    * `refresh_url`: a refresh now POSTs `grant_type=refresh_token` to the same
    * `token_endpoint` used for the authorization-code exchange (RFC 6749 §6).
    */
@@ -78,7 +78,7 @@ export async function performRefreshTokenExchange(
   refreshToken: string,
   opts: { label: string; accessTokenFallback?: string },
 ): Promise<RefreshExchangeResult> {
-  // AFPS 2.0.1+ default for `token_endpoint_auth_method` is
+  // AFPS default for `token_endpoint_auth_method` is
   // `client_secret_basic` (RFC 8414 §2 / RFC 7591 §2). When the manifest
   // omits the field, fall through to Basic auth instead of body auth so the
   // refresh wire matches the wider OAuth 2.1 ecosystem (Anthropic, Google,

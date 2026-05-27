@@ -4,9 +4,9 @@
  * Shared token utilities.
  * Used by both oauth.ts (initial token exchange) and token-refresh.ts (refresh flow).
  *
- * `OAuthTokenAuthMethod` (= AFPS 2.0 `token_endpoint_auth_method`) is the single
+ * `OAuthTokenAuthMethod` (= AFPS `token_endpoint_auth_method`) is the single
  * source of truth in @appstrate/core/validation. The token-request body
- * content-type is a wire-level concern with no manifest field in AFPS 2.0, so it
+ * content-type is a wire-level concern with no manifest field in AFPS, so it
  * is owned here as {@link OAuthTokenContentType}.
  */
 
@@ -17,7 +17,7 @@ import type { OAuthTokenAuthMethod } from "@appstrate/core/validation";
  *
  * Standard OAuth2 (RFC 6749 §4.1.3) is `application/x-www-form-urlencoded`;
  * a few providers (Atlassian/Jira) require `application/json`. Owned by the
- * connect package — AFPS 2.0 has no manifest field for this; the platform
+ * connect package — AFPS has no manifest field for this; the platform
  * layer passes it through from per-provider config when needed.
  */
 export type OAuthTokenContentType = "application/x-www-form-urlencoded" | "application/json";

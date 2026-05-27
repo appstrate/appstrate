@@ -258,7 +258,7 @@ export async function resolveLiveIntegrationCredentials(
     authType: authDef.type,
     fields: Object.freeze({ ...fields }),
     authorizedUris: Object.freeze([...(authDef.authorized_uris ?? [])]),
-    // AFPS 2.0 §7.3 (RFC 8707) names this field `resource`.
+    // AFPS §7.3 (RFC 8707) names this field `resource`.
     ...(authDef.resource !== undefined ? { resource: authDef.resource } : {}),
     ...(connection.expiresAt ? { expiresAt: connection.expiresAt.toISOString() } : {}),
     ...(connection.scopesGranted.length > 0
@@ -296,14 +296,14 @@ function isWithinLeadWindow(expiresAt: Date | null): boolean {
 }
 
 /**
- * Serialize the resolver's typed wire payload to the AFPS 2.0 snake_case
+ * Serialize the resolver's typed wire payload to the AFPS snake_case
  * HTTP response shape. The TS `IntegrationCredentialsWire` source-of-truth
  * type (in `@appstrate/connect/integration-credentials`) stays camelCase as
  * a TS-internal naming convention; this function is the JSON serialization
- * boundary that flips the field names to AFPS 2.0 snake_case before they
+ * boundary that flips the field names to AFPS snake_case before they
  * cross the wire to the sidecar.
  *
- * Field mapping (TS internal camelCase → AFPS 2.0 snake_case wire):
+ * Field mapping (TS internal camelCase → AFPS snake_case wire):
  *   authKey               → auth_key
  *   authType              → auth_type
  *   authorizedUris        → authorized_uris

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Appstrate MCP-Server Manifest",
-  "description": "Appstrate mcp-server manifest — the canonical AFPS 2.0.2 / MCPB schema (re-exported from @afps-spec/schema). The AFPS identity contract (type, name, schema_version, dependencies) lives at the manifest root (AFPS 2.0.2 §3.4 / §11.2).",
+  "description": "Appstrate mcp-server manifest — the canonical AFPS / MCPB schema (re-exported from @afps-spec/schema). The AFPS identity contract (type, name, schema_version, dependencies) lives at the manifest root (AFPS §3.4 / §11.2).",
   "type": "object",
   "properties": {
     "name": {
@@ -178,7 +178,7 @@
     },
     "schema_version": {
       "type": "string",
-      "pattern": "^2\\.(0|[1-9]\\d*)$"
+      "pattern": "^0\\.(0|[1-9]\\d*)$"
     },
     "dependencies": {
       "type": "object",
@@ -277,7 +277,8 @@
     "_meta": {
       "type": "object",
       "propertyNames": {
-        "type": "string"
+        "type": "string",
+        "pattern": "^(?!(?:mcp|modelcontextprotocol)(?:[./]|$))(?:[a-z0-9-]+(?:\\.[a-z0-9-]+)+\\/)?[A-Za-z0-9._-]+$"
       },
       "additionalProperties": {
         "type": "object",
@@ -289,7 +290,7 @@
     },
     "manifest_version": {
       "type": "string",
-      "minLength": 1
+      "pattern": "^\\d+\\.\\d+$"
     },
     "server": {
       "type": "object",
@@ -374,7 +375,48 @@
       "propertyNames": {
         "type": "string"
       },
-      "additionalProperties": {}
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "string",
+              "number",
+              "boolean",
+              "directory",
+              "file"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": "string"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "default": {},
+          "multiple": {
+            "type": "boolean"
+          },
+          "sensitive": {
+            "type": "boolean"
+          },
+          "min": {
+            "type": "number"
+          },
+          "max": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "additionalProperties": {}
+      }
     }
   },
   "required": [

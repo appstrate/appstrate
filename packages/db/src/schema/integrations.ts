@@ -13,7 +13,7 @@
  *   - Each (integration, auth) pair can hold multiple accounts (e.g.
  *     two Google accounts on the same Gmail integration). The
  *     `accountId` discriminator is extracted at connection time via
- *     the manifest's AFPS 2.0 `auths.{key}.identity_claims` JSONPath
+ *     the manifest's AFPS `auths.{key}.identity_claims` JSONPath
  *     map (§7.4) — the connect layer renders it into the row's
  *     `identityClaims` JSONB and `accountId` discriminator.
  *
@@ -66,7 +66,7 @@ export const integrationConnections = pgTable(
     endUserId: text("end_user_id").references(() => endUsers.id, { onDelete: "cascade" }),
     /** v1 envelope ciphertext (AES-GCM, keyring-encrypted). */
     credentialsEncrypted: text("credentials_encrypted").notNull(),
-    /** Identity claims extracted via the AFPS 2.0 `auths.{key}.identity_claims` map (§7.4) — `sub`, `email`, … */
+    /** Identity claims extracted via the AFPS `auths.{key}.identity_claims` map (§7.4) — `sub`, `email`, … */
     identityClaims: jsonb("identity_claims"),
     /** Granted OAuth scopes — surfaced in the UI for re-consent prompts. */
     scopesGranted: text("scopes_granted")

@@ -2,7 +2,7 @@
   "name": "@appstrate/intercom",
   "version": "1.0.0",
   "type": "integration",
-  "schema_version": "2.0",
+  "schema_version": "0.1",
   "display_name": "Intercom (API)",
   "description": "Customer messaging and support platform",
   "keywords": ["customer-support", "messaging"],

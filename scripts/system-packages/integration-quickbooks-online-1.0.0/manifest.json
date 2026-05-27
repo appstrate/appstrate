@@ -2,7 +2,7 @@
   "name": "@appstrate/quickbooks-online",
   "version": "1.0.0",
   "type": "integration",
-  "schema_version": "2.0",
+  "schema_version": "0.1",
   "display_name": "QuickBooks Online (API)",
   "description": "Cloud accounting software by Intuit — invoicing, expenses, and financial reporting",
   "keywords": ["accounting", "finance"],

@@ -10,7 +10,7 @@ import { isValidRange } from "./semver.ts";
 // ─────────────────────────────────────────────
 
 /**
- * Generic dependency object form per AFPS 2.0.2 §4.1 — `version` is the
+ * Generic dependency object form per AFPS §4.1 — `version` is the
  * semver range, every other field is per-dependency-type configuration
  * (e.g. integrations carry `scopes`/`auth_key`).
  */
@@ -30,7 +30,7 @@ export type DependencyValue = string | DependencyObject;
 export type IntegrationDependencyValue = string | IntegrationDependencyObject;
 
 /**
- * Package dependency map as declared in manifest.json. Per AFPS 2.0.2 §4.1
+ * Package dependency map as declared in manifest.json. Per AFPS §4.1
  * each value can be either a bare semver range or an object whose `version`
  * member is a semver range (object form is the carrier for per-dependency-type
  * configuration like `scopes`/`auth_key` for integrations).
@@ -48,7 +48,7 @@ export interface Dependencies {
 /**
  * Error thrown by {@link assertNoLegacyDepKeys} when a manifest carries the
  * retired AFPS 1.x dependency keys (`dependencies.providers` /
- * `dependencies.tools`). Per AFPS 2.0 §2.1 / Appendix D, producers MUST NOT
+ * `dependencies.tools`). Per AFPS §2.1 / Appendix D, producers MUST NOT
  * emit these keys — they were renamed to `dependencies.integrations` and
  * `dependencies.mcp_servers`. The publish path calls this guard to reject
  * newly-emitted legacy shapes.
@@ -56,12 +56,12 @@ export interface Dependencies {
 export class LegacyDepKeyError extends Error {
   /** Manifest field path that triggered the rejection (e.g. `"dependencies.providers"`). */
   public readonly field: string;
-  /** Canonical AFPS 2.0 key that should be used instead. */
+  /** Canonical AFPS key that should be used instead. */
   public readonly suggestedRename: string;
 
   constructor(field: string, suggestedRename: string) {
     super(
-      `${field} is a retired AFPS 1.x dependency key — producers MUST NOT emit it per AFPS 2.0 §2.1 / Appendix D. Rename to "${suggestedRename}".`,
+      `${field} is a retired AFPS 1.x dependency key — producers MUST NOT emit it per AFPS §2.1 / Appendix D. Rename to "${suggestedRename}".`,
     );
     this.name = "LegacyDepKeyError";
     this.field = field;
@@ -72,7 +72,7 @@ export class LegacyDepKeyError extends Error {
 /**
  * Publish-time guard: reject manifests that carry the retired AFPS 1.x
  * dependency keys (`dependencies.providers`, `dependencies.tools`). Per
- * AFPS 2.0 §2.1 + Appendix D, producers MUST NOT emit these keys; they map
+ * AFPS §2.1 + Appendix D, producers MUST NOT emit these keys; they map
  * to `dependencies.integrations` and `dependencies.mcp_servers` respectively.
  *
  * Call this from the publish path BEFORE persisting a new version row.
@@ -125,7 +125,7 @@ function readVersionRange(value: unknown): string | null {
 /**
  * Extract dependency entries from a manifest's `dependencies` field.
  * Parses scoped names from the skills, mcp_servers, and integrations
- * dependency maps. Per AFPS 2.0.2 §4.1 each value is either a bare semver
+ * dependency maps. Per AFPS §4.1 each value is either a bare semver
  * range string OR an object `{ version, ... }`; this helper normalizes both
  * to a flat `DepEntry` carrying just the version range. Object-form extras
  * (e.g. `scopes`/`auth_key` for integrations) are read via
@@ -197,7 +197,7 @@ export interface ManifestIntegrationEntry {
   tools?: string[];
   scopes?: string[];
   /**
-   * AFPS 2.0 §4.1 — selects which `auths.<key>` entry on the depended-on
+   * AFPS §4.1 — selects which `auths.<key>` entry on the depended-on
    * integration this agent dependency uses, when the integration declares
    * multiple auth methods. `undefined` lets the runtime pick per existing
    * resolver cascade (any accessible connection on the integration).
@@ -217,7 +217,7 @@ function pickString(value: unknown): string | undefined {
 /**
  * Resolve an agent manifest's per-integration configuration.
  *
- * Per AFPS 2.0.2 §4.1, per-integration configuration lives on the canonical
+ * Per AFPS §4.1, per-integration configuration lives on the canonical
  * `dependencies.integrations.<id>` object form,
  * `{ version, scopes?, auth_key?, tools?, ... }`.
  *
@@ -254,7 +254,7 @@ export function parseManifestIntegrations(
 }
 
 /**
- * Write integration entries back to a manifest using the AFPS 2.0.2 §4.1
+ * Write integration entries back to a manifest using the AFPS §4.1
  * canonical inline object form: each `dependencies.integrations.<id>`
  * becomes `{ version, scopes?, auth_key?, tools? }`. Entries with no
  * per-integration configuration collapse to a bare semver string for

@@ -357,10 +357,10 @@ describe("token-aware spill — `_meta` accounting", () => {
     expect(consumed[2]).toBeGreaterThan(consumed[1]!);
   });
 
-  // AFPS 2.0.2 (Phase F1 follow-up): `_meta` keys must match Appendix B's
+  // AFPS (Phase F1 follow-up): `_meta` keys must match Appendix B's
   // `META_NAMESPACE_KEY` regex — either a bare token or `<reverse-dns>/<id>`.
   // Writers always emit `dev.appstrate/token-budget`.
-  it("writers emit the AFPS 2.0.2 reverse-DNS key", async () => {
+  it("writers emit the AFPS reverse-DNS key", async () => {
     const fetchFn = mock(
       async () =>
         new Response('{"hello":"world"}', {

@@ -2,16 +2,16 @@
 // Copyright 2026 Appstrate
 
 /**
- * Validate a multi-package {@link Bundle} against the AFPS 2.0 spec.
+ * Validate a multi-package {@link Bundle} against the AFPS spec.
  *
  * Runs:
- *   - AFPS 2.0 manifest schema check per package (via `@afps-spec/schema`),
+ *   - AFPS manifest schema check per package (via `@afps-spec/schema`),
  *     dispatched across the four package types `agent | skill | mcp-server |
- *     integration` via the root-level `type` discriminator (AFPS 2.0.2 §3.4
+ *     integration` via the root-level `type` discriminator (AFPS §3.4
  *     lifted mcp-server identity to the manifest root).
  *   - `schema_version` MAJOR policy check on the types that carry one
  *     (`agent` requires it; `skill`/`integration`/`mcp-server` declare it at
- *     the root — AFPS 2.0.2 lifted it there for mcp-server too).
+ *     the root — AFPS lifted it there for mcp-server too).
  *   - `type = "agent"` for the root when `agentOnlyRoot` is on
  *   - Prompt template syntax check on the root's `prompt.md` if present
  *   - Cycle + divergent-version detection (non-fatal warnings)
@@ -58,7 +58,7 @@ export interface BundleValidationResult {
 }
 
 export interface ValidateBundleOptions {
-  /** Accepted `schema_version` MAJORs. Default: `[2]` (AFPS 2.0). */
+  /** Accepted `schema_version` MAJORs. Default: `[0]` (AFPS 0.1 draft). */
   supportedMajors?: readonly number[];
   /**
    * Require the root package's `type` to be `"agent"`. Default: `true`.
@@ -72,7 +72,7 @@ export function validateBundle(
   bundle: Bundle,
   opts: ValidateBundleOptions = {},
 ): BundleValidationResult {
-  const supportedMajors = opts.supportedMajors ?? [2];
+  const supportedMajors = opts.supportedMajors ?? [0];
   const agentOnlyRoot = opts.agentOnlyRoot ?? true;
   const issues: BundleValidationIssue[] = [];
 
@@ -124,7 +124,7 @@ function validatePackage(
   },
 ): void {
   const manifest = pkg.manifest as Record<string, unknown>;
-  // AFPS 2.0.2 (§3.4 / §11.2): mcp-server identity was lifted from
+  // AFPS (§3.4 / §11.2): mcp-server identity was lifted from
   // `_meta["dev.afps/mcp-server"]` to the manifest root, so the root `type`
   // discriminator is now authoritative for every package type.
   const effectiveType: unknown = manifest["type"];
@@ -206,8 +206,8 @@ function validatePackage(
 }
 
 /**
- * The four AFPS 2.0 package-type schemas. The `tool`/`provider` package types
- * (and their `@afps-spec` schemas) were removed in 2.0 — `mcp-server` (MCPB,
+ * The four AFPS package-type schemas. The `tool`/`provider` package types
+ * (and their `@afps-spec` schemas) were removed — `mcp-server` (MCPB,
  * §3.4) and `integration` (§3.5/§7) replace them.
  */
 type TypeSchema =
@@ -232,7 +232,7 @@ function schemaForType(type: unknown): TypeSchema | null {
 }
 
 /**
- * Enforce the `schema_version` MAJOR policy per package type (AFPS 2.0.2,
+ * Enforce the `schema_version` MAJOR policy per package type (AFPS,
  * snake_case `schema_version`).
  *
  *   - `agent`       — `schema_version` is REQUIRED by the AFPS schema, so a
@@ -240,7 +240,7 @@ function schemaForType(type: unknown): TypeSchema | null {
  *     Here we additionally enforce the runtime's supported-MAJOR policy.
  *   - `skill` / `integration` / `mcp-server` — `schema_version` is OPTIONAL at
  *     the schema level. When present we enforce the MAJOR policy; when absent
- *     we accept it. AFPS 2.0.2 lifted `schema_version` to the root of
+ *     we accept it. AFPS lifted `schema_version` to the root of
  *     mcp-server (§3.4), so mcp-server is no longer exempt — it gets the same
  *     check as skill/integration.
  */
@@ -260,7 +260,7 @@ function checkSchemaVersion(
         code: "SCHEMA_VERSION_MISSING",
         identity,
         path: "manifest.schema_version",
-        message: 'agent manifest must declare a schema_version (e.g. "2.0")',
+        message: 'agent manifest must declare a schema_version (e.g. "0.1")',
         severity: "error",
       });
     }

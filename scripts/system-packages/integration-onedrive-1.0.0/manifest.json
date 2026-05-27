@@ -2,7 +2,7 @@
   "name": "@appstrate/onedrive",
   "version": "1.0.0",
   "type": "integration",
-  "schema_version": "2.0",
+  "schema_version": "0.1",
   "display_name": "OneDrive (API)",
   "description": "Cloud file storage and sharing by Microsoft",
   "keywords": ["storage", "productivity"],

@@ -63,7 +63,7 @@ const REFERENCE_MANIFEST = {
   name: "@afps/conformance-ref",
   version: "1.0.0",
   type: "agent",
-  schema_version: "2.0",
+  schema_version: "0.1",
   display_name: "Conformance Reference Agent",
   author: "AFPS",
 };
@@ -503,31 +503,31 @@ const L4_EMPTY_SCRIPT: ConformanceCase = {
   },
 };
 
-// ─── AFPS 2.0.2 manifest-shape cases ─────────────────────────────
+// ─── AFPS manifest-shape cases ─────────────────────────────
 //
-// These cases exercise the v2.0.2 spec invariants the bundle-load path does
+// These cases exercise the AFPS spec invariants the bundle-load path does
 // NOT enforce on its own: manifest validation, dependency walking, and
 // `_meta` namespace hygiene. They run validation against the canonical
-// `@afps-spec/schema` (v2) directly so the suite stays portable across
+// `@afps-spec/schema` directly so the suite stays portable across
 // language runtimes (third-party runners get the same pass/fail by
 // re-implementing the same validators).
 //
 // L1.6 — mcp-server identity at the manifest root (§3.4 / §11.2).
-//   AFPS 2.0.2 lifted `type`, `name`, and `schema_version` out of the
+//   AFPS lifted `type`, `name`, and `schema_version` out of the
 //   `_meta["dev.afps/mcp-server"]` block onto the root. Accepting the old
 //   shape (identity ONLY in `_meta`) would silently break tools that key
 //   off the root discriminant.
 const L1_MCP_SERVER_ROOT_IDENTITY: ConformanceCase = {
   id: "L1.6",
   level: "L1",
-  title: "mcp-server identity lives at the manifest root (AFPS 2.0.2 §3.4)",
+  title: "mcp-server identity lives at the manifest root (AFPS §3.4)",
   run: () => {
     const goodManifest = {
       manifest_version: "0.3",
       name: "@afps/conformance-mcp",
       version: "1.0.0",
       type: "mcp-server",
-      schema_version: "2.0",
+      schema_version: "0.1",
       display_name: "Conformance MCP Server",
       server: {
         type: "node",
@@ -538,13 +538,13 @@ const L1_MCP_SERVER_ROOT_IDENTITY: ConformanceCase = {
     const goodResult = mcpServerManifestSchema.safeParse(goodManifest);
     if (!goodResult.success) {
       return fail(
-        `v2.0.2 root-identity manifest rejected: ${goodResult.error.issues
+        `root-identity manifest rejected: ${goodResult.error.issues
           .map((i) => `${i.path.join(".")}: ${i.message}`)
           .join("; ")}`,
       );
     }
 
-    // Legacy v2.0.0/v2.0.1 shape — identity ONLY in `_meta`. The root is
+    // Legacy AFPS 1.x shape — identity ONLY in `_meta`. The root is
     // missing `type`/`name`/`schema_version`, so the lifted-shape schema
     // MUST refuse it.
     const legacyManifest = {
@@ -560,13 +560,13 @@ const L1_MCP_SERVER_ROOT_IDENTITY: ConformanceCase = {
         "dev.afps/mcp-server": {
           name: "@afps/conformance-mcp",
           type: "mcp-server",
-          schema_version: "2.0",
+          schema_version: "0.1",
         },
       },
     };
     const legacyResult = mcpServerManifestSchema.safeParse(legacyManifest);
     if (legacyResult.success) {
-      return fail("legacy _meta-only mcp-server identity must be rejected post-2.0.2");
+      return fail("legacy _meta-only mcp-server identity must be rejected");
     }
     return pass();
   },
@@ -586,7 +586,7 @@ const L1_INTEGRATION_MUTUAL_EXCLUSION: ConformanceCase = {
         name: "@afps/conformance-integ",
         version: "1.0.0",
         type: "integration",
-        schema_version: "2.0",
+        schema_version: "0.1",
         display_name: "Conformance Integration",
         source: { kind: "local", server: { name: "@afps/conformance-integ", version: "^1.0.0" } },
         auths: {
@@ -661,7 +661,7 @@ const L1_POLYMORPHIC_DEPENDENCIES: ConformanceCase = {
       name: "@afps/conformance-agent",
       version: "1.0.0",
       type: "agent",
-      schema_version: "2.0",
+      schema_version: "0.1",
       display_name: "Conformance Agent",
       author: "AFPS",
       dependencies: {
@@ -704,20 +704,20 @@ const L1_POLYMORPHIC_DEPENDENCIES: ConformanceCase = {
   },
 };
 
-// L1.9 — `tools_policy` drives per-tool policy (§7.10). 2.0.2 renamed the
+// L1.9 — `tools_policy` drives per-tool policy (§7.10). AFPS renamed the
 // legacy `tools` map to `tools_policy` to disambiguate from the
 // mcp-server's `tools[]` catalog. Manifests using the new key MUST
 // validate; the new key is what platform helpers read.
 const L1_TOOLS_POLICY: ConformanceCase = {
   id: "L1.9",
   level: "L1",
-  title: "tools_policy drives per-tool policy (AFPS 2.0.2 §7.10)",
+  title: "tools_policy drives per-tool policy (AFPS §7.10)",
   run: () => {
     const manifest = {
       name: "@afps/conformance-tp",
       version: "1.0.0",
       type: "integration",
-      schema_version: "2.0",
+      schema_version: "0.1",
       display_name: "Conformance Integration",
       source: { kind: "local", server: { name: "@afps/conformance-tp", version: "^1.0.0" } },
       auths: {
@@ -875,7 +875,7 @@ const SKILL_MANIFEST = {
   name: "@afps/conformance-skill",
   version: "1.0.0",
   type: "skill",
-  schema_version: "2.0",
+  schema_version: "0.1",
 };
 
 const MCP_SERVER_MANIFEST = {
@@ -883,7 +883,7 @@ const MCP_SERVER_MANIFEST = {
   name: "@afps/conformance-mcp",
   version: "1.0.0",
   type: "mcp-server",
-  schema_version: "2.0",
+  schema_version: "0.1",
   display_name: "Conformance MCP Server",
   server: {
     type: "node",
@@ -1091,7 +1091,7 @@ const L1_REJECT_DEEP_PATH: ConformanceCase = {
 
 // ─── L3 — extended signing coverage ─────────────────────────────────
 //
-// Covers gaps surfaced by the AFPS 2.0 audit: alg_unsupported (alg field
+// Covers gaps surfaced by the AFPS audit: alg_unsupported (alg field
 // outside the supported vocabulary), chain_invalid (loop detection), and
 // `verifyBundleWithPolicy`'s 3-state gate.
 

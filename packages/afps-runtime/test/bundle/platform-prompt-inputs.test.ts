@@ -40,12 +40,12 @@ describe("buildPlatformPromptInputs", () => {
   it("extracts template + schema_version + timeout from the root package", () => {
     const root = pkg(
       "@acme/agent@1.0.0",
-      { type: "agent", schema_version: "2.0", timeout: 120 },
+      { type: "agent", schema_version: "0.1", timeout: 120 },
       { "prompt.md": "HELLO" },
     );
     const inputs = buildPlatformPromptInputs(bundleOf(root), ctx());
     expect(inputs.template).toBe("HELLO");
-    expect(inputs.schemaVersion).toBe("2.0");
+    expect(inputs.schemaVersion).toBe("0.1");
     expect(inputs.timeoutSeconds).toBe(120);
   });
 
@@ -81,7 +81,7 @@ describe("buildPlatformPromptInputs", () => {
         name: "@acme/m1",
         version: "1.0.0",
         type: "mcp-server",
-        schema_version: "2.0",
+        schema_version: "0.1",
         server: {
           type: "node",
           entry_point: "server/index.js",
@@ -110,7 +110,7 @@ describe("buildPlatformPromptInputs", () => {
       "@acme/agent@1.0.0",
       {
         type: "agent",
-        schema_version: "2.0",
+        schema_version: "0.1",
         timeout: 60,
         output: { schema: { properties: { msg: { type: "string" } }, required: ["msg"] } },
       },
@@ -121,7 +121,7 @@ describe("buildPlatformPromptInputs", () => {
       name: "@acme/m",
       version: "1.0.0",
       type: "mcp-server",
-      schema_version: "2.0",
+      schema_version: "0.1",
       server: {
         type: "node",
         entry_point: "server/index.js",

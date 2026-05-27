@@ -138,7 +138,7 @@ export async function createAgent(
   name: string,
 ): Promise<{ id: string }> {
   const manifest = {
-    schema_version: "2.0",
+    schema_version: "0.1",
     name: `${scope}/${name}`,
     display_name: `Test Agent ${name}`,
     version: "0.1.0",
@@ -169,7 +169,7 @@ export async function createAgentWithConfig(
   configProperties: Record<string, unknown>,
 ): Promise<{ id: string }> {
   const manifest = {
-    schema_version: "2.0",
+    schema_version: "0.1",
     name: `${scope}/${name}`,
     display_name: `Test Agent ${name}`,
     version: "0.1.0",

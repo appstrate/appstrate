@@ -30,9 +30,9 @@ const ENC = new TextEncoder();
 const DEC = new TextDecoder();
 
 /**
- * A valid author-time MCPB (`mcp-server`) manifest (AFPS 2.0.2). The
+ * A valid author-time MCPB (`mcp-server`) manifest (AFPS). The
  * vendoring source is declared under `_meta["dev.appstrate/vendor"]`. AFPS
- * 2.0.2 (§3.4) lifted the scoped identity (`name`, `type`, `schema_version`)
+ * (§3.4) lifted the scoped identity (`name`, `type`, `schema_version`)
  * to the manifest root.
  */
 function authorManifest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -41,7 +41,7 @@ function authorManifest(overrides: Record<string, unknown> = {}): Record<string,
     name: "@official/widget",
     version: "1.0.0",
     type: "mcp-server",
-    schema_version: "2.0",
+    schema_version: "0.1",
     display_name: "Widget Server",
     server: {
       type: "node",
@@ -67,7 +67,7 @@ function selfContainedManifest(overrides: Record<string, unknown> = {}): Record<
     name: "@official/widget",
     version: "1.0.0",
     type: "mcp-server",
-    schema_version: "2.0",
+    schema_version: "0.1",
     display_name: "Widget Server",
     server: {
       type: "node",
@@ -130,7 +130,7 @@ describe("packDeterministicZip", () => {
 
 describe("suggestBundleFileName", () => {
   it("uses the scoped root identity, escaping scope separators", () => {
-    // AFPS 2.0.2 (§3.4): the scoped identity lives at the manifest root.
+    // AFPS (§3.4): the scoped identity lives at the manifest root.
     expect(
       suggestBundleFileName({
         name: "@official/widget",

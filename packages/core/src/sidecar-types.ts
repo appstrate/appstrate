@@ -163,7 +163,7 @@ export interface IntegrationSpawnSpec {
   /** McpHost namespace — tool names are prefixed with `{namespace}__`. */
   namespace: string;
   /**
-   * AFPS 2.0 source kind — peer discriminant for the sidecar's spawn-mode
+   * AFPS source kind — peer discriminant for the sidecar's spawn-mode
    * dispatch. Mirrors `manifest.source.kind` from the integration manifest
    * and is the authoritative selector for the local/remote/api branches in
    * `integrations-boot.ts`.
@@ -208,14 +208,14 @@ export interface IntegrationSpawnSpec {
       type?: string;
       /**
        * Path (relative to bundle root) of the spawned server's entry. AFPS
-       * 2.0 §7.4 / MCPB calls this field `entry_point` — snake_case on the
+       * §7.4 / MCPB calls this field `entry_point` — snake_case on the
        * wire and on the spawn spec to avoid a per-type translation hop
        * (the prior `entryPoint` camelCase was a churn-only divergence
        * from the manifest the spawn-resolver reads).
        */
       entry_point?: string;
       /**
-       * AFPS 2.0 — the SEPARATE `mcp-server` package id this integration's
+       * AFPS — the SEPARATE `mcp-server` package id this integration's
        * `source.kind: "local"` references (`source.server.name`). The sidecar
        * fetches THIS package's `.afps` bundle (the runnable server code) from
        * `GET /internal/mcp-server-bundle/:scope/:name`, NOT the integration's
@@ -243,10 +243,10 @@ export interface IntegrationSpawnSpec {
        */
       url?: string;
       /**
-       * AFPS 2.0 §7.1 — remote MCP transport selector. Mirrors the
+       * AFPS §7.1 — remote MCP transport selector. Mirrors the
        * manifest's `source.remote.transport` enum (`"streamable-http" |
        * "sse"`). Defaults to `"streamable-http"` on the sidecar side when
-       * absent (back-compat for v2.0.0 manifests). Only meaningful when
+       * absent (back-compat for manifests that predate the enum). Only meaningful when
        * {@link IntegrationSpawnSpec.sourceKind} is `"remote"`.
        */
       transport?: "streamable-http" | "sse";
@@ -284,7 +284,7 @@ export interface IntegrationSpawnSpec {
    */
   spawnEnv: Record<string, string>;
   /**
-   * AFPS 2.0.2 §7.6 — `delivery.files` mounts. The sidecar materialises each
+   * AFPS §7.6 — `delivery.files` mounts. The sidecar materialises each
    * entry into the runner's filesystem at the declared absolute path with the
    * declared POSIX `mode` (default `"0400"`). `content_b64` is the rendered
    * file body (the `{$credential.<field>}` template applied to the credential
@@ -313,7 +313,7 @@ export interface IntegrationSpawnSpec {
    */
   httpDeliveryAuths?: Record<string, HttpDeliveryAuthSpec>;
   /**
-   * R8a defensive filter — names from `manifest.hidden_tools` (AFPS 2.0.2
+   * R8a defensive filter — names from `manifest.hidden_tools` (AFPS
    * §3.4 / `integration.schema.json`). Install-time validation already
    * subtracts these from the agent's tool catalog via
    * {@link resolveIntegrationToolCatalog}, so in the happy path the

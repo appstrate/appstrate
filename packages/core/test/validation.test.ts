@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it, spyOn } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
   validateManifest,
   extractSkillMeta,
@@ -20,7 +20,7 @@ function validAgentManifest(overrides?: Record<string, unknown>) {
     name: "@test/my-agent",
     version: "1.0.0",
     type: "agent",
-    schema_version: "2.0",
+    schema_version: "0.1",
     display_name: "My Agent",
     author: "test",
     ...overrides,
@@ -69,7 +69,7 @@ describe("validateManifest", () => {
   it("missing type field rejects with a typed Unknown package type error", () => {
     // Without a `type`, validateManifest fails fast with a single typed Zod
     // issue keyed on `type` rather than running the permissive base schema.
-    // This makes the dispatcher's contract explicit: `type` is the AFPS 2.0
+    // This makes the dispatcher's contract explicit: `type` is the AFPS
     // discriminator and MUST be one of agent|skill|mcp-server|integration.
     const { type: _, ...noType } = validAgentManifest();
     const result = validateManifest(noType);
@@ -88,7 +88,7 @@ describe("validateManifest", () => {
   });
 
   it("legacy `tool` / `provider` types produce the typed Unknown package type error", () => {
-    // AFPS 2.0 Appendix D removed `tool` (→ `mcp-server`) and `provider` (→
+    // AFPS Appendix D removed `tool` (→ `mcp-server`) and `provider` (→
     // `integration`). Manifests carrying the old strings must fail with the
     // single typed dispatcher error rather than a list of partial errors from
     // the permissive base schema.
@@ -128,7 +128,7 @@ describe("validateManifest", () => {
       name: "@test/minimal",
       version: "1.0.0",
       type: "agent",
-      schema_version: "2.0",
+      schema_version: "0.1",
       display_name: "Minimal Agent",
       author: "test",
       // dependencies, timeout, integrations_configuration intentionally omitted
@@ -205,7 +205,7 @@ describe("validateManifest", () => {
     expect(result.valid).toBe(true);
   });
 
-  it("accepts an integration dependency value in object form (AFPS 2.0.2 §4.1)", () => {
+  it("accepts an integration dependency value in object form (AFPS §4.1)", () => {
     const result = validateManifest(
       validAgentManifest({
         dependencies: {
@@ -280,22 +280,22 @@ describe("validateManifest", () => {
     expect(result.valid).toBe(false);
   });
 
-  // ─── schema_version format validation (AFPS 2.0) ───
+  // ─── schema_version format validation (AFPS 0.x) ───
 
-  it("rejects schema_version with patch segment (2.0.0)", () => {
-    const result = validateManifest(validAgentManifest({ schema_version: "2.0.0" }));
+  it("rejects schema_version with patch segment (0.1.0)", () => {
+    const result = validateManifest(validAgentManifest({ schema_version: "0.1.0" }));
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.includes("schema_version"))).toBe(true);
   });
 
-  it("rejects schema_version without minor segment (2)", () => {
-    const result = validateManifest(validAgentManifest({ schema_version: "2" }));
+  it("rejects schema_version without minor segment (0)", () => {
+    const result = validateManifest(validAgentManifest({ schema_version: "0" }));
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.includes("schema_version"))).toBe(true);
   });
 
-  it("rejects schema_version with v prefix (v2.0)", () => {
-    const result = validateManifest(validAgentManifest({ schema_version: "v2.0" }));
+  it("rejects schema_version with v prefix (v0.1)", () => {
+    const result = validateManifest(validAgentManifest({ schema_version: "v0.1" }));
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.includes("schema_version"))).toBe(true);
   });
@@ -305,8 +305,8 @@ describe("validateManifest", () => {
     expect(result.valid).toBe(false);
   });
 
-  it("accepts schema_version with higher minor (2.99)", () => {
-    const result = validateManifest(validAgentManifest({ schema_version: "2.99" }));
+  it("accepts schema_version with higher minor (0.99)", () => {
+    const result = validateManifest(validAgentManifest({ schema_version: "0.99" }));
     expect(result.valid).toBe(true);
   });
 
@@ -318,7 +318,7 @@ describe("validateManifest", () => {
       name: "@test-org/hello-world",
       version: "1.0.0",
       type: "agent",
-      schema_version: "2.0",
+      schema_version: "0.1",
       display_name: "Hello World",
       author: "Appstrate",
       description: "A demo agent",
@@ -336,7 +336,7 @@ describe("validateManifest", () => {
       name: "@test-org/fallback-agent",
       version: "0.0.0",
       type: "agent",
-      schema_version: "2.0",
+      schema_version: "0.1",
       display_name: "Fallback",
       author: "",
       description: "",
@@ -359,7 +359,7 @@ describe("validateManifest", () => {
       name: "@test-org/my-agent",
       version: "1.0.0",
       type: "agent",
-      schema_version: "2.0",
+      schema_version: "0.1",
       display_name: "My Agent",
       description: "An agent",
       author: "user@example.com",
@@ -376,7 +376,7 @@ describe("validateManifest", () => {
       name: "@test-org/my-skill",
       version: "1.0.0",
       type: "skill",
-      schema_version: "2.0",
+      schema_version: "0.1",
     };
     const result = validateManifest(manifest);
     expect(result.valid).toBe(true);
@@ -417,7 +417,7 @@ describe("validateManifest", () => {
 });
 
 // ─────────────────────────────────────────────
-// validateManifest — all four AFPS 2.0 package types
+// validateManifest — all four AFPS package types
 // ─────────────────────────────────────────────
 
 describe("validateManifest — package-type dispatch", () => {
@@ -426,7 +426,7 @@ describe("validateManifest — package-type dispatch", () => {
       name: "@test/gmail",
       version: "1.0.0",
       type: "integration",
-      schema_version: "2.0",
+      schema_version: "0.1",
       display_name: "Gmail",
       source: { kind: "remote", remote: { url: "https://x/mcp", transport: "streamable-http" } },
       auths: {
@@ -443,13 +443,13 @@ describe("validateManifest — package-type dispatch", () => {
     expect(r.valid).toBe(true);
   });
 
-  it("dispatches an mcp-server manifest via root identity (AFPS 2.0.2 §3.4)", () => {
+  it("dispatches an mcp-server manifest via root identity (AFPS §3.4)", () => {
     const r = validateManifest({
       manifest_version: "0.3",
       name: "@test/fetch-json",
       version: "1.0.0",
       type: "mcp-server",
-      schema_version: "2.0",
+      schema_version: "0.1",
       display_name: "Fetch JSON",
       server: {
         type: "node",
@@ -473,12 +473,12 @@ describe("validateManifest — package-type dispatch", () => {
       },
     });
     // No root `type` → dispatcher fails fast with the typed Unknown-package-type
-    // error (AFPS 2.0 requires `type` as the discriminator).
+    // error (AFPS requires `type` as the discriminator).
     expect(r.valid).toBe(false);
   });
 
-  it("rejects an mcp-server carrying only the legacy _meta identity (AFPS 2.0.2 removed it)", () => {
-    // Pre-2.0.2 producers may still emit `_meta["dev.afps/mcp-server"]`. The
+  it("rejects an mcp-server carrying only the legacy _meta identity (AFPS removed it)", () => {
+    // Legacy AFPS 1.x producers may still emit `_meta["dev.afps/mcp-server"]`. The
     // new dispatch ignores it entirely — without a root `type: "mcp-server"`,
     // the dispatcher fails fast with the typed Unknown-package-type error.
     const r = validateManifest({
@@ -501,7 +501,7 @@ describe("validateManifest — package-type dispatch", () => {
       name: "@test/uv-srv",
       version: "1.0.0",
       type: "mcp-server",
-      schema_version: "2.0",
+      schema_version: "0.1",
       server: { type: "uv", entry_point: "main.py", mcp_config: { command: "uv" } },
     });
     expect(r.valid).toBe(false);
@@ -564,7 +564,7 @@ describe("extractManifestMetadata", () => {
     expect(metadata.repositoryUrl).toBeUndefined();
   });
 
-  // ── AFPS 2.0 §3.1 common-field projection ──
+  // ── AFPS §3.1 common-field projection ──
 
   it("v2 common fields — all projected to ManifestMetadata", () => {
     const manifest = {
@@ -773,7 +773,7 @@ describe("validateManifest — v2 common fields (§3.1)", () => {
       name: "@example/customer-intake",
       version: "1.2.0",
       type: "agent",
-      schema_version: "2.0",
+      schema_version: "0.1",
       display_name: "Customer Intake Assistant",
       description: "Collects inbound requests and prepares a structured summary.",
       keywords: ["workflow", "intake", "support"],
@@ -801,7 +801,7 @@ describe("validateManifest — v2 common fields (§3.1)", () => {
       name: "@example/pkg",
       version: "1.0.0",
       type: "agent" as const,
-      schema_version: "2.0",
+      schema_version: "0.1",
       display_name: "Pkg",
       author: { name: "Jane", email: "jane@example.com", url: "https://jane.example" },
       repository: {
@@ -835,49 +835,42 @@ describe("validateManifest — v2 common fields (§3.1)", () => {
     expect(result.success).toBe(false);
   });
 
-  it("schema_version — agent schema accepts higher MINOR (2.5) as best-effort (§2.4)", () => {
+  it("schema_version — agent schema accepts higher MINOR (0.5) as best-effort (§2.4)", () => {
     const result = agentManifestSchema.safeParse({
       name: "@test/my-agent",
       version: "1.0.0",
       type: "agent",
-      schema_version: "2.5",
+      schema_version: "0.5",
       display_name: "My Agent",
       author: "test",
     });
     expect(result.success).toBe(true);
   });
 
-  it("schema_version — SUPPORTED_SCHEMA_VERSION_MAJOR is 2", () => {
+  it("schema_version — SUPPORTED_SCHEMA_VERSION_MAJOR is 0", () => {
     // Constant pinning so a future bump becomes a deliberate code edit.
-    expect(SUPPORTED_SCHEMA_VERSION_MAJOR).toBe(2);
+    expect(SUPPORTED_SCHEMA_VERSION_MAJOR).toBe(0);
   });
 
-  // ── _meta soft-fail unknown-namespace keys (§10.1) ──
+  // ── _meta strict-reject malformed namespace keys (AFPS 0.1, §2 + §10.1) ──
 
-  it("_meta — soft-accepts malformed namespace key and emits a warning (§10.1)", () => {
-    // §10.1: "Consumers MUST NOT reject manifests that contain unknown `_meta`
-    // keys." A key like `nodots/foo` violates Appendix B's META_NAMESPACE_KEY
-    // regex (the namespace before `/` requires at least one `.`), but the
-    // manifest must still round-trip — only a warning is emitted.
-    const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
-    try {
-      const result = validateManifest(
-        validSkillManifest({
-          _meta: {
-            "nodots/foo": { foo: "bar" },
-          },
-        }),
-      );
-      expect(result.valid).toBe(true);
-      // A warning must have been emitted referencing the malformed key.
-      expect(warnSpy).toHaveBeenCalled();
-      const warned = warnSpy.mock.calls.some((args) =>
-        args.some((a) => typeof a === "string" && a.includes("nodots/foo")),
-      );
-      expect(warned).toBe(true);
-    } finally {
-      warnSpy.mockRestore();
-    }
+  it("_meta — hard-rejects malformed namespace key (§2 — malformed key = malformed package)", () => {
+    // AFPS 0.1 makes the upstream `metaSchema` STRICT. A key like `nodots/foo`
+    // violates Appendix B's META_NAMESPACE_KEY regex (a `/`-prefixed key's
+    // namespace must contain at least one `.`), so it is a malformed key — and
+    // a malformed key makes the package malformed, which consumers MUST reject
+    // (§2). Only WELL-FORMED unknown namespaces are tolerated (§10.1); malformed
+    // keys are rejected at parse time, no warning emitted.
+    const result = validateManifest(
+      validSkillManifest({
+        _meta: {
+          "nodots/foo": { foo: "bar" },
+        },
+      }),
+    );
+    expect(result.valid).toBe(false);
+    // The rejection must reference the `_meta` path / offending key.
+    expect(result.errors.some((e) => e.includes("_meta") || e.includes("nodots/foo"))).toBe(true);
   });
 
   it("_meta — bare key with no namespace prefix is accepted (matches META_NAMESPACE_KEY)", () => {

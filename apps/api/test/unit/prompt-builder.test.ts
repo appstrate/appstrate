@@ -57,7 +57,7 @@ function makeTestBundle(opts: {
   });
 
   const docsById = new Map((opts.packageDocs ?? []).map((d) => [d.id, d.content]));
-  // Each AFPS 2.0 dependency type carries its own doc companion at the
+  // Each AFPS dependency type carries its own doc companion at the
   // archive root: skill→SKILL.md, integration→INTEGRATION.md,
   // mcp-server→README.md (the convention used across the codebase).
   const addPackage = (meta: ToolMeta, type: string, docFile: string): void => {
@@ -230,7 +230,7 @@ describe("buildEnrichedPrompt — core structure", () => {
 // ─── Dependency doc companions ─────────────────────────────
 
 describe("buildEnrichedPrompt — dependency doc companions", () => {
-  // AFPS 2.0 dependencies carry a doc companion at their archive root:
+  // AFPS dependencies carry a doc companion at their archive root:
   // skill→SKILL.md, integration→INTEGRATION.md, mcp-server→README.md.
   // None of these are rendered into the platform prompt — integrations
   // and mcp-servers self-document via MCP `tools/list`, and a skill's

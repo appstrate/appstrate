@@ -185,7 +185,7 @@ describe("runConnectLogin", () => {
     expect(capture.args.arguments).toEqual({});
   });
 
-  // F3 — the login-tool result wire format is snake_case (AFPS 2.0.2 §7.x);
+  // F3 — the login-tool result wire format is snake_case (AFPS §7.x);
   // the parser must accept BOTH snake_case and the legacy camelCase form
   // for one release window.
   it("accepts snake_case identity_claims / expires_at / scopes_granted in the login-tool result", async () => {

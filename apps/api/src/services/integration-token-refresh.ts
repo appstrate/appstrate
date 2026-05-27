@@ -259,7 +259,7 @@ export async function buildIntegrationOAuthRefreshContext(
   applicationId: string,
 ): Promise<IntegrationRefreshContext | null> {
   if (authDef.type !== "oauth2") return null;
-  // AFPS 2.0 §7.3: refresh POSTs to `token_endpoint` (the old `tokenUrl` /
+  // AFPS §7.3: refresh POSTs to `token_endpoint` (the old `tokenUrl` /
   // `refreshUrl` split is gone). The endpoint may be filled by discovery from
   // `issuer` — but the refresh path needs a concrete URL, so require it here.
   const afpsAuth = authDef;
@@ -312,7 +312,7 @@ export async function buildIntegrationOAuthRefreshContext(
       return null;
     }
   }
-  // AFPS 2.0: `scope_separator` moved under `_meta["dev.appstrate/oauth"]`.
+  // AFPS: `scope_separator` moved under `_meta["dev.appstrate/oauth"]`.
   const oauthMeta = (afpsAuth._meta?.["dev.appstrate/oauth"] ?? undefined) as
     | { scope_separator?: string }
     | undefined;

@@ -224,7 +224,7 @@ const INLINE_RESPONSE_THRESHOLD_BYTES = 32 * 1024;
  * `{ status, headers }`) so a CallToolResult can carry both without
  * collision.
  *
- * AFPS 2.0.2 (Phase F1 follow-up): reverse-DNS namespace — `_meta` keys
+ * AFPS (Phase F1 follow-up): reverse-DNS namespace — `_meta` keys
  * must be either a single bare token or a reverse-DNS prefix (RFC §10.1
  * / Appendix B). The canonical form is `"dev.appstrate/token-budget"`.
  */

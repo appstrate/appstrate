@@ -22,14 +22,14 @@ import { unzipArtifact } from "@appstrate/core/zip";
 
 const DEC = new TextDecoder();
 
-/** A self-contained author-time MCPB (`mcp-server`) manifest (AFPS 2.0.2 §3.4). */
+/** A self-contained author-time MCPB (`mcp-server`) manifest (AFPS §3.4). */
 function authorManifest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     manifest_version: "0.3",
     name: "@official/gmail",
     version: "1.0.0",
     type: "mcp-server",
-    schema_version: "2.0",
+    schema_version: "0.1",
     display_name: "Gmail Server",
     server: {
       type: "node",

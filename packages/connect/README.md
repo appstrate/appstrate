@@ -24,7 +24,7 @@ See `src/index.ts` for the authoritative export surface.
 - **oauth2** — OAuth 2.0 with PKCE, automatic token refresh
 - **api_key** — Single key stored in header
 - **basic** — Username/password Base64
-- **mtls** — Client-certificate authentication (AFPS 2.0.1 §7.2)
+- **mtls** — Client-certificate authentication (AFPS §7.2)
 - **custom** — Multi-field credential schema rendered as dynamic form
 
 ## OAuth error classification

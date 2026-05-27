@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Spawn resolver — `delivery.files` walker (AFPS 2.0.2 §7.6, CC-5).
+ * Spawn resolver — `delivery.files` walker (AFPS §7.6, CC-5).
  *
  * Verifies that:
  *  - `delivery.files.<path>: { value, mode? }` materialises into
@@ -66,7 +66,7 @@ function manifestWithFiles(opts: {
 
 function agentManifest(): Record<string, unknown> {
   return {
-    schema_version: "2.0",
+    schema_version: "0.1",
     type: "agent",
     name: "@orga/agent",
     version: "0.1.0",
@@ -157,7 +157,7 @@ describe("resolveIntegrationSpawns — delivery.files (CC-5)", () => {
     );
   });
 
-  it("defaults mode to 0400 when the manifest omits it (AFPS 2.0.2 §7.6)", async () => {
+  it("defaults mode to 0400 when the manifest omits it (AFPS §7.6)", async () => {
     await seedPackage({
       id: INTEG,
       orgId: ctx.orgId,

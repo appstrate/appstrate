@@ -45,8 +45,8 @@ function readRootPromptTemplate(bundle: Bundle): string {
 }
 
 /**
- * Read the root agent's AFPS 2.0 `schema_version` (snake_case) if declared.
- * AFPS 2.0 only — there is no camelCase fallback.
+ * Read the root agent's AFPS `schema_version` (snake_case) if declared.
+ * AFPS only — there is no camelCase fallback.
  */
 function readSchemaVersion(bundle: Bundle): string | undefined {
   const root = bundle.packages.get(bundle.root);
@@ -63,7 +63,7 @@ function readTimeoutSeconds(bundle: Bundle): number | undefined {
 }
 
 /**
- * Extract the AFPS 2.0 `{ schema, file_constraints?, ui_hints?, … }` wrapper
+ * Extract the AFPS `{ schema, file_constraints?, ui_hints?, … }` wrapper
  * for input/config/output sections. Returns the inner JSON Schema when
  * present, or `undefined`.
  */

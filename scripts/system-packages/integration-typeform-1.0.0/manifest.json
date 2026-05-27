@@ -2,7 +2,7 @@
   "name": "@appstrate/typeform",
   "version": "1.0.0",
   "type": "integration",
-  "schema_version": "2.0",
+  "schema_version": "0.1",
   "display_name": "Typeform (API)",
   "description": "Online form builder and survey platform",
   "keywords": ["forms", "surveys"],

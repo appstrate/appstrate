@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for the AFPS 2.0 `delivery.http` resolver (snake_case,
+ * Unit tests for the AFPS `delivery.http` resolver (snake_case,
  * `{$credential.<field>}` value templates). Pure data; no DB/network.
  */
 

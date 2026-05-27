@@ -34,12 +34,12 @@ const app = getTestApp();
 function gmailManifest(name = "@official/gmail"): IntegrationManifest {
   return {
     type: "integration",
-    schema_version: "2.0",
+    schema_version: "0.1",
     name,
     version: "0.1.0",
     display_name: "Gmail",
     description: "Gmail integration",
-    // AFPS 2.0: local server → mcp-server reference (separate package).
+    // AFPS: local server → mcp-server reference (separate package).
     source: { kind: "local", server: { name, version: "^0.1.0" } },
     auths: {
       api: {
@@ -369,7 +369,7 @@ describe("connectFieldsSchema — non-string credential values (R8b)", () => {
   function mixedTypeManifest(name = "@myorg/mixed"): IntegrationManifest {
     return {
       type: "integration",
-      schema_version: "2.0",
+      schema_version: "0.1",
       name,
       version: "0.1.0",
       display_name: "Mixed",

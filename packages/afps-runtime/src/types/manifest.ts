@@ -29,7 +29,7 @@ import {
 } from "@afps-spec/schema";
 
 /**
- * TypeScript types inferred from the AFPS 2.0 manifest schemas. The 1.x
+ * TypeScript types inferred from the AFPS manifest schemas. The 1.x
  * `tool`/`provider` package types were replaced by `mcp-server` (MCPB) and
  * `integration` (§3.4/§3.5).
  */

@@ -1,5 +1,5 @@
 {
-  "id": "234f129a-8f8e-48a1-b2b3-38d3be3786ab",
+  "id": "a5f5b023-37ad-499b-b31c-4c34366b0e3a",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -2224,9 +2224,9 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
-        "package_versions_manifest_v2": {
-          "name": "package_versions_manifest_v2",
-          "value": "\"manifest\" IS NULL OR (\"manifest\" ->> 'schema_version') IS NULL OR (\"manifest\" ->> 'schema_version') LIKE '2.%'"
+        "package_versions_manifest_v0": {
+          "name": "package_versions_manifest_v0",
+          "value": "\"manifest\" IS NULL OR (\"manifest\" ->> 'schema_version') IS NULL OR (\"manifest\" ->> 'schema_version') LIKE '0.%'"
         }
       },
       "isRLSEnabled": false
@@ -2419,9 +2419,9 @@
           "name": "packages_id_format",
           "value": "\"packages\".\"id\" ~ '^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$'"
         },
-        "packages_draft_manifest_v2": {
-          "name": "packages_draft_manifest_v2",
-          "value": "\"draft_manifest\" IS NULL OR (\"draft_manifest\" ->> 'schema_version') IS NULL OR (\"draft_manifest\" ->> 'schema_version') LIKE '2.%'"
+        "packages_draft_manifest_v0": {
+          "name": "packages_draft_manifest_v0",
+          "value": "\"draft_manifest\" IS NULL OR (\"draft_manifest\" ->> 'schema_version') IS NULL OR (\"draft_manifest\" ->> 'schema_version') LIKE '0.%'"
         }
       },
       "isRLSEnabled": false

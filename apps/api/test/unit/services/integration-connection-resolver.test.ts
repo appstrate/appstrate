@@ -41,7 +41,7 @@ const AGENT_ID = "@vendor/test-agent";
 function oauth2Manifest(): IntegrationManifest {
   return {
     type: "integration",
-    schema_version: "2.0",
+    schema_version: "0.1",
     name: INTEG,
     version: "1.0.0",
     display_name: "Test",
@@ -495,7 +495,7 @@ describe("resolveConnections — insufficient scopes on resolved connection", ()
   function scopedManifest(): IntegrationManifest {
     return {
       type: "integration",
-      schema_version: "2.0",
+      schema_version: "0.1",
       name: INTEG,
       version: "1.0.0",
       display_name: "Test",
@@ -657,7 +657,7 @@ describe("resolveConnections — org default", () => {
   it("a scope-deficient org default surfaces insufficient_scopes (checkHealth still runs)", () => {
     const manifest = {
       type: "integration",
-      schema_version: "2.0",
+      schema_version: "0.1",
       name: INTEG,
       version: "1.0.0",
       display_name: "Test",
@@ -694,9 +694,9 @@ describe("resolveConnections — org default", () => {
   });
 });
 
-// ─────────────────────── AFPS 2.0 §4.1 `auth_key` (C2) ────────────────────────
+// ─────────────────────── AFPS §4.1 `auth_key` (C2) ────────────────────────
 
-describe("resolveConnections — agent dep `auth_key` (AFPS 2.0 §4.1)", () => {
+describe("resolveConnections — agent dep `auth_key` (AFPS §4.1)", () => {
   function reqWithAuthKey(authKey: string): IntegrationRequirement {
     return {
       integrationId: INTEG,

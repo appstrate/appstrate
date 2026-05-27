@@ -78,7 +78,7 @@ export type { RefreshContext } from "./token-refresh.ts";
 export { planMitmAction } from "./integration-mitm-planner.ts";
 export type { MitmRequestContext } from "./integration-mitm-planner.ts";
 
-// AFPS 2.0 `delivery.http` resolver (snake_case, `{$credential.<field>}`
+// AFPS `delivery.http` resolver (snake_case, `{$credential.<field>}`
 // value templates). Counterpart to the pre-resolved `resolveHttpDelivery`.
 export { resolveAfpsHttpDelivery } from "./afps-delivery.ts";
 export type { AfpsHttpDelivery } from "./afps-delivery.ts";

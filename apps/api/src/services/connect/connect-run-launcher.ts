@@ -126,7 +126,7 @@ export async function buildConnectLoginSpec(
     );
   }
 
-  // AFPS 2.0: resolve the spawnable server from the `source` discriminant.
+  // AFPS: resolve the spawnable server from the `source` discriminant.
   // connect.tool requires a LOCAL runner — `remote`/`api` sources have no
   // spawnable server. For a local source the runnable server config lives on
   // the SEPARATE mcp-server package referenced by `source.server.name`.

@@ -56,15 +56,12 @@ export function JsonEditor({ value, onApply, schema }: JsonEditorProps) {
             validate: true,
             schemas: [
               {
-                // Fallback to the AFPS v2 agent schema URI when no explicit
-                // schema is provided. The previous `…/v1/any.schema.json` URL
-                // pointed at a v1 catch-all that no longer exists — the AFPS
-                // schema family is per-type from v2 onwards. Agent is the
-                // most common edit target in this editor; consumers passing
-                // an explicit `schema.uri` (skill/integration/mcp-server)
-                // override this default.
-                uri:
-                  schema?.uri ?? "https://afps.appstrate.dev/packages/schema/v2/agent.schema.json",
+                // Fallback to the AFPS agent schema URI when no explicit
+                // schema is provided. The AFPS schema family is per-type
+                // (agent/skill/integration/mcp-server). Agent is the most
+                // common edit target in this editor; consumers passing an
+                // explicit `schema.uri` override this default.
+                uri: schema?.uri ?? "https://schemas.afps.dev/v0/agent.schema.json",
                 fileMatch: ["*"],
                 schema: schema?.schema ?? {},
               },

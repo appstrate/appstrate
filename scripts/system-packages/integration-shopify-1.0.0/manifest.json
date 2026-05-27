@@ -2,7 +2,7 @@
   "name": "@appstrate/shopify",
   "version": "1.0.0",
   "type": "integration",
-  "schema_version": "2.0",
+  "schema_version": "0.1",
   "display_name": "Shopify (API)",
   "description": "E-commerce platform — manage products, orders, customers, and inventory",
   "keywords": ["e-commerce", "retail"],

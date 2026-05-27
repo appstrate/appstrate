@@ -100,7 +100,7 @@ const OWNER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "runs:read",
   "runs:cancel",
   "runs:delete",
-  // MCP servers (AFPS 2.0 §3.4 — browse/import/delete, no editor)
+  // MCP servers (AFPS §3.4 — browse/import/delete, no editor)
   "mcp-servers:read",
   "mcp-servers:write",
   "mcp-servers:delete",
@@ -231,7 +231,7 @@ export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permissio
   "skills:read",
   "skills:write",
   "skills:delete",
-  // MCP servers (AFPS 2.0 §3.4 — import/delete via API key for headless flows)
+  // MCP servers (AFPS §3.4 — import/delete via API key for headless flows)
   "mcp-servers:read",
   "mcp-servers:write",
   "mcp-servers:delete",

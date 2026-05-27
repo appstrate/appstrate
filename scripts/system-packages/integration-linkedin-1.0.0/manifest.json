@@ -2,7 +2,7 @@
   "name": "@appstrate/linkedin",
   "version": "1.0.0",
   "type": "integration",
-  "schema_version": "2.0",
+  "schema_version": "0.1",
   "display_name": "LinkedIn (API)",
   "description": "Professional networking and B2B marketing platform",
   "keywords": ["social-media", "marketing", "crm"],

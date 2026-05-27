@@ -74,7 +74,7 @@ function startTokenServer(): TokenServer {
 
 function gmailManifest(tokenUrl: string): Record<string, unknown> {
   return {
-    schema_version: "2.0",
+    schema_version: "0.1",
     type: "integration",
     name: INTEGRATION_ID,
     version: "1.0.0",
@@ -187,7 +187,7 @@ describe("credential-proxy integration-resolver", () => {
       type: "integration",
       source: "local",
       draftManifest: {
-        schema_version: "2.0",
+        schema_version: "0.1",
         type: "integration",
         name: NO_AUTH,
         version: "1.0.0",

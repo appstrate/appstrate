@@ -2,7 +2,7 @@
   "name": "@appstrate/firecrawl",
   "version": "1.0.0",
   "type": "integration",
-  "schema_version": "2.0",
+  "schema_version": "0.1",
   "display_name": "Firecrawl (API)",
   "description": "Web scraping and crawling API — extract clean data from any website",
   "keywords": ["web-scraping", "data-extraction", "ai"],

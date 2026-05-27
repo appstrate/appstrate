@@ -191,7 +191,7 @@ async function resolveOne(
   const apiCallAuthorizedUris = apiCallAuth?.authorized_uris ?? [];
   const apiCallAllowAllUris = apiCallAuth?.allow_all_uris ?? false;
 
-  // ── Resolve the sidecar server spec from the AFPS 2.0 `source`
+  // ── Resolve the sidecar server spec from the AFPS `source`
   // discriminant (replaces the 1.x inline `manifest.server`). ──
   //   - remote → Streamable HTTP MCP (`{ url, transport }`; spawn-mode is
   //              selected by `spec.sourceKind`, not `server.type`).
@@ -200,7 +200,7 @@ async function resolveOne(
   //   - api    → serverless (no `server` in the spec; sidecar skips spawn).
   //
   // Resolved BEFORE `resolveDeliveries` so the mcp-server's `mcp_config.env`
-  // template is available for AFPS 2.0.2 §7.6 `user_config_key` substitution
+  // template is available for AFPS §7.6 `user_config_key` substitution
   // (CC-4) — local-source integrations can bind a `delivery.env.<var>` to a
   // `${user_config.<key>}` placeholder in the referenced mcp-server's env map.
   const sourceKind = getIntegrationSourceKind(manifest);
@@ -221,7 +221,7 @@ async function resolveOne(
       logger.warn("remote-source integration missing remote.url; skipping", { integrationId });
       return null;
     }
-    // AFPS 2.0 §7.1 — `transport` is `"streamable-http" | "sse"`. The
+    // AFPS §7.1 — `transport` is `"streamable-http" | "sse"`. The
     // manifest schema enforces the enum + `required`; we forward the
     // declared value verbatim so the sidecar can pick the right MCP
     // client transport. Default to `"streamable-http"` only as a defensive
@@ -345,7 +345,7 @@ async function resolveOne(
             server: {
               ...(serverSpec.type ? { type: serverSpec.type } : {}),
               ...(serverSpec.entry_point ? { entry_point: serverSpec.entry_point } : {}),
-              // AFPS 2.0 — the referenced mcp-server package id, so the sidecar
+              // AFPS — the referenced mcp-server package id, so the sidecar
               // fetches the runnable server bundle from
               // `GET /internal/mcp-server-bundle/...` (local sources only).
               ...(serverSpec.serverPackageId
@@ -355,7 +355,7 @@ async function resolveOne(
               // a Streamable HTTP client against it. Mutually exclusive with
               // `entry_point` (enforced by `integrationManifestSchema`).
               ...(serverSpec.url ? { url: serverSpec.url } : {}),
-              // AFPS 2.0 §7.1 — `streamable-http` (default) | `sse`. Only
+              // AFPS §7.1 — `streamable-http` (default) | `sse`. Only
               // emitted on remote sources.
               ...(serverSpec.transport ? { transport: serverSpec.transport } : {}),
             },
@@ -464,7 +464,7 @@ interface ResolvedDeliveries {
   spawnEnv: Record<string, string>;
   httpDeliveryAuths?: NonNullable<IntegrationSpawnSpec["httpDeliveryAuths"]>;
   /**
-   * AFPS 2.0.2 §7.6 — materialised `delivery.files.<path>` entries. Each
+   * AFPS §7.6 — materialised `delivery.files.<path>` entries. Each
    * value's `{$credential.<field>}` template is rendered against the
    * decrypted credential bag, base64-encoded for the JSON wire, and ferried
    * to the sidecar where the runtime adapter writes the file with the
@@ -512,7 +512,7 @@ async function resolveDeliveries(
   }
 
   // Load the one connection chosen by the cascade. When the agent dep
-  // pins an `auth_key` (AFPS 2.0 §4.1), narrow the live-credentials
+  // pins an `auth_key` (AFPS §4.1), narrow the live-credentials
   // auto-pick to that single auth — the resolver snapshot already
   // honoured the pin, this is the parity guarantee for the no-snapshot
   // path (e.g. legacy callers that don't run the cascade upstream).
@@ -550,7 +550,7 @@ async function resolveDeliveries(
   // persisted (NON-injectable `inputs`). The sidecar mints the session at
   // boot by running the integration's login tool with the decrypted secret.
   //
-  // AFPS 2.0: the orchestrated-tool name + run policy live under
+  // AFPS: the orchestrated-tool name + run policy live under
   // `connect._meta["dev.appstrate/connect"]` (`tool`, `run_at`, `reauth_on`,
   // `produces`); `connect.tool` itself is just the spec marker object.
   const httpDecl0 = auth.delivery?.http;
@@ -647,10 +647,10 @@ async function resolveDeliveries(
   let resolvedAtLeastOne = false;
 
   // ─── delivery.env ───
-  // AFPS 2.0: each entry carries a `{$credential.<field>}` value template
+  // AFPS: each entry carries a `{$credential.<field>}` value template
   // (was the 1.x `{ from }` field pointer). Render it against the credential bag.
   //
-  // AFPS 2.0.2 §7.6 (CC-4): for local-source integrations whose referenced
+  // AFPS §7.6 (CC-4): for local-source integrations whose referenced
   // mcp-server declares `${user_config.<key>}` placeholders in
   // `server.mcp_config.env`, the entry's `user_config_key` (defaulting to the
   // env-variable name) names the placeholder we pre-render. The substituted
@@ -670,7 +670,7 @@ async function resolveDeliveries(
         continue;
       }
       spawnEnv[envKey] = value;
-      // AFPS 2.0.2 §7.6: collect the user_config bridge entries. Default
+      // AFPS §7.6: collect the user_config bridge entries. Default
       // `user_config_key` to the env-variable name when omitted.
       const userConfigKey = conf.user_config_key ?? envKey;
       userConfigSubstitutions[userConfigKey] = value;
@@ -678,7 +678,7 @@ async function resolveDeliveries(
     }
   }
 
-  // AFPS 2.0.2 §7.6 + §3.4 (CC-4) — bridge into the referenced mcp-server's
+  // AFPS §7.6 + §3.4 (CC-4) — bridge into the referenced mcp-server's
   // `mcp_config.env` template. Each `${user_config.<key>}` placeholder is
   // replaced with the rendered credential value the integration's
   // `delivery.env` materialised under that key. Keys without a matching
@@ -700,7 +700,7 @@ async function resolveDeliveries(
     }
   }
 
-  // ─── delivery.files (AFPS 2.0.2 §7.6, CC-5) ───
+  // ─── delivery.files (AFPS §7.6, CC-5) ───
   // Each entry's `value` is a `{$credential.<field>}` template rendered
   // against the credential bag (same grammar as `delivery.env`); `mode` is
   // an octal-string POSIX permission (default `0400`). Used primarily for

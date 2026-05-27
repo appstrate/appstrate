@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * First-class `mcp-server` package routes (AFPS 2.0.2 §3.4).
+ * First-class `mcp-server` package routes (AFPS §3.4).
  *
  * An `mcp-server` package's `manifest.json` is AFPS-native at the root with
  * MCPB-vocabulary fields embedded — the AFPS identity contract
  * (`type: "mcp-server"`, scoped `name`, `schema_version`, `dependencies`) is
  * lifted to the manifest root alongside MCPB-vocabulary fields (`server`,
- * `tools`, `user_config`) in AFPS 2.0.2 §3.4 / §11.2. They are import-only
+ * `tools`, `user_config`) in AFPS §3.4 / §11.2. They are import-only
  * (no editor), but otherwise have full parity with the other
  * package types: importable via `POST /api/packages/import`, listable via
  * `GET /api/packages/mcp-servers`, and fetchable via
@@ -41,7 +41,7 @@ function enc(s: string): Uint8Array {
 }
 
 /**
- * Build a minimal valid mcp-server `.afps` ZIP. AFPS 2.0.2 (§3.4) lifted the
+ * Build a minimal valid mcp-server `.afps` ZIP. AFPS (§3.4) lifted the
  * mcp-server identity to the manifest root, so `manifest.json` carries
  * `type: "mcp-server"` + the scoped `@scope/name` at the top level. The
  * server payload referenced by `server.entry_point` is left untouched by
@@ -123,7 +123,7 @@ describe("mcp-server package routes", () => {
         name: SERVER_ID,
         version: "1.0.0",
         type: "agent",
-        schema_version: "2.0",
+        schema_version: "0.1",
         display_name: "Impostor",
         author: "tester",
       };

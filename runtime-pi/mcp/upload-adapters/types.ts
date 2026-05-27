@@ -30,7 +30,7 @@ import { RESERVED_INTEGRATION_UPLOAD_PROTOCOLS } from "@appstrate/core/integrati
  * `uploadProtocol` enum and through integration manifests'
  * `source.api.upload_protocols[]`.
  *
- * AFPS 2.0.2 dropped the closed enum in favour of an open string array; the
+ * AFPS dropped the closed enum in favour of an open string array; the
  * runtime treats the protocol as an opaque `string` and recognises the
  * well-known reserved values via {@link RESERVED_INTEGRATION_UPLOAD_PROTOCOLS}
  * from `@appstrate/core/integration`. Producers MAY emit other
@@ -249,7 +249,7 @@ export interface UploadAdapter {
  * in the Pi tool surface. Sourced from `@appstrate/core/integration`
  * (`RESERVED_INTEGRATION_UPLOAD_PROTOCOLS`) — the same list AFPS reserves
  * for the well-known protocols — so the runtime's recognition set cannot
- * drift from the canonical reserved set. Per AFPS 2.0.2 the field is open
+ * drift from the canonical reserved set. Per AFPS the field is open
  * (producers MAY emit other values); consumers SHOULD ignore unknown ones.
  */
 export const UPLOAD_PROTOCOLS: readonly UploadProtocol[] = RESERVED_INTEGRATION_UPLOAD_PROTOCOLS;

@@ -172,7 +172,7 @@ export interface ResourceEntry {
   /**
    * When the depended-on integration declares multiple auth methods,
    * selects which `auths.<key>` entry this agent dependency uses.
-   * AFPS 2.0 §4.1. `undefined` keeps the runtime's existing resolver
+   * AFPS §4.1. `undefined` keeps the runtime's existing resolver
    * cascade behaviour (any accessible connection on the integration).
    * Ignored for non-integration resource types.
    */

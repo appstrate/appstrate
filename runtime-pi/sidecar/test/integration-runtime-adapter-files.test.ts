@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Process adapter — `delivery.files` materialisation (AFPS 2.0.2 §7.6, CC-5).
+ * Process adapter — `delivery.files` materialisation (AFPS §7.6, CC-5).
  *
  * The process adapter shares the host filesystem with the integration
  * subprocess, so we try to write each manifest-declared file at its absolute

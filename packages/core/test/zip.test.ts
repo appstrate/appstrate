@@ -26,7 +26,7 @@ function validAgentManifest() {
     name: "@test/my-agent",
     version: "1.0.0",
     type: "agent",
-    schema_version: "2.0",
+    schema_version: "0.1",
     display_name: "My Agent",
     author: "test",
   });
@@ -51,7 +51,7 @@ function validIntegrationManifest() {
     type: "integration",
     name: "@test/my-integration",
     version: "1.0.0",
-    schema_version: "2.0",
+    schema_version: "0.1",
     display_name: "My Integration",
     source: { kind: "local", server: { name: "@test/my-integration-server", version: "^1.0.0" } },
     auths: {
@@ -120,7 +120,7 @@ describe("parsePackageZip", () => {
       type: "integration",
       name: "@test/broken",
       version: "1.0.0",
-      schema_version: "2.0",
+      schema_version: "0.1",
       display_name: "Broken",
       // missing source + auths
     });
@@ -202,7 +202,7 @@ describe("parsePackageZip", () => {
       name: "@test/raw-roundtrip",
       version: "1.0.0",
       type: "agent" as const,
-      schema_version: "2.0",
+      schema_version: "0.1",
       display_name: "Raw Roundtrip Test",
       author: "test",
       // dependencies and timeout intentionally omitted

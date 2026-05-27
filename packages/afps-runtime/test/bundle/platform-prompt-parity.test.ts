@@ -44,7 +44,7 @@ function makeFixtureBundle(): Bundle {
       name: "@fixture/agent",
       version: "1.0.0",
       type: "agent",
-      schema_version: "2.0",
+      schema_version: "0.1",
       timeout: 120,
       input: {
         schema: {
@@ -73,7 +73,7 @@ function makeFixtureBundle(): Bundle {
       name: "@fixture/search",
       version: "1.0.0",
       type: "mcp-server",
-      schema_version: "2.0",
+      schema_version: "0.1",
       server: {
         type: "node",
         entry_point: "server/index.js",

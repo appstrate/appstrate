@@ -2,7 +2,7 @@
 
 /**
  * OAuth2 authorization-code + PKCE flow for AFPS integration `auths.{key}` of
- * type `oauth2` (AFPS 2.0 §7.3).
+ * type `oauth2` (AFPS §7.3).
  *
  * Pure module: takes pre-resolved endpoints + client credentials + an
  * {@link OAuthStateStore}, returns either an authorization URL (initiate)
@@ -12,7 +12,7 @@
  * us. Exposes an initiate (authorization URL) and a callback (token
  * exchange) function for the integration OAuth flow.
  *
- * Notable AFPS 2.0 inputs:
+ * Notable AFPS inputs:
  *   - `resource` (RFC 8707) is sent on both the authorize URL and the token
  *     request — some IdPs only honour it on one of the two.
  *   - `code_challenge_methods_supported`: `["S256"]` ⇒ PKCE-S256; absent/empty
@@ -81,9 +81,9 @@ export interface InitiateIntegrationOAuthInput {
   /**
    * Token endpoint client-auth method (`token_endpoint_auth_method`).
    *
-   * AFPS 2.0.1 (CC-10, §7.3, CHANGELOG): when the manifest does not specify
+   * AFPS (CC-10, §7.3, CHANGELOG): when the manifest does not specify
    * a value, the default is now `"client_secret_basic"` — the RFC 8414 §2 /
-   * RFC 7591 §2 default. AFPS 2.0.0 documented `"client_secret_post"` as the
+   * RFC 7591 §2 default. AFPS documented `"client_secret_post"` as the
    * default; the flip aligns with the OAuth 2.1 ecosystem (Anthropic, Google,
    * GitHub, Slack all accept Basic; some IdPs require it).
    *
@@ -156,7 +156,7 @@ export async function initiateIntegrationOAuth(
   store: OAuthStateStore,
   input: InitiateIntegrationOAuthInput,
 ): Promise<InitiateIntegrationOAuthResult> {
-  // AFPS 2.0.1 (CC-10, §7.3): default-when-missing flipped from
+  // AFPS (CC-10, §7.3): default-when-missing flipped from
   // `"client_secret_post"` to `"client_secret_basic"` — RFC 8414 §2 /
   // RFC 7591 §2 default. Manifest-explicit values continue to work.
   const tokenAuthMethod = input.tokenEndpointAuthMethod ?? "client_secret_basic";
@@ -187,7 +187,7 @@ export async function initiateIntegrationOAuth(
     );
   }
 
-  // PKCE-method precedence (AFPS 2.0 §7.3 + RFC 8414 §2):
+  // PKCE-method precedence (AFPS §7.3 + RFC 8414 §2):
   //   1. Manifest-declared `code_challenge_methods_supported` (authoritative).
   //   2. Discovery-projected `code_challenge_methods_supported` (RFC 8414 — a
   //      manifest that only declares an `issuer` rides on whatever the IdP
@@ -323,7 +323,7 @@ export async function handleIntegrationOAuthCallback(
     tokenEndpoint: integration.tokenEndpoint,
     clientId: integration.clientId ?? "",
     clientSecret: integration.clientSecret ?? "",
-    // AFPS 2.0.1 (CC-10, §7.3): default-when-missing flipped from
+    // AFPS (CC-10, §7.3): default-when-missing flipped from
     // `"client_secret_post"` to `"client_secret_basic"`.
     tokenEndpointAuthMethod: integration.tokenEndpointAuthMethod ?? "client_secret_basic",
     codeVerifier: stateRow.codeVerifier || undefined,

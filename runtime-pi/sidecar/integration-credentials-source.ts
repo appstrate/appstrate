@@ -37,14 +37,14 @@ import { logger } from "./logger.ts";
 export type { IntegrationCredentialsWire };
 
 /**
- * Normalize an HTTP-parsed credentials payload from the platform's AFPS 2.0
+ * Normalize an HTTP-parsed credentials payload from the platform's AFPS
  * snake_case wire to the TS-internal camelCase `IntegrationCredentialsWire`
  * shape. The TS source-of-truth interface (in `@appstrate/connect/
  * integration-credentials`) is camelCase per the documented TS-internal
  * naming convention; this function is the deserialization boundary that
  * flips the field names from the platform's snake_case wire.
  *
- * Field mapping (AFPS 2.0 snake_case wire → TS internal camelCase):
+ * Field mapping (AFPS snake_case wire → TS internal camelCase):
  *   auth_key              → authKey
  *   auth_type             → authType
  *   authorized_uris       → authorizedUris

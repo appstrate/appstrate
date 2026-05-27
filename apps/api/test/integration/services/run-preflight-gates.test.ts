@@ -22,7 +22,7 @@ function loadedPackage(id: string, timeoutOverride?: number): LoadedPackage {
     manifest: {
       name: id,
       version: "0.1.0",
-      schema_version: "2.0",
+      schema_version: "0.1",
       display_name: id,
       type: "agent",
       ...(timeoutOverride !== undefined ? { timeout: timeoutOverride } : {}),

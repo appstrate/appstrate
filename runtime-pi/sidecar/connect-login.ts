@@ -28,7 +28,7 @@ import type { IntegrationCredentialsSource } from "./integration-credentials-sou
 import { logger } from "./logger.ts";
 
 /**
- * AFPS 2.0 `auths.{key}.delivery.http` block — snake_case (`in`, `name`,
+ * AFPS `auths.{key}.delivery.http` block — snake_case (`in`, `name`,
  * `value`, `prefix?`, `encoding?`, `allow_server_override?`), as carried on the
  * spawn spec's `connectLogin.deliveryHttp`. The `value` is a
  * `{$credential.<field>}` template; {@link resolveAfpsHttpDelivery} (the same
@@ -145,7 +145,7 @@ export async function runConnectLogin(opts: RunConnectLoginOptions): Promise<Cre
       //       declaring an alternative (`delivery.env`).
       // Either way, the runtime can't legitimately inject anything; the
       // older behaviour produced silent auth failures upstream rather than
-      // a clear boot error. AFPS 2.0.2 §7.3 requires every auth to declare
+      // a clear boot error. AFPS §7.3 requires every auth to declare
       // either `delivery.env` or `delivery.http` with a non-empty header
       // name — surface that requirement here.
       throw new Error(
@@ -200,9 +200,9 @@ function parseLoginToolResult(result: {
     throw new Error("connect-login: login tool result `outputs` is not a string map");
   }
   const out: LoginToolResult = { outputs };
-  // AFPS 2.0.2 wire format is snake_case (`identity_claims`, `expires_at`,
+  // AFPS wire format is snake_case (`identity_claims`, `expires_at`,
   // `scopes_granted`); accept the camelCase forms for one release window so
-  // an integration built against AFPS 2.0.1 still parses cleanly. Snake_case
+  // an integration built against AFPS still parses cleanly. Snake_case
   // wins on conflict (the canonical wire form). Drop the camelCase branches
   // in the next major release.
   const identityClaims = coerceStringMap(obj.identity_claims ?? obj.identityClaims);

@@ -568,7 +568,7 @@
                       "id": "@acme/email-sorter",
                       "display_name": "Email Sorter",
                       "description": "Automatically sorts and labels incoming emails",
-                      "schema_version": "2.0",
+                      "schema_version": "0.1",
                       "author": "Acme Corp",
                       "keywords": ["email", "automation"],
                       "source": "local",
@@ -586,7 +586,7 @@
                       "id": "@appstrate/code-reviewer",
                       "display_name": "Code Reviewer",
                       "description": "Reviews pull requests and suggests improvements",
-                      "schema_version": "2.0",
+                      "schema_version": "0.1",
                       "author": "Appstrate",
                       "keywords": ["code", "review", "github"],
                       "source": "system",
@@ -1860,12 +1860,12 @@
               },
               "example": {
                 "manifest": {
-                  "$schema": "https://afps.appstrate.dev/packages/schema/v2/agent.schema.json",
+                  "$schema": "https://schemas.afps.dev/v0/agent.schema.json",
                   "name": "@inline/one-shot",
                   "display_name": "One-shot summary",
                   "version": "0.0.0",
                   "type": "agent",
-                  "schema_version": "2.0",
+                  "schema_version": "0.1",
                   "dependencies": {}
                 },
                 "prompt": "Summarize the attached document in three bullet points.",
@@ -3848,7 +3848,7 @@
                           "type": {
                             "type": "string",
                             "enum": ["oauth2", "api_key", "basic", "mtls", "custom"],
-                            "description": "Auth method type (AFPS 2.0.2 §7.2). `mtls` was added in v2.0.1 — client cert + key are supplied via `credentials.schema` and injected at runtime through `delivery.files`."
+                            "description": "Auth method type (AFPS §7.2). For `mtls`, client cert + key are supplied via `credentials.schema` and injected at runtime through `delivery.files`."
                           },
                           "required": {
                             "type": "boolean"
@@ -3861,7 +3861,7 @@
                           },
                           "resource": {
                             "type": ["string", "null"],
-                            "description": "RFC 8707 resource indicator declared by the manifest (`auths.{key}.resource`). AFPS 2.0 §7.3 name — matches the RFC."
+                            "description": "RFC 8707 resource indicator declared by the manifest (`auths.{key}.resource`). AFPS §7.3 name — matches the RFC."
                           },
                           "connections": {
                             "type": "array",
@@ -10243,7 +10243,7 @@
         "operationId": "getMcpServerBundle",
         "tags": ["Internal"],
         "summary": "Fetch the AFPS bundle bytes for a referenced mcp-server package",
-        "description": "Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise an integration's MCP server before spawning a runner container. In AFPS 2.0 a local-source integration references a SEPARATE mcp-server package via `source.server.name`; this endpoint serves that package's bundle. It verifies that the run's agent declares an installed integration (in `dependencies.integrations`) that references this mcp-server — orthogonal access control to the credentials endpoint. Returns the raw ZIP archive (`application/zip`).",
+        "description": "Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise an integration's MCP server before spawning a runner container. In AFPS a local-source integration references a SEPARATE mcp-server package via `source.server.name`; this endpoint serves that package's bundle. It verifies that the run's agent declares an installed integration (in `dependencies.integrations`) that references this mcp-server — orthogonal access control to the credentials endpoint. Returns the raw ZIP archive (`application/zip`).",
         "security": [
           {
             "bearerExecToken": []
@@ -16354,7 +16354,7 @@
                     }
                   }
                 },
-                "description": "AFPS 2.0 §4.1 mcp_servers dependency group"
+                "description": "AFPS §4.1 mcp_servers dependency group"
               },
               "integrations": {
                 "type": "array",
@@ -17165,7 +17165,7 @@
       },
       "IntegrationCredentialsResponse": {
         "type": "object",
-        "description": "Live credentials + per-auth HTTP delivery plans + per-auth expiries for an installed integration. Returned by both `GET /internal/integration-credentials/{scope}/{name}` and `POST .../refresh` (identical shape). Feeds the sidecar's MITM `MitmCredentialSource.current()` + `.deliveryPlans()`. All wire keys are snake_case per AFPS 2.0 (see `docs/CASING_CONVENTIONS.md` — internal sidecar↔platform endpoints share the Zone 1 default).",
+        "description": "Live credentials + per-auth HTTP delivery plans + per-auth expiries for an installed integration. Returned by both `GET /internal/integration-credentials/{scope}/{name}` and `POST .../refresh` (identical shape). Feeds the sidecar's MITM `MitmCredentialSource.current()` + `.deliveryPlans()`. All wire keys are snake_case per AFPS (see `docs/CASING_CONVENTIONS.md` — internal sidecar↔platform endpoints share the Zone 1 default).",
         "required": ["auths", "delivery_plans", "expires_at_epoch_ms"],
         "properties": {
           "auths": {
@@ -17194,7 +17194,7 @@
                 },
                 "resource": {
                   "type": "string",
-                  "description": "RFC 8707 resource indicator declared by the manifest (`auths.{key}.resource`). AFPS 2.0 §7.3 name — matches the RFC."
+                  "description": "RFC 8707 resource indicator declared by the manifest (`auths.{key}.resource`). AFPS §7.3 name — matches the RFC."
                 },
                 "expires_at": {
                   "type": "string",
@@ -17211,7 +17211,7 @@
                   "additionalProperties": {
                     "type": "string"
                   },
-                  "description": "Identity claims captured at connect time (e.g. OIDC `sub`, `email`). AFPS 2.0 §7 name."
+                  "description": "Identity claims captured at connect time (e.g. OIDC `sub`, `email`). AFPS §7 name."
                 }
               }
             }
@@ -17390,13 +17390,13 @@
         "description": "AFPS Agent manifest extended with Appstrate platform fields. Standard fields are defined by the AFPS Agent schema; extension fields use the x- prefix per AFPS §10.",
         "allOf": [
           {
-            "$ref": "https://afps.appstrate.dev/packages/schema/v2/agent.schema.json"
+            "$ref": "https://schemas.afps.dev/v0/agent.schema.json"
           }
         ]
       },
       "SkillManifest": {
-        "description": "AFPS Skill manifest. See https://afps.appstrate.dev for field reference.",
-        "$ref": "https://afps.appstrate.dev/packages/schema/v2/skill.schema.json"
+        "description": "AFPS Skill manifest. See https://schemas.afps.dev for field reference.",
+        "$ref": "https://schemas.afps.dev/v0/skill.schema.json"
       },
       "FileConstraintsMap": {
         "type": "object",

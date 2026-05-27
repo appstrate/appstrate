@@ -197,7 +197,7 @@ export function translateResolutionError(e: ConnectionResolutionError): Validati
           ...(e.ownedByActor !== undefined ? { owned_by_actor: e.ownedByActor } : {}),
         }
       : {}),
-    // AFPS 2.0 §4.1 — surface the pinned `auth_key` (the agent dep's choice)
+    // AFPS §4.1 — surface the pinned `auth_key` (the agent dep's choice)
     // and which auth_keys the actor's existing connections use, so the UI
     // can guide the user to connect via the right auth method.
     ...(e.code === "auth_key_mismatch"

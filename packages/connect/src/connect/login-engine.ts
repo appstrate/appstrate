@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Declarative login engine (AFPS 2.0 §7.7, spec §4.8).
+ * Declarative login engine (AFPS §7.7, spec §4.8).
  *
  * Executes a manifest-declared single login request: substitute `{{...}}`
  * placeholders (from the transient bootstrap `inputs`) into one HTTP request,
@@ -11,7 +11,7 @@
  * following. Stateful flows (multi-cookie sessions, TLS impersonation, refresh,
  * redirect chains) belong on the Orchestrated `connect.tool` path, not here.
  *
- * The `connect` block is consumed in AFPS 2.0 shape (snake_case). Each
+ * The `connect` block is consumed in AFPS shape (snake_case). Each
  * `outputs[name]` is one of:
  *   - an Arazzo runtime-expression string (`$response.body#/<json-pointer>`,
  *     `$response.header.<name>`, `$statusCode`);
@@ -72,7 +72,7 @@ export const DEFAULT_LOGIN_LIMITS: LoginLimits = {
 };
 
 /**
- * An AFPS 2.0 `connect.login.outputs` entry. Either an Arazzo runtime
+ * An AFPS `connect.login.outputs` entry. Either an Arazzo runtime
  * expression string, an AFPS extractor object, or an Arazzo Selector Object
  * (`{ context, selector, type }`).
  */
@@ -84,7 +84,7 @@ export type LoginOutput =
   | ArazzoSelectorObject;
 
 /**
- * Arazzo Selector Object (§7.7, AFPS 2.0). `context` is an Arazzo runtime
+ * Arazzo Selector Object (§7.7, AFPS). `context` is an Arazzo runtime
  * expression yielding the document to query (typically `$response.body`);
  * `selector` is the type-specific query string.
  */
@@ -421,7 +421,7 @@ async function readBoundedText(res: Response, maxBytes: number): Promise<string>
 const SINGLE_CREDENTIAL_REF = /^\{\$credential\.([A-Za-z0-9_]+)\}$/;
 
 /**
- * Resolve a jwt extractor's `token` reference. AFPS 2.0 expresses it as a
+ * Resolve a jwt extractor's `token` reference. AFPS expresses it as a
  * `{$credential.<field>}` template (a reference to another extracted output);
  * a bare field name is also accepted for resilience.
  */
@@ -544,7 +544,7 @@ function evaluateJsonPath(root: unknown, path: string): unknown {
 }
 
 /**
- * Apply one AFPS 2.0 `outputs` expression. `scope` carries values already
+ * Apply one AFPS `outputs` expression. `scope` carries values already
  * extracted in this pass (for jwt `token` resolution). Returns `undefined`
  * when the expression is unrecognised or its target is absent — the caller
  * fails closed on `undefined`/empty for declared outputs.

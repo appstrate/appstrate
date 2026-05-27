@@ -13,7 +13,7 @@ import {
 // --- Fixtures ---
 
 const VALID_MANIFEST = {
-  schema_version: "2.0",
+  schema_version: "0.1",
   name: "@test-org/test-agent",
   version: "1.0.0",
   type: "agent",
@@ -112,7 +112,7 @@ describe("validateManifest", () => {
 
   it("accepts manifest without optional sections (input, output, state)", () => {
     const minimal = {
-      schema_version: "2.0",
+      schema_version: "0.1",
       name: "@test-org/minimal",
       version: "1.0.0",
       type: "agent",
@@ -148,7 +148,7 @@ describe("validateManifest", () => {
 
   it("rejects manifest missing required fields", () => {
     const bad = {
-      schema_version: "2.0",
+      schema_version: "0.1",
       name: "@test-org/test",
       version: "1.0.0",
       type: "agent",

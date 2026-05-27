@@ -34,7 +34,7 @@ export interface ResolvedAuthCredentials {
   authorizedUris: readonly string[];
   /**
    * RFC 8707 resource indicator declared by the manifest
-   * (`auths.{key}.resource`). AFPS 2.0 §7.3 name — matches the RFC.
+   * (`auths.{key}.resource`). AFPS §7.3 name — matches the RFC.
    */
   resource?: string;
   /** Identity claims extracted by `extractTokenIdentity` — passthrough metadata. */

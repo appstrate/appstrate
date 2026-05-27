@@ -273,7 +273,7 @@ async function loadAccessibleConnectionById(
  * precedence); call sites needing deterministic disambiguation go through
  * `resolveConnectionsForRun`.
  *
- * `requiredAuthKey` (AFPS 2.0 §4.1) — when set, narrows iteration to that
+ * `requiredAuthKey` (AFPS §4.1) — when set, narrows iteration to that
  * single auth key. The dep's `auth_key` pin must beat the manifest's
  * declared-auth precedence on the live-credentials path; this is the
  * non-snapshot mirror of the resolver's pre-cascade filter.
@@ -503,7 +503,7 @@ export function extractIdentity(
   source: Record<string, unknown>,
 ): { accountId: string; identityClaims: Record<string, unknown> } {
   const auth = lookupAuth(manifest, authKey) as AfpsManifestAuth;
-  // AFPS 2.0 (Appendix D): `extractTokenIdentity` → `identity_claims`.
+  // AFPS (Appendix D): `extractTokenIdentity` → `identity_claims`.
   const mapping = auth.identity_claims ?? {};
   const claims: Record<string, unknown> = {};
   for (const [outKey, accessor] of Object.entries(mapping)) {
@@ -520,7 +520,7 @@ export function extractIdentity(
 }
 
 /**
- * AFPS 2.0 §7.4 — enforce `auth.required_identity_claims`.
+ * AFPS §7.4 — enforce `auth.required_identity_claims`.
  *
  * Per spec §7.4 line 931, `required_identity_claims` enumerates **OIDC
  * source-side claim names** that MUST be present on the resolved identity
@@ -1047,7 +1047,7 @@ export async function getIntegrationAuthStatuses(
   const oauthClientKeys = new Set(oauthClients.map((r) => r.authKey));
 
   const auths: IntegrationAuthStatus[] = Object.entries(authsMap).map(([key, rawAuth]) => {
-    // AFPS 2.0 (Appendix D): `scopes` → `default_scopes`, `audience` →
+    // AFPS (Appendix D): `scopes` → `default_scopes`, `audience` →
     // `resource` (RFC 8707); the Appstrate run-policy `required` flag moved
     // under `_meta["dev.appstrate/auth"].required`.
     const auth = rawAuth as AfpsManifestAuth;
@@ -1060,7 +1060,7 @@ export async function getIntegrationAuthStatuses(
       type: auth.type,
       required: authMeta?.required ?? true,
       scopes: auth.default_scopes ?? [],
-      // AFPS 2.0 §7.3 (RFC 8707) names this field `resource`.
+      // AFPS §7.3 (RFC 8707) names this field `resource`.
       resource,
       connections: allConnections.filter((c) => c.auth_key === key),
       has_oauth_client: oauthClientKeys.has(key),

@@ -4,7 +4,7 @@
 /**
  * Canonical `{$credential.<field>}` value-template renderer.
  *
- * AFPS 2.0 `delivery.http` / `delivery.env` / `delivery.files` value templates
+ * AFPS `delivery.http` / `delivery.env` / `delivery.files` value templates
  * reference an auth's decrypted credential bag via the `{$credential.<field>}`
  * syntax. This is a DISTINCT syntax from the `{{var}}` substitution handled by
  * `@appstrate/afps-runtime`'s `substituteVars` — there is exactly ONE

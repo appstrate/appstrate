@@ -87,7 +87,7 @@ export class OrchestratedStrategy implements IntegrationConnectStrategy {
   ): Promise<IntegrationConnectionSummary> {
     const credentials = assertFieldsInput(input, "OrchestratedStrategy");
     const { manifest, auth } = await readIntegrationAuth(ctx.scope, ctx.integrationId, ctx.authKey);
-    // AFPS 2.0: `connect.tool` is the marker object `{}`; the orchestrated-tool
+    // AFPS: `connect.tool` is the marker object `{}`; the orchestrated-tool
     // name + run policy (`tool`, `run_at`, `produces`, `persist_login_secret`)
     // live under `connect._meta["dev.appstrate/connect"]`.
     const connect = auth.connect as AfpsManifestConnect | undefined;

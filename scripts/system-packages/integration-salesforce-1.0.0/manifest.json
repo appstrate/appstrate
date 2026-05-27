@@ -2,7 +2,7 @@
   "name": "@appstrate/salesforce",
   "version": "1.0.0",
   "type": "integration",
-  "schema_version": "2.0",
+  "schema_version": "0.1",
   "display_name": "Salesforce (API)",
   "description": "Cloud-based CRM platform for sales, service, and marketing",
   "keywords": ["crm", "sales", "marketing"],

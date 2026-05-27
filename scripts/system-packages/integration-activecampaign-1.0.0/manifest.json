@@ -2,7 +2,7 @@
   "name": "@appstrate/activecampaign",
   "version": "1.0.0",
   "type": "integration",
-  "schema_version": "2.0",
+  "schema_version": "0.1",
   "display_name": "ActiveCampaign (API)",
   "description": "Marketing automation and CRM platform — contacts, deals, campaigns, and automations",
   "keywords": ["marketing", "crm"],

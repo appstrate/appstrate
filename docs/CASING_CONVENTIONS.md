@@ -2,7 +2,7 @@
 
 **Status**: authoritative reference. Audit via `/audit-casing` (see `.claude/commands/audit-casing.md`).
 
-This document captures every casing decision made during the AFPS 1.x → 2.0 + DTO snake_case unification. Any code change MUST respect these rules. Deviations are bugs.
+This document captures every casing decision made during the AFPS snake_case + DTO unification. Any code change MUST respect these rules. Deviations are bugs.
 
 ---
 
@@ -41,7 +41,7 @@ Everything that crosses HTTP in JSON or sits at rest in canonical formats.
 - AFPS spec Zod schemas (`afps-spec/packages/schema/src/schemas.ts`)
 - Appstrate validators (`packages/core/src/{validation,integration,mcp-server,form}.ts`)
 
-**Sub-exception — `form.ts` legacy camelCase reader**: `mapAfpsToRjsf` in `packages/core/src/form.ts` reads BOTH canonical snake_case (`file_constraints`, `ui_hints`, `property_order`, `max_size`) AND legacy camelCase (`fileConstraints`, `uiHints`, `propertyOrder`, `maxSize`) wrappers. Canonical snake_case wins; writeback is always snake_case. Reason: AFPS 1.x manifests persisted before the 2.0 migration are still on disk. Drop once a backfill re-saves every persisted manifest. RJSF vendor-namespaced keys (`ui:order`, `ui:widget`, `ui:placeholder`) and RJSF widget options (`accept`, `maxSize`, `multiple`, `maxFiles`) are third-party APIs and intentionally camelCase — out of scope for Zone 1.
+**Sub-exception — `form.ts` legacy camelCase reader**: `mapAfpsToRjsf` in `packages/core/src/form.ts` reads BOTH canonical snake_case (`file_constraints`, `ui_hints`, `property_order`, `max_size`) AND legacy camelCase (`fileConstraints`, `uiHints`, `propertyOrder`, `maxSize`) wrappers. Canonical snake_case wins; writeback is always snake_case. Reason: AFPS 1.x manifests persisted before the snake_case migration are still on disk. Drop once a backfill re-saves every persisted manifest. RJSF vendor-namespaced keys (`ui:order`, `ui:widget`, `ui:placeholder`) and RJSF widget options (`accept`, `maxSize`, `multiple`, `maxFiles`) are third-party APIs and intentionally camelCase — out of scope for Zone 1.
 
 **Why snake_case** (SOTA evidence):
 
@@ -169,7 +169,7 @@ If unsure: "universal" means "appears on >5 different types". Otherwise snake_ca
 
 #### Carve-out 4e — ModelProviderDefinition + provider DTOs
 
-> **Vocabulary note**: "provider" here refers to **model providers** — Appstrate's internal LLM-credential registry (OpenAI, Anthropic, Codex, Claude Code, …). Not to be confused with the retired AFPS 1.x `provider` package type, which became `integration` in AFPS 2.0 (Appendix D). Model providers are a distinct Appstrate subsystem with its own DTO surface.
+> **Vocabulary note**: "provider" here refers to **model providers** — Appstrate's internal LLM-credential registry (OpenAI, Anthropic, Codex, Claude Code, …). Not to be confused with the retired AFPS 1.x `provider` package type, which became `integration` in AFPS (Appendix D). Model providers are a distinct Appstrate subsystem with its own DTO surface.
 
 **Files**:
 
@@ -295,7 +295,7 @@ SSE Run payload is camelCase (per Carve-out 4h). REST Run payload mixes snake_ca
 
 **Schedule override endpoints** (`/api/schedules`, `/api/agents/:id/schedules`) use **snake_case** wire fields: `model_id_override`, `proxy_id_override`, `version_override`.
 
-End-to-end consistent within each endpoint family (backend Zod ↔ OpenAPI ↔ frontend hook all match). The asymmetry is historical — the override fields followed AFPS 2.0 snake_case canon while the standalone fields predate the migration. These IDs appear on 4 types each (≤5 threshold for Carve-out 4b), so they don't qualify as universal DB convention.
+End-to-end consistent within each endpoint family (backend Zod ↔ OpenAPI ↔ frontend hook all match). The asymmetry is historical — the override fields followed AFPS snake_case canon while the standalone fields predate the migration. These IDs appear on 4 types each (≤5 threshold for Carve-out 4b), so they don't qualify as universal DB convention.
 
 Don't introduce new endpoints in this surface; if a new model/proxy/credential endpoint is needed, prefer snake_case wire.
 
@@ -311,7 +311,7 @@ Treat any new management-CRUD route on a BA plugin table the same way (mirror th
 
 ## Field-name catalog (canonical)
 
-### Manifest fields (AFPS 2.0 — all snake_case)
+### Manifest fields (AFPS — all snake_case)
 
 **Common**: `name`, `version`, `type`, `display_name`, `description`, `keywords`, `license`, `repository`, `schema_version`, `dependencies`, `_meta`, `author`
 
@@ -324,7 +324,7 @@ Treat any new management-CRUD route on a BA plugin table the same way (mirror th
 - `file_constraints.{key}`: `accept`, `max_size`
 - `ui_hints.{key}`: `placeholder`
 
-**MCP-server (MCPB)**: `manifest_version`, `server.{type, entry_point, mcp_config}`, `mcp_config.{command, args, env, platform_overrides}`, `tools[].{name, description}`, `user_config`, `_meta["dev.appstrate/mcp-server"].runtime` (Appstrate Bun override; per AFPS 2.0.2 the mcp-server manifest is AFPS-native at the root — no `_meta["dev.afps/mcp-server"]` identity wrapper)
+**MCP-server (MCPB)**: `manifest_version`, `server.{type, entry_point, mcp_config}`, `mcp_config.{command, args, env, platform_overrides}`, `tools[].{name, description}`, `user_config`, `_meta["dev.appstrate/mcp-server"].runtime` (Appstrate Bun override; per AFPS the mcp-server manifest is AFPS-native at the root — no `_meta["dev.afps/mcp-server"]` identity wrapper)
 
 **Integration**:
 
@@ -354,7 +354,7 @@ Treat any new management-CRUD route on a BA plugin table the same way (mirror th
 
 **Integration DTO domain fields** (snake_case, post Phase 4): `scopes_granted`, `needs_reconnection`, `owner_type`, `owner_name`, `auth_key`, `account_id`, `shared_with_org`, `identity_claims`, `block_user_connections`, `has_oauth_client`, `has_client_secret`, `redirect_uri`, `missing_scopes`, `resolved_missing_scopes`, `resolved_owned_by_actor`, `org_default_enforced`, `can_add_connection`, `tool_catalog`, `required_scopes`, `required_auth_key`, `url_patterns`, `source_id`, `source_type`, `client_id`, `client_secret`, `client_secret_hash`, `client_type`, `allowed_scopes`, `connected_at`, `force_account_select`, `connection_id`, `integration_package_id`, `agent_package_id`, `admin_pinned_connection_id`, `member_pinned_connection_id`, `org_default_connection_id`, `resolved_connection_id`, `owner_id`, `owner_user_id`, `owner_end_user_id`, `is_own`
 
-**Internal sidecar↔platform wire fields** (snake_case, AFPS 2.0): the `/internal/integration-credentials/{scope}/{name}` GET + refresh endpoints emit all keys snake_case — `auth_key`, `auth_type`, `authorized_uris`, `scopes_granted`, `identity_claims`, `expires_at`, `delivery_plans`, `expires_at_epoch_ms`, and per-plan `header_name`, `header_prefix`, `allow_server_override`. The TS-internal source-of-truth type `IntegrationCredentialsWire` (in `@appstrate/connect/integration-credentials`) stays camelCase per the Zone 3 TS-internal convention; field-name translation happens at the JSON boundary via `serializeIntegrationCredentialsWire` (platform-side) and `normalizeIntegrationCredentialsWire` (sidecar-side). The legacy camelCase dual-emit was retired with AFPS 2.0 — there is no carve-out for these endpoints. `audience` remains as a back-compat alias for `resource` (RFC 8707) and is dual-emitted for one release window with a `TODO(AFPS 2.1)` removal marker.
+**Internal sidecar↔platform wire fields** (snake_case, AFPS): the `/internal/integration-credentials/{scope}/{name}` GET + refresh endpoints emit all keys snake_case — `auth_key`, `auth_type`, `authorized_uris`, `scopes_granted`, `identity_claims`, `expires_at`, `delivery_plans`, `expires_at_epoch_ms`, and per-plan `header_name`, `header_prefix`, `allow_server_override`. The TS-internal source-of-truth type `IntegrationCredentialsWire` (in `@appstrate/connect/integration-credentials`) stays camelCase per the Zone 3 TS-internal convention; field-name translation happens at the JSON boundary via `serializeIntegrationCredentialsWire` (platform-side) and `normalizeIntegrationCredentialsWire` (sidecar-side). The legacy camelCase dual-emit was retired with AFPS — there is no carve-out for these endpoints. `audience` remains as a back-compat alias for `resource` (RFC 8707) and is dual-emitted for one release window with a `TODO(AFPS 2.1)` removal marker.
 
 **Cloud billing wire**: `usage_percent`, `credits_used`, `credit_quota`, `period_end`, `cancel_at_period_end`, `plan_id`, `return_url`
 
@@ -504,7 +504,7 @@ The `/audit-casing` skill dispatches parallel opus sub-agents to verify every di
 
 | Phase         | Commit                 | Scope                                                              |
 | ------------- | ---------------------- | ------------------------------------------------------------------ |
-| Pass 1        | (many)                 | AFPS 1.x → 2.0 manifest field renames (snake_case)                 |
+| Pass 1        | (many)                 | AFPS manifest field renames (snake_case)                           |
 | Pass 2        | (many)                 | Fix readers/writers that missed Pass 1                             |
 | Phase 1       | `79bb77f5`             | DTO mirror fields: `display_name`, `schema_version`, `forked_from` |
 | Phase 2       | `009ae169`             | ~30 DTO domain fields (agent/skill/run/schedule)                   |

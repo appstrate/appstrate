@@ -176,7 +176,7 @@ export interface ParsedPackageZip {
   type: PackageType;
   /**
    * Canonical package id — for every package type (agent/skill/integration/
-   * mcp-server) this is the scoped manifest `name`. AFPS 2.0.2 (§3.4) lifted
+   * mcp-server) this is the scoped manifest `name`. AFPS (§3.4) lifted
    * the mcp-server scoped identity to the manifest root, removing the
    * previous `_meta["dev.afps/mcp-server"].name` indirection.
    */
@@ -270,7 +270,7 @@ export function parsePackageZip(zipBuffer: Uint8Array, maxSize?: number): Parsed
 
   const manifest = validation.manifest!;
 
-  // AFPS 2.0.2 (§3.4 / §11.2) lifted mcp-server identity to the manifest root,
+  // AFPS (§3.4 / §11.2) lifted mcp-server identity to the manifest root,
   // so every package type now declares its `type` at the top level.
   const type: PackageType | undefined = (manifest as { type?: PackageType }).type;
 
@@ -323,7 +323,7 @@ export function parsePackageZip(zipBuffer: Uint8Array, maxSize?: number): Parsed
       throw new PackageZipError("INVALID_MANIFEST", `Unsupported package type: "${type}"`);
   }
 
-  // Canonical AFPS identity, type-agnostic: AFPS 2.0.2 (§3.4) lifted the
+  // Canonical AFPS identity, type-agnostic: AFPS (§3.4) lifted the
   // mcp-server scoped identity to the manifest root, so every package type
   // now stores `@scope/name` at the top-level `name`. The previous
   // `_meta["dev.afps/mcp-server"].name` fallback is gone.

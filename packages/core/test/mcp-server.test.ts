@@ -3,7 +3,7 @@
 /**
  * Unit tests for the mcp-server `_meta` accessors.
  *
- * AFPS 2.0.2 (§3.4 / §11.2) lifted mcp-server identity (`name`, `type`,
+ * AFPS (§3.4 / §11.2) lifted mcp-server identity (`name`, `type`,
  * `schema_version`, `dependencies`) from `_meta["dev.afps/mcp-server"]` to
  * the manifest root, so the previous `getMcpServerAfpsName` helper is gone.
  * The vendor extension under `_meta["dev.appstrate/mcp-server"]` (runtime
@@ -23,7 +23,7 @@ function manifest(meta?: Record<string, unknown>): McpServerManifest {
     name: "@me/toolkit-server",
     version: "1.0.0",
     type: "mcp-server",
-    schema_version: "2.0",
+    schema_version: "0.1",
     server: { type: "node", entry_point: "./server.ts" },
     ...(meta ? { _meta: meta } : {}),
   } as unknown as McpServerManifest;
@@ -35,7 +35,7 @@ function manifestWithUserConfig(userConfig: Record<string, unknown>): Record<str
     name: "@me/toolkit-server",
     version: "1.0.0",
     type: "mcp-server",
-    schema_version: "2.0",
+    schema_version: "0.1",
     server: {
       type: "node",
       entry_point: "./server.ts",

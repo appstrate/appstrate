@@ -62,7 +62,7 @@ export class LoginStrategy implements IntegrationConnectStrategy {
     // run through the same extractTokenIdentity mapping the other strategies use.
     const identitySource = { ...outputs, ...identityClaims };
     const identity = extractIdentity(manifest, ctx.authKey, identitySource);
-    // AFPS 2.0 §7.4 — refuse the connection if any `required_identity_claims`
+    // AFPS §7.4 — refuse the connection if any `required_identity_claims`
     // came back missing/empty. The combined claim set is the engine-promoted
     // `identityClaims` ⊕ the manifest-mapped `identity.identityClaims` — same
     // bag we persist below, so the gate matches what would land on the row.

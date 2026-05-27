@@ -63,7 +63,7 @@ export interface PlatformPromptTool {
  * Per-integration prompt entry. The integration is identified by its
  * package id; the optional human-readable description comes from the
  * integration manifest, and `doc` carries the raw `INTEGRATION.md`
- * content (AFPS 2.0 §3.5) — when present, the runtime SHOULD surface it
+ * content (AFPS §3.5) — when present, the runtime SHOULD surface it
  * to the agent. We inline it directly into the platform prompt so the
  * LLM can read it without an extra workspace lookup.
  */
@@ -109,7 +109,7 @@ export interface PlatformPromptOptions {
    * integration's description (from its manifest) and, when present,
    * its `INTEGRATION.md` content inlined into the prompt so the agent
    * can read the integration's API documentation alongside the
-   * `{ns}__*` tools advertised via MCP `tools/list`. AFPS 2.0 §3.5.
+   * `{ns}__*` tools advertised via MCP `tools/list`. AFPS §3.5.
    */
   integrations?: ReadonlyArray<PlatformPromptIntegration>;
 
@@ -240,7 +240,7 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
   // One section per integration resolved for this run. The integration's
   // tools are advertised via MCP `tools/list` under the `{ns}__*` prefix —
   // we deliberately do NOT list them here. The `### API Documentation`
-  // subsection surfaces the integration's `INTEGRATION.md` (AFPS 2.0 §3.5)
+  // subsection surfaces the integration's `INTEGRATION.md` (AFPS §3.5)
   // verbatim so the LLM can read its API contract without a workspace
   // lookup. Subsection omitted when `doc` is absent / empty.
   if (opts.integrations && opts.integrations.length > 0) {

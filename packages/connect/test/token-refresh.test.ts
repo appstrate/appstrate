@@ -39,7 +39,7 @@ async function captureError(stub: typeof fetch): Promise<unknown> {
 
 describe("performRefreshTokenExchange — token_endpoint_auth_method default (R8b N-3)", () => {
   it("defaults undefined tokenEndpointAuthMethod to client_secret_basic (RFC 8414/7591)", async () => {
-    // AFPS 2.0.1+ default for `token_endpoint_auth_method` is
+    // AFPS default for `token_endpoint_auth_method` is
     // `client_secret_basic`. When the manifest omits the field, the refresh
     // wire MUST send credentials via the Authorization header (Basic auth),
     // NOT via the body — matching Anthropic/Google/GitHub/Slack expectations.

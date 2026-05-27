@@ -37,7 +37,7 @@ export function defaultEditorState(orgSlug?: string, userEmail?: string): AgentE
   return {
     manifest: {
       $schema: AFPS_SCHEMA_URLS.agent,
-      schema_version: "2.0",
+      schema_version: "0.1",
       type: "agent",
       name: orgSlug ? `@${orgSlug}/` : "",
       version: "1.0.0",
@@ -59,7 +59,7 @@ export function defaultSkillManifest(
 ): Record<string, unknown> {
   return {
     $schema: AFPS_SCHEMA_URLS.skill,
-    schema_version: "2.0",
+    schema_version: "0.1",
     type: "skill",
     name: orgSlug ? `@${orgSlug}/` : "",
     version: "1.0.0",
@@ -74,7 +74,7 @@ export const DEFAULT_SKILL_CONTENT = "---\nname: \ndescription: \n---\n\n";
 // ─── Runtime tools (manifest.runtime_tools) ──────────────────
 
 /**
- * Read the agent manifest's top-level `runtime_tools: string[]` (AFPS 2.0) —
+ * Read the agent manifest's top-level `runtime_tools: string[]` (AFPS) —
  * the built-in runtime tools the agent author opted into (all opt-in,
  * `output` included). Tolerates a missing or malformed field by returning an
  * empty array.
@@ -135,7 +135,7 @@ export function manifestToMetadata(m: Record<string, unknown>): MetadataState {
 
 /** Apply MetadataState changes back into a manifest patch.
  *
- * Emits canonical AFPS 2.0 snake_case (`display_name`).
+ * Emits canonical AFPS snake_case (`display_name`).
  */
 export function metadataToManifestPatch(m: MetadataState): Record<string, unknown> {
   return {
@@ -157,7 +157,7 @@ export function getResourceEntries(
   m: Record<string, unknown>,
   type: "skills" | "integrations",
 ): ResourceEntry[] {
-  // Integrations: AFPS 2.0.2 §4.1 canonical inline object form —
+  // Integrations: AFPS §4.1 canonical inline object form —
   // `dependencies.integrations.<id>` is `{ version, scopes?, tools?, auth_key? }`.
   // `auth_key` (§4.1) selects which `auths.<key>` entry on the depended-on
   // integration this dep uses, when the integration declares multiple auths.
@@ -345,7 +345,7 @@ export function schemaToFields(
 }
 
 /**
- * Build a fresh AFPS 2.0 canonical `SchemaWrapper` from editor field state.
+ * Build a fresh AFPS canonical `SchemaWrapper` from editor field state.
  *
  * M8 — emits only canonical snake_case keys (`schema`, `file_constraints`,
  * `ui_hints`, `property_order`). Every per-property entry is constructed
@@ -388,7 +388,7 @@ export function fieldsToSchema(
         if (f.description) prop.description = f.description;
         properties[key] = prop;
       }
-      // Build file_constraints (canonical AFPS 2.0 snake_case)
+      // Build file_constraints (canonical AFPS snake_case)
       const constraint: FileConstraint = {};
       if (f.accept) constraint.accept = f.accept;
       if (f.maxSize) {
@@ -452,7 +452,7 @@ export function fieldsToSchema(
         }
       }
       properties[key] = prop;
-      // Build ui_hints for placeholder (canonical AFPS 2.0 snake_case)
+      // Build ui_hints for placeholder (canonical AFPS snake_case)
       if (mode === "input" && f.placeholder) {
         ui_hints[key] = { placeholder: f.placeholder };
       }

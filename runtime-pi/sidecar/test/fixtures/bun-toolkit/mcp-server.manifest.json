@@ -3,7 +3,7 @@
   "name": "@appstrate/bun-toolkit-server",
   "version": "1.0.0",
   "type": "mcp-server",
-  "schema_version": "2.0",
+  "schema_version": "0.1",
   "display_name": "Bun Toolkit Server",
   "description": "Reference mcp-server for a Bun-native MCP server. Zero-dependency, exercising bun:sqlite, Bun.CryptoHasher, Bun.password, crypto.randomUUID, and a runtime self-report.",
   "server": {

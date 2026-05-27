@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AFPS 2.0 `delivery.http` resolver (snake_case, value-template shape).
+ * AFPS `delivery.http` resolver (snake_case, value-template shape).
  *
- * The AFPS 2.0 `auths.{key}.delivery.http` block (snake_case) is:
+ * The AFPS `auths.{key}.delivery.http` block (snake_case) is:
  *
  *   { in: "header", name }              header channel + name
  *   { prefix }                          value prefix, e.g. "Bearer "
@@ -14,7 +14,7 @@
  *
  * The value is a TEMPLATE referencing credential fields via the
  * `{$credential.<field>}` syntax (the same syntax `delivery.env`/`delivery.files`
- * use). This module is a THIN ADAPTER: it maps the AFPS 2.0 snake_case shape
+ * use). This module is a THIN ADAPTER: it maps the AFPS snake_case shape
  * onto the runtime plan-input shape (rewriting `{$credential.<field>}` →
  * `{{field}}`, a pure syntax projection over the same credential bag) and
  * delegates to the single engine {@link resolveHttpDelivery} (in
@@ -28,7 +28,7 @@ import { resolveHttpDelivery, type HttpDeliveryConfig } from "@appstrate/afps-ru
 import type { HttpDeliveryPlan } from "./integration-credentials.ts";
 
 /**
- * Rewrite the AFPS 2.0 `{$credential.<field>}` value-template syntax into the
+ * Rewrite the AFPS `{$credential.<field>}` value-template syntax into the
  * `{{field}}` syntax the shared engine's `substituteVars` renders. Both resolve
  * the SAME credential bag with the same "missing field → empty" policy, so this
  * is a pure syntax projection — the substitution semantics are unchanged.
@@ -38,7 +38,7 @@ function toEngineTemplate(value: string): string {
 }
 
 /**
- * Subset of the AFPS 2.0 `auths.{key}.delivery.http` block this resolver
+ * Subset of the AFPS `auths.{key}.delivery.http` block this resolver
  * consumes. `value` is a template; `{$credential.<field>}` references resolve
  * against the auth's credential bag.
  */
@@ -58,7 +58,7 @@ export interface AfpsHttpDelivery {
 }
 
 /**
- * Resolve an AFPS 2.0 `delivery.http` declaration into a {@link HttpDeliveryPlan}.
+ * Resolve an AFPS `delivery.http` declaration into a {@link HttpDeliveryPlan}.
  *
  * Returns `null` when no header can be injected (e.g. `custom` auth without an
  * explicit `delivery.http`, or a declaration with an empty header name) — the
@@ -66,7 +66,7 @@ export interface AfpsHttpDelivery {
  *
  * All behaviour (auth-type defaults, `basic → base64(user:pass)` fallback,
  * `encoding: "base64"` per RFC 7617 — prefix unencoded, value base64'd) is
- * supplied by {@link resolveHttpDelivery}; this function only maps the AFPS 2.0
+ * supplied by {@link resolveHttpDelivery}; this function only maps the AFPS
  * snake_case block onto its plan-input shape:
  *   - `name` / `prefix` → `headerName` / `headerPrefix` (undefined → engine
  *     default for the auth type).

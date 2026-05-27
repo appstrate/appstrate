@@ -37,7 +37,7 @@ const VALID_AGENT = {
   name: "@me/root",
   version: "1.0.0",
   type: "agent",
-  schema_version: "2.0",
+  schema_version: "0.1",
   display_name: "Root",
   author: "tester",
 };
@@ -46,7 +46,7 @@ const VALID_SKILL = {
   name: "@me/a",
   version: "1.0.0",
   type: "skill",
-  schema_version: "2.0",
+  schema_version: "0.1",
 };
 
 /**
@@ -57,13 +57,13 @@ const VALID_SKILL = {
  */
 const VALID_SKILL_MD = enc("---\nname: skill\n---\nbody");
 
-/** A valid AFPS 2.0.2 mcp-server manifest (MCPB shape + root identity). */
+/** A valid AFPS mcp-server manifest (MCPB shape + root identity). */
 const VALID_MCP_SERVER = {
   manifest_version: "0.3",
   name: "@me/mcp",
   version: "1.0.0",
   type: "mcp-server",
-  schema_version: "2.0",
+  schema_version: "0.1",
   display_name: "My MCP Server",
   server: {
     type: "node",
@@ -72,12 +72,12 @@ const VALID_MCP_SERVER = {
   },
 };
 
-/** A valid AFPS 2.0 integration manifest (snake_case, `source` discriminant). */
+/** A valid AFPS integration manifest (snake_case, `source` discriminant). */
 const VALID_INTEGRATION = {
   name: "@me/integ",
   version: "1.0.0",
   type: "integration",
-  schema_version: "2.0",
+  schema_version: "0.1",
   display_name: "My Integration",
   source: { kind: "api", api: {} },
   auths: {
@@ -90,7 +90,7 @@ const VALID_INTEGRATION = {
   },
 };
 
-describe("validateBundle (AFPS 2.0)", () => {
+describe("validateBundle (AFPS)", () => {
   it("accepts a valid single-package agent bundle", async () => {
     const root = makePkg("@me/root@1.0.0" as PackageIdentity, VALID_AGENT, {
       "prompt.md": enc("Hello {{input.task}}."),
@@ -114,7 +114,7 @@ describe("validateBundle (AFPS 2.0)", () => {
   });
 
   it("rejects a schema_version with an unsupported MAJOR (afps-spec regex)", async () => {
-    // The v2 afps-spec schema constrains schema_version to /^2\./, so a 1.x
+    // The v0 afps-spec schema constrains schema_version to /^0\./, so a 1.x
     // value surfaces as a MANIFEST_SCHEMA error on schema_version.
     const root = makePkg(
       "@me/root@1.0.0" as PackageIdentity,
@@ -131,7 +131,7 @@ describe("validateBundle (AFPS 2.0)", () => {
   });
 
   it("rejects an AFPS 1.x camelCase manifest (the migration's headline contract)", async () => {
-    // Spec-fidelity gate: the 1.x→2.0 migration's whole point is that the
+    // Spec-fidelity gate: the snake_case migration's whole point is that the
     // wire-format casing flipped. A fully-camelCased 1.x manifest must NOT
     // be silently accepted — it must hit MANIFEST_SCHEMA errors on both
     // `schemaVersion` (unknown field via missing `schema_version`) and the
@@ -142,7 +142,7 @@ describe("validateBundle (AFPS 2.0)", () => {
       type: "agent",
       schemaVersion: "1.1",
       displayName: "Legacy Agent",
-      // 1.x wrapper keys that don't exist in 2.0:
+      // 1.x wrapper keys that don't exist in the current AFPS shape:
       input: {
         schema: { type: "object", properties: { task: { type: "string" } } },
         fileConstraints: { upload: { accept: ["text/plain"], maxSize: 1024 } },
@@ -171,16 +171,16 @@ describe("validateBundle (AFPS 2.0)", () => {
   });
 
   it("rejects a manifest that mixes 1.x camelCase + 2.0 snake_case wrapper keys", async () => {
-    // A half-migrated manifest where someone renamed schema_version → "2.0"
+    // A half-migrated manifest where someone renamed schema_version → "0.1"
     // but kept 1.x wrapper keys (fileConstraints, uiHints, …) must still fail.
     // The afps-spec schema rejects unknown keys at the wrapper level via
     // strict object validation — this pins that no 1.x relic survives the
-    // schema_version=2.0 declaration.
+    // schema_version=0.1 declaration.
     const mixedManifest = {
       name: "@me/root",
       version: "1.0.0",
       type: "agent",
-      schema_version: "2.0",
+      schema_version: "0.1",
       display_name: "Half-migrated Agent",
       input: {
         schema: { type: "object", properties: { task: { type: "string" } } },
@@ -195,7 +195,7 @@ describe("validateBundle (AFPS 2.0)", () => {
     const result = validateBundle(bundle);
 
     // Either the schema rejects fileConstraints as unknown OR it strips it
-    // silently. Strict-object semantics in AFPS 2.0 mandate the former; this
+    // silently. Strict-object semantics in AFPS mandate the former; this
     // test pins that contract.
     const errors = result.issues.filter((i) => i.severity === "error");
     expect(
@@ -208,7 +208,7 @@ describe("validateBundle (AFPS 2.0)", () => {
   });
 
   it("flags an unsupported MAJOR via the runtime supportedMajors policy", async () => {
-    // A structurally-valid v2 manifest, but the runtime restricts to majors [3].
+    // A structurally-valid v0 manifest, but the runtime restricts to majors [3].
     const root = makePkg("@me/root@1.0.0" as PackageIdentity, VALID_AGENT, {
       "prompt.md": enc("p"),
     });
@@ -271,7 +271,7 @@ describe("validateBundle (AFPS 2.0)", () => {
         name: "@me/b",
         version: "1.0.0",
         type: "skill",
-        schema_version: "2.0",
+        schema_version: "0.1",
         dependencies: { skills: { "@me/a": "^1" } },
       },
       { "SKILL.md": VALID_SKILL_MD },
@@ -292,12 +292,12 @@ describe("validateBundle (AFPS 2.0)", () => {
     });
     const a1 = makePkg(
       "@me/dup@1.0.0" as PackageIdentity,
-      { name: "@me/dup", version: "1.0.0", type: "skill", schema_version: "2.0" },
+      { name: "@me/dup", version: "1.0.0", type: "skill", schema_version: "0.1" },
       { "SKILL.md": VALID_SKILL_MD },
     );
     const a2 = makePkg(
       "@me/dup@1.1.0" as PackageIdentity,
-      { name: "@me/dup", version: "1.1.0", type: "skill", schema_version: "2.0" },
+      { name: "@me/dup", version: "1.1.0", type: "skill", schema_version: "0.1" },
       { "SKILL.md": VALID_SKILL_MD },
     );
     const bundle = await buildBundleFromCatalog(root, emptyPackageCatalog);
@@ -344,7 +344,7 @@ describe("validateBundle (AFPS 2.0)", () => {
   });
 
   it("rejects an mcp-server with a corrupt root identity (unscoped name)", async () => {
-    // AFPS 2.0.2 lifted the scoped identity to the manifest root. The schema's
+    // AFPS lifted the scoped identity to the manifest root. The schema's
     // root `name` regex enforces `@scope/name`, so an unscoped value MUST be
     // rejected.
     const badMcp = {
@@ -368,7 +368,7 @@ describe("validateBundle (AFPS 2.0)", () => {
   });
 
   it("flags an mcp-server with no root type as unsupported", async () => {
-    // Without `type: "mcp-server"` at the root (AFPS 2.0.2 §3.4), the package
+    // Without `type: "mcp-server"` at the root (AFPS §3.4), the package
     // is genuinely unidentifiable and surfaces as UNSUPPORTED_TYPE.
     const orphan = { ...VALID_MCP_SERVER } as Record<string, unknown>;
     delete orphan.type;
@@ -386,7 +386,7 @@ describe("validateBundle (AFPS 2.0)", () => {
     expect(result.issues.some((i) => i.code === "UNSUPPORTED_TYPE")).toBe(true);
   });
 
-  it("accepts a valid integration dependency (AFPS 2.0 snake_case)", async () => {
+  it("accepts a valid integration dependency (AFPS snake_case)", async () => {
     const root = makePkg(
       "@me/root@1.0.0" as PackageIdentity,
       { ...VALID_AGENT, dependencies: { integrations: { "@me/integ": "^1" } } },
@@ -449,7 +449,7 @@ describe("validateBundle (AFPS 2.0)", () => {
   });
 
   it("flags an unsupported MAJOR on a skill dependency via supportedMajors policy", async () => {
-    // A structurally-valid v2 skill, but the runtime restricts to majors [3].
+    // A structurally-valid v0 skill, but the runtime restricts to majors [3].
     const root = makePkg(
       "@me/root@1.0.0" as PackageIdentity,
       { ...VALID_AGENT, dependencies: { skills: { "@me/a": "^1" } } },
@@ -459,8 +459,8 @@ describe("validateBundle (AFPS 2.0)", () => {
       "SKILL.md": VALID_SKILL_MD,
     });
     const bundle = await buildBundleFromCatalog(root, new InMemoryPackageCatalog([skill]));
-    const result = validateBundle(bundle, { supportedMajors: [2, 3] });
-    // root agent is 2.0 (ok); skill is 2.0 too, so [2,3] passes. Restrict to [3].
+    const result = validateBundle(bundle, { supportedMajors: [0, 3] });
+    // root agent is 0.1 (ok); skill is 0.1 too, so [0,3] passes. Restrict to [3].
     const restricted = validateBundle(bundle, { supportedMajors: [3] });
     expect(result.valid).toBe(true);
     expect(
@@ -482,7 +482,7 @@ describe("validateBundle (AFPS 2.0)", () => {
       name: "@me/x",
       version: "1.0.0",
       type: "tool", // removed AFPS package type
-      schema_version: "2.0",
+      schema_version: "0.1",
     });
     const bundle = await buildBundleFromCatalog(root, new InMemoryPackageCatalog([bogus]));
     const result = validateBundle(bundle);

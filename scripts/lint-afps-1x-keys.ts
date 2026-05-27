@@ -238,7 +238,7 @@ function main(): void {
     `[lint-afps-1x-keys] FAIL — ${hits.length} suspect line(s) emit AFPS-1.x camelCase manifest keys.\n`,
   );
   console.error(
-    "AFPS 2.0 requires canonical snake_case (display_name, schema_version, file_constraints, ui_hints,\n" +
+    "AFPS requires canonical snake_case (display_name, schema_version, file_constraints, ui_hints,\n" +
       "property_order, max_size, icon_url, runtime_tools, …). If this hit is a legitimate read-fallback or\n" +
       "documented back-compat, prefix the line with `// AFPS-1.x` or `// back-compat`. If it's a writer\n" +
       "context, switch to the canonical snake_case key.\n",

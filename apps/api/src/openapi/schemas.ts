@@ -262,7 +262,7 @@ export const schemas = {
                 version: { type: "string" },
               },
             },
-            description: "AFPS 2.0 §4.1 mcp_servers dependency group",
+            description: "AFPS §4.1 mcp_servers dependency group",
           },
           integrations: {
             type: "array",
@@ -758,7 +758,7 @@ export const schemas = {
   IntegrationCredentialsResponse: {
     type: "object",
     description:
-      "Live credentials + per-auth HTTP delivery plans + per-auth expiries for an installed integration. Returned by both `GET /internal/integration-credentials/{scope}/{name}` and `POST .../refresh` (identical shape). Feeds the sidecar's MITM `MitmCredentialSource.current()` + `.deliveryPlans()`. All wire keys are snake_case per AFPS 2.0 (see `docs/CASING_CONVENTIONS.md` — internal sidecar↔platform endpoints share the Zone 1 default).",
+      "Live credentials + per-auth HTTP delivery plans + per-auth expiries for an installed integration. Returned by both `GET /internal/integration-credentials/{scope}/{name}` and `POST .../refresh` (identical shape). Feeds the sidecar's MITM `MitmCredentialSource.current()` + `.deliveryPlans()`. All wire keys are snake_case per AFPS (see `docs/CASING_CONVENTIONS.md` — internal sidecar↔platform endpoints share the Zone 1 default).",
     required: ["auths", "delivery_plans", "expires_at_epoch_ms"],
     properties: {
       auths: {
@@ -774,7 +774,7 @@ export const schemas = {
             resource: {
               type: "string",
               description:
-                "RFC 8707 resource indicator declared by the manifest (`auths.{key}.resource`). AFPS 2.0 §7.3 name — matches the RFC.",
+                "RFC 8707 resource indicator declared by the manifest (`auths.{key}.resource`). AFPS §7.3 name — matches the RFC.",
             },
             expires_at: { type: "string", format: "date-time" },
             scopes_granted: { type: "array", items: { type: "string" } },
@@ -782,7 +782,7 @@ export const schemas = {
               type: "object",
               additionalProperties: { type: "string" },
               description:
-                "Identity claims captured at connect time (e.g. OIDC `sub`, `email`). AFPS 2.0 §7 name.",
+                "Identity claims captured at connect time (e.g. OIDC `sub`, `email`). AFPS §7 name.",
             },
           },
         },
@@ -867,11 +867,11 @@ export const schemas = {
     description:
       "AFPS Agent manifest extended with Appstrate platform fields. " +
       "Standard fields are defined by the AFPS Agent schema; extension fields use the x- prefix per AFPS §10.",
-    allOf: [{ $ref: "https://afps.appstrate.dev/packages/schema/v2/agent.schema.json" }],
+    allOf: [{ $ref: "https://schemas.afps.dev/v0/agent.schema.json" }],
   },
   SkillManifest: {
-    description: "AFPS Skill manifest. See https://afps.appstrate.dev for field reference.",
-    $ref: "https://afps.appstrate.dev/packages/schema/v2/skill.schema.json",
+    description: "AFPS Skill manifest. See https://schemas.afps.dev for field reference.",
+    $ref: "https://schemas.afps.dev/v0/skill.schema.json",
   },
   FileConstraintsMap: {
     type: "object",

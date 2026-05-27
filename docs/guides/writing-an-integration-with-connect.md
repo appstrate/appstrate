@@ -1,6 +1,6 @@
 # Writing an integration with `connect`
 
-How an AFPS 2.0 integration author declares **credential acquisition and delivery** in
+How an AFPS integration author declares **credential acquisition and delivery** in
 `manifest.auths.{key}`. A single declarative substrate covers every shape — the platform
 selects a strategy purely from the manifest. This guide maps each declaration to the
 strategy it selects, shows the minimal manifest for each, and covers the surrounding
@@ -14,14 +14,14 @@ v2 model (sources, delivery vocabulary, per-tool policy, scope catalog).
 > `deliverySchema`, `authMethod`).
 > Platform source of truth: `apps/api/src/services/connect/registry.ts` (`resolveStrategy`).
 
-All manifest field names below are **snake_case** — the AFPS 2.0 wire convention.
+All manifest field names below are **snake_case** — the AFPS wire convention.
 All value templates use the Arazzo runtime-expression grammar `{$credential.<field>}`,
 `{$outputs.<name>}` — NOT the 1.x `{{<field>}}` form.
 
 ```jsonc
 {
-  "$schema": "https://afps.appstrate.dev/packages/schema/v2/integration.schema.json",
-  "schema_version": "2.0",
+  "$schema": "https://schemas.afps.dev/v0/integration.schema.json",
+  "schema_version": "0.1",
   "type": "integration",
   // …
 }
@@ -40,7 +40,7 @@ All value templates use the Arazzo runtime-expression grammar `{$credential.<fie
 | `custom`    | `tool`    | `run-start`             | LoginSecret  | store the secret, mint the session at each run      |
 | `custom`    | `tool`    | `link`                  | Orchestrated | run the login tool once in an ephemeral connect-run |
 
-AFPS 2.0 auth `type` is one of `oauth2 | api_key | basic | mtls | custom`. The 1.x
+AFPS auth `type` is one of `oauth2 | api_key | basic | mtls | custom`. The 1.x
 `oauth1` type is **removed** — no working connect path, no signing layer was ever
 implemented. Model OAuth1 services as `custom` plus an orchestrated `connect.tool` if
 needed.
@@ -140,7 +140,7 @@ depth against an integration that accidentally pre-empts the injection.
 
 ## 1. OAuth 2.0 (`oauth2`)
 
-For IdPs that support the authorization-code + PKCE flow. AFPS 2.0 is
+For IdPs that support the authorization-code + PKCE flow. AFPS is
 **discovery-first**: when `issuer` is present, the consumer probes the three
 well-known locations (RFC 8414, OIDC path-insertion, OIDC path-append) and validates
 that the returned `issuer` member matches before using any discovered endpoint.
@@ -405,7 +405,7 @@ session is minted fresh inside each agent run's sidecar by the connect-login
 primitive. Set `persist_login_secret: true` so the tool can re-bootstrap an expired
 session without re-prompting.
 
-`connect.tool` is loosely-defined in AFPS 2.0 §7.7 — its field shapes are
+`connect.tool` is loosely-defined in AFPS §7.7 — its field shapes are
 deliberately experimental at the spec level. The Appstrate platform carries its
 fields under the `dev.appstrate/connect` vendor extension key in `_meta` (§10).
 
@@ -508,7 +508,7 @@ when each run needs a fresh session from a stored secret.
 
 ## `tools_policy` — per-tool authorization metadata
 
-`tools_policy` (renamed from 1.x `tools` in AFPS 2.0.2) is an OPTIONAL **sparse policy
+`tools_policy` (renamed from 1.x `tools` in AFPS) is an OPTIONAL **sparse policy
 table** keyed by tool name. It carries per-tool authorization metadata for `local`
 and `remote` sources. It is NOT the catalog of "tools this integration exposes" — that
 catalog is canonical to the referenced surface (the `_policy` suffix disambiguates).

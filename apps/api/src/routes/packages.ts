@@ -339,7 +339,7 @@ interface PackageRouteConfig {
   getHandler?: (c: Context<AppEnv>) => Promise<Response>;
 }
 
-// Every AFPS 2.0 package type exposes user-facing routes. `Partial` is kept so
+// Every AFPS package type exposes user-facing routes. `Partial` is kept so
 // the `ROUTE_CONFIGS[type]?.` lookups stay null-tolerant, but all four types are
 // wired. `agent`/`skill` have JSON-body editors; `integration`/`mcp-server` are
 // import-only (no editor — both are authored externally and land via ZIP).
@@ -373,9 +373,9 @@ const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
     storageFileName: () => "manifest.json",
     jsonBodyCreate: false,
   },
-  // AFPS 2.0 §3.4 — standalone mcp-server packages. Import-only like
+  // AFPS §3.4 — standalone mcp-server packages. Import-only like
   // integrations (no editor): authored externally.
-  // AFPS-native manifest carrying MCPB vocabulary fields (server / tools / user_config) verbatim — NOT a strict-MCPB manifest. See AFPS spec §3.4 (v2.0.2).
+  // AFPS-native manifest carrying MCPB vocabulary fields (server / tools / user_config) verbatim — NOT a strict-MCPB manifest. See AFPS spec §3.4.
   // Listable, viewable, and importable as `.afps` like the other types.
   // Referenced by an integration's `source.kind: "local"`.
   "mcp-server": {

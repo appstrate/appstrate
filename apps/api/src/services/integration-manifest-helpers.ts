@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AFPS 2.0 integration-manifest accessors.
+ * AFPS integration-manifest accessors.
  *
- * The AFPS 2.0 integration manifest type (`@afps-spec/schema`) is built on
+ * The AFPS integration manifest type (`@afps-spec/schema`) is built on
  * `z.looseObject`, so most fields surface as `unknown` / index-signature at the
  * TypeScript level. These helpers narrow the specific subset the platform reads
  * on the spawn / credential / connect paths — the `source` discriminant, the
@@ -11,7 +11,7 @@
  * extensions — into typed accessors so call sites stay readable and the snake_case
  * vocabulary lives in exactly one place.
  *
- * Vocabulary (AFPS 2.0 §7, Appendix D):
+ * Vocabulary (AFPS §7, Appendix D):
  *   - `source.kind: "local" | "remote" | "api"` replaces the 1.x inline `server`.
  *   - per-auth OAuth: `authorization_endpoint`, `token_endpoint`, `resource`,
  *     `default_scopes`, `code_challenge_methods_supported`, …
@@ -26,19 +26,19 @@ import type { ManifestDeliveryHttp } from "@appstrate/core/sidecar-types";
 import { renderCredentialTemplate as renderCredentialTemplateCore } from "@appstrate/core/credential-template";
 
 /**
- * AFPS 2.0 `delivery.http` block (snake_case). The sidecar's canonical
+ * AFPS `delivery.http` block (snake_case). The sidecar's canonical
  * {@link ManifestDeliveryHttp} type (`{ in, name, prefix?, value, encoding?,
  * allow_server_override? }`) is the source of truth so the spawn-side resolver
  * and the sidecar's connect-login renderer can never drift.
  */
 export type AfpsHttpDelivery = ManifestDeliveryHttp;
 
-/** Narrowed view of a single `auths.{key}` method (AFPS 2.0 §7.2 – §7.9). */
+/** Narrowed view of a single `auths.{key}` method (AFPS §7.2 – §7.9). */
 export interface AfpsManifestAuth {
   /**
-   * Auth-method type discriminant (AFPS 2.0.1+ §7.2).
-   *  - `oauth2` / `api_key` / `basic` / `custom`: legacy v2.0.0 set.
-   *  - `mtls`: mutual TLS client authentication (v2.0.1). The client certificate +
+   * Auth-method type discriminant (AFPS §7.2).
+   *  - `oauth2` / `api_key` / `basic` / `custom`: the base set.
+   *  - `mtls`: mutual TLS client authentication. The client certificate +
    *    private key (and optional chain) are described by `credentials.schema` (§7.5)
    *    and injected via `delivery.files` (§7.6) at well-known paths the underlying
    *    HTTP client loads. Maps to OpenAPI `mutualTLS` (§7.11).
@@ -49,7 +49,23 @@ export interface AfpsManifestAuth {
   authorization_endpoint?: string;
   token_endpoint?: string;
   userinfo_endpoint?: string;
-  token_endpoint_auth_method?: "client_secret_post" | "client_secret_basic" | "none";
+  /**
+   * OAuth2 token-endpoint client-auth method (§7.3). AFPS 0.1 widened this to
+   * the full RFC 7591 / OIDC Core vocabulary. Appstrate's OAuth client only
+   * implements `client_secret_basic` / `client_secret_post` / `none`; the
+   * JWT-assertion (`client_secret_jwt`, `private_key_jwt`) and mTLS
+   * (`tls_client_auth`, `self_signed_tls_client_auth`) methods are accepted in
+   * the manifest type but normalized away at the token-exchange boundary
+   * (treated as unspecified → RFC 8414 §2 default `client_secret_basic`).
+   */
+  token_endpoint_auth_method?:
+    | "client_secret_basic"
+    | "client_secret_post"
+    | "client_secret_jwt"
+    | "private_key_jwt"
+    | "tls_client_auth"
+    | "self_signed_tls_client_auth"
+    | "none";
   code_challenge_methods_supported?: string[];
   resource?: string;
   authorization_params?: Record<string, unknown>;
@@ -73,11 +89,32 @@ export interface AfpsManifestAuth {
   _meta?: Record<string, unknown>;
 }
 
+/** The `token_endpoint_auth_method` values Appstrate's OAuth client implements. */
+export type SupportedTokenEndpointAuthMethod =
+  | "client_secret_basic"
+  | "client_secret_post"
+  | "none";
+
+/**
+ * Narrow an AFPS 0.1 `token_endpoint_auth_method` to the subset Appstrate
+ * implements. The JWT-assertion / mTLS client-auth methods are valid in a 0.1
+ * manifest but unsupported here — they normalize to `undefined`, which the
+ * token-exchange path treats as unspecified (RFC 8414 §2 default
+ * `client_secret_basic`).
+ */
+export function toSupportedTokenEndpointAuthMethod(
+  method: AfpsManifestAuth["token_endpoint_auth_method"],
+): SupportedTokenEndpointAuthMethod | undefined {
+  return method === "client_secret_basic" || method === "client_secret_post" || method === "none"
+    ? method
+    : undefined;
+}
+
 export interface AfpsDeliveryEnvEntry {
   value: string;
   sensitive?: boolean;
   /**
-   * AFPS 2.0.2 §7.6 — when this `delivery.env` entry's value flows into the
+   * AFPS §7.6 — when this `delivery.env` entry's value flows into the
    * referenced mcp-server's `${user_config.<key>}` placeholder (in
    * `server.mcp_config.env`). The resolver pre-renders the substitution so the
    * same integration package works in both Appstrate's local-source path AND a
@@ -95,7 +132,7 @@ export interface AfpsDeliveryFilesEntry {
   value: string;
   /**
    * POSIX permission bits as an octal string (e.g. `"0400"`, `"0600"`).
-   * Defaults to `"0400"` (read-only owner) per AFPS 2.0.2 §7.6.
+   * Defaults to `"0400"` (read-only owner) per AFPS §7.6.
    */
   mode?: string;
 }
@@ -122,7 +159,7 @@ export interface AfpsManifestConnect {
 
 /**
  * Appstrate orchestrated-tool extension carried under
- * `connect._meta["dev.appstrate/connect"]` — the run-policy fields AFPS 2.0
+ * `connect._meta["dev.appstrate/connect"]` — the run-policy fields AFPS
  * leaves to the consumer (`tool` name, `run_at`, `reauth_on`, `produces`,
  * `persist_login_secret`).
  */
@@ -137,7 +174,7 @@ export interface AppstrateConnectMeta {
 const APPSTRATE_CONNECT_META_KEY = "dev.appstrate/connect";
 
 /**
- * Render an AFPS 2.0 `{$credential.<field>}` value template (used by
+ * Render an AFPS `{$credential.<field>}` value template (used by
  * `delivery.env` / `delivery.files`) against a decrypted credential bag.
  * Unknown refs render empty — a missing field means "nothing to inject".
  * Returns `null` when the template resolves to an empty string (so callers can
@@ -156,7 +193,7 @@ export function renderCredentialTemplate(
 }
 
 /**
- * Default file mode for `delivery.files` entries (AFPS 2.0.2 §7.6: `"0400"`).
+ * Default file mode for `delivery.files` entries (AFPS §7.6: `"0400"`).
  * Read-only by owner — the strictest sane default for credential material.
  */
 export const DEFAULT_DELIVERY_FILE_MODE = "0400";

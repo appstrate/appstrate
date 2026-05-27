@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AFPS 2.0 integration manifest schema + install-time helper tests.
+ * AFPS integration manifest schema + install-time helper tests.
  *
  * Covers: source kinds (local/remote/api); oauth2 discovery + manual; api_key
  * / basic / custom + credentials; delivery http/env/files; connect.login
@@ -10,7 +10,7 @@
  * superRefine rules; validateManifest dispatch; and every exported helper.
  */
 
-import { describe, it, expect, spyOn } from "bun:test";
+import { describe, it, expect } from "bun:test";
 import {
   integrationManifestSchema,
   type IntegrationManifest,
@@ -34,13 +34,13 @@ import { validateManifest, metaSchema } from "../src/validation.ts";
 // Fixture helpers
 // ─────────────────────────────────────────────
 
-/** A minimal valid AFPS 2.0 integration with a single oauth2 auth + http delivery. */
+/** A minimal valid AFPS integration with a single oauth2 auth + http delivery. */
 function baseManifest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     name: "@official/gmail",
     version: "1.0.0",
     type: "integration",
-    schema_version: "2.0",
+    schema_version: "0.1",
     display_name: "Gmail",
     source: { kind: "remote", remote: { url: "https://gmail/mcp", transport: "streamable-http" } },
     auths: {
@@ -140,8 +140,8 @@ describe("integrationManifestSchema — source kinds", () => {
     ).toBeGreaterThan(0);
   });
 
-  it("accepts a non-reserved upload protocol (AFPS 2.0.2 — open vocabulary)", () => {
-    // AFPS 2.0.2 dropped the closed enum for `source.api.upload_protocols`;
+  it("accepts a non-reserved upload protocol (AFPS — open vocabulary)", () => {
+    // AFPS dropped the closed enum for `source.api.upload_protocols`;
     // any unique non-empty string is now accepted (producers MAY emit
     // reverse-DNS-qualified values, consumers MUST tolerate them).
     const r = integrationManifestSchema.safeParse(
@@ -297,7 +297,7 @@ describe("integrationManifestSchema — delivery rules", () => {
   });
 
   it("install-time error path cites §7.6 on the auths.{key}.delivery field (R8b)", () => {
-    // AFPS 2.0 §7.6 mutex: an auth method MUST NOT mix `http` (proxy
+    // AFPS §7.6 mutex: an auth method MUST NOT mix `http` (proxy
     // injection, server never holds the secret) with `env`/`files` (server
     // holds the secret). The error path MUST surface on the delivery field
     // so the editor lands the user on the right spot.
@@ -915,7 +915,7 @@ describe("validateManifest — integration dispatch", () => {
 // ─────────────────────────────────────────────
 
 describe("RESERVED_INTEGRATION_UPLOAD_PROTOCOLS", () => {
-  it("matches the AFPS 2.0.2 reserved set", () => {
+  it("matches the AFPS reserved set", () => {
     expect([...RESERVED_INTEGRATION_UPLOAD_PROTOCOLS].sort()).toEqual([
       "google-resumable",
       "ms-resumable",
@@ -1019,7 +1019,7 @@ function connectToolManifest(connectBlock: Record<string, unknown>): Integration
 
 describe("getConnectToolNames — AFPS spec-natural + vendor _meta", () => {
   it("reads the spec-natural `connect.tool.name` location (R8b N-2)", () => {
-    // AFPS 2.0 §7.7: `connect.tool` is the canonical block for the
+    // AFPS §7.7: `connect.tool` is the canonical block for the
     // orchestrated-acquisition mode; the inner `name` is the tool reference.
     const m = connectToolManifest({ tool: { name: "perform_login" } });
     expect(getConnectToolNames(m)).toEqual(["perform_login"]);
@@ -1272,43 +1272,32 @@ describe("validateAgentIntegrationScopes", () => {
 // T7 (Wave 3 + Wave 5) — `_meta` namespace key validation
 // ─────────────────────────────────────────────
 //
-// AFPS 2.0 Appendix B defines META_NAMESPACE_KEY as a strict regex
-// (reverse-DNS namespace + `/` + identifier). Upstream `@afps-spec/schema@2.0.3`
-// types `_meta` as `z.record(z.string(), z.record(z.string(), z.unknown()))` —
-// any string key passes, including uppercase + whitespace + reserved
-// `mcp/` / `modelcontextprotocol/` prefixes per §10.
+// AFPS 0.1 Appendix B defines META_NAMESPACE_KEY as a strict regex (an OPTIONAL
+// reverse-DNS namespace + `/` + identifier, or a bare identifier). As of AFPS
+// 0.1 the upstream `@afps-spec/schema` `metaSchema` is STRICT: it enforces that
+// pattern AND folds in a reserved-prefix negative-lookahead, hard-rejecting both
+// malformed namespace keys and the §10 reserved `mcp/` / `modelcontextprotocol/`
+// prefixes at parse time.
 //
-// Per §10.1, consumers MUST NOT reject manifests with unknown `_meta` keys.
-// The local refine therefore SOFT-fails Appendix B violations (accept + warn)
-// while HARD-rejecting the §10 reserved prefixes (which producers MUST NOT
-// author at all).
+// Per §10.1, consumers MUST NOT reject WELL-FORMED but unknown `_meta` keys —
+// but a MALFORMED key makes the package malformed, which §2 says consumers MUST
+// reject. appstrate delegates entirely to the upstream schema (no local refine).
 //
 // Final-report cross-reference: M1.
-describe("T7 — _meta namespace key validation (local refine)", () => {
-  it("soft-accepts _meta keys that do not match META_NAMESPACE_KEY regex (§10.1)", () => {
-    const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
-    try {
-      const r = metaSchema.safeParse({ "BAD KEY": {} });
-      expect(r.success).toBe(true);
-      expect(warnSpy).toHaveBeenCalled();
-      const warned = warnSpy.mock.calls.some((args) =>
-        args.some((a) => typeof a === "string" && a.includes("BAD KEY")),
-      );
-      expect(warned).toBe(true);
-    } finally {
-      warnSpy.mockRestore();
-    }
+describe("T7 — _meta namespace key validation (delegated to upstream 0.1 schema)", () => {
+  it("rejects _meta keys that do not match META_NAMESPACE_KEY regex (§2 malformed key)", () => {
+    const r = metaSchema.safeParse({ "BAD KEY": {} });
+    expect(r.success).toBe(false);
   });
 
   it("rejects _meta keys using the reserved `mcp/` prefix per AFPS §10", () => {
     const r = metaSchema.safeParse({ "mcp/reserved": {} });
     expect(r.success).toBe(false);
+    // The rejection now comes from the upstream Zod regex (reserved-prefix
+    // negative-lookahead), not a custom appstrate message — assert the
+    // offending key is referenced rather than a specific message string.
     if (!r.success) {
-      expect(
-        r.error.issues.some(
-          (i) => i.path.includes("mcp/reserved") && /reserved prefix/i.test(i.message),
-        ),
-      ).toBe(true);
+      expect(r.error.issues.some((i) => i.path.includes("mcp/reserved"))).toBe(true);
     }
   });
 
@@ -1317,17 +1306,12 @@ describe("T7 — _meta namespace key validation (local refine)", () => {
     expect(r.success).toBe(false);
   });
 
-  it("soft-accepts _meta keys whose namespace contains uppercase letters (§10.1)", () => {
-    // Appendix B regex requires lowercase namespace segments — but §10.1 says
-    // consumers MUST NOT reject unknown keys. Accept with a warning.
-    const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
-    try {
-      const r = metaSchema.safeParse({ "dev.AFPS/x": {} });
-      expect(r.success).toBe(true);
-      expect(warnSpy).toHaveBeenCalled();
-    } finally {
-      warnSpy.mockRestore();
-    }
+  it("rejects _meta keys whose namespace contains uppercase letters (§2 malformed key)", () => {
+    // Appendix B requires lowercase namespace segments — a `/`-prefixed key whose
+    // namespace has uppercase is malformed and is hard-rejected by the upstream
+    // 0.1 schema (only WELL-FORMED unknown keys are tolerated per §10.1).
+    const r = metaSchema.safeParse({ "dev.AFPS/x": {} });
+    expect(r.success).toBe(false);
   });
 
   it("accepts the transitional `dev.appstrate.afps/` alias (spec editorial note §10)", () => {

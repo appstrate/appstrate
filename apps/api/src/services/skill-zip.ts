@@ -51,7 +51,7 @@ export async function tryParseSkillOnlyZip(
     name: packageId,
     version,
     type: "skill" as const,
-    schema_version: "2.0",
+    schema_version: "0.1",
     description: meta.description || undefined,
     display_name: meta.name,
   });

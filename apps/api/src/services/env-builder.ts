@@ -179,7 +179,7 @@ export async function buildRunContext(params: {
   // ready-to-spawn specs (manifest + bundle bytes + delivery env with
   // live credentials). Failures here are per-integration warnings; the
   // run proceeds with the surviving subset. The resolver reads the
-  // tool/scope selection per AFPS 2.0.2 §4.1 / §4.4 — reads the inline object
+  // tool/scope selection per AFPS §4.1 / §4.4 — reads the inline object
   // form on `dependencies.integrations[id]` plus the top-level
   // `manifest.integrations[id]` tool/scope block.
   const integrationSpawns = await resolveIntegrationSpawns({
@@ -189,8 +189,8 @@ export async function buildRunContext(params: {
     resolvedConnections: params.resolvedConnections ?? null,
   });
 
-  // AFPS 2.0: snake_case. The editor writes `runtime_tools`; the legacy
-  // camelCase `runtimeTools` was dropped in the 2.0 migration. Reading the
+  // AFPS: snake_case. The editor writes `runtime_tools`; the legacy
+  // camelCase `runtimeTools` was dropped in the snake_case migration. Reading the
   // wrong key here silently dropped every author's runtime-tool selection.
   const manifestRuntimeTools = (agent.manifest as { runtime_tools?: unknown }).runtime_tools;
   const runtimeTools = Array.isArray(manifestRuntimeTools)

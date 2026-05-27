@@ -9,7 +9,7 @@
  *   - `custom` + `connect.tool`                 → OrchestratedStrategy (code, needs executor)
  *   - `api_key` / `basic` / `mtls` / bare custom → FieldsStrategy (paste-the-bag)
  *
- * `mtls` (AFPS 2.0.1+ §7.2) reuses FieldsStrategy: the user pastes a credential
+ * `mtls` (AFPS §7.2) reuses FieldsStrategy: the user pastes a credential
  * bag (client certificate PEM + private key PEM, optional intermediate chain),
  * the manifest's `credentials.schema` validates the shape, and the bag is
  * persisted on the connection. At runtime the integration spawn resolver
@@ -55,7 +55,7 @@ export function resolveStrategy(
       // Declarative single login request → Login.
       const connect = auth.connect as AfpsManifestConnect | undefined;
       if (connect?.login) return new LoginStrategy();
-      // AFPS 2.0: `connect.tool` is the marker object `{}`; the orchestrated
+      // AFPS: `connect.tool` is the marker object `{}`; the orchestrated
       // tool name + `run_at` policy live under `connect._meta["dev.appstrate/connect"]`.
       const connectMeta = getAppstrateConnectMeta(connect);
       // connect.tool + run_at:"run-start" → store-the-secret only (P2). The

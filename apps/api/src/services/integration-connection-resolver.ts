@@ -82,7 +82,7 @@ export interface IntegrationRequirement {
    */
   agentScopes: readonly string[];
   /**
-   * AFPS 2.0 §4.1 `auth_key` — when set, restricts the candidate
+   * AFPS §4.1 `auth_key` — when set, restricts the candidate
    * connection set to rows whose `authKey === requiredAuthKey`
    * BEFORE the cascade runs. `undefined` keeps the existing flat-model
    * semantics (any connection on the integration is a valid pick).
@@ -169,7 +169,7 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
     // integrations expose no tools, so scope selection keeps them active.
     if (!req.hasSelectedTools && req.agentScopes.length === 0) continue;
 
-    // AFPS 2.0 §4.1 `auth_key`: when the agent dep pins an auth method,
+    // AFPS §4.1 `auth_key`: when the agent dep pins an auth method,
     // restrict the candidate connection set to rows on that auth BEFORE
     // running the cascade. The chosen connection's authKey carries through
     // to credential injection downstream; pre-filtering here means every

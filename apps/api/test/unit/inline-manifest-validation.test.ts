@@ -21,7 +21,7 @@ function baseManifest(overrides: Record<string, unknown> = {}): Record<string, u
     name: "@acme/inline-test",
     version: "1.0.0",
     type: "agent",
-    schema_version: "2.0",
+    schema_version: "0.1",
     display_name: "Inline Test",
     author: "ACME",
     ...overrides,

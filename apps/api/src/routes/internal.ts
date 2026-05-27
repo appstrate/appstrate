@@ -371,7 +371,7 @@ export function createInternalRouter() {
 
   // GET /internal/mcp-server-bundle/:scope/:name
   // Returns the mcp-server package's .afps bundle bytes (the runnable MCP
-  // server code). In AFPS 2.0 a local-source integration references a SEPARATE
+  // server code). In AFPS a local-source integration references a SEPARATE
   // mcp-server package via `source.server.name`; the sidecar fetches that
   // package's bundle here before spawning a runner. Authorised by the same
   // Bearer run-token as the credentials surface; additionally verifies the

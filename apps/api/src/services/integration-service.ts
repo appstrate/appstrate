@@ -166,7 +166,7 @@ export async function getIntegration(
  * Per-integration prompt companion returned by
  * {@link fetchIntegrationPromptDocs}. `description` comes from the
  * integration manifest; `doc` is the raw `INTEGRATION.md` content
- * (AFPS 2.0 §3.5) parsed at install time and persisted on
+ * (AFPS §3.5) parsed at install time and persisted on
  * `packages.draftContent`. Either may be absent.
  */
 export interface IntegrationPromptDoc {

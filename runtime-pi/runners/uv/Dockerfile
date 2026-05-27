@@ -3,7 +3,7 @@
 # Appstrate MCP Runner — uv (Python via Astral's uv)
 #
 # Spawned per-integration by the sidecar when an AFPS integration
-# manifest declares `server.type: "uv"` (MCPB 0.4 / AFPS 2.0.2 §3.4,
+# manifest declares `server.type: "uv"` (MCPB 0.4 / AFPS §3.4,
 # `manifest_version: "0.4"`). The runner uses Astral's `uv` to resolve
 # and execute the bundle — `uv run` reads `pyproject.toml` /
 # `requirements.txt` / inline PEP-723 script metadata, materialises a

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for the pure AFPS 2.0 integration-manifest accessors — the
+ * Unit tests for the pure AFPS integration-manifest accessors — the
  * `source` discriminant narrowing (`local` | `remote` | `api`), the
  * orchestrated-connect `_meta` extension reader, and the
  * `{$credential.<field>}` value-template renderer. Pure functions, no DB.
@@ -21,7 +21,7 @@ import {
 function manifest(source: unknown, auths?: Record<string, unknown>): IntegrationManifest {
   return {
     type: "integration",
-    schema_version: "2.0",
+    schema_version: "0.1",
     source,
     auths,
   } as unknown as IntegrationManifest;

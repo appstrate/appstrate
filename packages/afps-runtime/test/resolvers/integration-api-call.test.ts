@@ -82,7 +82,7 @@ function apiKeyIntegrationManifest(
 ) {
   return {
     integration: {
-      schema_version: "2.0",
+      schema_version: "0.1",
       type: "integration",
       source: { kind: "api", api: {} },
       _meta: { "dev.appstrate/api": { auth_key: "main" } },
@@ -129,7 +129,7 @@ describe("readIntegrationRefs", () => {
     expect(readIntegrationRefs(makeBundle(root))).toEqual([]);
   });
 
-  it("accepts AFPS 2.0.2 §4.1 object-form deps and extracts version from `version`", () => {
+  it("accepts AFPS §4.1 object-form deps and extracts version from `version`", () => {
     const root = makePackage(
       "@acme/agent",
       "1.0.0",
@@ -193,7 +193,7 @@ describe("readApiCallIntegrationMeta", () => {
     const root = makePackage("@acme/agent", "1.0.0", "agent", {});
     const integ = makePackage("@acme/mcp", "1.0.0", "integration", {
       "integration.json": JSON.stringify({
-        schema_version: "2.0",
+        schema_version: "0.1",
         type: "integration",
         source: { kind: "local", server: { name: "@acme/mcp-server", version: "^1.0.0" } },
         auths: {
@@ -220,7 +220,7 @@ describe("readApiCallIntegrationMeta", () => {
     const root = makePackage("@acme/agent", "1.0.0", "agent", {});
     const integ = makePackage("@acme/api", "1.0.0", "integration", {
       "integration.json": JSON.stringify({
-        schema_version: "2.0",
+        schema_version: "0.1",
         type: "integration",
         source: { kind: "api", api: {} },
         _meta: { "dev.appstrate/api": { auth_key: "only" } },
@@ -261,7 +261,7 @@ describe("readApiCallIntegrationMeta", () => {
     const root = makePackage("@acme/agent", "1.0.0", "agent", {});
     const integ = makePackage("@acme/b64", "1.0.0", "integration", {
       "integration.json": JSON.stringify({
-        schema_version: "2.0",
+        schema_version: "0.1",
         type: "integration",
         source: { kind: "api", api: {} },
         _meta: { "dev.appstrate/api": { auth_key: "main" } },
@@ -293,7 +293,7 @@ describe("readApiCallIntegrationMeta", () => {
     const root = makePackage("@acme/agent", "1.0.0", "agent", {});
     const integ = makePackage("@acme/basic", "1.0.0", "integration", {
       "integration.json": JSON.stringify({
-        schema_version: "2.0",
+        schema_version: "0.1",
         type: "integration",
         source: { kind: "api", api: {} },
         _meta: { "dev.appstrate/api": { auth_key: "main" } },
@@ -323,7 +323,7 @@ describe("readApiCallIntegrationMeta", () => {
     const root = makePackage("@acme/agent", "1.0.0", "agent", {});
     const integ = makePackage("@acme/single", "1.0.0", "integration", {
       "integration.json": JSON.stringify({
-        schema_version: "2.0",
+        schema_version: "0.1",
         type: "integration",
         // api source, single auth, NO _meta["dev.appstrate/api"].auth_key —
         // the projector falls back to the single declared auth key.
@@ -376,7 +376,7 @@ describe("LocalIntegrationResolver", () => {
     const root = makePackage("@acme/agent", "1.0.0", "agent", {});
     const integ = makePackage("@acme/oauth", "1.0.0", "integration", {
       "integration.json": JSON.stringify({
-        schema_version: "2.0",
+        schema_version: "0.1",
         type: "integration",
         source: { kind: "api", api: {} },
         _meta: { "dev.appstrate/api": { auth_key: "main" } },

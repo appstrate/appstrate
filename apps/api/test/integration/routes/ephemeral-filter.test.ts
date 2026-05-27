@@ -24,7 +24,7 @@ const shadowManifest = {
   version: "0.0.0",
   type: "agent",
   description: "Inline",
-  schema_version: "2.0",
+  schema_version: "0.1",
 } as unknown as AgentManifest;
 
 describe("ephemeral filter — catalog endpoints hide inline shadows", () => {

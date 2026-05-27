@@ -2,7 +2,7 @@
   "name": "@appstrate/youtube",
   "version": "1.0.0",
   "type": "integration",
-  "schema_version": "2.0",
+  "schema_version": "0.1",
   "display_name": "YouTube (API)",
   "description": "Video sharing and streaming platform by Google",
   "keywords": ["social-media", "video", "marketing"],

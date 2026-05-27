@@ -37,7 +37,7 @@ async function makeBundle({ sign }: { sign: boolean }): Promise<{
     type: "agent",
     name: "@acme/bundle",
     version: "1.0.0",
-    schema_version: "2.0",
+    schema_version: "0.1",
     display_name: "Bundle",
     author: "Acme",
   };

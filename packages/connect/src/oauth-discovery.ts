@@ -3,7 +3,7 @@
 /**
  * Discovery-first OAuth endpoint resolution (RFC 8414 / OIDC Discovery 1.0).
  *
- * AFPS 2.0 lets an `oauth2` auth declare an `issuer` instead of (or alongside)
+ * AFPS lets an `oauth2` auth declare an `issuer` instead of (or alongside)
  * explicit `authorization_endpoint` / `token_endpoint`. When an issuer is
  * present and an endpoint is missing, we fetch the issuer's discovery document
  * and fill the gaps.

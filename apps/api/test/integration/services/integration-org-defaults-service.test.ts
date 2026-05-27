@@ -29,7 +29,7 @@ const INTEGRATION_ID = "@official/gmail";
 
 function integrationManifest(): Record<string, unknown> {
   return {
-    schema_version: "2.0",
+    schema_version: "0.1",
     type: "integration",
     name: INTEGRATION_ID,
     version: "1.0.0",

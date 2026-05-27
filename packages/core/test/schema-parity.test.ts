@@ -42,21 +42,21 @@ const entries = [
   {
     filename: "skill.schema.json",
     title: "Appstrate Skill Manifest",
-    description: "Appstrate skill manifest — AFPS 2.0 skill with relaxed optional metadata.",
+    description: "Appstrate skill manifest — AFPS skill with relaxed optional metadata.",
     schema: skillManifestSchema,
   },
   {
     filename: "mcp-server.schema.json",
     title: "Appstrate MCP-Server Manifest",
     description:
-      "Appstrate mcp-server manifest — the canonical AFPS 2.0.2 / MCPB schema (re-exported from @afps-spec/schema). The AFPS identity contract (type, name, schema_version, dependencies) lives at the manifest root (AFPS 2.0.2 §3.4 / §11.2).",
+      "Appstrate mcp-server manifest — the canonical AFPS / MCPB schema (re-exported from @afps-spec/schema). The AFPS identity contract (type, name, schema_version, dependencies) lives at the manifest root (AFPS §3.4 / §11.2).",
     schema: mcpServerManifestSchema,
   },
   {
     filename: "integration.schema.json",
     title: "Appstrate Integration Manifest",
     description:
-      "Appstrate integration manifest — AFPS 2.0 (packages/core/src/integration.ts). Cross-field rules (≥1 auth, oauth2 discovery, delivery, scope-catalog subset, per-tool auth-key) are enforced by the Zod superRefines and are not representable in JSON Schema.",
+      "Appstrate integration manifest — AFPS (packages/core/src/integration.ts). Cross-field rules (≥1 auth, oauth2 discovery, delivery, scope-catalog subset, per-tool auth-key) are enforced by the Zod superRefines and are not representable in JSON Schema.",
     schema: integrationManifestSchema,
   },
 ] as const;

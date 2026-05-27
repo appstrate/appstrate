@@ -26,7 +26,7 @@ function fakeFetch(
 
 const ALLOW = ["https://idp.example.com/**"];
 
-describe("runLogin — declarative login (AFPS 2.0)", () => {
+describe("runLogin — declarative login (AFPS)", () => {
   it("password grant: substitutes secrets, extracts token + expiry", async () => {
     const { impl, calls } = fakeFetch([
       { status: 200, body: JSON.stringify({ access_token: "TOK-123", expires_in: 3600 }) },

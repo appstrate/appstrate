@@ -43,7 +43,7 @@ const RUNNER_IMAGE_BY_TYPE: Record<string, string> = {
   // Docker socket mounted, so third-party bun code never shares its process).
   bun: "appstrate-mcp-runner-bun:latest",
   python: "appstrate-mcp-runner-python:latest",
-  // MCPB 0.4 / AFPS 2.0.2 §3.4 — `uv` runs Python through Astral's `uv`
+  // MCPB 0.4 / AFPS §3.4 — `uv` runs Python through Astral's `uv`
   // resolver. Dedicated image built on `ghcr.io/astral-sh/uv:python3.12-alpine`
   // so `uv run` is on PATH and can materialise per-bundle venvs from
   // pyproject.toml / requirements.txt / PEP-723 inline metadata.
@@ -141,7 +141,7 @@ async function killContainer(containerId: string): Promise<void> {
 }
 
 /**
- * AFPS 2.0.2 §7.6 (CC-5) — materialise a `delivery.files` entry into the
+ * AFPS §7.6 (CC-5) — materialise a `delivery.files` entry into the
  * runner container. Writes the decoded bytes to a sidecar-local temp file
  * with the requested POSIX mode, then `docker cp`'s it into the container
  * at the absolute manifest path. Returns the host temp file path so the
@@ -354,7 +354,7 @@ export function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapt
         await dockerExec(["cp", mitm.caCertHostPath, `${containerId}:${CA_CONTAINER_PATH}`]);
       }
 
-      // AFPS 2.0.2 §7.6 (CC-5) — materialise `delivery.files` entries into
+      // AFPS §7.6 (CC-5) — materialise `delivery.files` entries into
       // the runner container BEFORE `docker start -ai` so the entrypoint
       // observes them at boot. The host temp dir is cleaned up by
       // `shutdown()` (we keep the reference so cleanup is exception-safe).
@@ -389,7 +389,7 @@ export function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapt
         await killContainer(id);
       }
       containerIds.length = 0;
-      // AFPS 2.0.2 §7.6 (CC-5) — clean up host-side temp files holding
+      // AFPS §7.6 (CC-5) — clean up host-side temp files holding
       // decoded `delivery.files` bytes. Best-effort: if the dir is gone
       // (already cleaned, container's own --rm removed it, …) we skip.
       for (const dirs of hostTempDirsByContainer.values()) {

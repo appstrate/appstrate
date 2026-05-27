@@ -27,7 +27,7 @@ const MINIMAL_MANIFEST = JSON.stringify({
   version: "1.0.0",
   type: "agent",
   description: "Signature policy fixture",
-  schema_version: "2.0",
+  schema_version: "0.1",
   display_name: "Sig Test",
 });
 

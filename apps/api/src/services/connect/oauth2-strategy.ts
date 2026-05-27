@@ -24,6 +24,7 @@ import { initiateIntegrationOAuth, resolveOAuthEndpoints } from "@appstrate/conn
 import { forbidden, invalidRequest } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import { oauthStateStore } from "./oauth-state-store.ts";
+import { toSupportedTokenEndpointAuthMethod } from "../integration-manifest-helpers.ts";
 import {
   assertRequiredIdentityClaims,
   extractIdentity,
@@ -45,7 +46,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     const { auth: rawAuth } = await readIntegrationAuth(ctx.scope, ctx.integrationId, ctx.authKey);
     const auth =
       rawAuth as unknown as import("../integration-manifest-helpers.ts").AfpsManifestAuth;
-    // AFPS 2.0 §7.3: an oauth2 auth declares EITHER an `issuer` (discovery
+    // AFPS §7.3: an oauth2 auth declares EITHER an `issuer` (discovery
     // fills the endpoints in) OR explicit `authorization_endpoint` +
     // `token_endpoint`. Defensive guard — the manifest schema already enforces
     // this, but it also narrows the optional types for the initiate call.
@@ -61,7 +62,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       );
     }
     const redirectUri = client.redirect_uri ?? `${getEnv().APP_URL}/api/integrations/callback`;
-    // AFPS 2.0 §7.3 / §7.4 (Appendix D renames): `authorization_endpoint`,
+    // AFPS §7.3 / §7.4 (Appendix D renames): `authorization_endpoint`,
     // `token_endpoint`, `resource` (was audience), `token_endpoint_auth_method`
     // (was tokenAuthMethod), `default_scopes`, `code_challenge_methods_supported`
     // (PKCE; was pkceEnabled), `issuer` (new — discovery). `scope_separator`
@@ -69,6 +70,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     const oauthMeta = (auth._meta?.["dev.appstrate/oauth"] ?? undefined) as
       | { scope_separator?: string }
       | undefined;
+    const tokenAuthMethod = toSupportedTokenEndpointAuthMethod(auth.token_endpoint_auth_method);
     const result = await initiateIntegrationOAuth(oauthStateStore, {
       packageId: ctx.integrationId,
       authKey: ctx.authKey,
@@ -79,9 +81,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       ...(auth.token_endpoint ? { tokenEndpoint: auth.token_endpoint } : {}),
       clientId: client.client_id,
       clientSecret: client.clientSecret,
-      ...(auth.token_endpoint_auth_method
-        ? { tokenEndpointAuthMethod: auth.token_endpoint_auth_method }
-        : {}),
+      ...(tokenAuthMethod ? { tokenEndpointAuthMethod: tokenAuthMethod } : {}),
       scopes: opts.scopes,
       ...(oauthMeta?.scope_separator ? { scopeSeparator: oauthMeta.scope_separator } : {}),
       ...(auth.resource ? { resource: auth.resource } : {}),
@@ -129,7 +129,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
         }
       }
     }
-    // Userinfo URL precedence (AFPS 2.0 §7.3): mirror the same fallback chain
+    // Userinfo URL precedence (AFPS §7.3): mirror the same fallback chain
     // we apply for `code_challenge_methods_supported` —
     //   1. Manifest-declared `userinfo_endpoint` (authoritative).
     //   2. Discovery-projected `userinfo_endpoint` (a manifest that only
@@ -199,7 +199,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     }
 
     const { accountId, identityClaims } = extractIdentity(manifest, result.authKey, identitySource);
-    // AFPS 2.0 §7.4 — refuse the connection if any `required_identity_claims`
+    // AFPS §7.4 — refuse the connection if any `required_identity_claims`
     // came back missing/empty from the IdP. Fail BEFORE persistence so a
     // half-identified connection never lands in `integration_connections`.
     assertRequiredIdentityClaims(manifest, result.authKey, identityClaims);

@@ -5,7 +5,7 @@
  * `bundleMcpServer` — high-level orchestrator for the AFPS mcp-server
  * bundler.
  *
- * In AFPS 2.0, the runnable MCP server lives in a separate `mcp-server`
+ * In AFPS, the runnable MCP server lives in a separate `mcp-server`
  * package whose manifest is AFPS-native at the root (carrying MCPB-vocabulary
  * `server` / `tools` / `user_config` fields lifted alongside the AFPS identity
  * fields — see AFPS §3.4); an integration whose `source.kind: "local"`

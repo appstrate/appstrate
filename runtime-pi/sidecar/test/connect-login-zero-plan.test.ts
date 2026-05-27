@@ -69,7 +69,7 @@ describe("runConnectLogin — zero-plan rejection (R8a)", () => {
   it("throws when delivery.http.name is whitespace-only (resolver collapses to null)", async () => {
     // Same null-plan path: the resolver short-circuits when the header
     // name is the empty string. Tests the same defensive branch the
-    // primary case covers (and matches the AFPS 2.0.2 schema
+    // primary case covers (and matches the AFPS schema
     // `minLength: 1` constraint).
     const source = makeSource();
     const host = fakeHostReturning({ outputs: { session: "S2" } });

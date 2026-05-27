@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * mtls auth type — connect strategy + end-to-end persistence (AFPS 2.0.2 §7.2,
+ * mtls auth type — connect strategy + end-to-end persistence (AFPS §7.2,
  * CC-6). mtls reuses FieldsStrategy: the user pastes a credential bag (client
  * cert PEM + private key PEM), the manifest's `credentials.schema` validates
  * the shape, and the bag is stored on the connection. At runtime the integration

@@ -2,7 +2,7 @@
 // Copyright 2026 Appstrate
 
 /**
- * AFPS 2.0 runtime resolvers.
+ * AFPS runtime resolvers.
  *
  * Interfaces for loading in-bundle `dependencies.skills[]` content plus the
  * integration `api_call` surface. The runtime supplies a default "bundled"
@@ -13,9 +13,9 @@
  * NOTE: the `Tool` types here are the generic MCP Tool protocol from
  * `@afps-spec/types` — they describe the shape of a tool surfaced to the LLM
  * (e.g. the integration `api_call` tool built by `makeApiCallTool`). In AFPS
- * 2.0 tools come from spawned `mcp-server` packages (§3.4) and integrations
+ * tools come from spawned `mcp-server` packages (§3.4) and integrations
  * (§3.5), NOT from loading a package `entrypoint` module in-process (that was
- * the 1.x `tool` package type, removed in 2.0).
+ * the retired 1.x `tool` package type).
  *
  * Specification: `afps-spec/spec.md` §8.
  */

@@ -2,7 +2,7 @@
   "name": "@appstrate/twilio",
   "version": "1.0.0",
   "type": "integration",
-  "schema_version": "2.0",
+  "schema_version": "0.1",
   "display_name": "Twilio (API)",
   "description": "Cloud communications platform for SMS, voice, and messaging",
   "keywords": ["messaging", "communications"],

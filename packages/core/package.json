@@ -79,7 +79,7 @@
     "./credential-template": "./src/credential-template.ts"
   },
   "dependencies": {
-    "@afps-spec/schema": "^2.0.3",
+    "@afps-spec/schema": "^0.1.0",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
     "fflate": "^0.8.0",

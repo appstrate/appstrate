@@ -2,7 +2,7 @@
   "name": "@appstrate/shortcut",
   "version": "1.0.0",
   "type": "integration",
-  "schema_version": "2.0",
+  "schema_version": "0.1",
   "display_name": "Shortcut (API)",
   "description": "Project management platform for software development teams",
   "keywords": ["project-management", "issue-tracking", "development"],

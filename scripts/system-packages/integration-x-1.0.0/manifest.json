@@ -2,7 +2,7 @@
   "name": "@appstrate/x",
   "version": "1.0.0",
   "type": "integration",
-  "schema_version": "2.0",
+  "schema_version": "0.1",
   "display_name": "X (Twitter) (API)",
   "description": "Social media platform for microblogging and real-time engagement",
   "keywords": ["social-media", "marketing"],

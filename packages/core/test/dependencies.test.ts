@@ -83,7 +83,7 @@ describe("extractDependencies", () => {
     expect(deps.find((d) => d.depType === "integration")).toBeDefined();
   });
 
-  it("manifest with mcp_servers — AFPS 2.0 first-class dep map", () => {
+  it("manifest with mcp_servers — AFPS first-class dep map", () => {
     const manifest = {
       dependencies: {
         mcp_servers: { "@acme/gmail-server": "^1.0.0", "@acme/github-server": "~2.0.0" },
@@ -235,7 +235,7 @@ describe("extractDependencies", () => {
 });
 
 // ─────────────────────────────────────────────
-// assertNoLegacyDepKeys — publish-time guard (AFPS 2.0 §2.1 / Appendix D)
+// assertNoLegacyDepKeys — publish-time guard (AFPS §2.1 / Appendix D)
 // ─────────────────────────────────────────────
 
 describe("assertNoLegacyDepKeys (publish-time guard)", () => {
@@ -272,7 +272,7 @@ describe("assertNoLegacyDepKeys (publish-time guard)", () => {
     }
   });
 
-  it("accepts canonical AFPS 2.0 dependency shapes (integrations + mcp_servers + skills)", () => {
+  it("accepts canonical AFPS dependency shapes (integrations + mcp_servers + skills)", () => {
     const manifest = {
       dependencies: {
         skills: { "@acme/skill-a": "^1.0.0" },
@@ -424,7 +424,7 @@ describe("writeManifestIntegrations", () => {
     expect(deps.integrations).toBeUndefined();
   });
 
-  it("pure AFPS 2.0 snake_case manifest round-trips identity", () => {
+  it("pure AFPS snake_case manifest round-trips identity", () => {
     const canonical: Record<string, unknown> = {
       dependencies: {
         integrations: {
@@ -450,7 +450,7 @@ describe("writeManifestIntegrations", () => {
   });
 
   // ───────────────────────────────────────────────────────────────────
-  // AFPS 2.0 §4.1 `auth_key` (C2) — multi-auth selector threading.
+  // AFPS §4.1 `auth_key` (C2) — multi-auth selector threading.
   // ───────────────────────────────────────────────────────────────────
 
   it("parseManifestIntegrations extracts `auth_key` from canonical dep object form (§4.1)", () => {

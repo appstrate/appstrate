@@ -2,22 +2,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AFPS 2.0 Integration manifest — Zod schema, TypeScript types, and the
+ * AFPS Integration manifest — Zod schema, TypeScript types, and the
  * install-time scope/tool helpers Appstrate builds on top of the spec.
  *
- * Appstrate fully adopts AFPS 2.0 (`docs`/`afps-spec/spec.md` §2, §3.5, §7)
+ * Appstrate fully adopts AFPS (`docs`/`afps-spec/spec.md` §2, §3.5, §7)
  * as its integration manifest format. The base schemas are imported from
  * `@afps-spec/schema` (v2) and lightly extended here with the Appstrate
  * cross-field MUST rules that AFPS leaves to the consumer (scope-catalog
  * subset, per-tool auth-key disambiguation, connect.login output gating).
  *
  * Field vocabulary is snake_case (§Appendix D). The integration manifest
- * itself is read as AFPS 2.0 canonical only — there is no 1.x camelCase
- * reading path on this schema. Reads and writes everywhere are AFPS 2.0
+ * itself is read as AFPS canonical only — there is no 1.x camelCase
+ * reading path on this schema. Reads and writes everywhere are AFPS
  * canonical.
  *
  * SCOPE NOTE — runtime vs manifest:
- *   The MANIFEST schema below is snake_case AFPS 2.0. The PURE RUNTIME
+ *   The MANIFEST schema below is snake_case AFPS. The PURE RUNTIME
  *   types at the bottom of this file (`ConnectionOverrides`,
  *   `ResolvedConnection`, `ConnectionResolution*`, `AgentIntegrationScopeError`)
  *   describe the connection RESOLVER's output, not serialized manifest
@@ -32,12 +32,12 @@ import {
 import type { ManifestIntegrationEntry } from "./dependencies.ts";
 
 // ─────────────────────────────────────────────
-// Re-exports of AFPS 2.0 primitives consumed elsewhere
+// Re-exports of AFPS primitives consumed elsewhere
 // ─────────────────────────────────────────────
 
 /**
  * Resumable-upload protocols an `api`-source integration MAY advertise
- * (`source.api.upload_protocols`, AFPS §7.1 / §7.5). AFPS 2.0.2 dropped the
+ * (`source.api.upload_protocols`, AFPS §7.1 / §7.5). AFPS dropped the
  * closed enum in favour of an open string array of *reserved* values:
  * producers MAY emit other (reverse-DNS-qualified) values and consumers MUST
  * tolerate them. The runtime-pi upload adapters use this list to recognise
@@ -46,7 +46,7 @@ import type { ManifestIntegrationEntry } from "./dependencies.ts";
  */
 export const RESERVED_INTEGRATION_UPLOAD_PROTOCOLS = RESERVED_UPLOAD_PROTOCOLS;
 /**
- * @deprecated AFPS 2.0.2 replaced the closed enum with an open string array.
+ * @deprecated AFPS replaced the closed enum with an open string array.
  * The type is now `string` and the constant {@link RESERVED_INTEGRATION_UPLOAD_PROTOCOLS}
  * lists the values reserved by the spec. Kept as a back-compat alias for
  * downstream consumers; will be removed in a follow-up phase.
@@ -54,7 +54,7 @@ export const RESERVED_INTEGRATION_UPLOAD_PROTOCOLS = RESERVED_UPLOAD_PROTOCOLS;
 export type IntegrationUploadProtocol = string;
 
 // ─────────────────────────────────────────────
-// Integration manifest (AFPS 2.0 + Appstrate cross-field rules)
+// Integration manifest (AFPS + Appstrate cross-field rules)
 // ─────────────────────────────────────────────
 
 /**
@@ -297,7 +297,7 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
 });
 
 /**
- * The AFPS 2.0 integration manifest type. Re-exported from
+ * The AFPS integration manifest type. Re-exported from
  * `@afps-spec/schema` (the base structural type — the Appstrate superRefine
  * above adds cross-field validation without changing the shape).
  */
@@ -373,7 +373,7 @@ export const APPSTRATE_CONNECT_META_KEY = "dev.appstrate/connect";
  * primitives the platform invokes at boot, not agent capabilities.
  *
  * Reads two locations in this priority order:
- *   1. `connect.tool.name` (string) — AFPS 2.0 §7.7 spec-natural location.
+ *   1. `connect.tool.name` (string) — AFPS §7.7 spec-natural location.
  *      `connect.tool` is the canonical block for the orchestrated-acquisition
  *      mode; `name` is the tool reference. Preferred form for new manifests.
  *   2. `connect._meta["dev.appstrate/connect"].tool` — legacy vendor-extension
@@ -492,12 +492,12 @@ export function resolveIntegrationToolCatalog(
  * Resolve the effective `api_call` configuration for an integration, or
  * `null` when the integration is not an `api`-source integration.
  *
- * AFPS 2.0 models the serverless credential-injecting surface as
+ * AFPS models the serverless credential-injecting surface as
  * `source.kind: "api"`. The single declared auth supplies the credential and
  * URL allowlist. `upload_protocols` is now `source.api.upload_protocols`
  * (was the old `apiCall.uploadProtocols`).
  *
- * NOTE — the old `apiCall.authKey` was an explicit auth pointer. AFPS 2.0
+ * NOTE — the old `apiCall.authKey` was an explicit auth pointer. AFPS
  * has no per-source auth pointer: an `api`-source integration draws from its
  * (typically single) declared auth. When the integration declares exactly one
  * auth we return it; when it declares several we return the first key
@@ -820,7 +820,7 @@ export interface ConnectionResolutionError {
   /** True when the resolved connection belongs to the current actor. */
   ownedByActor?: boolean;
   /**
-   * AFPS 2.0 §4.1 — agent dep's pinned `auth_key` when
+   * AFPS §4.1 — agent dep's pinned `auth_key` when
    * `code === "auth_key_mismatch"`.
    */
   requiredAuthKey?: string;

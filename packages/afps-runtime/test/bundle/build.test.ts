@@ -46,7 +46,7 @@ const ROOT = {
   name: "@me/root",
   version: "1.0.0",
   type: "agent",
-  schema_version: "2.0",
+  schema_version: "0.1",
   display_name: "Root",
   author: "tester",
 };
@@ -59,7 +59,7 @@ describe("buildBundleFromCatalog", () => {
     expect(bundle.root).toBe("@me/root@1.0.0");
   });
 
-  it("walks skill + mcp_server + integration deps (AFPS 2.0 sections)", async () => {
+  it("walks skill + mcp_server + integration deps (AFPS sections)", async () => {
     const rootManifest = {
       ...ROOT,
       dependencies: {
@@ -73,10 +73,10 @@ describe("buildBundleFromCatalog", () => {
     });
     const skill = makePkg(
       "@me/skill-a@1.3.0" as PackageIdentity,
-      { name: "@me/skill-a", version: "1.3.0", type: "skill", schema_version: "2.0" },
+      { name: "@me/skill-a", version: "1.3.0", type: "skill", schema_version: "0.1" },
       { "SKILL.md": enc("s") },
     );
-    // AFPS 2.0.2 (§3.4) lifted the mcp-server scoped identity to the manifest
+    // AFPS (§3.4) lifted the mcp-server scoped identity to the manifest
     // root, so `name`, `type`, and `schema_version` live at the top level.
     const mcp = makePkg(
       "@me/mcp-x@1.2.3" as PackageIdentity,
@@ -85,7 +85,7 @@ describe("buildBundleFromCatalog", () => {
         name: "@me/mcp-x",
         version: "1.2.3",
         type: "mcp-server",
-        schema_version: "2.0",
+        schema_version: "0.1",
         server: {
           type: "node",
           entry_point: "server/index.js",
@@ -98,7 +98,7 @@ describe("buildBundleFromCatalog", () => {
       name: "@me/integ-y",
       version: "1.0.0",
       type: "integration",
-      schema_version: "2.0",
+      schema_version: "0.1",
       source: { kind: "api", api: {} },
       auths: {
         key: {
@@ -131,7 +131,7 @@ describe("buildBundleFromCatalog", () => {
     });
     const skill = makePkg(
       "@me/skill-a@1.3.0" as PackageIdentity,
-      { name: "@me/skill-a", version: "1.3.0", type: "skill", schema_version: "2.0" },
+      { name: "@me/skill-a", version: "1.3.0", type: "skill", schema_version: "0.1" },
       { "SKILL.md": enc("s") },
     );
     // Only the skill is in the catalog: an integration/mcp_server dep must not
@@ -145,7 +145,7 @@ describe("buildBundleFromCatalog", () => {
     expect(bundle.packages.get("@me/integ-y@1.0.0" as PackageIdentity)).toBeUndefined();
   });
 
-  it("walks AFPS 2.0.2 §4.1 object-form deps (skills + integrations + mcp_servers)", async () => {
+  it("walks AFPS §4.1 object-form deps (skills + integrations + mcp_servers)", async () => {
     const rootManifest = {
       ...ROOT,
       dependencies: {
@@ -161,17 +161,17 @@ describe("buildBundleFromCatalog", () => {
     });
     const skill = makePkg(
       "@me/skill-a@1.3.0" as PackageIdentity,
-      { name: "@me/skill-a", version: "1.3.0", type: "skill", schema_version: "2.0" },
+      { name: "@me/skill-a", version: "1.3.0", type: "skill", schema_version: "0.1" },
       { "SKILL.md": enc("s") },
     );
     const mcp = makePkg(
       "@me/mcp-x@1.2.3" as PackageIdentity,
-      { name: "@me/mcp-x", version: "1.2.3", type: "mcp-server", schema_version: "2.0" },
+      { name: "@me/mcp-x", version: "1.2.3", type: "mcp-server", schema_version: "0.1" },
       {},
     );
     const integ = makePkg(
       "@me/integ-y@1.0.0" as PackageIdentity,
-      { name: "@me/integ-y", version: "1.0.0", type: "integration", schema_version: "2.0" },
+      { name: "@me/integ-y", version: "1.0.0", type: "integration", schema_version: "0.1" },
       {},
     );
     const cat = new InMemoryPackageCatalog([skill, mcp, integ]);
@@ -197,14 +197,14 @@ describe("buildBundleFromCatalog", () => {
         name: "@me/a",
         version: "1.0.0",
         type: "skill",
-        schema_version: "2.0",
+        schema_version: "0.1",
         dependencies: { skills: { "@me/b": "^1" } },
       },
       { "SKILL.md": enc("a") },
     );
     const b = makePkg(
       "@me/b@1.5.0" as PackageIdentity,
-      { name: "@me/b", version: "1.5.0", type: "skill", schema_version: "2.0" },
+      { name: "@me/b", version: "1.5.0", type: "skill", schema_version: "0.1" },
       { "SKILL.md": enc("b") },
     );
     const cat = new InMemoryPackageCatalog([a, b]);
@@ -228,7 +228,7 @@ describe("buildBundleFromCatalog", () => {
         name: "@me/a",
         version: "1.0.0",
         type: "skill",
-        schema_version: "2.0",
+        schema_version: "0.1",
         dependencies: { skills: { "@me/shared": "^1" } },
       },
       { "SKILL.md": enc("a") },
@@ -239,14 +239,14 @@ describe("buildBundleFromCatalog", () => {
         name: "@me/b",
         version: "1.0.0",
         type: "skill",
-        schema_version: "2.0",
+        schema_version: "0.1",
         dependencies: { skills: { "@me/shared": "^1" } },
       },
       { "SKILL.md": enc("b") },
     );
     const shared = makePkg(
       "@me/shared@1.0.0" as PackageIdentity,
-      { name: "@me/shared", version: "1.0.0", type: "skill", schema_version: "2.0" },
+      { name: "@me/shared", version: "1.0.0", type: "skill", schema_version: "0.1" },
       { "SKILL.md": enc("s") },
     );
     const cat = new InMemoryPackageCatalog([a, b, shared]);
@@ -267,7 +267,7 @@ describe("buildBundleFromCatalog", () => {
         name: "@me/a",
         version: "1.0.0",
         type: "skill",
-        schema_version: "2.0",
+        schema_version: "0.1",
         dependencies: { skills: { "@me/b": "^1" } },
       },
       { "SKILL.md": enc("a") },
@@ -278,7 +278,7 @@ describe("buildBundleFromCatalog", () => {
         name: "@me/b",
         version: "1.0.0",
         type: "skill",
-        schema_version: "2.0",
+        schema_version: "0.1",
         dependencies: { skills: { "@me/a": "^1" } }, // cycle back to a
       },
       { "SKILL.md": enc("b") },
@@ -321,7 +321,7 @@ describe("buildBundleFromCatalog", () => {
     );
     const a = makePkg(
       "@me/a@1.0.0" as PackageIdentity,
-      { name: "@me/a", version: "1.0.0", type: "skill", schema_version: "2.0" },
+      { name: "@me/a", version: "1.0.0", type: "skill", schema_version: "0.1" },
       { "SKILL.md": enc("a") },
     );
     const cat = new InMemoryPackageCatalog([a]);
@@ -341,7 +341,7 @@ describe("buildBundleFromCatalog", () => {
     );
     const wrong = makePkg(
       "@me/wrong@9.9.9" as PackageIdentity,
-      { name: "@me/wrong", version: "9.9.9", type: "skill", schema_version: "2.0" },
+      { name: "@me/wrong", version: "9.9.9", type: "skill", schema_version: "0.1" },
       { "SKILL.md": enc("w") },
     );
     const lyingCatalog = {
@@ -374,7 +374,7 @@ describe("buildBundleFromCatalog", () => {
         name: "@me/pre-registered",
         version: "1.0.0",
         type: "skill",
-        schema_version: "2.0",
+        schema_version: "0.1",
       },
       { "SKILL.md": enc("s") },
     );

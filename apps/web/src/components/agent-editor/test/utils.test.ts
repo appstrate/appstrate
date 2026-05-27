@@ -112,7 +112,7 @@ describe("getResourceEntries / setResourceEntries", () => {
     });
 
     it("writes the canonical inline object form when tools is an explicit array (even empty)", () => {
-      // AFPS 2.0.2 §4.1 — dep value is `{ version, tools? }`. The Appstrate-
+      // AFPS §4.1 — dep value is `{ version, tools? }`. The Appstrate-
       // invented top-level `manifest.integrations` block is no longer written;
       // it is only read for legacy back-compat.
       const m: Record<string, unknown> = { dependencies: {} };
@@ -164,8 +164,8 @@ describe("defaultEditorState", () => {
     expect(state.manifest.author).toBe("user@test.com");
     expect(state.manifest.type).toBe("agent");
     expect(state.manifest.version).toBe("1.0.0");
-    // Canonical AFPS 2.0 manifest version — was wrongly "1.1" pre-rename.
-    expect(state.manifest.schema_version).toBe("2.0");
+    // Canonical AFPS 0.x draft manifest version.
+    expect(state.manifest.schema_version).toBe("0.1");
     expect(state.manifest.schemaVersion).toBeUndefined();
     expect(state.prompt).toBe("");
   });
@@ -463,7 +463,7 @@ describe("fieldsToSchema — JSON Schema purity", () => {
   });
 });
 
-// ─── manifestToSchemaFields — canonical AFPS 2.0 wrapper reads ──
+// ─── manifestToSchemaFields — canonical AFPS wrapper reads ──
 
 describe("manifestToSchemaFields — canonical snake_case wrappers", () => {
   it("reads canonical snake_case wrapper fields", () => {
@@ -553,9 +553,9 @@ describe("getRuntimeTools", () => {
   });
 });
 
-// ─── Writers emit canonical AFPS 2.0 keys only ──
+// ─── Writers emit canonical AFPS keys only ──
 
-describe("writers emit canonical AFPS 2.0 keys", () => {
+describe("writers emit canonical AFPS keys", () => {
   it("metadataToManifestPatch — emits canonical display_name", () => {
     const patch = metadataToManifestPatch({
       id: "agent",

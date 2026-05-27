@@ -45,7 +45,7 @@ export async function buildPlatformSystemPrompt(
   }));
 
   // Phase 1.4 — inline each resolved integration's manifest description +
-  // INTEGRATION.md (AFPS 2.0 §3.5) so the LLM can read the integration's
+  // INTEGRATION.md (AFPS §3.5) so the LLM can read the integration's
   // API contract alongside the `{ns}__*` tools advertised via MCP
   // `tools/list`. Docs are pulled from `packages.draftContent` (captured
   // at install time by `core/zip.ts`) — never re-fetched from storage.

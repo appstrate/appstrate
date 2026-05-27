@@ -63,7 +63,7 @@ function makeFixtureEntry(opts: FixtureOpts): SystemPackageEntry {
     name: opts.id,
     version: opts.version,
     type,
-    schema_version: "2.0",
+    schema_version: "0.1",
     display_name: `Fixture ${opts.id}`,
   };
   const content = opts.contentBytes ?? `# ${opts.id}\n\nFixture content.`;

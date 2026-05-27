@@ -49,8 +49,8 @@ function makePayload(token: string): IntegrationCredentialsWire {
 }
 
 /**
- * Build the snake_case JSON shape the platform emits over the wire (per AFPS
- * 2.0). The sidecar's `normalizeIntegrationCredentialsWire` is the
+ * Build the snake_case JSON shape the platform emits over the wire (per AFPS).
+ * The sidecar's `normalizeIntegrationCredentialsWire` is the
  * deserialization boundary that flips these snake_case keys back to the TS
  * camelCase `IntegrationCredentialsWire` shape — tests must mock the wire,
  * not the TS shape.
