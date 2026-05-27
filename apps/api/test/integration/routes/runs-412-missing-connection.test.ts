@@ -50,11 +50,12 @@ const SECOND_INTEGRATION = "@runorg/extra-svc";
 const MCP_SERVER = "@runorg/svc-server";
 
 function buildAgentManifest(integrations: string[]): Record<string, unknown> {
-  const deps: Record<string, string> = {};
-  const sel: Record<string, { tools?: string[] }> = {};
+  // AFPS §4.1 canonical form: per-integration config (version + tool/scope
+  // selection) lives on the `dependencies.integrations.<id>` object — there
+  // is no separate top-level `integrations` block.
+  const deps: Record<string, { version: string; tools: string[] }> = {};
   for (const id of integrations) {
-    deps[id] = "^1.0.0";
-    sel[id] = { tools: ["search"] };
+    deps[id] = { version: "^1.0.0", tools: ["search"] };
   }
   return {
     name: AGENT,
@@ -63,7 +64,6 @@ function buildAgentManifest(integrations: string[]): Record<string, unknown> {
     schema_version: "0.1",
     display_name: "Connection-Dependent Agent",
     dependencies: { integrations: deps },
-    integrations: sel,
   };
 }
 

@@ -2,7 +2,6 @@
 
 import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import i18n from "../i18n";
 import { Search, Users } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
 import { Button } from "@/components/ui/button";
@@ -15,6 +14,7 @@ import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { EndUserCreateModal } from "../components/end-user-create-modal";
 import { EndUserDetailModal } from "../components/end-user-detail-modal";
+import { formatDateField } from "../lib/markdown";
 
 /** Deterministic color from ID hash for the avatar circle. */
 const AVATAR_COLORS = [
@@ -45,14 +45,6 @@ function getInitials(name: string | null, email: string | null): string {
   }
   if (email) return email.slice(0, 2).toUpperCase();
   return "?";
-}
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(i18n.language, {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
 }
 
 function EndUserAvatar({ user }: { user: EndUserInfo }) {
@@ -194,7 +186,7 @@ export function EndUsersPage() {
                       </div>
                     </div>
                     <span className="text-muted-foreground shrink-0 text-xs">
-                      {formatDate(user.createdAt)}
+                      {formatDateField(user.createdAt, "date")}
                     </span>
                   </div>
                 </div>

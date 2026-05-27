@@ -747,8 +747,8 @@ describe("installSessionBridge — getUsage()", () => {
 
     const metric = sink.events.find((e) => e.type === "appstrate.metric") as unknown as {
       usage: {
-        input_tokens: number;
-        output_tokens: number;
+        input_tokens?: number;
+        output_tokens?: number;
         cache_creation_input_tokens?: number;
         cache_read_input_tokens?: number;
       };

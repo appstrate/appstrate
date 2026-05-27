@@ -3,6 +3,13 @@
 
 import semver from "semver";
 
+// The canonical 3-step resolver lives in the shared zero-dependency package
+// so the platform and the standalone `afps` CLI share one implementation.
+// Imported (used internally by resolveVersionFromCatalog) and re-exported to
+// preserve the `@appstrate/core/semver:resolveVersionString` public surface.
+import { resolveVersionString } from "@appstrate/afps-shared/semver-resolve";
+export { resolveVersionString };
+
 /** Check whether `v` is a valid semver version string. */
 export function isValidVersion(v: string): boolean {
   return semver.valid(v) !== null;
@@ -60,60 +67,6 @@ export interface CatalogVersion {
   version: string;
   /** Whether this version has been yanked from distribution. */
   yanked: boolean;
-}
-
-/**
- * Generic 3-step semver resolution: exact match → dist-tag → semver range.
- *
- * Pure string-level helper. Callers are responsible for hydrating any
- * associated metadata (id, integrity, …) from the returned version
- * string, and for applying yank policy by pre-filtering the
- * `rangeVersions` and `distTags` inputs accordingly.
- *
- * Deliberately mirrored line-for-line by `resolveVersionString` in
- * `@appstrate/afps-runtime` (`src/bundle/semver-resolve.ts`), which ships
- * standalone and cannot take a runtime dep on this package. The drift guard is
- * `packages/afps-runtime/test/bundle/semver-resolve-parity.test.ts` — it runs
- * the same input matrix through both copies and fails on any divergence. Change
- * both when the algorithm changes.
- *
- * Conventional yank policy (matches npm/crates.io and the canonical
- * {@link resolveVersionFromCatalog} below):
- * - `exactVersions`: include yanked (exact pins always resolve).
- * - `distTags`: exclude tags pointing at yanked versions.
- * - `rangeVersions`: exclude yanked.
- *
- * Returns the matched version string (e.g. `"1.2.3"`) or `null`.
- */
-export function resolveVersionString(
-  query: string,
-  exactVersions: readonly string[],
-  rangeVersions: readonly string[],
-  distTags: Readonly<Record<string, string>>,
-): string | null {
-  // 1. Exact match (caller decides whether yanked are included).
-  if (isValidVersion(query)) {
-    return exactVersions.includes(query) ? query : null;
-  }
-
-  // 2. Dist-tag (caller pre-filters out tags pointing at yanked).
-  const tagged = distTags[query];
-  if (tagged !== undefined) {
-    if (rangeVersions.includes(tagged) || exactVersions.includes(tagged)) {
-      return tagged;
-    }
-    // Tag found but the target was filtered out (e.g. yanked) — do
-    // not fall through to range resolution; tags are not ranges.
-    return null;
-  }
-
-  // 3. Semver range.
-  if (isValidRange(query)) {
-    const candidates = rangeVersions.filter(isValidVersion);
-    return matchVersion([...candidates], query);
-  }
-
-  return null;
 }
 
 /**

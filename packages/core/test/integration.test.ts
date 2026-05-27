@@ -1017,32 +1017,12 @@ function connectToolManifest(connectBlock: Record<string, unknown>): Integration
   );
 }
 
-describe("getConnectToolNames — AFPS spec-natural + vendor _meta", () => {
+describe("getConnectToolNames — AFPS spec-natural", () => {
   it("reads the spec-natural `connect.tool.name` location (R8b N-2)", () => {
     // AFPS §7.7: `connect.tool` is the canonical block for the
     // orchestrated-acquisition mode; the inner `name` is the tool reference.
     const m = connectToolManifest({ tool: { name: "perform_login" } });
     expect(getConnectToolNames(m)).toEqual(["perform_login"]);
-  });
-
-  it("falls back to the legacy vendor `_meta` location", () => {
-    // Back-compat: published manifests written before the spec-natural form
-    // existed carry the tool name under `_meta["dev.appstrate/connect"].tool`.
-    const m = connectToolManifest({
-      tool: {},
-      _meta: { "dev.appstrate/connect": { tool: "perform_login" } },
-    });
-    expect(getConnectToolNames(m)).toEqual(["perform_login"]);
-  });
-
-  it("prefers spec-natural over vendor _meta when both are present", () => {
-    // The two locations should never disagree, but if they do, the
-    // spec-natural form wins — that's the canonical reading.
-    const m = connectToolManifest({
-      tool: { name: "spec_natural" },
-      _meta: { "dev.appstrate/connect": { tool: "vendor_legacy" } },
-    });
-    expect(getConnectToolNames(m)).toEqual(["spec_natural"]);
   });
 
   it("returns [] when no auth declares connect.tool", () => {

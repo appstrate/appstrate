@@ -2,19 +2,13 @@
 // Copyright 2026 Appstrate
 
 /**
- * Drift guard for the deliberate two-copy `resolveVersionString` (3-step semver
- * resolution). afps-runtime ships standalone and cannot take a runtime
- * dependency on `@appstrate/core`, so the function is intentionally mirrored
- * line-for-line in both packages (see the header comments at both sites).
- *
- * This test runs the same input matrix through both implementations and asserts
- * byte-identical output, so any divergence between the copies fails CI. Core is
- * pulled in as a devDependency for the test only — never a runtime dep.
+ * Behaviour matrix for the canonical 3-step `resolveVersionString`
+ * (exact → dist-tag → range). Formerly the afps-runtime ↔ core parity test;
+ * with a single shared source there is exactly one implementation to pin.
  */
 
 import { describe, it, expect } from "bun:test";
-import { resolveVersionString as runtimeResolve } from "../../src/bundle/semver-resolve.ts";
-import { resolveVersionString as coreResolve } from "@appstrate/core/semver";
+import { resolveVersionString } from "../src/semver-resolve.ts";
 
 interface Case {
   name: string;
@@ -22,18 +16,34 @@ interface Case {
   exact: string[];
   range: string[];
   distTags: Record<string, string>;
+  expected: string | null;
 }
 
 const CASES: Case[] = [
   // 1. Exact match
-  { name: "exact hit", query: "1.2.3", exact: ["1.2.3", "1.0.0"], range: ["1.2.3"], distTags: {} },
-  { name: "exact miss → null", query: "9.9.9", exact: ["1.2.3"], range: ["1.2.3"], distTags: {} },
+  {
+    name: "exact hit",
+    query: "1.2.3",
+    exact: ["1.2.3", "1.0.0"],
+    range: ["1.2.3"],
+    distTags: {},
+    expected: "1.2.3",
+  },
+  {
+    name: "exact miss → null",
+    query: "9.9.9",
+    exact: ["1.2.3"],
+    range: ["1.2.3"],
+    distTags: {},
+    expected: null,
+  },
   {
     name: "exact pin resolves even when not in range set (yanked)",
     query: "1.2.3",
     exact: ["1.2.3"],
     range: [],
     distTags: {},
+    expected: "1.2.3",
   },
   // 2. Dist-tag
   {
@@ -42,6 +52,7 @@ const CASES: Case[] = [
     exact: ["1.0.0", "2.0.0"],
     range: ["1.0.0", "2.0.0"],
     distTags: { latest: "2.0.0" },
+    expected: "2.0.0",
   },
   {
     name: "dist-tag target filtered out → null (no range fallback)",
@@ -49,6 +60,7 @@ const CASES: Case[] = [
     exact: ["1.0.0"],
     range: ["1.0.0"],
     distTags: { latest: "9.9.9" },
+    expected: null,
   },
   {
     name: "dist-tag points at exact-only (yanked-but-pinned) target",
@@ -56,6 +68,7 @@ const CASES: Case[] = [
     exact: ["3.0.0"],
     range: [],
     distTags: { beta: "3.0.0" },
+    expected: "3.0.0",
   },
   // 3. Semver range
   {
@@ -64,6 +77,7 @@ const CASES: Case[] = [
     exact: ["1.0.0", "1.5.0", "2.0.0"],
     range: ["1.0.0", "1.5.0", "2.0.0"],
     distTags: {},
+    expected: "1.5.0",
   },
   {
     name: "range with no satisfying version → null",
@@ -71,6 +85,7 @@ const CASES: Case[] = [
     exact: ["1.0.0"],
     range: ["1.0.0"],
     distTags: {},
+    expected: null,
   },
   {
     name: "tilde range",
@@ -78,6 +93,7 @@ const CASES: Case[] = [
     exact: ["1.2.0", "1.2.9", "1.3.0"],
     range: ["1.2.0", "1.2.9", "1.3.0"],
     distTags: {},
+    expected: "1.2.9",
   },
   {
     name: "x-range",
@@ -85,6 +101,7 @@ const CASES: Case[] = [
     exact: ["1.0.0", "1.9.0", "2.0.0"],
     range: ["1.0.0", "1.9.0", "2.0.0"],
     distTags: {},
+    expected: "1.9.0",
   },
   {
     name: "range skips invalid version strings in the range set",
@@ -92,25 +109,39 @@ const CASES: Case[] = [
     exact: ["1.0.0", "not-a-version", "1.4.0"],
     range: ["1.0.0", "not-a-version", "1.4.0"],
     distTags: {},
+    expected: "1.4.0",
   },
   // Garbage / empty
-  { name: "garbage query → null", query: "@@@", exact: ["1.0.0"], range: ["1.0.0"], distTags: {} },
-  { name: "empty everything → null", query: "1.0.0", exact: [], range: [], distTags: {} },
+  {
+    name: "garbage query → null",
+    query: "@@@",
+    exact: ["1.0.0"],
+    range: ["1.0.0"],
+    distTags: {},
+    expected: null,
+  },
+  {
+    name: "empty everything → null",
+    query: "1.0.0",
+    exact: [],
+    range: [],
+    distTags: {},
+    expected: null,
+  },
   {
     name: "star range picks max",
     query: "*",
     exact: ["1.0.0", "2.3.4"],
     range: ["1.0.0", "2.3.4"],
     distTags: {},
+    expected: "2.3.4",
   },
 ];
 
-describe("resolveVersionString parity (afps-runtime ↔ @appstrate/core)", () => {
+describe("resolveVersionString", () => {
   for (const c of CASES) {
-    it(`identical output: ${c.name}`, () => {
-      const fromRuntime = runtimeResolve(c.query, c.exact, c.range, c.distTags);
-      const fromCore = coreResolve(c.query, c.exact, c.range, c.distTags);
-      expect(fromRuntime).toBe(fromCore);
+    it(c.name, () => {
+      expect(resolveVersionString(c.query, c.exact, c.range, c.distTags)).toBe(c.expected);
     });
   }
 });

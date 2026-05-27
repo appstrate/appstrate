@@ -186,6 +186,7 @@
       "dependencies": {
         "@afps-spec/schema": "^0.1.0",
         "@afps-spec/types": "^0.1.0",
+        "@appstrate/afps-shared": "workspace:*",
         "fflate": "^0.8.2",
         "file-type": "^22.0.1",
         "mustache": "^4.2.0",
@@ -208,11 +209,25 @@
         "@mariozechner/pi-coding-agent",
       ],
     },
+    "packages/afps-shared": {
+      "name": "@appstrate/afps-shared",
+      "version": "0.1.0",
+      "dependencies": {
+        "semver": "^7.7.1",
+      },
+      "devDependencies": {
+        "@types/semver": "^7.7.1",
+      },
+      "peerDependencies": {
+        "typescript": "^5",
+      },
+    },
     "packages/connect": {
       "name": "@appstrate/connect",
       "version": "0.0.0",
       "dependencies": {
         "@appstrate/afps-runtime": "workspace:*",
+        "@appstrate/afps-shared": "workspace:*",
         "@appstrate/core": "workspace:*",
         "@appstrate/db": "workspace:*",
         "@appstrate/env": "workspace:*",
@@ -225,6 +240,7 @@
       "version": "2.21.0",
       "dependencies": {
         "@afps-spec/schema": "^0.1.0",
+        "@appstrate/afps-shared": "^0.1.0",
         "ajv": "^8.20.0",
         "ajv-formats": "^3.0.1",
         "fflate": "^0.8.0",
@@ -248,6 +264,8 @@
       "name": "@appstrate/db",
       "version": "0.0.0",
       "dependencies": {
+        "@appstrate/afps-shared": "workspace:*",
+        "@appstrate/core": "workspace:*",
         "@appstrate/emails": "workspace:*",
         "@appstrate/env": "workspace:*",
         "@aws-sdk/client-s3": "^3.1038.0",
@@ -409,6 +427,8 @@
     "@apidevtools/swagger-parser": ["@apidevtools/swagger-parser@12.1.0", "", { "dependencies": { "@apidevtools/json-schema-ref-parser": "14.0.1", "@apidevtools/openapi-schemas": "^2.1.0", "@apidevtools/swagger-methods": "^3.0.2", "ajv": "^8.17.1", "ajv-draft-04": "^1.0.0", "call-me-maybe": "^1.0.2" }, "peerDependencies": { "openapi-types": ">=7" } }, "sha512-e5mJoswsnAX0jG+J09xHFYQXb/bUc5S3pLpMxUuRUA2H8T2kni3yEoyz2R3Dltw5f4A6j6rPNMpWTK+iVDFlng=="],
 
     "@appstrate/afps-runtime": ["@appstrate/afps-runtime@workspace:packages/afps-runtime"],
+
+    "@appstrate/afps-shared": ["@appstrate/afps-shared@workspace:packages/afps-shared"],
 
     "@appstrate/api": ["@appstrate/api@workspace:apps/api"],
 

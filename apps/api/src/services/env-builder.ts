@@ -180,8 +180,7 @@ export async function buildRunContext(params: {
   // live credentials). Failures here are per-integration warnings; the
   // run proceeds with the surviving subset. The resolver reads the
   // tool/scope selection per AFPS §4.1 / §4.4 — reads the inline object
-  // form on `dependencies.integrations[id]` plus the top-level
-  // `manifest.integrations[id]` tool/scope block.
+  // form on `dependencies.integrations[id]` (version + tools + scopes).
   const integrationSpawns = await resolveIntegrationSpawns({
     applicationId,
     actor,

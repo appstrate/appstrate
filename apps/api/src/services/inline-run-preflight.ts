@@ -5,7 +5,7 @@
  *
  * Runs every validation that has no durable side effect:
  *   1. Manifest shape (AFPS + inline caps)
- *   2. config + input against the manifest's own AJV schemas
+ *   2. input against the manifest's own AJV schema
  *   3. Agent readiness (prompt, skills, tools, config)
  *
  * Two modes:
@@ -35,7 +35,7 @@ import {
 import { parsePathMessage } from "../lib/field-errors.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { logger } from "../lib/logger.ts";
-import { validateConfig, validateInput } from "./schema.ts";
+import { validateInput } from "./schema.ts";
 import { validateInlineManifest } from "./inline-manifest-validation.ts";
 import { buildShadowLoadedPackage, generateShadowPackageId } from "./inline-run.ts";
 import { getInlineRunLimits } from "./run-limits.ts";
@@ -104,7 +104,10 @@ export async function runInlinePreflight(params: {
   const modelIdOverride = body.modelId ?? null;
   const proxyIdOverride = body.proxyId ?? null;
 
-  // ----- 2. config + input against manifest schemas (AJV) -----
+  // ----- 2. input against manifest schema (AJV) -----
+  // config + prompt validation are delegated entirely to agent readiness
+  // (stage 3) — the single source of truth for those two fields. Only
+  // `input` is validated here, since readiness has no notion of run input.
   const effectiveConfig =
     body.config && typeof body.config === "object" && !Array.isArray(body.config)
       ? (body.config as Record<string, unknown>)
@@ -115,21 +118,6 @@ export async function runInlinePreflight(params: {
       : null;
 
   if (manifest) {
-    const configSchema = manifest.config?.schema;
-    if (configSchema) {
-      const cv = validateConfig(effectiveConfig, asJSONSchemaObject(configSchema));
-      if (!cv.valid) {
-        const entries: ValidationFieldError[] = cv.errors.map((e) => ({
-          field: e.field ? `config.${e.field}` : "config",
-          code: "invalid_config",
-          title: "Invalid Config",
-          message: e.message,
-        }));
-        if (mode === "fail-fast") throw validationFailed(entries);
-        push(entries);
-      }
-    }
-
     const inputSchema = manifest.input?.schema;
     if (inputSchema) {
       const iv = validateInput(effectiveInput ?? undefined, asJSONSchemaObject(inputSchema));
@@ -164,12 +152,11 @@ export async function runInlinePreflight(params: {
       resolvedDeps,
     );
 
-    // In accumulate mode, stage 2 already validated config via AJV against
-    // the manifest schema — tell readiness to skip its config check so the
-    // same field never appears twice in `errors[]`. Prompt is NOT skipped:
-    // stage 1's structural check only validates prompt type and byte size,
-    // not emptiness, so readiness remains the single source for the
-    // `empty_prompt` signal.
+    // Readiness is the single source of truth for both config (AJV against
+    // the manifest schema) and prompt emptiness — stage 1's structural check
+    // only covers prompt type and byte size, not emptiness, and stage 2 no
+    // longer touches config. Fail-fast throws the first readiness error;
+    // accumulate folds every readiness entry into the shared accumulator.
     if (mode === "fail-fast") {
       await validateAgentReadiness({
         agent: probeAgent,
@@ -186,7 +173,6 @@ export async function runInlinePreflight(params: {
           config: effectiveConfig,
           applicationId,
           actor,
-          skip: { config: true },
         }),
       );
     }

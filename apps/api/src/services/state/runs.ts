@@ -8,7 +8,6 @@ import {
   or,
   desc,
   isNull,
-  isNotNull,
   inArray,
   count,
   gte,
@@ -96,7 +95,6 @@ function safeRunLogData(value: Record<string, unknown> | null) {
   return result.data;
 }
 
-import { asRecordOrNull } from "@appstrate/core/safe-json";
 import { toISO } from "../../lib/date-helpers.ts";
 
 /**
@@ -414,30 +412,6 @@ export async function updateRun(
         extra: [eq(runs.id, id)],
       }),
     );
-}
-
-export async function getLastCheckpoint(
-  scope: AppScope,
-  packageId: string,
-  actor: Actor | null,
-): Promise<Record<string, unknown> | null> {
-  const conditions = [
-    eq(runs.packageId, packageId),
-    eq(runs.orgId, scope.orgId),
-    eq(runs.applicationId, scope.applicationId),
-    isNotNull(runs.checkpoint),
-  ];
-  if (actor) {
-    conditions.push(actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));
-  }
-
-  const [row] = await db
-    .select({ checkpoint: runs.checkpoint })
-    .from(runs)
-    .where(and(...conditions))
-    .orderBy(desc(runs.startedAt))
-    .limit(1);
-  return asRecordOrNull(row?.checkpoint);
 }
 
 export type RecentRunsField = RunHistoryField;

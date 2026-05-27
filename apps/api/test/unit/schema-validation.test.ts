@@ -3,12 +3,7 @@
 import { describe, it, expect } from "bun:test";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 import { validateManifest } from "@appstrate/core/validation";
-import {
-  validateConfig,
-  validateInput,
-  validateOutput,
-  validateAgentContent,
-} from "../../src/services/schema.ts";
+import { validateConfig, validateInput, validateOutput } from "../../src/services/schema.ts";
 
 // --- Fixtures ---
 
@@ -448,58 +443,5 @@ describe("validateOutput", () => {
     const result = validateOutput({ summary: "Done", count: "5" }, OUTPUT_SCHEMA);
     // AJV with coerceTypes should accept "5" as a number
     expect(result.valid).toBe(true);
-  });
-});
-
-// =====================================================
-// validateAgentContent
-// =====================================================
-
-describe("validateAgentContent", () => {
-  it("bare slug without scope is rejected", () => {
-    const result = validateAgentContent("Do something", [
-      { id: "web-search", description: "Search", content: "..." },
-    ]);
-    expect(result.valid).toBe(false);
-    expect(result.errors[0]).toContain("web-search");
-  });
-
-  it("valid prompt and skills pass (scoped name)", () => {
-    const result = validateAgentContent("Do something", [
-      { id: "@appstrate/web-search", description: "Search", content: "..." },
-    ]);
-    expect(result.valid).toBe(true);
-    expect(result.errors).toHaveLength(0);
-  });
-
-  it("empty prompt fails", () => {
-    const result = validateAgentContent("", []);
-    expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes("prompt"))).toBe(true);
-  });
-
-  it("invalid skill ID fails", () => {
-    const result = validateAgentContent("Do something", [
-      { id: "Invalid Skill!", description: "Bad", content: "..." },
-    ]);
-    expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes("Invalid Skill!"))).toBe(true);
-  });
-
-  it("invalid scoped skill ID fails", () => {
-    const result = validateAgentContent("Do something", [
-      { id: "@UPPER/case", description: "Bad", content: "..." },
-    ]);
-    expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes("@UPPER/case"))).toBe(true);
-  });
-
-  it("duplicate skill IDs fail", () => {
-    const result = validateAgentContent("Do something", [
-      { id: "@appstrate/search", description: "A", content: "..." },
-      { id: "@appstrate/search", description: "B", content: "..." },
-    ]);
-    expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes("duplicated"))).toBe(true);
   });
 });

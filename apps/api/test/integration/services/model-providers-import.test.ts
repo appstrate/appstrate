@@ -10,7 +10,7 @@
  *
  * The CLI does the loopback OAuth dance on the user's machine (since the
  * public CLI client_ids only allowlist `localhost:PORT/...` redirect_uris)
- * and POSTs the resulting tokens to `/api/model-providers-oauth/import`.
+ * and POSTs the resulting tokens to `/api/model-providers-oauth/pair/redeem`.
  * That route is a thin Zod + audit + permission wrapper around this
  * service function — most of the persistence + claim-derivation logic
  * lives here, so we exercise the function directly.

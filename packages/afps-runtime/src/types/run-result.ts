@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Appstrate
 
+import type { TokenUsage } from "@appstrate/afps-shared/token-usage";
+
 /**
  * Severity levels carried by `log.written` run events. Mirrored on the
  * aggregated {@link LogEntry} so the reducer can surface the same
@@ -80,13 +82,12 @@ export interface RunResult {
  * Snake-case token-usage shape carried on {@link RunResult.usage} and the
  * `appstrate.metric` event. Mirrors the platform's `runs.tokenUsage` JSONB
  * column shape so finalize can persist it directly without re-mapping.
+ *
+ * Canonical definition lives in `@appstrate/afps-shared/token-usage` (imported
+ * at the top of this file); re-exported here so existing `@appstrate/afps-runtime`
+ * importers keep working.
  */
-export interface TokenUsage {
-  input_tokens: number;
-  output_tokens: number;
-  cache_creation_input_tokens?: number;
-  cache_read_input_tokens?: number;
-}
+export type { TokenUsage };
 
 export interface Memory {
   content: string;

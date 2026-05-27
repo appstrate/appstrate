@@ -52,6 +52,8 @@ export type AfpsErrorCode =
   | "RESOLVER_PATH_OUTSIDE_ALLOWED_ROOTS"
   | "RESOLVER_PATH_SYMLINK_REFUSED"
   | "RESOLVER_PATH_INVALID"
+  | "RESOLVER_URL_BLOCKED"
+  | "RESOLVER_REDIRECT_BLOCKED"
   | "RUN_HISTORY_FETCH_FAILED"
   | "RUN_HISTORY_BAD_RESPONSE"
   | "RUN_HISTORY_TIMEOUT"
@@ -138,7 +140,9 @@ export class ResolverError extends AfpsRuntimeError {
     | "RESOLVER_BODY_INVALID"
     | "RESOLVER_PATH_OUTSIDE_ALLOWED_ROOTS"
     | "RESOLVER_PATH_SYMLINK_REFUSED"
-    | "RESOLVER_PATH_INVALID";
+    | "RESOLVER_PATH_INVALID"
+    | "RESOLVER_URL_BLOCKED"
+    | "RESOLVER_REDIRECT_BLOCKED";
 
   constructor(
     code:
@@ -149,7 +153,12 @@ export class ResolverError extends AfpsRuntimeError {
       | "RESOLVER_BODY_INVALID"
       | "RESOLVER_PATH_OUTSIDE_ALLOWED_ROOTS"
       | "RESOLVER_PATH_SYMLINK_REFUSED"
-      | "RESOLVER_PATH_INVALID",
+      | "RESOLVER_PATH_INVALID"
+      // The standalone CLI's `LocalIntegrationResolver` surfaces these
+      // when the shared outbound-HTTP engine refuses the initial target
+      // (SSRF blocklist) or a redirect hop (per-hop SSRF / off-allowlist).
+      | "RESOLVER_URL_BLOCKED"
+      | "RESOLVER_REDIRECT_BLOCKED",
     message: string,
     details?: Record<string, unknown>,
   ) {

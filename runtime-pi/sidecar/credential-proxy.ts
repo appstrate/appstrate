@@ -33,7 +33,6 @@ import {
   isBlockedUrl,
   matchesAuthorizedUri,
   normalizeAuthScheme,
-  stripUserInfoAndFragment,
   substituteVars,
   findUnresolvedPlaceholders,
   OUTBOUND_TIMEOUT_MS,
@@ -41,234 +40,14 @@ import {
   type CredentialsResponse,
   type SidecarConfig,
 } from "./helpers.ts";
+import {
+  fetchFollowingRedirectsCapturingCookies,
+  mergeSetCookieIntoJar,
+  redactHost,
+  RedirectBlockedError,
+} from "@appstrate/afps-runtime/resolvers";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "./logger.ts";
-
-const MAX_REDIRECTS = 10;
-
-/**
- * Per-hop redirect refusal. Caught by {@link executeApiCall} and
- * surfaced as 403 (vs the 502 reserved for network faults). The host
- * is exposed for logs only — a redirect target may itself encode
- * capabilities (`?token=…`) we don't want in the agent's error.
- */
-class RedirectBlockedError extends Error {
-  constructor(
-    public readonly reason: "ssrf" | "unauthorized",
-    public readonly hopUrl: string,
-  ) {
-    super(`Redirect blocked (${reason})`);
-    this.name = "RedirectBlockedError";
-  }
-}
-
-/** Extract hostname for audit logs, never throwing. */
-function redactHost(url: string): string {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return "<unparseable>";
-  }
-}
-
-/** Dedup by cookie name; strip attributes (Path, Expires, Domain, SameSite, …). */
-function mergeSetCookieIntoJar(
-  setCookieHeaders: string[],
-  cookieJar: Map<string, string[]>,
-  integrationId: string,
-): void {
-  if (!setCookieHeaders.length) return;
-  const byName = new Map<string, string>();
-  for (const ck of cookieJar.get(integrationId) ?? []) byName.set(ck.split("=")[0]!, ck);
-  for (const h of setCookieHeaders) {
-    const ck = h.split(";")[0]!.trim();
-    byName.set(ck.split("=")[0]!, ck);
-  }
-  cookieJar.set(integrationId, [...byName.values()]);
-}
-
-/** Parse a `Cookie:` header value into name→pair entries, deduped by name. */
-function parseCookieHeader(value: string | null): Map<string, string> {
-  const byName = new Map<string, string>();
-  if (!value) return byName;
-  for (const part of value.split(";")) {
-    const trimmed = part.trim();
-    if (trimmed) byName.set(trimmed.split("=")[0]!, trimmed);
-  }
-  return byName;
-}
-
-interface RedirectFollowOptions {
-  url: string;
-  init: RequestInit;
-  fetchFn: typeof fetch;
-  cookieJar: Map<string, string[]>;
-  integrationId: string;
-  /** Lowercased name of the credential header server-injected by the proxy. */
-  injectedCredentialHeader: string | null;
-  /**
-   * Provider's declared trust boundary. Each candidate redirect hop is
-   * checked against this allowlist; off-allowlist hops throw
-   * {@link RedirectBlockedError} instead of being followed. Empty or
-   * undefined → no allowlist gate, origin-based credential strip
-   * applies (mirroring WHATWG fetch).
-   */
-  authorizedUris?: string[];
-  /**
-   * When true, every URL matches the "allowlist" — the per-hop
-   * allowlist gate is bypassed and credential strip falls back to
-   * origin equality. The per-hop SSRF blocklist still applies (no
-   * `allowAllUris` ever lets a redirect target loopback / RFC1918).
-   */
-  allowAllUris?: boolean;
-}
-
-/**
- * Manually follow 3xx redirects so we can capture `Set-Cookie` from
- * **every** hop into the per-integration jar — Bun's native fetch only
- * surfaces the final hop's `Set-Cookie`, which breaks multi-step
- * OAuth/CAS flows where the session cookie lands on an intermediate
- * 302 (see #473).
- *
- * Defence-in-depth for redirect chains (see #475):
- *
- *   - **Per-hop SSRF blocklist** — every candidate hop is checked
- *     against `isBlockedUrl` (loopback, RFC1918, link-local, cloud
- *     metadata) regardless of `allowAllUris`. A compromised upstream
- *     can no longer pivot the proxy to `http://169.254.169.254/...`.
- *   - **Per-hop allowlist** — when the integration declared
- *     `authorizedUris`, every hop must match. Off-allowlist redirects
- *     are refused with a structured 403 rather than silently followed
- *     into attacker-controlled hosts.
- *   - **Hybrid credential strip** — when an allowlist is declared,
- *     surviving hops are inside the trust boundary by construction so
- *     credentials are forwarded (lets multi-host APIs like Dropbox
- *     `api.dropboxapi.com` ⇄ `content.dropboxapi.com` work). With
- *     `allowAllUris: true` (no declared boundary) we fall back to
- *     WHATWG-style origin-based strip.
- *
- * Streaming bodies skip this path entirely (caller falls back to
- * native fetch — bodies can't be replayed across hops). The initial-
- * URL allowlist check still bounds the SSRF surface for that path.
- *
- * Caller-supplied cookies are preserved across hops (Bun's native
- * follower propagates the request `Cookie` header all the way). The
- * jar wins on name conflict so server-rotated values replace stale
- * caller-supplied ones.
- *
- * Returns the terminal `Response` plus the URL it was served from so
- * callers driving redirect-chain flows (OAuth code, CAS ticket,
- * magic-link) can extract callback query params without parsing
- * bodies (see #471).
- */
-async function fetchFollowingRedirectsCapturingCookies(
-  opts: RedirectFollowOptions,
-): Promise<{ response: Response; finalUrl: string }> {
-  const {
-    url,
-    init,
-    fetchFn,
-    cookieJar,
-    integrationId,
-    injectedCredentialHeader,
-    authorizedUris,
-    allowAllUris,
-  } = opts;
-  const hasAllowlist = !!authorizedUris && authorizedUris.length > 0;
-  const callerCookies = parseCookieHeader(
-    new Headers(init.headers as HeadersInit | undefined).get("cookie"),
-  );
-
-  let currentUrl = url;
-  let currentInit: RequestInit = { ...init, redirect: "manual" };
-
-  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    const response = await fetchFn(currentUrl, currentInit);
-    mergeSetCookieIntoJar(response.headers.getSetCookie(), cookieJar, integrationId);
-
-    if (response.status < 300 || response.status >= 400) {
-      return { response, finalUrl: currentUrl };
-    }
-    const location = response.headers.get("location");
-    if (!location) return { response, finalUrl: currentUrl };
-
-    // Per WHATWG fetch (HTTP-redirect fetch step 11) + RFC 9110 §15.4:
-    //   - 301/302 downgrade POST → GET (other methods preserved)
-    //   - 303     downgrade everything-except-GET/HEAD → GET (HEAD preserved)
-    //   - 307/308 preserve method + body verbatim
-    const method = (currentInit.method ?? "GET").toUpperCase();
-    const dropBody =
-      ((response.status === 301 || response.status === 302) && method === "POST") ||
-      (response.status === 303 && method !== "GET" && method !== "HEAD");
-    // Resolve, then strip userinfo + fragment. Userinfo in a Location
-    // would arrive as basic-auth on the next hop (credential confusion);
-    // fragment is HTTP-irrelevant. Stripping keeps the allowlist matcher
-    // host-based (not userinfo-spoofable). Input is post-`new URL()` so
-    // the `?? raw` fallback is defensive — never hit in practice.
-    const raw = new URL(location, currentUrl).toString();
-    const nextUrl = stripUserInfoAndFragment(raw) ?? raw;
-
-    // Per-hop SSRF + allowlist validation. The initial-URL checks in
-    // executeApiCall step 4 only see the operator-supplied target
-    // — a redirect chain could pivot to internal targets or off-
-    // allowlist hosts without these guards.
-    if (isBlockedUrl(nextUrl)) {
-      logger.warn("Redirect refused (SSRF blocklist)", {
-        integrationId,
-        hop,
-        host: redactHost(nextUrl),
-      });
-      throw new RedirectBlockedError("ssrf", nextUrl);
-    }
-    if (hasAllowlist && !allowAllUris && !matchesAuthorizedUri(nextUrl, authorizedUris!)) {
-      logger.warn("Redirect refused (not in authorizedUris)", {
-        integrationId,
-        hop,
-        host: redactHost(nextUrl),
-      });
-      throw new RedirectBlockedError("unauthorized", nextUrl);
-    }
-
-    // Hybrid credential strip:
-    //   - Declared allowlist (and not allowAllUris) → every surviving
-    //     hop is in-allowlist by construction, credentials are safe to
-    //     forward (multi-host APIs like Dropbox work).
-    //   - allowAllUris / no allowlist → no declared trust boundary, fall
-    //     back to WHATWG origin-based strip.
-    const crossOrigin = new URL(nextUrl).origin !== new URL(currentUrl).origin;
-    const stripCred = (!hasAllowlist || !!allowAllUris) && crossOrigin;
-
-    const headers = new Headers(currentInit.headers as HeadersInit | undefined);
-    headers.delete("cookie");
-    // Compose Cookie from caller-supplied + jar (jar wins on dup name).
-    const merged = new Map(callerCookies);
-    for (const ck of cookieJar.get(integrationId) ?? []) merged.set(ck.split("=")[0]!, ck);
-    if (merged.size) headers.set("cookie", [...merged.values()].join("; "));
-    if (dropBody) {
-      headers.delete("content-length");
-      headers.delete("content-type");
-    }
-    if (stripCred) {
-      headers.delete("authorization");
-      if (injectedCredentialHeader) headers.delete(injectedCredentialHeader);
-      // Cookies are credentials too. The jar/caller cookies were composed
-      // above unconditionally (to follow intra-allowlist multi-host flows);
-      // strip them on an out-of-boundary cross-origin hop so an
-      // upstream-controlled redirect can't exfiltrate the session jar.
-      headers.delete("cookie");
-    }
-
-    currentInit = {
-      ...currentInit,
-      method: dropBody ? "GET" : currentInit.method,
-      body: dropBody ? undefined : currentInit.body,
-      headers,
-    };
-    currentUrl = nextUrl;
-  }
-
-  throw new Error(`Too many redirects (>${MAX_REDIRECTS}) starting at ${url}`);
-}
 
 /**
  * Body modes the proxy core accepts. The HTTP handler can produce
@@ -556,6 +335,8 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       injectedCredentialHeader: activeCreds.credentialHeaderName?.toLowerCase() ?? null,
       authorizedUris: creds.authorizedUris ?? undefined,
       allowAllUris: creds.allowAllUris,
+      // Preserve the sidecar's structured per-hop refusal logging.
+      logger,
     });
   };
 

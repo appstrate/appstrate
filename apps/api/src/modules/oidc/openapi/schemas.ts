@@ -49,7 +49,7 @@ const oauthClientObject: Record<string, unknown> = {
 
 /**
  * `application_smtp_configs` row as returned by the admin API.
- * Kept in lockstep with `SmtpConfigView` in `../services/smtp.ts` —
+ * Kept in lockstep with `SmtpConfigView` in `@appstrate/shared-types` —
  * the encrypted password column is intentionally omitted (never returned).
  */
 const smtpConfigView: Record<string, unknown> = {
@@ -81,7 +81,7 @@ const smtpConfigView: Record<string, unknown> = {
 
 /**
  * `application_social_providers` row as returned by the admin API.
- * Kept in lockstep with `SocialProviderView` in `../services/social.ts`
+ * Kept in lockstep with `SocialProviderView` in `@appstrate/shared-types`
  * — the encrypted client secret is intentionally omitted (never returned).
  */
 const socialProviderView: Record<string, unknown> = {

@@ -3,14 +3,11 @@
 /**
  * Canonical pair-redeem route — `POST /api/model-providers-oauth/pair/redeem`.
  *
- * Same handler as the legacy `/import` alias (see
- * `model-providers-oauth-import-pairing-bearer.test.ts` for the full
- * single-use / cross-org / cross-provider invariants). This file covers
+ * Single-use / cross-org / cross-provider invariants live in
+ * `model-providers-oauth-pair-redeem-bearer.test.ts`. This file covers
  * the canonical-path-specific contract:
  *   - The canonical path successfully redeems a fresh pairing token.
- *   - The legacy `/import` alias remains accepted and emits a
- *     `Deprecation: true` response header + a `Link: <…/pair/redeem>; rel="successor-version"`.
- *   - The canonical path does NOT emit the deprecation header.
+ *   - The canonical path does NOT emit any deprecation header.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -102,58 +99,5 @@ describe("POST /api/model-providers-oauth/pair/redeem — canonical route", () =
       body: JSON.stringify(VALID_BODY("test-oauth")),
     });
     expect(res.status).toBe(410);
-  });
-});
-
-describe("POST /api/model-providers-oauth/import — legacy alias", () => {
-  let ctx: TestContext;
-
-  beforeEach(async () => {
-    await truncateAll();
-    ctx = await createTestContext();
-  });
-
-  it("still works (back-compat for connect-helper versions already in the wild)", async () => {
-    const pairing = await mintPairing(ctx, "test-oauth");
-    const res = await app.request("/api/model-providers-oauth/import", {
-      method: "POST",
-      headers: bearerHeaders(pairing.token),
-      body: JSON.stringify(VALID_BODY("test-oauth")),
-    });
-    expect(res.status).toBe(200);
-  });
-
-  it("emits Deprecation: true and a Link: successor-version response header", async () => {
-    const pairing = await mintPairing(ctx, "test-oauth");
-    const res = await app.request("/api/model-providers-oauth/import", {
-      method: "POST",
-      headers: bearerHeaders(pairing.token),
-      body: JSON.stringify(VALID_BODY("test-oauth")),
-    });
-    expect(res.status).toBe(200);
-    expect(res.headers.get("Deprecation")).toBe("true");
-    const link = res.headers.get("Link") ?? "";
-    expect(link).toContain("/api/model-providers-oauth/pair/redeem");
-    expect(link).toContain('rel="successor-version"');
-  });
-
-  it("treats the canonical and legacy paths as the same single-use pairing (cross-path replay 410s)", async () => {
-    const pairing = await mintPairing(ctx, "test-oauth");
-
-    // Consume via legacy path …
-    const r1 = await app.request("/api/model-providers-oauth/import", {
-      method: "POST",
-      headers: bearerHeaders(pairing.token),
-      body: JSON.stringify(VALID_BODY("test-oauth")),
-    });
-    expect(r1.status).toBe(200);
-
-    // … then a replay on the canonical path must fail (same DB row).
-    const r2 = await app.request("/api/model-providers-oauth/pair/redeem", {
-      method: "POST",
-      headers: bearerHeaders(pairing.token),
-      body: JSON.stringify(VALID_BODY("test-oauth")),
-    });
-    expect(r2.status).toBe(410);
   });
 });

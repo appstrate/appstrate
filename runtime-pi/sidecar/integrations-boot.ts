@@ -348,10 +348,6 @@ export async function connectRemoteHttpIntegration(
     );
   }
 
-  // TODO(AFPS migration): drop camelCase fallback after one release window.
-  // `fetchInitial` normalizes the wire payload (snake_case primary, camelCase
-  // fallback) via `normalizeIntegrationCredentialsWire`, so the consumer code
-  // below sees a stable typed shape during the dual-emit window.
   const initial = await fetchInitial(spec.integrationId, bundleFetchOpts);
 
   // Pick the auth whose header we'll inject. OAuth2 wins (refresh-aware);

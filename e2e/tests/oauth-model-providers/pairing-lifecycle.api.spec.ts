@@ -3,7 +3,7 @@
 /**
  * End-to-end cross-link contract for OAuth model provider pairings.
  *
- * Integration tests cover the pairing/import wiring in-process against the
+ * Integration tests cover the pairing/redeem wiring in-process against the
  * synthetic `test-oauth` provider; this e2e closes the loop against the
  * live server with the two real registered providers shipped in the default
  * module set: `codex` (from `@appstrate/module-codex`) and `claude-code`
@@ -15,8 +15,8 @@
  *
  *   1. POST /pairing            (mint, cookie-auth)
  *   2. GET  /pairing/:id        → pending
- *   3. POST /import bad bearer  → 410          (replay-proof)
- *   4. POST /import (helper sim, bearer-auth, body-supplied identity
+ *   3. POST /pair/redeem bad bearer  → 410          (replay-proof)
+ *   4. POST /pair/redeem (helper sim, bearer-auth, body-supplied identity
  *      bypasses the JWT identity hook when present — exact path used by
  *      `@appstrate/connect-helper` when the upstream provider returns the
  *      identity in the OAuth response body)
@@ -25,7 +25,7 @@
  *                                 `authMode:"oauth2"`, `source:"custom"`,
  *                                 `providerId:"<provider>"`,
  *                                 `needsReconnection:false`
- *   7. POST /import token replay → 410
+ *   7. POST /pair/redeem token replay → 410
  *   8. DELETE credential        → 204, gone from the list
  *   9. DELETE /pairing/<bogus>  → 204 idempotent (wrong-id is silent)
  *
@@ -114,7 +114,7 @@ for (const provider of PROVIDER_CASES) {
 
       // 3. Replay-proof bearer: a token-shaped string that didn't come from
       //    a real mint MUST 410, not 401 (single error code, no enumeration).
-      const replayBadRes = await request.post("/api/model-providers-oauth/import", {
+      const replayBadRes = await request.post("/api/model-providers-oauth/pair/redeem", {
         headers: {
           Authorization: "Bearer appp_garbage.notreallyatoken",
           "Content-Type": "application/json",
@@ -146,7 +146,7 @@ for (const provider of PROVIDER_CASES) {
       if (provider.requiresAccountId) {
         importBody.accountId = SYNTHETIC_ACCOUNT_ID;
       }
-      const importRes = await request.post("/api/model-providers-oauth/import", {
+      const importRes = await request.post("/api/model-providers-oauth/pair/redeem", {
         headers: {
           Authorization: `Bearer ${mint.token}`,
           "Content-Type": "application/json",
@@ -192,7 +192,7 @@ for (const provider of PROVIDER_CASES) {
         if (provider.requiresAccountId) {
           replayBody.accountId = SYNTHETIC_ACCOUNT_ID;
         }
-        const replayConsumedRes = await request.post("/api/model-providers-oauth/import", {
+        const replayConsumedRes = await request.post("/api/model-providers-oauth/pair/redeem", {
           headers: {
             Authorization: `Bearer ${mint.token}`,
             "Content-Type": "application/json",

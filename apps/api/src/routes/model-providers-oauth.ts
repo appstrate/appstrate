@@ -18,7 +18,6 @@ import {
 import { invalidRequest, notFound, parseBody, unauthorized } from "../lib/errors.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { getClientIp } from "../lib/client-ip.ts";
-import { logger } from "../lib/logger.ts";
 
 /**
  * Body shape posted by `npx @appstrate/connect-helper <token>` after it
@@ -69,10 +68,8 @@ const importBody = z.object({
 });
 
 /**
- * Pair-redeem handler — shared between the canonical
- * `POST /api/model-providers-oauth/pair/redeem` route and the legacy
- * `POST /api/model-providers-oauth/import` alias kept for back-compat with
- * the `@appstrate/connect-helper` versions already in the wild via `npx`.
+ * Pair-redeem handler for the canonical
+ * `POST /api/model-providers-oauth/pair/redeem` route.
  *
  * Auth is exclusively `Authorization: Bearer appp_<token>`. The platform
  * minted the token via POST /pairing (session-auth + RBAC); the helper
@@ -147,34 +144,13 @@ export function createModelProvidersOAuthRouter() {
   // helper performs (consume the one-shot bearer + post credentials back).
   router.post("/pair/redeem", handlePairRedeem);
 
-  // POST /api/model-providers-oauth/import — legacy alias kept indefinitely
-  // for backward compatibility with `@appstrate/connect-helper` versions
-  // already in the wild via `npx @appstrate/connect-helper@latest <token>`.
-  // Behaviour is identical to the canonical path; the only difference is a
-  // `Deprecation: true` response header + a `logger.warn` so operators can
-  // track adoption of the new path before retiring the alias.
-  router.post("/import", async (c) => {
-    logger.warn(
-      "Deprecated route hit: POST /api/model-providers-oauth/import — clients should migrate to POST /api/model-providers-oauth/pair/redeem",
-      {
-        requestId: c.get("requestId"),
-        path: "/api/model-providers-oauth/import",
-        successor: "/api/model-providers-oauth/pair/redeem",
-      },
-    );
-    c.header("Deprecation", "true");
-    c.header("Link", '</api/model-providers-oauth/pair/redeem>; rel="successor-version"');
-    return handlePairRedeem(c);
-  });
-
   // ────────────────────────────────────────────────────────────────────────
   // Pairing flow (dashboard-initiated OAuth model provider connection)
   //
   // The browser POSTs /pairing → token + `npx` command surfaced in the UI
   // → user pastes into terminal → `@appstrate/connect-helper` runs the
-  // loopback OAuth dance → POSTs credentials to /import using the pairing
-  // token as Bearer credentials. The Bearer-auth path on /import is wired
-  // in a separate change; this router only exposes the lifecycle CRUD.
+  // loopback OAuth dance → POSTs credentials to /pair/redeem using the pairing
+  // token as Bearer credentials. This router only exposes the lifecycle CRUD.
   // ────────────────────────────────────────────────────────────────────────
 
   /** Pairing token TTL — 5 minutes is enough for the user to switch tabs and paste. */

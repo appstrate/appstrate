@@ -40,7 +40,7 @@ describe("auth-secrets", () => {
     resetCaches();
   });
 
-  describe("backward-compat: single BETTER_AUTH_SECRET", () => {
+  describe("single BETTER_AUTH_SECRET", () => {
     beforeEach(() => {
       process.env.BETTER_AUTH_SECRET = "legacy-single-secret-32-chars-long";
       delete process.env.BETTER_AUTH_SECRETS;
@@ -62,10 +62,10 @@ describe("auth-secrets", () => {
       expect(verifyAuthHmac("payload", sig)).toBe(true);
     });
 
-    it("verifies a legacy un-prefixed signature against the active secret", () => {
+    it("rejects an un-prefixed signature", () => {
       const sig = signAuthHmac("payload");
-      const legacy = sig.split("$")[1]!;
-      expect(verifyAuthHmac("payload", legacy)).toBe(true);
+      const unprefixed = sig.split("$")[1]!;
+      expect(verifyAuthHmac("payload", unprefixed)).toBe(false);
     });
   });
 

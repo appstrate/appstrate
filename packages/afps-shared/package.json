@@ -1,0 +1,60 @@
+{
+  "name": "@appstrate/afps-shared",
+  "version": "0.1.0",
+  "description": "Zero-dependency AFPS helpers shared by @appstrate/core and @appstrate/afps-runtime (companion-file checks, semver resolution, SRI integrity, credential templates, delivery.http projection)",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "bun": ">=1.3.9"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "sideEffects": false,
+  "author": "Appstrate <hello@appstrate.dev>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/appstrate/appstrate.git",
+    "directory": "packages/afps-shared"
+  },
+  "homepage": "https://github.com/appstrate/appstrate/tree/main/packages/afps-shared",
+  "bugs": {
+    "url": "https://github.com/appstrate/appstrate/issues"
+  },
+  "keywords": [
+    "appstrate",
+    "afps",
+    "semver",
+    "integrity",
+    "sri"
+  ],
+  "files": [
+    "src",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "exports": {
+    "./companion-files": "./src/companion-files.ts",
+    "./semver-resolve": "./src/semver-resolve.ts",
+    "./integrity": "./src/integrity.ts",
+    "./credential-template": "./src/credential-template.ts",
+    "./delivery-http": "./src/delivery-http.ts",
+    "./ssrf": "./src/ssrf.ts",
+    "./token-usage": "./src/token-usage.ts"
+  },
+  "dependencies": {
+    "semver": "^7.7.1"
+  },
+  "devDependencies": {
+    "@types/semver": "^7.7.1"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "check": "tsc --noEmit",
+    "test": "bun test"
+  }
+}

@@ -11,9 +11,6 @@ import type { IntegrationManifest } from "@appstrate/core/integration";
 
 export type IntegrationManifestView = IntegrationManifest;
 export type IntegrationManifestAuth = NonNullable<IntegrationManifest["auths"]>[string];
-export type IntegrationManifestToolPolicy = NonNullable<
-  IntegrationManifest["tools_policy"]
->[string];
 export type IntegrationAuthType = IntegrationManifestAuth["type"];
 
 /**

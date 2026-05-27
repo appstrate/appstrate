@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Bearer-pairing-token auth on POST /api/model-providers-oauth/import.
+ * Bearer-pairing-token auth on POST /api/model-providers-oauth/pair/redeem.
  *
  * The route is bearer-only — there is no cookie/API-key fallback:
  *   1. Dashboard mints token via POST /pairing (session-auth + RBAC).
  *   2. `npx @appstrate/connect-helper` runs the loopback OAuth dance.
- *   3. Helper POSTs credentials to /import with the pairing token as Bearer.
+ *   3. Helper POSTs credentials to /pair/redeem with the pairing token as Bearer.
  *
  * Invariants tested here:
  *   - Bearer auth works without any session cookie / X-Org-Id / X-Application-Id.
@@ -61,7 +61,7 @@ const VALID_BODY = (providerId = "test-oauth") => ({
   accountId: "11111111-2222-4333-8444-555555555555",
 });
 
-describe("POST /api/model-providers-oauth/import — pairing-bearer track", () => {
+describe("POST /api/model-providers-oauth/pair/redeem — pairing-bearer track", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
@@ -71,7 +71,7 @@ describe("POST /api/model-providers-oauth/import — pairing-bearer track", () =
 
   it("imports credentials when authenticated by a fresh pairing token", async () => {
     const pairing = await mintPairing(ctx, "test-oauth");
-    const res = await app.request("/api/model-providers-oauth/import", {
+    const res = await app.request("/api/model-providers-oauth/pair/redeem", {
       method: "POST",
       headers: bearerHeaders(pairing.token),
       body: JSON.stringify(VALID_BODY("test-oauth")),
@@ -85,7 +85,7 @@ describe("POST /api/model-providers-oauth/import — pairing-bearer track", () =
   it("flips the pairing's consumed_at on success (single-use)", async () => {
     const pairing = await mintPairing(ctx, "test-oauth");
 
-    const r1 = await app.request("/api/model-providers-oauth/import", {
+    const r1 = await app.request("/api/model-providers-oauth/pair/redeem", {
       method: "POST",
       headers: bearerHeaders(pairing.token),
       body: JSON.stringify(VALID_BODY("test-oauth")),
@@ -103,14 +103,14 @@ describe("POST /api/model-providers-oauth/import — pairing-bearer track", () =
   it("rejects a replay of the same token with 410 Gone", async () => {
     const pairing = await mintPairing(ctx, "test-oauth");
 
-    const r1 = await app.request("/api/model-providers-oauth/import", {
+    const r1 = await app.request("/api/model-providers-oauth/pair/redeem", {
       method: "POST",
       headers: bearerHeaders(pairing.token),
       body: JSON.stringify(VALID_BODY("test-oauth")),
     });
     expect(r1.status).toBe(200);
 
-    const r2 = await app.request("/api/model-providers-oauth/import", {
+    const r2 = await app.request("/api/model-providers-oauth/pair/redeem", {
       method: "POST",
       headers: bearerHeaders(pairing.token),
       body: JSON.stringify(VALID_BODY("test-oauth")),
@@ -119,7 +119,7 @@ describe("POST /api/model-providers-oauth/import — pairing-bearer track", () =
   });
 
   it("rejects malformed bearer tokens with 410 (single error code, no enumeration)", async () => {
-    const res = await app.request("/api/model-providers-oauth/import", {
+    const res = await app.request("/api/model-providers-oauth/pair/redeem", {
       method: "POST",
       headers: bearerHeaders("appp_garbage.notreallyatoken"),
       body: JSON.stringify(VALID_BODY("test-oauth")),
@@ -131,7 +131,7 @@ describe("POST /api/model-providers-oauth/import — pairing-bearer track", () =
     const pairing = await mintPairing(ctx, "test-oauth");
 
     // No authHeaders(ctx) — bearer-only.
-    const res = await app.request("/api/model-providers-oauth/import", {
+    const res = await app.request("/api/model-providers-oauth/pair/redeem", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -145,7 +145,7 @@ describe("POST /api/model-providers-oauth/import — pairing-bearer track", () =
   it("rejects session-cookie requests without a pairing-bearer (bearer-only route)", async () => {
     // The route is bearer-only — cookie/API-key requests reach the handler
     // (auth-pipeline only bypasses on `Bearer appp_`) and 401 there.
-    const res = await app.request("/api/model-providers-oauth/import", {
+    const res = await app.request("/api/model-providers-oauth/pair/redeem", {
       method: "POST",
       headers: authHeaders(ctx, { "Content-Type": "application/json" }),
       body: JSON.stringify(VALID_BODY("test-oauth")),

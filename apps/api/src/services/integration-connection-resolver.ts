@@ -41,6 +41,7 @@ import {
   type ResolvedConnection,
   type ResolvedConnectionMap,
 } from "@appstrate/core/integration";
+import type { ValidationFieldError } from "../lib/errors.ts";
 import type { Actor } from "../lib/actor.ts";
 import { actorFilter } from "../lib/actor.ts";
 import type { AppScope } from "../lib/scope.ts";
@@ -504,6 +505,108 @@ export async function resolveRunConnectionSnapshot(
     errors: resolution.errors,
   };
 }
+
+/**
+ * The fully-formed `missing_integration_connection` 412 payload, transport-
+ * agnostic. Both run-kickoff paths (run-pipeline throws an `ApiError`,
+ * run-creation returns a result object) surface the identical shape; this is
+ * the single definition of that shape.
+ */
+export interface MissingConnectionError {
+  status: 412;
+  code: "missing_integration_connection";
+  title: "Missing Integration Connection";
+  detail: string;
+  errors: ValidationFieldError[];
+}
+
+export type ResolveRunConnectionsOutcome =
+  | { ok: true; resolved: ResolvedConnectionMap | null }
+  | { ok: false; error: MissingConnectionError };
+
+/**
+ * Resolve the per-run connection snapshot and fold any resolver errors into
+ * the canonical `missing_integration_connection` 412 payload. Returns a
+ * discriminated union so each caller adapts the error to its own transport —
+ * `run-pipeline.ts` rethrows it as an `ApiError`, `run-creation.ts` maps it
+ * into its `{ ok: false, error }` result convention. The snapshot resolution
+ * + the empty→null projection + the error mapping live here once so the two
+ * kickoff paths can never drift on the 412 shape.
+ */
+export async function resolveRunConnectionsOrError(
+  input: ResolveConnectionsForRunInput,
+): Promise<ResolveRunConnectionsOutcome> {
+  const snapshot = await resolveRunConnectionSnapshot(input);
+  if (snapshot.errors.length > 0) {
+    return {
+      ok: false,
+      error: {
+        status: 412,
+        code: "missing_integration_connection",
+        title: "Missing Integration Connection",
+        detail: snapshot.errors[0]!.message,
+        errors: snapshot.errors.map(translateResolutionError),
+      },
+    };
+  }
+  return { ok: true, resolved: snapshot.resolved };
+}
+
+/**
+ * Map a `ConnectionResolutionError` to the wire-format ValidationFieldError
+ * the upstream 412 envelope expects.
+ *
+ * Field path: `integrations.{packageId}` — one error per integration in
+ * the flat model. The dashboard's MissingConnectionsModal parses on the
+ * same prefix so existing UI plumbing still works.
+ */
+export function translateResolutionError(e: ConnectionResolutionError): ValidationFieldError {
+  const title = TITLE_BY_CODE[e.code];
+  return {
+    field: `integrations.${e.integrationId}`,
+    code: e.code,
+    title,
+    message: e.message,
+    // Smuggle the candidate ids on must_choose_connection so the modal
+    // can render a picker.
+    ...(e.candidateConnectionIds && e.candidateConnectionIds.length > 0
+      ? { candidateConnectionIds: e.candidateConnectionIds }
+      : {}),
+    // Smuggle scope-diff detail on insufficient_scopes so the UI can offer
+    // an upgrade (own connection) or a read-only error (foreign owner).
+    ...(e.code === "insufficient_scopes"
+      ? {
+          ...(e.connectionId ? { connection_id: e.connectionId } : {}),
+          ...(e.missingScopes && e.missingScopes.length > 0
+            ? { missing_scopes: e.missingScopes }
+            : {}),
+          ...(e.ownedByActor !== undefined ? { owned_by_actor: e.ownedByActor } : {}),
+        }
+      : {}),
+    // AFPS §4.1 — surface the pinned `auth_key` (the agent dep's choice)
+    // and which auth_keys the actor's existing connections use, so the UI
+    // can guide the user to connect via the right auth method.
+    ...(e.code === "auth_key_mismatch"
+      ? {
+          ...(e.requiredAuthKey ? { required_auth_key: e.requiredAuthKey } : {}),
+          ...(e.availableAuthKeys && e.availableAuthKeys.length > 0
+            ? { available_auth_keys: e.availableAuthKeys }
+            : {}),
+        }
+      : {}),
+  } as ValidationFieldError;
+}
+
+const TITLE_BY_CODE: Record<ConnectionResolutionError["code"], string> = {
+  not_connected: "Integration Not Connected",
+  needs_reconnection: "Needs Reconnection",
+  connection_blocked_by_admin: "Connection Blocked by Admin",
+  pinned_connection_unavailable: "Pinned Connection Unavailable",
+  override_connection_unavailable: "Override Connection Unavailable",
+  must_choose_connection: "Multiple Connections Available — Pick One",
+  insufficient_scopes: "Insufficient Permissions",
+  auth_key_mismatch: "Connection Auth Method Mismatch",
+};
 
 async function buildRequirement(
   entry: ManifestIntegrationEntry,

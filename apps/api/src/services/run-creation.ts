@@ -32,7 +32,7 @@ import type { Actor } from "../lib/actor.ts";
 import type { FileReference, UploadedFile } from "./run-launcher/types.ts";
 import { prepareAndExecuteRun, extractRunAgentDenorm } from "./run-pipeline.ts";
 import { validateAgentReadiness } from "./agent-readiness.ts";
-import { resolveRunConnectionSnapshot } from "./integration-connection-resolver.ts";
+import { resolveRunConnectionsOrError } from "./integration-connection-resolver.ts";
 import type { ResolvedConnectionMap } from "@appstrate/core/integration";
 import { createRun as createRunRow } from "./state/runs.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
@@ -212,7 +212,7 @@ async function createRemoteRun(input: CreateRunInput): Promise<CreateRunResult> 
   //     gets a structured agent_not_ready it can surface verbatim.
   let resolvedConnections: ResolvedConnectionMap | null = null;
   if (actor) {
-    const snapshot = await resolveRunConnectionSnapshot({
+    const outcome = await resolveRunConnectionsOrError({
       agentManifest: agent.manifest as Record<string, unknown>,
       packageId: agent.id,
       actor,
@@ -220,17 +220,20 @@ async function createRemoteRun(input: CreateRunInput): Promise<CreateRunResult> 
       runOverrides: input.connectionOverrides ?? null,
       scheduleOverrides: input.scheduleConnectionOverrides ?? null,
     });
-    if (snapshot.errors.length > 0) {
+    if (!outcome.ok) {
+      // Remote runners get a flat `agent_not_ready` they can surface verbatim
+      // — no structured `errors[]` channel on the result shape. Preserve the
+      // historical code/status; the human-readable detail is the first error.
       return {
         ok: false,
         error: {
           code: "agent_not_ready",
-          message: snapshot.errors[0]!.message,
-          status: 412,
+          message: outcome.error.detail,
+          status: outcome.error.status,
         },
       };
     }
-    resolvedConnections = snapshot.resolved;
+    resolvedConnections = outcome.resolved;
   }
 
   // --- Mint sink credentials ---

@@ -9,7 +9,7 @@
 import { eq, and, desc, lt, gt } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { endUsers, applications } from "@appstrate/db/schema";
-import type { EndUserInfo, EndUserListResponse } from "@appstrate/shared-types";
+import type { EndUserInfo, ListEnvelope } from "@appstrate/shared-types";
 import { logger } from "../lib/logger.ts";
 import { notFound, ApiError } from "../lib/errors.ts";
 import { listResponse } from "../lib/list-response.ts";
@@ -115,7 +115,7 @@ export async function listEndUsers(
     startingAfter?: string;
     endingBefore?: string;
   } = {},
-): Promise<EndUserListResponse> {
+): Promise<ListEnvelope<EndUserInfo>> {
   const limit = Math.min(Math.max(params.limit ?? 20, 1), 100);
   const fetchLimit = limit + 1; // Fetch one extra to detect hasMore
 

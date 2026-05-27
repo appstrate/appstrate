@@ -4,8 +4,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, buildQs } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
-import type { EndUserInfo, EndUserListResponse } from "@appstrate/shared-types";
-export type { EndUserInfo, EndUserListResponse } from "@appstrate/shared-types";
+import type { EndUserInfo, ListEnvelope } from "@appstrate/shared-types";
+export type { EndUserInfo } from "@appstrate/shared-types";
 
 export interface EndUserListParams {
   limit?: number;
@@ -18,7 +18,7 @@ export function useEndUsers(params?: EndUserListParams) {
   return useQuery({
     queryKey: ["end-users", orgId, applicationId, params?.limit, params?.startingAfter],
     queryFn: () =>
-      api<EndUserListResponse>(
+      api<ListEnvelope<EndUserInfo>>(
         `/end-users${buildQs({
           limit: params?.limit,
           startingAfter: params?.startingAfter,

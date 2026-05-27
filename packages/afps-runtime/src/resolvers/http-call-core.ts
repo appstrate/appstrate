@@ -10,9 +10,21 @@
  * to {@link makeApiCallTool}. The local + remote integration resolvers in
  * `integration-api-call.ts` reuse this module verbatim.
  *
- * Body streaming, redirect/cookie/SSRF hardening, `authorized_uris`
- * matching, and response serialisation all live here so every transport
- * shares one implementation.
+ * Scope of THIS module: request-body materialisation (string / `{ fromBytes }`
+ * / `{ fromFile }` / `{ multipart }`, with streaming + size caps), the
+ * workspace-rooted path-safety pipeline, the JSON-schema surfaced to the
+ * LLM, the static `authorized_uris` allowlist matcher
+ * ({@link matchesAuthorizedUriSpec}) + tool-layer enforcement
+ * ({@link makeApiCallTool} calls `enforceAuthorizedUris` before dispatch),
+ * and response serialisation ({@link serializeFetchResponse}).
+ *
+ * The credential-source-agnostic OUTBOUND request pipeline — SSRF
+ * blocklist preflight + the manual redirect-follower (per-hop SSRF,
+ * per-hop `authorized_uris` re-check, hybrid credential-strip,
+ * cookie-jar capture, userinfo/fragment stripping) — lives in the
+ * sibling `./api-call-engine.ts`, shared verbatim with the platform
+ * sidecar's `executeApiCall`. `integration-api-call.ts`'s local resolver
+ * dispatches through that engine's `guardedFetch`.
  *
  * Specification: `afps-spec/spec.md` §8.2, §8.4 — file-reference IO.
  */
@@ -598,7 +610,7 @@ export function makeApiCallTool(
  * integration resolvers always pass `{ns}__api_call`, so this fallback
  * mostly serves tests.
  */
-function slugifyIntegrationId(integrationId: string): string {
+export function slugifyIntegrationId(integrationId: string): string {
   return integrationId.replace(/^@/, "").replace(/[^a-zA-Z0-9_]/g, "_");
 }
 

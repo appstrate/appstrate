@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { UploadDescriptor, UploadFn } from "@appstrate/ui/schema-form";
+import type { ListEnvelope } from "@appstrate/shared-types";
 import { getCurrentOrgId } from "./hooks/use-org";
 import { getCurrentApplicationId } from "./stores/app-store";
 
@@ -92,12 +93,7 @@ export async function api<T = unknown>(path: string, options: RequestInit = {}):
   return apiFetch<T>(`${API_BASE}${path}`, options);
 }
 
-export interface ListEnvelope<T> {
-  object: "list";
-  data: T[];
-  hasMore: boolean;
-  total?: number;
-}
+export type { ListEnvelope } from "@appstrate/shared-types";
 
 /**
  * Typed reader for Stripe-canonical list responses (`{ object: "list", data, hasMore, total? }`).

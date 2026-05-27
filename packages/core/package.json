@@ -72,6 +72,7 @@
     "./module": "./src/module.ts",
     "./permissions": "./src/permissions.ts",
     "./platform-types": "./src/platform-types.ts",
+    "./token-usage": "./src/token-usage.ts",
     "./sidecar-types": "./src/sidecar-types.ts",
     "./pairing-token": "./src/pairing-token.ts",
     "./jwt": "./src/jwt.ts",
@@ -80,6 +81,7 @@
   },
   "dependencies": {
     "@afps-spec/schema": "^0.1.0",
+    "@appstrate/afps-shared": "^0.1.0",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
     "fflate": "^0.8.0",
