@@ -375,8 +375,9 @@ export interface AgentDetail {
   dependencies: {
     skills: { id: string; version: string; name?: string; description?: string }[];
     /**
-     * Niveau 2 — agent's `dependencies.integrations` flattened by
-     * `parseManifestIntegrations`. Always populated (system + user
+     * Niveau 2 — agent's integration declarations (`dependencies.integrations`
+     * + `integrations_configuration`) flattened by `parseManifestIntegrations`.
+     * Always populated (system + user
      * agents), so the dashboard's Connexions tab can render the
      * integration-connection status without depending on the optional
      * `manifest` field below.

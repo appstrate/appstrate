@@ -3,7 +3,8 @@
 
 import { z } from "zod";
 import {
-  agentManifestSchema as afpsAgentManifestSchema,
+  agentManifestObjectSchema as afpsAgentManifestObjectSchema,
+  refineIntegrationsConfiguration,
   skillManifestSchema as afpsSkillManifestSchema,
   tokenEndpointAuthMethodEnum as afpsTokenEndpointAuthMethodEnum,
   dependenciesSchema as afpsDependenciesSchema,
@@ -206,7 +207,7 @@ export type Manifest = z.infer<typeof manifestSchema>;
  * Zod schema for agent manifests — extends AFPS with relaxed optional metadata for local drafts
  * AND the Phase 1.0 `dependencies.integrations` map (proposal §4.2.3).
  */
-const agentManifestObjectSchema = afpsAgentManifestSchema.safeExtend({
+const agentManifestObjectSchema = afpsAgentManifestObjectSchema.extend({
   // All standard fields (name, version, schema_version, dependencies,
   // display_name, input/output/config, timeout) inherited from the AFPS
   // schema.
@@ -246,6 +247,11 @@ const agentManifestObjectSchema = afpsAgentManifestSchema.safeExtend({
  * output schema may finish without ever calling output (side-effect-only run).
  */
 export const agentManifestSchema = agentManifestObjectSchema.superRefine((m, ctx) => {
+  // AFPS §4.4 — re-apply the canonical orphan-key rule (the base AFPS schema
+  // is the plain object here so it stays extendable; the rule lives in the
+  // shared `refineIntegrationsConfiguration` to avoid drift).
+  refineIntegrationsConfiguration(m, ctx);
+
   const outputSchema = (m as { output?: { schema?: unknown } }).output?.schema;
   const hasOutputSchema =
     outputSchema != null &&

@@ -15,8 +15,9 @@
  * renders see the explicit form.
  *
  * The picker writes back through `onChange` (handed in by
- * `ResourceSection`); the resulting `ResourceEntry` is translated to
- * the manifest's top-level `integrations[id]` block by
+ * `ResourceSection`); the resulting `ResourceEntry` is split into the
+ * `dependencies.integrations[id]` version (§4.1) and the
+ * `integrations_configuration[id]` selection (§4.4) by
  * `setResourceEntries('integrations')`.
  */
 
@@ -89,7 +90,7 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
   const declaredToolNames = nativeCatalog.map((t) => t.name);
   const hasToolCatalog = declaredToolNames.length > 0;
 
-  // Multi-auth surface (AFPS §4.1 `auth_key`): when the integration
+  // Multi-auth surface (AFPS §4.4 `auth_key`): when the integration
   // declares >1 auth method, the agent author can pin which `auths.<key>`
   // this dep uses at runtime. `undefined` keeps the resolver cascade's
   // default behaviour (any accessible connection wins).

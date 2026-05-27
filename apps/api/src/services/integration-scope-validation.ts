@@ -2,7 +2,7 @@
 
 /**
  * Phase 1 — install-time validation that an agent's
- * `dependencies.integrations[id]` rich-form selections (tools / scopes)
+ * `integrations_configuration[id]` selections (tools / scopes, §4.4)
  * are consistent with the catalog declared on each referenced
  * integration's manifest.
  *
@@ -14,8 +14,8 @@
  * `ValidationFieldError` shape.
  *
  * Short-circuit cases (no validation, no error):
- *  - Agent declares only `version` (bare semver-range string) →
- *    nothing to validate.
+ *  - Agent declares the integration with no `integrations_configuration`
+ *    entry → nothing to validate.
  *  - Integration not (yet) installed / not visible to the org →
  *    validation is skipped silently. The run-readiness check
  *    (`agent-readiness.ts`) is the authority on "integration must be
@@ -43,14 +43,15 @@ export interface ValidateAgentIntegrationSelectionsInput {
 }
 
 /**
- * Walk the agent's integration deps in rich form, look each one up in
- * the DB, and run the pure subset validator. Returns the accumulated
- * field errors (empty array on success). Caller decides whether to
- * `throw validationFailed(errors)` or surface them differently.
+ * Walk the agent's configured integrations (those with an
+ * `integrations_configuration` entry), look each one up in the DB, and run
+ * the pure subset validator. Returns the accumulated field errors (empty
+ * array on success). Caller decides whether to `throw validationFailed(errors)`
+ * or surface them differently.
  *
- * Non-agent manifests, bare-version-string integration deps, and
- * absent integrations all short-circuit to a successful result — see
- * the module preamble for the rationale.
+ * Non-agent manifests, integrations with no configuration entry, and absent
+ * integrations all short-circuit to a successful result — see the module
+ * preamble for the rationale.
  */
 export async function validateAgentIntegrationSelections(
   input: ValidateAgentIntegrationSelectionsInput,
@@ -61,18 +62,18 @@ export async function validateAgentIntegrationSelections(
   const integrations = parseManifestIntegrations(manifest);
   if (integrations.length === 0) return [];
 
-  // Only rich-form entries carry tools/scopes — bare-version-string
-  // entries have nothing to validate.
-  const richEntries = integrations.filter(
+  // Only configured entries carry tools/scopes — integrations with no
+  // configuration entry have nothing to validate.
+  const configuredEntries = integrations.filter(
     (e) => (e.tools && e.tools.length > 0) || (e.scopes && e.scopes.length > 0),
   );
-  if (richEntries.length === 0) return [];
+  if (configuredEntries.length === 0) return [];
 
   // Sequential DB lookups keep the implementation simple and the
   // typical agent declares ≤ 3 integrations; trade a little latency
   // for stable ordering of errors in the response.
   const errors: ValidationFieldError[] = [];
-  for (const entry of richEntries) {
+  for (const entry of configuredEntries) {
     const integration = await getIntegration(orgId, entry.id);
     if (!integration) {
       // Integration not visible / not installed — defer to run-time

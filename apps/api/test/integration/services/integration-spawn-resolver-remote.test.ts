@@ -50,12 +50,13 @@ function manifest(withRemote = true) {
 
 function agentManifest(): Record<string, unknown> {
   return {
-    schema_version: "0.1",
+    schema_version: "0.2",
     type: "agent",
     name: "@orga/agent",
     version: "0.1.0",
     display_name: "Agent",
-    dependencies: { integrations: { [INTEG]: { version: "^0.1.0", tools: ["search"] } } },
+    dependencies: { integrations: { [INTEG]: "^0.1.0" } },
+    integrations_configuration: { [INTEG]: { tools: ["search"] } },
   };
 }
 
@@ -153,12 +154,13 @@ describe("resolveIntegrationSpawns — local source error guards", () => {
 
   function localAgent(): Record<string, unknown> {
     return {
-      schema_version: "0.1",
+      schema_version: "0.2",
       type: "agent",
       name: "@orga/agent",
       version: "0.1.0",
       display_name: "Agent",
-      dependencies: { integrations: { [LOCAL]: { version: "^0.1.0", tools: ["search"] } } },
+      dependencies: { integrations: { [LOCAL]: "^0.1.0" } },
+      integrations_configuration: { [LOCAL]: { tools: ["search"] } },
     };
   }
 

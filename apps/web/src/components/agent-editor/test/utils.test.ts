@@ -72,23 +72,23 @@ describe("getResourceEntries / setResourceEntries", () => {
 
   // Niveau 2 — version + tool/scope selection both live on the canonical
   // `dependencies.integrations.<id>` object form (§4.1).
-  describe("integrations (canonical §4.1 object form)", () => {
-    it("reads version from deps with no selection block", () => {
+  describe("integrations (deps + integrations_configuration, §4.1/§4.4)", () => {
+    it("reads version from deps with no configuration entry", () => {
       const m = { dependencies: { integrations: { "@vendor/gmail": "^1.0.0" } } };
       expect(getResourceEntries(m, "integrations")).toEqual([
         { id: "@vendor/gmail", version: "^1.0.0" },
       ]);
     });
 
-    it("reads version + selection from the canonical dep object", () => {
+    it("reads version from deps + selection from integrations_configuration", () => {
       const m = {
         dependencies: {
-          integrations: {
-            "@vendor/gmail": {
-              version: "^1.0.0",
-              tools: ["list_messages", "send_message"],
-              scopes: ["delete"],
-            },
+          integrations: { "@vendor/gmail": "^1.0.0" },
+        },
+        integrations_configuration: {
+          "@vendor/gmail": {
+            tools: ["list_messages", "send_message"],
+            scopes: ["delete"],
           },
         },
       };
@@ -111,30 +111,34 @@ describe("getResourceEntries / setResourceEntries", () => {
       expect(m.integrations).toBeUndefined();
     });
 
-    it("writes the canonical inline object form when tools is an explicit array (even empty)", () => {
-      // AFPS §4.1 — dep value is `{ version, tools? }`. The Appstrate-
-      // invented top-level `manifest.integrations` block is no longer written;
-      // it is only read for legacy back-compat.
+    it("writes config to integrations_configuration when tools is an explicit array (even empty)", () => {
+      // AFPS §4.4 — dep value is a bare semver string; tools/scopes live in
+      // the top-level `integrations_configuration` map.
       const m: Record<string, unknown> = { dependencies: {} };
       setResourceEntries(m, "integrations", [
         { id: "@vendor/gmail", version: "^1.0.0", tools: [] },
       ]);
       expect((m.dependencies as Record<string, unknown>).integrations).toEqual({
-        "@vendor/gmail": { version: "^1.0.0", tools: [] },
+        "@vendor/gmail": "^1.0.0",
+      });
+      expect(m.integrations_configuration).toEqual({
+        "@vendor/gmail": { tools: [] },
       });
       expect(m.integrations).toBeUndefined();
     });
 
-    it("writes tools + scopes inline on the canonical dep entry (§4.1)", () => {
+    it("writes tools + scopes to integrations_configuration (§4.4)", () => {
       const m: Record<string, unknown> = { dependencies: {} };
       setResourceEntries(m, "integrations", [
         { id: "@vendor/gmail", version: "^1.0.0", tools: ["list_messages"], scopes: ["delete"] },
       ]);
       expect((m.dependencies as Record<string, unknown>).integrations).toEqual({
+        "@vendor/gmail": "^1.0.0",
+      });
+      expect(m.integrations_configuration).toEqual({
         "@vendor/gmail": {
-          version: "^1.0.0",
-          scopes: ["delete"],
           tools: ["list_messages"],
+          scopes: ["delete"],
         },
       });
       expect(m.integrations).toBeUndefined();
@@ -165,7 +169,7 @@ describe("defaultEditorState", () => {
     expect(state.manifest.type).toBe("agent");
     expect(state.manifest.version).toBe("1.0.0");
     // Canonical AFPS 0.x draft manifest version.
-    expect(state.manifest.schema_version).toBe("0.1");
+    expect(state.manifest.schema_version).toBe("0.2");
     expect(state.manifest.schemaVersion).toBeUndefined();
     expect(state.prompt).toBe("");
   });

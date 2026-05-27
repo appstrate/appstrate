@@ -178,9 +178,9 @@ export async function buildRunContext(params: {
   // Phase 1.4 — resolve any declared `dependencies.integrations` into
   // ready-to-spawn specs (manifest + bundle bytes + delivery env with
   // live credentials). Failures here are per-integration warnings; the
-  // run proceeds with the surviving subset. The resolver reads the
-  // tool/scope selection per AFPS §4.1 / §4.4 — reads the inline object
-  // form on `dependencies.integrations[id]` (version + tools + scopes).
+  // run proceeds with the surviving subset. The resolver reads the version
+  // from `dependencies.integrations[id]` (§4.1) and the tool/scope selection
+  // from `integrations_configuration[id]` (§4.4).
   const integrationSpawns = await resolveIntegrationSpawns({
     applicationId,
     actor,

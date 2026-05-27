@@ -121,9 +121,10 @@ function agentManifest(name: string, tools: string[]): Record<string, unknown> {
     name,
     version: "1.0.0",
     type: "agent",
-    schema_version: "0.1",
+    schema_version: "0.2",
     display_name: name,
-    dependencies: { integrations: { [INTEGRATION_ID]: { version: "^1.0.0", tools } } },
+    dependencies: { integrations: { [INTEGRATION_ID]: "^1.0.0" } },
+    integrations_configuration: { [INTEGRATION_ID]: { tools } },
   };
 }
 

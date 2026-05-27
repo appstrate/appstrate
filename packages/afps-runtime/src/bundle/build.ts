@@ -303,20 +303,12 @@ function extractDependencies(manifest: AfpsManifest, depTypes: DepRequest["type"
     const section = depsObj[type];
     if (!section || typeof section !== "object" || Array.isArray(section)) continue;
     for (const [name, spec] of Object.entries(section as Record<string, unknown>)) {
-      // AFPS §4.1 — dependency value is polymorphic: bare semver
-      // string OR object `{ version, ... }` carrying per-dep configuration.
-      // The bundle walker only needs the version range; object-form extras
-      // (scopes / auth_key for integrations) are consumed downstream by
-      // `parseManifestIntegrations` against the same manifest.
-      let versionSpec: string | null = null;
-      if (typeof spec === "string") {
-        versionSpec = spec;
-      } else if (spec && typeof spec === "object") {
-        const v = (spec as { version?: unknown }).version;
-        if (typeof v === "string") versionSpec = v;
-      }
-      if (versionSpec === null) continue;
-      out.push({ name, versionSpec, type });
+      // AFPS §4.1 — each dependency value is a bare semver range string.
+      // Per-integration configuration (`tools`/`scopes`/`auth_key`) lives in
+      // the top-level `integrations_configuration` map and is consumed
+      // downstream by `parseManifestIntegrations` against the same manifest.
+      if (typeof spec !== "string") continue;
+      out.push({ name, versionSpec: spec, type });
     }
   }
   return out;

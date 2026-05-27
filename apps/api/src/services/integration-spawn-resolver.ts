@@ -69,10 +69,10 @@ export interface ResolveIntegrationsInput {
   actor: Actor | null;
   /**
    * The agent's full manifest. Versions come from
-   * `dependencies.integrations`, tool/scope selections from the
-   * top-level `integrations` block (niveau 2 scope model). The resolver
-   * propagates the per-id `tools[]` to `IntegrationSpawnSpec.toolAllowlist`
-   * for sidecar-side enforcement (Phase 3).
+   * `dependencies.integrations` (§4.1), tool/scope selections from the
+   * top-level `integrations_configuration` block (§4.4, niveau 2 scope
+   * model). The resolver propagates the per-id `tools[]` to
+   * `IntegrationSpawnSpec.toolAllowlist` for sidecar-side enforcement (Phase 3).
    */
   agentManifest: Record<string, unknown>;
   /**

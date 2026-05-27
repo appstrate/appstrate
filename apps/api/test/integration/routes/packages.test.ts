@@ -711,29 +711,29 @@ describe("Packages API", () => {
       selection: { version: string; tools?: string[]; scopes?: string[] } | string,
       suffix = "ok",
     ) {
-      const isBare = typeof selection === "string";
-      // AFPS §4.1 — tool/scope selection lives on the canonical
-      // `dependencies.integrations.<id>` object form (read by
-      // `parseManifestIntegrations`), not a top-level `integrations` block.
-      const hasRich = !isBare && (selection.tools !== undefined || selection.scopes !== undefined);
-      const dep: unknown = isBare
-        ? selection
-        : hasRich
-          ? {
-              version: selection.version,
-              ...(selection.tools !== undefined ? { tools: selection.tools } : {}),
-              ...(selection.scopes !== undefined ? { scopes: selection.scopes } : {}),
-            }
-          : selection.version;
+      // AFPS §4.1/§4.4 — the dependency value is a bare semver string;
+      // tool/scope selection lives in the top-level `integrations_configuration`
+      // block (both read by `parseManifestIntegrations`).
+      const version = typeof selection === "string" ? selection : selection.version;
+      const config =
+        typeof selection === "string"
+          ? undefined
+          : selection.tools !== undefined || selection.scopes !== undefined
+            ? {
+                ...(selection.tools !== undefined ? { tools: selection.tools } : {}),
+                ...(selection.scopes !== undefined ? { scopes: selection.scopes } : {}),
+              }
+            : undefined;
       const manifest: Record<string, unknown> = {
         name: `@pkgorg/agent-${suffix}`,
         version: "0.1.0",
         type: "agent",
-        schema_version: "0.1",
+        schema_version: "0.2",
         display_name: `Agent ${suffix}`,
         dependencies: {
-          integrations: { [integrationId]: dep },
+          integrations: { [integrationId]: version },
         },
+        ...(config ? { integrations_configuration: { [integrationId]: config } } : {}),
       };
       return { manifest, content: "Prompt" };
     }
@@ -762,7 +762,7 @@ describe("Packages API", () => {
       expect(res.status).toBe(400);
       const body = (await res.json()) as { errors?: { code: string; field: string }[] };
       expect(body.errors?.[0]?.code).toBe("unknown_tool");
-      expect(body.errors?.[0]?.field).toBe(`integrations.${integrationId}.tools`);
+      expect(body.errors?.[0]?.field).toBe(`integrations_configuration.${integrationId}.tools`);
     });
 
     it("rejects an agent declaring a scope outside the integration's availableScopes", async () => {
@@ -817,11 +817,12 @@ describe("Packages API", () => {
             name: "@pkgorg/agent-put",
             version: "0.2.0",
             type: "agent",
-            schema_version: "0.1",
+            schema_version: "0.2",
             display_name: "Updated",
             dependencies: {
-              integrations: { [integrationId]: { version: "^1.0.0", tools: ["nope"] } },
+              integrations: { [integrationId]: "^1.0.0" },
             },
+            integrations_configuration: { [integrationId]: { tools: ["nope"] } },
           },
           content: "Updated prompt",
           lock_version: agent.lockVersion,

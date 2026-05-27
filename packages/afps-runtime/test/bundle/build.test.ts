@@ -145,15 +145,16 @@ describe("buildBundleFromCatalog", () => {
     expect(bundle.packages.get("@me/integ-y@1.0.0" as PackageIdentity)).toBeUndefined();
   });
 
-  it("walks AFPS §4.1 object-form deps (skills + integrations + mcp_servers)", async () => {
+  it("walks AFPS §4.1 semver-string deps (skills + integrations + mcp_servers)", async () => {
     const rootManifest = {
       ...ROOT,
       dependencies: {
-        skills: { "@me/skill-a": { version: "^1.0.0" } },
-        mcp_servers: { "@me/mcp-x": { version: "1.2.3" } },
-        integrations: {
-          "@me/integ-y": { version: "^1.0.0", scopes: ["s1"], auth_key: "oauth" },
-        },
+        skills: { "@me/skill-a": "^1.0.0" },
+        mcp_servers: { "@me/mcp-x": "1.2.3" },
+        integrations: { "@me/integ-y": "^1.0.0" },
+      },
+      integrations_configuration: {
+        "@me/integ-y": { scopes: ["s1"], auth_key: "oauth" },
       },
     };
     const root = makePkg("@me/root@1.0.0" as PackageIdentity, rootManifest, {

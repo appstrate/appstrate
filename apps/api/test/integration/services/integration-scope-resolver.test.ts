@@ -64,24 +64,24 @@ function agentManifest(
   selection: { version: string; tools?: string[]; scopes?: string[] },
 ): Record<string, unknown> {
   const { version, tools, scopes } = selection;
-  // Per AFPS §4.1, per-integration tool/scope selection lives on the
-  // canonical `dependencies.integrations.<id>` object form — not a separate
-  // top-level `integrations` block (which `parseManifestIntegrations` ignores).
-  const dep: Record<string, unknown> =
+  // Per AFPS §4.1 the dependency value is a bare semver string; per-integration
+  // tool/scope selection lives in the top-level `integrations_configuration`
+  // block (§4.4). Both are read by `parseManifestIntegrations`.
+  const config =
     tools !== undefined || scopes !== undefined
       ? {
-          version,
           ...(tools !== undefined ? { tools } : {}),
           ...(scopes !== undefined ? { scopes } : {}),
         }
-      : (version as unknown as Record<string, unknown>);
+      : undefined;
   return {
     name,
     version: "1.0.0",
     type: "agent",
-    schema_version: "0.1",
+    schema_version: "0.2",
     display_name: name,
-    dependencies: { integrations: { [INTEGRATION_ID]: dep } },
+    dependencies: { integrations: { [INTEGRATION_ID]: version } },
+    ...(config ? { integrations_configuration: { [INTEGRATION_ID]: config } } : {}),
   };
 }
 

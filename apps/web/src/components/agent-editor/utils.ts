@@ -37,7 +37,7 @@ export function defaultEditorState(orgSlug?: string, userEmail?: string): AgentE
   return {
     manifest: {
       $schema: AFPS_SCHEMA_URLS.agent,
-      schema_version: "0.1",
+      schema_version: "0.2",
       type: "agent",
       name: orgSlug ? `@${orgSlug}/` : "",
       version: "1.0.0",
@@ -59,7 +59,7 @@ export function defaultSkillManifest(
 ): Record<string, unknown> {
   return {
     $schema: AFPS_SCHEMA_URLS.skill,
-    schema_version: "0.1",
+    schema_version: "0.2",
     type: "skill",
     name: orgSlug ? `@${orgSlug}/` : "",
     version: "1.0.0",
@@ -87,7 +87,7 @@ export function defaultIntegrationManifest(
 ): Record<string, unknown> {
   return {
     $schema: AFPS_SCHEMA_URLS.integration,
-    schema_version: "0.1",
+    schema_version: "0.2",
     type: "integration",
     name: orgSlug ? `@${orgSlug}/` : "",
     version: "1.0.0",
@@ -210,10 +210,11 @@ export function getResourceEntries(
   m: Record<string, unknown>,
   type: "skills" | "integrations",
 ): ResourceEntry[] {
-  // Integrations: AFPS §4.1 canonical inline object form —
-  // `dependencies.integrations.<id>` is `{ version, scopes?, tools?, auth_key? }`.
-  // `auth_key` (§4.1) selects which `auths.<key>` entry on the depended-on
-  // integration this dep uses, when the integration declares multiple auths.
+  // Integrations: the version comes from `dependencies.integrations.<id>`
+  // (a bare semver string, §4.1) and the tool/scope/auth selection from the
+  // top-level `integrations_configuration.<id>` map (§4.4). `auth_key`
+  // selects which `auths.<key>` entry on the depended-on integration this
+  // agent uses, when the integration declares multiple auths.
   if (type === "integrations") {
     return parseManifestIntegrations(m).map((e) => ({
       id: e.id,

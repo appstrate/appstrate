@@ -129,7 +129,7 @@ describe("readIntegrationRefs", () => {
     expect(readIntegrationRefs(makeBundle(root))).toEqual([]);
   });
 
-  it("accepts AFPS §4.1 object-form deps and extracts version from `version`", () => {
+  it("reads AFPS §4.1 semver-string integration deps", () => {
     const root = makePackage(
       "@acme/agent",
       "1.0.0",
@@ -139,15 +139,18 @@ describe("readIntegrationRefs", () => {
         dependencies: {
           integrations: {
             "@acme/api": "^1.0.0",
-            "@acme/rich": { version: "^2.0.0", scopes: ["s1"], auth_key: "oauth" },
+            "@acme/other": "^2.0.0",
           },
+        },
+        integrations_configuration: {
+          "@acme/other": { scopes: ["s1"], auth_key: "oauth" },
         },
       },
     );
     const refs = readIntegrationRefs(makeBundle(root));
     expect(refs).toEqual([
       { name: "@acme/api", version: "^1.0.0" },
-      { name: "@acme/rich", version: "^2.0.0" },
+      { name: "@acme/other", version: "^2.0.0" },
     ]);
   });
 

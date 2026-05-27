@@ -4,15 +4,15 @@
  * Phase 2 — OAuth scope inference for integration connect flows.
  *
  * `computeRequiredScopes` walks every agent installed in the application,
- * reads its `dependencies.integrations[id]` rich-form selection, and
+ * reads its `integrations_configuration[id]` selection (§4.4), and
  * unions the scopes contributed by each:
  *
  *   - `tools[]` declared by the agent → look up
  *     `integration.tools_policy[t].requiredScopes` (filtered by `requiredAuthKey`
  *     when multi-auth) and union them.
  *   - `scopes[]` declared by the agent → unioned as-is.
- *   - Agent declared the integration as a bare semver-range string (or
- *     rich form without `tools[]`) → contribute the union of *every*
+ *   - Agent declared the integration with no `integrations_configuration`
+ *     entry (or one without `tools[]`) → contribute the union of *every*
  *     declared tool's `requiredScopes` for this auth (= "all tools
  *     allowed" default that mirrors Phase 3's runtime allowlist
  *     semantics).
@@ -80,8 +80,8 @@ export async function computeRequiredScopes(
   }
 
   // Walk installed agents. We need the manifest of each to read its
-  // `dependencies.integrations` rich form; that lives on `draftManifest`,
-  // same column the runtime resolver reads at spawn time.
+  // `integrations_configuration`; that lives on `draftManifest`, same
+  // column the runtime resolver reads at spawn time.
   const installed = await db
     .select({ draftManifest: packages.draftManifest })
     .from(applicationPackages)
@@ -104,11 +104,11 @@ export async function computeRequiredScopes(
     const viaTools = scopesContributedByTools({
       manifest: integration.manifest,
       authKey: input.authKey,
-      // entry.tools = undefined → "all tools allowed" default (bare
-      // semver-range deps + rich form without `tools`). entry.tools =
-      // [] (explicit empty array) is treated as "no tools used" —
-      // agents that opted into the rich form but want zero tools also
-      // want zero inferred scopes.
+      // entry.tools = undefined → "all tools allowed" default (no
+      // integrations_configuration entry, or one without `tools`).
+      // entry.tools = [] (explicit empty array) is treated as "no tools
+      // used" — agents that configured zero tools also want zero
+      // inferred scopes.
       agentTools: entry.tools,
     });
     const viaExplicit = entry.scopes ? [...entry.scopes] : [];

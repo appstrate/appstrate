@@ -86,10 +86,11 @@ function manifestErrorsToFieldErrors(errors: string[]): ValidationFieldError[] {
 
 /**
  * Phase 1 gate — after `validateManifest` accepts an agent manifest,
- * cross-check that any rich-form `dependencies.integrations[id]`
- * selection is a subset of the referenced integration's catalog. Skips
- * silently for non-agent types, legacy-string deps, and integrations
- * not visible to the org (the latter handled by run-time dep validation).
+ * cross-check that any `integrations_configuration[id]` selection (§4.4)
+ * is a subset of the referenced integration's catalog. Skips silently for
+ * non-agent types, integrations with no configuration entry, and
+ * integrations not visible to the org (the latter handled by run-time dep
+ * validation).
  */
 async function assertAgentIntegrationScopesValid(
   manifest: Record<string, unknown>,
@@ -1292,7 +1293,7 @@ export function createPackagesRouter() {
       });
     }
 
-    // Phase 1 — for agent imports, cross-check rich-form integration
+    // Phase 1 — for agent imports, cross-check integrations_configuration
     // selections against the referenced integration catalogs. `parsePackageZip`
     // already ran `validateManifest`; this is the niveau 2 follow-up.
     await assertAgentIntegrationScopesValid(manifest as Record<string, unknown>, orgId);

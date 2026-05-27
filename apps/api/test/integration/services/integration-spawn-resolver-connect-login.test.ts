@@ -62,14 +62,15 @@ function runStartManifest(name = INTEG): IntegrationManifest {
  */
 function agentManifest(): Record<string, unknown> {
   return {
-    schema_version: "0.1",
+    schema_version: "0.2",
     type: "agent",
     name: "@orga/agent",
     version: "0.1.0",
     display_name: "Orga Agent",
     dependencies: {
-      integrations: { [INTEG]: { version: "^0.1.0", tools: ["fetch_invoices", "login"] } },
+      integrations: { [INTEG]: "^0.1.0" },
     },
+    integrations_configuration: { [INTEG]: { tools: ["fetch_invoices", "login"] } },
   };
 }
 

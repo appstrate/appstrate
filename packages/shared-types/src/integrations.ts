@@ -14,10 +14,11 @@ export type IntegrationManifestAuth = NonNullable<IntegrationManifest["auths"]>[
 export type IntegrationAuthType = IntegrationManifestAuth["type"];
 
 /**
- * An agent's `dependencies.integrations` entry flattened by
- * `parseManifestIntegrations`: the bare version dep merged with the optional
- * top-level `integrations[id]` tool/scope selection. Structurally identical to
- * core's `ManifestIntegrationEntry` (the return shape of that parser), so it is
+ * An agent's integration declaration flattened by `parseManifestIntegrations`:
+ * the version from `dependencies.integrations[id]` (§4.1) merged with the
+ * optional `integrations_configuration[id]` tool/scope/auth selection (§4.4).
+ * Structurally identical to core's `ManifestIntegrationEntry` (the return shape
+ * of that parser), so it is
  * re-exported under the agent-facing name rather than duplicated — backend
  * (`AgentDetail`) and frontend read one definition that cannot drift.
  */
