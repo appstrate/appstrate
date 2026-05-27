@@ -35,10 +35,19 @@ function enc(s: string): Uint8Array {
 }
 
 function buildAfps(manifest: Record<string, unknown>, content: string): Uint8Array {
-  return zipSync({
+  const files: Record<string, Uint8Array> = {
     "manifest.json": enc(JSON.stringify(manifest, null, 2)),
-    "prompt.md": enc(content),
-  });
+  };
+  // AFPS §3.3/§3.4 companion-file invariants enforced by the bundle loader:
+  // agents need a non-empty prompt.md, skills need a SKILL.md with a
+  // frontmatter `name`. Emit the right companion for the package type.
+  if (manifest.type === "skill") {
+    const name = typeof manifest.name === "string" ? manifest.name : "@test/skill";
+    files["SKILL.md"] = enc(`---\nname: ${name}\n---\n\n${content}`);
+  } else {
+    files["prompt.md"] = enc(content);
+  }
+  return zipSync(files);
 }
 
 async function seedPackageWithZip(opts: {

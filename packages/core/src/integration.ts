@@ -26,31 +26,41 @@
 
 import {
   integrationManifestSchema as afpsIntegrationManifestSchema,
-  RESERVED_UPLOAD_PROTOCOLS,
   type IntegrationManifest as AfpsIntegrationManifest,
 } from "@afps-spec/schema";
 import type { ManifestIntegrationEntry } from "./dependencies.ts";
 
 // ─────────────────────────────────────────────
-// Re-exports of AFPS primitives consumed elsewhere
+// Appstrate vendor extension: api_call (`_meta["dev.appstrate/api"]`)
 // ─────────────────────────────────────────────
 
 /**
- * Resumable-upload protocols an `api`-source integration MAY advertise
- * (`source.api.upload_protocols`, AFPS §7.1 / §7.5). AFPS dropped the
- * closed enum in favour of an open string array of *reserved* values:
- * producers MAY emit other (reverse-DNS-qualified) values and consumers MUST
- * tolerate them. The runtime-pi upload adapters use this list to recognise
- * the well-known protocols; non-reserved values flow through as opaque
- * strings.
+ * `_meta` key carrying the Appstrate-specific `api_call` capability. This is a
+ * vendor extension (AFPS §10) — orthogonal to `source.kind`. Any integration
+ * (`local`, `remote`, or `none`) MAY expose the credential-injecting HTTP proxy
+ * by declaring one or more auths under `_meta["dev.appstrate/api"].auths`.
+ *
+ * Shape: `{ auths: { <authKey>: { upload_protocols?: string[] } } }`. Presence
+ * of an `authKey` opts that auth into the `api_call` tool. Single opted-in auth
+ * → the tool is named `api_call`; multiple → `api_call__{authKey}` per auth.
  */
-export const RESERVED_INTEGRATION_UPLOAD_PROTOCOLS = RESERVED_UPLOAD_PROTOCOLS;
+export const API_META_KEY = "dev.appstrate/api";
+
 /**
- * @deprecated AFPS replaced the closed enum with an open string array.
- * The type is now `string` and the constant {@link RESERVED_INTEGRATION_UPLOAD_PROTOCOLS}
- * lists the values reserved by the spec. Kept as a back-compat alias for
- * downstream consumers; will be removed in a follow-up phase.
+ * Resumable-upload protocols an api_call auth MAY advertise under
+ * `_meta["dev.appstrate/api"].auths.{key}.upload_protocols`. This is an open
+ * string array of *reserved* values: producers MAY emit other
+ * (reverse-DNS-qualified) values and consumers MUST tolerate them. The
+ * runtime-pi upload adapters use this list to recognise the well-known
+ * protocols; non-reserved values flow through as opaque strings.
  */
+export const RESERVED_INTEGRATION_UPLOAD_PROTOCOLS = [
+  "google-resumable",
+  "s3-multipart",
+  "tus",
+  "ms-resumable",
+] as const;
+/** An upload-protocol identifier (open string; reserved values listed above). */
 export type IntegrationUploadProtocol = string;
 
 // ─────────────────────────────────────────────
@@ -294,6 +304,45 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
       }
     }
   }
+
+  // (5) `_meta["dev.appstrate/api"]` (api_call vendor extension): every opted-in
+  // auth key MUST reference a declared `auths.{key}`, and `upload_protocols`
+  // (when present) MUST be an array of non-empty strings.
+  const apiMeta = (manifest as { _meta?: Record<string, unknown> })._meta?.[API_META_KEY] as
+    | { auths?: unknown }
+    | undefined;
+  if (apiMeta !== undefined) {
+    const metaAuths = apiMeta.auths;
+    if (!metaAuths || typeof metaAuths !== "object" || Array.isArray(metaAuths)) {
+      ctx.addIssue({
+        code: "custom",
+        message: `_meta["${API_META_KEY}"].auths must be an object keyed by auth name`,
+        path: ["_meta", API_META_KEY, "auths"],
+      });
+    } else {
+      const authKeys = Object.keys(auths);
+      for (const [metaAuthKey, entry] of Object.entries(metaAuths as Record<string, unknown>)) {
+        if (!authKeys.includes(metaAuthKey)) {
+          ctx.addIssue({
+            code: "custom",
+            message: `_meta["${API_META_KEY}"].auths."${metaAuthKey}" does not match any auths.{key}`,
+            path: ["_meta", API_META_KEY, "auths", metaAuthKey],
+          });
+          continue;
+        }
+        const up = (entry as { upload_protocols?: unknown } | null)?.upload_protocols;
+        if (up !== undefined) {
+          if (!Array.isArray(up) || up.some((v) => typeof v !== "string" || v.length === 0)) {
+            ctx.addIssue({
+              code: "custom",
+              message: `_meta["${API_META_KEY}"].auths."${metaAuthKey}".upload_protocols must be an array of non-empty strings`,
+              path: ["_meta", API_META_KEY, "auths", metaAuthKey, "upload_protocols"],
+            });
+          }
+        }
+      }
+    }
+  }
 });
 
 /**
@@ -421,10 +470,11 @@ export interface ResolveIntegrationToolCatalogInput {
  * Single source of truth for what the agent's picker sees and what
  * `tools/list` exposes at runtime. Resolution:
  *
- *   1. Base catalog
- *      - api source        → synthetic `[api_call]`
+ *   1. Base catalog (the integration's own surface)
  *      - local + mcpServerTools provided → MCPB-canonical entries
  *      - otherwise          → `integration.tools_policy` keys (sparse fallback)
+ *   1b. Append api_call tool(s) from `_meta["dev.appstrate/api"]` (additive —
+ *       orthogonal to source kind; a `none` source contributes only these)
  *   2. Subtract `integration.hidden_tools` (explicit opt-out)
  *   3. Subtract `getConnectToolNames` (auto-hide run-start primitives)
  *   4. Attach policy from `integration.tools_policy[name]` when present
@@ -433,17 +483,17 @@ export function resolveIntegrationToolCatalog(
   input: ResolveIntegrationToolCatalogInput,
 ): IntegrationToolCatalogEntry[] {
   const { integration, mcpServerTools } = input;
-  const apiCallCfg = getApiCallConfig(integration);
 
-  // Step 1 — base catalog
+  // Step 1 — the integration's own MCP catalog
   let base: IntegrationToolCatalogEntry[];
-  if (apiCallCfg !== null) {
-    base = [{ name: API_CALL_TOOL_NAME }];
-  } else if (mcpServerTools && mcpServerTools.length > 0) {
+  if (mcpServerTools && mcpServerTools.length > 0) {
     base = mcpServerTools.map((t) => ({ name: t.name, description: t.description }));
   } else {
     base = getDeclaredToolNames(integration).map((name) => ({ name }));
   }
+
+  // Step 1b — append api_call tool(s) (vendor extension, additive)
+  base = [...base, ...getApiCallConfigs(integration).map((c) => ({ name: c.toolName }))];
 
   // Step 2+3 — hide set (explicit + auto)
   const hidden = new Set<string>([
@@ -473,34 +523,69 @@ export function resolveIntegrationToolCatalog(
   return out;
 }
 
-/**
- * Resolve the effective `api_call` configuration for an integration, or
- * `null` when the integration is not an `api`-source integration.
- *
- * AFPS models the serverless credential-injecting surface as
- * `source.kind: "api"`. The single declared auth supplies the credential and
- * URL allowlist. `upload_protocols` is now `source.api.upload_protocols`
- * (was the old `apiCall.uploadProtocols`).
- *
- * NOTE — the old `apiCall.authKey` was an explicit auth pointer. AFPS
- * has no per-source auth pointer: an `api`-source integration draws from its
- * (typically single) declared auth. When the integration declares exactly one
- * auth we return it; when it declares several we return the first key
- * (callers needing disambiguation use `tools_policy.{name}.required_auth_key`). The
- * export name is kept stable for consumers; "api call config" now means "the
- * api-source credential surface".
- */
-export function getApiCallConfig(
+/** One resolved `api_call` capability — a single opted-in auth. */
+export interface ApiCallConfig {
+  /** The `auths.{key}` whose credential this api_call tool injects. */
+  authKey: string;
+  /**
+   * Agent-facing tool name (before the sidecar's `{namespace}__` prefix).
+   * `api_call` when the integration opts in exactly one auth; `api_call__{authKey}`
+   * when it opts in several.
+   */
+  toolName: string;
+  /** Resumable upload protocols this auth's surface supports (open list). */
+  uploadProtocols: IntegrationUploadProtocol[];
+}
+
+/** Read `_meta["dev.appstrate/api"].auths` as a raw record (or undefined). */
+function readApiMetaAuths(
   manifest: IntegrationManifest,
-): { authKey: string; uploadProtocols: IntegrationUploadProtocol[] } | null {
-  const source = manifest.source as { kind?: string; api?: { upload_protocols?: string[] } };
-  if (source?.kind !== "api") return null;
-  const authKeys = manifest.auths ? Object.keys(manifest.auths) : [];
-  if (authKeys.length === 0) return null;
-  return {
-    authKey: authKeys[0]!,
-    uploadProtocols: (source.api?.upload_protocols ?? []) as IntegrationUploadProtocol[],
-  };
+): Record<string, { upload_protocols?: unknown } | null> | undefined {
+  const meta = (manifest as { _meta?: Record<string, unknown> })._meta;
+  const api = meta?.[API_META_KEY] as { auths?: unknown } | undefined;
+  const auths = api?.auths;
+  if (!auths || typeof auths !== "object" || Array.isArray(auths)) return undefined;
+  return auths as Record<string, { upload_protocols?: unknown } | null>;
+}
+
+/**
+ * Resolve every `api_call` capability an integration exposes, driven entirely
+ * by the `_meta["dev.appstrate/api"].auths` vendor extension — orthogonal to
+ * `source.kind`, so an integration with a `local`/`remote` MCP server can ALSO
+ * expose api_call. Returns `[]` when the integration declares none.
+ *
+ * Each opted-in auth must reference a declared `auths.{key}`; unknown keys are
+ * skipped (the install-time superRefine rejects them, so this is defence in
+ * depth for already-stored manifests). Tool naming: a single opted-in auth →
+ * `api_call`; multiple → `api_call__{authKey}` per auth.
+ */
+export function getApiCallConfigs(manifest: IntegrationManifest): ApiCallConfig[] {
+  const metaAuths = readApiMetaAuths(manifest);
+  if (!metaAuths) return [];
+  const declaredAuths = manifest.auths ?? {};
+  const authKeys = Object.keys(metaAuths).filter((k) => k in declaredAuths);
+  if (authKeys.length === 0) return [];
+  const single = authKeys.length === 1;
+  return authKeys.map((authKey) => {
+    const raw = metaAuths[authKey]?.upload_protocols;
+    const uploadProtocols = Array.isArray(raw)
+      ? raw.filter((v): v is string => typeof v === "string")
+      : [];
+    return {
+      authKey,
+      toolName: single ? API_CALL_TOOL_NAME : `${API_CALL_TOOL_NAME}__${authKey}`,
+      uploadProtocols,
+    };
+  });
+}
+
+/**
+ * True when `name` is an api_call tool name — the bare `api_call` or a
+ * per-auth `api_call__{authKey}` variant. Used to recognise api_call selections
+ * that never appear in `tools_policy`.
+ */
+export function isApiCallToolName(name: string): boolean {
+  return name === API_CALL_TOOL_NAME || name.startsWith(`${API_CALL_TOOL_NAME}__`);
 }
 
 /**
@@ -544,11 +629,12 @@ export function requiredAuthKeysForAgent(
     if (!tool || typeof tool.required_auth_key !== "string") continue;
     if (declaredAuths.includes(tool.required_auth_key)) out.add(tool.required_auth_key);
   }
-  // The generic `api_call` tool isn't in `manifest.tools_policy`; pin the auth
-  // it draws from (the api source) when selected.
-  if (agentTools?.includes(API_CALL_TOOL_NAME)) {
-    const cfg = getApiCallConfig(manifest);
-    if (cfg && declaredAuths.includes(cfg.authKey)) out.add(cfg.authKey);
+  // The `api_call` tool(s) aren't in `manifest.tools_policy`; pin each one's
+  // auth (from `_meta["dev.appstrate/api"]`) when the matching tool is selected.
+  const apiCallByTool = new Map(getApiCallConfigs(manifest).map((c) => [c.toolName, c.authKey]));
+  for (const toolName of agentTools ?? []) {
+    const authKey = apiCallByTool.get(toolName);
+    if (authKey && declaredAuths.includes(authKey)) out.add(authKey);
   }
   // Scope-only selection maps each selected scope to the auth(s) whose
   // scope_catalog declares it.

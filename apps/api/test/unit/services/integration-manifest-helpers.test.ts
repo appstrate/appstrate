@@ -2,7 +2,7 @@
 
 /**
  * Unit tests for the pure AFPS integration-manifest accessors — the
- * `source` discriminant narrowing (`local` | `remote` | `api`), the
+ * `source` discriminant narrowing (`local` | `remote` | `none`), the
  * orchestrated-connect `_meta` extension reader, and the
  * `{$credential.<field>}` value-template renderer. Pure functions, no DB.
  */
@@ -56,7 +56,7 @@ describe("getIntegrationSourceKind", () => {
   it("returns each valid discriminant", () => {
     expect(getIntegrationSourceKind(manifest({ kind: "local" }))).toBe("local");
     expect(getIntegrationSourceKind(manifest({ kind: "remote" }))).toBe("remote");
-    expect(getIntegrationSourceKind(manifest({ kind: "api" }))).toBe("api");
+    expect(getIntegrationSourceKind(manifest({ kind: "none" }))).toBe("none");
   });
 
   it("returns undefined for an unknown or absent kind", () => {

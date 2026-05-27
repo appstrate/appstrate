@@ -4,10 +4,10 @@
 /**
  * AFPS integration `api_call` resolver.
  *
- * An api-source integration — `source.kind: "api"` (or one associating an
- * auth via `_meta["dev.appstrate/api"].auth_key`), backed by a single auth
- * whose `delivery.http` describes how to inject the credential — exposes a
- * generic credential-injecting HTTP tool. On the
+ * An integration that opts an auth into the `_meta["dev.appstrate/api"]`
+ * vendor extension — backed by an auth whose `delivery.http` describes how to
+ * inject the credential — exposes a generic credential-injecting HTTP tool per
+ * opted-in auth (orthogonal to `source.kind`). On the
  * platform this surfaces as the sidecar's `{ns}__api_call` MCP tool
  * (`runtime-pi/sidecar/mcp.ts` + `api-call-credentials.ts`). This module is
  * the portable equivalent that the standalone `appstrate run` CLI uses to
@@ -31,9 +31,10 @@
  *     the integration id as the `X-Integration-Id` scope marker. Credentials never
  *     leave the platform.
  *
- * Tool surface: one AFPS `Tool` per api-source integration, named
- * `{ns}__api_call` to match the platform's namespacing — NOT a single
- * `api_call` dispatcher keyed by a providerId enum.
+ * Tool surface: one AFPS `Tool` per opted-in auth, named `{ns}__api_call`
+ * (single auth) or `{ns}__api_call__{authKey}` (several) to match the
+ * platform's namespacing — NOT a single `api_call` dispatcher keyed by a
+ * providerId enum.
  */
 
 import type { Bundle, Tool } from "./types.ts";
@@ -73,23 +74,29 @@ export interface IntegrationRef {
 }
 
 /**
- * Flat runtime view of an integration's `source.kind: "api"` surface, projected
- * from the integration manifest. Carries everything the resolver needs to build
- * a credential-injecting tool: the auth's URL allowlist, the auth type, and
- * the auth's `delivery.http` config (if any).
+ * Flat runtime view of one api_call surface (a single opted-in auth), projected
+ * from the integration manifest's `_meta["dev.appstrate/api"]` extension.
+ * Carries everything the resolver needs to build a credential-injecting tool:
+ * the auth's URL allowlist, the auth type, and the auth's `delivery.http`
+ * config (if any).
  */
 export interface ApiCallIntegrationMeta {
   /** Scoped package id (e.g. `@appstrate/gmail`). */
   name: string;
   /**
-   * MCP-style namespace used to name the tool `{namespace}__api_call`.
-   * Defaults to the slugified package id (matches the platform).
+   * MCP-style namespace used to prefix the tool name. Defaults to the
+   * slugified package id (matches the platform).
    */
   namespace: string;
   /**
-   * Auth key supplying credentials. For AFPS `source.kind: "api"` integrations,
-   * resolved from `_meta["dev.appstrate/api"].auth_key`, or the single declared
-   * auth when only one exists.
+   * Bare agent-facing tool name (before the `{namespace}__` prefix).
+   * `api_call` when the integration opts in exactly one auth; `api_call__{authKey}`
+   * when several.
+   */
+  toolName: string;
+  /**
+   * Auth key supplying credentials — one of the keys under
+   * `_meta["dev.appstrate/api"].auths`.
    */
   authKey: string;
   /** Auth type (`oauth2` | `api_key` | `basic` | `custom`). */
@@ -134,15 +141,15 @@ export function readIntegrationRefs(bundle: Bundle): IntegrationRef[] {
 }
 
 /**
- * Project an integration manifest onto {@link ApiCallIntegrationMeta}.
- * Returns `null` when the integration does NOT declare `apiCall` (it is a
- * pure MCP-server integration with no generic call surface) — the caller
- * skips it.
+ * Project an integration manifest onto its {@link ApiCallIntegrationMeta}
+ * surfaces — one per auth opted into `_meta["dev.appstrate/api"].auths`.
+ * Returns `[]` when the integration declares no api_call (it is a pure
+ * MCP-server integration with no generic call surface) — the caller skips it.
  */
-export function readApiCallIntegrationMeta(
+export function readApiCallIntegrationMetas(
   bundle: Bundle,
   ref: IntegrationRef,
-): ApiCallIntegrationMeta | null {
+): ApiCallIntegrationMeta[] {
   const pkg = resolvePackageRef(bundle, ref);
   let parsed: unknown = pkg?.manifest;
   if (pkg) {
@@ -154,14 +161,13 @@ export function readApiCallIntegrationMeta(
       }
     }
   }
-  return projectApiCallMeta(ref.name, parsed);
+  return projectApiCallMetas(ref.name, parsed);
 }
 
-function projectApiCallMeta(name: string, parsed: unknown): ApiCallIntegrationMeta | null {
-  if (!parsed || typeof parsed !== "object") return null;
+function projectApiCallMetas(name: string, parsed: unknown): ApiCallIntegrationMeta[] {
+  if (!parsed || typeof parsed !== "object") return [];
   const m = parsed as {
-    source?: { kind?: string };
-    _meta?: Record<string, { auth_key?: string }>;
+    _meta?: Record<string, { auths?: Record<string, unknown> }>;
     auths?: Record<
       string,
       {
@@ -172,35 +178,39 @@ function projectApiCallMeta(name: string, parsed: unknown): ApiCallIntegrationMe
       }
     >;
   };
-  // AFPS: the generic api_call surface is the api-source credential plane.
-  // The auth it draws from is declared under `_meta["dev.appstrate/api"].auth_key`
-  // (the platform's `getApiCallConfig` convention); fall back to the single
-  // declared auth. Integrations without an api-call association expose no
-  // generic tool — the caller skips them.
-  const auths = m.auths ?? {};
-  const authKeys = Object.keys(auths);
-  const declaredAuthKey = m._meta?.["dev.appstrate/api"]?.auth_key;
-  const authKey =
-    declaredAuthKey ?? (m.source?.kind === "api" && authKeys.length > 0 ? authKeys[0] : undefined);
-  if (!authKey) return null;
-  const auth = auths[authKey];
-  if (!auth) return null;
+  // api_call is the credential-injecting plane, declared via the
+  // `_meta["dev.appstrate/api"].auths` vendor extension (orthogonal to
+  // source.kind). Each opted-in auth that references a declared `auths.{key}`
+  // yields one tool. Integrations without the extension expose no generic
+  // tool — the caller skips them.
+  const declaredAuths = m.auths ?? {};
+  const metaAuths = m._meta?.["dev.appstrate/api"]?.auths;
+  if (!metaAuths || typeof metaAuths !== "object" || Array.isArray(metaAuths)) return [];
+  const authKeys = Object.keys(metaAuths).filter((k) => k in declaredAuths);
+  if (authKeys.length === 0) return [];
+  const namespace = slugifyIntegrationId(name);
+  const single = authKeys.length === 1;
 
-  const authorizedUris = Array.isArray(auth.authorized_uris)
-    ? auth.authorized_uris.filter((u): u is string => typeof u === "string")
-    : [];
-  const allowAllUris = auth.allow_all_uris === true;
-  const http = projectHttpDeliveryConfig(auth.delivery?.http);
-
-  return {
-    name,
-    namespace: slugifyIntegrationId(name),
-    authKey,
-    authType: typeof auth.type === "string" ? auth.type : "custom",
-    authorizedUris,
-    allowAllUris,
-    ...(http ? { http } : {}),
-  };
+  const out: ApiCallIntegrationMeta[] = [];
+  for (const authKey of authKeys) {
+    const auth = declaredAuths[authKey]!;
+    const authorizedUris = Array.isArray(auth.authorized_uris)
+      ? auth.authorized_uris.filter((u): u is string => typeof u === "string")
+      : [];
+    const allowAllUris = auth.allow_all_uris === true;
+    const http = projectHttpDeliveryConfig(auth.delivery?.http);
+    out.push({
+      name,
+      namespace,
+      toolName: single ? "api_call" : `api_call__${authKey}`,
+      authKey,
+      authType: typeof auth.type === "string" ? auth.type : "custom",
+      authorizedUris,
+      allowAllUris,
+      ...(http ? { http } : {}),
+    });
+  }
+  return out;
 }
 
 /** Build the {@link ApiCallMeta} the HTTP core uses for `authorizedUris` enforcement. */
@@ -212,9 +222,9 @@ function toApiCallMeta(meta: ApiCallIntegrationMeta): ApiCallMeta {
   };
 }
 
-/** Tool name surfaced to the LLM, matching the platform's `{ns}__api_call`. */
+/** Tool name surfaced to the LLM, matching the platform's `{ns}__{toolName}`. */
 export function apiCallToolName(meta: ApiCallIntegrationMeta): string {
-  return `${meta.namespace}__api_call`;
+  return `${meta.namespace}__${meta.toolName}`;
 }
 
 // ─────────────────────────────────────────────
@@ -295,23 +305,25 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
     const creds = await this.loadCreds();
     const tools: Tool[] = [];
     for (const ref of refs) {
-      const meta = readApiCallIntegrationMeta(bundle, ref);
-      if (!meta) continue; // not an apiCall integration — skip
+      const metas = readApiCallIntegrationMetas(bundle, ref);
+      if (metas.length === 0) continue; // not an apiCall integration — skip
       const entry = creds.integrations[ref.name];
       if (!entry) {
         throw new Error(
           `LocalIntegrationResolver: no credentials found for ${ref.name} in the local creds file`,
         );
       }
-      tools.push(
-        makeApiCallTool(toApiCallMeta(meta), this.buildCall(meta, entry), {
-          toolName: apiCallToolName(meta),
-          description:
-            `Make an authenticated request through the "${meta.name}" integration's ` +
-            "credential-injecting proxy. Supply method, target URL, optional headers/body, " +
-            "and responseMode. The target must match the integration auth's authorized_uris.",
-        }),
-      );
+      for (const meta of metas) {
+        tools.push(
+          makeApiCallTool(toApiCallMeta(meta), this.buildCall(meta, entry), {
+            toolName: apiCallToolName(meta),
+            description:
+              `Make an authenticated request through the "${meta.name}" integration's ` +
+              "credential-injecting proxy. Supply method, target URL, optional headers/body, " +
+              "and responseMode. The target must match the integration auth's authorized_uris.",
+          }),
+        );
+      }
     }
     return tools;
   }
@@ -525,20 +537,21 @@ export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallRes
   async resolve(refs: IntegrationRef[], bundle: Bundle): Promise<Tool[]> {
     const tools: Tool[] = [];
     for (const ref of refs) {
-      const meta = readApiCallIntegrationMeta(bundle, ref);
-      if (!meta) continue;
-      // The platform enforces `authorized_uris` server-side — allow all
-      // locally so the tool dispatches and lets the proxy gate.
-      const remoteMeta: ApiCallMeta = { name: meta.name, allowAllUris: true };
-      tools.push(
-        makeApiCallTool(remoteMeta, this.buildCall(meta), {
-          toolName: apiCallToolName(meta),
-          description:
-            `Make an authenticated request through the "${meta.name}" integration's ` +
-            "credential-injecting proxy. Supply method, target URL, optional headers/body, " +
-            "and responseMode. The target must match the integration auth's authorized_uris.",
-        }),
-      );
+      const metas = readApiCallIntegrationMetas(bundle, ref);
+      for (const meta of metas) {
+        // The platform enforces `authorized_uris` server-side — allow all
+        // locally so the tool dispatches and lets the proxy gate.
+        const remoteMeta: ApiCallMeta = { name: meta.name, allowAllUris: true };
+        tools.push(
+          makeApiCallTool(remoteMeta, this.buildCall(meta), {
+            toolName: apiCallToolName(meta),
+            description:
+              `Make an authenticated request through the "${meta.name}" integration's ` +
+              "credential-injecting proxy. Supply method, target URL, optional headers/body, " +
+              "and responseMode. The target must match the integration auth's authorized_uris.",
+          }),
+        );
+      }
     }
     return tools;
   }

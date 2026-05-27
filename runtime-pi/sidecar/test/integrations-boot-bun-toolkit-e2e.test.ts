@@ -156,7 +156,7 @@ describe("@appstrate/bun-toolkit fixtures", () => {
 
     const m = result.manifest as unknown as {
       source: { kind: string; server?: { name: string } };
-      _meta?: Record<string, { auth_key?: string }>;
+      _meta?: Record<string, { auths?: Record<string, unknown> }>;
       auths: Record<
         string,
         { type: string; delivery: { http: { in: string; name: string; value: string } } }
@@ -165,7 +165,9 @@ describe("@appstrate/bun-toolkit fixtures", () => {
     };
     expect(m.source.kind).toBe("local");
     expect(m.source.server?.name).toBe(SERVER_ID);
-    expect(m._meta?.["dev.appstrate/api"]?.auth_key).toBe("primary");
+    // api_call is additive (vendor `_meta`) on a local source — the `primary`
+    // auth is opted into the api_call tool alongside the spawned MCP server.
+    expect(m._meta?.["dev.appstrate/api"]?.auths).toHaveProperty("primary");
     expect(m.auths.primary!.type).toBe("api_key");
     expect(m.auths.primary!.delivery.http.name).toBe("X-Toolkit-Token");
     expect(m.auths.primary!.delivery.http.value).toBe("{$credential.api_key}");

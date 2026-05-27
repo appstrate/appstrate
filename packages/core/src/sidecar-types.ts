@@ -157,6 +157,30 @@ export interface HttpDeliveryAuthSpec {
   expiresAtEpochMs: number | null;
 }
 
+/**
+ * One credential-injecting `api_call` tool — a single auth opted into the
+ * `_meta["dev.appstrate/api"]` vendor extension. See
+ * {@link IntegrationSpawnSpec.apiCalls}.
+ */
+export interface ApiCallSpec {
+  /** Which declared auth supplies credentials + authorized_uris. */
+  authKey: string;
+  /**
+   * Agent-facing tool name (before the `{namespace}__` prefix). `api_call` for
+   * a single opted-in auth; `api_call__{authKey}` when several are opted in.
+   */
+  toolName: string;
+  /** URI allowlist (verbatim from `auths.{authKey}.authorized_uris`). */
+  authorizedUris: readonly string[];
+  /**
+   * Skip the `authorized_uris` allowlist (SSRF blocklist still applies).
+   * From `auths.{authKey}.allow_all_uris` — for user-supplied base URLs.
+   */
+  allowAllUris?: boolean;
+  /** Resumable-upload protocols the tool advertises (may be empty). */
+  uploadProtocols?: readonly string[];
+}
+
 export interface IntegrationSpawnSpec {
   /** Integration package id (e.g. `@appstrate/gmail-mcp`). */
   integrationId: string;
@@ -178,19 +202,23 @@ export interface IntegrationSpawnSpec {
    *                  mcp-server bundle.
    *   - `"remote"` → open a Streamable HTTP MCP client against
    *                  `manifest.server.url`; no bundle, no MITM.
-   *   - `"api"`    → serverless; the sidecar skips spawn and wires the
-   *                  generic `api_call` tool only (`manifest.server` is
-   *                  undefined in this case).
+   *   - `"none"`   → no MCP backing; the sidecar skips spawn. The only tools
+   *                  it can expose are the `api_call` tool(s) declared via the
+   *                  `_meta["dev.appstrate/api"]` vendor extension ({@link apiCalls}).
+   *                  `manifest.server` is undefined in this case.
+   *
+   * Note: api_call is ORTHOGONAL to `sourceKind` — a `"local"`/`"remote"`
+   * integration can also carry {@link apiCalls} entries.
    */
-  sourceKind: "local" | "remote" | "api";
+  sourceKind: "local" | "remote" | "none";
   /** Validated `type: integration` manifest (server, auths). */
   manifest: {
     name: string;
     version: string;
     /**
      * MCP server to spawn/connect. Optional on the spawn spec: the
-     * resolver omits it for serverless integrations (`source.kind: "api"`,
-     * no `server`), which expose only the generic `api_call` tool. The
+     * resolver omits it for serverless integrations (`source.kind: "none"`,
+     * no `server`), which expose only their `api_call` tool(s) (if any). The
      * sidecar skips spawn entirely for such specs.
      *
      * NOTE: `server.type` here carries the AFPS `mcpServerTypeEnum` value
@@ -253,30 +281,23 @@ export interface IntegrationSpawnSpec {
     };
   };
   /**
-   * Generic credential-injecting HTTP tool. Set when the manifest declares
-   * `source.kind: "api"` AND the agent
-   * selected the `api_call` tool. The sidecar registers a
-   * `{namespace}__api_call` tool that proxies an arbitrary upstream
-   * request bounded by {@link authorizedUris}, injecting the resolved
-   * auth's credential header via the same machinery as `delivery.http`.
+   * Generic credential-injecting HTTP tool(s), one per auth opted into the
+   * `_meta["dev.appstrate/api"]` vendor extension AND selected by the agent.
+   * Orthogonal to {@link sourceKind} — populated for `local`/`remote`/`none`
+   * alike. For each entry the sidecar registers a `{namespace}__{toolName}`
+   * tool that proxies an arbitrary upstream request bounded by
+   * {@link ApiCallSpec.authorizedUris}, injecting the resolved auth's
+   * credential header via the same machinery as `delivery.http`.
+   *
+   * A single opted-in auth → `toolName: "api_call"`; multiple →
+   * `toolName: "api_call__{authKey}"` per entry.
    *
    * Credentials are NOT inlined here — the sidecar reads them from the
    * `/internal/integration-credentials` surface (same as MITM / remote
-   * HTTP) so a leaked env var can't surface a live token.
+   * HTTP) so a leaked env var can't surface a live token. Omitted when the
+   * integration exposes no api_call tool (or the agent selected none).
    */
-  apiCall?: {
-    /** Which declared auth supplies credentials + authorized_uris. */
-    authKey: string;
-    /** URI allowlist (verbatim from `auths.{authKey}.authorized_uris`). */
-    authorizedUris: readonly string[];
-    /**
-     * Skip the `authorized_uris` allowlist (SSRF blocklist still applies).
-     * From `auths.{authKey}.allow_all_uris` — for user-supplied base URLs.
-     */
-    allowAllUris?: boolean;
-    /** Resumable-upload protocols the tool advertises (may be empty). */
-    uploadProtocols?: readonly string[];
-  };
+  apiCalls?: readonly ApiCallSpec[];
   /**
    * Env vars to inject on the spawned subprocess. Resolved from
    * `manifest.auths.{key}.delivery.env` by the platform — values are

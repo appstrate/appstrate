@@ -64,23 +64,25 @@ function agentManifest(
   selection: { version: string; tools?: string[]; scopes?: string[] },
 ): Record<string, unknown> {
   const { version, tools, scopes } = selection;
-  const m: Record<string, unknown> = {
+  // Per AFPS §4.1, per-integration tool/scope selection lives on the
+  // canonical `dependencies.integrations.<id>` object form — not a separate
+  // top-level `integrations` block (which `parseManifestIntegrations` ignores).
+  const dep: Record<string, unknown> =
+    tools !== undefined || scopes !== undefined
+      ? {
+          version,
+          ...(tools !== undefined ? { tools } : {}),
+          ...(scopes !== undefined ? { scopes } : {}),
+        }
+      : (version as unknown as Record<string, unknown>);
+  return {
     name,
     version: "1.0.0",
     type: "agent",
     schema_version: "0.1",
     display_name: name,
-    dependencies: { integrations: { [INTEGRATION_ID]: version } },
+    dependencies: { integrations: { [INTEGRATION_ID]: dep } },
   };
-  if (tools !== undefined || scopes !== undefined) {
-    m.integrations = {
-      [INTEGRATION_ID]: {
-        ...(tools !== undefined ? { tools } : {}),
-        ...(scopes !== undefined ? { scopes } : {}),
-      },
-    };
-  }
-  return m;
 }
 
 describe("integration-scope-resolver", () => {

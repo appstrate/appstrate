@@ -12,7 +12,7 @@
  * vocabulary lives in exactly one place.
  *
  * Vocabulary (AFPS §7, Appendix D):
- *   - `source.kind: "local" | "remote" | "api"` replaces the 1.x inline `server`.
+ *   - `source.kind: "local" | "remote" | "none"` replaces the 1.x inline `server`.
  *   - per-auth OAuth: `authorization_endpoint`, `token_endpoint`, `resource`,
  *     `default_scopes`, `code_challenge_methods_supported`, …
  *   - `delivery.http` is `{ in, name, prefix?, value, encoding?, allow_server_override? }`.
@@ -252,13 +252,13 @@ export function isSafeDeliveryFilePath(path: string): boolean {
   return true;
 }
 
-/** The integration source discriminant kind (`local` | `remote` | `api`). */
+/** The integration source discriminant kind (`local` | `remote` | `none`). */
 export function getIntegrationSourceKind(
   manifest: IntegrationManifest,
-): "local" | "remote" | "api" | undefined {
+): "local" | "remote" | "none" | undefined {
   const source = (manifest as { source?: { kind?: string } }).source;
   const kind = source?.kind;
-  return kind === "local" || kind === "remote" || kind === "api" ? kind : undefined;
+  return kind === "local" || kind === "remote" || kind === "none" ? kind : undefined;
 }
 
 /** `source.server` reference for a `local`-source integration (the mcp-server package). */

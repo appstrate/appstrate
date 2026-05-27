@@ -119,8 +119,7 @@ describe("GET /internal/mcp-server-bundle/:scope/:name", () => {
         type: "agent",
         schema_version: "0.1",
         display_name: "Test Agent",
-        dependencies: { integrations: { [INTEGRATION]: "^1.0.0" } },
-        integrations: { [INTEGRATION]: { tools: ["search"] } },
+        dependencies: { integrations: { [INTEGRATION]: { version: "^1.0.0", tools: ["search"] } } },
       },
     });
     await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);

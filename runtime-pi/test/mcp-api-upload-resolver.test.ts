@@ -43,7 +43,6 @@ import type { UploadProtocol } from "../mcp/upload-adapters/index.ts";
 const API_CALL_TOOL = "x__api_call";
 
 const ctxBase = (workspace: string) => ({
-  runId: "run_test",
   toolCallId: "tc_1",
   workspace,
   signal: new AbortController().signal,
@@ -87,7 +86,7 @@ async function makePair(
         content: [{ type: "text", text: sim.body }],
         ...(sim.isError ? { isError: true } : {}),
         _meta: {
-          "appstrate/upstream": {
+          "dev.appstrate/upstream": {
             status: sim.status,
             headers: sim.headers,
           },
@@ -337,7 +336,7 @@ describe("McpApiUploadResolver — google-resumable", () => {
           uploadProtocol: "google-resumable",
           partSizeBytes: 4 * 1024 * 1024,
         },
-        { runId: "r", toolCallId: "t", workspace, signal: ac.signal },
+        { toolCallId: "t", workspace, signal: ac.signal },
       );
       expect(result.ok).toBe(false);
       if (result.ok) throw new Error("expected failure");
@@ -1008,7 +1007,7 @@ describe("McpApiUploadResolver — cross-cutting", () => {
         content: [{ type: "text", text: "credential fetch failed: 401 from upstream auth" }],
         isError: true,
         _meta: {
-          "appstrate/upstream": { status: 0, headers: {} },
+          "dev.appstrate/upstream": { status: 0, headers: {} },
         },
       })) as never,
     };
@@ -1072,7 +1071,7 @@ describe("McpApiUploadResolver — cancellation parity", () => {
           uploadProtocol: "s3-multipart",
           partSizeBytes: 5 * 1024 * 1024,
         },
-        { runId: "r", toolCallId: "t", workspace, signal: ac.signal },
+        { toolCallId: "t", workspace, signal: ac.signal },
       );
       expect(result.ok).toBe(false);
       if (result.ok) throw new Error("expected failure");
@@ -1118,7 +1117,7 @@ describe("McpApiUploadResolver — cancellation parity", () => {
           uploadProtocol: "tus",
           partSizeBytes: 4 * 1024 * 1024,
         },
-        { runId: "r", toolCallId: "t", workspace, signal: ac.signal },
+        { toolCallId: "t", workspace, signal: ac.signal },
       );
       expect(result.ok).toBe(false);
       if (result.ok) throw new Error("expected failure");
@@ -1161,7 +1160,7 @@ describe("McpApiUploadResolver — cancellation parity", () => {
           uploadProtocol: "ms-resumable",
           partSizeBytes: 5 * 1024 * 1024,
         },
-        { runId: "r", toolCallId: "t", workspace, signal: ac.signal },
+        { toolCallId: "t", workspace, signal: ac.signal },
       );
       expect(result.ok).toBe(false);
       if (result.ok) throw new Error("expected failure");
@@ -1223,7 +1222,7 @@ describe("McpApiUploadResolver — cancellation parity", () => {
           uploadProtocol: "google-resumable",
           partSizeBytes: 4 * 1024 * 1024,
         },
-        { runId: "r", toolCallId: "t", workspace, signal: ac.signal },
+        { toolCallId: "t", workspace, signal: ac.signal },
       );
       expect(result.ok).toBe(false);
       await deletes.wait(1);

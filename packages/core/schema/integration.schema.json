@@ -364,25 +364,11 @@
           "properties": {
             "kind": {
               "type": "string",
-              "const": "api"
-            },
-            "api": {
-              "type": "object",
-              "properties": {
-                "upload_protocols": {
-                  "type": "array",
-                  "items": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                }
-              },
-              "additionalProperties": {}
+              "const": "none"
             }
           },
           "required": [
-            "kind",
-            "api"
+            "kind"
           ],
           "additionalProperties": {}
         }

@@ -23,11 +23,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import {
-  expandScopesGranted,
-  getApiCallConfig,
-  API_CALL_TOOL_NAME,
-} from "@appstrate/core/integration";
+import { expandScopesGranted, isApiCallToolName } from "@appstrate/core/integration";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Spinner } from "../spinner";
 import { useIntegrationDetail } from "../../hooks/use-integrations";
@@ -44,23 +40,23 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
   const { data: detail, isLoading } = useIntegrationDetail(packageId);
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
-  // apiCall integrations expose the generic `api_call` tool, which the runtime
-  // injects only when it's present in the agent's `tools[]`. Default it on when
-  // a freshly-added integration (`tools` still undefined) exposes api_call as
-  // its ONLY surface (no native MCP tools) so it works out of the box. When the
-  // integration ALSO ships native tools (attachable api_call), the generic tool
-  // is an opt-in escape hatch — don't grant it by default; the native tools are
-  // the primary surface and the user opts into api_call below.
+  // api_call integrations expose generic credential-injecting tool(s), which the
+  // runtime injects only when present in the agent's `tools[]`. Default them on
+  // when a freshly-added integration (`tools` still undefined) exposes api_call
+  // as its ONLY surface (no native MCP tools) so it works out of the box. When
+  // the integration ALSO ships native tools (attachable api_call), the generic
+  // tool is an opt-in escape hatch — don't grant it by default; the native tools
+  // are the primary surface and the user opts into api_call below.
   useEffect(() => {
-    if (!detail || getApiCallConfig(detail.manifest) === null) return;
-    if (entry.tools !== undefined) return;
-    // catalog excludes the synthetic api_call entry for the purposes of this
-    // check — we want "does the integration expose discrete MCP tools too?"
-    const nativeCount = (detail.tool_catalog ?? []).filter(
-      (t) => t.name !== API_CALL_TOOL_NAME,
-    ).length;
-    if (nativeCount > 0) return;
-    onChange({ ...entry, tools: [API_CALL_TOOL_NAME] });
+    if (!detail || entry.tools !== undefined) return;
+    const catalog = detail.tool_catalog ?? [];
+    const apiCallNames = catalog.filter((t) => isApiCallToolName(t.name)).map((t) => t.name);
+    if (apiCallNames.length === 0) return;
+    // Only default-on when api_call is the integration's ONLY surface (no
+    // discrete native MCP tools).
+    const hasNative = catalog.some((t) => !isApiCallToolName(t.name));
+    if (hasNative) return;
+    onChange({ ...entry, tools: apiCallNames });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail, entry.tools]);
 
@@ -85,9 +81,11 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
   // `tools{}` policy table is no longer the source of truth for "what
   // exists" (it only carries per-tool policy when present).
   const fullCatalog = detail.tool_catalog ?? [];
-  // The synthetic api_call entry has its own dedicated checkbox row;
-  // exclude it from the native tools list so it doesn't render twice.
-  const nativeCatalog = fullCatalog.filter((t) => t.name !== API_CALL_TOOL_NAME);
+  // The api_call tool(s) have their own dedicated checkbox row(s); exclude
+  // them from the native tools list so they don't render twice.
+  const apiCallEntries = fullCatalog.filter((t) => isApiCallToolName(t.name));
+  const apiCallToolNames = apiCallEntries.map((t) => t.name);
+  const nativeCatalog = fullCatalog.filter((t) => !isApiCallToolName(t.name));
   const declaredToolNames = nativeCatalog.map((t) => t.name);
   const hasToolCatalog = declaredToolNames.length > 0;
 
@@ -110,18 +108,11 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
     onChange({ ...entry, auth_key: next });
   };
 
-  // apiCall integrations expose the generic `api_call` tool instead of
-  // discrete MCP tools. Surface it as a selectable tool so the agent author
-  // can opt in (the runtime gates injection on it).
-  const isApiCall = getApiCallConfig(detail.manifest) !== null;
-  const apiCallSelected = (entry.tools ?? []).includes(API_CALL_TOOL_NAME);
-  const toggleApiCall = () => {
-    const current = entry.tools ?? [];
-    const next = current.includes(API_CALL_TOOL_NAME)
-      ? current.filter((tool) => tool !== API_CALL_TOOL_NAME)
-      : [...current, API_CALL_TOOL_NAME];
-    onChange({ ...entry, tools: next });
-  };
+  // api_call integrations expose generic credential-injecting tool(s) (one per
+  // auth opted into the `_meta["dev.appstrate/api"]` extension) instead of, or
+  // alongside, discrete MCP tools. Surface each as a selectable tool so the
+  // agent author can opt in (the runtime gates injection on the selection).
+  const isApiCall = apiCallToolNames.length > 0;
 
   // Aggregate scope catalog across every auth — the resolver treats them
   // as a single namespace per integration (Phase 0). Dedup by `value`,
@@ -242,23 +233,29 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
           </label>
         </div>
       )}
-      {isApiCall && (
-        <label className="flex cursor-pointer items-start gap-2">
-          <Checkbox
-            checked={apiCallSelected}
-            onCheckedChange={toggleApiCall}
-            data-testid={`integ-apicall-${packageId}`}
-          />
-          <span className="flex flex-col">
-            <span className="text-xs font-medium">
-              {t("agentEditor.integrations.apiCall.label")}
+      {isApiCall &&
+        apiCallEntries.map((tool) => (
+          <label key={tool.name} className="flex cursor-pointer items-start gap-2">
+            <Checkbox
+              checked={selectedTools.has(tool.name)}
+              onCheckedChange={() => toggleTool(tool.name)}
+              data-testid={
+                apiCallEntries.length > 1
+                  ? `integ-apicall-${packageId}-${tool.name}`
+                  : `integ-apicall-${packageId}`
+              }
+            />
+            <span className="flex flex-col">
+              <span className="text-xs font-medium">
+                {t("agentEditor.integrations.apiCall.label")}
+                {apiCallEntries.length > 1 ? ` · ${tool.name}` : ""}
+              </span>
+              <span className="text-muted-foreground text-[11px]">
+                {t("agentEditor.integrations.apiCall.description")}
+              </span>
             </span>
-            <span className="text-muted-foreground text-[11px]">
-              {t("agentEditor.integrations.apiCall.description")}
-            </span>
-          </span>
-        </label>
-      )}
+          </label>
+        ))}
       {hasToolCatalog && (
         <div>
           <div className="mb-2 flex items-center justify-between gap-2">

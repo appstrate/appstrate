@@ -607,6 +607,19 @@ describe("Packages API", () => {
       suffix = "ok",
     ) {
       const isBare = typeof selection === "string";
+      // AFPS §4.1 — tool/scope selection lives on the canonical
+      // `dependencies.integrations.<id>` object form (read by
+      // `parseManifestIntegrations`), not a top-level `integrations` block.
+      const hasRich = !isBare && (selection.tools !== undefined || selection.scopes !== undefined);
+      const dep: unknown = isBare
+        ? selection
+        : hasRich
+          ? {
+              version: selection.version,
+              ...(selection.tools !== undefined ? { tools: selection.tools } : {}),
+              ...(selection.scopes !== undefined ? { scopes: selection.scopes } : {}),
+            }
+          : selection.version;
       const manifest: Record<string, unknown> = {
         name: `@pkgorg/agent-${suffix}`,
         version: "0.1.0",
@@ -614,17 +627,9 @@ describe("Packages API", () => {
         schema_version: "0.1",
         display_name: `Agent ${suffix}`,
         dependencies: {
-          integrations: { [integrationId]: isBare ? selection : selection.version },
+          integrations: { [integrationId]: dep },
         },
       };
-      if (!isBare && (selection.tools !== undefined || selection.scopes !== undefined)) {
-        manifest.integrations = {
-          [integrationId]: {
-            ...(selection.tools !== undefined ? { tools: selection.tools } : {}),
-            ...(selection.scopes !== undefined ? { scopes: selection.scopes } : {}),
-          },
-        };
-      }
       return { manifest, content: "Prompt" };
     }
 
@@ -709,8 +714,9 @@ describe("Packages API", () => {
             type: "agent",
             schema_version: "0.1",
             display_name: "Updated",
-            dependencies: { integrations: { [integrationId]: "^1.0.0" } },
-            integrations: { [integrationId]: { tools: ["nope"] } },
+            dependencies: {
+              integrations: { [integrationId]: { version: "^1.0.0", tools: ["nope"] } },
+            },
           },
           content: "Updated prompt",
           lock_version: agent.lockVersion,

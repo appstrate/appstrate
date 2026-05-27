@@ -4,7 +4,7 @@
  * AFPS integration-manifest builders for tests.
  *
  * After the AFPS migration the integration manifest is snake_case with a
- * `source` discriminant (`local` | `remote` | `api`), per-auth `delivery.http`
+ * `source` discriminant (`local` | `remote` | `none`), per-auth `delivery.http`
  * value templates (`{$credential.<field>}`), `authorized_uris`, and OAuth
  * endpoint fields (`authorization_endpoint`, `token_endpoint`, `default_scopes`,
  * …). These builders centralise the new shape so the integration / credential /
@@ -218,28 +218,47 @@ export function remoteIntegrationManifest(opts: {
   } as unknown as IntegrationManifest;
 }
 
-/** Build an AFPS integration manifest with a serverless `api` source. */
+/**
+ * Build a serverless AFPS integration manifest (`source.kind: "none"` — no MCP
+ * server to spawn). When `apiCall` is set, the integration opts the named auth
+ * into the `api_call` vendor capability via the `_meta["dev.appstrate/api"]`
+ * extension (orthogonal to `source.kind`). `apiCall.authKey` MUST be a key that
+ * also exists in `auths`. `apiCall.uploadProtocols` carries the resumable-upload
+ * protocols that auth advertises.
+ */
 export function apiIntegrationManifest(opts: {
   name: string;
   version?: string;
   displayName?: string;
-  uploadProtocols?: string[];
+  /** Opt an auth into the `api_call` tool via `_meta["dev.appstrate/api"]`. */
+  apiCall?: { authKey: string; uploadProtocols?: string[] };
   auths: Record<string, AuthSpec>;
   tools_policy?: Record<string, unknown>;
 }): IntegrationManifest {
   const version = opts.version ?? "1.0.0";
   const auths: Record<string, unknown> = {};
   for (const [k, spec] of Object.entries(opts.auths)) auths[k] = buildAuth(spec);
+  const meta = opts.apiCall
+    ? {
+        _meta: {
+          "dev.appstrate/api": {
+            auths: {
+              [opts.apiCall.authKey]: opts.apiCall.uploadProtocols
+                ? { upload_protocols: opts.apiCall.uploadProtocols }
+                : {},
+            },
+          },
+        },
+      }
+    : {};
   return {
     type: "integration",
     schema_version: "0.1",
     name: opts.name,
     version,
     display_name: opts.displayName ?? opts.name,
-    source: {
-      kind: "api",
-      api: opts.uploadProtocols ? { upload_protocols: opts.uploadProtocols } : {},
-    },
+    source: { kind: "none" },
+    ...meta,
     auths,
     ...(opts.tools_policy ? { tools_policy: opts.tools_policy } : {}),
   } as unknown as IntegrationManifest;

@@ -46,8 +46,7 @@ function buildAgentManifest(): Record<string, unknown> {
     type: "agent",
     schema_version: "0.1",
     display_name: "Pin Test Agent",
-    dependencies: { integrations: { [INTEGRATION]: "^1.0.0" } },
-    integrations: { [INTEGRATION]: { tools: ["search"] } },
+    dependencies: { integrations: { [INTEGRATION]: { version: "^1.0.0", tools: ["search"] } } },
   };
 }
 

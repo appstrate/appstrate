@@ -9,8 +9,7 @@
   "license": "Apache-2.0",
   "icon": "wordpress",
   "source": {
-    "kind": "api",
-    "api": {}
+    "kind": "none"
   },
   "auths": {
     "primary": {
@@ -58,7 +57,9 @@
       "author": "Appstrate"
     },
     "dev.appstrate/api": {
-      "auth_key": "primary"
+      "auths": {
+        "primary": {}
+      }
     }
   }
 }

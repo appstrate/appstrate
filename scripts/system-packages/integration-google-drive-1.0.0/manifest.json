@@ -9,10 +9,7 @@
   "license": "Apache-2.0",
   "icon": "googledrive",
   "source": {
-    "kind": "api",
-    "api": {
-      "upload_protocols": ["google-resumable"]
-    }
+    "kind": "none"
   },
   "auths": {
     "primary": {
@@ -78,7 +75,11 @@
       "author": "Appstrate"
     },
     "dev.appstrate/api": {
-      "auth_key": "primary"
+      "auths": {
+        "primary": {
+          "upload_protocols": ["google-resumable"]
+        }
+      }
     }
   }
 }

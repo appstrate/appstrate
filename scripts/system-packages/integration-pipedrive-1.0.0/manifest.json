@@ -9,8 +9,7 @@
   "license": "Apache-2.0",
   "icon": "https://api.iconify.design/logos/pipedrive.svg",
   "source": {
-    "kind": "api",
-    "api": {}
+    "kind": "none"
   },
   "auths": {
     "primary": {
@@ -109,7 +108,9 @@
       "author": "Appstrate"
     },
     "dev.appstrate/api": {
-      "auth_key": "primary"
+      "auths": {
+        "primary": {}
+      }
     }
   }
 }

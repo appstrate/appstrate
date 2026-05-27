@@ -52,11 +52,11 @@ needed.
 Every integration declares `source.kind` to tell the platform how the upstream is
 reached. The authentication layer (`auths`) is applied on top, regardless of source.
 
-| `source.kind` | Sub-object                                                                         | When to use                                                                  |
-| ------------- | ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `local`       | `source.server: { name, version, vendored? }` — references an `mcp-server` package | Local stdio MCP server (Node, Python, binary) bundled separately             |
-| `remote`      | `source.remote: { url, transport: "streamable-http" \| "sse" }`                    | Hosted MCP endpoint (Google MCP, Anthropic-hosted MCPs, Composio, Linear, …) |
-| `api`         | `source.api: { upload_protocols?: string[] }`                                      | Raw HTTP API — no MCP server; sidecar synthesizes a `{ns}__api_call` tool    |
+| `source.kind` | Sub-object                                                                         | When to use                                                                                   |
+| ------------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `local`       | `source.server: { name, version, vendored? }` — references an `mcp-server` package | Local stdio MCP server (Node, Python, binary) bundled separately                              |
+| `remote`      | `source.remote: { url, transport: "streamable-http" \| "sse" }`                    | Hosted MCP endpoint (Google MCP, Anthropic-hosted MCPs, Composio, Linear, …)                  |
+| `none`        | _(no sub-object)_                                                                  | Serverless integration — no MCP server; reaches upstream via the `api_call` vendor capability |
 
 ```jsonc
 // local — references a separate mcp-server package by AFPS identity + semver range
@@ -65,14 +65,32 @@ reached. The authentication layer (`auths`) is applied on top, regardless of sou
 // remote — hosted MCP endpoint
 "source": { "kind": "remote", "remote": { "url": "https://gmailmcp.googleapis.com/mcp/v1", "transport": "streamable-http" } }
 
-// api — credential-injecting HTTP API surface (no MCP server)
-"source": { "kind": "api", "api": { "upload_protocols": ["google-resumable", "tus"] } }
+// none — serverless: no MCP server
+"source": { "kind": "none" }
 ```
 
-`upload_protocols` is an **open** array of strings (reserved values: `google-resumable`,
-`s3-multipart`, `tus`, `ms-resumable`). Producers MAY emit other identifiers (prefer
-reverse-DNS qualified strings such as `com.example/proprietary-resumable`); consumers
-MUST preserve unknown values.
+### Enabling `api_call`
+
+`api_call` is an Appstrate vendor capability **orthogonal** to `source.kind` — any
+integration (`local`, `remote`, or `none`) can expose it by opting `auths` entries into
+the `_meta["dev.appstrate/api"]` extension. Each opted-in auth key (must exist in the
+top-level `auths`) yields one `api_call` tool; a single opted-in auth → `api_call`,
+multiple → `api_call__<authKey>`.
+
+```jsonc
+"_meta": {
+  "dev.appstrate/api": {
+    "auths": {
+      "primary": { "upload_protocols": ["google-resumable", "tus"] }
+    }
+  }
+}
+```
+
+`upload_protocols` is an optional per-auth **open** array of strings (reserved values:
+`google-resumable`, `s3-multipart`, `tus`, `ms-resumable`). Producers MAY emit other
+identifiers (prefer reverse-DNS qualified strings such as
+`com.example/proprietary-resumable`); consumers MUST preserve unknown values.
 
 ---
 

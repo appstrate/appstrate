@@ -846,13 +846,16 @@ export async function bootIntegrations(
       //    tools under one namespace; the spawned server stays primary.
       // Returns the number of tools added so callers can sum the tool count.
       const attachApiCall = async (intoNamespace?: string): Promise<number> => {
-        if (!spec.apiCall) return 0;
+        const apiCalls = spec.apiCalls ?? [];
+        if (apiCalls.length === 0) return 0;
         if (!apiCallDeps) {
           logger.warn("integration declares api_call but sidecar has no proxy deps; skipping", {
             integrationId: spec.integrationId,
           });
           return 0;
         }
+        // One credentials source per integration (it serves every auth); each
+        // api_call entry binds its own auth via a per-auth adapter.
         const initial = await fetchInitialIntegrationCredentials(
           spec.integrationId,
           bundleFetchOpts,
@@ -863,54 +866,63 @@ export async function bootIntegrations(
           runToken: bundleFetchOpts.runToken,
           initialPayload: initial,
         });
-        const credAdapter = createApiCallCredentialAdapter({
-          source,
-          authKey: spec.apiCall.authKey,
-          authorizedUris: spec.apiCall.authorizedUris,
-          ...(spec.apiCall.allowAllUris ? { allowAllUris: true } : {}),
-        });
-        const integ: ApiCallIntegrationConfig = {
-          namespace: spec.namespace, // McpHost.register normalises it
-          integrationId: spec.integrationId,
-          fetchCredentials: credAdapter.fetchCredentials,
-          refreshCredentials: credAdapter.refreshCredentials,
-          // Resumable-upload protocols the manifest declared (plumbed via
-          // the spawn resolver). When non-empty the factory also emits an
-          // `api_upload` tool; the agent-side resolver drives it.
-          ...(spec.apiCall.uploadProtocols && spec.apiCall.uploadProtocols.length > 0
-            ? { uploadProtocols: spec.apiCall.uploadProtocols }
-            : {}),
-        };
-        const defs = createApiCallToolDefs(integ, apiCallDeps);
-        const pair = await createInProcessPair(defs, {
-          serverInfo: { name: `appstrate-api-call-${spec.integrationId}`, version: "1" },
-        });
-        const wrapped = wrapClient(pair.client, { close: () => pair.close() });
-        const sizeBefore = host.size();
-        await host.register({
-          namespace: spec.namespace,
-          client: wrapped,
-          trusted: true,
-          allowedTools: defs.map((d) => d.descriptor.name),
-          ...(intoNamespace ? { intoNamespace } : {}),
-        });
-        const count = host.size() - sizeBefore;
-        clients.push(wrapped);
-        logger.info("integration api_call registered (in-process)", {
-          integrationId: spec.integrationId,
-          namespace: intoNamespace ?? spec.namespace,
-          authKey: spec.apiCall.authKey,
-          attached: intoNamespace !== undefined,
-          toolCount: count,
-        });
-        return count;
+        let total = 0;
+        for (const apiCall of apiCalls) {
+          const credAdapter = createApiCallCredentialAdapter({
+            source,
+            authKey: apiCall.authKey,
+            authorizedUris: apiCall.authorizedUris,
+            ...(apiCall.allowAllUris ? { allowAllUris: true } : {}),
+          });
+          const integ: ApiCallIntegrationConfig = {
+            namespace: spec.namespace, // McpHost.register normalises it
+            integrationId: spec.integrationId,
+            toolName: apiCall.toolName,
+            fetchCredentials: credAdapter.fetchCredentials,
+            refreshCredentials: credAdapter.refreshCredentials,
+            // Resumable-upload protocols the manifest declared (plumbed via
+            // the spawn resolver). When non-empty the factory also emits an
+            // `api_upload` tool; the agent-side resolver drives it.
+            ...(apiCall.uploadProtocols && apiCall.uploadProtocols.length > 0
+              ? { uploadProtocols: apiCall.uploadProtocols }
+              : {}),
+          };
+          const defs = createApiCallToolDefs(integ, apiCallDeps);
+          const pair = await createInProcessPair(defs, {
+            serverInfo: {
+              name: `appstrate-api-call-${spec.integrationId}-${apiCall.toolName}`,
+              version: "1",
+            },
+          });
+          const wrapped = wrapClient(pair.client, { close: () => pair.close() });
+          const sizeBefore = host.size();
+          await host.register({
+            namespace: spec.namespace,
+            client: wrapped,
+            trusted: true,
+            allowedTools: defs.map((d) => d.descriptor.name),
+            ...(intoNamespace ? { intoNamespace } : {}),
+          });
+          const count = host.size() - sizeBefore;
+          clients.push(wrapped);
+          total += count;
+          logger.info("integration api_call registered (in-process)", {
+            integrationId: spec.integrationId,
+            namespace: intoNamespace ?? spec.namespace,
+            authKey: apiCall.authKey,
+            toolName: apiCall.toolName,
+            attached: intoNamespace !== undefined,
+            toolCount: count,
+          });
+        }
+        return total;
       };
 
       // Serverless integration (api_call-only, no MCP server) — the in-process
       // api_call server is its entire surface (registered as the primary).
-      // Dispatch on `sourceKind === "api"`; the resolver also leaves
+      // Dispatch on `sourceKind === "none"`; the resolver also leaves
       // `manifest.server` undefined for this branch.
-      if (spec.sourceKind === "api" || !spec.manifest.server) {
+      if (spec.sourceKind === "none" || !spec.manifest.server) {
         const apiCallToolCount = await attachApiCall();
         spawned.push({
           integrationId: spec.integrationId,

@@ -6,7 +6,7 @@ import {
   LocalIntegrationResolver,
   RemoteAppstrateIntegrationResolver,
   readIntegrationRefs,
-  readApiCallIntegrationMeta,
+  readApiCallIntegrationMetas,
   apiCallToolName,
   type Bundle,
   type BundlePackage,
@@ -84,8 +84,8 @@ function apiKeyIntegrationManifest(
     integration: {
       schema_version: "0.1",
       type: "integration",
-      source: { kind: "api", api: {} },
-      _meta: { "dev.appstrate/api": { auth_key: "main" } },
+      source: { kind: "none" },
+      _meta: { "dev.appstrate/api": { auths: { main: {} } } },
       auths: {
         main: {
           type: "api_key",
@@ -172,24 +172,25 @@ describe("readIntegrationRefs", () => {
   });
 });
 
-describe("readApiCallIntegrationMeta", () => {
+describe("readApiCallIntegrationMetas", () => {
   it("projects authKey, authType, authorizedUris, delivery.http from the manifest", () => {
     const root = makePackage("@acme/agent", "1.0.0", "agent", {});
     const integ = makePackage("@acme/api", "1.0.0", "integration", {
       "integration.json": JSON.stringify(apiKeyIntegrationManifest("@acme/api").integration),
     });
     const bundle = makeBundle(root, [integ]);
-    const meta = readApiCallIntegrationMeta(bundle, { name: "@acme/api", version: "^1" });
-    expect(meta).not.toBeNull();
-    expect(meta!.authKey).toBe("main");
-    expect(meta!.authType).toBe("api_key");
-    expect(meta!.authorizedUris).toEqual(["https://api.acme.com/**"]);
-    expect(meta!.allowAllUris).toBe(false);
-    expect(meta!.http?.headerName).toBe("X-Api-Key");
-    expect(apiCallToolName(meta!)).toBe("acme_api__api_call");
+    const metas = readApiCallIntegrationMetas(bundle, { name: "@acme/api", version: "^1" });
+    expect(metas).toHaveLength(1);
+    const meta = metas[0]!;
+    expect(meta.authKey).toBe("main");
+    expect(meta.authType).toBe("api_key");
+    expect(meta.authorizedUris).toEqual(["https://api.acme.com/**"]);
+    expect(meta.allowAllUris).toBe(false);
+    expect(meta.http?.headerName).toBe("X-Api-Key");
+    expect(apiCallToolName(meta)).toBe("acme_api__api_call");
   });
 
-  it("returns null for an integration with no apiCall (pure MCP server)", () => {
+  it("returns [] for an integration with no apiCall (pure MCP server)", () => {
     const root = makePackage("@acme/agent", "1.0.0", "agent", {});
     const integ = makePackage("@acme/mcp", "1.0.0", "integration", {
       "integration.json": JSON.stringify({
@@ -213,17 +214,17 @@ describe("readApiCallIntegrationMeta", () => {
       }),
     });
     const bundle = makeBundle(root, [integ]);
-    expect(readApiCallIntegrationMeta(bundle, { name: "@acme/mcp", version: "^1" })).toBeNull();
+    expect(readApiCallIntegrationMetas(bundle, { name: "@acme/mcp", version: "^1" })).toEqual([]);
   });
 
-  it("resolves the auth named by the apiCall block", () => {
+  it("resolves the auth named by the api_call _meta block", () => {
     const root = makePackage("@acme/agent", "1.0.0", "agent", {});
     const integ = makePackage("@acme/api", "1.0.0", "integration", {
       "integration.json": JSON.stringify({
         schema_version: "0.1",
         type: "integration",
-        source: { kind: "api", api: {} },
-        _meta: { "dev.appstrate/api": { auth_key: "only" } },
+        source: { kind: "none" },
+        _meta: { "dev.appstrate/api": { auths: { only: {} } } },
         auths: {
           only: {
             type: "api_key",
@@ -236,8 +237,44 @@ describe("readApiCallIntegrationMeta", () => {
       }),
     });
     const bundle = makeBundle(root, [integ]);
-    const meta = readApiCallIntegrationMeta(bundle, { name: "@acme/api", version: "^1" });
-    expect(meta!.authKey).toBe("only");
+    const metas = readApiCallIntegrationMetas(bundle, { name: "@acme/api", version: "^1" });
+    expect(metas[0]!.authKey).toBe("only");
+  });
+
+  it("emits one meta per opted-in auth with api_call__{authKey} tool names (multi-auth)", () => {
+    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+    const integ = makePackage("@acme/multi", "1.0.0", "integration", {
+      "integration.json": JSON.stringify({
+        schema_version: "0.1",
+        type: "integration",
+        source: { kind: "none" },
+        _meta: { "dev.appstrate/api": { auths: { main: {}, alt: {} } } },
+        auths: {
+          main: {
+            type: "api_key",
+            authorized_uris: ["https://api.acme.com/**"],
+            delivery: {
+              http: { in: "header", name: "X-Api-Key", value: "{$credential.api_key}" },
+            },
+          },
+          alt: {
+            type: "api_key",
+            authorized_uris: ["https://alt.acme.com/**"],
+            delivery: {
+              http: { in: "header", name: "X-Alt-Key", value: "{$credential.api_key}" },
+            },
+          },
+        },
+      }),
+    });
+    const bundle = makeBundle(root, [integ]);
+    const metas = readApiCallIntegrationMetas(bundle, { name: "@acme/multi", version: "^1" });
+    expect(metas).toHaveLength(2);
+    expect(metas.map((m) => m.toolName).sort()).toEqual(["api_call__alt", "api_call__main"]);
+    expect(metas.map((m) => apiCallToolName(m)).sort()).toEqual([
+      "acme_multi__api_call__alt",
+      "acme_multi__api_call__main",
+    ]);
   });
 
   // ── toHttpDeliveryConfig branches ──
@@ -252,9 +289,9 @@ describe("readApiCallIntegrationMeta", () => {
       "integration.json": JSON.stringify(apiKeyIntegrationManifest("@acme/api").integration),
     });
     const bundle = makeBundle(root, [integ]);
-    const meta = readApiCallIntegrationMeta(bundle, { name: "@acme/api", version: "^1" });
+    const meta = readApiCallIntegrationMetas(bundle, { name: "@acme/api", version: "^1" })[0]!;
     // Single-ref fast path: lowered to a bare field name (not a template object).
-    expect(meta!.http?.valueFrom).toBe("api_key");
+    expect(meta.http?.valueFrom).toBe("api_key");
   });
 
   it("keeps encoding=base64 as a { template, encoding } valueFrom", () => {
@@ -263,8 +300,8 @@ describe("readApiCallIntegrationMeta", () => {
       "integration.json": JSON.stringify({
         schema_version: "0.1",
         type: "integration",
-        source: { kind: "api", api: {} },
-        _meta: { "dev.appstrate/api": { auth_key: "main" } },
+        source: { kind: "none" },
+        _meta: { "dev.appstrate/api": { auths: { main: {} } } },
         auths: {
           main: {
             type: "api_key",
@@ -285,8 +322,8 @@ describe("readApiCallIntegrationMeta", () => {
       }),
     });
     const bundle = makeBundle(root, [integ]);
-    const meta = readApiCallIntegrationMeta(bundle, { name: "@acme/b64", version: "^1" });
-    expect(meta!.http?.valueFrom).toEqual({ template: "{{api_key}}", encoding: "base64" });
+    const meta = readApiCallIntegrationMetas(bundle, { name: "@acme/b64", version: "^1" })[0]!;
+    expect(meta.http?.valueFrom).toEqual({ template: "{{api_key}}", encoding: "base64" });
   });
 
   it("rewrites a value with two {$credential.*} refs into {{field}} template syntax", () => {
@@ -295,8 +332,8 @@ describe("readApiCallIntegrationMeta", () => {
       "integration.json": JSON.stringify({
         schema_version: "0.1",
         type: "integration",
-        source: { kind: "api", api: {} },
-        _meta: { "dev.appstrate/api": { auth_key: "main" } },
+        source: { kind: "none" },
+        _meta: { "dev.appstrate/api": { auths: { main: {} } } },
         auths: {
           main: {
             type: "basic",
@@ -315,35 +352,8 @@ describe("readApiCallIntegrationMeta", () => {
       }),
     });
     const bundle = makeBundle(root, [integ]);
-    const meta = readApiCallIntegrationMeta(bundle, { name: "@acme/basic", version: "^1" });
-    expect(meta!.http?.valueFrom).toEqual({ template: "{{username}}:{{password}}" });
-  });
-
-  it("resolves the single declared auth for an api source with no _meta.auth_key", () => {
-    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
-    const integ = makePackage("@acme/single", "1.0.0", "integration", {
-      "integration.json": JSON.stringify({
-        schema_version: "0.1",
-        type: "integration",
-        // api source, single auth, NO _meta["dev.appstrate/api"].auth_key —
-        // the projector falls back to the single declared auth key.
-        source: { kind: "api", api: {} },
-        auths: {
-          solo: {
-            type: "api_key",
-            authorized_uris: ["https://api.acme.com/**"],
-            delivery: {
-              http: { in: "header", name: "X-Api-Key", value: "{$credential.api_key}" },
-            },
-          },
-        },
-      }),
-    });
-    const bundle = makeBundle(root, [integ]);
-    const meta = readApiCallIntegrationMeta(bundle, { name: "@acme/single", version: "^1" });
-    expect(meta).not.toBeNull();
-    expect(meta!.authKey).toBe("solo");
-    expect(meta!.authType).toBe("api_key");
+    const meta = readApiCallIntegrationMetas(bundle, { name: "@acme/basic", version: "^1" })[0]!;
+    expect(meta.http?.valueFrom).toEqual({ template: "{{username}}:{{password}}" });
   });
 });
 
@@ -378,8 +388,8 @@ describe("LocalIntegrationResolver", () => {
       "integration.json": JSON.stringify({
         schema_version: "0.1",
         type: "integration",
-        source: { kind: "api", api: {} },
-        _meta: { "dev.appstrate/api": { auth_key: "main" } },
+        source: { kind: "none" },
+        _meta: { "dev.appstrate/api": { auths: { main: {} } } },
         auths: {
           main: {
             type: "oauth2",

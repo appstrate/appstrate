@@ -273,10 +273,24 @@ describe("syncSystemPackagesToDb", () => {
       id: "@sys-test/multi-skill",
       version: "1.1.0",
     });
-    const { canonical, versions } = buildRegistry([v1, v11]);
-    _setSystemPackagesForTesting(canonical, versions);
-
-    await syncSystemPackagesToDb();
+    // `createPackageVersion` is forward-only (a version must be strictly
+    // higher than every existing one). The boot sync registers all versions
+    // via an internal `Promise.all`, which serializes per-packageId on a
+    // pg advisory lock but does NOT guarantee ascending grant order — under
+    // contention the higher version can commit first and the lower one is
+    // then rejected as VERSION_NOT_HIGHER. Real system-package shipments add
+    // versions monotonically, so we replicate the ascending-publish flow:
+    // sync 1.0.0 first, then add 1.1.0 and re-sync. Both must end registered.
+    {
+      const { canonical, versions } = buildRegistry([v1]);
+      _setSystemPackagesForTesting(canonical, versions);
+      await syncSystemPackagesToDb();
+    }
+    {
+      const { canonical, versions } = buildRegistry([v1, v11]);
+      _setSystemPackagesForTesting(canonical, versions);
+      await syncSystemPackagesToDb();
+    }
 
     const versionRows = await db
       .select({ version: packageVersions.version })

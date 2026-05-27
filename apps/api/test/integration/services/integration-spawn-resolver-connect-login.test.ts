@@ -67,8 +67,9 @@ function agentManifest(): Record<string, unknown> {
     name: "@orga/agent",
     version: "0.1.0",
     display_name: "Orga Agent",
-    dependencies: { integrations: { [INTEG]: "^0.1.0" } },
-    integrations: { [INTEG]: { tools: ["fetch_invoices", "login"] } },
+    dependencies: {
+      integrations: { [INTEG]: { version: "^0.1.0", tools: ["fetch_invoices", "login"] } },
+    },
   };
 }
 

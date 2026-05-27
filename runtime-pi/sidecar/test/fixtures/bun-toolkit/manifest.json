@@ -58,6 +58,6 @@
     }
   },
   "_meta": {
-    "dev.appstrate/api": { "auth_key": "primary" }
+    "dev.appstrate/api": { "auths": { "primary": {} } }
   }
 }

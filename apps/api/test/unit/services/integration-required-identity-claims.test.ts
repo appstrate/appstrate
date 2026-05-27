@@ -31,7 +31,7 @@ function manifestWith({
   return {
     type: "integration",
     schema_version: "0.1",
-    source: { kind: "api", api: {} },
+    source: { kind: "none" },
     auths: {
       session: {
         type: "oauth2",

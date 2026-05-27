@@ -79,7 +79,7 @@ const VALID_INTEGRATION = {
   type: "integration",
   schema_version: "0.1",
   display_name: "My Integration",
-  source: { kind: "api", api: {} },
+  source: { kind: "none" },
   auths: {
     api: {
       type: "api_key",

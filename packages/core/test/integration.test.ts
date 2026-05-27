@@ -17,7 +17,7 @@ import {
   API_CALL_TOOL_NAME,
   getConnectToolNames,
   getDeclaredToolNames,
-  getApiCallConfig,
+  getApiCallConfigs,
   getToolUrlPatterns,
   getAvailableScopes,
   requiredAuthKeysForAgent,
@@ -105,18 +105,16 @@ describe("integrationManifestSchema — source kinds", () => {
     expect(r.success).toBe(true);
   });
 
-  it("accepts an api source with upload_protocols", () => {
-    const r = integrationManifestSchema.safeParse(
-      baseManifest({ source: { kind: "api", api: { upload_protocols: ["google-resumable"] } } }),
-    );
+  it("accepts a none source (no MCP backing)", () => {
+    const r = integrationManifestSchema.safeParse(baseManifest({ source: { kind: "none" } }));
     expect(r.success).toBe(true);
   });
 
-  it("accepts an api source with no upload_protocols", () => {
+  it("rejects the removed api source kind", () => {
     const r = integrationManifestSchema.safeParse(
       baseManifest({ source: { kind: "api", api: {} } }),
     );
-    expect(r.success).toBe(true);
+    expect(r.success).toBe(false);
   });
 
   it("rejects an unknown source kind", () => {
@@ -128,28 +126,6 @@ describe("integrationManifestSchema — source kinds", () => {
     const m = baseManifest();
     delete m.source;
     expect(errorPaths(m)).toContain("source");
-  });
-
-  it("rejects duplicate upload_protocols", () => {
-    expect(
-      errorPaths(
-        baseManifest({
-          source: { kind: "api", api: { upload_protocols: ["tus", "tus"] } },
-        }),
-      ).length,
-    ).toBeGreaterThan(0);
-  });
-
-  it("accepts a non-reserved upload protocol (AFPS — open vocabulary)", () => {
-    // AFPS dropped the closed enum for `source.api.upload_protocols`;
-    // any unique non-empty string is now accepted (producers MAY emit
-    // reverse-DNS-qualified values, consumers MUST tolerate them).
-    const r = integrationManifestSchema.safeParse(
-      baseManifest({
-        source: { kind: "api", api: { upload_protocols: ["com.example.custom-resumable"] } },
-      }),
-    );
-    expect(r.success).toBe(true);
   });
 });
 
@@ -208,7 +184,7 @@ describe("integrationManifestSchema — api_key/basic/custom credentials", () =>
   it("accepts api_key with credentials.schema + env delivery", () => {
     const r = integrationManifestSchema.safeParse(
       baseManifest({
-        source: { kind: "api", api: {} },
+        source: { kind: "none" },
         auths: {
           key: {
             type: "api_key",
@@ -391,7 +367,7 @@ describe("integrationManifestSchema — credentials.schema $ref SSRF guard", () 
     // object schema (`type: "object" + properties`), so the $ref must live
     // inside a property (not at the root) to reach the SSRF guard at all.
     const m = baseManifest({
-      source: { kind: "api", api: {} },
+      source: { kind: "none" },
       auths: {
         foo: {
           type: "api_key",
@@ -419,7 +395,7 @@ describe("integrationManifestSchema — credentials.schema $ref SSRF guard", () 
 
   it("rejects a nested external $ref inside credentials.schema", () => {
     const m = baseManifest({
-      source: { kind: "api", api: {} },
+      source: { kind: "none" },
       auths: {
         foo: {
           type: "api_key",
@@ -441,7 +417,7 @@ describe("integrationManifestSchema — credentials.schema $ref SSRF guard", () 
 
   it("accepts a local fragment $ref (#/$defs/Foo)", () => {
     const m = baseManifest({
-      source: { kind: "api", api: {} },
+      source: { kind: "none" },
       auths: {
         foo: {
           type: "api_key",
@@ -468,7 +444,7 @@ describe("integrationManifestSchema — credentials.schema $ref SSRF guard", () 
 describe("integrationManifestSchema — delivery.http.in install gate", () => {
   it("rejects delivery.http.in = 'query' (runtime only supports 'header')", () => {
     const m = baseManifest({
-      source: { kind: "api", api: {} },
+      source: { kind: "none" },
       auths: {
         key: {
           type: "api_key",
@@ -497,7 +473,7 @@ describe("integrationManifestSchema — delivery.http.in install gate", () => {
 
   it("rejects delivery.http.in = 'cookie'", () => {
     const m = baseManifest({
-      source: { kind: "api", api: {} },
+      source: { kind: "none" },
       auths: {
         key: {
           type: "api_key",
@@ -516,7 +492,7 @@ describe("integrationManifestSchema — delivery.http.in install gate", () => {
     // Sanity — the existing baseManifest declares delivery.http.in: "header"
     // implicitly via the oauth2 default; assert explicit header still parses.
     const m = baseManifest({
-      source: { kind: "api", api: {} },
+      source: { kind: "none" },
       auths: {
         key: {
           type: "api_key",
@@ -543,7 +519,7 @@ describe("integrationManifestSchema — delivery.http.in install gate", () => {
 describe("integrationManifestSchema — mtls + delivery.http install gate", () => {
   it("rejects mtls auth combined with delivery.http", () => {
     const m = baseManifest({
-      source: { kind: "api", api: {} },
+      source: { kind: "none" },
       auths: {
         client_cert: {
           type: "mtls",
@@ -581,7 +557,7 @@ describe("integrationManifestSchema — mtls + delivery.http install gate", () =
 
   it("accepts mtls auth with delivery.files", () => {
     const m = baseManifest({
-      source: { kind: "api", api: {} },
+      source: { kind: "none" },
       auths: {
         client_cert: {
           type: "mtls",
@@ -615,7 +591,7 @@ describe("integrationManifestSchema — mtls + delivery.http install gate", () =
 
 function customWithConnect(connect: Record<string, unknown>, delivery?: Record<string, unknown>) {
   return baseManifest({
-    source: { kind: "api", api: {} },
+    source: { kind: "none" },
     auths: {
       session: {
         type: "custom",
@@ -926,14 +902,14 @@ describe("RESERVED_INTEGRATION_UPLOAD_PROTOCOLS", () => {
 });
 
 // ─────────────────────────────────────────────
-// Helpers — getApiCallConfig / getDeclaredToolNames / getAvailableScopes
+// Helpers — getApiCallConfigs / getDeclaredToolNames / getAvailableScopes
 // ─────────────────────────────────────────────
 
-describe("getApiCallConfig", () => {
-  it("returns the api-source config with upload protocols", () => {
-    const m = parse(
+describe("getApiCallConfigs", () => {
+  function apiCallManifest(metaAuths: Record<string, unknown>): IntegrationManifest {
+    return parse(
       baseManifest({
-        source: { kind: "api", api: { upload_protocols: ["tus"] } },
+        source: { kind: "none" },
         auths: {
           key: {
             type: "api_key",
@@ -941,14 +917,47 @@ describe("getApiCallConfig", () => {
             authorized_uris: ["https://api/**"],
             delivery: { env: { K: { value: "{$credential.k}" } } },
           },
+          alt: {
+            type: "api_key",
+            credentials: { schema: { type: "object", properties: {} } },
+            authorized_uris: ["https://api/**"],
+            delivery: { env: { K2: { value: "{$credential.k}" } } },
+          },
         },
+        _meta: { "dev.appstrate/api": { auths: metaAuths } },
       }),
     );
-    expect(getApiCallConfig(m)).toEqual({ authKey: "key", uploadProtocols: ["tus"] });
+  }
+
+  it("returns a single api_call config with upload protocols", () => {
+    const m = apiCallManifest({ key: { upload_protocols: ["tus"] } });
+    expect(getApiCallConfigs(m)).toEqual([
+      { authKey: "key", toolName: "api_call", uploadProtocols: ["tus"] },
+    ]);
   });
 
-  it("returns null for a non-api source", () => {
-    expect(getApiCallConfig(parse(baseManifest()))).toBeNull();
+  it("names per-auth tools when several auths opt in", () => {
+    const m = apiCallManifest({ key: {}, alt: {} });
+    expect(getApiCallConfigs(m)).toEqual([
+      { authKey: "key", toolName: "api_call__key", uploadProtocols: [] },
+      { authKey: "alt", toolName: "api_call__alt", uploadProtocols: [] },
+    ]);
+  });
+
+  it("returns [] when the integration declares no api_call extension", () => {
+    expect(getApiCallConfigs(parse(baseManifest()))).toEqual([]);
+  });
+
+  it("works orthogonally to a local source (api_call alongside an MCP server)", () => {
+    const m = parse(
+      baseManifest({
+        source: { kind: "local", server: { name: "@x/srv", version: "^1.0.0" } },
+        _meta: { "dev.appstrate/api": { auths: { oauth: {} } } },
+      }),
+    );
+    expect(getApiCallConfigs(m)).toEqual([
+      { authKey: "oauth", toolName: "api_call", uploadProtocols: [] },
+    ]);
   });
 });
 
@@ -1001,7 +1010,7 @@ describe("getDeclaredToolNames / getAvailableScopes / getToolUrlPatterns", () =>
 function connectToolManifest(connectBlock: Record<string, unknown>): IntegrationManifest {
   return parse(
     baseManifest({
-      source: { kind: "api", api: {} },
+      source: { kind: "none" },
       auths: {
         session: {
           type: "custom",
@@ -1128,7 +1137,7 @@ describe("missingScopesForConnection", () => {
   it("returns [] for a non-oauth2 auth even with declared scopes", () => {
     const api = parse(
       baseManifest({
-        source: { kind: "api", api: {} },
+        source: { kind: "none" },
         auths: {
           key: {
             type: "api_key",
@@ -1172,10 +1181,10 @@ describe("requiredAuthKeysForAgent", () => {
     expect(requiredAuthKeysForAgent(m, ["list_issues"], undefined)).toEqual(["oauth"]);
   });
 
-  it("api_call selection pins the api-source auth", () => {
+  it("api_call selection pins the auth its _meta entry draws from (multi-auth)", () => {
     const m = parse(
       baseManifest({
-        source: { kind: "api", api: {} },
+        source: { kind: "none" },
         auths: {
           key: {
             type: "api_key",
@@ -1183,10 +1192,18 @@ describe("requiredAuthKeysForAgent", () => {
             authorized_uris: ["https://api/**"],
             delivery: { env: { K: { value: "{$credential.k}" } } },
           },
+          alt: {
+            type: "api_key",
+            credentials: { schema: { type: "object", properties: {} } },
+            authorized_uris: ["https://api/**"],
+            delivery: { env: { K2: { value: "{$credential.k}" } } },
+          },
         },
+        _meta: { "dev.appstrate/api": { auths: { key: {}, alt: {} } } },
       }),
     );
-    expect(requiredAuthKeysForAgent(m, [API_CALL_TOOL_NAME], undefined)).toEqual(["key"]);
+    // Multi-auth → per-auth tool names; selecting one pins only its auth.
+    expect(requiredAuthKeysForAgent(m, ["api_call__alt"], undefined)).toEqual(["alt"]);
   });
 
   it("scope-only selection maps scopes to their catalog auth (multi-auth)", () => {
@@ -1227,10 +1244,10 @@ describe("validateAgentIntegrationScopes", () => {
     expect(errs[0]!.code).toBe("scope_not_in_catalog");
   });
 
-  it("accepts the synthetic api_call tool on an api-source integration", () => {
+  it("accepts the synthetic api_call tool on an api_call integration", () => {
     const api = parse(
       baseManifest({
-        source: { kind: "api", api: {} },
+        source: { kind: "none" },
         auths: {
           key: {
             type: "api_key",
@@ -1240,6 +1257,7 @@ describe("validateAgentIntegrationScopes", () => {
           },
         },
         tools_policy: { real_tool: { required_scopes: [] } },
+        _meta: { "dev.appstrate/api": { auths: { key: {} } } },
       }),
     );
     expect(

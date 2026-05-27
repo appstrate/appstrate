@@ -9,8 +9,7 @@
   "license": "Apache-2.0",
   "icon": "https://www.google.com/s2/favicons?domain=freshdesk.com&sz=128",
   "source": {
-    "kind": "api",
-    "api": {}
+    "kind": "none"
   },
   "auths": {
     "primary": {
@@ -53,7 +52,9 @@
       "author": "Appstrate"
     },
     "dev.appstrate/api": {
-      "auth_key": "primary"
+      "auths": {
+        "primary": {}
+      }
     }
   }
 }

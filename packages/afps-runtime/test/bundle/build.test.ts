@@ -99,7 +99,7 @@ describe("buildBundleFromCatalog", () => {
       version: "1.0.0",
       type: "integration",
       schema_version: "0.1",
-      source: { kind: "api", api: {} },
+      source: { kind: "none" },
       auths: {
         key: {
           type: "api_key",

@@ -66,7 +66,10 @@ function apiSourceManifest(): IntegrationManifest {
     name: "@me/api-integ",
     version: "1.0.0",
     display_name: "API",
-    source: { kind: "api", api: {} },
+    // Serverless integration: no MCP backing, api_call exposed via the
+    // `_meta["dev.appstrate/api"]` vendor extension (orthogonal to source.kind).
+    source: { kind: "none" },
+    _meta: { "dev.appstrate/api": { auths: { primary: {} } } },
     auths: {
       primary: {
         type: "api_key",
@@ -139,12 +142,26 @@ describe("resolveIntegrationToolCatalog", () => {
     expect(out.map((e) => e.name)).toEqual(["fetch_data"]);
   });
 
-  it("api source: synthesises [api_call] regardless of mcp-server tools", () => {
+  it("none source with api_call _meta: appends api_call to the base catalog", () => {
+    // A `none` source has no MCP base catalog of its own, so the appended
+    // api_call tool is the only entry. (Any `mcpServerTools` passed here are
+    // a no-op the resolver still prepends — see the local+api_call case below.)
     const out = resolveIntegrationToolCatalog({
       integration: apiSourceManifest(),
-      mcpServerTools: [{ name: "ignored" }],
     });
     expect(out).toEqual([{ name: API_CALL_TOOL_NAME }]);
+  });
+
+  it("local source WITH api_call _meta: api_call is appended to the mcp tools", () => {
+    const integration = localSourceManifest({});
+    (integration as unknown as { _meta: unknown })._meta = {
+      "dev.appstrate/api": { auths: { primary: {} } },
+    };
+    const out = resolveIntegrationToolCatalog({
+      integration,
+      mcpServerTools: [{ name: "kv_set" }, { name: "kv_get" }],
+    });
+    expect(out.map((e) => e.name)).toEqual(["kv_set", "kv_get", API_CALL_TOOL_NAME]);
   });
 
   it("local source without mcp-server tools: falls back to integration.tools_policy keys", () => {

@@ -110,7 +110,7 @@ export {
   LocalIntegrationResolver,
   RemoteAppstrateIntegrationResolver,
   readIntegrationRefs,
-  readApiCallIntegrationMeta,
+  readApiCallIntegrationMetas,
   apiCallToolName,
   type IntegrationApiCallResolver,
   type IntegrationRef,

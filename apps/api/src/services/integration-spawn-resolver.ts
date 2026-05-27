@@ -32,11 +32,7 @@ import {
   resolveAfpsHttpDelivery,
 } from "@appstrate/connect";
 import type { AfpsHttpDelivery as ConnectAfpsHttpDelivery } from "@appstrate/connect";
-import {
-  getToolUrlPatterns,
-  getApiCallConfig,
-  API_CALL_TOOL_NAME,
-} from "@appstrate/core/integration";
+import { getToolUrlPatterns, getApiCallConfigs } from "@appstrate/core/integration";
 import type {
   IntegrationManifest,
   ResolvedConnection,
@@ -49,7 +45,7 @@ import {
   getMcpServerMcpConfigEnv,
   renderMcpConfigEnv,
 } from "@appstrate/core/mcp-server";
-import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
+import type { IntegrationSpawnSpec, ApiCallSpec } from "@appstrate/core/sidecar-types";
 
 import { logger } from "../lib/logger.ts";
 import type { Actor } from "../lib/actor.ts";
@@ -176,20 +172,26 @@ async function resolveOne(
   // encoding a typical (multi-MB) integration bundle blows past Linux's
   // env var size limit.
   //
-  // A serverless integration declares
-  // `source.kind: "api"` and no `server`: no runner to spawn, just the generic
-  // credential-injecting tool. Exposed when the agent selected it
-  // (least-privilege: the catch-all tool is never auto-granted).
-  // `authorized_uris` come from the auth the api source resolved to.
-  const apiCallCfg = getApiCallConfig(manifest);
-  const exposeApiCall =
-    apiCallCfg !== null && (agentToolSelection ?? []).includes(API_CALL_TOOL_NAME);
-  const apiCallAuth =
-    exposeApiCall && apiCallCfg
-      ? (manifest.auths?.[apiCallCfg.authKey] as AfpsManifestAuth | undefined)
-      : undefined;
-  const apiCallAuthorizedUris = apiCallAuth?.authorized_uris ?? [];
-  const apiCallAllowAllUris = apiCallAuth?.allow_all_uris ?? false;
+  // api_call is the generic credential-injecting tool, declared via the
+  // `_meta["dev.appstrate/api"]` vendor extension (orthogonal to source kind —
+  // a `local`/`remote`/`none` integration may all expose it). Each opted-in
+  // auth yields one tool; we keep only the ones the agent actually selected
+  // (least-privilege: the catch-all tool is never auto-granted). `authorized_uris`
+  // come from each api_call auth.
+  const selectedTools = new Set(agentToolSelection ?? []);
+  const apiCalls: ApiCallSpec[] = getApiCallConfigs(manifest)
+    .filter((cfg) => selectedTools.has(cfg.toolName))
+    .map((cfg) => {
+      const auth = manifest.auths?.[cfg.authKey] as AfpsManifestAuth | undefined;
+      return {
+        authKey: cfg.authKey,
+        toolName: cfg.toolName,
+        authorizedUris: [...(auth?.authorized_uris ?? [])],
+        ...(auth?.allow_all_uris ? { allowAllUris: true } : {}),
+        ...(cfg.uploadProtocols.length > 0 ? { uploadProtocols: cfg.uploadProtocols } : {}),
+      } satisfies ApiCallSpec;
+    });
+  const exposeApiCall = apiCalls.length > 0;
 
   // ── Resolve the sidecar server spec from the AFPS `source`
   // discriminant (replaces the 1.x inline `manifest.server`). ──
@@ -197,7 +199,7 @@ async function resolveOne(
   //              selected by `spec.sourceKind`, not `server.type`).
   //   - local  → resolve the referenced mcp-server package's MCPB manifest
   //              and emit `{ type, entry_point }` from `server.{type, entry_point}`.
-  //   - api    → serverless (no `server` in the spec; sidecar skips spawn).
+  //   - none   → serverless (no `server` in the spec; sidecar skips spawn).
   //
   // Resolved BEFORE `resolveDeliveries` so the mcp-server's `mcp_config.env`
   // template is available for AFPS §7.6 `user_config_key` substitution
@@ -275,7 +277,7 @@ async function resolveOne(
       ...(typeof ref.vendored === "boolean" ? { vendored: ref.vendored } : {}),
     };
   }
-  // sourceKind === "api" (or unknown) → serverless, serverSpec stays undefined.
+  // sourceKind === "none" (or unknown) → serverless, serverSpec stays undefined.
 
   // An integration is viable if EITHER `delivery.env` OR `delivery.http`
   // resolved to something — pure-http integrations (no env vars) still
@@ -320,10 +322,10 @@ async function resolveOne(
     : baseAllowlist;
 
   // Peer discriminant for the sidecar's spawn-mode dispatch. Mirrors
-  // `source.kind`; defaults to `"api"` when the manifest didn't declare a
-  // recognised source (serverless fall-back — matches the legacy behaviour
-  // of leaving `server` undefined and only wiring `api_call`).
-  const specSourceKind: "local" | "remote" | "api" = sourceKind ?? "api";
+  // `source.kind`; defaults to `"none"` when the manifest didn't declare a
+  // recognised source (serverless fall-back — the sidecar skips spawn and
+  // wires only the api_call tool(s), if any).
+  const specSourceKind: "local" | "remote" | "none" = sourceKind ?? "none";
 
   return {
     integrationId,
@@ -332,7 +334,7 @@ async function resolveOne(
     manifest: {
       name: manifest.name,
       version: manifest.version,
-      // Serverless integrations (`sourceKind: "api"`) omit `server` in the
+      // Serverless integrations (`sourceKind: "none"`) omit `server` in the
       // spec — the sidecar's serverless path (no spec.manifest.server) skips
       // spawn and only wires the generic api_call tool. Local runners
       // (node|python|binary|uv, resolved from the referenced mcp-server) emit
@@ -362,18 +364,7 @@ async function resolveOne(
           }
         : {}),
     },
-    ...(exposeApiCall && apiCallCfg
-      ? {
-          apiCall: {
-            authKey: apiCallCfg.authKey,
-            authorizedUris: [...apiCallAuthorizedUris],
-            ...(apiCallAllowAllUris ? { allowAllUris: true } : {}),
-            ...(apiCallCfg.uploadProtocols.length > 0
-              ? { uploadProtocols: apiCallCfg.uploadProtocols }
-              : {}),
-          },
-        }
-      : {}),
+    ...(apiCalls.length > 0 ? { apiCalls } : {}),
     // R8a defensive filter — surface `manifest.hidden_tools` to the
     // sidecar so the McpHost can drop them from `tools/list` at runtime,
     // independent of whether the install-time catalog resolver already

@@ -328,10 +328,10 @@ Treat any new management-CRUD route on a BA plugin table the same way (mirror th
 
 **Integration**:
 
-- `source.kind`: `"local" | "remote" | "api"`
+- `source.kind`: `"local" | "remote" | "none"`
 - `source.server.{name, version, vendored}`
 - `source.remote.{url, transport}`
-- `source.api.upload_protocols`
+- `_meta["dev.appstrate/api"].auths.<key>.upload_protocols`
 - `auths.{key}.{type, issuer, authorization_endpoint, token_endpoint, userinfo_endpoint, token_endpoint_auth_method, code_challenge_methods_supported, resource, authorization_params, default_scopes, scope_catalog, identity_claims, required_identity_claims, credentials, connect, delivery, authorized_uris, allow_all_uris}`
 - `auths.{key}.connect.{login, tool, limits}`
 - `auths.{key}.connect.login.{request, success_criteria, outputs, expires_in_output, identity_outputs}`

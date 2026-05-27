@@ -61,8 +61,7 @@ function buildAgentManifest(name: string): Record<string, unknown> {
     type: "agent",
     schema_version: "0.1",
     display_name: `Admin Test Agent ${name}`,
-    dependencies: { integrations: { [INTEGRATION]: "^1.0.0" } },
-    integrations: { [INTEGRATION]: { tools: ["search"] } },
+    dependencies: { integrations: { [INTEGRATION]: { version: "^1.0.0", tools: ["search"] } } },
   };
 }
 

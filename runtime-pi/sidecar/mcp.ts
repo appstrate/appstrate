@@ -594,6 +594,7 @@ function buildSidecarTools(options: MountMcpOptions): {
   // Built lazily (per `/mcp` request) by `mountMcp` because the set of
   // integrations is only known after the background bootstrap finishes.
   const makeApiCallTool = (integ: ApiCallIntegrationConfig): AppstrateToolDefinition => {
+    const toolName = integ.toolName ?? "api_call";
     const ctx = {
       proxyDeps: {
         ...proxyDeps,
@@ -601,11 +602,11 @@ function buildSidecarTools(options: MountMcpOptions): {
         refreshCredentials: integ.refreshCredentials,
       },
       integrationId: integ.integrationId,
-      label: "api_call",
+      label: toolName,
     };
     return {
       descriptor: {
-        name: `${integ.namespace}__api_call`,
+        name: `${integ.namespace}__${toolName}`,
         description:
           `Make an authenticated request through the "${integ.integrationId}" integration's ` +
           "credential-injecting proxy. The sidecar injects the integration's resolved " +
@@ -641,9 +642,10 @@ function buildSidecarTools(options: MountMcpOptions): {
       (p): p is string => typeof p === "string" && p.length > 0,
     );
     if (protocols.length === 0) return null;
+    const uploadToolName = (integ.toolName ?? "api_call").replace(/^api_call/, "api_upload");
     return {
       descriptor: {
-        name: `${integ.namespace}__api_upload`,
+        name: `${integ.namespace}__${uploadToolName}`,
         description:
           `Upload a workspace file (>5 MB friendly) to the "${integ.integrationId}" integration's ` +
           "API over a chunked resumable protocol. Bytes flow through the credential-injecting " +
@@ -1544,8 +1546,15 @@ async function readBodyBounded(res: Response, maxBytes: number): Promise<string>
  * shared credential-proxy core.
  */
 export interface ApiCallIntegrationConfig {
-  /** McpHost-style namespace — the tool is named `{namespace}__api_call`. */
+  /** McpHost-style namespace — the tool is named `{namespace}__{toolName}`. */
   namespace: string;
+  /**
+   * Bare api_call tool name (before the `{namespace}__` prefix). `api_call`
+   * for an integration that opts in a single auth; `api_call__{authKey}` when
+   * it opts in several. Defaults to `api_call` when omitted. The companion
+   * upload tool swaps the `api_call` prefix for `api_upload`.
+   */
+  toolName?: string;
   /** Integration package id (used as the proxy `integrationId` + audit source). */
   integrationId: string;
   /** Resolve the integration's credentials into the proxy payload. */

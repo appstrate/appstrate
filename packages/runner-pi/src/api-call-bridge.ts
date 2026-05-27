@@ -19,8 +19,7 @@ import type { RuntimeEventEmitter } from "./runtime-tools/mcp-forward.ts";
 import {
   apiCallRequestJsonSchema,
   readIntegrationRefs,
-  readApiCallIntegrationMeta,
-  apiCallToolName,
+  readApiCallIntegrationMetas,
   type IntegrationApiCallResolver,
   type IntegrationRef,
   type Tool as AfpsTool,
@@ -57,28 +56,31 @@ export async function buildApiCallExtensionFactory(
   const refs = readIntegrationRefs(opts.bundle);
   if (refs.length === 0) return [];
 
-  // Keep only refs that resolve to an apiCall integration. Pure MCP-server
+  // Keep only refs that resolve to ≥1 apiCall surface. Pure MCP-server
   // integrations have no generic call surface and are skipped (their tools
-  // flow through the sidecar/runner path on the platform, not the CLI).
-  const apiCallRefs: { ref: IntegrationRef; toolName: string }[] = [];
+  // flow through the sidecar/runner path on the platform, not the CLI). An
+  // integration may opt several auths into api_call, yielding multiple tools
+  // — track the owning integration id per emitted tool so the index pairing
+  // below stays aligned with the resolver's (ref, auth) iteration order.
+  const refsWithApiCall: IntegrationRef[] = [];
+  const integrationIdPerTool: string[] = [];
   for (const ref of refs) {
-    const meta = readApiCallIntegrationMeta(opts.bundle, ref);
-    if (meta) apiCallRefs.push({ ref, toolName: apiCallToolName(meta) });
+    const metas = readApiCallIntegrationMetas(opts.bundle, ref);
+    if (metas.length === 0) continue;
+    refsWithApiCall.push(ref);
+    for (let i = 0; i < metas.length; i++) integrationIdPerTool.push(ref.name);
   }
-  if (apiCallRefs.length === 0) return [];
+  if (refsWithApiCall.length === 0) return [];
 
-  const tools = await opts.integrationResolver.resolve(
-    apiCallRefs.map((r) => r.ref),
-    opts.bundle,
-  );
+  const tools = await opts.integrationResolver.resolve(refsWithApiCall, opts.bundle);
   if (tools.length === 0) return [];
 
-  // The resolver yields one tool per apiCall ref in the same order. Pair
-  // each AFPS tool with its `{ns}__api_call` name.
+  // The resolver yields tools in the same (ref, auth) order we flattened
+  // above — pair each AFPS tool with its owning integration id by index.
   const factories: ExtensionFactory[] = [];
   for (let i = 0; i < tools.length; i++) {
     const tool = tools[i]!;
-    const integrationId = apiCallRefs[i]?.ref.name ?? tool.name;
+    const integrationId = integrationIdPerTool[i] ?? tool.name;
     factories.push(makeApiCallExtension(tool, integrationId, opts));
   }
   return factories;
