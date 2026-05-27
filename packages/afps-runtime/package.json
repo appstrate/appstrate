@@ -66,7 +66,7 @@
     "fixtures:build": "bun run scripts/build-fixtures.ts"
   },
   "dependencies": {
-    "@afps-spec/schema": "^0.2.0",
+    "@afps-spec/schema": "^0.3.0",
     "@afps-spec/types": "^0.1.0",
     "@appstrate/afps-shared": "workspace:*",
     "file-type": "^22.0.1",
