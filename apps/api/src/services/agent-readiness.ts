@@ -6,8 +6,10 @@
  */
 
 import type { LoadedPackage } from "../types/index.ts";
-import { resolveConnectionsForRun } from "./integration-connection-resolver.ts";
-import type { ConnectionResolutionError } from "@appstrate/core/integration";
+import {
+  resolveConnectionsForRun,
+  translateResolutionError,
+} from "./integration-connection-resolver.ts";
 import { validateConfig } from "./schema.ts";
 import { extractManifestSchemas } from "../lib/manifest-utils.ts";
 import { isPromptEmpty, findMissingDependencies } from "@appstrate/core/validation";
@@ -28,14 +30,6 @@ export interface AgentReadinessParams {
    * that resolve the actor from request context may not have one.
    */
   actor: Actor | null;
-  /**
-   * Skip individual checks already performed by an upstream validator. Used
-   * by the inline-run preflight, which validates `prompt` via the manifest
-   * structural check and `config` via AJV at its own stage, then calls
-   * readiness for the remaining dependency checks. Avoids emitting duplicate
-   * entries for the same field in `accumulate` mode.
-   */
-  skip?: { prompt?: boolean; config?: boolean };
 }
 
 /**
@@ -48,11 +42,11 @@ export interface AgentReadinessParams {
 export async function collectAgentReadinessErrors(
   params: AgentReadinessParams,
 ): Promise<ValidationFieldError[]> {
-  const { agent, orgId, config, applicationId, actor, skip } = params;
+  const { agent, orgId, config, applicationId, actor } = params;
   const { manifest } = agent;
   const errors: ValidationFieldError[] = [];
 
-  if (!skip?.prompt && isPromptEmpty(agent.prompt)) {
+  if (isPromptEmpty(agent.prompt)) {
     errors.push({
       field: "prompt",
       code: "empty_prompt",
@@ -96,7 +90,7 @@ export async function collectAgentReadinessErrors(
     }
   }
 
-  if (!skip?.config && config) {
+  if (config) {
     const { config: configSchema } = extractManifestSchemas(manifest);
     const effectiveSchema = configSchema ?? { type: "object" as const, properties: {} };
     const configValidation = validateConfig(config, effectiveSchema);
@@ -165,62 +159,6 @@ export async function validateAgentReadiness(params: AgentReadinessParams): Prom
     detail: first.message,
   });
 }
-
-/**
- * Map a `ConnectionResolutionError` to the wire-format ValidationFieldError
- * the upstream 412 envelope expects.
- *
- * Field path: `integrations.{packageId}` — one error per integration in
- * the flat model. The dashboard's MissingConnectionsModal parses on the
- * same prefix so existing UI plumbing still works.
- */
-export function translateResolutionError(e: ConnectionResolutionError): ValidationFieldError {
-  const title = TITLE_BY_CODE[e.code];
-  return {
-    field: `integrations.${e.integrationId}`,
-    code: e.code,
-    title,
-    message: e.message,
-    // Smuggle the candidate ids on must_choose_connection so the modal
-    // can render a picker.
-    ...(e.candidateConnectionIds && e.candidateConnectionIds.length > 0
-      ? { candidateConnectionIds: e.candidateConnectionIds }
-      : {}),
-    // Smuggle scope-diff detail on insufficient_scopes so the UI can offer
-    // an upgrade (own connection) or a read-only error (foreign owner).
-    ...(e.code === "insufficient_scopes"
-      ? {
-          ...(e.connectionId ? { connection_id: e.connectionId } : {}),
-          ...(e.missingScopes && e.missingScopes.length > 0
-            ? { missing_scopes: e.missingScopes }
-            : {}),
-          ...(e.ownedByActor !== undefined ? { owned_by_actor: e.ownedByActor } : {}),
-        }
-      : {}),
-    // AFPS §4.1 — surface the pinned `auth_key` (the agent dep's choice)
-    // and which auth_keys the actor's existing connections use, so the UI
-    // can guide the user to connect via the right auth method.
-    ...(e.code === "auth_key_mismatch"
-      ? {
-          ...(e.requiredAuthKey ? { required_auth_key: e.requiredAuthKey } : {}),
-          ...(e.availableAuthKeys && e.availableAuthKeys.length > 0
-            ? { available_auth_keys: e.availableAuthKeys }
-            : {}),
-        }
-      : {}),
-  } as ValidationFieldError;
-}
-
-const TITLE_BY_CODE: Record<ConnectionResolutionError["code"], string> = {
-  not_connected: "Integration Not Connected",
-  needs_reconnection: "Needs Reconnection",
-  connection_blocked_by_admin: "Connection Blocked by Admin",
-  pinned_connection_unavailable: "Pinned Connection Unavailable",
-  override_connection_unavailable: "Override Connection Unavailable",
-  must_choose_connection: "Multiple Connections Available — Pick One",
-  insufficient_scopes: "Insufficient Permissions",
-  auth_key_mismatch: "Connection Auth Method Mismatch",
-};
 
 /**
  * Re-validate a deep-merged config against the manifest schema.

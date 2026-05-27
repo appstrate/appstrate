@@ -33,6 +33,7 @@
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
+import type { TokenUsage } from "@appstrate/shared-types";
 import {
   formatToolArgsCompact,
   formatToolArgsVerbose,
@@ -238,14 +239,7 @@ function createHumanSink(opts: SinkOptions, writeStdout: (chunk: string) => void
         case "appstrate.metric": {
           // Print only the terminal metric (at end of run). Too noisy
           // mid-run otherwise.
-          const u = event.usage as
-            | {
-                input_tokens?: number;
-                output_tokens?: number;
-                cache_creation_input_tokens?: number;
-                cache_read_input_tokens?: number;
-              }
-            | undefined;
+          const u = event.usage as TokenUsage | undefined;
           const cost = typeof event.cost === "number" ? event.cost : 0;
           const input = u?.input_tokens ?? 0;
           const output = u?.output_tokens ?? 0;

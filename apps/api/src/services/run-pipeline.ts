@@ -10,8 +10,8 @@ import { buildRunContext, ModelNotConfiguredError } from "./env-builder.ts";
 import { createRun } from "./state/runs.ts";
 import { getPackageConfig } from "./application-packages.ts";
 import { executeAgentInBackground } from "../routes/runs.ts";
-import { validateAgentReadiness, translateResolutionError } from "./agent-readiness.ts";
-import { resolveRunConnectionSnapshot } from "./integration-connection-resolver.ts";
+import { validateAgentReadiness } from "./agent-readiness.ts";
+import { resolveRunConnectionsOrError } from "./integration-connection-resolver.ts";
 import type { ConnectionOverrides, ResolvedConnectionMap } from "@appstrate/core/integration";
 import { parseScopedName } from "@appstrate/core/naming";
 import { mintSinkCredentials } from "../lib/mint-sink-credentials.ts";
@@ -207,7 +207,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   // way the caller needs structured feedback, not a silent fallback.
   let resolvedConnections: ResolvedConnectionMap | null = null;
   if (actor) {
-    const snapshot = await resolveRunConnectionSnapshot({
+    const outcome = await resolveRunConnectionsOrError({
       agentManifest: agent.manifest as Record<string, unknown>,
       packageId: agent.id,
       actor,
@@ -215,16 +215,16 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
       runOverrides: params.connectionOverrides ?? null,
       scheduleOverrides: params.scheduleConnectionOverrides ?? null,
     });
-    if (snapshot.errors.length > 0) {
+    if (!outcome.ok) {
       throw new ApiError({
-        status: 412,
-        code: "missing_integration_connection",
-        title: "Missing Integration Connection",
-        detail: snapshot.errors[0]!.message,
-        errors: snapshot.errors.map(translateResolutionError),
+        status: outcome.error.status,
+        code: outcome.error.code,
+        title: outcome.error.title,
+        detail: outcome.error.detail,
+        errors: outcome.error.errors,
       });
     }
-    resolvedConnections = snapshot.resolved;
+    resolvedConnections = outcome.resolved;
   }
 
   // --- Step 3: Build run context ---

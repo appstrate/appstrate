@@ -68,6 +68,7 @@
   "dependencies": {
     "@afps-spec/schema": "^0.1.0",
     "@afps-spec/types": "^0.1.0",
+    "@appstrate/afps-shared": "workspace:*",
     "file-type": "^22.0.1",
     "fflate": "^0.8.2",
     "mustache": "^4.2.0",

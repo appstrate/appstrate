@@ -43,8 +43,7 @@ function localSourceManifest(opts: {
   };
   if (opts.connectToolName) {
     auth.connect = {
-      tool: {},
-      _meta: { "dev.appstrate/connect": { tool: opts.connectToolName, run_at: "run-start" } },
+      tool: { name: opts.connectToolName, run_at: "run-start" },
     };
   }
   return {

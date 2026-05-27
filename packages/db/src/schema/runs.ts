@@ -15,6 +15,7 @@ import {
   check,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+import type { TokenUsage } from "@appstrate/core/token-usage";
 import { runStatusEnum, llmUsageSourceEnum, runOriginEnum } from "./enums.ts";
 import { user } from "./auth.ts";
 import { applications, endUsers } from "./applications.ts";
@@ -72,12 +73,7 @@ export const runs = pgTable(
     // in `run-info-tab.tsx`. Do NOT rename to camelCase without a data
     // migration and a coordinated wire-schema bump — the JSONB payloads
     // already in production use snake_case.
-    tokenUsage: jsonb("token_usage").$type<{
-      input_tokens?: number;
-      output_tokens?: number;
-      cache_creation_input_tokens?: number;
-      cache_read_input_tokens?: number;
-    }>(),
+    tokenUsage: jsonb("token_usage").$type<TokenUsage>(),
     startedAt: timestamp("started_at", { withTimezone: true }).defaultNow().notNull(),
     completedAt: timestamp("completed_at", { withTimezone: true }),
     duration: integer("duration"),
@@ -197,7 +193,7 @@ export const runs = pgTable(
     index("idx_runs_end_user_id").on(table.endUserId),
     // Per-agent run history (the hottest list path): WHERE package_id = ?
     // ORDER BY started_at DESC. Also serves getLastRun / getRecentRuns /
-    // getLastCheckpoint / nextRunNumber. A backward scan satisfies the DESC
+    // nextRunNumber. A backward scan satisfies the DESC
     // sort, so a plain composite suffices.
     index("idx_runs_package_started").on(table.packageId, table.startedAt),
     // schedule_id is LEFT JOINed on every enriched run list and the FK

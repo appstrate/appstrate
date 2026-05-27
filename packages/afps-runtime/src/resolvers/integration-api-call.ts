@@ -14,12 +14,18 @@
  * inject credentials locally — no sidecar, no container.
  *
  * The reusable HTTP core lives in {@link makeApiCallTool} / {@link ApiCallFn}
- * (body streaming, redirect handling, `authorized_uris` matching, response
- * serialisation). This module is credential-source-specific:
+ * (body streaming, `authorized_uris` matching, response serialisation), and
+ * the shared outbound pipeline (SSRF blocklist + the redirect-follower with
+ * per-hop SSRF / per-hop allowlist / hybrid credential-strip / cookie
+ * capture) lives in `./api-call-engine.ts` — identical to the platform
+ * sidecar's `executeApiCall`. This module is credential-source-specific:
  *
  *   - {@link LocalIntegrationResolver} reads a JSON creds file keyed by
- *     integration id and injects the credential header itself (offline /
- *     air-gapped dev — no refresh, no rotation).
+ *     integration id and injects the credential header itself, then
+ *     dispatches the upstream call through the shared engine's
+ *     `guardedFetch` (offline / air-gapped dev — no refresh, no rotation).
+ *     The engine adds the SSRF blocklist + redirect-follower the raw
+ *     `fetch` path used to lack.
  *   - {@link RemoteAppstrateIntegrationResolver} forwards every call through
  *     a pinned Appstrate instance's `/api/credential-proxy/proxy` route, with
  *     the integration id as the `X-Integration-Id` scope marker. Credentials never
@@ -38,10 +44,17 @@ import {
   applyTransportHeaders,
   isReproducibleBody,
   matchesAuthorizedUriSpec,
+  slugifyIntegrationId,
   type ApiCallFn,
   type ApiCallMeta,
 } from "./http-call-core.ts";
+import { guardedFetch, PreflightError } from "./api-call-engine.ts";
+import { AuthorizedUrisError, ResolverError } from "../errors.ts";
 import { resolveHttpDelivery, type HttpDeliveryConfig } from "./http-delivery.ts";
+import {
+  projectHttpDeliveryConfig,
+  type AfpsHttpDelivery,
+} from "@appstrate/afps-shared/delivery-http";
 import { substituteVars } from "./template-vars.ts";
 import { resolvePackageRef } from "./bundle-adapter.ts";
 
@@ -120,11 +133,6 @@ export function readIntegrationRefs(bundle: Bundle): IntegrationRef[] {
   return refs;
 }
 
-/** Slugify a package id into a tool-name-safe namespace (matches platform). */
-function slugifyNamespace(id: string): string {
-  return id.replace(/^@/, "").replace(/[^a-zA-Z0-9_]/g, "_");
-}
-
 /**
  * Project an integration manifest onto {@link ApiCallIntegrationMeta}.
  * Returns `null` when the integration does NOT declare `apiCall` (it is a
@@ -149,49 +157,6 @@ export function readApiCallIntegrationMeta(
   return projectApiCallMeta(ref.name, parsed);
 }
 
-/** A single `{$credential.<field>}` reference, lowered to a bare field name. */
-const SINGLE_CREDENTIAL_REF = /^\{\$credential\.([A-Za-z0-9_]+)\}$/;
-
-/** AFPS `delivery.http` block (snake_case). */
-interface AfpsDeliveryHttp {
-  name?: string;
-  prefix?: string;
-  value?: string;
-  encoding?: "base64";
-  allow_server_override?: boolean;
-}
-
-/**
- * Project an AFPS `delivery.http` block (snake_case) onto the internal
- * {@link HttpDeliveryConfig} the `resolveHttpDelivery` plan layer consumes.
- * Mirrors the sidecar's `toHttpDeliveryConfig` — a single `{$credential.field}`
- * value lowers to a bare `valueFrom` field name; anything richer is rewritten
- * to the resolver's `{{field}}` template syntax.
- */
-function toHttpDeliveryConfig(http: AfpsDeliveryHttp | undefined): HttpDeliveryConfig | undefined {
-  if (!http) return undefined;
-  const cfg: HttpDeliveryConfig = {};
-  if (typeof http.name === "string") cfg.headerName = http.name;
-  if (typeof http.prefix === "string") cfg.headerPrefix = http.prefix;
-  if (typeof http.allow_server_override === "boolean") {
-    cfg.allowServerOverride = http.allow_server_override;
-  }
-  const value = typeof http.value === "string" ? http.value : undefined;
-  if (value !== undefined) {
-    const single = value.match(SINGLE_CREDENTIAL_REF);
-    if (single && http.encoding === undefined) {
-      cfg.valueFrom = single[1]!;
-    } else {
-      const template = value.replace(
-        /\{\$credential\.([A-Za-z0-9_]+)\}/g,
-        (_m, field: string) => `{{${field}}}`,
-      );
-      cfg.valueFrom = http.encoding === "base64" ? { template, encoding: "base64" } : { template };
-    }
-  }
-  return cfg;
-}
-
 function projectApiCallMeta(name: string, parsed: unknown): ApiCallIntegrationMeta | null {
   if (!parsed || typeof parsed !== "object") return null;
   const m = parsed as {
@@ -203,7 +168,7 @@ function projectApiCallMeta(name: string, parsed: unknown): ApiCallIntegrationMe
         type?: string;
         authorized_uris?: unknown;
         allow_all_uris?: unknown;
-        delivery?: { http?: AfpsDeliveryHttp };
+        delivery?: { http?: AfpsHttpDelivery };
       }
     >;
   };
@@ -225,11 +190,11 @@ function projectApiCallMeta(name: string, parsed: unknown): ApiCallIntegrationMe
     ? auth.authorized_uris.filter((u): u is string => typeof u === "string")
     : [];
   const allowAllUris = auth.allow_all_uris === true;
-  const http = toHttpDeliveryConfig(auth.delivery?.http);
+  const http = projectHttpDeliveryConfig(auth.delivery?.http);
 
   return {
     name,
-    namespace: slugifyNamespace(name),
+    namespace: slugifyIntegrationId(name),
     authKey,
     authType: typeof auth.type === "string" ? auth.type : "custom",
     authorizedUris,
@@ -373,7 +338,10 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
       for (const [key, value] of Object.entries(headers)) {
         headers[key] = substituteVars(value, fields);
       }
-      injectCredential(headers, meta, entry);
+      // Inject the credential header locally and capture its name so the
+      // shared engine's redirect-follower knows which header to strip on
+      // an out-of-boundary cross-origin hop.
+      const injectedCredentialHeader = injectCredential(headers, meta, entry);
 
       const resolvedBody = await resolveBodyForFetch(req.body, {
         allowFromFile: true,
@@ -385,12 +353,61 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
         headers["Content-Type"] = resolvedBody.contentType;
       }
 
-      const res = await this.fetchImpl(target, {
+      // Route through the shared engine — same SSRF blocklist + manual
+      // redirect-follower (per-hop SSRF, per-hop authorized_uris,
+      // hybrid credential-strip, userinfo/fragment stripping) the sidecar
+      // uses. Previously this was a raw `fetch(target, …)` with default
+      // `redirect: "follow"` and NO SSRF check — the gap this engine closes.
+      const init: RequestInit & Record<string, unknown> = {
         method: req.method,
         headers,
         body: resolvedBody.kind === "bytes" ? resolvedBody.bytes : resolvedBody.stream,
         signal: ctx.signal,
-      });
+      };
+      if (resolvedBody.kind === "stream") init.duplex = "half";
+
+      let res: Response;
+      try {
+        const result = await guardedFetch({
+          url: target,
+          init,
+          fetchFn: this.fetchImpl,
+          authorizedUris: meta.authorizedUris,
+          allowAllUris: meta.allowAllUris,
+          injectedCredentialHeader: injectedCredentialHeader?.toLowerCase() ?? null,
+          integrationId: meta.name,
+        });
+        res = result.response;
+      } catch (err) {
+        // The shared engine throws on a refused initial target (SSRF /
+        // off-allowlist) or a refused redirect hop. Surface these as a
+        // typed resolver error rather than a bare fetch exception so the
+        // CLI agent gets a clear, structured failure — the host is
+        // redacted (a redirect target may carry `?token=…`).
+        if (err instanceof PreflightError) {
+          if (err.reason === "not_authorized") {
+            throw new AuthorizedUrisError(
+              "AUTHORIZED_URIS_MISMATCH",
+              `Integration ${meta.name}: ${err.message}`,
+              { integration: meta.name, target },
+            );
+          }
+          throw new ResolverError(
+            "RESOLVER_URL_BLOCKED",
+            `Integration ${meta.name}: ${err.message}`,
+            { integration: meta.name, target },
+          );
+        }
+        if (err instanceof Error && err.name === "RedirectBlockedError") {
+          throw new ResolverError(
+            "RESOLVER_REDIRECT_BLOCKED",
+            `Integration ${meta.name}: redirect blocked (${(err as { reason?: string }).reason})`,
+            { integration: meta.name },
+          );
+        }
+        throw err;
+      }
+
       return serializeFetchResponse(res, {
         workspace: ctx.workspace,
         toolCallId: ctx.toolCallId,
@@ -409,12 +426,16 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
  * When neither yields a header (e.g. `custom` auth with no `delivery.http`),
  * nothing is injected — the agent supplies its own auth via `{{var}}`
  * substitution, as for a `custom` auth.
+ *
+ * Returns the name of the header it injected (or `null` when nothing was
+ * injected) so the caller can hand it to the shared engine's
+ * redirect-follower for cross-origin credential stripping.
  */
 function injectCredential(
   headers: Record<string, string>,
   meta: ApiCallIntegrationMeta,
   entry: LocalIntegrationCredentialsFile["integrations"][string],
-): void {
+): string | null {
   const fields = entry.fields;
 
   // 1. Explicit override from the creds file.
@@ -422,16 +443,16 @@ function injectCredential(
     const rendered = entry.injection.template
       ? substituteVars(entry.injection.template, fields)
       : (fields.api_key ?? fields.access_token);
-    if (!rendered) return;
+    if (!rendered) return null;
     const headerName = entry.injection.headerName ?? "Authorization";
     const headerPrefix = entry.injection.headerPrefix ?? "";
     headers[headerName] = `${headerPrefix}${rendered}`;
-    return;
+    return headerName;
   }
 
   // 2. Manifest `delivery.http` plan (auth-type defaults).
   const plan = resolveHttpDelivery(meta.authType, fields, meta.http);
-  if (!plan || !plan.headerName) return;
+  if (!plan || !plan.headerName) return null;
   // `allowServerOverride: false` (default) → strip a caller-supplied header
   // of the same name before injecting (defence-in-depth, mirrors the sidecar).
   if (!plan.allowServerOverride) {
@@ -440,6 +461,7 @@ function injectCredential(
     }
   }
   headers[plan.headerName] = `${plan.headerPrefix}${plan.value}`;
+  return plan.headerName;
 }
 
 // ─────────────────────────────────────────────

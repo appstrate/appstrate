@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
-import { listPackages, getPackage } from "../../../src/services/package-catalog.ts";
+import { getPackage } from "../../../src/services/package-catalog.ts";
 
 describe("package-catalog", () => {
   let userId: string;
@@ -18,125 +18,6 @@ describe("package-catalog", () => {
     const { org } = await createTestOrg(userId, { slug: "testorg" });
     orgId = org.id;
     orgSlug = org.slug;
-  });
-
-  // ── listPackages ──────────────────────────────────────────
-
-  describe("listPackages", () => {
-    it("returns agents belonging to the org", async () => {
-      await seedPackage({
-        orgId,
-        id: `@${orgSlug}/agent-a`,
-        draftManifest: {
-          name: `@${orgSlug}/agent-a`,
-          version: "0.1.0",
-          type: "agent",
-          description: "Agent A",
-        },
-      });
-      await seedPackage({
-        orgId,
-        id: `@${orgSlug}/agent-b`,
-        draftManifest: {
-          name: `@${orgSlug}/agent-b`,
-          version: "0.1.0",
-          type: "agent",
-          description: "Agent B",
-        },
-      });
-
-      const agents = await listPackages(orgId);
-
-      expect(agents.length).toBeGreaterThanOrEqual(2);
-      const ids = agents.map((f) => f.id);
-      expect(ids).toContain(`@${orgSlug}/agent-a`);
-      expect(ids).toContain(`@${orgSlug}/agent-b`);
-    });
-
-    it("includes system packages (orgId: null) alongside org packages", async () => {
-      await seedPackage({
-        orgId: null,
-        id: "@system/sys-agent",
-        source: "system",
-        draftManifest: {
-          name: "@system/sys-agent",
-          version: "1.0.0",
-          type: "agent",
-          description: "System",
-        },
-      });
-      await seedPackage({
-        orgId,
-        id: `@${orgSlug}/user-agent`,
-        draftManifest: {
-          name: `@${orgSlug}/user-agent`,
-          version: "0.1.0",
-          type: "agent",
-          description: "User",
-        },
-      });
-
-      const agents = await listPackages(orgId);
-      const ids = agents.map((f) => f.id);
-      expect(ids).toContain("@system/sys-agent");
-      expect(ids).toContain(`@${orgSlug}/user-agent`);
-    });
-
-    it("does not return packages from other orgs", async () => {
-      const otherUser = await createTestUser({ email: "other@test.com" });
-      const { org: otherOrg } = await createTestOrg(otherUser.id, { slug: "otherorg" });
-
-      await seedPackage({
-        orgId: otherOrg.id,
-        id: "@otherorg/secret-agent",
-        draftManifest: {
-          name: "@otherorg/secret-agent",
-          version: "0.1.0",
-          type: "agent",
-          description: "Other",
-        },
-      });
-
-      const agents = await listPackages(orgId);
-      const ids = agents.map((f) => f.id);
-      expect(ids).not.toContain("@otherorg/secret-agent");
-    });
-
-    it("only returns packages of type agent", async () => {
-      await seedPackage({
-        orgId,
-        id: `@${orgSlug}/my-agent`,
-        type: "agent",
-        draftManifest: {
-          name: `@${orgSlug}/my-agent`,
-          version: "0.1.0",
-          type: "agent",
-          description: "An agent",
-        },
-      });
-      await seedPackage({
-        orgId,
-        id: `@${orgSlug}/my-skill`,
-        type: "skill",
-        draftManifest: {
-          name: `@${orgSlug}/my-skill`,
-          version: "0.1.0",
-          type: "skill",
-          description: "A skill",
-        },
-      });
-
-      const agents = await listPackages(orgId);
-      const ids = agents.map((f) => f.id);
-      expect(ids).toContain(`@${orgSlug}/my-agent`);
-      expect(ids).not.toContain(`@${orgSlug}/my-skill`);
-    });
-
-    it("returns an empty array when no agents exist", async () => {
-      const agents = await listPackages(orgId);
-      expect(agents).toBeArray();
-      expect(agents).toHaveLength(0);
-    });
   });
 
   // ── getPackage ────────────────────────────────────────────

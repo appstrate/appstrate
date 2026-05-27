@@ -638,8 +638,8 @@ export function installSessionBridge(
         if (u) {
           const inputDelta = u.input ?? 0;
           const outputDelta = u.output ?? 0;
-          totalUsage.input_tokens += inputDelta;
-          totalUsage.output_tokens += outputDelta;
+          totalUsage.input_tokens = (totalUsage.input_tokens ?? 0) + inputDelta;
+          totalUsage.output_tokens = (totalUsage.output_tokens ?? 0) + outputDelta;
           totalUsage.cache_creation_input_tokens =
             (totalUsage.cache_creation_input_tokens ?? 0) + (u.cacheWrite ?? 0);
           totalUsage.cache_read_input_tokens =

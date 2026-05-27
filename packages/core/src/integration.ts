@@ -364,22 +364,14 @@ export function getDeclaredToolNames(manifest: IntegrationManifest): string[] {
   return manifest.tools_policy ? Object.keys(manifest.tools_policy) : [];
 }
 
-/** The `_meta` key carrying Appstrate's connect-tool extension on an auth's connect block. */
-export const APPSTRATE_CONNECT_META_KEY = "dev.appstrate/connect";
-
 /**
  * Tool names referenced as a run-start `connect.tool` across all auths.
  * Auto-hidden from the agent surface — these are credential-acquisition
  * primitives the platform invokes at boot, not agent capabilities.
  *
- * Reads two locations in this priority order:
- *   1. `connect.tool.name` (string) — AFPS §7.7 spec-natural location.
- *      `connect.tool` is the canonical block for the orchestrated-acquisition
- *      mode; `name` is the tool reference. Preferred form for new manifests.
- *   2. `connect._meta["dev.appstrate/connect"].tool` — legacy vendor-extension
- *      location used before the spec-natural `connect.tool.name` shape was
- *      adopted. Kept for back-compat so older published manifests keep
- *      auto-hiding their connect tool.
+ * Reads `connect.tool.name` (string) — AFPS §7.7 spec-natural location.
+ * `connect.tool` is the canonical block for the orchestrated-acquisition
+ * mode; `name` is the tool reference.
  */
 export function getConnectToolNames(manifest: IntegrationManifest): string[] {
   const names: string[] = [];
@@ -388,20 +380,13 @@ export function getConnectToolNames(manifest: IntegrationManifest): string[] {
       auth as {
         connect?: {
           tool?: { name?: unknown };
-          _meta?: Record<string, { tool?: unknown }>;
         };
       }
     ).connect;
-    // (1) spec-natural — `connect.tool.name`
     const specNatural = connect?.tool?.name;
     if (typeof specNatural === "string" && specNatural.length > 0) {
       names.push(specNatural);
-      continue;
     }
-    // (2) legacy vendor extension — `connect._meta["dev.appstrate/connect"].tool`
-    const meta = connect?._meta?.[APPSTRATE_CONNECT_META_KEY];
-    const t = meta?.tool;
-    if (typeof t === "string" && t.length > 0) names.push(t);
   }
   return names;
 }

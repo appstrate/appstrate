@@ -2,6 +2,7 @@
 
 import { z } from "zod";
 import type { ModelCost } from "@appstrate/core/module";
+import type { TokenUsage } from "@appstrate/core/token-usage";
 
 export type { WebhookInfo, WebhookCreateResponse, WebhookDelivery } from "./webhooks.ts";
 import type { AgentIntegrationEntry } from "./integrations.ts";
@@ -16,7 +17,6 @@ export type {
   IntegrationConnection,
   IntegrationDetail,
   IntegrationManifestAuth,
-  IntegrationManifestToolPolicy,
   IntegrationManifestView,
   IntegrationOAuthClient,
   IntegrationOrgDefault,
@@ -31,6 +31,22 @@ import type { PackageType } from "@appstrate/core/validation";
 export type { PackageType };
 
 export type { Run } from "@appstrate/db/schema";
+
+/**
+ * Stripe-canonical list envelope for HTTP list responses.
+ *
+ * Wire format: `{ object: "list", data: T[], hasMore: boolean, total?, limit? }`.
+ * `total` is the full row count (offset pagination); `limit` is the page size
+ * echoed by cursor-style endpoints (e.g. end-users). Both optional so every
+ * list endpoint variant fits the single canonical shape.
+ */
+export interface ListEnvelope<T> {
+  object: "list";
+  data: T[];
+  hasMore: boolean;
+  total?: number;
+  limit?: number;
+}
 
 import { runStatusEnum as _runStatusEnum } from "@appstrate/db/schema";
 type _RunStatus = (typeof _runStatusEnum.enumValues)[number];
@@ -437,12 +453,12 @@ export const modelCostSchema = z.object({
  * cost-accounting consumer.
  */
 export const tokenUsageSchema = z.object({
-  input_tokens: z.number().nonnegative(),
-  output_tokens: z.number().nonnegative(),
+  input_tokens: z.number().nonnegative().optional(),
+  output_tokens: z.number().nonnegative().optional(),
   cache_creation_input_tokens: z.number().nonnegative().optional(),
   cache_read_input_tokens: z.number().nonnegative().optional(),
 });
-export type TokenUsage = z.infer<typeof tokenUsageSchema>;
+export type { TokenUsage };
 
 /**
  * In-place accumulator for {@link TokenUsage} totals.
@@ -453,8 +469,8 @@ export type TokenUsage = z.infer<typeof tokenUsageSchema>;
  * `total` so subsequent reads always yield a number.
  */
 export function accumulateTokenUsage(total: TokenUsage, addition: TokenUsage): void {
-  total.input_tokens += addition.input_tokens ?? 0;
-  total.output_tokens += addition.output_tokens ?? 0;
+  total.input_tokens = (total.input_tokens ?? 0) + (addition.input_tokens ?? 0);
+  total.output_tokens = (total.output_tokens ?? 0) + (addition.output_tokens ?? 0);
   total.cache_creation_input_tokens =
     (total.cache_creation_input_tokens ?? 0) + (addition.cache_creation_input_tokens ?? 0);
   total.cache_read_input_tokens =
@@ -750,38 +766,10 @@ export interface EndUserInfo {
   updatedAt: string;
 }
 
-export interface EndUserListResponse {
-  object: "list";
-  data: EndUserInfo[];
-  hasMore: boolean;
-  limit: number;
-}
-
 // --- OIDC Module — per-application auth config view types ---
+//
+// These OIDC-module-owned wire types live in ./oidc.ts (the frontend cannot
+// cross the module boundary to import from the API). Re-exported here so
+// existing importers keep working.
 
-// Wire shape for `/api/applications/:id/smtp-config` and
-// `/api/applications/:id/social-providers/:provider`. Lives here so
-// backend services, OpenAPI schemas, and frontend hooks stay in lockstep.
-
-export type SocialProviderId = "google" | "github";
-
-export interface SmtpConfigView {
-  applicationId: string;
-  host: string;
-  port: number;
-  username: string;
-  fromAddress: string;
-  fromName: string | null;
-  secureMode: "auto" | "tls" | "starttls" | "none";
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface SocialProviderView {
-  applicationId: string;
-  provider: SocialProviderId;
-  clientId: string;
-  scopes: string[] | null;
-  createdAt: string;
-  updatedAt: string;
-}
+export type { SocialProviderId, SmtpConfigView, SocialProviderView } from "./oidc.ts";

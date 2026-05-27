@@ -80,6 +80,29 @@ export {
   type SerializeFetchResponseContext,
 } from "./http-call-core.ts";
 
+// Shared, credential-source-agnostic outbound-HTTP engine: authorized_uris
+// + SSRF preflight and the manual redirect-follower (per-hop SSRF + per-hop
+// allowlist + hybrid credential-strip + cookie capture). Consumed by the
+// sidecar's `executeApiCall` (platform path) AND the local CLI resolver.
+export {
+  MAX_REDIRECTS,
+  OUTBOUND_TIMEOUT_MS,
+  matchesAuthorizedUri,
+  stripUserInfoAndFragment,
+  preflightUrl,
+  redactHost,
+  mergeSetCookieIntoJar,
+  fetchFollowingRedirectsCapturingCookies,
+  guardedFetch,
+  RedirectBlockedError,
+  PreflightError,
+  type PreflightResult,
+  type PreflightOptions,
+  type RedirectFollowOptions,
+  type RedirectLogger,
+  type GuardedFetchOptions,
+} from "./api-call-engine.ts";
+
 // Integration `api_call` surface — the portable equivalent of the platform's
 // `{ns}__api_call` MCP tool. Reuses the same HTTP core (`makeApiCallTool`) as
 // the runtime's spawned-integration resolvers.

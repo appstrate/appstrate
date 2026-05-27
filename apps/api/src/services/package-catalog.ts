@@ -178,7 +178,7 @@ export async function getPackageWithAccess(
  * Select packages scoped to `orgId` (system + user) with shared projection,
  * `notEphemeral` + type filter, and the system-first ordering. Callers pass
  * additional `where` predicates and an optional row cap; everything else is
- * held constant so `listPackages` and `searchPackages` stay in lockstep.
+ * held constant so callers stay in lockstep.
  */
 async function selectScopedPackages(args: {
   orgId: string;
@@ -218,7 +218,7 @@ async function selectScopedPackages(args: {
 
 /**
  * Free-text catalog search for external modules via PlatformServices.
- * Matches `id` and manifest fields (`name`, `displayName`, `description`)
+ * Matches `id` and manifest fields (`name`, `display_name`, `description`)
  * with Postgres `ILIKE` — fine for the few-hundred-packages-per-org
  * scale; a full-text index can be bolted on later if volume grows.
  *
@@ -242,21 +242,11 @@ export async function searchPackages(args: {
     extra: or(
       sql`${packages.id} ILIKE ${pattern}`,
       sql`${packages.draftManifest}->>'name' ILIKE ${pattern}`,
-      // AFPS snake_case (`display_name`); legacy rows carrying the 1.x
-      // `displayName` key are upgraded in place by the data migration.
       sql`${packages.draftManifest}->>'display_name' ILIKE ${pattern}`,
       sql`${packages.draftManifest}->>'description' ILIKE ${pattern}`,
     ),
     limit: limit + 1,
   });
-}
-
-/** List packages by type: system (orgId: null) + user packages (from DB, scoped by org). Defaults to "agent". */
-export async function listPackages(
-  orgId: string,
-  type: PackageType = "agent",
-): Promise<LoadedPackage[]> {
-  return selectScopedPackages({ orgId, type });
 }
 
 /** Get all package IDs (system + user, scoped by org). Used for collision checks. */

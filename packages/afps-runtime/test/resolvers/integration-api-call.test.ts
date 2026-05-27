@@ -506,6 +506,186 @@ describe("LocalIntegrationResolver", () => {
   });
 });
 
+// The local resolver now routes upstream calls through the shared
+// outbound-HTTP engine (`api-call-engine.ts`), gaining the SSRF blocklist
+// + manual redirect-follower the platform sidecar already had. Previously
+// it did a raw `fetch(target, …)` with default `redirect: "follow"` and NO
+// SSRF check — these tests pin the closed gap.
+describe("LocalIntegrationResolver — SSRF + redirect hardening (newly added on the CLI path)", () => {
+  function allowAllManifest(name: `@${string}/${string}`) {
+    return makePackage(name, "1.0.0", "integration", {
+      "integration.json": JSON.stringify(
+        apiKeyIntegrationManifest(name, { allowAllUris: true }).integration,
+      ),
+    });
+  }
+
+  function narrowAllowlistManifest(name: `@${string}/${string}`, authorizedUris: string[]) {
+    return makePackage(name, "1.0.0", "integration", {
+      "integration.json": JSON.stringify(
+        apiKeyIntegrationManifest(name, { authorizedUris }).integration,
+      ),
+    });
+  }
+
+  // Even with allow_all_uris (the tool-layer authorized_uris gate is a
+  // no-op), the engine's SSRF preflight must refuse internal targets.
+  const blockedTargets = [
+    "http://169.254.169.254/latest/meta-data/", // AWS/GCP metadata
+    "http://127.0.0.1:8080/admin", // loopback
+    "http://localhost/secret",
+    "http://10.0.0.5/internal", // RFC1918
+    "http://[::1]/x", // IPv6 loopback
+    "http://metadata.google.internal/computeMetadata/v1/", // GCP metadata host
+  ];
+  for (const target of blockedTargets) {
+    it(`refuses SSRF-blocked target ${target} before any outbound fetch`, async () => {
+      let fetched = false;
+      const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+      const bundle = makeBundle(root, [allowAllManifest("@acme/api")]);
+      const resolver = new LocalIntegrationResolver({
+        creds: { version: 1, integrations: { "@acme/api": { fields: { api_key: "secret" } } } },
+        fetch: (() => {
+          fetched = true;
+          return Promise.resolve(new Response("{}", { status: 200 }));
+        }) as unknown as typeof fetch,
+      });
+      const tools = await resolver.resolve([{ name: "@acme/api", version: "^1" }], bundle);
+      const { ctx } = makeCtx();
+      await expect(tools[0]!.execute({ method: "GET", target }, ctx)).rejects.toThrow(
+        /blocked network range/,
+      );
+      // No outbound bytes — the SSRF preflight fires before fetch.
+      expect(fetched).toBe(false);
+    });
+  }
+
+  it("follows a same-host redirect and returns the terminal response", async () => {
+    const seen: string[] = [];
+    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+    const bundle = makeBundle(root, [
+      narrowAllowlistManifest("@acme/api", ["https://api.acme.com/**"]),
+    ]);
+    const resolver = new LocalIntegrationResolver({
+      creds: { version: 1, integrations: { "@acme/api": { fields: { api_key: "secret" } } } },
+      fetch: ((url: string) => {
+        seen.push(url);
+        if (url === "https://api.acme.com/v1/old") {
+          return Promise.resolve(
+            new Response(null, {
+              status: 302,
+              headers: { location: "https://api.acme.com/v1/new" },
+            }),
+          );
+        }
+        return Promise.resolve(
+          new Response(JSON.stringify({ ok: true }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+        );
+      }) as typeof fetch,
+    });
+    const tools = await resolver.resolve([{ name: "@acme/api", version: "^1" }], bundle);
+    const { ctx } = makeCtx();
+    const res = await tools[0]!.execute(
+      { method: "GET", target: "https://api.acme.com/v1/old" },
+      ctx,
+    );
+    // The follower chased the 302 to the final 200.
+    expect(seen).toEqual(["https://api.acme.com/v1/old", "https://api.acme.com/v1/new"]);
+    const body = JSON.parse((res.content[0] as { text: string }).text) as { status: number };
+    expect(body.status).toBe(200);
+  });
+
+  it("refuses a redirect hop that leaves the authorized_uris allowlist", async () => {
+    const seen: string[] = [];
+    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+    const bundle = makeBundle(root, [
+      narrowAllowlistManifest("@acme/api", ["https://api.acme.com/**"]),
+    ]);
+    const resolver = new LocalIntegrationResolver({
+      creds: { version: 1, integrations: { "@acme/api": { fields: { api_key: "secret" } } } },
+      fetch: ((url: string) => {
+        seen.push(url);
+        // First (allowed) hop redirects OFF the allowlist to an attacker host.
+        return Promise.resolve(
+          new Response(null, {
+            status: 302,
+            headers: { location: "https://evil.attacker.com/steal" },
+          }),
+        );
+      }) as typeof fetch,
+    });
+    const tools = await resolver.resolve([{ name: "@acme/api", version: "^1" }], bundle);
+    const { ctx } = makeCtx();
+    await expect(
+      tools[0]!.execute({ method: "GET", target: "https://api.acme.com/v1/me" }, ctx),
+    ).rejects.toThrow(/redirect blocked/i);
+    // Only the initial (allowed) hop was issued — the off-allowlist hop
+    // was refused before re-issuing the fetch.
+    expect(seen).toEqual(["https://api.acme.com/v1/me"]);
+  });
+
+  it("refuses a redirect hop pointing at an SSRF-blocked target (allow_all_uris)", async () => {
+    const seen: string[] = [];
+    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+    const bundle = makeBundle(root, [allowAllManifest("@acme/api")]);
+    const resolver = new LocalIntegrationResolver({
+      creds: { version: 1, integrations: { "@acme/api": { fields: { api_key: "secret" } } } },
+      fetch: ((url: string) => {
+        seen.push(url);
+        // Public first hop redirects to the cloud metadata endpoint — the
+        // classic SSRF-via-redirect pivot. allow_all_uris must NOT permit it.
+        return Promise.resolve(
+          new Response(null, {
+            status: 302,
+            headers: { location: "http://169.254.169.254/latest/meta-data/" },
+          }),
+        );
+      }) as typeof fetch,
+    });
+    const tools = await resolver.resolve([{ name: "@acme/api", version: "^1" }], bundle);
+    const { ctx } = makeCtx();
+    await expect(
+      tools[0]!.execute({ method: "GET", target: "https://public.example.com/start" }, ctx),
+    ).rejects.toThrow(/redirect blocked/i);
+    expect(seen).toEqual(["https://public.example.com/start"]);
+  });
+
+  it("strips the injected credential header on an off-boundary cross-origin redirect (allow_all_uris)", async () => {
+    const inits: { url: string; headers: Record<string, string> }[] = [];
+    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+    const bundle = makeBundle(root, [allowAllManifest("@acme/api")]);
+    const resolver = new LocalIntegrationResolver({
+      creds: { version: 1, integrations: { "@acme/api": { fields: { api_key: "secret" } } } },
+      fetch: ((url: string, init: RequestInit) => {
+        inits.push({ url, headers: { ...((init.headers as Record<string, string>) ?? {}) } });
+        if (url === "https://a.example.com/start") {
+          return Promise.resolve(
+            new Response(null, {
+              status: 302,
+              headers: { location: "https://b.example.com/next" },
+            }),
+          );
+        }
+        return Promise.resolve(new Response("{}", { status: 200 }));
+      }) as typeof fetch,
+    });
+    const tools = await resolver.resolve([{ name: "@acme/api", version: "^1" }], bundle);
+    const { ctx } = makeCtx();
+    await tools[0]!.execute({ method: "GET", target: "https://a.example.com/start" }, ctx);
+    // Hop 1 carries the injected credential; hop 2 (cross-origin, no
+    // declared allowlist) must have it stripped (WHATWG origin-strip).
+    const hop1 = inits.find((i) => i.url === "https://a.example.com/start")!;
+    const hop2 = inits.find((i) => i.url === "https://b.example.com/next")!;
+    const hop1Key = Object.entries(hop1.headers).find(([k]) => k.toLowerCase() === "x-api-key");
+    const hop2Key = Object.entries(hop2.headers).find(([k]) => k.toLowerCase() === "x-api-key");
+    expect(hop1Key?.[1]).toBe("secret");
+    expect(hop2Key).toBeUndefined();
+  });
+});
+
 describe("RemoteAppstrateIntegrationResolver", () => {
   it("POSTs to /api/credential-proxy/proxy with X-Integration-Id = integration id", async () => {
     const calls: { url: string; init: RequestInit }[] = [];

@@ -2,7 +2,6 @@
 
 import { createAjv } from "@appstrate/core/ajv";
 import { isFileField, type JSONSchemaObject, type JSONSchema7 } from "@appstrate/core/form";
-import { scopedNameRegex } from "@appstrate/core/validation";
 import { validateConfig as validateConfigCore } from "@appstrate/core/schema-validation";
 
 // --- AJV runtime validation ---
@@ -189,25 +188,4 @@ export function validateOutput(
   schema: JSONSchemaObject,
 ): { valid: boolean; errors: string[] } {
   return runValidate("output", result, schema);
-}
-
-export function validateAgentContent(
-  prompt: string,
-  skills: { id: string; name?: string; description: string; content: string }[],
-): { valid: boolean; errors: string[] } {
-  const errors: string[] = [];
-  if (!prompt || prompt.trim().length === 0) {
-    errors.push("prompt cannot be empty");
-  }
-  const seenIds = new Set<string>();
-  for (const skill of skills) {
-    if (!scopedNameRegex.test(skill.id)) {
-      errors.push(`skill.id '${skill.id}' is not a valid package reference`);
-    }
-    if (seenIds.has(skill.id)) {
-      errors.push(`skill.id '${skill.id}' is duplicated`);
-    }
-    seenIds.add(skill.id);
-  }
-  return { valid: errors.length === 0, errors };
 }

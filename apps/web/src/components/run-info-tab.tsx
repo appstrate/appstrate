@@ -7,6 +7,7 @@ import { JsonView } from "./json-view";
 import { SectionCard } from "./section-card";
 import { EmptyState } from "./page-states";
 import { RunTrigger } from "./run-trigger";
+import { formatDateField } from "../lib/markdown";
 import { ACTIVE_RUN_STATUSES, type EnrichedRun } from "@appstrate/shared-types";
 
 interface RunInfoTabProps {
@@ -35,7 +36,7 @@ function formatTimestamp(value: string | Date | null | undefined): string | null
   if (!value) return null;
   const d = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(d.getTime())) return null;
-  return d.toLocaleString();
+  return formatDateField(d, "datetime");
 }
 
 export function RunInfoTab({ run }: RunInfoTabProps) {

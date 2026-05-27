@@ -4,9 +4,9 @@
  * Platform-side bundle assembly helpers.
  *
  * These are thin wrappers over the runtime primitives — the only
- * platform-specific concern is plumbing {@link DbPackageCatalog} +
- * {@link InMemoryPackageCatalog} through the right composition for each
- * entry point (classic run, inline run, future export endpoint).
+ * platform-specific concern is plumbing {@link DbPackageCatalog} through
+ * the right composition for each entry point (classic run, import, export
+ * endpoint).
  *
  * Runtime primitives are in `@appstrate/afps-runtime/bundle`:
  *   - `buildBundleFromCatalog` — transitive walk
@@ -17,13 +17,10 @@
 import {
   buildBundleFromAfps,
   buildBundleFromCatalog,
-  composeCatalogs,
   extractRootFromAfps,
-  InMemoryPackageCatalog,
   type Bundle,
   type BundleMetadata,
   type BundlePackage,
-  type PackageCatalog,
 } from "@appstrate/afps-runtime/bundle";
 import { DbPackageCatalog } from "./run-launcher/db-package-catalog.ts";
 import { DraftPackageCatalog } from "./run-launcher/draft-package-catalog.ts";
@@ -52,23 +49,6 @@ export async function buildBundleFromDb(
 ): Promise<Bundle> {
   const catalog = new DbPackageCatalog({ orgId: scope.orgId });
   return buildBundleFromCatalog(root, catalog, { metadata, depTypes: ["skills"] });
-}
-
-/**
- * Build a Bundle for an inline run — the root + any declared companion
- * packages come from the posted payload; unresolved transitive deps
- * fall through to the org registry (spec §9.5).
- */
-export async function buildBundleFromInlinePayload(
-  root: BundlePackage,
-  inlinePackages: BundlePackage[],
-  scope: BundleAssemblyScope,
-  metadata?: BundleMetadata,
-): Promise<Bundle> {
-  const inline = new InMemoryPackageCatalog(inlinePackages);
-  const db = new DbPackageCatalog({ orgId: scope.orgId });
-  const composed: PackageCatalog = composeCatalogs(inline, db);
-  return buildBundleFromCatalog(root, composed, { metadata, depTypes: ["skills"] });
 }
 
 /**

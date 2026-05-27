@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useMemo, useCallback, type FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { PACKAGE_CONFIG } from "./use-packages";
@@ -73,7 +72,6 @@ export function useEditorState<S extends EditorStateBase>(
   opts: UseEditorStateOptions<S>,
 ): UseEditorStateReturn<S> {
   const { initialState, packageType, packageId, isEdit, toWireBody, validate } = opts;
-  const navigate = useNavigate();
   const qc = useQueryClient();
   const createPkg = useCreatePackage(packageType);
   const updatePkg = useUpdatePackage(packageType, packageId || "");
@@ -149,10 +147,6 @@ export function useEditorState<S extends EditorStateBase>(
   );
 
   const isPending = createPkg.isPending || updatePkg.isPending;
-
-  // navigate is unused in the public surface (callers handle their own
-  // cancel routing) but we keep the import: future onCancel helper.
-  void navigate;
 
   return {
     state,

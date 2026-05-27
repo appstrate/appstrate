@@ -44,6 +44,7 @@ import {
   TERMINAL_RUN_STATUSES,
   type RunStatus,
   type TerminalRunStatus,
+  type TokenUsage,
 } from "@appstrate/shared-types";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { createConsoleSink } from "./sink.ts";
@@ -82,12 +83,7 @@ export interface RemoteRunRecord {
   checkpoint?: unknown;
   cost?: number | null;
   /** snake-case to mirror the platform's `runs.tokenUsage` JSONB shape. */
-  tokenUsage?: {
-    input_tokens?: number;
-    output_tokens?: number;
-    cache_creation_input_tokens?: number;
-    cache_read_input_tokens?: number;
-  } | null;
+  tokenUsage?: TokenUsage | null;
   startedAt?: string | null;
   completedAt?: string | null;
   duration?: number | null;

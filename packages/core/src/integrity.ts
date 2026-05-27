@@ -1,53 +1,27 @@
 // Copyright 2025-2026 Appstrate
 // SPDX-License-Identifier: Apache-2.0
 
-import { timingSafeEqual } from "node:crypto";
+import {
+  computeIntegrity,
+  verifyIntegrity,
+  type IntegrityCheckResult,
+} from "@appstrate/afps-shared/integrity";
 
 import { stripScope } from "./naming.ts";
 
-/**
- * Compute a Subresource Integrity (SRI) hash for binary data.
- * @param data - Binary content to hash
- * @returns SRI string in the format "sha256-{base64}"
- */
-export function computeIntegrity(data: Uint8Array | Buffer): string {
-  const hash = new Bun.CryptoHasher("sha256");
-  hash.update(data);
-  const base64 = hash.digest("base64");
-  return `sha256-${base64}`;
-}
-
-// ─────────────────────────────────────────────
-// Integrity verification
-// ─────────────────────────────────────────────
-
-/** Result of an integrity verification check. */
-export interface IntegrityCheckResult {
-  /** Whether the computed hash matches the expected value. */
-  valid: boolean;
-  /** The computed SRI hash string. */
-  computed: string;
-}
+// SRI primitives moved to the shared zero-dependency `@appstrate/afps-shared`
+// package so the platform and the standalone `afps` CLI share one
+// implementation. The `@appstrate/core/integrity` public surface is preserved:
+// `computeIntegrity`, `IntegrityCheckResult`, and `verifyArtifactIntegrity`
+// (an alias of the shared `verifyIntegrity`).
+export { computeIntegrity, type IntegrityCheckResult };
 
 /**
- * Verify artifact integrity by computing SHA256 hash and comparing to expected value.
- *
- * Comparison is constant-time when the lengths match — a short-circuit on
- * mismatched lengths is safe because SRI strings of a given algorithm have a
- * fixed length, and the length itself is not a secret.
+ * Verify artifact integrity by computing SHA256 hash and comparing to the
+ * expected value. Alias for the shared `verifyIntegrity` — preserves the
+ * historical `@appstrate/core/integrity` export name.
  */
-export function verifyArtifactIntegrity(
-  data: Uint8Array,
-  expectedIntegrity: string,
-): IntegrityCheckResult {
-  const computed = computeIntegrity(data);
-  if (computed.length !== expectedIntegrity.length) {
-    return { valid: false, computed };
-  }
-  const a = Buffer.from(computed, "utf8");
-  const b = Buffer.from(expectedIntegrity, "utf8");
-  return { valid: timingSafeEqual(a, b), computed };
-}
+export const verifyArtifactIntegrity = verifyIntegrity;
 
 // ─────────────────────────────────────────────
 // Download filename
