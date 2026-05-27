@@ -337,7 +337,7 @@ export interface IntegrationSpawnSpec {
    * array disables the namespace entirely (no tools surfaced).
    *
    * Always an array (never undefined): the platform builds it from
-   * `manifest.integrations[id].tools` and defaults to `[]` when the
+   * `dependencies.integrations[id].tools` and defaults to `[]` when the
    * agent author didn't pick any tool — least privilege by default,
    * the integration still spawns (so env-delivery / MITM credentials
    * remain functional for side-channel use) but exposes nothing to the

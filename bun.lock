@@ -264,7 +264,7 @@
       "name": "@appstrate/db",
       "version": "0.0.0",
       "dependencies": {
-        "@appstrate/afps-shared": "^0.1.0",
+        "@appstrate/afps-shared": "workspace:*",
         "@appstrate/core": "workspace:*",
         "@appstrate/emails": "workspace:*",
         "@appstrate/env": "workspace:*",
