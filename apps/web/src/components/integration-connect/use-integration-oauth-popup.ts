@@ -56,7 +56,7 @@ export function useIntegrationOAuthPopup() {
             ...(input.forceAccountSelect ? { forceAccountSelect: true } : {}),
             ...(input.connectionId ? { connectionId: input.connectionId } : {}),
           });
-          popup.location.href = session.authUrl;
+          popup.location.href = session.auth_url;
           await new Promise<void>((resolve, reject) => {
             const timer = setTimeout(() => {
               clearInterval(poll);

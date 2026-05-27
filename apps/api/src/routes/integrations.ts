@@ -486,7 +486,7 @@ export function createIntegrationsRouter() {
         },
         { scopes, forceAccountSelect: body.force_account_select ?? false },
       );
-      return c.json({ authUrl: result.redirectUrl, state: result.state });
+      return c.json({ auth_url: result.redirectUrl, state: result.state });
     },
   );
 

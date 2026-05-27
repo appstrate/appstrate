@@ -139,7 +139,7 @@ function LibraryMatrix({
               )}
             </TableCell>
             {applications.map((app) => {
-              const installed = pkg.installedIn.includes(app.id);
+              const installed = pkg.installed_in.includes(app.id);
               const isSystem = pkg.source === "system";
               return (
                 <TableCell key={app.id} className="text-center">

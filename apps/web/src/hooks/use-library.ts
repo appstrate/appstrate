@@ -12,7 +12,7 @@ export interface LibraryPackageItem {
   source: "system" | "local";
   name: string;
   description: string;
-  installedIn: string[];
+  installed_in: string[];
 }
 
 export interface LibraryApp {
@@ -52,10 +52,10 @@ function updateLibraryCache(
           if (pkg.id !== packageId) return pkg;
           return {
             ...pkg,
-            installedIn:
+            installed_in:
               action === "install"
-                ? [...pkg.installedIn, applicationId]
-                : pkg.installedIn.filter((id) => id !== applicationId),
+                ? [...pkg.installed_in, applicationId]
+                : pkg.installed_in.filter((id) => id !== applicationId),
           };
         }),
       ]),
@@ -81,12 +81,12 @@ export function usePackageInstallState(packageId: string) {
     const installedAppNames =
       libraryPkg && libraryData
         ? libraryData.applications
-            .filter((a) => libraryPkg.installedIn.includes(a.id))
+            .filter((a) => libraryPkg.installed_in.includes(a.id))
             .map((a) => a.name)
         : [];
 
     const isInstalledInCurrentApp = !!(
-      currentAppId && libraryPkg?.installedIn.includes(currentAppId)
+      currentAppId && libraryPkg?.installed_in.includes(currentAppId)
     );
 
     return { installedAppNames, isInstalledInCurrentApp };

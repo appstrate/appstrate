@@ -551,9 +551,9 @@ export const integrationsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["authUrl", "state"],
+                required: ["auth_url", "state"],
                 properties: {
-                  authUrl: { type: "string", format: "uri" },
+                  auth_url: { type: "string", format: "uri" },
                   state: { type: "string" },
                 },
               },

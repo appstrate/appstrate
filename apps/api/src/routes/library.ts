@@ -49,7 +49,7 @@ export function createLibraryRouter() {
         .orderBy(packages.id),
     ]);
 
-    // Group: packageId → { meta, installedIn[] }
+    // Group: packageId → { meta, installed_in[] }
     const pkgMap = new Map<
       string,
       {
@@ -58,7 +58,7 @@ export function createLibraryRouter() {
         source: string;
         name: string;
         description: string;
-        installedIn: string[];
+        installed_in: string[];
       }
     >();
 
@@ -72,12 +72,12 @@ export function createLibraryRouter() {
           source: row.source,
           name: typeof m.display_name === "string" ? m.display_name : row.id,
           description: typeof m.description === "string" ? m.description : "",
-          installedIn: [],
+          installed_in: [],
         };
         pkgMap.set(row.id, entry);
       }
       if (row.applicationId) {
-        entry.installedIn.push(row.applicationId);
+        entry.installed_in.push(row.applicationId);
       }
     }
 

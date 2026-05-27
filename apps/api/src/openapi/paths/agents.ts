@@ -350,8 +350,8 @@ export const agentsPaths = {
               schema: {
                 type: "object",
                 properties: {
-                  memoriesDeleted: { type: "integer" },
-                  checkpointDeleted: { type: "boolean" },
+                  memories_deleted: { type: "integer" },
+                  checkpoint_deleted: { type: "boolean" },
                 },
               },
             },

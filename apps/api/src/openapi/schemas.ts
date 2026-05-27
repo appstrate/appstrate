@@ -911,11 +911,11 @@ export const schemas = {
     type: "array",
     description:
       "Packages of a single type visible to the org. Each entry carries an " +
-      "`installedIn` array listing the caller-org applications where the package " +
+      "`installed_in` array listing the caller-org applications where the package " +
       "is currently installed (empty array = not installed in any of the caller's apps).",
     items: {
       type: "object",
-      required: ["id", "type", "source", "name", "description", "installedIn"],
+      required: ["id", "type", "source", "name", "description", "installed_in"],
       properties: {
         id: { type: "string", description: "Package id (`pkg_…`)." },
         type: { type: "string", enum: ["agent", "skill", "mcp-server", "integration"] },
@@ -934,7 +934,7 @@ export const schemas = {
           description:
             "Description from the package draft manifest; empty string when not provided.",
         },
-        installedIn: {
+        installed_in: {
           type: "array",
           description:
             "Application ids (`app_…`) belonging to the caller's org where this package is installed.",

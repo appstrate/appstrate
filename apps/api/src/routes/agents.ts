@@ -377,7 +377,10 @@ export function createAgentsRouter() {
         },
       });
 
-      return c.json({ memoriesDeleted, checkpointDeleted });
+      return c.json({
+        memories_deleted: memoriesDeleted,
+        checkpoint_deleted: checkpointDeleted,
+      });
     },
   );
 

@@ -5,7 +5,7 @@
  *
  * Single endpoint that powers the dashboard library view: returns every
  * package visible to the org (org-owned + system) grouped by type, with
- * a per-package `installedIn` array indicating which of the caller's
+ * a per-package `installed_in` array indicating which of the caller's
  * applications already have the package installed.
  */
 
@@ -18,7 +18,7 @@ export const libraryPaths = {
       description:
         "Returns every package available to the caller's organization (org-owned + system) " +
         "grouped by type (`agent`, `skill`, `integration`). Each package carries an " +
-        "`installedIn` array of application ids — the applications belonging to the caller's " +
+        "`installed_in` array of application ids — the applications belonging to the caller's " +
         "org where the package is currently installed. Ephemeral packages are excluded.\n\n" +
         "The response also includes the org's applications (id, name, isDefault) so the UI " +
         "can render a single grid keyed by app without an additional `/api/applications` call.",
@@ -83,7 +83,7 @@ export const libraryPaths = {
                       source: "org",
                       name: "Inbox Triage",
                       description: "Sorts incoming Gmail threads into priority buckets.",
-                      installedIn: ["app_default"],
+                      installed_in: ["app_default"],
                     },
                   ],
                   skill: [],
@@ -95,7 +95,7 @@ export const libraryPaths = {
                       source: "system",
                       name: "Gmail",
                       description: "Google Mail OAuth integration.",
-                      installedIn: ["app_default", "app_staging"],
+                      installed_in: ["app_default", "app_staging"],
                     },
                   ],
                 },

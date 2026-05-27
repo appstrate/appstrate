@@ -200,7 +200,7 @@ export function useDeleteAllMemories(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async () => {
-      return api<{ memoriesDeleted: number; checkpointDeleted: boolean }>(
+      return api<{ memories_deleted: number; checkpoint_deleted: boolean }>(
         `/agents/${packageId}/persistence?kind=memory`,
         { method: "DELETE" },
       );

@@ -41,7 +41,7 @@ Everything that crosses HTTP in JSON or sits at rest in canonical formats.
 - AFPS spec Zod schemas (`afps-spec/packages/schema/src/schemas.ts`)
 - Appstrate validators (`packages/core/src/{validation,integration,mcp-server,form}.ts`)
 
-**Sub-exception — `form.ts` legacy camelCase reader**: `mapAfpsToRjsf` in `packages/core/src/form.ts` reads BOTH canonical snake_case (`file_constraints`, `ui_hints`, `property_order`, `max_size`) AND legacy camelCase (`fileConstraints`, `uiHints`, `propertyOrder`, `maxSize`) wrappers. Canonical snake_case wins; writeback is always snake_case. Reason: AFPS 1.x manifests persisted before the snake_case migration are still on disk. Drop once a backfill re-saves every persisted manifest. RJSF vendor-namespaced keys (`ui:order`, `ui:widget`, `ui:placeholder`) and RJSF widget options (`accept`, `maxSize`, `multiple`, `maxFiles`) are third-party APIs and intentionally camelCase — out of scope for Zone 1.
+**Sub-exception — `form.ts` RJSF vendor keys**: `mapAfpsToRjsf` in `packages/core/src/form.ts` reads canonical snake_case wrappers only (`file_constraints`, `ui_hints`, `property_order`, `max_size`); writeback is always snake_case. (The legacy camelCase reader fallback for AFPS 1.x persisted manifests has been removed — the reader is now snake_case-only.) RJSF vendor-namespaced keys (`ui:order`, `ui:widget`, `ui:placeholder`) and RJSF widget options (`accept`, `maxSize`, `multiple`, `maxFiles`) are third-party APIs and intentionally camelCase — out of scope for Zone 1.
 
 **Why snake_case** (SOTA evidence):
 
@@ -153,7 +153,7 @@ If unsure: "universal" means "appears on >5 different types". Otherwise snake_ca
 
 #### Carve-out 4c — Profile/Member DTOs (Better Auth-derived)
 
-`profile.displayName`, `member.displayName`, `OrganizationMember.*`, `MeConnectionSourceGroup.displayName` (when sourced from a profile) stay camelCase.
+`profile.displayName`, `member.displayName`, `OrganizationMember.*` stay camelCase. (`MeConnectionSourceGroup` is now integration-sourced and fully snake_case — no longer a profile-derived camelCase shape.)
 
 **Why**: These shapes come from Better Auth's user/profile tables. Consuming as-is.
 

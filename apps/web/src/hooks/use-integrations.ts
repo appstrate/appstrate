@@ -228,7 +228,7 @@ export function useInitiateIntegrationOAuth() {
       forceAccountSelect?: boolean;
       connectionId?: string;
     }) =>
-      api<{ authUrl: string; state: string }>(
+      api<{ auth_url: string; state: string }>(
         `/integrations/${encodeURI(packageId)}/auths/${encodeURI(authKey)}/connect/oauth2`,
         {
           method: "POST",
