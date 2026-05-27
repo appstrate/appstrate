@@ -24,11 +24,9 @@ import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { validate as validateOpenAPI } from "@readme/openapi-parser";
 import { lintFromString, createConfig } from "@redocly/openapi-core";
+import type { OpenApiSchemaEntry } from "@appstrate/core/module";
 import { buildOpenApiSpec } from "../apps/api/src/openapi/index.ts";
-import {
-  buildZodSchemaRegistry,
-  type ZodSchemaEntry,
-} from "../apps/api/src/openapi/zod-schema-registry.ts";
+import { buildZodSchemaRegistry } from "../apps/api/src/openapi/zod-schema-registry.ts";
 import { collectModuleOpenApi } from "./lib/module-openapi.ts";
 
 // ---------------------------------------------------------------------------
@@ -554,7 +552,7 @@ function normalizeType(schema: Record<string, unknown>): {
 }
 
 interface SchemaDiscrepancy {
-  entry: ZodSchemaEntry;
+  entry: OpenApiSchemaEntry;
   issues: string[];
 }
 

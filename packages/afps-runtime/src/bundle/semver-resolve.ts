@@ -14,6 +14,11 @@
  * (it's published standalone), so the two implementations are kept in
  * sync deliberately. Update both when the algorithm changes.
  *
+ * Drift guard: `packages/afps-runtime/test/bundle/semver-resolve-parity.test.ts`
+ * runs the same input matrix through both functions and asserts identical
+ * output. If you change this algorithm, change the core copy too — the parity
+ * test fails otherwise.
+ *
  * Returns the matched version string (e.g. `"1.2.3"`) or `null`.
  */
 

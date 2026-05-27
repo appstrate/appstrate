@@ -7,8 +7,10 @@
  * `appstrate run` CLI ({@link ./integration-api-call.ts}).
  *
  * afps-runtime is the dependency-free bottom layer, so the single copy lives
- * here and `@appstrate/connect` (which already depends on this package)
- * imports + re-exports it — there is no longer a hand-maintained mirror.
+ * here. `@appstrate/connect`'s `afps-delivery.ts` is a thin adapter that maps
+ * the AFPS 2.0 snake_case `delivery.http` block onto {@link HttpDeliveryConfig}
+ * and delegates to {@link resolveHttpDelivery} — the per-auth-type default
+ * table, the `basic` fallback, and the base64 branch are NOT duplicated there.
  *
  * The resolver is credential-source agnostic: it takes the auth type, the
  * decrypted credential fields, and the manifest's `delivery.http` block, and

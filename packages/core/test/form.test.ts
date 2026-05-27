@@ -195,48 +195,6 @@ describe("mapAfpsToRjsf", () => {
     expect(uiSchema.bio).toMatchObject({ "ui:widget": "textarea", "ui:placeholder": "Tell us…" });
     expect(uiSchema.title).toBeUndefined();
   });
-
-  // AFPS 1.x compat regression: legacy camelCase wrappers must still
-  // resolve correctly so manifests written before the 2.0 rename keep
-  // opening. New writes always emit canonical snake_case.
-  it("accepts legacy camelCase wrapper fields (1.x compat reader)", () => {
-    const legacyWrapper = {
-      schema: {
-        type: "object" as const,
-        properties: {
-          doc: { type: "string", format: "uri", contentMediaType: "application/pdf" },
-          a: { type: "string" },
-          b: { type: "string" },
-        },
-      },
-      fileConstraints: { doc: { accept: ".pdf", maxSize: 2_000_000 } },
-      uiHints: { a: { placeholder: "type something…" } },
-      propertyOrder: ["b", "a"],
-    };
-    const { uiSchema } = mapAfpsToRjsf(legacyWrapper as unknown as SchemaWrapper);
-    expect(uiSchema["ui:order"]).toEqual(["b", "a", "doc", "*"]);
-    expect(uiSchema.a).toMatchObject({ "ui:placeholder": "type something…" });
-    expect(uiSchema.doc).toMatchObject({
-      "ui:widget": "file",
-      "ui:options": { accept: ".pdf", maxSize: 2_000_000 },
-    });
-  });
-
-  it("prefers canonical snake_case over legacy camelCase when both present", () => {
-    const mixed = {
-      schema: {
-        type: "object" as const,
-        properties: { a: { type: "string" }, b: { type: "string" } },
-      },
-      property_order: ["a", "b"],
-      propertyOrder: ["b", "a"],
-      ui_hints: { a: { placeholder: "canonical" } },
-      uiHints: { a: { placeholder: "legacy" } },
-    };
-    const { uiSchema } = mapAfpsToRjsf(mixed as unknown as SchemaWrapper);
-    expect(uiSchema["ui:order"]).toEqual(["a", "b", "*"]);
-    expect(uiSchema.a).toMatchObject({ "ui:placeholder": "canonical" });
-  });
 });
 
 describe("asJSONSchemaObject", () => {

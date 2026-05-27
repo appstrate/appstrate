@@ -14,18 +14,28 @@
  *
  * The value is a TEMPLATE referencing credential fields via the
  * `{$credential.<field>}` syntax (the same syntax `delivery.env`/`delivery.files`
- * use). This resolver renders that template against an auth's decrypted
- * credential bag and returns a {@link HttpDeliveryPlan} — the SAME plan shape
- * the rest of the pipeline (sidecar MITM listener, api-call credentials) already
- * consumes, so downstream consumers are untouched.
- *
- * `resolveAfpsHttpDelivery` reads the AFPS 2.0 manifest `delivery.http` block
- * directly; `resolveHttpDelivery` (from `@appstrate/afps-runtime`) is the
- * lower-level plan resolver fed by the runtime plan-input shape (callers
- * project the 2.0 block into it). Both emit the same `HttpDeliveryPlan`.
+ * use). This module is a THIN ADAPTER: it maps the AFPS 2.0 snake_case shape
+ * onto the runtime plan-input shape (rewriting `{$credential.<field>}` →
+ * `{{field}}`, a pure syntax projection over the same credential bag) and
+ * delegates to the single engine {@link resolveHttpDelivery} (in
+ * `@appstrate/afps-runtime`, the dependency-free bottom layer). The
+ * per-auth-type default table, the `basic → base64(user:pass)` fallback, and the
+ * base64-encoding branch all live in that one engine — they are NOT
+ * re-implemented here.
  */
 
+import { resolveHttpDelivery, type HttpDeliveryConfig } from "@appstrate/afps-runtime/resolvers";
 import type { HttpDeliveryPlan } from "./integration-credentials.ts";
+
+/**
+ * Rewrite the AFPS 2.0 `{$credential.<field>}` value-template syntax into the
+ * `{{field}}` syntax the shared engine's `substituteVars` renders. Both resolve
+ * the SAME credential bag with the same "missing field → empty" policy, so this
+ * is a pure syntax projection — the substitution semantics are unchanged.
+ */
+function toEngineTemplate(value: string): string {
+  return value.replace(/\{\$credential\.([A-Za-z0-9_]+)\}/g, "{{$1}}");
+}
 
 /**
  * Subset of the AFPS 2.0 `auths.{key}.delivery.http` block this resolver
@@ -47,30 +57,6 @@ export interface AfpsHttpDelivery {
   allow_server_override?: boolean;
 }
 
-/** Auth-type defaults — the implicit header injection AFPS §7.6 grants per type. */
-const AUTH_TYPE_DEFAULTS: Readonly<
-  Record<string, { name: string; prefix: string; value: string }>
-> = {
-  oauth2: { name: "Authorization", prefix: "Bearer ", value: "{$credential.access_token}" },
-  api_key: { name: "X-Api-Key", prefix: "", value: "{$credential.api_key}" },
-  basic: { name: "Authorization", prefix: "Basic ", value: "" },
-  custom: { name: "", prefix: "", value: "" },
-};
-
-const CREDENTIAL_REF = /\{\$credential\.([A-Za-z0-9_]+)\}/g;
-
-/**
- * Render a `{$credential.<field>}` value template against a credential bag.
- * Unknown refs render empty (a missing field means "no value to inject"),
- * mirroring the `delivery.http` rendering policy used elsewhere.
- */
-function renderCredentialTemplate(
-  template: string,
-  fields: Readonly<Record<string, string>>,
-): string {
-  return template.replace(CREDENTIAL_REF, (_match, field: string) => fields[field] ?? "");
-}
-
 /**
  * Resolve an AFPS 2.0 `delivery.http` declaration into a {@link HttpDeliveryPlan}.
  *
@@ -78,51 +64,29 @@ function renderCredentialTemplate(
  * explicit `delivery.http`, or a declaration with an empty header name) — the
  * MITM planner treats that as "inject nothing for this auth".
  *
- * Behaviour:
- *   - Auth-type defaults supply the header name/prefix/value template when the
- *     declaration omits them.
- *   - Explicit declaration fields always win over the defaults.
- *   - `basic` with no explicit value base64s `username:password` from the bag.
- *   - `encoding: "base64"` base64s the rendered value.
+ * All behaviour (auth-type defaults, `basic → base64(user:pass)` fallback,
+ * `encoding: "base64"` per RFC 7617 — prefix unencoded, value base64'd) is
+ * supplied by {@link resolveHttpDelivery}; this function only maps the AFPS 2.0
+ * snake_case block onto its plan-input shape:
+ *   - `name` / `prefix` → `headerName` / `headerPrefix` (undefined → engine
+ *     default for the auth type).
+ *   - `value` (a `{$credential.<field>}` template) → `valueFrom.template`,
+ *     carrying `encoding`. Left undefined when the manifest omits `value`, so
+ *     the engine applies its own default value template + `basic` fallback.
  */
 export function resolveAfpsHttpDelivery(
   authType: string,
   fields: Readonly<Record<string, string>>,
   http: AfpsHttpDelivery | undefined,
 ): HttpDeliveryPlan | null {
-  const defaults = AUTH_TYPE_DEFAULTS[authType] ?? { name: "", prefix: "", value: "" };
-
-  const headerName = http?.name ?? defaults.name;
-  if (!headerName) return null;
-
-  const headerPrefix = http?.prefix ?? defaults.prefix;
-  const valueTemplate = http?.value ?? defaults.value;
-
-  let value = valueTemplate.length === 0 ? "" : renderCredentialTemplate(valueTemplate, fields);
-  // §7.6 spec-text reads "applied to the rendered prefix+value string before
-  // placement". The §7.6 commented example, however, shows the output for
-  // `prefix: "Basic ", value: "{$credential.email}/token:{$credential.api_key}",
-  // encoding: "base64"` as `Basic <base64(email/token:apikey)>` — i.e. prefix
-  // placed UNENCODED, value base64'd. We resolve the ambiguity in favour of
-  // the commented example (and the HTTP Basic interop convention RFC 7617
-  // defines as `Basic <base64(user:pass)>`): the prefix stays uncoded and only
-  // the rendered `value` is base64'd. The `afps-delivery.test.ts:Zendesk-style`
-  // case pins this behaviour.
-  if (http?.encoding === "base64" && value.length > 0) {
-    value = Buffer.from(value, "utf8").toString("base64");
-  }
-
-  // basic with no explicit value template → build base64(username:password).
-  if (value.length === 0 && authType === "basic" && http?.value === undefined) {
-    const username = fields["username"] ?? "";
-    const password = fields["password"] ?? "";
-    value = Buffer.from(`${username}:${password}`, "utf8").toString("base64");
-  }
-
-  return {
-    headerName,
-    headerPrefix,
-    value,
-    allowServerOverride: http?.allow_server_override === true,
+  const config: HttpDeliveryConfig = {
+    headerName: http?.name,
+    headerPrefix: http?.prefix,
+    valueFrom:
+      http?.value === undefined
+        ? undefined
+        : { template: toEngineTemplate(http.value), encoding: http.encoding },
+    allowServerOverride: http?.allow_server_override,
   };
+  return resolveHttpDelivery(authType, fields, config);
 }

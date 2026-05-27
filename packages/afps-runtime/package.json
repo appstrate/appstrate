@@ -87,6 +87,7 @@
     }
   },
   "devDependencies": {
+    "@appstrate/core": "workspace:*",
     "@types/mustache": "^4.2.6",
     "@types/semver": "^7.7.1",
     "@mariozechner/pi-coding-agent": "^0.70.6",

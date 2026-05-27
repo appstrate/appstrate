@@ -83,7 +83,6 @@ async function rpc(
 }
 
 const TOKEN_BUDGET_META_KEY = "dev.appstrate/token-budget";
-const TOKEN_BUDGET_META_KEY_LEGACY = "appstrate://token-budget";
 
 interface BudgetMeta {
   estimatedTokens: number;
@@ -360,10 +359,8 @@ describe("token-aware spill — `_meta` accounting", () => {
 
   // AFPS 2.0.2 (Phase F1 follow-up): `_meta` keys must match Appendix B's
   // `META_NAMESPACE_KEY` regex — either a bare token or `<reverse-dns>/<id>`.
-  // The legacy URI-scheme form `appstrate://token-budget` (with `://`)
-  // violated that rule. Writers now always emit `dev.appstrate/token-budget`;
-  // readers tolerate both for one release window.
-  it("writers emit the AFPS 2.0.2 reverse-DNS key, not the legacy URI-scheme key", async () => {
+  // Writers always emit `dev.appstrate/token-budget`.
+  it("writers emit the AFPS 2.0.2 reverse-DNS key", async () => {
     const fetchFn = mock(
       async () =>
         new Response('{"hello":"world"}', {
@@ -384,34 +381,7 @@ describe("token-aware spill — `_meta` accounting", () => {
     const result = res.json.result as CallToolResult;
     // Canonical key present.
     expect(result._meta?.[TOKEN_BUDGET_META_KEY]).toBeDefined();
-    // Legacy key NOT emitted on writes (read-side compat only).
-    expect(result._meta?.[TOKEN_BUDGET_META_KEY_LEGACY]).toBeUndefined();
   });
-
-  // Parametric read-side test: both keys must yield the same payload shape
-  // when a reader reaches into `_meta` looking for token-budget accounting.
-  // This guards the documented contract that readers accept either key.
-  it.each([TOKEN_BUDGET_META_KEY, TOKEN_BUDGET_META_KEY_LEGACY])(
-    "reader can pick budget meta from key %s when present",
-    (key) => {
-      // Simulate two sidecar releases: one emits the new key, one emits
-      // the legacy key. A reader that prefers new and falls back to legacy
-      // must recover the same payload from either shape.
-      const payload: BudgetMeta = {
-        estimatedTokens: 100,
-        consumedTokens: 100,
-        runBudgetTokens: 100_000,
-        inlineCapTokens: 4_000,
-        decision: "inline",
-        reason: "under_inline_cap",
-      };
-      const metaFromKey: Record<string, unknown> = { [key]: payload };
-      const picked =
-        (metaFromKey[TOKEN_BUDGET_META_KEY] as BudgetMeta | undefined) ??
-        (metaFromKey[TOKEN_BUDGET_META_KEY_LEGACY] as BudgetMeta | undefined);
-      expect(picked).toEqual(payload);
-    },
-  );
 });
 
 describe("token-aware spill — applied to all platform tools", () => {

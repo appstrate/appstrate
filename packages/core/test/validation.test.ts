@@ -205,21 +205,6 @@ describe("validateManifest", () => {
     expect(result.valid).toBe(true);
   });
 
-  it("agent with integrations selection folded into integrations_configuration", () => {
-    const result = validateManifest(
-      validAgentManifest({
-        dependencies: { integrations: { "@test/gmail-mcp": "^1.0.0" } },
-        integrations_configuration: {
-          "@test/gmail-mcp": {
-            tools: ["list_messages", "get_message"],
-            scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
-          },
-        },
-      }),
-    );
-    expect(result.valid).toBe(true);
-  });
-
   it("accepts an integration dependency value in object form (AFPS 2.0.2 §4.1)", () => {
     const result = validateManifest(
       validAgentManifest({
@@ -271,58 +256,6 @@ describe("validateManifest", () => {
       }),
     );
     expect(result.valid).toBe(false);
-  });
-
-  it("rejects agent integration tool names that don't match snake_case", () => {
-    const result = validateManifest(
-      validAgentManifest({
-        dependencies: { integrations: { "@test/gmail-mcp": "^1.0.0" } },
-        integrations_configuration: {
-          "@test/gmail-mcp": { tools: ["List-Messages"] },
-        },
-      }),
-    );
-    expect(result.valid).toBe(false);
-  });
-
-  it("rejects agent integration tool names with a leading underscore (R8b N-1)", () => {
-    // Drift fix: validation.ts used to allow `_internal` while naming.ts's
-    // namespaced TOOL_NAME_PATTERN_NEW disallowed `_internal__foo`. Both halves
-    // now share TOOL_NAME_INNER_PATTERN — leading underscores are rejected.
-    const result = validateManifest(
-      validAgentManifest({
-        dependencies: { integrations: { "@test/gmail-mcp": "^1.0.0" } },
-        integrations_configuration: {
-          "@test/gmail-mcp": { tools: ["__leading_underscore"] },
-        },
-      }),
-    );
-    expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes("tools"))).toBe(true);
-  });
-
-  it("rejects a single leading underscore on integration tool names (R8b N-1)", () => {
-    const result = validateManifest(
-      validAgentManifest({
-        dependencies: { integrations: { "@test/gmail-mcp": "^1.0.0" } },
-        integrations_configuration: {
-          "@test/gmail-mcp": { tools: ["_internal"] },
-        },
-      }),
-    );
-    expect(result.valid).toBe(false);
-  });
-
-  it("accepts a well-formed snake_case integration tool name", () => {
-    const result = validateManifest(
-      validAgentManifest({
-        dependencies: { integrations: { "@test/gmail-mcp": "^1.0.0" } },
-        integrations_configuration: {
-          "@test/gmail-mcp": { tools: ["list_messages", "send_message"] },
-        },
-      }),
-    );
-    expect(result.valid).toBe(true);
   });
 
   it("agent with built-in skill using wildcard version", () => {
@@ -882,33 +815,6 @@ describe("validateManifest — v2 common fields (§3.1)", () => {
 
     const local = validateManifest(sample);
     expect(local.valid).toBe(true);
-  });
-
-  it("agent integrations_configuration — auth_key round-trips alongside tools/scopes", () => {
-    // Per AFPS Appendix D, `auth_key` is a publisher-set field inside
-    // `integrations_configuration.<id>`. The local schema now composes with the
-    // canonical `integrationConfiguration` shape so `auth_key` is part of the
-    // declared schema (was previously surviving only via looseObject passthrough).
-    const result = validateManifest(
-      validAgentManifest({
-        dependencies: { integrations: { "@scope/foo": "^1.0.0" } },
-        integrations_configuration: {
-          "@scope/foo": {
-            auth_key: "primary",
-            scopes: ["read"],
-            tools: ["list"],
-          },
-        },
-      }),
-    );
-    expect(result.valid).toBe(true);
-    const m = result.manifest as Record<string, unknown>;
-    const cfg = m.integrations_configuration as Record<string, Record<string, unknown>>;
-    expect(cfg["@scope/foo"]).toEqual({
-      auth_key: "primary",
-      scopes: ["read"],
-      tools: ["list"],
-    });
   });
 
   // ── schema_version MAJOR-policy (§2.4) ──

@@ -70,10 +70,9 @@ describe("getResourceEntries / setResourceEntries", () => {
     expect((m.dependencies as Record<string, unknown>).skills).toBeUndefined();
   });
 
-  // Niveau 2 — version lives in `dependencies.integrations` (bare
-  // string), tool/scope selection lives in the top-level `integrations`
-  // block. These tests pin the round-trip across both halves.
-  describe("integrations (niveau 2 two-block layout)", () => {
+  // Niveau 2 — version + tool/scope selection both live on the canonical
+  // `dependencies.integrations.<id>` object form (§4.1).
+  describe("integrations (canonical §4.1 object form)", () => {
     it("reads version from deps with no selection block", () => {
       const m = { dependencies: { integrations: { "@vendor/gmail": "^1.0.0" } } };
       expect(getResourceEntries(m, "integrations")).toEqual([
@@ -81,11 +80,16 @@ describe("getResourceEntries / setResourceEntries", () => {
       ]);
     });
 
-    it("merges version + selection from the two blocks", () => {
+    it("reads version + selection from the canonical dep object", () => {
       const m = {
-        dependencies: { integrations: { "@vendor/gmail": "^1.0.0" } },
-        integrations: {
-          "@vendor/gmail": { tools: ["list_messages", "send_message"], scopes: ["delete"] },
+        dependencies: {
+          integrations: {
+            "@vendor/gmail": {
+              version: "^1.0.0",
+              tools: ["list_messages", "send_message"],
+              scopes: ["delete"],
+            },
+          },
         },
       };
       expect(getResourceEntries(m, "integrations")).toEqual([
@@ -459,15 +463,11 @@ describe("fieldsToSchema — JSON Schema purity", () => {
   });
 });
 
-// ─── AFPS 1.x lenient-reader compat regression ──────────────
-//
-// Manifests saved by the pre-2.0 editor still live in users' databases
-// with camelCase wrapper fields. `manifestToSchemaFields` must accept
-// both shapes — re-saving migrates the manifest forward to snake_case.
+// ─── manifestToSchemaFields — canonical AFPS 2.0 wrapper reads ──
 
-describe("manifestToSchemaFields — AFPS 1.x lenient compat", () => {
-  it("reads a legacy manifest with camelCase wrapper fields", () => {
-    const legacyManifest: Record<string, unknown> = {
+describe("manifestToSchemaFields — canonical snake_case wrappers", () => {
+  it("reads canonical snake_case wrapper fields", () => {
+    const manifest: Record<string, unknown> = {
       input: {
         schema: {
           type: "object",
@@ -482,12 +482,12 @@ describe("manifestToSchemaFields — AFPS 1.x lenient compat", () => {
           },
           required: ["query"],
         },
-        uiHints: { query: { placeholder: "type…" } },
-        fileConstraints: { doc: { accept: ".pdf", maxSize: 1_000_000 } },
-        propertyOrder: ["doc", "query"],
+        ui_hints: { query: { placeholder: "type…" } },
+        file_constraints: { doc: { accept: ".pdf", max_size: 1_000_000 } },
+        property_order: ["doc", "query"],
       },
     };
-    const input = manifestToSchemaFields(legacyManifest).input!;
+    const input = manifestToSchemaFields(manifest).input!;
     // property_order respected → doc first, query second
     expect(input.map((f) => f.key)).toEqual(["doc", "query"]);
     const queryField = input.find((f) => f.key === "query")!;
@@ -497,29 +497,11 @@ describe("manifestToSchemaFields — AFPS 1.x lenient compat", () => {
     expect(docField.accept).toBe(".pdf");
     expect(docField.maxSize).toBe("1000000");
   });
-
-  it("prefers canonical snake_case when both shapes are present", () => {
-    const mixedManifest: Record<string, unknown> = {
-      input: {
-        schema: {
-          type: "object",
-          properties: { a: { type: "string" }, b: { type: "string" } },
-        },
-        property_order: ["a", "b"],
-        propertyOrder: ["b", "a"],
-        ui_hints: { a: { placeholder: "canonical" } },
-        uiHints: { a: { placeholder: "legacy" } },
-      },
-    };
-    const input = manifestToSchemaFields(mixedManifest).input!;
-    expect(input.map((f) => f.key)).toEqual(["a", "b"]);
-    expect(input.find((f) => f.key === "a")!.placeholder).toBe("canonical");
-  });
 });
 
-// ─── manifestToMetadata — v1 camelCase compat ───────────────
+// ─── manifestToMetadata ───────────────
 
-describe("manifestToMetadata — v1 → v2 compat", () => {
+describe("manifestToMetadata", () => {
   it("reads canonical display_name (snake_case)", () => {
     const m = {
       name: "@test/agent",
@@ -529,29 +511,6 @@ describe("manifestToMetadata — v1 → v2 compat", () => {
     };
     const meta = manifestToMetadata(m);
     expect(meta.displayName).toBe("Canonical Name");
-  });
-
-  it("falls back to camelCase displayName for legacy manifests", () => {
-    const m = {
-      name: "@test/agent",
-      version: "1.0.0",
-      type: "agent",
-      displayName: "Legacy Name",
-    };
-    const meta = manifestToMetadata(m);
-    expect(meta.displayName).toBe("Legacy Name");
-  });
-
-  it("prefers canonical display_name when both are present", () => {
-    const m = {
-      name: "@test/agent",
-      version: "1.0.0",
-      type: "agent",
-      display_name: "Canonical",
-      displayName: "Legacy",
-    };
-    const meta = manifestToMetadata(m);
-    expect(meta.displayName).toBe("Canonical");
   });
 
   it("renders structured author object's name field as the editor text", () => {
@@ -577,22 +536,12 @@ describe("manifestToMetadata — v1 → v2 compat", () => {
   });
 });
 
-// ─── getRuntimeTools — v1 camelCase compat ──────────────────
+// ─── getRuntimeTools ──────────────────
 
-describe("getRuntimeTools — v1 → v2 compat", () => {
+describe("getRuntimeTools", () => {
   it("reads canonical runtime_tools (snake_case)", () => {
     const m = { runtime_tools: ["output", "note"] };
     expect(getRuntimeTools(m)).toEqual(["output", "note"]);
-  });
-
-  it("falls back to camelCase runtimeTools for legacy manifests", () => {
-    const m = { runtimeTools: ["output", "log"] };
-    expect(getRuntimeTools(m)).toEqual(["output", "log"]);
-  });
-
-  it("prefers canonical runtime_tools when both are present", () => {
-    const m = { runtime_tools: ["output"], runtimeTools: ["note"] };
-    expect(getRuntimeTools(m)).toEqual(["output"]);
   });
 
   it("tolerates missing field", () => {
@@ -604,84 +553,10 @@ describe("getRuntimeTools — v1 → v2 compat", () => {
   });
 });
 
-// ─── getResourceEntries — v1 providersConfiguration compat ──
+// ─── Writers emit canonical AFPS 2.0 keys only ──
 
-describe("getResourceEntries — providersConfiguration v1 alias", () => {
-  it("reads scopes from v1 camelCase providersConfiguration", () => {
-    const m = {
-      dependencies: { integrations: { "@scope/int": "^1.0.0" } },
-      providersConfiguration: {
-        "@scope/int": { scopes: ["read", "write"] },
-      },
-    };
-    const entries = getResourceEntries(m, "integrations");
-    expect(entries).toHaveLength(1);
-    expect(entries[0]!.scopes).toEqual(["read", "write"]);
-  });
-
-  it("reads tools from v1 camelCase providersConfiguration", () => {
-    const m = {
-      dependencies: { integrations: { "@scope/int": "^1.0.0" } },
-      providersConfiguration: {
-        "@scope/int": { tools: ["list_x", "create_x"] },
-      },
-    };
-    const entries = getResourceEntries(m, "integrations");
-    expect(entries[0]!.tools).toEqual(["list_x", "create_x"]);
-  });
-
-  it("canonical dependencies.integrations object wins over providersConfiguration", () => {
-    const m = {
-      dependencies: {
-        integrations: {
-          "@scope/int": { version: "^1.0.0", scopes: ["canonical"] },
-        },
-      },
-      providersConfiguration: {
-        "@scope/int": { scopes: ["v1-legacy"] },
-      },
-    };
-    const entries = getResourceEntries(m, "integrations");
-    expect(entries[0]!.scopes).toEqual(["canonical"]);
-  });
-
-  it("setResourceEntries — drops providersConfiguration after canonical write", () => {
-    const m: Record<string, unknown> = {
-      dependencies: { integrations: { "@scope/int": "^1.0.0" } },
-      providersConfiguration: {
-        "@scope/int": { tools: ["legacy"] },
-      },
-    };
-    setResourceEntries(m, "integrations", [
-      { id: "@scope/int", version: "^1.0.0", tools: ["new_canonical"] },
-    ]);
-    expect(m.providersConfiguration).toBeUndefined();
-    const deps = m.dependencies as Record<string, Record<string, unknown>>;
-    expect(deps.integrations!["@scope/int"]).toMatchObject({
-      version: "^1.0.0",
-      tools: ["new_canonical"],
-    });
-  });
-});
-
-// ─── T10 (Wave 3) — M8 writer strips legacy camelCase siblings ──
-//
-// Pin the M8 fix: `metadataToManifestPatch` and `setRuntimeTools` MUST drop
-// the legacy 1.x camelCase sibling on every write so re-saving a 1.x manifest
-// migrates it forward. `metadataToManifestPatch` emits `displayName: undefined`
-// alongside canonical `display_name`; under JSON.stringify (the persistence
-// boundary), `undefined` properties are omitted so the persisted manifest
-// carries only the canonical key. `setRuntimeTools` calls `delete` directly.
-
-describe("T10 — M8 writer drops legacy camelCase siblings", () => {
-  it("metadataToManifestPatch — `displayName` drops out of JSON.stringify(merge(m, patch))", () => {
-    const legacy: Record<string, unknown> = {
-      name: "@test/agent",
-      version: "1.0.0",
-      type: "agent",
-      displayName: "Legacy Name",
-      display_name: "Legacy Name",
-    };
+describe("writers emit canonical AFPS 2.0 keys", () => {
+  it("metadataToManifestPatch — emits canonical display_name", () => {
     const patch = metadataToManifestPatch({
       id: "agent",
       scope: "test",
@@ -691,41 +566,21 @@ describe("T10 — M8 writer drops legacy camelCase siblings", () => {
       author: "",
       keywords: [],
     });
-    // Shallow-merge (matches the editor's `updateManifest({ ...m, ...patch })`)
-    const merged = { ...legacy, ...patch };
-    // displayName is set to undefined in the patch → drops on JSON.stringify
-    const serialized = JSON.parse(JSON.stringify(merged)) as Record<string, unknown>;
+    const serialized = JSON.parse(JSON.stringify(patch)) as Record<string, unknown>;
     expect(serialized.display_name).toBe("New Canonical");
     expect(serialized).not.toHaveProperty("displayName");
   });
 
-  it("setRuntimeTools — DELETES `runtimeTools` when writing snake_case", () => {
-    const legacy: Record<string, unknown> = {
-      runtimeTools: ["output", "log"],
-    };
-    setRuntimeTools(legacy, ["output"]);
-    expect(legacy.runtime_tools).toEqual(["output"]);
-    expect(legacy).not.toHaveProperty("runtimeTools");
+  it("setRuntimeTools — writes canonical runtime_tools", () => {
+    const m: Record<string, unknown> = {};
+    setRuntimeTools(m, ["output"]);
+    expect(m.runtime_tools).toEqual(["output"]);
   });
 
-  it("setRuntimeTools — drops `runtimeTools` even when canonical was already present", () => {
-    const mixed: Record<string, unknown> = {
-      runtime_tools: ["output"],
-      runtimeTools: ["note"],
-    };
-    setRuntimeTools(mixed, ["output", "log"]);
-    expect(mixed.runtime_tools).toEqual(["output", "log"]);
-    expect(mixed).not.toHaveProperty("runtimeTools");
-  });
-
-  it("setRuntimeTools — empty selection drops BOTH keys", () => {
-    const mixed: Record<string, unknown> = {
-      runtime_tools: ["output"],
-      runtimeTools: ["note"],
-    };
-    setRuntimeTools(mixed, []);
-    expect(mixed).not.toHaveProperty("runtime_tools");
-    expect(mixed).not.toHaveProperty("runtimeTools");
+  it("setRuntimeTools — empty selection drops runtime_tools", () => {
+    const m: Record<string, unknown> = { runtime_tools: ["output"] };
+    setRuntimeTools(m, []);
+    expect(m).not.toHaveProperty("runtime_tools");
   });
 
   it("fieldsToSchema — wrapper output has NO camelCase keys (legacy fileConstraints/uiHints/propertyOrder/maxSize)", () => {

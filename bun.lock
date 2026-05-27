@@ -193,6 +193,7 @@
         "zod": "^4.4.3",
       },
       "devDependencies": {
+        "@appstrate/core": "workspace:*",
         "@mariozechner/pi-ai": "^0.70.6",
         "@mariozechner/pi-coding-agent": "^0.70.6",
         "@types/mustache": "^4.2.6",

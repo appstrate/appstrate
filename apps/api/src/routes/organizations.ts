@@ -22,7 +22,7 @@ import {
   orgSettingsSchema,
 } from "../services/organizations.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { toSlug } from "@appstrate/core/naming";
+import { toSlug, SLUG_REGEX } from "@appstrate/core/naming";
 import { ApiError, forbidden, invalidRequest, notFound, parseBody } from "../lib/errors.ts";
 import { listResponse } from "../lib/list-response.ts";
 import {
@@ -83,18 +83,12 @@ async function recordOrgAudit(
 
 export const createOrgSchema = z.object({
   name: z.string().min(1, "Name is required"),
-  slug: z
-    .string()
-    .regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/, "Invalid slug (kebab-case required)")
-    .optional(),
+  slug: z.string().regex(SLUG_REGEX, "Invalid slug (kebab-case required)").optional(),
 });
 
 export const updateOrgSchema = z.object({
   name: z.string().min(1).optional(),
-  slug: z
-    .string()
-    .regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/, "Invalid slug (kebab-case required)")
-    .optional(),
+  slug: z.string().regex(SLUG_REGEX, "Invalid slug (kebab-case required)").optional(),
 });
 
 export const addMemberSchema = z.object({

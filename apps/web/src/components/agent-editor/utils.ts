@@ -17,12 +17,6 @@ import {
 } from "@appstrate/core/form";
 import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
 import { parseManifestIntegrations, writeManifestIntegrations } from "@appstrate/core/dependencies";
-import { AFPS_1X_READ_FALLBACK_REMOVAL } from "@appstrate/core/back-compat";
-
-// Silence unused-warning — the import exists so removal of the back-compat
-// reads below in `manifestToSchemaFields` is one `tsc` error away once the
-// deprecation milestone ships.
-void AFPS_1X_READ_FALLBACK_REMOVAL;
 
 // ─── Version ranges ─────────────────────────────────────────
 
@@ -80,18 +74,13 @@ export const DEFAULT_SKILL_CONTENT = "---\nname: \ndescription: \n---\n\n";
 // ─── Runtime tools (manifest.runtime_tools) ──────────────────
 
 /**
- * Read the agent manifest's top-level `runtime_tools: string[]` (AFPS 2.0;
- * was 1.x `runtimeTools`) — the built-in runtime tools the agent author opted
- * into (all opt-in, `output` included). Tolerates a missing or malformed field
- * by returning an empty array.
- *
- * Reads the canonical snake_case field first, then falls back to the legacy
- * 1.x camelCase `runtimeTools` for manifests saved before the 2.0 migration.
- * `setRuntimeTools` always writes the canonical form, so re-saving migrates
- * the manifest forward.
+ * Read the agent manifest's top-level `runtime_tools: string[]` (AFPS 2.0) —
+ * the built-in runtime tools the agent author opted into (all opt-in,
+ * `output` included). Tolerates a missing or malformed field by returning an
+ * empty array.
  */
 export function getRuntimeTools(m: Record<string, unknown>): string[] {
-  const raw = m.runtime_tools ?? m.runtimeTools;
+  const raw = m.runtime_tools;
   return Array.isArray(raw) ? raw.filter((v): v is string => typeof v === "string") : [];
 }
 
@@ -105,9 +94,6 @@ export function setRuntimeTools(m: Record<string, unknown>, tools: string[]): vo
   } else {
     delete m.runtime_tools;
   }
-  // M8 — drop the legacy 1.x camelCase sibling on every write. Idempotent:
-  // re-running on a manifest that already has only snake_case is a no-op.
-  delete m.runtimeTools;
 }
 
 // ─── Manifest accessors ─────────────────────────────────────
@@ -119,12 +105,6 @@ export function getManifestName(m: Record<string, unknown>): { scope: string; id
 }
 
 /** Extract MetadataState from a manifest object. Includes timeout if present (agents only).
- *
- * Reads canonical AFPS 2.0 snake_case fields first; falls back to legacy 1.x
- * camelCase aliases (`displayName`, `runtimeTools`, etc.) so manifests saved
- * before the 2.0 migration still load into the editor. Writes go through
- * `metadataToManifestPatch`, which always emits canonical snake_case — so
- * editing-and-saving an old manifest migrates it forward.
  *
  * `author` accepts both the AFPS §3.1 bare-string form and the structured
  * `{ name, email?, url? }` object form: the editor's metadata UI is a single
@@ -145,7 +125,7 @@ export function manifestToMetadata(m: Record<string, unknown>): MetadataState {
     id,
     scope,
     version: (m.version as string) ?? "1.0.0",
-    displayName: (m.display_name as string) ?? (m.displayName as string) ?? "", // afps-1x-lint-ok: MetadataState TS-internal field (CASING_CONVENTIONS.md carve-out); manifest write is via metadataToManifestPatch's snake_case `display_name`.
+    displayName: (m.display_name as string) ?? "", // afps-1x-lint-ok: MetadataState TS-internal field (CASING_CONVENTIONS.md carve-out); manifest write is via metadataToManifestPatch's snake_case `display_name`.
     description: (m.description as string) ?? "",
     author: authorText,
     keywords: Array.isArray(m.keywords) ? (m.keywords as string[]) : [],
@@ -155,21 +135,13 @@ export function manifestToMetadata(m: Record<string, unknown>): MetadataState {
 
 /** Apply MetadataState changes back into a manifest patch.
  *
- * M8 — emits canonical snake_case (`display_name`) AND nulls the legacy 1.x
- * camelCase sibling (`displayName: undefined`) in the same patch. When the
- * patch is shallow-merged into the manifest, the resulting JSON
- * serialization drops `displayName`; idempotent against manifests that
- * already have only snake_case keys.
+ * Emits canonical AFPS 2.0 snake_case (`display_name`).
  */
 export function metadataToManifestPatch(m: MetadataState): Record<string, unknown> {
   return {
     name: m.scope ? `@${m.scope}/${m.id}` : m.id,
     version: m.version,
     display_name: m.displayName,
-    // M8 — strip the legacy 1.x camelCase sibling on every write. `undefined`
-    // collapses on JSON.stringify so the persisted manifest carries only
-    // the canonical `display_name`.
-    displayName: undefined,
     description: m.description,
     author: m.author,
     keywords: m.keywords,
@@ -189,9 +161,6 @@ export function getResourceEntries(
   // `dependencies.integrations.<id>` is `{ version, scopes?, tools?, auth_key? }`.
   // `auth_key` (§4.1) selects which `auths.<key>` entry on the depended-on
   // integration this dep uses, when the integration declares multiple auths.
-  // `parseManifestIntegrations` merges canonical + the deprecated
-  // `integrations_configuration` alias + a legacy top-level `integrations`
-  // block (back-compat for manifests saved before AFPS 2.0.2).
   if (type === "integrations") {
     return parseManifestIntegrations(m).map((e) => ({
       id: e.id,
@@ -256,49 +225,20 @@ export function toResourceEntry(r: {
 export function manifestToSchemaFields(
   manifest: Record<string, unknown>,
 ): Record<string, SchemaField[]> {
-  // AFPS 1.x compat: legacy camelCase wrappers (`fileConstraints` /
-  // `uiHints` / `propertyOrder` / `maxSize`) are still on disk for
-  // manifests saved before the 2.0 migration. Accept both shapes, prefer
-  // canonical snake_case. `fieldsToSchema` always writes canonical so
-  // re-saving migrates the manifest forward. Removal milestone:
-  // AFPS_1X_READ_FALLBACK_REMOVAL (see @appstrate/core/back-compat). The
-  // top-level `void` reference makes removal a tsc error.
-  type LegacyConstraint = { accept?: string; max_size?: number; maxSize?: number };
   type ManifestWrapper = {
     schema?: JSONSchemaObject;
-    file_constraints?: Record<string, LegacyConstraint>;
-    fileConstraints?: Record<string, LegacyConstraint>;
+    file_constraints?: Record<string, FileConstraint>;
     ui_hints?: Record<string, { placeholder?: string }>;
-    uiHints?: Record<string, { placeholder?: string }>;
     property_order?: string[];
-    propertyOrder?: string[];
   };
   const wrapperFor = (key: string) => {
     const raw = manifest[key] as ManifestWrapper | undefined;
     if (!raw) return undefined;
-    const fileConstraintsRaw = raw.file_constraints ?? raw.fileConstraints;
-    const fileConstraints = fileConstraintsRaw
-      ? Object.fromEntries(
-          Object.entries(fileConstraintsRaw).map(([k, v]) => [
-            k,
-            {
-              ...(v.accept !== undefined ? { accept: v.accept } : {}),
-              // Bridge legacy maxSize into canonical max_size before passing
-              // to schemaToFields (which reads max_size via FileConstraint).
-              ...(v.max_size != null
-                ? { max_size: v.max_size }
-                : v.maxSize != null
-                  ? { max_size: v.maxSize }
-                  : {}),
-            } satisfies FileConstraint,
-          ]),
-        )
-      : undefined;
     return {
       schema: raw.schema,
-      file_constraints: fileConstraints,
-      ui_hints: raw.ui_hints ?? raw.uiHints,
-      property_order: raw.property_order ?? raw.propertyOrder,
+      file_constraints: raw.file_constraints,
+      ui_hints: raw.ui_hints,
+      property_order: raw.property_order,
     };
   };
   return {

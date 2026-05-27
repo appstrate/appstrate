@@ -29,10 +29,7 @@
  */
 
 import { isValidToolNameForExisting } from "@appstrate/core/naming";
-import {
-  RUNTIME_TOOL_EVENTS_META_KEY,
-  RUNTIME_TOOL_EVENTS_META_KEY_LEGACY,
-} from "@appstrate/core/runtime-tool-defs";
+import { RUNTIME_TOOL_EVENTS_META_KEY } from "@appstrate/core/runtime-tool-defs";
 import {
   sanitiseToolDescriptor,
   type AppstrateMcpClient,
@@ -43,26 +40,18 @@ import {
 
 /**
  * Drop the first-party runtime-event channel from a third-party tool result.
- * `dev.appstrate/events` under `_meta` (plus its legacy single-segment alias
- * `appstrate/events`) is the trusted channel the platform's own runtime tools
- * (output/log/note/pin/report) use to surface canonical run events; an
- * integration upstream has no legitimate reason to set it, so we remove BOTH
- * forms to prevent run-event forgery. Returns the result untouched when
- * neither key is present (the common case).
+ * `dev.appstrate/events` under `_meta` is the trusted channel the platform's
+ * own runtime tools (output/log/note/pin/report) use to surface canonical run
+ * events; an integration upstream has no legitimate reason to set it, so we
+ * remove it to prevent run-event forgery. Returns the result untouched when
+ * the key is not present (the common case).
  */
 function stripForgedRuntimeEvents(result: CallToolResult): CallToolResult {
   const meta = result._meta;
-  if (
-    !meta ||
-    (!(RUNTIME_TOOL_EVENTS_META_KEY in meta) && !(RUNTIME_TOOL_EVENTS_META_KEY_LEGACY in meta))
-  ) {
+  if (!meta || !(RUNTIME_TOOL_EVENTS_META_KEY in meta)) {
     return result;
   }
-  const {
-    [RUNTIME_TOOL_EVENTS_META_KEY]: _dropped,
-    [RUNTIME_TOOL_EVENTS_META_KEY_LEGACY]: _droppedLegacy,
-    ...rest
-  } = meta;
+  const { [RUNTIME_TOOL_EVENTS_META_KEY]: _dropped, ...rest } = meta;
   return { ...result, _meta: rest };
 }
 

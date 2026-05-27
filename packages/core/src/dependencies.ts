@@ -4,12 +4,6 @@
 import { parseScopedName } from "./naming.ts";
 import { getErrorMessage } from "./errors";
 import { isValidRange } from "./semver.ts";
-import { AFPS_1X_READ_FALLBACK_REMOVAL } from "./back-compat.ts";
-
-// Silence unused-warning when this file is consumed without referencing the
-// constant — the import exists so removal of the back-compat block is one
-// `tsc` error away once the deprecation milestone ships.
-void AFPS_1X_READ_FALLBACK_REMOVAL;
 
 // ─────────────────────────────────────────────
 // Dependencies shape (manifest format)
@@ -56,9 +50,8 @@ export interface Dependencies {
  * retired AFPS 1.x dependency keys (`dependencies.providers` /
  * `dependencies.tools`). Per AFPS 2.0 §2.1 / Appendix D, producers MUST NOT
  * emit these keys — they were renamed to `dependencies.integrations` and
- * `dependencies.mcp_servers`. The read path ({@link extractDependencies})
- * keeps projecting legacy keys for back-compat against in-DB manifests; the
- * publish path calls this guard to reject newly-emitted legacy shapes.
+ * `dependencies.mcp_servers`. The publish path calls this guard to reject
+ * newly-emitted legacy shapes.
  */
 export class LegacyDepKeyError extends Error {
   /** Manifest field path that triggered the rejection (e.g. `"dependencies.providers"`). */
@@ -82,9 +75,7 @@ export class LegacyDepKeyError extends Error {
  * AFPS 2.0 §2.1 + Appendix D, producers MUST NOT emit these keys; they map
  * to `dependencies.integrations` and `dependencies.mcp_servers` respectively.
  *
- * Call this from the publish path BEFORE persisting a new version row. The
- * read-side projection in {@link extractDependencies} continues to accept
- * legacy keys so existing in-DB manifests keep resolving.
+ * Call this from the publish path BEFORE persisting a new version row.
  *
  * @throws LegacyDepKeyError when a legacy key is detected on the manifest.
  */
@@ -152,24 +143,6 @@ export function extractDependencies(manifest: Record<string, unknown>): DepEntry
   const deps: DepEntry[] = [];
   const { skills = {}, mcp_servers = {}, integrations = {} } = dependencies;
 
-  // AFPS 1.x → 2.0 read fallback (see AFPS_1X_READ_FALLBACK_REMOVAL in
-  // back-compat.ts). Appendix D of the AFPS 2.0 spec maps the retired 1.x
-  // dependency keys to their 2.0 equivalents:
-  //   - `dependencies.providers` → `dependencies.integrations`
-  //   - `dependencies.tools`     → `dependencies.mcp_servers`
-  // Mirrors the `providersConfiguration` precedence pattern in
-  // `parseManifestIntegrations` — canonical reads run first; legacy
-  // projections are appended AFTER so canonical entries win on collision.
-  const legacy = dependencies as Record<string, unknown>;
-  const legacyProviders =
-    legacy.providers && typeof legacy.providers === "object"
-      ? (legacy.providers as Record<string, IntegrationDependencyValue>)
-      : {};
-  const legacyTools =
-    legacy.tools && typeof legacy.tools === "object"
-      ? (legacy.tools as Record<string, DependencyValue>)
-      : {};
-
   const maps: [
     Record<string, DependencyValue | IntegrationDependencyValue>,
     DepEntry["depType"],
@@ -177,15 +150,7 @@ export function extractDependencies(manifest: Record<string, unknown>): DepEntry
     [skills, "skill"],
     [mcp_servers, "mcp-server"],
     [integrations, "integration"],
-    // 1.x back-compat projections (canonical wins on collision — these are
-    // de-duplicated by the seen-set below).
-    [legacyTools, "mcp-server"],
-    [legacyProviders, "integration"],
   ];
-
-  // Track canonical entries so the 1.x projections can't double-emit a dep
-  // already declared on the canonical key.
-  const seen = new Set<string>();
 
   for (const [map, depType] of maps) {
     for (const [fullName, raw] of Object.entries(map)) {
@@ -204,9 +169,6 @@ export function extractDependencies(manifest: Record<string, unknown>): DepEntry
           `Invalid semver range for ${depType} dependency "${fullName}": "${versionRange}"`,
         );
       }
-      const key = `${depType}:@${parsed.scope}/${parsed.name}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
       deps.push({ depScope: `@${parsed.scope}`, depName: parsed.name, depType, versionRange });
     }
   }
@@ -255,28 +217,9 @@ function pickString(value: unknown): string | undefined {
 /**
  * Resolve an agent manifest's per-integration configuration.
  *
- * Per AFPS 2.0.2 §4.1 / §4.4, three sources may carry per-integration
- * configuration, read in priority order — the first non-empty value for
- * each key wins:
- *
- *   1. **Canonical** — `dependencies.integrations.<id>` object form,
- *      `{ version, scopes?, auth_key?, ... }` (§4.1).
- *   2. **Deprecated alias** — `integrations_configuration.<id>` (§4.4).
- *      Consumers MUST accept this; on conflict the canonical wins.
- *   3. **Legacy back-compat read** — top-level `manifest.integrations.<id>`,
- *      an Appstrate-invented block from before AFPS 2.0.2. Used as a
- *      fall-back so existing stored manifests keep working; writers no
- *      longer emit it (see {@link writeManifestIntegrations}).
- *   4. **Pre-2.0 camelCase alias** — `providersConfiguration.<id>`. The
- *      Appstrate 1.x name for what AFPS 2.0 §4.4 calls
- *      `integrations_configuration`. Read-only fallback for manifests
- *      stored before the snake_case migration; writers emit the canonical
- *      form (which migrates the manifest forward on next save). Scheduled
- *      for removal in {@link AFPS_1X_READ_FALLBACK_REMOVAL} — at that point
- *      a one-time DB backfill on `package_versions.manifest` MUST rewrite
- *      any remaining `providersConfiguration` payloads into
- *      `integrations_configuration` (see `back-compat.ts` for the query
- *      shape), and this fallback read MUST be deleted.
+ * Per AFPS 2.0.2 §4.1, per-integration configuration lives on the canonical
+ * `dependencies.integrations.<id>` object form,
+ * `{ version, scopes?, auth_key?, tools?, ... }`.
  *
  * Version range always comes from `dependencies.integrations.<id>`
  * (string form OR `.version` on the object). An integration with no
@@ -288,56 +231,22 @@ export function parseManifestIntegrations(
 ): ManifestIntegrationEntry[] {
   const deps = (manifest.dependencies ?? {}) as { integrations?: Record<string, unknown> };
   const versionMap = deps.integrations ?? {};
-  const deprecatedAlias = (manifest.integrations_configuration ?? {}) as Record<string, unknown>;
-  const legacyTopLevel = (manifest.integrations ?? {}) as Record<string, unknown>;
-  // 1.x camelCase alias of `integrations_configuration` — read-only fallback,
-  // scheduled for removal in AFPS_1X_READ_FALLBACK_REMOVAL (see back-compat.ts).
-  const v1CamelAlias = (manifest.providersConfiguration ?? {}) as Record<string, unknown>;
 
   const out: ManifestIntegrationEntry[] = [];
   for (const [id, rawDep] of Object.entries(versionMap)) {
     const version = readVersionRange(rawDep);
     if (version === null) continue;
 
-    // Canonical object-form fields on the dep entry itself (§4.1) — highest priority.
+    // Canonical object-form fields on the dep entry itself (§4.1).
     const depObj =
       rawDep && typeof rawDep === "object" ? (rawDep as Record<string, unknown>) : undefined;
-    const aliasObj =
-      deprecatedAlias[id] && typeof deprecatedAlias[id] === "object"
-        ? (deprecatedAlias[id] as Record<string, unknown>)
-        : undefined;
-    const legacyObj =
-      legacyTopLevel[id] && typeof legacyTopLevel[id] === "object"
-        ? (legacyTopLevel[id] as Record<string, unknown>)
-        : undefined;
-    const v1Obj =
-      v1CamelAlias[id] && typeof v1CamelAlias[id] === "object"
-        ? (v1CamelAlias[id] as Record<string, unknown>)
-        : undefined;
 
-    // Precedence: canonical dep object > deprecated alias > legacy top-level block > v1 camelCase alias.
-    const scopes =
-      toStringArray(depObj?.scopes) ??
-      toStringArray(aliasObj?.scopes) ??
-      toStringArray(legacyObj?.scopes) ??
-      toStringArray(v1Obj?.scopes);
-    // `tools[]` is an Appstrate extension (no AFPS field of this name) — read
-    // from the same merged sources so editor round-trips don't lose the
-    // selection. `auth_key` likewise can come from any of the four.
-    const tools =
-      toStringArray(depObj?.tools) ??
-      toStringArray(aliasObj?.tools) ??
-      toStringArray(legacyObj?.tools) ??
-      toStringArray(v1Obj?.tools);
+    const scopes = toStringArray(depObj?.scopes);
+    // `tools[]` is an Appstrate extension (no AFPS field of this name).
+    const tools = toStringArray(depObj?.tools);
     // `auth_key` (§4.1) — string pointing at one of the integration's
-    // `auths.<key>` entries. Mirrors the same precedence cascade as
-    // `scopes` / `tools`: canonical dep object > deprecated alias > legacy
-    // top-level block > v1 camelCase alias.
-    const auth_key =
-      pickString(depObj?.auth_key) ??
-      pickString(aliasObj?.auth_key) ??
-      pickString(legacyObj?.auth_key) ??
-      pickString(v1Obj?.auth_key);
+    // `auths.<key>` entries.
+    const auth_key = pickString(depObj?.auth_key);
 
     out.push({ id, version: version || "*", tools, scopes, auth_key });
   }
@@ -350,12 +259,6 @@ export function parseManifestIntegrations(
  * becomes `{ version, scopes?, auth_key?, tools? }`. Entries with no
  * per-integration configuration collapse to a bare semver string for
  * minimal manifests.
- *
- * Drops the deprecated `integrations_configuration` alias (§4.4) and the
- * Appstrate-invented top-level `manifest.integrations.<id>` block — both
- * are merged back in on read by {@link parseManifestIntegrations} for
- * back-compat, but writers emit only the canonical form so newly-saved
- * manifests round-trip clean against AFPS validators.
  *
  * Note: `tools[]` is an Appstrate extension key with no AFPS field of the
  * same name. AFPS dependency entries are `looseObject`s (§4.1), so the
@@ -394,13 +297,6 @@ export function writeManifestIntegrations(
   } else {
     delete deps.integrations;
   }
-  // Drop legacy/deprecated alternates — they are read for back-compat in
-  // parseManifestIntegrations but the canonical form is the single writer.
-  delete manifest.integrations;
-  delete manifest.integrations_configuration;
-  // 1.x camelCase alias — same back-compat read path, single writer migrates.
-  // Removal tracked by AFPS_1X_READ_FALLBACK_REMOVAL (see back-compat.ts).
-  delete (manifest as Record<string, unknown>).providersConfiguration;
 }
 
 /** Result of circular dependency detection. */

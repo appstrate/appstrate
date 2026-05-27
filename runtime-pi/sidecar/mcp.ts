@@ -226,36 +226,9 @@ const INLINE_RESPONSE_THRESHOLD_BYTES = 32 * 1024;
  *
  * AFPS 2.0.2 (Phase F1 follow-up): reverse-DNS namespace — `_meta` keys
  * must be either a single bare token or a reverse-DNS prefix (RFC §10.1
- * / Appendix B). The legacy URI-scheme form `"appstrate://token-budget"`
- * violated Appendix B's `META_NAMESPACE_KEY` regex; the canonical form
- * is now `"dev.appstrate/token-budget"`.
- *
- * Writers always emit the new key; readers accept BOTH the new key and
- * the legacy key for one release window so a runtime built from this
- * release can still consume `_meta` from a sidecar built against AFPS
- * 2.0.1. See {@link TOKEN_BUDGET_META_KEY_LEGACY}.
+ * / Appendix B). The canonical form is `"dev.appstrate/token-budget"`.
  */
 export const TOKEN_BUDGET_META_KEY = "dev.appstrate/token-budget";
-
-/**
- * Deprecated legacy `_meta` key for token-budget accounting. Accepted on
- * read for back-compat with sidecars built against AFPS 2.0.1 or
- * earlier. New writes always use {@link TOKEN_BUDGET_META_KEY}; the
- * legacy alias is read-only and is scheduled for removal in
- * {@link TOKEN_BUDGET_LEGACY_REMOVAL}.
- *
- * @deprecated AFPS 2.0.2: read-only alias. Removal target:
- *   {@link TOKEN_BUDGET_LEGACY_REMOVAL}.
- */
-export const TOKEN_BUDGET_META_KEY_LEGACY = "appstrate://token-budget";
-
-/**
- * Removal target for {@link TOKEN_BUDGET_META_KEY_LEGACY}. Mirrors the
- * tracked-removal pattern used by `AFPS_1X_READ_FALLBACK_REMOVAL` in
- * `@appstrate/core/back-compat`. Search this constant when sweeping
- * legacy `_meta` aliases at the targeted release.
- */
-export const TOKEN_BUDGET_LEGACY_REMOVAL = "AFPS 2.1";
 
 /**
  * Discriminated reason surfaced in the agent-facing `_meta` payload.

@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { z } from "zod";
-import { TOOL_NAME_INNER_PATTERN } from "./naming.ts";
 import {
   agentManifestSchema as afpsAgentManifestSchema,
   skillManifestSchema as afpsSkillManifestSchema,
@@ -11,7 +10,6 @@ import {
   scopedName as afpsScopedName,
   packageTypeEnum as afpsPackageTypeEnum,
   metaSchema as afpsMetaSchema,
-  integrationConfiguration as afpsIntegrationConfiguration,
 } from "@afps-spec/schema";
 import { integrationManifestSchema, type IntegrationManifest } from "./integration.ts";
 import { mcpServerManifestSchema, type McpServerManifest } from "./mcp-server.ts";
@@ -134,9 +132,7 @@ export const META_NAMESPACE_KEY_REGEX: RegExp = /^([a-z0-9-]+(\.[a-z0-9-]+)+\/)?
 /**
  * `_meta` key prefixes reserved by the MCP specification per AFPS §10. Manifests
  * MUST NOT author keys under these namespaces — they are vendor-controlled by
- * the MCP project. The transitional `dev.appstrate.afps/` alias is accepted
- * until the `afps.dev` domain is operationally controlled (per spec editorial
- * note in §10).
+ * the MCP project.
  */
 const RESERVED_META_PREFIXES = ["mcp/", "modelcontextprotocol/"] as const;
 
@@ -238,8 +234,8 @@ export type Manifest = z.infer<typeof manifestSchema>;
  */
 const agentManifestObjectSchema = afpsAgentManifestSchema.extend({
   // All standard fields (name, version, schema_version, dependencies,
-  // display_name, input/output/config, timeout, integrations_configuration)
-  // inherited from the AFPS 2.0 schema.
+  // display_name, input/output/config, timeout) inherited from the AFPS 2.0
+  // schema.
   // AFPS requires author (MUST, non-empty) for publication; core relaxes it
   // for local drafts (the agent-editor stores `author: ""` until the user
   // fills it in). Accepts both the AFPS 2.0 §3.1 structured-object form and
@@ -264,40 +260,6 @@ const agentManifestObjectSchema = afpsAgentManifestSchema.extend({
   // validation, prompt builder, sidecar tool registration) and namespacing
   // it would be disproportionate.
   runtime_tools: z.array(z.enum(SELECTABLE_RUNTIME_TOOLS)).optional(),
-  // Niveau 2 — per-integration runtime policy, folded into AFPS 2.0
-  // `integrations_configuration` (§4.4). Keys mirror
-  // `dependencies.integrations[id]`. `scopes[]` is the AFPS-defined key
-  // (the explicit OAuth scope escape hatch, unioned with the set inferred
-  // from the selected tools' `required_scopes`). `tools[]` is the
-  // Appstrate-specific allowlist exposed to the agent's LLM via the
-  // sidecar's McpHost — an extension key on the otherwise loose
-  // `integration_configuration` object (AFPS `integrations_configuration`
-  // values are looseObjects, so the extra key round-trips per §10).
-  // @deprecated AFPS 2.0 §4.4 — read-fallback only
-  integrations_configuration: z
-    .record(
-      z.string().regex(scopedNameRegex),
-      // Compose with the canonical `integrationConfiguration` (§4.4 + Appendix D)
-      // so publisher-set fields (`auth_key`, `scopes`) round-trip explicitly
-      // instead of relying on looseObject passthrough — and append the
-      // Appstrate-specific `tools[]` allowlist that drives the sidecar's
-      // McpHost. Both sides are looseObject, so future spec additions still
-      // round-trip without code changes here.
-      afpsIntegrationConfiguration.extend({
-        tools: z
-          .array(
-            z.string().regex(TOOL_NAME_INNER_PATTERN, {
-              error: "integration tool names must match /^[a-z][a-z0-9_]*$/",
-            }),
-          )
-          .optional(),
-      }),
-    )
-    .optional()
-    .describe(
-      "Deprecated in AFPS 2.0 — superseded by dependencies.integrations.<id> object form. Accepted on read for backward compatibility.",
-    )
-    .meta({ deprecated: true }),
 });
 
 /**

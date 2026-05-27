@@ -13,11 +13,8 @@
  *
  * Field vocabulary is snake_case (§Appendix D). The integration manifest
  * itself is read as AFPS 2.0 canonical only — there is no 1.x camelCase
- * reading path on this schema. (Note: a one-release-window back-compat for
- * pre-2.0 camelCase aliases on the *agent* manifest still exists in
- * `dependencies.ts` / `form.ts` for stored manifests written before the 2.0
- * migration; see {@link import("./back-compat.ts").AFPS_1X_READ_FALLBACK_REMOVAL}
- * for the removal milestone. Writes everywhere are AFPS 2.0 canonical.)
+ * reading path on this schema. Reads and writes everywhere are AFPS 2.0
+ * canonical.
  *
  * SCOPE NOTE — runtime vs manifest:
  *   The MANIFEST schema below is snake_case AFPS 2.0. The PURE RUNTIME

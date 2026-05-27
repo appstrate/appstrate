@@ -70,6 +70,13 @@ export interface CatalogVersion {
  * string, and for applying yank policy by pre-filtering the
  * `rangeVersions` and `distTags` inputs accordingly.
  *
+ * Deliberately mirrored line-for-line by `resolveVersionString` in
+ * `@appstrate/afps-runtime` (`src/bundle/semver-resolve.ts`), which ships
+ * standalone and cannot take a runtime dep on this package. The drift guard is
+ * `packages/afps-runtime/test/bundle/semver-resolve-parity.test.ts` — it runs
+ * the same input matrix through both copies and fails on any divergence. Change
+ * both when the algorithm changes.
+ *
  * Conventional yank policy (matches npm/crates.io and the canonical
  * {@link resolveVersionFromCatalog} below):
  * - `exactVersions`: include yanked (exact pins always resolve).

@@ -23,6 +23,7 @@
 
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import type { ManifestDeliveryHttp } from "@appstrate/core/sidecar-types";
+import { renderCredentialTemplate as renderCredentialTemplateCore } from "@appstrate/core/credential-template";
 
 /**
  * AFPS 2.0 `delivery.http` block (snake_case). The sidecar's canonical
@@ -135,8 +136,6 @@ export interface AppstrateConnectMeta {
 
 const APPSTRATE_CONNECT_META_KEY = "dev.appstrate/connect";
 
-const CREDENTIAL_REF = /\{\$credential\.([A-Za-z0-9_]+)\}/g;
-
 /**
  * Render an AFPS 2.0 `{$credential.<field>}` value template (used by
  * `delivery.env` / `delivery.files`) against a decrypted credential bag.
@@ -144,13 +143,16 @@ const CREDENTIAL_REF = /\{\$credential\.([A-Za-z0-9_]+)\}/g;
  * Returns `null` when the template resolves to an empty string (so callers can
  * skip env vars / files whose backing credential field is absent), mirroring
  * the old `delivery.env.from` "field missing → skip" behaviour.
+ *
+ * Thin wrapper over the shared `@appstrate/core/credential-template` renderer
+ * (single implementation of the `{$credential.<field>}` syntax) pinned to the
+ * `delivery.env` / `delivery.files` empty→null policy.
  */
 export function renderCredentialTemplate(
   template: string,
   fields: Readonly<Record<string, string>>,
 ): string | null {
-  const rendered = template.replace(CREDENTIAL_REF, (_m, field: string) => fields[field] ?? "");
-  return rendered.length === 0 ? null : rendered;
+  return renderCredentialTemplateCore(template, fields, { emptyAs: "null" });
 }
 
 /**

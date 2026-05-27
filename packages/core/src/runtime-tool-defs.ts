@@ -47,23 +47,9 @@ import { SELECTABLE_RUNTIME_TOOLS, type SelectableRuntimeTool } from "./runtime-
  *
  * AFPS 2.0.2 (Phase F1): reverse-DNS namespace — `_meta` keys must be
  * either a single bare token or a reverse-DNS prefix (RFC §2.2 / Appendix
- * B). The legacy single-segment `"appstrate/events"` key violated that
- * rule; the canonical form is now `"dev.appstrate/events"`.
- *
- * Writers always emit the new key; readers must accept BOTH the new key
- * and the legacy key for one release window. See {@link RUNTIME_TOOL_EVENTS_META_KEY_LEGACY}.
+ * B). The canonical form is `"dev.appstrate/events"`.
  */
 export const RUNTIME_TOOL_EVENTS_META_KEY = "dev.appstrate/events";
-
-/**
- * Deprecated legacy `_meta` key for runtime tool events. Accepted on
- * read for back-compat with sidecars / runtimes built against AFPS
- * 2.0.1 or earlier. Drop after one release window; new writes always
- * use {@link RUNTIME_TOOL_EVENTS_META_KEY}.
- *
- * @deprecated Use {@link RUNTIME_TOOL_EVENTS_META_KEY} for writes.
- */
-export const RUNTIME_TOOL_EVENTS_META_KEY_LEGACY = "appstrate/events";
 
 /**
  * The closed set of canonical run-event types a runtime tool may emit. Used
@@ -378,9 +364,7 @@ export function reEmitRuntimeToolEvents(
   meta: Record<string, unknown> | undefined,
   emit: (event: RuntimeToolEvent) => void,
 ): void {
-  // Accept both the canonical reverse-DNS key (AFPS 2.0.2+) and the legacy
-  // single-segment key (AFPS 2.0.1 and earlier) for one release window.
-  const raw = meta?.[RUNTIME_TOOL_EVENTS_META_KEY] ?? meta?.[RUNTIME_TOOL_EVENTS_META_KEY_LEGACY];
+  const raw = meta?.[RUNTIME_TOOL_EVENTS_META_KEY];
   if (!Array.isArray(raw)) return;
   for (const ev of raw) {
     if (

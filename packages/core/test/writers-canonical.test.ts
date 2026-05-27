@@ -170,27 +170,6 @@ describe("T1 — createOrgItem writer never emits AFPS-1.x camelCase keys", () =
 // ─────────────────────────────────────────────
 
 describe("T1 — writeManifestIntegrations emits canonical AFPS 2.0.2 §4.1 keys only", () => {
-  it("does not emit `providersConfiguration` (legacy 1.x camelCase alias)", () => {
-    const m: Record<string, unknown> = {
-      // Seed a stale legacy alias to verify the writer drops it
-      providersConfiguration: { "@scope/int": { scopes: ["read"] } },
-    };
-    writeManifestIntegrations(m, [{ id: "@scope/int", version: "^1.0.0", scopes: ["repo"] }]);
-    expect(m).not.toHaveProperty("providersConfiguration");
-    const violations = findBannedKeysDeep(m);
-    expect(violations).toEqual([]);
-  });
-
-  it("does not emit `integrations_configuration` (deprecated alias)", () => {
-    const m: Record<string, unknown> = {
-      integrations_configuration: { "@scope/int": { scopes: ["read"] } },
-    };
-    writeManifestIntegrations(m, [
-      { id: "@scope/int", version: "^1.0.0", tools: ["list"], scopes: ["repo"], auth_key: "pat" },
-    ]);
-    expect(m).not.toHaveProperty("integrations_configuration");
-  });
-
   it("round-trips tools + scopes + auth_key through canonical keys only", () => {
     const m: Record<string, unknown> = {};
     writeManifestIntegrations(m, [

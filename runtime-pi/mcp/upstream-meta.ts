@@ -27,7 +27,6 @@
 import {
   UPSTREAM_HEADER_ALLOWLIST,
   UPSTREAM_META_KEY,
-  UPSTREAM_META_KEY_LEGACY,
   type UpstreamMeta,
 } from "@appstrate/mcp-transport";
 import type { CallToolResult } from "@appstrate/mcp-transport";
@@ -38,7 +37,6 @@ import type { CallToolResult } from "@appstrate/mcp-transport";
 export {
   UPSTREAM_HEADER_ALLOWLIST,
   UPSTREAM_META_KEY,
-  UPSTREAM_META_KEY_LEGACY,
   type UpstreamMeta,
 } from "@appstrate/mcp-transport";
 
@@ -53,10 +51,7 @@ export function readUpstreamMeta(result: CallToolResult): UpstreamMeta {
   if (!meta) {
     throw new Error(`api_call: missing _meta on CallToolResult — sidecar protocol violation`);
   }
-  // Accept both the canonical reverse-DNS key (AFPS 2.0.2+) and the legacy
-  // single-segment key (AFPS 2.0.1 and earlier) for one release window so
-  // a fresh runtime can still consume `_meta` from a stale sidecar.
-  const raw = meta[UPSTREAM_META_KEY] ?? meta[UPSTREAM_META_KEY_LEGACY];
+  const raw = meta[UPSTREAM_META_KEY];
   if (raw === undefined) {
     throw new Error(`api_call: missing _meta['${UPSTREAM_META_KEY}'] on CallToolResult`);
   }

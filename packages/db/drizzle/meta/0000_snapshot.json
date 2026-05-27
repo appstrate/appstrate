@@ -1,5 +1,5 @@
 {
-  "id": "04c74007-e604-44fb-8291-fade659c9154",
+  "id": "234f129a-8f8e-48a1-b2b3-38d3be3786ab",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -2223,7 +2223,12 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "package_versions_manifest_v2": {
+          "name": "package_versions_manifest_v2",
+          "value": "\"manifest\" IS NULL OR (\"manifest\" ->> 'schema_version') IS NULL OR (\"manifest\" ->> 'schema_version') LIKE '2.%'"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.packages": {
@@ -2413,6 +2418,10 @@
         "packages_id_format": {
           "name": "packages_id_format",
           "value": "\"packages\".\"id\" ~ '^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$'"
+        },
+        "packages_draft_manifest_v2": {
+          "name": "packages_draft_manifest_v2",
+          "value": "\"draft_manifest\" IS NULL OR (\"draft_manifest\" ->> 'schema_version') IS NULL OR (\"draft_manifest\" ->> 'schema_version') LIKE '2.%'"
         }
       },
       "isRLSEnabled": false
@@ -4370,6 +4379,10 @@
         "integration_conn_exactly_one_owner": {
           "name": "integration_conn_exactly_one_owner",
           "value": "(user_id IS NOT NULL AND end_user_id IS NULL) OR (user_id IS NULL AND end_user_id IS NOT NULL)"
+        },
+        "integration_connections_auth_key_valid": {
+          "name": "integration_connections_auth_key_valid",
+          "value": "\"auth_key\" ~ '^[a-z][a-z0-9_]*$'"
         }
       },
       "isRLSEnabled": false

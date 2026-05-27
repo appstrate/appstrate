@@ -20,7 +20,6 @@ import { stripUserInfoAndFragment } from "./helpers.ts";
 // churn-only rename pass.
 export {
   UPSTREAM_META_KEY,
-  UPSTREAM_META_KEY_LEGACY,
   UPSTREAM_HEADER_ALLOWLIST,
   type UpstreamMeta,
 } from "@appstrate/mcp-transport";

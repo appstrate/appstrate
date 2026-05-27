@@ -13,6 +13,7 @@
  */
 
 import { z } from "zod";
+import type { OpenApiSchemaEntry } from "@appstrate/core/module";
 
 // --- End-User schemas (routes/end-users.ts) ---
 import { createEndUserSchema, updateEndUserSchema } from "../routes/end-users.ts";
@@ -92,17 +93,6 @@ import {
 // Registry type and entries
 // ---------------------------------------------------------------------------
 
-export interface ZodSchemaEntry {
-  /** HTTP method (uppercase) */
-  method: string;
-  /** OpenAPI path (e.g. "/api/agents") */
-  path: string;
-  /** The Zod schema converted to JSON Schema via z.toJSONSchema() */
-  jsonSchema: Record<string, unknown>;
-  /** Human-readable description for reporting */
-  description: string;
-}
-
 /**
  * Convert a Zod schema to JSON Schema. Wrapped to handle errors gracefully.
  */
@@ -113,7 +103,7 @@ function toJsonSchema(schema: z.ZodType): Record<string, unknown> {
 /**
  * Core Zod request-body schemas (always present, not module-owned).
  */
-const coreSchemas: ZodSchemaEntry[] = [
+const coreSchemas: OpenApiSchemaEntry[] = [
   // ─── End-Users ──────────────────────────────────────────────────────────
   {
     method: "POST",
@@ -382,6 +372,8 @@ const coreSchemas: ZodSchemaEntry[] = [
  * Must be called after modules are initialized (or after static filesystem discovery
  * in build-time scripts).
  */
-export function buildZodSchemaRegistry(moduleSchemas: ZodSchemaEntry[] = []): ZodSchemaEntry[] {
+export function buildZodSchemaRegistry(
+  moduleSchemas: OpenApiSchemaEntry[] = [],
+): OpenApiSchemaEntry[] {
   return [...coreSchemas, ...moduleSchemas];
 }

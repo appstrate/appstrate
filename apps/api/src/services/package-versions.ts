@@ -40,24 +40,6 @@ import { toISO } from "../lib/date-helpers.ts";
 // Version creation
 // ─────────────────────────────────────────────
 
-// ─────────────────────────────────────────────
-// AFPS 2.0 migration / back-compat note
-// ─────────────────────────────────────────────
-// `manifest` is persisted on `package_versions.manifest` (JSONB). Writers
-// across the codebase emit AFPS 2.0 canonical (snake_case) shape only —
-// see `writeManifestIntegrations` in `@appstrate/core/dependencies` and the
-// `fileConstraints`/`uiHints`/`propertyOrder`/`maxSize` emitters in
-// `@appstrate/core/form`. However, manifests stored before the 2.0 cutover
-// may still carry pre-2.0 camelCase aliases (`providersConfiguration`,
-// `fileConstraints`, `uiHints`, `propertyOrder`, `maxSize`). The reader sides
-// in `@appstrate/core` honor those aliases as a back-compat fallback.
-//
-// Before removing those fallbacks (target milestone: `AFPS_1X_READ_FALLBACK_REMOVAL`
-// in `@appstrate/core/back-compat`), a one-time DB backfill MUST rewrite the
-// affected `package_versions.manifest` payloads in place. See `back-compat.ts`
-// for the JSONB rewrite shape (`manifest @> '{"providersConfiguration":...}'`
-// search + `jsonb_set` + `#-` rewrite, per wrapper location).
-
 interface CreateVersionParams {
   packageId: string;
   version: string;

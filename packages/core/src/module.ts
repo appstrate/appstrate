@@ -11,6 +11,7 @@
  */
 
 import type { Hono } from "hono";
+import type { ValidationFieldError } from "./api-errors.ts";
 import type { Logger } from "./logger.ts";
 import type { OrgRole } from "./permissions.ts";
 import type { ModelApiShape, OAuthWireFormat } from "./sidecar-types.ts";
@@ -957,20 +958,12 @@ export interface RunStatusChangeParams {
 
 /**
  * Single field-level error entry carried on
- * {@link RunConnectionMissingParams.errors}. Mirrors the shape platform
- * routes return as 4xx envelopes — modules can forward this verbatim to
- * downstream consumers (webhook payloads, Slack messages) without remapping.
+ * {@link RunConnectionMissingParams.errors}. Aliases the core
+ * {@link ValidationFieldError} (the shape platform routes return as 4xx
+ * envelopes) so modules can forward it verbatim to downstream consumers
+ * (webhook payloads, Slack messages) without remapping.
  */
-export interface RunConnectionMissingError {
-  /** Dotted field path the failure attaches to (e.g. `integrations.@official/gmail.api_key`). */
-  field: string;
-  /** Stable machine code (e.g. `missing_integration_connection`). */
-  code: string;
-  /** Human-readable failure message. */
-  message: string;
-  /** Optional UI-facing title. */
-  title?: string;
-}
+export type RunConnectionMissingError = ValidationFieldError;
 
 /** Parameters passed to the `onRunConnectionMissing` event. */
 export interface RunConnectionMissingParams {

@@ -238,7 +238,8 @@ CREATE TABLE "package_versions" (
 	"yanked" boolean DEFAULT false NOT NULL,
 	"yanked_reason" text,
 	"created_by" text,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "package_versions_manifest_v2" CHECK ("manifest" IS NULL OR ("manifest" ->> 'schema_version') IS NULL OR ("manifest" ->> 'schema_version') LIKE '2.%')
 );
 --> statement-breakpoint
 CREATE TABLE "packages" (
@@ -255,7 +256,8 @@ CREATE TABLE "packages" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"lock_version" integer DEFAULT 1 NOT NULL,
 	"forked_from" text,
-	CONSTRAINT "packages_id_format" CHECK ("packages"."id" ~ '^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$')
+	CONSTRAINT "packages_id_format" CHECK ("packages"."id" ~ '^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$'),
+	CONSTRAINT "packages_draft_manifest_v2" CHECK ("draft_manifest" IS NULL OR ("draft_manifest" ->> 'schema_version') IS NULL OR ("draft_manifest" ->> 'schema_version') LIKE '2.%')
 );
 --> statement-breakpoint
 CREATE TABLE "credential_proxy_usage" (
@@ -418,7 +420,8 @@ CREATE TABLE "integration_connections" (
 	"shared_with_org" boolean DEFAULT false NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "integration_conn_exactly_one_owner" CHECK ((user_id IS NOT NULL AND end_user_id IS NULL) OR (user_id IS NULL AND end_user_id IS NOT NULL))
+	CONSTRAINT "integration_conn_exactly_one_owner" CHECK ((user_id IS NOT NULL AND end_user_id IS NULL) OR (user_id IS NULL AND end_user_id IS NOT NULL)),
+	CONSTRAINT "integration_connections_auth_key_valid" CHECK ("auth_key" ~ '^[a-z][a-z0-9_]*$')
 );
 --> statement-breakpoint
 CREATE TABLE "integration_oauth_clients" (
