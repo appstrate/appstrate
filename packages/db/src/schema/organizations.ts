@@ -199,7 +199,7 @@ export const modelProviderCredentials = pgTable(
  *      plaintext token returned to the browser ONCE (never re-served).
  *   2. Helper decodes the token client-side, runs the provider's loopback
  *      OAuth dance, then POSTs the resulting credentials to
- *      /api/model-providers-oauth/import using the pairing token as
+ *      /api/model-providers-oauth/pair/redeem using the pairing token as
  *      Bearer credentials. The platform-side Bearer auth re-hashes the
  *      secret portion (SHA-256, base64url) and looks the row up by
  *      `token_hash`.

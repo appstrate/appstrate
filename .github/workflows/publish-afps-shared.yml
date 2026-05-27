@@ -1,5 +1,10 @@
 name: Publish @appstrate/afps-shared to npm
 
+# RELEASE ORDER: @appstrate/afps-shared is a leaf dependency of @appstrate/core
+# (and afps-runtime) via a `^` range. Publish a new afps-shared version to npm
+# BEFORE tagging any core/afps-runtime release that bumps its `^` dependency,
+# or `npm install @appstrate/core` will fail to resolve the range.
+
 on:
   push:
     tags:

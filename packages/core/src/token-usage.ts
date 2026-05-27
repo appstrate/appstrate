@@ -2,18 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Canonical token-usage shape reported by an LLM provider for a completion.
- *
- * Wire format is snake_case (AFPS `appstrate.metric` event, the platform's
- * `runs.tokenUsage` JSONB column, the runner-event ingestion route, and every
- * cost-accounting consumer). All four fields are OPTIONAL — this is the widest
- * shape and matches wire reality where usage may be partial. It is the single
- * definition re-exported by `@appstrate/shared-types`, `@appstrate/afps-runtime`,
- * the Drizzle schema, the web realtime hooks, and the CLI runner.
+ * Canonical token-usage shape — the definition now lives in the zero-dep leaf
+ * package `@appstrate/afps-shared`. Re-exported here so the public
+ * `@appstrate/core/token-usage` import path stays stable for existing consumers.
  */
-export interface TokenUsage {
-  input_tokens?: number;
-  output_tokens?: number;
-  cache_creation_input_tokens?: number;
-  cache_read_input_tokens?: number;
-}
+export type { TokenUsage } from "@appstrate/afps-shared/token-usage";

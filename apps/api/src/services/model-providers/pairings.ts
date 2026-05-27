@@ -9,7 +9,7 @@
  *   2. The user runs `npx @appstrate/connect-helper <token>`. The helper
  *      decodes the token (header carries platform URL + providerId), runs
  *      the loopback OAuth dance, then POSTs credentials to
- *      /api/model-providers-oauth/import using the pairing token as Bearer
+ *      /api/model-providers-oauth/pair/redeem using the pairing token as Bearer
  *      credentials.
  *   3. The Bearer auth path calls `consumePairing()`, which atomically
  *      flips `consumed_at` from NULL to now() and returns the row. Any

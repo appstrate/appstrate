@@ -15,7 +15,7 @@ import {
   check,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-import type { TokenUsage } from "@appstrate/core/token-usage";
+import type { TokenUsage } from "@appstrate/afps-shared/token-usage";
 import { runStatusEnum, llmUsageSourceEnum, runOriginEnum } from "./enums.ts";
 import { user } from "./auth.ts";
 import { applications, endUsers } from "./applications.ts";

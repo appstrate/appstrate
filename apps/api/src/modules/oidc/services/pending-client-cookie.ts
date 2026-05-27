@@ -111,7 +111,7 @@ function parseAndVerify(raw: string): string | null {
   // Format: `<clientId>.<exp>.<sig>`. `clientId` never contains a dot (it
   // starts with `oauth_` and is base64url) and `sig` is now `<kid>$<hmac>`
   // — neither contains a dot — so splitting on `.` still yields exactly 3
-  // parts. Legacy un-prefixed signatures are accepted by `verifyAuthHmac`.
+  // parts.
   const parts = raw.split(".");
   if (parts.length !== 3) return null;
   const [clientId, expStr, sig] = parts as [string, string, string];

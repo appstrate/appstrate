@@ -8,7 +8,7 @@ import { SectionCard } from "./section-card";
 import { EmptyState } from "./page-states";
 import { RunTrigger } from "./run-trigger";
 import { formatDateField } from "../lib/markdown";
-import { ACTIVE_RUN_STATUSES, type EnrichedRun } from "@appstrate/shared-types";
+import { ACTIVE_RUN_STATUSES, type EnrichedRun, type TokenUsage } from "@appstrate/shared-types";
 
 interface RunInfoTabProps {
   run: EnrichedRun;
@@ -43,12 +43,7 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
   const { t } = useTranslation(["agents", "settings"]);
   const input = run.input as Record<string, unknown> | null;
   const config = run.config as Record<string, unknown> | null;
-  const usage = run.token_usage as {
-    input_tokens?: number;
-    output_tokens?: number;
-    cache_creation_input_tokens?: number;
-    cache_read_input_tokens?: number;
-  } | null;
+  const usage = run.token_usage as TokenUsage | null;
   const metadata = run.metadata as Record<string, unknown> | null;
   const hasUsage = run.cost != null || usage != null || run.model_label != null;
   const runnerOriginLabel =

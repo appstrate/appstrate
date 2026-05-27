@@ -6,7 +6,7 @@
  * Covers the public endpoints exposed by
  * `apps/api/src/routes/model-providers-oauth.ts`:
  *
- *   - `POST /api/model-providers-oauth/import` is bearer-pairing-only —
+ *   - `POST /api/model-providers-oauth/pair/redeem` is bearer-pairing-only —
  *     any request that arrives with cookie auth (no `Bearer appp_…`)
  *     short-circuits at the route's first check and returns 401 BEFORE
  *     body validation runs. This is the contract integration tests in
@@ -36,7 +36,7 @@ import { test, expect } from "../../fixtures/api.fixture.ts";
 const SYNTHETIC_UNKNOWN_PROVIDER = "@example/not-a-real-provider";
 
 test.describe("OAuth Model Providers — API smoke", () => {
-  // The import route is bearer-pairing-only — cookie auth 401s at the
+  // The pair/redeem route is bearer-pairing-only — cookie auth 401s at the
   // route's first check before body validation ever runs. Probing the
   // gate with several body shapes (well-formed, empty label, missing
   // accessToken) proves the gate ignores the body entirely, which is
@@ -44,7 +44,7 @@ test.describe("OAuth Model Providers — API smoke", () => {
   // cannot route around the auth check by triggering a different code
   // path. Body-shape validation under the bearer-authenticated path is
   // pinned by `model-providers-oauth-import-pairing-bearer.test.ts`.
-  test("import 401s on cookie-auth regardless of body shape (bearer-only gate) @smoke", async ({
+  test("pair/redeem 401s on cookie-auth regardless of body shape (bearer-only gate) @smoke", async ({
     apiClient,
   }) => {
     const bodies = [
@@ -67,7 +67,7 @@ test.describe("OAuth Model Providers — API smoke", () => {
       },
     ];
     for (const body of bodies) {
-      const res = await apiClient.post("/model-providers-oauth/import", body);
+      const res = await apiClient.post("/model-providers-oauth/pair/redeem", body);
       expect(res.status()).toBe(401);
     }
   });

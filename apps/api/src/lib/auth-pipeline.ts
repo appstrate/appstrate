@@ -281,7 +281,7 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
  * same rule (e.g. app-context, api-version) can share this function.
  *
  * `headers` is optional and lets callers signal a request-scoped bypass
- * (e.g. pairing-token bearer auth on /import) without polluting the
+ * (e.g. pairing-token bearer auth on /pair/redeem) without polluting the
  * static `publicPaths` allowlist with conditionals.
  */
 export function skipAuth(path: string, publicPaths: Set<string>, headers?: Headers): boolean {
@@ -302,15 +302,7 @@ export function skipAuth(path: string, publicPaths: Set<string>, headers?: Heade
   // providerId become the request context, replacing the cookie/API-key
   // chain entirely. Requests without the bearer reach the route handler
   // and 401 there.
-  //
-  // The canonical path is `/pair/redeem`; `/import` is a deprecation alias
-  // kept indefinitely for `@appstrate/connect-helper` versions already in
-  // the wild via `npx`. Both share the same auth-bypass rule.
-  if (
-    (path === "/api/model-providers-oauth/pair/redeem" ||
-      path === "/api/model-providers-oauth/import") &&
-    headers
-  ) {
+  if (path === "/api/model-providers-oauth/pair/redeem" && headers) {
     const auth = headers.get("authorization") ?? headers.get("Authorization");
     if (auth?.startsWith("Bearer appp_")) return true;
   }

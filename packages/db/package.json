@@ -20,6 +20,7 @@
     "db:push": "drizzle-kit push"
   },
   "dependencies": {
+    "@appstrate/afps-shared": "^0.1.0",
     "@appstrate/core": "workspace:*",
     "@appstrate/emails": "workspace:*",
     "@appstrate/env": "workspace:*",
