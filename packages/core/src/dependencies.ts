@@ -10,36 +10,33 @@ import { isValidRange } from "./semver.ts";
 // ─────────────────────────────────────────────
 
 /**
- * Generic dependency object form per AFPS §4.1 — `version` is the
- * semver range, every other field is per-dependency-type configuration
- * (e.g. integrations carry `scopes`/`auth_key`).
+ * Package dependency maps as declared in manifest.json (AFPS §4.1). Each
+ * value is a bare semver range string — the maps declare which packages are
+ * depended on and at what versions, nothing more. Per-integration agent
+ * configuration lives in the top-level `integrations_configuration` map
+ * ({@link IntegrationsConfiguration}, AFPS §4.4).
  */
-export interface DependencyObject {
-  version: string;
-  [key: string]: unknown;
+export interface Dependencies {
+  skills?: Record<string, string>;
+  mcp_servers?: Record<string, string>;
+  integrations?: Record<string, string>;
 }
 
-/** Integration dependency object form (§4.1) — version + optional scopes + optional auth_key. */
-export interface IntegrationDependencyObject extends DependencyObject {
+/**
+ * Per-integration agent configuration (AFPS §4.4), keyed by integration
+ * dependency id. Each key MUST correspond to an entry in
+ * `dependencies.integrations`. `tools` drives the runtime allowlist + OAuth
+ * scope inference; `scopes` is the explicit escape hatch; `auth_key`
+ * disambiguates a multi-auth integration.
+ */
+export interface IntegrationConfiguration {
+  tools?: string[];
   scopes?: string[];
   auth_key?: string;
 }
 
-/** Polymorphic dependency value: bare semver range string OR object form. */
-export type DependencyValue = string | DependencyObject;
-export type IntegrationDependencyValue = string | IntegrationDependencyObject;
-
-/**
- * Package dependency map as declared in manifest.json. Per AFPS §4.1
- * each value can be either a bare semver range or an object whose `version`
- * member is a semver range (object form is the carrier for per-dependency-type
- * configuration like `scopes`/`auth_key` for integrations).
- */
-export interface Dependencies {
-  skills?: Record<string, DependencyValue>;
-  mcp_servers?: Record<string, DependencyValue>;
-  integrations?: Record<string, IntegrationDependencyValue>;
-}
+/** The agent manifest's `integrations_configuration` map (AFPS §4.4). */
+export type IntegrationsConfiguration = Record<string, IntegrationConfiguration>;
 
 // ─────────────────────────────────────────────
 // Publish-time guard against legacy 1.x dep keys
@@ -108,27 +105,11 @@ export interface DepEntry {
 }
 
 /**
- * Extract a normalized version range from a polymorphic AFPS dependency
- * value. Accepts either a bare semver range string or the object form
- * `{ version, ... }` (§4.1). Returns `null` if the value can't be coerced
- * to a version string.
- */
-function readVersionRange(value: unknown): string | null {
-  if (typeof value === "string") return value;
-  if (value && typeof value === "object") {
-    const v = (value as { version?: unknown }).version;
-    if (typeof v === "string") return v;
-  }
-  return null;
-}
-
-/**
  * Extract dependency entries from a manifest's `dependencies` field.
  * Parses scoped names from the skills, mcp_servers, and integrations
- * dependency maps. Per AFPS §4.1 each value is either a bare semver
- * range string OR an object `{ version, ... }`; this helper normalizes both
- * to a flat `DepEntry` carrying just the version range. Object-form extras
- * (e.g. `scopes`/`auth_key` for integrations) are read via
+ * dependency maps. Per AFPS §4.1 each value is a bare semver range string.
+ * Per-integration agent configuration (`tools`/`scopes`/`auth_key`) lives in
+ * the top-level `integrations_configuration` map and is read via
  * {@link parseManifestIntegrations}.
  * @param manifest - Raw manifest object containing an optional `dependencies` field
  * @returns Array of parsed dependency entries
@@ -143,10 +124,7 @@ export function extractDependencies(manifest: Record<string, unknown>): DepEntry
   const deps: DepEntry[] = [];
   const { skills = {}, mcp_servers = {}, integrations = {} } = dependencies;
 
-  const maps: [
-    Record<string, DependencyValue | IntegrationDependencyValue>,
-    DepEntry["depType"],
-  ][] = [
+  const maps: [Record<string, string>, DepEntry["depType"]][] = [
     [skills, "skill"],
     [mcp_servers, "mcp-server"],
     [integrations, "integration"],
@@ -158,18 +136,15 @@ export function extractDependencies(manifest: Record<string, unknown>): DepEntry
       if (!parsed) {
         throw new Error(`Invalid scoped package name: ${fullName}`);
       }
-      const versionRange = readVersionRange(raw);
-      if (versionRange === null) {
+      if (typeof raw !== "string") {
         throw new Error(
-          `Invalid dependency value for ${fullName}: expected string or { version: string, ... }, got ${typeof raw}`,
+          `Invalid dependency value for ${fullName}: expected a semver range string, got ${typeof raw}`,
         );
       }
-      if (!isValidRange(versionRange)) {
-        throw new Error(
-          `Invalid semver range for ${depType} dependency "${fullName}": "${versionRange}"`,
-        );
+      if (!isValidRange(raw)) {
+        throw new Error(`Invalid semver range for ${depType} dependency "${fullName}": "${raw}"`);
       }
-      deps.push({ depScope: `@${parsed.scope}`, depName: parsed.name, depType, versionRange });
+      deps.push({ depScope: `@${parsed.scope}`, depName: parsed.name, depType, versionRange: raw });
     }
   }
 
@@ -177,13 +152,13 @@ export function extractDependencies(manifest: Record<string, unknown>): DepEntry
 }
 
 // ─────────────────────────────────────────────
-// Integration entries (deps version + top-level integrations selection)
+// Integration entries (deps version + integrations_configuration)
 // ─────────────────────────────────────────────
 
 /**
  * Resolved view of an integration declared on an agent manifest: the
- * version range from `dependencies.integrations[id]` paired with the
- * tool/scope selection from the top-level `integrations[id]` block.
+ * version range from `dependencies.integrations[id]` (§4.1) merged with the
+ * tool/scope/auth selection from `integrations_configuration[id]` (§4.4).
  *
  * `tools === undefined` means the agent declared the dep but didn't
  * pick any tool — the runtime treats this as "0 tools used, integration
@@ -197,10 +172,10 @@ export interface ManifestIntegrationEntry {
   tools?: string[];
   scopes?: string[];
   /**
-   * AFPS §4.1 — selects which `auths.<key>` entry on the depended-on
-   * integration this agent dependency uses, when the integration declares
-   * multiple auth methods. `undefined` lets the runtime pick per existing
-   * resolver cascade (any accessible connection on the integration).
+   * AFPS §4.4 — selects which `auths.<key>` entry on the depended-on
+   * integration this agent uses, when the integration declares multiple
+   * auth methods. `undefined` lets the runtime pick per existing resolver
+   * cascade (any accessible connection on the integration).
    */
   auth_key?: string;
 }
@@ -217,52 +192,48 @@ function pickString(value: unknown): string | undefined {
 /**
  * Resolve an agent manifest's per-integration configuration.
  *
- * Per AFPS §4.1, per-integration configuration lives on the canonical
- * `dependencies.integrations.<id>` object form,
- * `{ version, scopes?, auth_key?, tools?, ... }`.
+ * The version range comes from `dependencies.integrations.<id>` (a bare
+ * semver range string, §4.1). The tool/scope/auth selection comes from the
+ * top-level `integrations_configuration.<id>` map (§4.4).
  *
- * Version range always comes from `dependencies.integrations.<id>`
- * (string form OR `.version` on the object). An integration with no
- * `dependencies.integrations.<id>` entry is dropped — the dep table is
- * the canonical "is this integration declared" gate.
+ * `dependencies.integrations` is the canonical "is this integration declared"
+ * gate: an integration with no dependency entry is dropped, and any
+ * `integrations_configuration` entry without a matching dependency is
+ * ignored here (it is rejected at manifest validation).
  */
 export function parseManifestIntegrations(
   manifest: Record<string, unknown>,
 ): ManifestIntegrationEntry[] {
   const deps = (manifest.dependencies ?? {}) as { integrations?: Record<string, unknown> };
   const versionMap = deps.integrations ?? {};
+  const configMap = (manifest.integrations_configuration ?? {}) as Record<string, unknown>;
 
   const out: ManifestIntegrationEntry[] = [];
-  for (const [id, rawDep] of Object.entries(versionMap)) {
-    const version = readVersionRange(rawDep);
-    if (version === null) continue;
+  for (const [id, rawVersion] of Object.entries(versionMap)) {
+    if (typeof rawVersion !== "string") continue;
 
-    // Canonical object-form fields on the dep entry itself (§4.1).
-    const depObj =
-      rawDep && typeof rawDep === "object" ? (rawDep as Record<string, unknown>) : undefined;
+    const config =
+      configMap[id] && typeof configMap[id] === "object"
+        ? (configMap[id] as Record<string, unknown>)
+        : undefined;
 
-    const scopes = toStringArray(depObj?.scopes);
-    // `tools[]` is an Appstrate extension (no AFPS field of this name).
-    const tools = toStringArray(depObj?.tools);
-    // `auth_key` (§4.1) — string pointing at one of the integration's
-    // `auths.<key>` entries.
-    const auth_key = pickString(depObj?.auth_key);
-
-    out.push({ id, version: version || "*", tools, scopes, auth_key });
+    out.push({
+      id,
+      version: rawVersion || "*",
+      tools: toStringArray(config?.tools),
+      scopes: toStringArray(config?.scopes),
+      auth_key: pickString(config?.auth_key),
+    });
   }
   return out;
 }
 
 /**
- * Write integration entries back to a manifest using the AFPS §4.1
- * canonical inline object form: each `dependencies.integrations.<id>`
- * becomes `{ version, scopes?, auth_key?, tools? }`. Entries with no
- * per-integration configuration collapse to a bare semver string for
- * minimal manifests.
- *
- * Note: `tools[]` is an Appstrate extension key with no AFPS field of the
- * same name. AFPS dependency entries are `looseObject`s (§4.1), so the
- * extra key round-trips through the canonical schema unchanged.
+ * Write integration entries back to a manifest in the AFPS split form:
+ * the semver range goes to `dependencies.integrations.<id>` (a bare string,
+ * §4.1) and the per-integration configuration goes to
+ * `integrations_configuration.<id>` ({ tools?, scopes?, auth_key? }, §4.4).
+ * Entries with no configuration leave no `integrations_configuration` entry.
  */
 export function writeManifestIntegrations(
   manifest: Record<string, unknown>,
@@ -270,23 +241,21 @@ export function writeManifestIntegrations(
 ): void {
   if (!manifest.dependencies) manifest.dependencies = {};
   const deps = manifest.dependencies as Record<string, unknown>;
-  const integrationMap: Record<string, IntegrationDependencyValue> = {};
+  const integrationMap: Record<string, string> = {};
+  const configMap: IntegrationsConfiguration = {};
 
   for (const e of entries) {
     if (!e.id) continue;
-    const version = e.version || "*";
+    integrationMap[e.id] = e.version || "*";
+
     const hasTools = e.tools !== undefined;
     const hasScopes = Array.isArray(e.scopes) && e.scopes.length > 0;
     const hasAuthKey = typeof e.auth_key === "string" && e.auth_key.length > 0;
 
-    if (!hasTools && !hasScopes && !hasAuthKey) {
-      // Minimal entry — collapse to bare version string per §4.1.
-      integrationMap[e.id] = version;
-    } else {
-      integrationMap[e.id] = {
-        version,
-        ...(hasScopes ? { scopes: [...e.scopes!] } : {}),
+    if (hasTools || hasScopes || hasAuthKey) {
+      configMap[e.id] = {
         ...(hasTools ? { tools: [...e.tools!] } : {}),
+        ...(hasScopes ? { scopes: [...e.scopes!] } : {}),
         ...(hasAuthKey ? { auth_key: e.auth_key! } : {}),
       };
     }
@@ -296,6 +265,12 @@ export function writeManifestIntegrations(
     deps.integrations = integrationMap;
   } else {
     delete deps.integrations;
+  }
+
+  if (Object.keys(configMap).length > 0) {
+    manifest.integrations_configuration = configMap;
+  } else {
+    delete manifest.integrations_configuration;
   }
 }
 

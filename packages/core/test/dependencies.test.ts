@@ -121,49 +121,20 @@ describe("extractDependencies", () => {
     expect(() => extractDependencies(manifest)).toThrow("Invalid scoped package name: no-scope");
   });
 
-  it("accepts mcp_servers value in object form (§4.1) and extracts the version", () => {
-    const manifest = {
-      dependencies: { mcp_servers: { "@acme/srv": { version: "^1.0.0" } } },
-    };
-    const deps = extractDependencies(manifest);
-    expect(deps).toHaveLength(1);
-    expect(deps[0]!.depType).toBe("mcp-server");
-    expect(deps[0]!.versionRange).toBe("^1.0.0");
-  });
-
-  it("accepts skill value in object form (§4.1) and extracts the version", () => {
-    const manifest = {
-      dependencies: { skills: { "@acme/skill": { version: "^1.0.0" } } },
-    };
-    const deps = extractDependencies(manifest);
-    expect(deps).toHaveLength(1);
-    expect(deps[0]!.depType).toBe("skill");
-    expect(deps[0]!.versionRange).toBe("^1.0.0");
-  });
-
-  it("accepts integration value in object form (§4.1) with scopes + auth_key extras", () => {
-    const manifest = {
-      dependencies: {
-        integrations: {
-          "@acme/gmail-mcp": {
-            version: "^1.0.0",
-            scopes: ["gmail.readonly"],
-            auth_key: "oauth",
-          },
-        },
-      },
-    };
-    const deps = extractDependencies(manifest);
-    expect(deps).toHaveLength(1);
-    expect(deps[0]!.depType).toBe("integration");
-    expect(deps[0]!.versionRange).toBe("^1.0.0");
-  });
-
-  it("throws when dependency value is neither string nor object-with-version", () => {
+  it("throws when a dependency value is not a string (§4.1)", () => {
     const manifest = {
       dependencies: { skills: { "@acme/skill": 42 as unknown as string } },
     };
-    expect(() => extractDependencies(manifest)).toThrow(/expected string or/);
+    expect(() => extractDependencies(manifest)).toThrow(/expected a semver range string/);
+  });
+
+  it("rejects the object form — dependency values are semver strings only (§4.1)", () => {
+    const manifest = {
+      dependencies: {
+        integrations: { "@acme/gmail-mcp": { version: "^1.0.0" } as unknown as string },
+      },
+    };
+    expect(() => extractDependencies(manifest)).toThrow(/expected a semver range string/);
   });
 
   it("throws on invalid scoped package name", () => {
@@ -177,7 +148,7 @@ describe("extractDependencies", () => {
     );
   });
 
-  it("manifest with integrations as bare version string (legacy)", () => {
+  it("manifest with integrations as a bare semver string", () => {
     const manifest = {
       dependencies: { integrations: { "@acme/gmail-mcp": "^1.0.0" } },
     };
@@ -187,30 +158,10 @@ describe("extractDependencies", () => {
     expect(deps[0]!.versionRange).toBe("^1.0.0");
   });
 
-  it("accepts integration dependency value in object form (§4.1)", () => {
-    const manifest = {
-      dependencies: {
-        integrations: { "@acme/gmail-mcp": { version: "^1.0.0" } },
-      },
-    };
-    const deps = extractDependencies(manifest);
-    expect(deps).toHaveLength(1);
-    expect(deps[0]!.versionRange).toBe("^1.0.0");
-  });
-
   // H5 — invalid semver range rejected upstream at extract time.
-  it("throws on invalid semver range (string form)", () => {
+  it("throws on invalid semver range", () => {
     const manifest = {
       dependencies: { skills: { "@acme/skill": "not-a-range" } },
-    };
-    expect(() => extractDependencies(manifest)).toThrow(/Invalid semver range/);
-  });
-
-  it("throws on invalid semver range (object form)", () => {
-    const manifest = {
-      dependencies: {
-        integrations: { "@acme/x": { version: "definitely-not-a-range" } },
-      },
     };
     expect(() => extractDependencies(manifest)).toThrow(/Invalid semver range/);
   });
@@ -304,52 +255,59 @@ describe("parseManifestIntegrations", () => {
     ]);
   });
 
-  it("reads tools/scopes from the canonical dep-entry object form (§4.1)", () => {
+  it("reads tools/scopes from integrations_configuration (§4.4)", () => {
     const out = parseManifestIntegrations({
-      dependencies: {
-        integrations: {
-          "@acme/gmail-mcp": {
-            version: "^1.0.0",
-            tools: ["list_messages", "get_message"],
-            scopes: ["s1", "s2"],
-          },
+      dependencies: { integrations: { "@acme/gmail-mcp": "^1.0.0" } },
+      integrations_configuration: {
+        "@acme/gmail-mcp": {
+          tools: ["list_messages", "get_message"],
+          scopes: ["s1", "s2"],
         },
       },
     });
     expect(out).toHaveLength(1);
     expect(out[0]!.id).toBe("@acme/gmail-mcp");
+    expect(out[0]!.version).toBe("^1.0.0");
     expect(out[0]!.tools).toEqual(["list_messages", "get_message"]);
     expect(out[0]!.scopes).toEqual(["s1", "s2"]);
   });
 
-  it("accepts dep entries in object form (§4.1) and surfaces inline scopes/auth_key", () => {
+  it("surfaces scopes/auth_key from integrations_configuration only for configured deps (§4.4)", () => {
     const out = parseManifestIntegrations({
       dependencies: {
-        integrations: {
-          "@acme/ok": "^1.0.0",
-          "@acme/rich": {
-            version: "^1.0.0",
-            scopes: ["s1"],
-            auth_key: "oauth",
-          },
-        },
+        integrations: { "@acme/ok": "^1.0.0", "@acme/rich": "^1.0.0" },
+      },
+      integrations_configuration: {
+        "@acme/rich": { scopes: ["s1"], auth_key: "oauth" },
       },
     });
     expect(out).toHaveLength(2);
     const rich = out.find((e) => e.id === "@acme/rich");
     expect(rich!.version).toBe("^1.0.0");
     expect(rich!.scopes).toEqual(["s1"]);
+    expect(rich!.auth_key).toBe("oauth");
+    const ok = out.find((e) => e.id === "@acme/ok");
+    expect(ok!.scopes).toBeUndefined();
+  });
+
+  it("ignores an integrations_configuration entry with no matching dependency", () => {
+    const out = parseManifestIntegrations({
+      dependencies: { integrations: { "@acme/declared": "^1.0.0" } },
+      integrations_configuration: {
+        "@acme/orphan": { tools: ["x"] },
+      },
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0]!.id).toBe("@acme/declared");
   });
 
   it("filters non-string entries inside tools/scopes arrays", () => {
     const out = parseManifestIntegrations({
-      dependencies: {
-        integrations: {
-          "@acme/gmail-mcp": {
-            version: "^1.0.0",
-            tools: ["good", 42, null, "another"] as unknown as string[],
-            scopes: ["s1", false, "s2"] as unknown as string[],
-          },
+      dependencies: { integrations: { "@acme/gmail-mcp": "^1.0.0" } },
+      integrations_configuration: {
+        "@acme/gmail-mcp": {
+          tools: ["good", 42, null, "another"] as unknown as string[],
+          scopes: ["s1", false, "s2"] as unknown as string[],
         },
       },
     });
@@ -359,7 +317,7 @@ describe("parseManifestIntegrations", () => {
 });
 
 describe("writeManifestIntegrations", () => {
-  it("emits canonical inline object form (§4.1) with scopes + tools, no top-level block", () => {
+  it("writes the version to dependencies and config to integrations_configuration (§4.4)", () => {
     const m: Record<string, unknown> = {};
     writeManifestIntegrations(m, [
       {
@@ -370,25 +328,25 @@ describe("writeManifestIntegrations", () => {
       },
     ]);
     expect(m.dependencies).toEqual({
-      integrations: {
-        "@acme/gmail-mcp": {
-          version: "^1.0.0",
-          scopes: ["gmail.readonly"],
-          tools: ["list_messages"],
-        },
+      integrations: { "@acme/gmail-mcp": "^1.0.0" },
+    });
+    expect(m.integrations_configuration).toEqual({
+      "@acme/gmail-mcp": {
+        tools: ["list_messages"],
+        scopes: ["gmail.readonly"],
       },
     });
-    // Must NOT emit the Appstrate-invented top-level block or the deprecated alias.
+    // No Appstrate-invented top-level `integrations` block.
     expect(m.integrations).toBeUndefined();
-    expect(m.integrations_configuration).toBeUndefined();
   });
 
-  it("collapses entries with no scopes/tools to a bare semver string", () => {
+  it("leaves no integrations_configuration entry for a dep with no config", () => {
     const m: Record<string, unknown> = {};
     writeManifestIntegrations(m, [{ id: "@acme/gmail-mcp", version: "^1.0.0" }]);
     expect(m.dependencies).toEqual({
       integrations: { "@acme/gmail-mcp": "^1.0.0" },
     });
+    expect(m.integrations_configuration).toBeUndefined();
   });
 
   it("round-trips through parseManifestIntegrations", () => {
@@ -427,61 +385,63 @@ describe("writeManifestIntegrations", () => {
   it("pure AFPS snake_case manifest round-trips identity", () => {
     const canonical: Record<string, unknown> = {
       dependencies: {
-        integrations: {
-          "@acme/gmail-mcp": {
-            version: "^1.0.0",
-            scopes: ["gmail.readonly"],
-            tools: ["list_messages"],
-          },
+        integrations: { "@acme/gmail-mcp": "^1.0.0" },
+      },
+      integrations_configuration: {
+        "@acme/gmail-mcp": {
+          tools: ["list_messages"],
+          scopes: ["gmail.readonly"],
         },
       },
     };
     const entries = parseManifestIntegrations(canonical);
     writeManifestIntegrations(canonical, entries);
     expect(canonical.dependencies).toEqual({
-      integrations: {
-        "@acme/gmail-mcp": {
-          version: "^1.0.0",
-          scopes: ["gmail.readonly"],
-          tools: ["list_messages"],
-        },
+      integrations: { "@acme/gmail-mcp": "^1.0.0" },
+    });
+    expect(canonical.integrations_configuration).toEqual({
+      "@acme/gmail-mcp": {
+        tools: ["list_messages"],
+        scopes: ["gmail.readonly"],
       },
     });
   });
 
   // ───────────────────────────────────────────────────────────────────
-  // AFPS §4.1 `auth_key` (C2) — multi-auth selector threading.
+  // AFPS §4.4 `auth_key` (C2) — multi-auth selector threading.
   // ───────────────────────────────────────────────────────────────────
 
-  it("parseManifestIntegrations extracts `auth_key` from canonical dep object form (§4.1)", () => {
+  it("parseManifestIntegrations extracts `auth_key` from integrations_configuration (§4.4)", () => {
     const out = parseManifestIntegrations({
-      dependencies: {
-        integrations: {
-          "@acme/github-mcp": { version: "^1.0.0", auth_key: "pat" },
-        },
+      dependencies: { integrations: { "@acme/github-mcp": "^1.0.0" } },
+      integrations_configuration: {
+        "@acme/github-mcp": { auth_key: "pat" },
       },
     });
     expect(out).toHaveLength(1);
     expect(out[0]!.auth_key).toBe("pat");
   });
 
-  it("writeManifestIntegrations emits `auth_key` in canonical object form", () => {
+  it("writeManifestIntegrations emits `auth_key` in integrations_configuration", () => {
     const m: Record<string, unknown> = {};
     writeManifestIntegrations(m, [{ id: "@acme/github-mcp", version: "^1.0.0", auth_key: "pat" }]);
     expect(m.dependencies).toEqual({
-      integrations: {
-        "@acme/github-mcp": { version: "^1.0.0", auth_key: "pat" },
-      },
+      integrations: { "@acme/github-mcp": "^1.0.0" },
+    });
+    expect(m.integrations_configuration).toEqual({
+      "@acme/github-mcp": { auth_key: "pat" },
     });
   });
 
-  it("writeManifestIntegrations prevents collapse-to-string when `auth_key` is set", () => {
-    // Even without tools/scopes, an entry carrying `auth_key` MUST stay in
-    // object form — otherwise the pin would be lost on save.
+  it("writeManifestIntegrations keeps the dep a bare string even when `auth_key` is set", () => {
+    // The dependency value is always a semver string; `auth_key` lives in the
+    // config block, so it survives the round-trip without an object dep form.
     const m: Record<string, unknown> = {};
     writeManifestIntegrations(m, [{ id: "@acme/github-mcp", version: "^1.0.0", auth_key: "pat" }]);
     const deps = m.dependencies as { integrations: Record<string, unknown> };
-    expect(typeof deps.integrations["@acme/github-mcp"]).toBe("object");
+    expect(deps.integrations["@acme/github-mcp"]).toBe("^1.0.0");
+    const config = m.integrations_configuration as Record<string, unknown>;
+    expect(config["@acme/github-mcp"]).toEqual({ auth_key: "pat" });
   });
 
   it("round-trips: parse(write({ id, version, auth_key })) equals input", () => {

@@ -187,11 +187,10 @@ export const manifestSchema = z.looseObject({
   screenshots: z.array(z.string()).optional(),
   privacy_policies: z.array(z.string()).optional(),
   compatibility: compatibilityObjectSchema.optional(),
-  // Polymorphic dependency map per AFPS §4.1: each value is either a
-  // bare semver range (string) OR an object `{ version, ... }` carrying
-  // per-dependency configuration (e.g. `scopes`/`auth_key` for integrations).
-  // Schema is re-used from the canonical `@afps-spec/schema` package to keep
-  // appstrate from drifting.
+  // Flat dependency maps per AFPS §4.1: each value is a bare semver range
+  // string. Per-integration agent configuration lives in the top-level
+  // `integrations_configuration` map (§4.4). Schema is re-used from the
+  // canonical `@afps-spec/schema` package to keep appstrate from drifting.
   dependencies: afpsDependenciesSchema,
   _meta: metaSchema.optional(),
 });
@@ -207,7 +206,7 @@ export type Manifest = z.infer<typeof manifestSchema>;
  * Zod schema for agent manifests — extends AFPS with relaxed optional metadata for local drafts
  * AND the Phase 1.0 `dependencies.integrations` map (proposal §4.2.3).
  */
-const agentManifestObjectSchema = afpsAgentManifestSchema.extend({
+const agentManifestObjectSchema = afpsAgentManifestSchema.safeExtend({
   // All standard fields (name, version, schema_version, dependencies,
   // display_name, input/output/config, timeout) inherited from the AFPS
   // schema.
@@ -221,10 +220,11 @@ const agentManifestObjectSchema = afpsAgentManifestSchema.extend({
   license: z.string().optional(),
   // Mirror the AFPS canonical: `repository` accepts string OR `{ type, url, directory? }`.
   repository: repositoryFieldSchema.optional(),
-  // `dependencies` is inherited verbatim from the canonical AFPS
-  // `agentManifestSchema`. Per §4.1 each value is polymorphic — a bare
-  // semver range string OR an object `{ version, scopes?, auth_key?, ... }`.
-  // We do not override the field here to avoid drifting from the spec.
+  // `dependencies` and `integrations_configuration` are inherited verbatim
+  // from the canonical AFPS `agentManifestSchema` (§4.1 flat semver-range
+  // maps + §4.4 per-integration config, including the rule that every
+  // `integrations_configuration` key matches a declared integration dep).
+  // We do not override those fields here to avoid drifting from the spec.
   // First-party runtime tools enabled for this agent — all opt-in, none
   // auto-injected (`output` included). `output` is required to be present
   // only when an output schema is declared (enforced by the superRefine

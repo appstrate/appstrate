@@ -208,7 +208,7 @@ describe("validateAgentIntegrationScopes — uses the catalog, not the policy ta
     );
     expect(errors).toHaveLength(1);
     expect(errors[0]!.code).toBe("unknown_tool");
-    expect(errors[0]!.field).toBe("integrations.@me/integ.tools");
+    expect(errors[0]!.field).toBe("integrations_configuration.@me/integ.tools");
   });
 
   it("rejects a hidden tool even if the mcp-server advertises it", () => {

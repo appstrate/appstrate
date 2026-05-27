@@ -205,27 +205,27 @@ describe("validateManifest", () => {
     expect(result.valid).toBe(true);
   });
 
-  it("accepts an integration dependency value in object form (AFPS §4.1)", () => {
+  it("accepts an integration dependency as a bare semver string (AFPS §4.1)", () => {
     const result = validateManifest(
       validAgentManifest({
         dependencies: {
-          integrations: { "@test/gmail-mcp": { version: "^1.0.0" } },
+          integrations: { "@test/gmail-mcp": "^1.0.0" },
         },
       }),
     );
     expect(result.valid).toBe(true);
   });
 
-  it("accepts integration dependency object form with scopes + auth_key inline (§4.1)", () => {
+  it("accepts per-integration config in integrations_configuration with scopes + auth_key (§4.4)", () => {
     const result = validateManifest(
       validAgentManifest({
         dependencies: {
-          integrations: {
-            "@test/gmail-mcp": {
-              version: "^1.0.0",
-              scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
-              auth_key: "oauth",
-            },
+          integrations: { "@test/gmail-mcp": "^1.0.0" },
+        },
+        integrations_configuration: {
+          "@test/gmail-mcp": {
+            scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
+            auth_key: "oauth",
           },
         },
       }),
@@ -233,25 +233,39 @@ describe("validateManifest", () => {
     expect(result.valid).toBe(true);
   });
 
-  it("accepts skill + mcp_server dependency values in object form (§4.1)", () => {
+  it("accepts skill + mcp_server dependency values as bare semver strings (§4.1)", () => {
     const result = validateManifest(
       validAgentManifest({
         dependencies: {
-          skills: { "@test/skill": { version: "^1.0.0" } },
-          mcp_servers: { "@test/mcp": { version: "^2.0.0" } },
+          skills: { "@test/skill": "^1.0.0" },
+          mcp_servers: { "@test/mcp": "^2.0.0" },
         },
       }),
     );
     expect(result.valid).toBe(true);
   });
 
-  it("rejects integration dependency object missing `version`", () => {
+  it("rejects an integration dependency in object form (§4.1)", () => {
     const result = validateManifest(
       validAgentManifest({
         dependencies: {
           integrations: {
-            "@test/gmail-mcp": { scopes: ["https://www.googleapis.com/auth/gmail.readonly"] },
+            "@test/gmail-mcp": { version: "^1.0.0" } as unknown as string,
           },
+        },
+      }),
+    );
+    expect(result.valid).toBe(false);
+  });
+
+  it("rejects an integrations_configuration entry with no matching dependency (§4.4)", () => {
+    const result = validateManifest(
+      validAgentManifest({
+        dependencies: {
+          integrations: { "@test/gmail-mcp": "^1.0.0" },
+        },
+        integrations_configuration: {
+          "@test/orphan": { tools: ["x"] },
         },
       }),
     );

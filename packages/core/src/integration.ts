@@ -804,7 +804,7 @@ export function validateAgentIntegrationScopes(
       for (const tool of selection.tools) {
         if (allowed.has(tool)) continue;
         errors.push({
-          field: `integrations.${selection.id}.tools`,
+          field: `integrations_configuration.${selection.id}.tools`,
           code: "unknown_tool",
           message: `Tool "${tool}" is not exposed by integration ${selection.id}`,
         });
@@ -819,7 +819,7 @@ export function validateAgentIntegrationScopes(
       for (const scope of selection.scopes) {
         if (!catalogSet.has(scope)) {
           errors.push({
-            field: `integrations.${selection.id}.scopes`,
+            field: `integrations_configuration.${selection.id}.scopes`,
             code: "scope_not_in_catalog",
             message: `Scope "${scope}" is not declared in scope_catalog of integration ${selection.id}`,
           });

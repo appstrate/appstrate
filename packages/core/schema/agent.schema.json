@@ -190,23 +190,7 @@
             "pattern": "^@[a-z0-9]([a-z0-9-]*[a-z0-9])?\\/[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
           },
           "additionalProperties": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "object",
-                "properties": {
-                  "version": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "version"
-                ],
-                "additionalProperties": {}
-              }
-            ]
+            "type": "string"
           }
         },
         "mcp_servers": {
@@ -216,23 +200,7 @@
             "pattern": "^@[a-z0-9]([a-z0-9-]*[a-z0-9])?\\/[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
           },
           "additionalProperties": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "object",
-                "properties": {
-                  "version": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "version"
-                ],
-                "additionalProperties": {}
-              }
-            ]
+            "type": "string"
           }
         },
         "integrations": {
@@ -242,33 +210,7 @@
             "pattern": "^@[a-z0-9]([a-z0-9-]*[a-z0-9])?\\/[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
           },
           "additionalProperties": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "object",
-                "properties": {
-                  "version": {
-                    "type": "string"
-                  },
-                  "scopes": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "auth_key": {
-                    "type": "string",
-                    "pattern": "^[a-z][a-z0-9_]*$"
-                  }
-                },
-                "required": [
-                  "version"
-                ],
-                "additionalProperties": {}
-              }
-            ]
+            "type": "string"
           }
         }
       },
@@ -297,6 +239,12 @@
       "additionalProperties": {
         "type": "object",
         "properties": {
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "scopes": {
             "type": "array",
             "items": {
