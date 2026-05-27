@@ -274,9 +274,35 @@ export class McpHost {
       }
       const sanitisedToolBody = sanitiseToolBody(sanitised.name);
       const namespacedName = sanitisedToolBody ? `${normalisedNs}__${sanitisedToolBody}` : "";
-      const finalName = isValidToolNameForExisting(namespacedName)
+      let finalName = isValidToolNameForExisting(namespacedName)
         ? namespacedName
         : `${normalisedNs}__tool_${this.toolDescriptors.length}`;
+      // Dedup: two DISTINCT upstream tools can converge onto the same
+      // `finalName` after `sanitiseToolBody` collapses separators (e.g.
+      // `list-issues`, `list_issues`, and `list.issues` all → `list_issues`).
+      // Without this guard the later tool would silently overwrite the
+      // earlier one's index entries (toolToClient / originalToolNames) while
+      // both still get pushed onto `toolDescriptors` — the agent would see a
+      // duplicate name and the first tool would become unreachable. Suffix
+      // `_2`, `_3`, … until free, mirroring namespace disambiguation.
+      if (this.toolToNamespace.has(finalName)) {
+        const base = finalName;
+        let suffix = 2;
+        while (this.toolToNamespace.has(finalName)) {
+          finalName = `${base}_${suffix}`;
+          suffix += 1;
+        }
+        this.options.onLog?.({
+          source: `host:${normalisedNs}`,
+          level: "warn",
+          data: {
+            event: "tool_name_collision",
+            originalName: tool.name,
+            base,
+            allocated: finalName,
+          },
+        });
+      }
       this.toolToNamespace.set(finalName, normalisedNs);
       this.toolToClient.set(finalName, effectiveUpstream.client);
       this.originalToolNames.set(finalName, tool.name);

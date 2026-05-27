@@ -233,6 +233,52 @@ describe("McpHost — buildTools", () => {
       await upstream.pair.close();
     }
   });
+
+  it("disambiguates two same-server tools that collapse to one name", async () => {
+    // `list-issues` and `list_issues` both sanitise to body `list_issues`,
+    // so without dedup the second would silently overwrite the first's
+    // dispatch index while both got advertised under `gh__list_issues`.
+    const upstream = await makeUpstream([
+      {
+        descriptor: {
+          name: "list-issues",
+          description: "dash variant",
+          inputSchema: { type: "object" },
+        },
+        handler: async () => ({ content: [{ type: "text", text: "dash" }] }),
+      },
+      {
+        descriptor: {
+          name: "list_issues",
+          description: "underscore variant",
+          inputSchema: { type: "object" },
+        },
+        handler: async () => ({ content: [{ type: "text", text: "underscore" }] }),
+      },
+    ]);
+    const logs: Array<{ event?: string }> = [];
+    try {
+      const host = new McpHost({ onLog: (e) => logs.push(e.data as { event?: string }) });
+      await host.register({ namespace: "gh", client: upstream.client });
+      const tools = host.buildTools();
+      const names = tools.map((t) => t.descriptor.name).sort();
+      // Two distinct names — no overwrite, no lost tool.
+      expect(names).toEqual(["gh__list_issues", "gh__list_issues_2"]);
+      // Registration order is preserved: first tool keeps the base name.
+      const base = tools.find((t) => t.descriptor.name === "gh__list_issues")!;
+      const suffixed = tools.find((t) => t.descriptor.name === "gh__list_issues_2")!;
+      const baseResult = await base.handler({}, { signal: undefined as never } as never);
+      const suffixedResult = await suffixed.handler({}, { signal: undefined as never } as never);
+      // Each namespaced name dispatches to its OWN upstream tool — proving the
+      // per-tool index was not clobbered by the collision.
+      expect(baseResult.content[0]).toEqual({ type: "text", text: "dash" });
+      expect(suffixedResult.content[0]).toEqual({ type: "text", text: "underscore" });
+      // A collision audit log was emitted.
+      expect(logs.some((l) => l.event === "tool_name_collision")).toBe(true);
+    } finally {
+      await upstream.pair.close();
+    }
+  });
 });
 
 describe("McpHost — namespace normalisation", () => {

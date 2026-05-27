@@ -722,6 +722,38 @@ async function spawnAndConnectLocalIntegration(params: {
 }
 
 /**
+ * No-silent-degradation guard: the agent author selected `spec.toolAllowlist`
+ * tools, but only `added` of the server's native tools survived registration
+ * (a selected tool can vanish if the server doesn't advertise it under the
+ * declared name, or if the poisoning sanitiser drops its descriptor for being
+ * too large). `added` counts ONLY the spawned/remote server's tools — never the
+ * in-process api_call tool, which is not part of the agent's tool selection.
+ * Surface the shortfall as a `warn` breadcrumb so it reaches the boot report
+ * and run logs instead of the LLM silently behaving as if the tool was never
+ * authorised. Non-fatal by design: an optional tool that the upstream dropped
+ * shouldn't abort an otherwise-healthy run.
+ */
+export function pushUnavailableToolBreadcrumb(
+  spec: IntegrationSpawnSpec,
+  added: number,
+  breadcrumbs: IntegrationBootBreadcrumb[],
+): void {
+  const requested = spec.toolAllowlist;
+  if (!requested || requested.length === 0 || added >= requested.length) return;
+  const missing = requested.length - added;
+  breadcrumbs.push({
+    message: `${spec.integrationId}: ${missing}/${requested.length} selected tool(s) unavailable`,
+    level: "warn",
+    data: {
+      integrationId: spec.integrationId,
+      requested: requested.length,
+      surviving: added,
+      missing,
+    },
+  });
+}
+
+/**
  * Spawn each integration sequentially, register the surviving ones on a
  * shared {@link McpHost}, and return the materialised tool list. Per-integration
  * failures are captured in `result.failed` so a single broken integration
@@ -1013,6 +1045,7 @@ export async function bootIntegrations(
           ...((spec.hiddenTools?.length ?? 0) > 0 ? { hiddenTools: spec.hiddenTools } : {}),
         });
         const added = host.size() - sizeBefore;
+        pushUnavailableToolBreadcrumb(spec, added, breadcrumbs);
         // Attach the in-process api_call tool alongside the remote MCP's tools.
         const apiCallAdded = await attachApiCall(allocatedNs);
         spawned.push({
@@ -1078,6 +1111,7 @@ export async function bootIntegrations(
         clients,
         mitmListeners,
       });
+      pushUnavailableToolBreadcrumb(spec, added, breadcrumbs);
 
       // ─── P2 — connect.tool `runAt: "run-start"` session acquisition ───
       // Only the login secret was stored at dashboard connect; mint the
