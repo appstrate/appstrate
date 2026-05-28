@@ -154,10 +154,13 @@ function MissingRow({
   const { packageId, authKey } = parseField(err.field);
   const { data: detail } = useIntegrationDetail(packageId);
   const isMustChooseCode = err.code === "must_choose_connection";
-  // Only fetch the connection list when we need to render the picker — saves
-  // an extra round trip on the common not_connected / needs_reconnection rows.
-  const { data: connections } = useIntegrationConnections(isMustChooseCode ? packageId : undefined);
   const isReconnect = err.code === "needs_reconnection" || err.code === "insufficient_scopes";
+  // Fetch the connection list when we render the must_choose picker, or when a
+  // reconnect/upgrade row needs the dead connection's own auth_key to bind a
+  // single (non-dropdown) renew button to the right method. Still skipped on the
+  // common not_connected rows (no connection_id), saving a round trip there.
+  const needsConnections = isMustChooseCode || (isReconnect && !!err.connection_id);
+  const { data: connections } = useIntegrationConnections(needsConnections ? packageId : undefined);
   const isMustChoose = err.code === "must_choose_connection";
   // Structural failures (integration not active in the app, package missing
   // or invalid manifest) can't be fixed by connecting — an admin must
@@ -179,7 +182,16 @@ function MissingRow({
   // longer emitted. The chosen connection carries its own `auth_key`; we
   // only need an authKey for the reconnect/upgrade/connect CTA (to drive
   // the OAuth method), which falls back to the manifest default.
-  const targetAuthKey = authKey ?? pickDefaultAuth(detail?.manifest.auths);
+  // On a reconnect/upgrade the dead connection already pins a method; resolve
+  // its auth_key so the renew CTA is a single button bound to that method (no
+  // method-picker dropdown — there is nothing to choose). Falls back to the
+  // manifest default only until the connection list loads / for legacy
+  // authKey-suffixed fields.
+  const reconnectConn = err.connection_id
+    ? (connections ?? []).find((c) => c.id === err.connection_id)
+    : undefined;
+  const targetAuthKey =
+    authKey ?? reconnectConn?.auth_key ?? pickDefaultAuth(detail?.manifest.auths);
   const displayName = detail?.manifest.display_name ?? packageId;
   const candidateIds = err.candidateConnectionIds ?? [];
   const candidates = (connections ?? []).filter((c) => candidateIds.includes(c.id));
@@ -209,6 +221,7 @@ function MissingRow({
             authKey={targetAuthKey}
             {...(err.missing_scopes ? { scopes: err.missing_scopes } : {})}
             {...(err.connection_id ? { connectionId: err.connection_id } : {})}
+            {...(isReconnect ? { lockToAuthKey: true } : {})}
             intent={
               err.code === "insufficient_scopes"
                 ? "upgrade"
