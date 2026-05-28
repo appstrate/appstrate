@@ -76,7 +76,7 @@ describe("findUnresolvedPlaceholders", () => {
   });
 });
 
-describe("matchesAuthorizedUriSpec (AFPS 1.3 semantics)", () => {
+describe("matchesAuthorizedUriSpec (AFPS semantics)", () => {
   it("matches an exact URL", () => {
     expect(
       matchesAuthorizedUriSpec(

@@ -280,9 +280,7 @@ export function createRunsRouter() {
       // an identical resolved config for the same `(persisted, override)`.
       const mergedConfig = mergeAndValidateConfigOverride(effectiveAgent, config, configOverride);
 
-      // Single canonical prefix — `run_` — shared with inline + remote
-      // origins. The legacy `exec_` prefix was a platform-only relic from
-      // before the unified runner protocol.
+      // Single canonical prefix — `run_` — shared with inline + remote origins.
       const runId = `run_${crypto.randomUUID()}`;
 
       // Build file metadata for prompt context (no URLs — files injected directly into container)

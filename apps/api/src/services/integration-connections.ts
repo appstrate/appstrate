@@ -503,7 +503,7 @@ export function extractIdentity(
   source: Record<string, unknown>,
 ): { accountId: string; identityClaims: Record<string, unknown> } {
   const auth = lookupAuth(manifest, authKey) as AfpsManifestAuth;
-  // AFPS (Appendix D): `extractTokenIdentity` → `identity_claims`.
+  // AFPS: the token identity mapping is `identity_claims`.
   const mapping = auth.identity_claims ?? {};
   const claims: Record<string, unknown> = {};
   for (const [outKey, accessor] of Object.entries(mapping)) {
@@ -1057,8 +1057,8 @@ export async function getIntegrationAuthStatuses(
   const oauthClientKeys = new Set(oauthClients.map((r) => r.authKey));
 
   const auths: IntegrationAuthStatus[] = Object.entries(authsMap).map(([key, rawAuth]) => {
-    // AFPS (Appendix D): `scopes` → `default_scopes`, `audience` →
-    // `resource` (RFC 8707); the Appstrate run-policy `required` flag moved
+    // AFPS: default scopes are `default_scopes`, the OAuth resource is
+    // `resource` (RFC 8707); the Appstrate run-policy `required` flag lives
     // under `_meta["dev.appstrate/auth"].required`.
     const auth = rawAuth as AfpsManifestAuth;
     const authMeta = (auth._meta?.["dev.appstrate/auth"] ?? undefined) as

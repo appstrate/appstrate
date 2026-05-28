@@ -480,7 +480,7 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
 
   // Unified-persistence pinned-slot write — the single store for every
   // named pinned slot the agent wrote via `pin({ key, content })`,
-  // including the carry-over `"checkpoint"` slot. Honors the AFPS 1.4
+  // including the carry-over `"checkpoint"` slot. Honors the AFPS
   // scope when the runtime stamped one onto each slot; falls back to
   // the run's actor scope.
   if (result.pinned) {

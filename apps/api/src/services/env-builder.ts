@@ -188,9 +188,8 @@ export async function buildRunContext(params: {
     resolvedConnections: params.resolvedConnections ?? null,
   });
 
-  // AFPS: snake_case. The editor writes `runtime_tools`; the legacy
-  // camelCase `runtimeTools` was dropped in the snake_case migration. Reading the
-  // wrong key here silently dropped every author's runtime-tool selection.
+  // AFPS: snake_case. The editor writes `runtime_tools`; reading the wrong key
+  // here would silently drop every author's runtime-tool selection.
   const manifestRuntimeTools = (agent.manifest as { runtime_tools?: unknown }).runtime_tools;
   const runtimeTools = Array.isArray(manifestRuntimeTools)
     ? manifestRuntimeTools.filter((t): t is string => typeof t === "string")

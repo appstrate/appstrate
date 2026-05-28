@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Credential proxy endpoint (AFPS 1.3 — BYOI for external runners).
+ * Credential proxy endpoint (BYOI for external runners).
  *
  * Wire-compatible with the runtime-pi sidecar `/proxy` contract. Accepts
  * bearer auth: API keys (headless / GitHub Action) or OIDC-issued JWTs

@@ -145,9 +145,7 @@ export function createInternalRouter() {
       .catch(10)
       .parse(limitParam ?? 10);
 
-    // Wire field names — `state` (AFPS ≤ 1.3) is no longer accepted.
-    // The floor of supported runners is now AFPS 1.4 (ADR-011 final cut).
-    // Unknown values fail loudly with 400 so a stale runner schema can't
+    // Unknown field names fail loudly with 400 so a stale runner schema can't
     // silently strip fields the agent is asking for.
     let fields: RunHistoryField[] = ["checkpoint"];
     if (fieldsParam !== undefined) {

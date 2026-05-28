@@ -1198,7 +1198,7 @@ export async function _buildResolverInputsForTesting(
 
 /**
 /**
- * Pull the AFPS 1.x `config.schema` JSON Schema out of the bundle's
+ * Pull the AFPS `config.schema` JSON Schema out of the bundle's
  * root package manifest. Returns `undefined` when the agent declares
  * no config schema (so validation is a no-op). Mirrors the unexported
  * helper in `@appstrate/afps-runtime/bundle/platform-prompt-inputs`.

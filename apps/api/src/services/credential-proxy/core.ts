@@ -12,8 +12,7 @@
  *
  * Credentials are resolved from `integration_connections` (the same
  * machinery behind the sidecar's `/internal/integration-credentials/*`
- * surface) via {@link resolveIntegrationProxyCredentials} — the provider
- * tables were removed when the `provider` package type was retired.
+ * surface) via {@link resolveIntegrationProxyCredentials}.
  *
  * The in-container sidecar uses its own `executeApiCall` helper
  * (`runtime-pi/sidecar/credential-proxy.ts`) — same algorithm, same

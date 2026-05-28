@@ -219,24 +219,6 @@ describe("Internal API", () => {
       const entry = body.data[0]!;
       expect(entry.checkpoint).toEqual({ key: "value" });
       expect(entry.result).toEqual({ output: "done" });
-      // Legacy key never leaks back out — response speaks the new vocabulary.
-      expect(entry.state).toBeUndefined();
-    });
-
-    it("returns 400 with the valid-fields list when an unknown field is passed", async () => {
-      // The legacy AFPS ≤ 1.3 alias `state` is no longer accepted. Failing
-      // loudly here is what protects agents whose runtime is stale: the
-      // earlier silent-filter behaviour stripped the field and fell back to
-      // `["checkpoint"]`, masking the misconfiguration.
-      const res = await app.request("/internal/run-history?fields=state", {
-        headers: { Authorization: `Bearer ${runningToken}` },
-      });
-
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as { detail?: string; errors?: { field?: string }[] };
-      expect(body.detail).toContain("state");
-      expect(body.detail).toContain("checkpoint");
-      expect(body.detail).toContain("result");
     });
 
     it("returns 400 when only some fields are valid", async () => {

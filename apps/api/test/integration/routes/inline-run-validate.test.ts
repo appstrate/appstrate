@@ -235,9 +235,7 @@ describe("POST /api/runs/inline/validate", () => {
     };
     const configEntries = (body.errors ?? []).filter((e) => e.field.startsWith("config"));
     expect(configEntries.length).toBe(1);
-    // And the remaining code must be the stage-3 one, not the legacy
-    // readiness code (`config_incomplete` has been retired in favour of
-    // `invalid_config`).
+    // And the remaining code must be the stage-3 one (`invalid_config`).
     expect(configEntries[0]!.code).toBe("invalid_config");
   });
 
