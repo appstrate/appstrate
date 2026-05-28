@@ -162,7 +162,6 @@ describe("openPrTool — GitHub REST API contract", () => {
 
     const out = await openPrTool(
       { owner: "owner", repo: "repo", head: "feature/x", title: "Hello", body: "Body" },
-      { token: "t" },
       { fetchImpl: stub },
     );
 
@@ -203,7 +202,6 @@ describe("openPrTool — GitHub REST API contract", () => {
 
     const out = await openPrTool(
       { owner: "owner", repo: "repo", head: "feat", base: "develop", title: "Title" },
-      { token: "t" },
       { fetchImpl: stub },
     );
     expect(out.number).toBe(7);
@@ -216,10 +214,36 @@ describe("openPrTool — GitHub REST API contract", () => {
     await expect(
       openPrTool(
         { owner: "owner", repo: "repo", head: "x", base: "main", title: "T" },
-        { token: "t" },
         { fetchImpl: stub },
       ),
     ).rejects.toThrow(/422/);
+  });
+
+  it("does NOT set an Authorization header — MITM proxy injects auth per request", async () => {
+    let observedAuth: string | null | undefined;
+    const stub: typeof fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      observedAuth = headers.Authorization ?? headers.authorization ?? null;
+      if (url.endsWith("/repos/owner/repo/pulls") && init?.method === "POST") {
+        return new Response(
+          JSON.stringify({
+            number: 1,
+            html_url: "u",
+            head: { ref: "h" },
+            base: { ref: "b" },
+          }),
+          { status: 201 },
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as typeof fetch;
+
+    await openPrTool(
+      { owner: "owner", repo: "repo", head: "h", base: "b", title: "T" },
+      { fetchImpl: stub },
+    );
+    expect(observedAuth).toBeNull();
   });
 });
 
@@ -308,10 +332,7 @@ describe("cloneTool — local bare-repo roundtrip", () => {
 
   it("cloneTool rejects a dest that escapes the workspace", async () => {
     await expect(
-      cloneTool(
-        { owner: "x", repo: "y", dest: "../escape" },
-        { workspaceRoot: workspace, token: "t" },
-      ),
+      cloneTool({ owner: "x", repo: "y", dest: "../escape" }, { workspaceRoot: workspace }),
     ).rejects.toThrow(/path-traversal/);
   });
 
@@ -329,7 +350,7 @@ describe("cloneTool — local bare-repo roundtrip", () => {
     await expect(
       cloneTool(
         { owner: "nonexistent-owner-x", repo: "nonexistent-repo-y", dest },
-        { workspaceRoot: workspace, token: "definitely-not-valid" },
+        { workspaceRoot: workspace },
       ),
     ).rejects.toThrow(/git clone failed/);
   });

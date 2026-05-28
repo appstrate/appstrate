@@ -53,11 +53,11 @@
         "https://codeload.github.com/**"
       ],
       "delivery": {
-        "env": {
-          "GITHUB_TOKEN": {
-            "value": "{$credential.access_token}",
-            "sensitive": true
-          }
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer ",
+          "value": "{$credential.access_token}"
         }
       },
 

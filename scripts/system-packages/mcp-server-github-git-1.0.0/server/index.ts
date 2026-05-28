@@ -92,7 +92,6 @@ interface GitResult {
 
 interface RunGitOptions {
   cwd?: string;
-  token?: string;
   /** Capture stdout (default true). */
   capture?: boolean;
 }
@@ -150,14 +149,19 @@ export function classifyGitError(stderr: string): string | undefined {
 }
 
 /**
- * Spawn `git` with optional bearer-auth injected via
- * `GIT_CONFIG_COUNT/KEY/VALUE`. Returns stdout/stderr/exit code.
- * Throws on non-zero exit with a classified hint when one applies.
+ * Spawn `git`. Returns stdout/stderr/exit code. Throws on non-zero
+ * exit with a classified hint when one applies.
  *
- * Inherits process.env wholesale — the MCP runner container is on an
- * internal-only bridge with no direct egress; the sidecar injects
- * `HTTPS_PROXY` + `CURL_CA_BUNDLE` (`buildMitmEnvBlock`) so HTTP
- * clients route through the platform's TLS-terminating proxy.
+ * Auth + transport: the github-git integration declares `delivery.http`
+ * so the sidecar mints a per-run MITM listener and injects
+ * `HTTPS_PROXY` + `CURL_CA_BUNDLE` (`buildMitmEnvBlock`) into the
+ * runner env. Every git HTTPS request from the runner is intercepted
+ * by the MITM, which appends `Authorization: Bearer <token>` and
+ * forwards to GitHub. The MCP server never sees the token — it just
+ * lets libcurl honour the standard proxy env vars. Inheriting
+ * `process.env` wholesale is what makes this work; stripping the env
+ * (the original mistake on this server) would leave git with no
+ * proxy and no DNS path to github.com.
  *
  * Always prepends `-c safe.directory='*'` — git refuses to operate on
  * a working tree whose ownership differs from the calling uid. Even
@@ -173,11 +177,6 @@ async function runGit(args: string[], opts: RunGitOptions = {}): Promise<GitResu
   // Force git to fail rather than block waiting on an interactive
   // credential prompt — there is no terminal in the runner.
   env.GIT_TERMINAL_PROMPT = "0";
-  if (opts.token) {
-    env.GIT_CONFIG_COUNT = "1";
-    env.GIT_CONFIG_KEY_0 = "http.extraheader";
-    env.GIT_CONFIG_VALUE_0 = `AUTHORIZATION: bearer ${opts.token}`;
-  }
 
   const fullArgs = ["-c", "safe.directory=*", ...args];
   const started = performance.now();
@@ -185,7 +184,6 @@ async function runGit(args: string[], opts: RunGitOptions = {}): Promise<GitResu
     op: "git-spawn",
     cmd: args[0] ?? "<unknown>",
     cwd: opts.cwd ?? "<inherit>",
-    auth: opts.token ? "bearer" : "none",
   });
 
   const proc = Bun.spawn(["git", ...fullArgs], {
@@ -219,9 +217,16 @@ interface GhFetchDeps {
   fetchImpl?: typeof fetch;
 }
 
+/**
+ * Send a GitHub REST request. NO Authorization header is set — the
+ * sidecar's per-run MITM proxy (declared via `delivery.http` on the
+ * integration manifest) intercepts the HTTPS connection and injects
+ * the bearer token per-request. The server never sees the token,
+ * matching how every other workspace integration on the platform
+ * (github-mcp, gmail-mcp) handles auth.
+ */
 async function ghFetch(
   path: string,
-  token: string,
   init: RequestInit = {},
   deps: GhFetchDeps = {},
 ): Promise<Response> {
@@ -229,7 +234,6 @@ async function ghFetch(
   return fetchImpl(`${GITHUB_API}${path}`, {
     ...init,
     headers: {
-      Authorization: `Bearer ${token}`,
       Accept: "application/vnd.github+json",
       "User-Agent": "appstrate-github-git-mcp/1.0",
       "X-GitHub-Api-Version": "2022-11-28",
@@ -238,23 +242,18 @@ async function ghFetch(
   });
 }
 
-async function ghJson<T>(
-  path: string,
-  token: string,
-  init: RequestInit = {},
-  deps: GhFetchDeps = {},
-): Promise<T> {
+async function ghJson<T>(path: string, init: RequestInit = {}, deps: GhFetchDeps = {}): Promise<T> {
   const method = init.method ?? "GET";
   const started = performance.now();
   logLine({ op: "github-fetch", method, path });
-  const res = await ghFetch(path, token, init, deps);
+  const res = await ghFetch(path, init, deps);
   const elapsed = Math.round(performance.now() - started);
   logLine({ op: "github-fetch-done", method, path, status: res.status, ms: elapsed });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     const hint =
       res.status === 401
-        ? " hint: bearer token rejected — re-check the OAuth connection's scope grant and expiry."
+        ? " hint: bearer token rejected by MITM or GitHub — re-check the OAuth connection's scope grant and expiry."
         : res.status === 403
           ? " hint: forbidden — the token's scopes don't cover this resource (need `repo` for private, `public_repo` for public)."
           : res.status === 404
@@ -293,7 +292,7 @@ interface CloneArgs {
 
 export async function cloneTool(
   args: CloneArgs,
-  ctx: { workspaceRoot: string; token: string },
+  ctx: { workspaceRoot: string },
 ): Promise<{ path: string; branch: string }> {
   const dest = args.dest ?? defaultDestForRepo(args.owner, args.repo);
   const target = resolveInWorkspace(ctx.workspaceRoot, dest);
@@ -302,9 +301,9 @@ export async function cloneTool(
   // `--no-tags` + `--depth=1` would be faster but break later push/branch
   // operations; agents that want a shallow clone can opt in later if it
   // becomes a real ergonomic problem. Default to a full clone — KISS.
-  await runGit(["clone", url, target], { token: ctx.token });
+  await runGit(["clone", url, target]);
   if (args.ref) {
-    await runGit(["checkout", args.ref], { cwd: target, token: ctx.token });
+    await runGit(["checkout", args.ref], { cwd: target });
   }
   const head = await runGit(["rev-parse", "--abbrev-ref", "HEAD"], { cwd: target });
   return { path: target, branch: head.stdout.trim() };
@@ -367,7 +366,6 @@ let cachedIdentity: { name: string; email: string } | null = null;
 
 async function ensureCommitIdentity(
   cwd: string,
-  token: string,
   deps: GhFetchDeps,
 ): Promise<{ name: string; email: string }> {
   // Caller-side check first — already-configured local identity wins
@@ -384,7 +382,7 @@ async function ensureCommitIdentity(
     // `git config <key>` exits 1 when unset — fall through to derive.
   }
   if (!cachedIdentity) {
-    const user = await ghJson<GhUser>("/user", token, {}, deps);
+    const user = await ghJson<GhUser>("/user", {}, deps);
     cachedIdentity = {
       name: user.login,
       // GitHub's noreply pattern includes the user id so commits are
@@ -405,11 +403,11 @@ interface CommitArgs {
 
 export async function commitTool(
   args: CommitArgs,
-  ctx: { workspaceRoot: string; token: string },
+  ctx: { workspaceRoot: string },
   deps: GhFetchDeps = {},
 ): Promise<{ sha: string; message: string }> {
   const cwd = resolveInWorkspace(ctx.workspaceRoot, args.repo);
-  await ensureCommitIdentity(cwd, ctx.token, deps);
+  await ensureCommitIdentity(cwd, deps);
   if (args.paths && args.paths.length > 0) {
     // Validate each path stays inside the repo (the workspace check
     // alone would let `../other-repo/...` slip through — the resolved
@@ -438,14 +436,14 @@ interface PushArgs {
 
 export async function pushTool(
   args: PushArgs,
-  ctx: { workspaceRoot: string; token: string },
+  ctx: { workspaceRoot: string },
 ): Promise<{ ref: string }> {
   const cwd = resolveInWorkspace(ctx.workspaceRoot, args.repo);
   const branch =
     args.branch ?? (await runGit(["rev-parse", "--abbrev-ref", "HEAD"], { cwd })).stdout.trim();
   const gitArgs = ["push", "-u", "origin", branch];
   if (args.force) gitArgs.push("--force-with-lease");
-  await runGit(gitArgs, { cwd, token: ctx.token });
+  await runGit(gitArgs, { cwd });
   return { ref: `origin/${branch}` };
 }
 
@@ -461,14 +459,12 @@ interface OpenPrArgs {
 
 export async function openPrTool(
   args: OpenPrArgs,
-  ctx: { token: string },
   deps: GhFetchDeps = {},
 ): Promise<{ number: number; url: string; head: string; base: string }> {
   let base = args.base;
   if (!base) {
     const repoInfo = await ghJson<GhRepo>(
       `/repos/${encodeURIComponent(args.owner)}/${encodeURIComponent(args.repo)}`,
-      ctx.token,
       {},
       deps,
     );
@@ -476,7 +472,6 @@ export async function openPrTool(
   }
   const pr = await ghJson<GhPullCreated>(
     `/repos/${encodeURIComponent(args.owner)}/${encodeURIComponent(args.repo)}/pulls`,
-    ctx.token,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -654,7 +649,7 @@ const TOOLS = [
   },
 ] as const;
 
-function requireEnv(env: NodeJS.ProcessEnv): { workspaceRoot: string; token: string } {
+function requireWorkspace(env: NodeJS.ProcessEnv): { workspaceRoot: string } {
   const workspaceEnv = env.APPSTRATE_WORKSPACE;
   if (!workspaceEnv) {
     throw new Error(
@@ -662,13 +657,7 @@ function requireEnv(env: NodeJS.ProcessEnv): { workspaceRoot: string; token: str
         'Check that the integration\'s referenced mcp-server declares _meta["dev.appstrate/workspace"] AND that the run was launched on a workspace-capable orchestrator.',
     );
   }
-  const token = env.GITHUB_TOKEN;
-  if (!token) {
-    throw new Error(
-      "GITHUB_TOKEN is not set — this server requires the @appstrate/github-git integration's OAuth2 delivery.env mapping",
-    );
-  }
-  return { workspaceRoot: resolve(workspaceEnv), token };
+  return { workspaceRoot: resolve(workspaceEnv) };
 }
 
 function asString(v: unknown): string | undefined {
@@ -728,7 +717,7 @@ export async function handleRequest(
           const owner = asString(args.owner);
           const repo = asString(args.repo);
           if (!owner || !repo) throw new ProtocolError("owner and repo are required strings");
-          const ctx = requireEnv(env);
+          const ctx = requireWorkspace(env);
           const out = await cloneTool(
             {
               owner,
@@ -744,7 +733,7 @@ export async function handleRequest(
           const repo = asString(args.repo);
           const branch = asString(args.branch);
           if (!repo || !branch) throw new ProtocolError("repo and branch are required strings");
-          const ctx = requireEnv(env);
+          const ctx = requireWorkspace(env);
           const out = await checkoutBranchTool(
             {
               repo,
@@ -759,14 +748,14 @@ export async function handleRequest(
         case "status": {
           const repo = asString(args.repo);
           if (!repo) throw new ProtocolError("repo is a required string");
-          const ctx = requireEnv(env);
+          const ctx = requireWorkspace(env);
           const out = await statusTool({ repo }, { workspaceRoot: ctx.workspaceRoot });
           return okResult(req.id, out);
         }
         case "diff": {
           const repo = asString(args.repo);
           if (!repo) throw new ProtocolError("repo is a required string");
-          const ctx = requireEnv(env);
+          const ctx = requireWorkspace(env);
           const out = await diffTool(
             { repo, ...(asBool(args.staged) ? { staged: true } : {}) },
             { workspaceRoot: ctx.workspaceRoot },
@@ -777,7 +766,7 @@ export async function handleRequest(
           const repo = asString(args.repo);
           const message = asString(args.message);
           if (!repo || !message) throw new ProtocolError("repo and message are required strings");
-          const ctx = requireEnv(env);
+          const ctx = requireWorkspace(env);
           const out = await commitTool(
             {
               repo,
@@ -792,7 +781,7 @@ export async function handleRequest(
         case "push": {
           const repo = asString(args.repo);
           if (!repo) throw new ProtocolError("repo is a required string");
-          const ctx = requireEnv(env);
+          const ctx = requireWorkspace(env);
           const out = await pushTool(
             {
               repo,
@@ -811,8 +800,6 @@ export async function handleRequest(
           if (!owner || !repo || !head || !title) {
             throw new ProtocolError("owner, repo, head, and title are required strings");
           }
-          const token = env.GITHUB_TOKEN;
-          if (!token) throw new Error("GITHUB_TOKEN is not set");
           const out = await openPrTool(
             {
               owner,
@@ -823,7 +810,6 @@ export async function handleRequest(
               ...(asString(args.body) ? { body: asString(args.body)! } : {}),
               ...(asBool(args.draft) ? { draft: true } : {}),
             },
-            { token },
             deps,
           );
           return okResult(req.id, out);
