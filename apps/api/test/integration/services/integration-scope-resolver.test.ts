@@ -61,7 +61,7 @@ function gmailManifest(): Record<string, unknown> {
 
 function agentManifest(
   name: string,
-  selection: { version: string; tools?: string[]; scopes?: string[] },
+  selection: { version: string; tools?: string[] | "*"; scopes?: string[] },
 ): Record<string, unknown> {
   const { version, tools, scopes } = selection;
   // Per AFPS §4.1 the dependency value is a bare semver string; per-integration
@@ -231,6 +231,77 @@ describe("integration-scope-resolver", () => {
         authKey: "primary",
       });
       expect(out.required).toEqual(["read"]);
+    });
+
+    // AFPS §4.4 wildcard — `tools: "*"` bypasses per-tool union and falls
+    // back to the auth's `default_scopes` (§7.4). Verify the kickoff path
+    // reflects that: an agent that opted into every upstream tool should
+    // produce exactly the manifest's declared `default_scopes`, ignoring
+    // the per-tool policy table (which would otherwise contribute a subset).
+    it('wildcard tools = "*" uses the auth\'s default_scopes (not the per-tool union)', async () => {
+      // Re-seed the integration with `allow_undeclared_tools: true` AND a
+      // non-empty `default_scopes` (schema gate). Reuse `INTEGRATION_ID` so
+      // the agent's dep matches.
+      await truncateAll();
+      ctx = await createTestContext({ orgSlug: "scope" });
+      await seedPackage({
+        id: INTEGRATION_ID,
+        orgId: ctx.orgId,
+        type: "integration",
+        draftManifest: localIntegrationManifest({
+          name: INTEGRATION_ID,
+          displayName: "Gmail",
+          auths: {
+            primary: {
+              type: "oauth2",
+              authorizationEndpoint: "https://idp/a",
+              tokenEndpoint: "https://idp/t",
+              authorizedUris: ["https://api/*"],
+              defaultScopes: ["read", "send"],
+              delivery: httpHeaderDelivery({
+                name: "Authorization",
+                prefix: "Bearer ",
+                field: "access_token",
+              }),
+              scopeCatalog: [
+                { value: "read", label: "Read" },
+                { value: "send", label: "Send" },
+                { value: "delete", label: "Delete" },
+              ],
+            },
+          },
+          tools_policy: {
+            // Per-tool union would yield ["read"], but wildcard ignores this.
+            list_messages: { required_scopes: { primary: ["read"] } },
+            delete_message: { required_scopes: { primary: ["delete"] } },
+          },
+          allow_undeclared_tools: true,
+        }) as unknown as Record<string, unknown>,
+      });
+      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, INTEGRATION_ID);
+
+      await seedPackage({
+        id: "@scope/agent-wildcard",
+        orgId: ctx.orgId,
+        type: "agent",
+        draftManifest: agentManifest("@scope/agent-wildcard", {
+          version: "^1.0.0",
+          tools: "*",
+        }),
+      });
+      await installPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@scope/agent-wildcard",
+      );
+
+      const out = await computeRequiredScopes({
+        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        integrationId: INTEGRATION_ID,
+        authKey: "primary",
+      });
+      // Exactly the declared `default_scopes` — NOT `["read", "delete"]`
+      // (which would be the per-tool union if wildcard weren't honored).
+      expect(out.required.sort()).toEqual(["read", "send"]);
     });
 
     it("skips agents whose dep doesn't reference this integration", async () => {

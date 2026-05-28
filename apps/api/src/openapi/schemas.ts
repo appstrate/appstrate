@@ -273,9 +273,12 @@ export const schemas = {
                 id: { type: "string" },
                 version: { type: "string" },
                 tools: {
-                  type: "array",
-                  items: { type: "string" },
-                  description: "Niveau 2 tool allowlist (optional)",
+                  oneOf: [
+                    { type: "array", items: { type: "string" } },
+                    { type: "string", enum: ["*"] },
+                  ],
+                  description:
+                    "Niveau 2 tool allowlist (optional). Either an array of selected tool names or the AFPS §4.4 wildcard literal '*' opting the agent into every upstream tool (requires integration's `allow_undeclared_tools: true`).",
                 },
                 scopes: {
                   type: "array",

@@ -1099,6 +1099,49 @@ describe("scopesContributedByTools / requiredScopesForAgent", () => {
       }).sort(),
     ).toEqual(["extra", "read:org"].sort());
   });
+
+  it('requiredScopesForAgent returns the auth\'s default_scopes when agentTools is "*"', () => {
+    const withDefaults = parse(
+      baseManifest({
+        allow_undeclared_tools: true,
+        auths: {
+          oauth: {
+            type: "oauth2",
+            issuer: "https://accounts.google.com",
+            authorization_endpoint: "https://accounts.google.com/o/oauth2/v2/auth",
+            token_endpoint: "https://oauth2.googleapis.com/token",
+            authorized_uris: ["https://gmail.googleapis.com/**"],
+            default_scopes: ["read", "write"],
+            delivery: {
+              http: {
+                in: "header",
+                name: "Authorization",
+                prefix: "Bearer ",
+                value: "{$credential.access_token}",
+              },
+            },
+          },
+        },
+      }),
+    );
+    expect(
+      requiredScopesForAgent({
+        manifest: withDefaults,
+        authKey: "oauth",
+        agentTools: "*",
+        agentScopes: undefined,
+      }).sort(),
+    ).toEqual(["read", "write"]);
+    // Still unions explicit agentScopes.
+    expect(
+      requiredScopesForAgent({
+        manifest: withDefaults,
+        authKey: "oauth",
+        agentTools: "*",
+        agentScopes: ["extra"],
+      }).sort(),
+    ).toEqual(["extra", "read", "write"]);
+  });
 });
 
 describe("missingScopesForConnection", () => {
@@ -1202,6 +1245,100 @@ describe("requiredAuthKeysForAgent", () => {
     const m = parse(multiAuthManifest({}));
     expect(requiredAuthKeysForAgent(m, undefined, ["repo"])).toEqual(["oauth"]);
   });
+
+  it('wildcard tools="*" returns every wildcard-usable auth (oauth+pat both qualify)', () => {
+    // Build a multi-auth manifest: only the oauth auth declares
+    // `default_scopes`, but the pat (api_key) auth is non-oauth2 — also
+    // wildcard-usable since it carries no scope mechanism. Both surface.
+    const m = parse(
+      baseManifest({
+        allow_undeclared_tools: true,
+        auths: {
+          oauth: {
+            type: "oauth2",
+            issuer: "https://idp/i",
+            authorization_endpoint: "https://idp/a",
+            token_endpoint: "https://idp/t",
+            authorized_uris: ["https://api/**"],
+            default_scopes: ["repo"],
+            scope_catalog: [{ value: "repo", label: "Repo" }],
+            delivery: {
+              http: {
+                in: "header",
+                name: "Authorization",
+                prefix: "Bearer ",
+                value: "{$credential.access_token}",
+              },
+            },
+          },
+          pat: {
+            type: "api_key",
+            credentials: { schema: { type: "object", properties: { token: { type: "string" } } } },
+            authorized_uris: ["https://api/**"],
+            delivery: {
+              http: {
+                in: "header",
+                name: "Authorization",
+                prefix: "token ",
+                value: "{$credential.token}",
+              },
+            },
+          },
+        },
+      }),
+    );
+    expect(requiredAuthKeysForAgent(m, "*", undefined).sort()).toEqual(["oauth", "pat"]);
+  });
+
+  it('wildcard tools="*" excludes an oauth2 auth with empty default_scopes while keeping a non-oauth2 sibling', () => {
+    const m = parse(
+      baseManifest({
+        allow_undeclared_tools: true,
+        auths: {
+          oauth: {
+            type: "oauth2",
+            issuer: "https://idp/i",
+            authorization_endpoint: "https://idp/a",
+            token_endpoint: "https://idp/t",
+            authorized_uris: ["https://api/**"],
+            // No default_scopes — NOT wildcard-usable.
+            scope_catalog: [{ value: "repo", label: "Repo" }],
+            delivery: {
+              http: {
+                in: "header",
+                name: "Authorization",
+                prefix: "Bearer ",
+                value: "{$credential.access_token}",
+              },
+            },
+          },
+          pat: {
+            type: "api_key",
+            credentials: { schema: { type: "object", properties: { token: { type: "string" } } } },
+            authorized_uris: ["https://api/**"],
+            delivery: {
+              http: {
+                in: "header",
+                name: "Authorization",
+                prefix: "token ",
+                value: "{$credential.token}",
+              },
+            },
+          },
+        },
+      }),
+    );
+    expect(requiredAuthKeysForAgent(m, "*", undefined)).toEqual(["pat"]);
+  });
+
+  it('wildcard tools="*" falls back to every declared auth when none are wildcard-usable', () => {
+    // This shape is unreachable in production (the schema rejects
+    // `allow_undeclared_tools: true` without any wildcard-usable auth),
+    // but the runtime helper must still degrade gracefully if it ever sees
+    // it (legacy manifests, fixtures, schema relaxations).
+    const m = parse(baseManifest());
+    expect(requiredAuthKeysForAgent(m, "*", undefined)).toEqual(["oauth"]);
+  });
 });
 
 // ─────────────────────────────────────────────
@@ -1232,6 +1369,15 @@ describe("connectableAuthKeysForAgent", () => {
   it("single-auth integration returns the lone auth", () => {
     expect(connectableAuthKeysForAgent(scopedManifest(), ["read_tool"], undefined)).toEqual([
       "oauth",
+    ]);
+  });
+
+  it('wildcard tools="*" returns every declared auth (picker offers all candidates)', () => {
+    // The wildcard form is an "active selection" — the picker MUST offer every
+    // declared auth as a connection candidate, mirroring the multi-tool case.
+    expect(connectableAuthKeysForAgent(multiAuthManifest_(), "*", undefined).sort()).toEqual([
+      "oauth",
+      "pat",
     ]);
   });
 });
@@ -1291,6 +1437,42 @@ describe("validateAgentIntegrationScopes", () => {
     expect(
       validateAgentIntegrationScopes({ id: "@official/gmail", tools: [API_CALL_TOOL_NAME] }, api),
     ).toEqual([]);
+  });
+
+  it('accepts tools: "*" when the integration declares allow_undeclared_tools: true', () => {
+    const wildcardOk = parse(
+      baseManifest({
+        allow_undeclared_tools: true,
+        auths: {
+          oauth: {
+            type: "oauth2",
+            issuer: "https://accounts.google.com",
+            authorization_endpoint: "https://accounts.google.com/o/oauth2/v2/auth",
+            token_endpoint: "https://oauth2.googleapis.com/token",
+            authorized_uris: ["https://gmail.googleapis.com/**"],
+            default_scopes: ["read"],
+            delivery: {
+              http: {
+                in: "header",
+                name: "Authorization",
+                prefix: "Bearer ",
+                value: "{$credential.access_token}",
+              },
+            },
+          },
+        },
+      }),
+    );
+    expect(
+      validateAgentIntegrationScopes({ id: "@official/gmail", tools: "*" }, wildcardOk),
+    ).toEqual([]);
+  });
+
+  it('rejects tools: "*" when the integration does NOT declare allow_undeclared_tools', () => {
+    const errs = validateAgentIntegrationScopes({ id: "@official/gmail", tools: "*" }, m);
+    expect(errs).toHaveLength(1);
+    expect(errs[0]!.code).toBe("wildcard_not_authorized");
+    expect(errs[0]!.field).toBe("integrations_configuration.@official/gmail.tools");
   });
 });
 

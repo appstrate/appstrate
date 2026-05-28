@@ -16,7 +16,11 @@ import {
   type SchemaWrapper,
 } from "@appstrate/core/form";
 import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
-import { parseManifestIntegrations, writeManifestIntegrations } from "@appstrate/core/dependencies";
+import {
+  isToolsWildcard,
+  parseManifestIntegrations,
+  writeManifestIntegrations,
+} from "@appstrate/core/dependencies";
 
 // ─── Version ranges ─────────────────────────────────────────
 
@@ -219,7 +223,12 @@ export function getResourceEntries(
     return parseManifestIntegrations(m).map((e) => ({
       id: e.id,
       version: e.version,
-      ...(e.tools !== undefined ? { tools: [...e.tools] } : {}),
+      // AFPS §4.4 wildcard — preserve the `"*"` literal verbatim instead of
+      // spreading it as a string into `["*"]` (which would corrupt the
+      // round-trip back to `writeManifestIntegrations`).
+      ...(e.tools !== undefined
+        ? { tools: isToolsWildcard(e.tools) ? e.tools : [...e.tools] }
+        : {}),
       ...(e.scopes !== undefined ? { scopes: [...e.scopes] } : {}),
       ...(e.auth_key !== undefined ? { auth_key: e.auth_key } : {}),
     }));
@@ -244,7 +253,10 @@ export function setResourceEntries(
         .map((e) => ({
           id: e.id,
           version: e.version ?? "*",
-          ...(e.tools !== undefined ? { tools: [...e.tools] } : {}),
+          // AFPS §4.4 wildcard — preserve `"*"` literal; never spread.
+          ...(e.tools !== undefined
+            ? { tools: isToolsWildcard(e.tools) ? e.tools : [...e.tools] }
+            : {}),
           ...(e.scopes !== undefined ? { scopes: [...e.scopes] } : {}),
           ...(e.auth_key !== undefined ? { auth_key: e.auth_key } : {}),
         })),

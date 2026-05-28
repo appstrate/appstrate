@@ -98,6 +98,13 @@ export interface IntegrationDetail {
   auths: IntegrationAuthStatus[];
   /** Effective agent-facing tool catalog — the picker's source of truth. */
   tool_catalog: IntegrationToolCatalogEntry[];
+  /**
+   * AFPS §7.8 opt-in surfaced verbatim from the integration manifest.
+   * When `true`, the agent editor's tool picker MAY offer the
+   * "Include all upstream tools (advanced)" toggle that sets
+   * `integrations_configuration.<id>.tools = "*"`.
+   */
+  allow_undeclared_tools: boolean;
 }
 
 export interface IntegrationOAuthClient {

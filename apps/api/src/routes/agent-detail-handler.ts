@@ -12,7 +12,7 @@ import {
 } from "../services/package-versions.ts";
 import { getLastRun, getRunningRunsForPackage } from "../services/state/runs.ts";
 import { getPackageConfig } from "../services/application-packages.ts";
-import { parseManifestIntegrations } from "@appstrate/core/dependencies";
+import { isToolsWildcard, parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { parseScopedName } from "@appstrate/core/naming";
 import { mergeWithDefaults, asJSONSchemaObject } from "@appstrate/core/form";
 import { getItemId } from "./packages.ts";
@@ -74,7 +74,11 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
       integrations: parseManifestIntegrations(m as Record<string, unknown>).map((e) => ({
         id: e.id,
         version: e.version,
-        ...(e.tools !== undefined ? { tools: [...e.tools] } : {}),
+        // AFPS §4.4 wildcard — preserve the `"*"` literal verbatim instead
+        // of spreading the string into `["*"]`.
+        ...(e.tools !== undefined
+          ? { tools: isToolsWildcard(e.tools) ? e.tools : [...e.tools] }
+          : {}),
         ...(e.scopes !== undefined ? { scopes: [...e.scopes] } : {}),
       })),
     },

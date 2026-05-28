@@ -357,14 +357,18 @@ export interface IntegrationSpawnSpec {
    * either, so a forged call would fail as an unknown tool). An empty
    * array disables the namespace entirely (no tools surfaced).
    *
-   * Always an array (never undefined): the platform builds it from
+   * Usually an array — the platform builds it from
    * `dependencies.integrations[id].tools` and defaults to `[]` when the
-   * agent author didn't pick any tool — least privilege by default,
-   * the integration still spawns (so env-delivery / MITM credentials
-   * remain functional for side-channel use) but exposes nothing to the
-   * agent's LLM.
+   * agent author didn't pick any tool (least privilege).
+   *
+   * AFPS §4.4 wildcard — when the agent set `tools: "*"` (and the
+   * integration declares `allow_undeclared_tools: true`, §7.8) the
+   * platform emits `undefined` here. The sidecar's `McpHost.register`
+   * treats undefined as "no allowlist" and surfaces every tool the
+   * upstream advertises — forward-compatible passthrough for remote MCP
+   * servers that grow their surface between manifest republishes.
    */
-  toolAllowlist: readonly string[];
+  toolAllowlist?: readonly string[];
   /**
    * connect.tool substrate — `runAt: "run-start"` acquisition (P2). When
    * set, the integration's session is NOT pre-resolved at spawn: only the

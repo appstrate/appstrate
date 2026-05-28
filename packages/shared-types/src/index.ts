@@ -174,10 +174,12 @@ export interface ResourceEntry {
   /**
    * Niveau 2 — agent's tool allowlist for an integration dependency.
    * Drives sidecar `tools/list` filtering and OAuth scope inference.
-   * `undefined` keeps legacy "all tools allowed" semantics. Ignored for
-   * non-integration resource types.
+   * `undefined` keeps legacy "all tools allowed" semantics. The AFPS §4.4
+   * wildcard literal `"*"` opts the agent into every upstream tool (only
+   * valid when the integration declares `allow_undeclared_tools: true`,
+   * §7.8). Ignored for non-integration resource types.
    */
-  tools?: string[];
+  tools?: string[] | "*";
   /**
    * Niveau 2 — agent's explicit OAuth scope escape hatch for an
    * integration dependency, unioned with scopes inferred from `tools`.

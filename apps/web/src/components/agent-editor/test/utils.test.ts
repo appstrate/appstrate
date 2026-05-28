@@ -156,6 +156,39 @@ describe("getResourceEntries / setResourceEntries", () => {
         { id: "@vendor/picked", version: "^2.0.0", tools: ["read"] },
       ]);
     });
+
+    // AFPS §4.4 wildcard — the `"*"` literal MUST round-trip verbatim
+    // through getResourceEntries / setResourceEntries; spreading it (which a
+    // naive `[...e.tools]` would do, since strings are iterable) corrupts the
+    // wildcard to `["*"]` and breaks the runtime opt-in.
+    it('getResourceEntries preserves the wildcard literal `"*"` on tools', () => {
+      const m = {
+        dependencies: { integrations: { "@vendor/github-mcp": "^1.0.0" } },
+        integrations_configuration: { "@vendor/github-mcp": { tools: "*" } },
+      };
+      expect(getResourceEntries(m, "integrations")).toEqual([
+        { id: "@vendor/github-mcp", version: "^1.0.0", tools: "*" },
+      ]);
+    });
+
+    it('setResourceEntries writes the wildcard literal verbatim (not as `["*"]`)', () => {
+      const m: Record<string, unknown> = { dependencies: {} };
+      setResourceEntries(m, "integrations", [
+        { id: "@vendor/github-mcp", version: "^1.0.0", tools: "*" },
+      ]);
+      const config = m.integrations_configuration as Record<string, { tools?: unknown }>;
+      expect(config["@vendor/github-mcp"]!.tools).toBe("*");
+    });
+
+    it("round-trips the wildcard tools literal through set → get", () => {
+      const m: Record<string, unknown> = { dependencies: {} };
+      setResourceEntries(m, "integrations", [
+        { id: "@vendor/github-mcp", version: "^1.0.0", tools: "*", auth_key: "oauth" },
+      ]);
+      expect(getResourceEntries(m, "integrations")).toEqual([
+        { id: "@vendor/github-mcp", version: "^1.0.0", tools: "*", auth_key: "oauth" },
+      ]);
+    });
   });
 });
 

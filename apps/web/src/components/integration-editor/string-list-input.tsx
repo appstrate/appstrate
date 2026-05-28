@@ -12,7 +12,14 @@ interface StringListInputProps {
   description?: string;
 }
 
-/** Enter/comma-to-add chip list (authorized URIs, scopes, URL patterns, …). */
+/**
+ * Enter/comma-to-add chip list (authorized URIs, scopes, URL patterns, …).
+ *
+ * Pending typed text that the user hasn't yet confirmed with Enter/comma is
+ * auto-committed on blur (focus loss) — leaving the section, switching tabs,
+ * or clicking outside the field saves the in-progress chip rather than
+ * silently discarding it.
+ */
 export function StringListInput({
   label,
   values,
@@ -20,13 +27,16 @@ export function StringListInput({
   placeholder,
   description,
 }: StringListInputProps) {
+  const commitFromInput = (input: HTMLInputElement) => {
+    const v = input.value.trim().replace(/,$/g, "");
+    if (v && !values.includes(v)) onChange([...values, v]);
+    input.value = "";
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" || e.key === ",") {
       e.preventDefault();
-      const input = e.currentTarget;
-      const v = input.value.trim().replace(/,$/g, "");
-      if (v && !values.includes(v)) onChange([...values, v]);
-      input.value = "";
+      commitFromInput(e.currentTarget);
     }
   };
 
@@ -54,7 +64,12 @@ export function StringListInput({
           ))}
         </div>
       )}
-      <Input type="text" placeholder={placeholder} onKeyDown={handleKeyDown} />
+      <Input
+        type="text"
+        placeholder={placeholder}
+        onKeyDown={handleKeyDown}
+        onBlur={(e) => commitFromInput(e.currentTarget)}
+      />
       {description && <p className="text-muted-foreground text-xs">{description}</p>}
     </div>
   );

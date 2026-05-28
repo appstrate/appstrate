@@ -101,16 +101,22 @@ export async function computeRequiredScopes(
     const entry = integEntries.find((e) => e.id === input.integrationId);
     if (!entry) continue;
 
-    const viaTools = scopesContributedByTools({
-      manifest: integration.manifest,
-      authKey: input.authKey,
-      // entry.tools = undefined → "all tools allowed" default (no
-      // integrations_configuration entry, or one without `tools`).
-      // entry.tools = [] (explicit empty array) is treated as "no tools
-      // used" — agents that configured zero tools also want zero
-      // inferred scopes.
-      agentTools: entry.tools,
-    });
+    // AFPS §4.4 wildcard — when the agent set `tools: "*"`, scopes fall
+    // back to the auth's `default_scopes` (§7.4) instead of the per-tool
+    // union. Otherwise:
+    //   entry.tools = undefined → no integrations_configuration entry (or
+    //                             one without `tools`) → "no tools used".
+    //   entry.tools = [] (explicit empty array) → "no tools used" — agents
+    //                             that configured zero tools also want zero
+    //                             inferred scopes.
+    const viaTools =
+      entry.tools === "*"
+        ? (integration.manifest.auths?.[input.authKey]?.default_scopes ?? [])
+        : scopesContributedByTools({
+            manifest: integration.manifest,
+            authKey: input.authKey,
+            agentTools: entry.tools,
+          });
     const viaExplicit = entry.scopes ? [...entry.scopes] : [];
 
     for (const s of viaTools) required.add(s);

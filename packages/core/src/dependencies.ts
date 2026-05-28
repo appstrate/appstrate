@@ -23,14 +23,28 @@ export interface Dependencies {
 }
 
 /**
+ * Wildcard literal for {@link IntegrationConfiguration.tools} / {@link
+ * ManifestIntegrationEntry.tools} (AFPS §4.4). When set, the agent forgoes
+ * per-tool selection and accepts every tool the upstream MCP server
+ * advertises at runtime. Requires the referenced integration to declare
+ * `allow_undeclared_tools: true` (validated downstream).
+ */
+export const TOOLS_WILDCARD = "*" as const;
+export type ToolsWildcard = typeof TOOLS_WILDCARD;
+
+/**
  * Per-integration agent configuration (AFPS §4.4), keyed by integration
  * dependency id. Each key MUST correspond to an entry in
  * `dependencies.integrations`. `tools` drives the runtime allowlist + OAuth
  * scope inference; `scopes` is the explicit escape hatch; `auth_key`
  * disambiguates a multi-auth integration.
+ *
+ * `tools` accepts the wildcard literal `"*"` to opt the agent into all
+ * upstream tools (zero-trust preserved: the integration must opt in via
+ * `allow_undeclared_tools: true`).
  */
 export interface IntegrationConfiguration {
-  tools?: string[];
+  tools?: string[] | ToolsWildcard;
   scopes?: string[];
   auth_key?: string;
 }
@@ -169,7 +183,13 @@ export function extractDependencies(manifest: Record<string, unknown>): DepEntry
 export interface ManifestIntegrationEntry {
   id: string;
   version: string;
-  tools?: string[];
+  /**
+   * Per-tool selection (§4.4) — either an array of tool names the agent
+   * consumes, or the wildcard literal {@link TOOLS_WILDCARD} (`"*"`) to opt
+   * the agent into all upstream tools. The wildcard form requires the
+   * integration to declare `allow_undeclared_tools: true`.
+   */
+  tools?: string[] | ToolsWildcard;
   scopes?: string[];
   /**
    * AFPS §4.4 — selects which `auths.<key>` entry on the depended-on
@@ -178,6 +198,17 @@ export interface ManifestIntegrationEntry {
    * cascade (any accessible connection on the integration).
    */
   auth_key?: string;
+}
+
+/** Type guard — `tools` field is the AFPS wildcard literal. */
+export function isToolsWildcard(value: unknown): value is ToolsWildcard {
+  return value === TOOLS_WILDCARD;
+}
+
+function toToolsField(value: unknown): string[] | ToolsWildcard | undefined {
+  if (isToolsWildcard(value)) return TOOLS_WILDCARD;
+  if (!Array.isArray(value)) return undefined;
+  return value.filter((s): s is string => typeof s === "string");
 }
 
 function toStringArray(value: unknown): string[] | undefined {
@@ -220,7 +251,7 @@ export function parseManifestIntegrations(
     out.push({
       id,
       version: rawVersion || "*",
-      tools: toStringArray(config?.tools),
+      tools: toToolsField(config?.tools),
       scopes: toStringArray(config?.scopes),
       auth_key: pickString(config?.auth_key),
     });
@@ -254,7 +285,9 @@ export function writeManifestIntegrations(
 
     if (hasTools || hasScopes || hasAuthKey) {
       configMap[e.id] = {
-        ...(hasTools ? { tools: [...e.tools!] } : {}),
+        ...(hasTools
+          ? { tools: isToolsWildcard(e.tools) ? TOOLS_WILDCARD : [...(e.tools as string[])] }
+          : {}),
         ...(hasScopes ? { scopes: [...e.scopes!] } : {}),
         ...(hasAuthKey ? { auth_key: e.auth_key! } : {}),
       };

@@ -480,6 +480,42 @@ describe("writeManifestIntegrations", () => {
       integrations: { "@acme/github-mcp": "^1.0.0" },
     });
   });
+
+  // ───────────────────────────────────────────────────────────────────
+  // AFPS §4.4 wildcard tools — `"*"` opt-in passthrough
+  // ───────────────────────────────────────────────────────────────────
+
+  it('parseManifestIntegrations preserves the wildcard literal `"*"` on `tools`', () => {
+    const out = parseManifestIntegrations({
+      dependencies: { integrations: { "@acme/github-mcp": "^1.0.0" } },
+      integrations_configuration: {
+        "@acme/github-mcp": { tools: "*" },
+      },
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0]!.tools).toBe("*");
+  });
+
+  it('parseManifestIntegrations rejects non-`"*"` non-array strings (drops to undefined)', () => {
+    const out = parseManifestIntegrations({
+      dependencies: { integrations: { "@acme/github-mcp": "^1.0.0" } },
+      integrations_configuration: {
+        "@acme/github-mcp": { tools: "all" },
+      },
+    });
+    expect(out[0]!.tools).toBeUndefined();
+  });
+
+  it('writeManifestIntegrations round-trips the wildcard `"*"` literal', () => {
+    const m: Record<string, unknown> = {};
+    writeManifestIntegrations(m, [
+      { id: "@acme/github-mcp", version: "^1.0.0", tools: "*", auth_key: "oauth" },
+    ]);
+    const config = m.integrations_configuration as Record<string, { tools?: unknown }>;
+    expect(config["@acme/github-mcp"]!.tools).toBe("*");
+    const parsed = parseManifestIntegrations(m);
+    expect(parsed[0]!.tools).toBe("*");
+  });
 });
 
 describe("detectCycle", () => {

@@ -64,18 +64,21 @@ export interface IntegrationRequirement {
   integrationId: string;
   manifest: IntegrationManifest;
   /**
-   * True when the agent's `tools[]` selection is non-empty — i.e. the
-   * integration is actually used at run time. Empty-selection
-   * integrations are declared-but-inert and skipped by the resolver.
+   * True when the agent's `tools[]` selection is non-empty OR the wildcard
+   * literal `"*"` — i.e. the integration is actually used at run time.
+   * Empty-selection integrations are declared-but-inert and skipped by the
+   * resolver.
    */
   hasSelectedTools: boolean;
   /**
    * The agent's selected tool names on this integration. Drives OAuth
    * scope requirement inference (`requiredScopesForAgent`) so the
    * resolver can flag a resolved connection that lacks the scopes the
-   * selected tools need. Empty when no tools selected.
+   * selected tools need. Empty when no tools selected. The AFPS §4.4
+   * wildcard literal `"*"` means "all upstream tools" — scope inference
+   * then falls back to the auth's `default_scopes` (§7.4).
    */
-  agentTools: readonly string[];
+  agentTools: readonly string[] | "*";
   /**
    * The agent's explicitly-selected oauth scopes on this integration.
    * apiCall integrations expose no MCP tools, so this is
@@ -239,7 +242,7 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
 interface ResolveOneArgs {
   integrationId: string;
   manifest: IntegrationManifest;
-  agentTools: readonly string[];
+  agentTools: readonly string[] | "*";
   agentScopes: readonly string[];
   adminPinId: string | null;
   orgDefault: { connectionId: string; enforce: boolean } | null;
@@ -615,11 +618,16 @@ async function buildRequirement(
   if (!res.ok) return null; // Missing/invalid manifests are surfaced separately by
   //                          the run-readiness check (agent-readiness.ts); the
   //                          resolver ignores them.
+  // AFPS §4.4 wildcard — `tools: "*"` counts as a non-empty selection (the
+  // agent opted into every upstream tool); thread the literal through so
+  // `requiredScopesForAgent` can branch to the auth's `default_scopes`.
+  const wildcard = entry.tools === "*";
+  const hasArrayTools = Array.isArray(entry.tools) && entry.tools.length > 0;
   return {
     integrationId: entry.id,
     manifest: res.manifest,
-    hasSelectedTools: !!entry.tools && entry.tools.length > 0,
-    agentTools: entry.tools ?? [],
+    hasSelectedTools: wildcard || hasArrayTools,
+    agentTools: wildcard ? "*" : (entry.tools ?? []),
     agentScopes: entry.scopes ?? [],
     ...(entry.auth_key !== undefined ? { requiredAuthKey: entry.auth_key } : {}),
   };

@@ -1032,6 +1032,20 @@ function MetadataBlock({ manifest }: { manifest: IntegrationManifestView }) {
       ),
     ],
     [t("integration.field.serverType"), <span className="font-mono">{sourceKind}</span>],
+    ...(manifest.allow_undeclared_tools === true
+      ? ([
+          [
+            t("integration.field.allowUndeclaredTools"),
+            <Badge
+              variant="outline"
+              className="text-[0.65rem]"
+              data-testid="integration-meta-wildcard-badge"
+            >
+              {t("integration.field.allowUndeclaredToolsBadge")}
+            </Badge>,
+          ],
+        ] as Array<[string, React.ReactNode]>)
+      : []),
   ];
   return (
     <dl className="grid grid-cols-1 gap-y-2 text-sm sm:grid-cols-[max-content_1fr] sm:gap-x-4">
@@ -1166,8 +1180,20 @@ export function IntegrationDetailPage() {
             {detail.tool_catalog && detail.tool_catalog.length > 0 && (
               <Badge variant="outline" className="ml-1.5 text-[0.65rem]">
                 {detail.tool_catalog.length}
+                {detail.allow_undeclared_tools ? "+" : ""}
               </Badge>
             )}
+            {detail.tool_catalog &&
+              detail.tool_catalog.length === 0 &&
+              detail.allow_undeclared_tools && (
+                <Badge
+                  variant="outline"
+                  className="ml-1.5 text-[0.65rem]"
+                  data-testid="tab-tools-wildcard-badge"
+                >
+                  *
+                </Badge>
+              )}
           </TabsTrigger>
           <TabsTrigger value="about" data-testid="tab-about">
             {t("integration.tabs.about")}
@@ -1243,6 +1269,17 @@ export function IntegrationDetailPage() {
         <TabsContent value="tools" className="mt-4">
           <div className="max-w-2xl space-y-3">
             <p className="text-muted-foreground text-xs">{t("integration.tools.intro")}</p>
+            {detail.allow_undeclared_tools && (
+              <div
+                className="rounded-md border-l-2 border-amber-500/30 bg-amber-500/5 p-3 text-xs"
+                data-testid="integration-tools-wildcard-notice"
+              >
+                <p className="font-medium">{t("integration.tools.wildcardNotice.title")}</p>
+                <p className="text-muted-foreground mt-1">
+                  {t("integration.tools.wildcardNotice.body")}
+                </p>
+              </div>
+            )}
             {(detail.tool_catalog ?? []).length === 0 ? (
               <p className="text-muted-foreground text-sm">{t("integration.tools.none")}</p>
             ) : (

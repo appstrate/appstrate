@@ -620,7 +620,11 @@ export async function resolveAgentIntegrationPick(args: {
   if (!agent) throw notFound(`Agent '${agentPackageId}' not found in this organization`);
   const agentManifest = agent.manifest as unknown as Record<string, unknown>;
   const agentEntry = parseManifestIntegrations(agentManifest).find((e) => e.id === integrationId);
-  const agentTools = agentEntry?.tools ?? [];
+  // AFPS §4.4 — preserve the wildcard literal `"*"` so `missingScopesForConnection`
+  // can route through the default-scopes branch of `requiredScopesForAgent`.
+  // Coercing `"*"` to `[]` here would silently bypass the scope diff and let
+  // a connection with zero default scopes appear "fully connected".
+  const agentTools: readonly string[] | "*" = agentEntry?.tools ?? [];
   const agentScopes = agentEntry?.scopes ?? [];
 
   const manifestRes = await fetchIntegrationManifest(integrationId);

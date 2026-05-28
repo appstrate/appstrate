@@ -201,7 +201,7 @@ const toolCatalogEntrySchema = {
 
 const integrationDetailSchema = {
   type: "object",
-  required: ["manifest", "auths", "tool_catalog"],
+  required: ["manifest", "auths", "tool_catalog", "allow_undeclared_tools"],
   properties: {
     manifest: { type: "object", additionalProperties: true },
     auths: { type: "array", items: authStatusSchema },
@@ -210,6 +210,10 @@ const integrationDetailSchema = {
     // `hidden_tools` and auto-hidden connect.tool primitives. Falls back
     // to `manifest.tools_policy` keys when the mcp-server is absent.
     tool_catalog: { type: "array", items: toolCatalogEntrySchema },
+    // AFPS §7.8 — opt-in surfaced verbatim from the manifest. When `true`,
+    // the agent editor MAY offer the "all upstream tools" toggle that sets
+    // `integrations_configuration.<id>.tools = "*"`. Default `false`.
+    allow_undeclared_tools: { type: "boolean" },
   },
 } as const;
 

@@ -28,7 +28,7 @@
  * circuit at the type check.
  */
 
-import { parseManifestIntegrations } from "@appstrate/core/dependencies";
+import { isToolsWildcard, parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { validateAgentIntegrationScopes } from "@appstrate/core/integration";
 import type { ValidationFieldError } from "@appstrate/core/api-errors";
 
@@ -63,9 +63,16 @@ export async function validateAgentIntegrationSelections(
   if (integrations.length === 0) return [];
 
   // Only configured entries carry tools/scopes — integrations with no
-  // configuration entry have nothing to validate.
+  // configuration entry have nothing to validate. The AFPS §4.4 wildcard
+  // literal `"*"` counts as a configured selection (the agent opted into
+  // every upstream tool) and must reach `validateAgentIntegrationScopes`
+  // so the `wildcard_not_authorized` rule fires when the integration
+  // didn't opt in via `allow_undeclared_tools: true`.
   const configuredEntries = integrations.filter(
-    (e) => (e.tools && e.tools.length > 0) || (e.scopes && e.scopes.length > 0),
+    (e) =>
+      isToolsWildcard(e.tools) ||
+      (Array.isArray(e.tools) && e.tools.length > 0) ||
+      (e.scopes && e.scopes.length > 0),
   );
   if (configuredEntries.length === 0) return [];
 
@@ -112,7 +119,9 @@ export async function validateAgentIntegrationSelections(
         title:
           issue.code === "unknown_tool"
             ? "Unknown integration tool"
-            : "Scope outside integration catalog",
+            : issue.code === "wildcard_not_authorized"
+              ? "Wildcard tools not permitted by integration"
+              : "Scope outside integration catalog",
         message: issue.message,
       });
     }

@@ -4,11 +4,19 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Trash2, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SectionCard } from "../section-card";
 import { StringListInput } from "./string-list-input";
-import { getToolsPolicy, setToolsPolicy, getAuths, type ToolPolicyState } from "./utils";
+import {
+  getAllowUndeclaredTools,
+  getAuths,
+  getToolsPolicy,
+  setAllowUndeclaredTools,
+  setToolsPolicy,
+  type ToolPolicyState,
+} from "./utils";
 
 interface ToolsPolicySectionProps {
   manifest: Record<string, unknown>;
@@ -23,11 +31,24 @@ export function ToolsPolicySection({ manifest, onChange }: ToolsPolicySectionPro
   // Initialised once per mount; the tab unmounts on switch, so an external
   // JSON-tab edit is picked up on remount.
   const [rows, setRows] = useState<ToolPolicyState[]>(() => getToolsPolicy(manifest));
-  const authKeys = getAuths(manifest).map((a) => a.key);
+  const auths = getAuths(manifest);
+  const authKeys = auths.map((a) => a.key);
+  const allowUndeclared = getAllowUndeclaredTools(manifest);
+  // AFPS §7.8 — the wildcard opt-in requires ≥1 "wildcard-usable" auth:
+  // either a non-oauth2 auth (api_key/basic/custom/mtls — no scope mechanism,
+  // the wholesale grant covers any tool) or an oauth2 auth with non-empty
+  // `default_scopes`. The schema enforces this at save; surface the gate in
+  // the UI so the toggle is visibly disabled rather than rejected later.
+  const hasWildcardUsableAuth = auths.some(
+    (a) => a.type !== "oauth2" || a.defaultScopes.length > 0,
+  );
 
   const commit = (next: ToolPolicyState[]) => {
     setRows(next);
     onChange(setToolsPolicy(manifest, next));
+  };
+  const onAllowUndeclaredChange = (next: boolean) => {
+    onChange(setAllowUndeclaredTools(manifest, next));
   };
   const update = (idx: number, patch: Partial<ToolPolicyState>) =>
     commit(rows.map((p, i) => (i === idx ? { ...p, ...patch } : p)));
@@ -48,6 +69,37 @@ export function ToolsPolicySection({ manifest, onChange }: ToolsPolicySectionPro
       }
     >
       <p className="text-muted-foreground text-sm">{t("integrationEditor.toolsPolicy.help")}</p>
+
+      <div className="border-border bg-muted/30 rounded-md border border-dashed p-3">
+        <label
+          className={`flex items-start gap-2 ${
+            hasWildcardUsableAuth || allowUndeclared
+              ? "cursor-pointer"
+              : "cursor-not-allowed opacity-60"
+          }`}
+          data-testid="integration-editor-allow-undeclared-tools"
+        >
+          <Checkbox
+            checked={allowUndeclared}
+            disabled={!hasWildcardUsableAuth && !allowUndeclared}
+            onCheckedChange={(v) => onAllowUndeclaredChange(v === true)}
+            className="mt-0.5"
+          />
+          <span className="flex min-w-0 flex-col gap-0.5">
+            <span className="text-sm font-medium">
+              {t("integrationEditor.allowUndeclaredTools.label")}
+            </span>
+            <span className="text-muted-foreground text-xs">
+              {t("integrationEditor.allowUndeclaredTools.description")}
+            </span>
+            {!hasWildcardUsableAuth && (
+              <span className="text-destructive text-xs">
+                {t("integrationEditor.allowUndeclaredTools.requiresWildcardUsableAuth")}
+              </span>
+            )}
+          </span>
+        </label>
+      </div>
 
       {rows.map((policy, idx) => (
         <div key={idx} className="border-border space-y-3 rounded-md border p-3">

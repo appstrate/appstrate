@@ -2,12 +2,14 @@
 
 import { describe, it, expect } from "bun:test";
 import {
-  getSource,
-  setSource,
+  getAllowUndeclaredTools,
   getAuths,
-  setAuths,
-  emptyAuth,
+  getSource,
   getToolsPolicy,
+  emptyAuth,
+  setAllowUndeclaredTools,
+  setAuths,
+  setSource,
   setToolsPolicy,
 } from "../utils";
 
@@ -184,5 +186,27 @@ describe("integration-editor tools_policy", () => {
   it("removes tools_policy entirely when the list is empty", () => {
     const m = setToolsPolicy({ tools_policy: { x: {} } }, []);
     expect(m.tools_policy).toBeUndefined();
+  });
+});
+
+describe("integration-editor allow_undeclared_tools (§7.8)", () => {
+  it("getAllowUndeclaredTools returns false when absent or false", () => {
+    expect(getAllowUndeclaredTools({})).toBe(false);
+    expect(getAllowUndeclaredTools({ allow_undeclared_tools: false })).toBe(false);
+  });
+
+  it("getAllowUndeclaredTools returns true only for the literal `true` value", () => {
+    expect(getAllowUndeclaredTools({ allow_undeclared_tools: true })).toBe(true);
+    // Defensive: a truthy non-`true` value MUST NOT flip the flag on.
+    expect(getAllowUndeclaredTools({ allow_undeclared_tools: "true" })).toBe(false);
+    expect(getAllowUndeclaredTools({ allow_undeclared_tools: 1 })).toBe(false);
+  });
+
+  it("setAllowUndeclaredTools writes the flag on truthy and strips it on false", () => {
+    const enabled = setAllowUndeclaredTools({ name: "@x/y" }, true);
+    expect(enabled.allow_undeclared_tools).toBe(true);
+
+    const disabled = setAllowUndeclaredTools(enabled, false);
+    expect(disabled).not.toHaveProperty("allow_undeclared_tools");
   });
 });

@@ -241,4 +241,90 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
     expect(specs.length).toBe(1);
     expect(specs[0]!.connectLogin!.reauthOn).toEqual([401, 419]);
   });
+
+  // AFPS §4.4 wildcard + §7.8 — security regression test. When the agent
+  // opts into every upstream tool via `tools: "*"`, the McpHost allowlist
+  // is disabled (`toolAllowlist === undefined`). The connect-login tool
+  // would then reach the agent's LLM unless the resolver also unions its
+  // name into `hiddenTools`. This test pins that behavior.
+  it('wildcard tools = "*" still hides the connect-login tool via hiddenTools', async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "orga" });
+    // Wildcard requires `allow_undeclared_tools: true` AND at least one auth
+    // with non-empty `default_scopes` (enforced by core schema superRefine).
+    const manifest = localIntegrationManifest({
+      name: INTEG,
+      serverName: MCP_SERVER,
+      version: "0.1.0",
+      displayName: "OrgaBusiness",
+      auths: {
+        session: {
+          type: "custom",
+          authorizedUris: ["https://saas.example.com/**"],
+          credentialFields: ["identifiant", "mot_de_passe"],
+          delivery: httpHeaderDelivery({ name: "Cookie", field: "JSESSIONID" }),
+          // `default_scopes` is informational for a custom auth (no consent
+          // step) but satisfies the schema gate for `allow_undeclared_tools`.
+          defaultScopes: ["session:read"],
+          connect: connectToolBlock({
+            tool: "login",
+            runAt: "run-start",
+            persistLoginSecret: true,
+            produces: ["JSESSIONID"],
+          }),
+        },
+      },
+      tools_policy: { fetch_invoices: {}, login: {} },
+      allow_undeclared_tools: true,
+    });
+    await seedPackage({
+      id: INTEG,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: manifest,
+    });
+    await seedPackage({
+      id: MCP_SERVER,
+      orgId: ctx.orgId,
+      type: "mcp-server",
+      source: "local",
+      draftManifest: mcpServerManifest({ name: MCP_SERVER, version: "0.1.0", serverType: "node" }),
+    });
+    await seedInstalledPackage(ctx.defaultAppId, INTEG);
+
+    await new LoginSecretStrategy().complete(connectCtx(), {
+      kind: "fields",
+      credentials: { identifiant: "user1", mot_de_passe: "s3cr3t" },
+    });
+
+    const wildcardAgent: Record<string, unknown> = {
+      schema_version: "0.2",
+      type: "agent",
+      name: "@orga/agent",
+      version: "0.1.0",
+      display_name: "Orga Agent",
+      dependencies: { integrations: { [INTEG]: "^0.1.0" } },
+      integrations_configuration: { [INTEG]: { tools: "*" } },
+    };
+
+    const specs = await resolveIntegrationSpawns({
+      applicationId: ctx.defaultAppId,
+      actor: { type: "user", id: ctx.user.id },
+      agentManifest: wildcardAgent,
+    });
+
+    expect(specs.length).toBe(1);
+    const spec = specs[0]!;
+    // Wildcard surfaces every upstream tool — no allowlist filter on the spec.
+    expect(spec.toolAllowlist).toBeUndefined();
+    // …but the connect-login tool MUST still be filtered server-side via
+    // `hiddenTools`, otherwise the LLM could call it.
+    expect(spec.hiddenTools).toBeDefined();
+    expect(spec.hiddenTools).toContain("login");
+    // ConnectLogin metadata is still populated (the sidecar uses it to mint
+    // the session at boot before the agent connects).
+    expect(spec.connectLogin).toBeDefined();
+    expect(spec.connectLogin!.toolName).toBe("login");
+  });
 });

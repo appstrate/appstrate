@@ -291,3 +291,26 @@ export function setToolsPolicy(manifest: Rec, list: ToolPolicyState[]): Rec {
   next.tools_policy = tp;
   return next;
 }
+
+/**
+ * AFPS §7.8 — read the top-level `allow_undeclared_tools` opt-in flag.
+ * Returns `false` when absent or malformed.
+ */
+export function getAllowUndeclaredTools(manifest: Rec): boolean {
+  return manifest.allow_undeclared_tools === true;
+}
+
+/**
+ * AFPS §7.8 — write the top-level `allow_undeclared_tools` flag. Omits the
+ * field when `false` so the manifest stays at the default (the AFPS default
+ * is `false`; an explicit `false` would be noise on the wire).
+ */
+export function setAllowUndeclaredTools(manifest: Rec, value: boolean): Rec {
+  const next = { ...manifest };
+  if (value) {
+    next.allow_undeclared_tools = true;
+  } else {
+    delete next.allow_undeclared_tools;
+  }
+  return next;
+}

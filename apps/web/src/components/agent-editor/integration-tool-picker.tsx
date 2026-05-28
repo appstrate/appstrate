@@ -61,6 +61,11 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail, entry.tools]);
 
+  // AFPS §4.4 wildcard — the agent set `tools: "*"`, bypassing the per-tool
+  // picker. Tracked separately because `entry.tools === "*"` and the array
+  // form share the same field but the UI branches.
+  const wildcardSelected = entry.tools === "*";
+
   if (isLoading) {
     return (
       <div className="mt-2 flex items-center justify-center py-2">
@@ -129,8 +134,11 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
   // Least-privilege: `entry.tools === undefined` and `entry.tools === []`
   // both mean "0 tools picked, integration inert at runtime". The first
   // toggle promotes to `[]`-then-add so subsequent renders see the
-  // explicit form.
-  const selectedTools = new Set(entry.tools ?? []);
+  // explicit form. The wildcard form `"*"` short-circuits the picker
+  // (see `wildcardSelected` above) — fall back to an empty set so the
+  // checkbox lookups below stay safe.
+  const arrayTools = Array.isArray(entry.tools) ? entry.tools : [];
+  const selectedTools = new Set(arrayTools);
   const selectedScopes = new Set(entry.scopes ?? []);
   const allSelected =
     selectedTools.size === declaredToolNames.length && declaredToolNames.length > 0;
@@ -143,14 +151,21 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
   // Policy lookup goes through the resolved catalog: a tool without
   // policy contributes nothing (expected — most discoverable tools have
   // no scope requirements).
+  //
+  // Wildcard path (`tools: "*"`) skips per-tool inference entirely — the
+  // server-side resolver uses the auth's `default_scopes` instead, which
+  // is shown to the user via a dedicated notice rather than the attribution
+  // map.
   const catalogByName = new Map(fullCatalog.map((t) => [t.name, t]));
   const inferredScopes = new Map<string, string[]>();
-  for (const toolName of entry.tools ?? []) {
-    const meta = catalogByName.get(toolName);
-    for (const scope of Object.values(meta?.policy?.required_scopes ?? {}).flat()) {
-      const existing = inferredScopes.get(scope) ?? [];
-      if (!existing.includes(toolName)) existing.push(toolName);
-      inferredScopes.set(scope, existing);
+  if (!wildcardSelected) {
+    for (const toolName of arrayTools) {
+      const meta = catalogByName.get(toolName);
+      for (const scope of Object.values(meta?.policy?.required_scopes ?? {}).flat()) {
+        const existing = inferredScopes.get(scope) ?? [];
+        if (!existing.includes(toolName)) existing.push(toolName);
+        inferredScopes.set(scope, existing);
+      }
     }
   }
   const hasInferredScopes = inferredScopes.size > 0;
@@ -176,9 +191,21 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
   const pinnedOnlyScopes = [...selectedScopes].filter((s) => !inferredScopes.has(s));
 
   const toggleTool = (name: string) => {
-    const current = entry.tools ?? [];
+    // Defensive: the per-tool checkboxes are hidden when `wildcardSelected`,
+    // but a stray click during render race shouldn't silently corrupt the
+    // wildcard with an array. Treat `"*"` as no-op here.
+    if (wildcardSelected) return;
+    const current = arrayTools;
     const next = current.includes(name) ? current.filter((t) => t !== name) : [...current, name];
     onChange({ ...entry, tools: next });
+  };
+
+  // Wildcard toggle (AFPS §4.4) — gated by `detail.allow_undeclared_tools`.
+  // ON: replace any array selection with `"*"`. OFF: drop back to an empty
+  // array, mirroring "Select none" (the user re-picks tools individually).
+  const wildcardEnabled = detail.allow_undeclared_tools === true;
+  const onWildcardChange = (next: boolean) => {
+    onChange({ ...entry, tools: next ? "*" : [] });
   };
 
   const toggleScope = (value: string) => {
@@ -199,7 +226,48 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
   // without grepping the codebase — typical root cause is a DB
   // manifest that predates the niveau 2 fields and needs a server
   // reboot to drift-heal.
+  //
+  // AFPS §4.4 wildcard exception — when the integration declares
+  // `allow_undeclared_tools: true` but no declared catalog (the canonical
+  // "trust the upstream MCP server" case), the wildcard toggle is still
+  // meaningful and MUST surface; the early-return below would otherwise
+  // hide it. We render the toggle in a minimal frame instead of the
+  // noCatalog notice.
   if (!hasToolCatalog && !hasScopeCatalog && !isApiCall && !hasMultipleAuths) {
+    if (wildcardEnabled) {
+      return (
+        <div
+          className="bg-muted/30 mt-2 space-y-3 rounded-md border p-3"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="bg-background rounded-md border-l-2 border-amber-500/30 p-2">
+            <label
+              className="flex cursor-pointer items-start gap-2"
+              data-testid={`integ-wildcard-${packageId}`}
+            >
+              <Checkbox
+                checked={wildcardSelected}
+                onCheckedChange={(v) => onWildcardChange(v === true)}
+                className="mt-0.5"
+              />
+              <span className="flex min-w-0 flex-col">
+                <span className="text-xs font-semibold">
+                  {t("agentEditor.integrations.wildcard.label")}
+                </span>
+                <span className="text-muted-foreground text-[11px]">
+                  {t("agentEditor.integrations.wildcard.description")}
+                </span>
+              </span>
+            </label>
+            {wildcardSelected && (
+              <p className="text-muted-foreground mt-2 text-[11px]">
+                {t("agentEditor.integrations.wildcard.scopesNotice")}
+              </p>
+            )}
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="bg-muted/30 text-muted-foreground mt-2 rounded-md border p-3 text-[11px]">
         {t("agentEditor.integrations.tools.noCatalog")}
@@ -234,7 +302,35 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
           </label>
         </div>
       )}
-      {isApiCall &&
+      {wildcardEnabled && (
+        <div className="bg-background rounded-md border-l-2 border-amber-500/30 p-2">
+          <label
+            className="flex cursor-pointer items-start gap-2"
+            data-testid={`integ-wildcard-${packageId}`}
+          >
+            <Checkbox
+              checked={wildcardSelected}
+              onCheckedChange={(v) => onWildcardChange(v === true)}
+              className="mt-0.5"
+            />
+            <span className="flex min-w-0 flex-col">
+              <span className="text-xs font-semibold">
+                {t("agentEditor.integrations.wildcard.label")}
+              </span>
+              <span className="text-muted-foreground text-[11px]">
+                {t("agentEditor.integrations.wildcard.description")}
+              </span>
+            </span>
+          </label>
+          {wildcardSelected && (
+            <p className="text-muted-foreground mt-2 text-[11px]">
+              {t("agentEditor.integrations.wildcard.scopesNotice")}
+            </p>
+          )}
+        </div>
+      )}
+      {!wildcardSelected &&
+        isApiCall &&
         apiCallEntries.map((tool) => (
           <label key={tool.name} className="flex cursor-pointer items-start gap-2">
             <Checkbox
@@ -257,7 +353,7 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
             </span>
           </label>
         ))}
-      {hasToolCatalog && (
+      {!wildcardSelected && hasToolCatalog && (
         <div>
           <div className="mb-2 flex items-center justify-between gap-2">
             <span className="text-xs font-semibold">

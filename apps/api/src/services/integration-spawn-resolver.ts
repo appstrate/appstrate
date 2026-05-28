@@ -39,7 +39,7 @@ import type {
   ResolvedConnectionMap,
 } from "@appstrate/core/integration";
 // ResolvedConnectionMap is consumed via input prop (`resolvedConnections`) below.
-import { parseManifestIntegrations } from "@appstrate/core/dependencies";
+import { isToolsWildcard, parseManifestIntegrations } from "@appstrate/core/dependencies";
 import {
   getMcpServerRuntime,
   getMcpServerMcpConfigEnv,
@@ -126,7 +126,7 @@ async function resolveOne(
   integrationId: string,
   applicationId: string,
   actor: Actor,
-  agentToolSelection: readonly string[] | undefined,
+  agentToolSelection: readonly string[] | "*" | undefined,
   resolvedConnection: ResolvedConnection | null,
   requiredAuthKey: string | undefined,
 ): Promise<IntegrationSpawnSpec | null> {
@@ -178,9 +178,13 @@ async function resolveOne(
   // auth yields one tool; we keep only the ones the agent actually selected
   // (least-privilege: the catch-all tool is never auto-granted). `authorized_uris`
   // come from each api_call auth.
-  const selectedTools = new Set(agentToolSelection ?? []);
+  // AFPS §4.4 wildcard — when the agent opted into all upstream tools, the
+  // synthetic api_call tool(s) are auto-granted alongside the upstream surface.
+  // Otherwise filter to what the agent explicitly picked.
+  const wildcardSelection = isToolsWildcard(agentToolSelection);
+  const selectedTools = wildcardSelection ? null : new Set(agentToolSelection ?? []);
   const apiCalls: ApiCallSpec[] = getApiCallConfigs(manifest)
-    .filter((cfg) => selectedTools.has(cfg.toolName))
+    .filter((cfg) => wildcardSelection || selectedTools!.has(cfg.toolName))
     .map((cfg) => {
       const auth = manifest.auths?.[cfg.authKey] as AfpsManifestAuth | undefined;
       return {
@@ -310,10 +314,35 @@ async function resolveOne(
   // agent-facing capability — exclude it from the allowlist so the agent's
   // LLM can never invoke it directly. (It is normally not in the selection
   // anyway, but defence-in-depth: an author could have listed it.)
-  const baseAllowlist = agentToolSelection ?? [];
-  const toolAllowlist = deliveries.connectLogin
-    ? baseAllowlist.filter((t) => t !== deliveries.connectLogin!.toolName)
-    : baseAllowlist;
+  //
+  // AFPS §4.4 wildcard — when `agentToolSelection === "*"`, emit `undefined`
+  // so the sidecar's McpHost passes every upstream tool through (legacy
+  // "all tools allowed" path). The connect-login tool would otherwise reach
+  // the agent surface under that passthrough, so we append its name to
+  // `hiddenTools` below (the McpHost belt-and-suspenders filter that runs
+  // AFTER the allowlist). Without this, an integration with a `connect.tool`
+  // login primitive would expose the credential-acquisition tool to the
+  // agent's LLM whenever an agent opted into the wildcard.
+  let toolAllowlist: readonly string[] | undefined;
+  if (wildcardSelection) {
+    toolAllowlist = undefined;
+  } else {
+    const baseAllowlist = agentToolSelection ?? [];
+    toolAllowlist = deliveries.connectLogin
+      ? (baseAllowlist as readonly string[]).filter((t) => t !== deliveries.connectLogin!.toolName)
+      : baseAllowlist;
+  }
+
+  // R8a hidden-tools sidecar filter. Union of:
+  //   - `manifest.hidden_tools` (explicit opt-out)
+  //   - the connect-login `toolName` when the wildcard branch is in effect
+  //     (only then does the allowlist no longer filter it out)
+  // Connect tools never reach the agent's LLM regardless of agent selection.
+  const hiddenToolsUnion: string[] = [...(manifest.hidden_tools ?? [])];
+  if (wildcardSelection && deliveries.connectLogin) {
+    const loginName = deliveries.connectLogin.toolName;
+    if (!hiddenToolsUnion.includes(loginName)) hiddenToolsUnion.push(loginName);
+  }
 
   // Peer discriminant for the sidecar's spawn-mode dispatch. Mirrors
   // `source.kind`; defaults to `"none"` when the manifest didn't declare a
@@ -363,10 +392,11 @@ async function resolveOne(
     // sidecar so the McpHost can drop them from `tools/list` at runtime,
     // independent of whether the install-time catalog resolver already
     // removed them. This guards against fixtures / direct DB writes that
-    // bypass `resolveIntegrationToolCatalog`. Omitted when empty.
-    ...((manifest.hidden_tools?.length ?? 0) > 0
-      ? { hiddenTools: [...(manifest.hidden_tools ?? [])] }
-      : {}),
+    // bypass `resolveIntegrationToolCatalog`. Under the wildcard branch
+    // we also union in the connect-login tool name so the agent's LLM
+    // can never see the credential-acquisition primitive. Omitted when
+    // both sources are empty.
+    ...(hiddenToolsUnion.length > 0 ? { hiddenTools: hiddenToolsUnion } : {}),
     spawnEnv: deliveries.spawnEnv,
     // For remote HTTP MCP we deliberately drop `httpDeliveryAuths`: the
     // sidecar's HTTP path reads the access token directly from the
@@ -380,7 +410,11 @@ async function resolveOne(
     // the sidecar's McpHost registers nothing for this integration.
     // The agent author has to explicitly opt into each tool via the
     // editor UI.
-    toolAllowlist,
+    //
+    // AFPS §4.4 wildcard — `toolAllowlist === undefined` instructs the
+    // sidecar (via the conditional spread below) to omit the field, which
+    // McpHost interprets as "all tools allowed" (legacy passthrough).
+    ...(toolAllowlist !== undefined ? { toolAllowlist } : {}),
     ...(deliveries.connectLogin ? { connectLogin: deliveries.connectLogin } : {}),
     ...(deliveries.fileMounts && Object.keys(deliveries.fileMounts).length > 0
       ? { fileMounts: deliveries.fileMounts }

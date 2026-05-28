@@ -139,7 +139,7 @@ export interface ScheduleFormDeps {
    * connection-overrides picker. Empty when the agent has no
    * integrations.
    */
-  agentIntegrations: Array<{ id: string; tools?: string[] }>;
+  agentIntegrations: Array<{ id: string; tools?: string[] | "*" }>;
 }
 
 /**

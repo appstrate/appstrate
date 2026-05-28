@@ -32,6 +32,13 @@ export function AuthsSection({ manifest, onChange }: AuthsSectionProps) {
   // that setAuths drops from the manifest. Initialised once per mount; the tab
   // unmounts on switch, so an external JSON-tab edit is picked up on remount.
   const [rows, setRows] = useState<AuthState[]>(() => getAuths(manifest));
+  // AFPS §7.8 — when `allow_undeclared_tools: true` is set on the manifest,
+  // at least one auth MUST be "wildcard-usable": non-oauth2 (no scope
+  // mechanism — always usable) or oauth2 with non-empty `default_scopes`.
+  // Surface the gate inline only when no auth currently qualifies, on the
+  // oauth2 row(s) where the user actually has a fix (add `default_scopes`).
+  const wildcardEnabled = manifest.allow_undeclared_tools === true;
+  const hasWildcardUsableAuth = rows.some((r) => r.type !== "oauth2" || r.defaultScopes.length > 0);
 
   const commit = (next: AuthState[]) => {
     setRows(next);
@@ -168,6 +175,14 @@ export function AuthsSection({ manifest, onChange }: AuthsSectionProps) {
                 onChange={(defaultScopes) => updateAuth(idx, { defaultScopes })}
                 placeholder="read"
               />
+              {wildcardEnabled && !hasWildcardUsableAuth && (
+                <p
+                  className="text-destructive text-xs"
+                  data-testid={`auth-default-scopes-wildcard-warning-${auth.key}`}
+                >
+                  {t("integrationEditor.auths.defaultScopesRequiredForWildcard")}
+                </p>
+              )}
               <ScopeCatalogEditor
                 entries={auth.scopeCatalog}
                 onChange={(scopeCatalog) => updateAuth(idx, { scopeCatalog })}

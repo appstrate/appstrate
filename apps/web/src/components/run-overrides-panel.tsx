@@ -47,7 +47,7 @@ export interface RunOverridesValue {
 
 interface AgentIntegrationRef {
   id: string;
-  tools?: string[];
+  tools?: string[] | "*";
 }
 
 export interface RunOverridesPanelProps {

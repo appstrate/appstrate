@@ -28,7 +28,7 @@ import {
   integrationManifestSchema as afpsIntegrationManifestSchema,
   type IntegrationManifest as AfpsIntegrationManifest,
 } from "@afps-spec/schema";
-import type { ManifestIntegrationEntry } from "./dependencies.ts";
+import { isToolsWildcard, type ManifestIntegrationEntry } from "./dependencies.ts";
 
 // ─────────────────────────────────────────────
 // Appstrate vendor extension: api_call (`_meta["dev.appstrate/api"]`)
@@ -584,19 +584,39 @@ export function isApiCallToolName(name: string): boolean {
  */
 export function requiredAuthKeysForAgent(
   manifest: IntegrationManifest,
-  agentTools: readonly string[] | undefined,
+  agentTools: readonly string[] | "*" | undefined,
   agentScopes?: readonly string[] | undefined,
 ): string[] {
-  const hasTools = !!agentTools && agentTools.length > 0;
+  const wildcard = isToolsWildcard(agentTools);
+  const arrayTools = wildcard ? [] : (agentTools ?? []);
+  const hasTools = wildcard || arrayTools.length > 0;
   const hasScopes = !!agentScopes && agentScopes.length > 0;
   if (!hasTools && !hasScopes) return [];
   const declaredAuths = manifest.auths ? Object.keys(manifest.auths) : [];
   if (declaredAuths.length === 0) return [];
   if (declaredAuths.length === 1) return declaredAuths;
 
+  // AFPS §4.4 wildcard — the agent opted into every upstream tool, so we
+  // can't pin a specific auth from `tools_policy`. Return every "wildcard-
+  // usable" auth: non-oauth2 (no scope mechanism — wholesale grant covers
+  // any tool) or oauth2 with non-empty `default_scopes` (the fallback scope
+  // set). If none qualify, fall back to every declared auth so the resolver
+  // still surfaces a connection candidate rather than reporting "no auth
+  // needed" — install-gating already rejected manifests where no auth is
+  // wildcard-usable.
+  if (wildcard) {
+    const wildcardUsable = declaredAuths.filter((k) => {
+      const auth = manifest.auths?.[k];
+      if (!auth) return false;
+      if (auth.type !== "oauth2") return true;
+      return (auth.default_scopes?.length ?? 0) > 0;
+    });
+    return wildcardUsable.length > 0 ? wildcardUsable : declaredAuths;
+  }
+
   const toolsRecord = manifest.tools_policy ?? {};
   const out = new Set<string>();
-  for (const toolName of agentTools ?? []) {
+  for (const toolName of arrayTools) {
     const tool = toolsRecord[toolName];
     if (!tool?.required_scopes) continue;
     for (const authKey of Object.keys(tool.required_scopes)) {
@@ -606,7 +626,7 @@ export function requiredAuthKeysForAgent(
   // The `api_call` tool(s) aren't in `manifest.tools_policy`; pin each one's
   // auth (from `_meta["dev.appstrate/api"]`) when the matching tool is selected.
   const apiCallByTool = new Map(getApiCallConfigs(manifest).map((c) => [c.toolName, c.authKey]));
-  for (const toolName of agentTools ?? []) {
+  for (const toolName of arrayTools) {
     const authKey = apiCallByTool.get(toolName);
     if (authKey && declaredAuths.includes(authKey)) out.add(authKey);
   }
@@ -637,10 +657,13 @@ export function requiredAuthKeysForAgent(
  */
 export function connectableAuthKeysForAgent(
   manifest: IntegrationManifest,
-  agentTools: readonly string[] | undefined,
+  agentTools: readonly string[] | "*" | undefined,
   agentScopes?: readonly string[] | undefined,
 ): string[] {
-  const hasSelection = (agentTools?.length ?? 0) > 0 || (agentScopes?.length ?? 0) > 0;
+  const hasSelection =
+    isToolsWildcard(agentTools) ||
+    (Array.isArray(agentTools) && agentTools.length > 0) ||
+    (agentScopes?.length ?? 0) > 0;
   if (!hasSelection) return [];
   return manifest.auths ? Object.keys(manifest.auths) : [];
 }
@@ -649,15 +672,28 @@ export function connectableAuthKeysForAgent(
  * Required oauth scopes for an agent's use of (integration, authKey): the
  * union of tool-inferred scopes ({@link scopesContributedByTools}) and the
  * agent's explicitly-selected scopes.
+ *
+ * Wildcard path: when `agentTools === "*"` (AFPS §4.4 wildcard, requires
+ * the integration's `allow_undeclared_tools: true`), per-tool inference is
+ * bypassed and the selected auth's `default_scopes` (§7.4) is used as the
+ * baseline, still unioned with any explicit `agentScopes`.
  */
 export function requiredScopesForAgent(input: {
   manifest: IntegrationManifest;
   authKey: string;
-  agentTools: readonly string[] | undefined;
+  agentTools: readonly string[] | "*" | undefined;
   agentScopes: readonly string[] | undefined;
 }): string[] {
-  const viaTools = scopesContributedByTools(input);
   const viaExplicit = input.agentScopes ? [...input.agentScopes] : [];
+  if (isToolsWildcard(input.agentTools)) {
+    const defaultScopes = input.manifest.auths?.[input.authKey]?.default_scopes ?? [];
+    return [...new Set([...defaultScopes, ...viaExplicit])];
+  }
+  const viaTools = scopesContributedByTools({
+    manifest: input.manifest,
+    authKey: input.authKey,
+    agentTools: input.agentTools,
+  });
   return [...new Set([...viaTools, ...viaExplicit])];
 }
 
@@ -666,7 +702,8 @@ export function requiredScopesForAgent(input: {
  * scopes the given auth must be granted for the selected tools. With the
  * per-auth `required_scopes` map this is a direct lookup by `authKey`; tools
  * that declare no scopes under `authKey` contribute nothing. Returns `[]` when
- * the agent picked zero tools.
+ * the agent picked zero tools. The wildcard form (`"*"`) is handled by
+ * {@link requiredScopesForAgent}; this helper sees the array form only.
  */
 export function scopesContributedByTools(input: {
   manifest: IntegrationManifest;
@@ -725,7 +762,7 @@ export function missingScopesForConnection(input: {
   manifest: IntegrationManifest;
   authKey: string;
   granted: readonly string[];
-  agentTools: readonly string[] | undefined;
+  agentTools: readonly string[] | "*" | undefined;
   agentScopes: readonly string[] | undefined;
 }): string[] {
   if (input.manifest.auths?.[input.authKey]?.type !== "oauth2") return [];
@@ -756,7 +793,7 @@ export interface AgentIntegrationScopeError {
   /** Dotted JSON path into the agent manifest (`integrations.<id>.<field>`). */
   field: string;
   /** Stable machine-readable code consumed by route layer / UI. */
-  code: "unknown_tool" | "scope_not_in_catalog";
+  code: "unknown_tool" | "scope_not_in_catalog" | "wildcard_not_authorized";
   /** Human-readable detail for surfaces that don't translate `code`. */
   message: string;
 }
@@ -786,7 +823,22 @@ export function validateAgentIntegrationScopes(
 ): AgentIntegrationScopeError[] {
   const errors: AgentIntegrationScopeError[] = [];
 
-  if (selection.tools && selection.tools.length > 0) {
+  if (isToolsWildcard(selection.tools)) {
+    // AFPS §4.4 wildcard — the agent opts into every upstream tool. Only
+    // valid when the integration explicitly authorizes the pass-through
+    // via `allow_undeclared_tools: true` (§7.8). The integration schema
+    // already enforces that this flag requires ≥1 auth with non-empty
+    // `default_scopes`, so the scope set is well-defined at this point.
+    if (
+      (integrationManifest as { allow_undeclared_tools?: boolean }).allow_undeclared_tools !== true
+    ) {
+      errors.push({
+        field: `integrations_configuration.${selection.id}.tools`,
+        code: "wildcard_not_authorized",
+        message: `Integration ${selection.id} does not declare allow_undeclared_tools: true — wildcard tools "*" is not permitted`,
+      });
+    }
+  } else if (selection.tools && selection.tools.length > 0) {
     const catalog = resolveIntegrationToolCatalog({
       integration: integrationManifest,
       mcpServerTools,

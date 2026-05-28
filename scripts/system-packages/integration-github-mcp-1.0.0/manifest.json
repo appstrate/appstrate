@@ -9,17 +9,30 @@
   "source": {
     "kind": "remote",
     "remote": {
-      "url": "https://api.githubcopilot.com/mcp/",
+      "url": "https://api.githubcopilot.com/mcp/x/all",
       "transport": "streamable-http"
     }
   },
+  "allow_undeclared_tools": true,
   "auths": {
     "oauth": {
       "type": "oauth2",
       "authorization_endpoint": "https://github.com/login/oauth/authorize",
       "token_endpoint": "https://github.com/login/oauth/access_token",
       "userinfo_endpoint": "https://api.github.com/user",
-      "default_scopes": ["read:user", "repo"],
+      "default_scopes": [
+        "read:user",
+        "repo",
+        "read:org",
+        "workflow",
+        "security_events",
+        "notifications",
+        "gist",
+        "read:discussion",
+        "write:discussion",
+        "read:project",
+        "project"
+      ],
       "token_endpoint_auth_method": "client_secret_post",
       "identity_claims": {
         "accountId": "$.login",

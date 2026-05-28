@@ -986,6 +986,13 @@ export async function getIntegrationAuthStatuses(
    * fetch for the referenced mcp-server's MCPB tool advertisement.
    */
   tool_catalog: IntegrationToolCatalogEntry[];
+  /**
+   * AFPS §7.8 — surfaced verbatim from the manifest so the agent editor
+   * can gate its "Include all upstream tools" advanced toggle. `false`
+   * (default) keeps the picker in per-tool mode; `true` lets the agent
+   * set `integrations_configuration.<id>.tools = "*"`.
+   */
+  allow_undeclared_tools: boolean;
 }> {
   await assertAppBelongsToOrg(scope);
   const manifest = await loadManifestOrThrow(scope, packageId);
@@ -1061,7 +1068,13 @@ export async function getIntegrationAuthStatuses(
     };
   });
 
-  return { manifest, auths, tool_catalog: toolCatalog };
+  return {
+    manifest,
+    auths,
+    tool_catalog: toolCatalog,
+    allow_undeclared_tools:
+      (manifest as { allow_undeclared_tools?: boolean }).allow_undeclared_tools === true,
+  };
 }
 
 /**

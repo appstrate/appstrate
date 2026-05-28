@@ -97,7 +97,7 @@ interface ScheduleFormProps {
    * picker. Pass an empty array to hide. Read from
    * `agentDetail.dependencies.integrations` at the page level.
    */
-  agentIntegrations?: Array<{ id: string; tools?: string[] }>;
+  agentIntegrations?: Array<{ id: string; tools?: string[] | "*" }>;
   agents?: Array<{ id: string; displayName: string }>;
   selectedAgentId?: string;
   onAgentChange?: (agentId: string) => void;

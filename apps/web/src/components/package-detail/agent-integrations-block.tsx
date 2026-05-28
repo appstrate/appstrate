@@ -78,6 +78,11 @@ interface AgentIntegrationsBlockProps {
  * never lags the agent's editor state. The exact same logic powers the 412
  * server-side; the modal (Phase C) is the recovery path when this block is
  * stale or the actor hits Run before refreshing.
+ *
+ * AFPS §4.4 wildcard — when the agent declares `tools: "*"`, per-tool inference
+ * is bypassed and scope requirements fall back to the selected auth's
+ * `default_scopes` (§7.4). The activity check + connection picker still treat
+ * the wildcard as an active selection.
  */
 export function AgentIntegrationsBlock({ entries, agentPackageId }: AgentIntegrationsBlockProps) {
   // The list carries `active` (installed + enabled in this app). An agent can
@@ -111,7 +116,7 @@ export function AgentIntegrationsBlock({ entries, agentPackageId }: AgentIntegra
 
 interface IntegrationConnectionCardProps {
   packageId: string;
-  agentTools: string[] | undefined;
+  agentTools: string[] | "*" | undefined;
   agentScopes: string[] | undefined;
   /** Whether the integration is active (installed + enabled) in this app. */
   appActive: boolean;
@@ -166,7 +171,8 @@ function IntegrationConnectionCard({
   // are no discrete tools — the usage is the selected oauth scopes. Gating
   // on tools alone made apiCall integrations structurally unconnectable
   // from the agent page.
-  const isActive = (agentTools?.length ?? 0) > 0 || (agentScopes?.length ?? 0) > 0;
+  const isActive =
+    agentTools === "*" || (agentTools?.length ?? 0) > 0 || (agentScopes?.length ?? 0) > 0;
   const showMemberPicker = !!agentPackageId && isActive;
 
   // The dropdown is the unified per-integration control — it lists every
@@ -245,7 +251,7 @@ function FallbackConnectCard({
   manifest: IntegrationManifestView;
   authStatuses: IntegrationAuthStatus[];
   displayName: string;
-  agentTools: string[] | undefined;
+  agentTools: string[] | "*" | undefined;
   agentScopes: string[] | undefined;
 }) {
   const { t } = useTranslation(["agents", "settings"]);
@@ -386,7 +392,7 @@ function MemberConnectionPicker({
   manifest: IntegrationManifestView;
   authStatuses: IntegrationAuthStatus[];
   displayName: string;
-  agentTools: string[] | undefined;
+  agentTools: string[] | "*" | undefined;
   agentScopes: string[] | undefined;
 }) {
   const { t } = useTranslation(["agents", "settings"]);
@@ -760,7 +766,7 @@ function MemberConnectionPicker({
 function resolveAction(
   status: IntegrationStatus,
   manifest: IntegrationManifestView,
-  agentTools: string[] | undefined,
+  agentTools: string[] | "*" | undefined,
   agentScopes: string[] | undefined,
 ): { authKey: string; scopes?: string[]; intent: "connect" | "reconnect" | "upgrade" } | null {
   if (status.kind === "ok") return null;
@@ -827,7 +833,7 @@ type IntegrationStatus =
 function deriveIntegrationStatus(input: {
   manifest: IntegrationManifestView;
   connections: { auth_key: string; needs_reconnection: boolean }[];
-  agentTools: string[] | undefined;
+  agentTools: string[] | "*" | undefined;
   agentScopes: string[] | undefined;
 }): IntegrationStatus {
   const { manifest, connections, agentTools, agentScopes } = input;
@@ -839,7 +845,8 @@ function deriveIntegrationStatus(input: {
   // tools). Nothing selected → integration is declared but inert; surface as
   // "ok" with empty authKey so the card doesn't render a "connect" CTA for an
   // unused integration. The picker is the place to opt in.
-  const isActive = (agentTools?.length ?? 0) > 0 || (agentScopes?.length ?? 0) > 0;
+  const isActive =
+    agentTools === "*" || (agentTools?.length ?? 0) > 0 || (agentScopes?.length ?? 0) > 0;
   if (!isActive) return { kind: "ok", authKey: "" };
 
   if (connections.length === 0) return { kind: "not_connected" };

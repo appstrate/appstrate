@@ -128,6 +128,11 @@ function buildAuth(spec: AuthSpec): Record<string, unknown> {
         ),
       },
     };
+    // `default_scopes` is OPTIONAL on non-oauth2 auths (the field is purely
+    // informational there — no consent step), but the integration schema
+    // accepts it. Forward it so tests can use a non-oauth2 auth with
+    // `allow_undeclared_tools: true` (which requires non-empty default_scopes).
+    if (spec.defaultScopes) auth.default_scopes = spec.defaultScopes;
   }
   if (spec.connect) auth.connect = spec.connect;
   auth.delivery =
@@ -154,6 +159,8 @@ export function localIntegrationManifest(opts: {
       required_scopes?: Record<string, string[]>;
     }
   >;
+  /** AFPS §7.8 opt-in — when true, agents MAY set `tools: "*"`. */
+  allow_undeclared_tools?: boolean;
 }): IntegrationManifest {
   const version = opts.version ?? "1.0.0";
   const auths: Record<string, unknown> = {};
@@ -171,6 +178,7 @@ export function localIntegrationManifest(opts: {
     },
     auths,
     ...(opts.tools_policy ? { tools_policy: opts.tools_policy } : {}),
+    ...(opts.allow_undeclared_tools === true ? { allow_undeclared_tools: true } : {}),
   } as unknown as IntegrationManifest;
 }
 
