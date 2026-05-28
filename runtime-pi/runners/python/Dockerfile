@@ -28,9 +28,14 @@ LABEL org.opencontainers.image.title="Appstrate MCP Runner (Python)" \
       org.opencontainers.image.revision="${BUILD_REVISION}" \
       org.opencontainers.image.created="${BUILD_CREATED}"
 
+# Runner user pinned at UID 1001 (see bun runner Dockerfile for the
+# rationale) so the per-run shared workspace volume stays writable
+# across the agent + every runner sharing it.
 RUN apk add --no-cache python3 ca-certificates && \
+    addgroup -g 1001 runner && \
+    adduser -D -u 1001 -G runner -s /bin/sh runner && \
     mkdir -p /bundle && \
-    chown nobody:nobody /bundle
+    chown runner:runner /bundle
 
 # Bundles add their deps under /bundle/vendor (e.g. `pip install
 # --target vendor mcp`). PYTHONPATH lets `import mcp` resolve without
@@ -39,7 +44,7 @@ ENV PYTHONPATH=/bundle/vendor:/bundle \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-USER nobody:nobody
+USER runner:runner
 WORKDIR /bundle
 
 # `-u` forces unbuffered stdio so JSON-RPC lines reach the parent

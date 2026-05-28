@@ -44,11 +44,22 @@ LABEL org.opencontainers.image.title="Appstrate MCP Runner (Bun)" \
 # — adds ~25MB on alpine, dwarfed by the bun runtime itself. /bundle is
 # the conventional mount point — the sidecar `docker cp`s the extracted
 # bundle here before `docker start`.
+#
+# Runner user pinned at UID 1001 — matches the pi user in the agent
+# image (`runtime-pi/Dockerfile` L143-144) so the per-run shared
+# workspace volume (chowned 1001:1001 at boundary create time, see
+# docker-orchestrator.createIsolationBoundary) is writable by every
+# party that touches it. Without this alignment, a mcp-server runner
+# running as `nobody:nobody` (UID 65534) cannot mkdir / write into a
+# workspace whose top dir is owned by 1001 — every workspace-enabled
+# tool (`clone`, `commit`, `push`) fails with `Permission denied`.
 RUN apk add --no-cache ca-certificates git openssh-client && \
+    addgroup -g 1001 runner && \
+    adduser -D -u 1001 -G runner -s /bin/sh runner && \
     mkdir -p /bundle && \
-    chown nobody:nobody /bundle
+    chown runner:runner /bundle
 
-USER nobody:nobody
+USER runner:runner
 WORKDIR /bundle
 
 # `bun` is the entrypoint; the CMD (passed by the sidecar as the absolute

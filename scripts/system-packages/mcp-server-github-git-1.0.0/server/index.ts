@@ -98,19 +98,72 @@ interface RunGitOptions {
 }
 
 /**
+ * Structured stderr log line. Format: `[github-git-mcp] op=<phase>
+ * tool=<tool> ...key=value`. Goes through `process.stderr.write` so
+ * the sidecar's per-integration log pipeline picks it up verbatim
+ * (the platform tags it with `integrationId` upstream).
+ */
+function logLine(fields: Record<string, string | number | boolean>): void {
+  const parts: string[] = ["[github-git-mcp]"];
+  for (const [k, v] of Object.entries(fields)) {
+    const val = typeof v === "string" ? v : String(v);
+    parts.push(`${k}=${val.includes(" ") ? JSON.stringify(val) : val}`);
+  }
+  process.stderr.write(parts.join(" ") + "\n");
+}
+
+/**
+ * Classify a git stderr blob into an actionable hint. Returns a short
+ * string when a known failure pattern matches, otherwise undefined.
+ * Lets `runGit` enrich the thrown error with operator guidance instead
+ * of just dumping the raw stderr. Exported for unit testing.
+ */
+export function classifyGitError(stderr: string): string | undefined {
+  if (/Permission denied|EACCES|EPERM/i.test(stderr)) {
+    return (
+      "workspace permission denied — likely runner UID mismatch with workspace owner. " +
+      "Expected runner UID 1001 (matches the agent's pi user). Rebuild the runner image with the latest Dockerfile."
+    );
+  }
+  if (/dubious ownership/i.test(stderr)) {
+    return (
+      'git refused the working tree as "dubious ownership" — runner UID differs from the .git owner. ' +
+      "This server now passes `-c safe.directory='*'` on every invocation; if you still see this, the working tree predates the fix."
+    );
+  }
+  if (/could not resolve host|Temporary failure in name resolution|getaddrinfo/i.test(stderr)) {
+    return (
+      "DNS resolution failed — runner is on an internal network and must route through the sidecar proxy. " +
+      "Verify HTTPS_PROXY is set in the runner env (sidecar injects it via buildMitmEnvBlock)."
+    );
+  }
+  if (/Authentication failed|401|403/i.test(stderr)) {
+    return "GitHub rejected the bearer token — confirm the OAuth connection still has `repo` scope and hasn't expired.";
+  }
+  if (/Repository not found|404/i.test(stderr)) {
+    return (
+      "GitHub returned 404 — the repository may not exist OR the token lacks access. " +
+      "Re-check owner/repo casing and the connected user's permissions."
+    );
+  }
+  return undefined;
+}
+
+/**
  * Spawn `git` with optional bearer-auth injected via
  * `GIT_CONFIG_COUNT/KEY/VALUE`. Returns stdout/stderr/exit code.
- * Throws on non-zero exit so call sites stay flat — the error message
- * carries the full stderr so JSON-RPC consumers see the real reason
- * (vs. a generic "git failed").
+ * Throws on non-zero exit with a classified hint when one applies.
  *
  * Inherits process.env wholesale — the MCP runner container is on an
  * internal-only bridge with no direct egress; the sidecar injects
  * `HTTPS_PROXY` + `CURL_CA_BUNDLE` (`buildMitmEnvBlock`) so HTTP
- * clients route through the platform's TLS-terminating proxy. Stripping
- * the env would make `git clone` attempt a direct connection and fail
- * with a DNS / connection error. Token + GIT_TERMINAL_PROMPT layered on
- * top per call.
+ * clients route through the platform's TLS-terminating proxy.
+ *
+ * Always prepends `-c safe.directory='*'` — git refuses to operate on
+ * a working tree whose ownership differs from the calling uid. Even
+ * with UID-1001 runners we can hit this when the agent clones via its
+ * own bash (also uid 1001 but a different shell user record) and the
+ * MCP runner picks up later. Belt-and-suspenders, no functional cost.
  */
 async function runGit(args: string[], opts: RunGitOptions = {}): Promise<GitResult> {
   const env: Record<string, string> = {};
@@ -126,7 +179,16 @@ async function runGit(args: string[], opts: RunGitOptions = {}): Promise<GitResu
     env.GIT_CONFIG_VALUE_0 = `AUTHORIZATION: bearer ${opts.token}`;
   }
 
-  const proc = Bun.spawn(["git", ...args], {
+  const fullArgs = ["-c", "safe.directory=*", ...args];
+  const started = performance.now();
+  logLine({
+    op: "git-spawn",
+    cmd: args[0] ?? "<unknown>",
+    cwd: opts.cwd ?? "<inherit>",
+    auth: opts.token ? "bearer" : "none",
+  });
+
+  const proc = Bun.spawn(["git", ...fullArgs], {
     cwd: opts.cwd,
     env,
     stdout: "pipe",
@@ -138,8 +200,15 @@ async function runGit(args: string[], opts: RunGitOptions = {}): Promise<GitResu
     new Response(proc.stderr).text(),
     proc.exited,
   ]);
+  const elapsed = Math.round(performance.now() - started);
+  logLine({ op: "git-exit", cmd: args[0] ?? "<unknown>", code, ms: elapsed });
   if (code !== 0) {
-    throw new Error(`git ${args[0]} failed (exit ${code}): ${stderr.trim() || stdout.trim()}`);
+    const hint = classifyGitError(stderr);
+    const rawTail = stderr.trim() || stdout.trim();
+    const msg = hint
+      ? `git ${args[0]} failed (exit ${code}): ${rawTail}\nhint: ${hint}`
+      : `git ${args[0]} failed (exit ${code}): ${rawTail}`;
+    throw new Error(msg);
   }
   return { stdout, stderr, code };
 }
@@ -175,12 +244,23 @@ async function ghJson<T>(
   init: RequestInit = {},
   deps: GhFetchDeps = {},
 ): Promise<T> {
+  const method = init.method ?? "GET";
+  const started = performance.now();
+  logLine({ op: "github-fetch", method, path });
   const res = await ghFetch(path, token, init, deps);
+  const elapsed = Math.round(performance.now() - started);
+  logLine({ op: "github-fetch-done", method, path, status: res.status, ms: elapsed });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new Error(
-      `GitHub ${init.method ?? "GET"} ${path} failed: ${res.status} ${body.slice(0, 200)}`,
-    );
+    const hint =
+      res.status === 401
+        ? " hint: bearer token rejected — re-check the OAuth connection's scope grant and expiry."
+        : res.status === 403
+          ? " hint: forbidden — the token's scopes don't cover this resource (need `repo` for private, `public_repo` for public)."
+          : res.status === 404
+            ? " hint: 404 — the repo may not exist OR the token lacks visibility into it."
+            : "";
+    throw new Error(`GitHub ${method} ${path} failed: ${res.status} ${body.slice(0, 200)}.${hint}`);
   }
   return (await res.json()) as T;
 }
@@ -640,6 +720,8 @@ export async function handleRequest(
     // (workspace + token) so a missing-arg call returns a clean
     // -32602 even when the runner happens to lack env config — the
     // arg shape is a property of the request, not the deployment.
+    const toolStarted = performance.now();
+    logLine({ op: "tool-call", tool: params.name ?? "<unset>" });
     try {
       switch (params.name) {
         case "clone": {
@@ -747,6 +829,7 @@ export async function handleRequest(
           return okResult(req.id, out);
         }
         default:
+          logLine({ op: "tool-error", tool: params.name ?? "<unset>", kind: "unknown-tool" });
           return {
             jsonrpc: "2.0",
             id: req.id ?? null,
@@ -754,19 +837,35 @@ export async function handleRequest(
           };
       }
     } catch (err) {
+      const elapsed = Math.round(performance.now() - toolStarted);
+      const message = err instanceof Error ? err.message : String(err);
       if (err instanceof ProtocolError) {
+        logLine({
+          op: "tool-error",
+          tool: params.name ?? "<unset>",
+          kind: "protocol",
+          ms: elapsed,
+          message,
+        });
         return {
           jsonrpc: "2.0",
           id: req.id ?? null,
-          error: { code: -32602, message: err.message },
+          error: { code: -32602, message },
         };
       }
+      logLine({
+        op: "tool-error",
+        tool: params.name ?? "<unset>",
+        kind: "runtime",
+        ms: elapsed,
+        message,
+      });
       return {
         jsonrpc: "2.0",
         id: req.id ?? null,
         result: {
           isError: true,
-          content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
+          content: [{ type: "text", text: message }],
         },
       };
     }

@@ -40,11 +40,17 @@ LABEL org.opencontainers.image.title="Appstrate MCP Runner (Node)" \
 # ca-certificates — TLS trust store for outbound API calls (Gmail, etc.)
 # /bundle is the conventional mount point — sidecar `docker cp`s the
 # extracted bundle here before `docker start`.
+#
+# Runner user pinned at UID 1001 (see bun runner Dockerfile for the
+# rationale) so the per-run shared workspace volume stays writable
+# across the agent + every runner sharing it.
 RUN apk add --no-cache nodejs ca-certificates && \
+    addgroup -g 1001 runner && \
+    adduser -D -u 1001 -G runner -s /bin/sh runner && \
     mkdir -p /bundle && \
-    chown nobody:nobody /bundle
+    chown runner:runner /bundle
 
-USER nobody:nobody
+USER runner:runner
 WORKDIR /bundle
 
 # `node` is the entrypoint; the CMD (passed by the sidecar as the

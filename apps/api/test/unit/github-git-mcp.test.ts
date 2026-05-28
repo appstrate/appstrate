@@ -26,6 +26,7 @@ import {
   handleRequest,
   openPrTool,
   cloneTool,
+  classifyGitError,
 } from "../../../../scripts/system-packages/mcp-server-github-git-1.0.0/server/index.ts";
 
 // ───────────────────────── resolveInWorkspace ─────────────────────────
@@ -45,6 +46,36 @@ describe("resolveInWorkspace", () => {
   it("rejects `..` segments", () => {
     expect(() => resolveInWorkspace("/tmp/ws", "../escape")).toThrow(/path-traversal/);
     expect(() => resolveInWorkspace("/tmp/ws", "ok/../etc")).toThrow(/path-traversal/);
+  });
+});
+
+// ────────────────────────── classifyGitError ─────────────────────────
+
+describe("classifyGitError", () => {
+  it("hints workspace UID mismatch on Permission denied", () => {
+    const hint = classifyGitError("fatal: cannot mkdir /workspace/x: Permission denied");
+    expect(hint).toMatch(/UID mismatch/);
+  });
+
+  it("hints proxy mis-config on DNS resolution failure", () => {
+    const hint = classifyGitError("fatal: unable to access: Could not resolve host: github.com");
+    expect(hint).toMatch(/HTTPS_PROXY|sidecar proxy/);
+  });
+
+  it("hints token rejection on 401", () => {
+    const hint = classifyGitError(
+      "remote: HTTP 401 Authentication failed for 'https://github.com/owner/repo.git/'",
+    );
+    expect(hint).toMatch(/OAuth|scope/);
+  });
+
+  it("hints 404 ambiguity (missing repo OR insufficient token visibility)", () => {
+    const hint = classifyGitError("remote: Repository not found.");
+    expect(hint).toMatch(/repository may not exist|lacks access/);
+  });
+
+  it("returns undefined for unrecognised failures", () => {
+    expect(classifyGitError("fatal: some-niche-error-text")).toBeUndefined();
   });
 });
 
