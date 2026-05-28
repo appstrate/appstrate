@@ -125,32 +125,17 @@ export interface McpServerWorkspaceMount {
 const DEFAULT_WORKSPACE_MOUNT = "/workspace";
 
 /**
- * POSIX-only path normaliser — collapses `./` segments and resolves
- * `..` against parents in-place, preserves leading `/`, strips
- * trailing `/` (except for the root). Local to this module so the
- * core package stays node-builtin-free and works in browsers (some
- * core consumers are bundled into the web app).
+ * POSIX-only path canonicaliser — collapses `./` segments, drops empty
+ * segments (`//` runs, trailing `/`), preserves leading `/`. Local to
+ * this module so core stays node-builtin-free and works in browsers
+ * (some core consumers are bundled into the web app).
  *
- * NOT a general-purpose normaliser — only handles the cases the
- * workspace-mount validator needs to defend against: trailing
- * slashes, redundant `./`, and `..` segments that would otherwise
- * slip past a literal-string check.
+ * Does NOT resolve `..` — the validator rejects any path containing
+ * one before canonicalisation, so this only ever sees clean inputs.
  */
-function normalizeMount(path: string): string {
-  const parts = path.split("/");
-  const out: string[] = [];
-  for (const part of parts) {
-    if (part === "" || part === ".") continue;
-    if (part === "..") {
-      // Preserve `..` in the output so the downstream check still
-      // sees it and rejects. A "pop on .." behaviour would
-      // collapse the segment and silently neutralise the attack.
-      out.push("..");
-      continue;
-    }
-    out.push(part);
-  }
-  return "/" + out.join("/");
+function canonicaliseMount(path: string): string {
+  const parts = path.split("/").filter((p) => p !== "" && p !== ".");
+  return "/" + parts.join("/");
 }
 
 /**
@@ -199,15 +184,16 @@ export function getMcpServerWorkspaceMount(
   if (/[\x00-\x1f]/.test(rawMount)) {
     throw new Error(`${MCP_SERVER_WORKSPACE_META_KEY}.mount: control characters are not allowed`);
   }
-  // Normalise (collapses `a/./b` and `a/b/../c`) BEFORE the `..`
-  // check so a sneakily-nested `/work/../../etc` is caught even
-  // though it doesn't carry a literal top-level `..` segment.
-  const mount = normalizeMount(rawMount);
-  if (mount.split("/").some((seg) => seg === "..")) {
+  // Reject ANY `..` segment in the raw input (`/work/../etc` and
+  // `/work/foo/./../../etc` both contain literal `..` segments once
+  // split on `/`). Checking pre-canonicalisation keeps the rule a
+  // one-liner — no clever resolution arithmetic to audit.
+  if (rawMount.split("/").some((seg) => seg === "..")) {
     throw new Error(
       `${MCP_SERVER_WORKSPACE_META_KEY}.mount: path-traversal segments are not allowed`,
     );
   }
+  const mount = canonicaliseMount(rawMount);
   const forbiddenPrefixes = ["/proc/", "/sys/", "/dev/", "/etc/"];
   if (forbiddenPrefixes.some((p) => mount === p.replace(/\/$/, "") || mount.startsWith(p))) {
     throw new Error(

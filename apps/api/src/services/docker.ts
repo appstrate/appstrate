@@ -441,6 +441,26 @@ export async function stopContainersByRun(
   return "stopped";
 }
 
+/**
+ * Force-remove every container labelled with `appstrate.run=<runId>`
+ * (including stopped/dead rows kept by `AutoRemove: false`). Used by
+ * the orchestrator's pre-reap to evict zombies still holding a
+ * workspace volume open before `removeVolume` is attempted on a
+ * quick-restart loop — Docker 409s on attached volumes, so the volume
+ * pre-reap is a no-op until the zombie is gone.
+ */
+export async function removeContainersByRun(runId: string): Promise<number> {
+  const filters = JSON.stringify({
+    label: [`appstrate.run=${runId}`, "appstrate.managed=true"],
+  });
+  const res = await dockerFetch(`/containers/json?all=true&filters=${encodeURIComponent(filters)}`);
+  if (!res.ok) return 0;
+  const containers = (await res.json()) as Array<{ Id: string }>;
+  if (containers.length === 0) return 0;
+  const results = await Promise.allSettled(containers.map((c) => removeContainer(c.Id)));
+  return results.filter((r) => r.status === "fulfilled").length;
+}
+
 // --- Docker Network operations ---
 
 export async function createNetwork(
@@ -597,7 +617,15 @@ export async function runEphemeralCommand(options: {
   cmd: string[];
   binds?: string[];
   runId?: string;
+  /**
+   * Hard ceiling on the run lifecycle (pull + create + start + wait).
+   * Defaults to 60s — long enough for an image pull on a cold cache,
+   * short enough to fail a stuck init before it blocks the orchestrator.
+   */
+  timeoutMs?: number;
 }): Promise<void> {
+  const timeoutMs = options.timeoutMs ?? 60_000;
+  const deadline = Date.now() + timeoutMs;
   await ensureImage(options.image);
 
   const createRes = await dockerFetch("/containers/create", {
@@ -642,7 +670,19 @@ export async function runEphemeralCommand(options: {
     });
     await assertDockerOk(startRes, "start ephemeral container");
 
-    const exitCode = await waitForExit(containerId);
+    const remaining = deadline - Date.now();
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(
+        () =>
+          reject(
+            new Error(
+              `Ephemeral container ${options.image} timed out after ${timeoutMs}ms (cmd: ${options.cmd.join(" ")})`,
+            ),
+          ),
+        Math.max(remaining, 0),
+      ),
+    );
+    const exitCode = await Promise.race([waitForExit(containerId), timeoutPromise]);
     if (exitCode !== 0) {
       throw new Error(
         `Ephemeral container ${options.image} exited with code ${exitCode} (cmd: ${options.cmd.join(" ")})`,

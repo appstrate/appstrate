@@ -18,7 +18,7 @@
  * Re-test with `stdout: "pipe"` after upgrading Bun to check if the fix is still needed.
  */
 
-import { mkdir, rm, readdir, open as fsOpen } from "node:fs/promises";
+import { mkdir, rm, readdir, open as fsOpen, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { getEnv } from "@appstrate/env";
@@ -53,10 +53,18 @@ function workspaceDirFor(runId: string): string {
 
 /**
  * Scan `os.tmpdir()` for orphaned per-run workspace directories
- * (`appstrate-ws-*`) and remove them. Boot-time recovery only — runs
- * marked failed by `lib/boot.ts` are by definition not holding any of
- * these dirs, so removing them is safe. Returns the count of dirs
- * reclaimed for the {@link CleanupReport}.
+ * (`appstrate-ws-*`) owned by THIS process's uid and remove them.
+ * Boot-time recovery only — runs marked failed by `lib/boot.ts` are by
+ * definition not holding any of these dirs, so removing them is safe.
+ * Returns the count of dirs reclaimed for the {@link CleanupReport}.
+ *
+ * The uid filter avoids two problems on shared hosts:
+ *   - Reaping a workspace owned by another platform instance (running
+ *     as a different uid) — `rm` would silently fail with EPERM, but
+ *     the noisy "skip" path would otherwise log dozens of unrelated
+ *     directories per boot.
+ *   - Counting other-uid dirs in the cleanup report, inflating the
+ *     reclaimed total with directories we never touched.
  */
 async function reapOrphanWorkspaceDirs(): Promise<number> {
   let entries: string[];
@@ -65,17 +73,20 @@ async function reapOrphanWorkspaceDirs(): Promise<number> {
   } catch {
     return 0;
   }
+  const myUid = process.getuid?.() ?? -1;
   let count = 0;
   for (const name of entries) {
     if (!name.startsWith(WORKSPACE_DIR_PREFIX)) continue;
     const path = join(tmpdir(), name);
     try {
+      if (myUid >= 0) {
+        const st = await stat(path);
+        if (st.uid !== myUid) continue;
+      }
       await rm(path, { recursive: true, force: true });
       count++;
     } catch {
-      // Permission errors / other-user-owned dirs are silently
-      // skipped — tmpdir on shared hosts may carry workspaces from
-      // other UIDs, which are not ours to reap.
+      // Permission/stat errors — silently skip.
     }
   }
   return count;

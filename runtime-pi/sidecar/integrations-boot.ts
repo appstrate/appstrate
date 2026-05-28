@@ -728,6 +728,14 @@ async function spawnAndConnectLocalIntegration(params: {
     // SOTA-consistent: cyanheads/git-mcp-server, modelcontextprotocol/
     // servers/filesystem all rely on the Roots protocol for boundary
     // discovery instead of trusting CWD or hardcoded paths.
+    //
+    // `listChanged: false` is deliberate: the workspace boundary is
+    // static for the lifetime of a run — the orchestrator mounts a
+    // single per-run volume at boot and never reconfigures it. Setting
+    // `true` would force every Roots-aware server to subscribe to a
+    // notification channel that will never fire. If multi-root or
+    // dynamic remounting ever lands, flip this to `true` and emit
+    // `notifications/roots/list_changed` from the mount-change path.
     spec.workspaceMount && params.workspaceHandle
       ? { capabilities: { roots: { listChanged: false } } }
       : undefined,

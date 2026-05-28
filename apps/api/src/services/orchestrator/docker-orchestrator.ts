@@ -118,9 +118,12 @@ export class DockerOrchestrator implements ContainerOrchestrator {
       (async () => {
         // Pre-reap defends against the kill-9-then-immediate-restart
         // window where the orchestrator's `removeIsolationBoundary`
-        // never ran. The remove is best-effort (404 swallowed) so
-        // first-time creation costs at most one extra `volume rm`
-        // round trip.
+        // never ran. Force-remove any zombie containers labelled with
+        // this runId first — Docker 409s on `volume rm` while any
+        // container still references it, so a leftover sidecar/agent
+        // row from the previous boot would silently block volume
+        // creation. The remove is best-effort (404 swallowed).
+        await docker.removeContainersByRun(runId).catch(() => {});
         await docker.removeVolume(volumeName).catch(() => {});
         return docker.createVolume(volumeName, {
           labels: { "appstrate.run": runId },

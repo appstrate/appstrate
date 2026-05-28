@@ -72,12 +72,26 @@ interface CloneReceipt {
   files: number;
   bytes: number;
   topLevelPrefix: string | null;
+  /**
+   * Tar entries we refused to materialise (symlinks, hardlinks, global
+   * headers, anything not a regular file). Reported back to the agent
+   * so a clone that silently drops critical link targets surfaces in
+   * the response — without this the agent only sees the file count and
+   * has no signal that a Makefile-style `link-to-foo` was missing.
+   */
+  skipped: Array<{ name: string; typeflag: string }>;
 }
 
 /**
  * Validate + normalise the workspace destination path. Returns the
  * absolute resolved path; throws when the resolved path escapes the
  * workspace root or contains `..` segments.
+ *
+ * Leading slashes are stripped first (an "absolute" `/foo` from the
+ * agent is treated as workspace-relative `foo`, not as a host path);
+ * `..` segments are then rejected outright; finally the resolved path
+ * is asserted to stay under `workspaceRoot` as a belt-and-suspenders
+ * check against symlink-style escape vectors we haven't anticipated.
  */
 export function resolveDest(workspaceRoot: string, dest: string | undefined): string {
   const cleaned = (dest ?? "").replace(/^\/+/, "").trim();
@@ -101,9 +115,18 @@ export function resolveDest(workspaceRoot: string, dest: string | undefined): st
  * tarballs emit for paths > 100 chars — without it, the first deep
  * file in a monorepo would surface as a malformed entry.
  *
+ * The optional `onSkip` callback fires for every non-regular,
+ * non-directory entry the parser refuses to materialise (typeflag
+ * `1`/`2`/`3`/`g`/`x`/…). Callers pass it to surface dropped
+ * symlinks/hardlinks in the clone receipt — the parser stays pure and
+ * unit-testable without one.
+ *
  * Exported for unit testing.
  */
-export function parseTar(buf: Buffer): Array<{ name: string; content: Buffer }> {
+export function parseTar(
+  buf: Buffer,
+  onSkip?: (name: string, typeflag: string) => void,
+): Array<{ name: string; content: Buffer }> {
   const out: Array<{ name: string; content: Buffer }> = [];
   let offset = 0;
   let pendingLongName: string | null = null;
@@ -135,9 +158,12 @@ export function parseTar(buf: Buffer): Array<{ name: string; content: Buffer }> 
       pendingLongName = null;
       out.push({ name, content: payload });
     } else if (typeflag === "5") {
+      // Directory — implicit (we mkdir on file write).
       pendingLongName = null;
     } else {
+      const name = pendingLongName ?? (prefix ? `${prefix}/${rawName}` : rawName);
       pendingLongName = null;
+      onSkip?.(name, typeflag);
     }
 
     const padded = Math.ceil(size / 512) * 512;
@@ -218,7 +244,13 @@ export async function cloneRepo(
   }
   const tar = gunzipSync(gz);
 
-  const entries = parseTar(tar);
+  const skipped: Array<{ name: string; typeflag: string }> = [];
+  const entries = parseTar(tar, (name, typeflag) => {
+    skipped.push({ name, typeflag });
+    process.stderr.write(
+      `[github-clone-mcp] skipping tar entry typeflag=${typeflag} name=${name}\n`,
+    );
+  });
   if (entries.length > maxFiles) {
     throw new Error(
       `Tarball contains ${entries.length} files (> GITHUB_CLONE_MAX_FILES=${maxFiles}). Refusing as a defensive cap.`,
@@ -255,6 +287,7 @@ export async function cloneRepo(
     files: filesWritten,
     bytes: bytesWritten,
     topLevelPrefix,
+    skipped,
   };
 }
 
@@ -315,15 +348,17 @@ export async function handleRequest(req: JsonRpcRequest): Promise<JsonRpcRespons
     return { jsonrpc: "2.0", id: req.id ?? null, result: { tools: [CLONE_TOOL] } };
   }
   if (req.method === "tools/call") {
+    // Protocol-level failures (unknown tool name, invalid args shape)
+    // surface as top-level `error` per JSON-RPC + the MCP SDK
+    // convention. Tool execution failures (network, GitHub 4xx, tarball
+    // bomb) surface as `result.isError` per the MCP spec so the agent
+    // can route them to the same content path as a successful call.
     const params = (req.params ?? {}) as { name?: string; arguments?: Partial<CloneArgs> };
     if (params.name !== CLONE_TOOL.name) {
       return {
         jsonrpc: "2.0",
         id: req.id ?? null,
-        result: {
-          isError: true,
-          content: [{ type: "text", text: `Unknown tool: ${params.name}` }],
-        },
+        error: { code: -32602, message: `Unknown tool: ${params.name}` },
       };
     }
     const args = params.arguments ?? {};
@@ -331,10 +366,7 @@ export async function handleRequest(req: JsonRpcRequest): Promise<JsonRpcRespons
       return {
         jsonrpc: "2.0",
         id: req.id ?? null,
-        result: {
-          isError: true,
-          content: [{ type: "text", text: "owner and repo are required string fields" }],
-        },
+        error: { code: -32602, message: "owner and repo are required string fields" },
       };
     }
     try {

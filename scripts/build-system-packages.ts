@@ -21,10 +21,36 @@
  *   bun run scripts/build-system-packages.ts --check   # validate only (no write)
  */
 import { readdir, readFile, stat, writeFile, unlink } from "node:fs/promises";
-import { join } from "node:path";
+import { join, posix, relative, sep } from "node:path";
 import { validateManifest } from "@appstrate/core/validation";
 import { zipArtifact } from "@appstrate/core/zip";
 import { computeIntegrity } from "@appstrate/core/integrity";
+
+/**
+ * Recursively collect every regular file under `root` into the zip
+ * entry map, keyed by POSIX-style relative path. Symlinks are followed
+ * via `stat` (not `lstat`); subdirectories named `node_modules` are
+ * skipped — they should never be bundled into a system package.
+ */
+async function collectZipEntries(root: string): Promise<Record<string, Uint8Array>> {
+  const entries: Record<string, Uint8Array> = {};
+  async function walk(dir: string): Promise<void> {
+    const names = await readdir(dir);
+    for (const name of names) {
+      if (name === "node_modules" || name.startsWith(".")) continue;
+      const full = join(dir, name);
+      const st = await stat(full);
+      if (st.isDirectory()) {
+        await walk(full);
+      } else if (st.isFile()) {
+        const rel = relative(root, full).split(sep).join(posix.sep);
+        entries[rel] = new Uint8Array(await readFile(full));
+      }
+    }
+  }
+  await walk(root);
+  return entries;
+}
 
 const checkOnly = process.argv.includes("--check");
 const SOURCES_DIR = join(import.meta.dir, "system-packages");
@@ -85,15 +111,11 @@ async function main() {
     const type = (manifest.type as string | undefined) ?? "unknown";
     byType[type] = (byType[type] ?? 0) + 1;
 
-    // Collect all files — bundled into the archive.
-    const files = await readdir(dirPath);
-    const zipEntries: Record<string, Uint8Array> = {};
-    for (const file of files) {
-      const filePath = join(dirPath, file);
-      const fileStat = await stat(filePath);
-      if (!fileStat.isFile()) continue;
-      zipEntries[file] = new Uint8Array(await readFile(filePath));
-    }
+    // Bundle every file in the source dir (recursively). Subdirectory
+    // paths like `server/index.ts` keep their structure inside the
+    // archive so a manifest `entry_point: "server/index.ts"` resolves
+    // against the extracted bundle root at runtime.
+    const zipEntries = await collectZipEntries(dirPath);
 
     const zipBytes: Uint8Array = zipArtifact(zipEntries);
 

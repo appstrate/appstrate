@@ -180,28 +180,50 @@ describe("handleRequest — JSON-RPC surface", () => {
     expect(result.tools[0]?.name).toBe("clone_repo");
   });
 
-  it("returns an MCP error response for an unknown tool name", async () => {
+  it("returns a top-level -32602 error for an unknown tool name", async () => {
     const res = await handleRequest({
       jsonrpc: "2.0",
       id: 3,
       method: "tools/call",
       params: { name: "bogus" },
     });
-    const result = res?.result as { isError: boolean; content: Array<{ text: string }> };
-    expect(result.isError).toBe(true);
-    expect(result.content[0]?.text).toMatch(/Unknown tool/);
+    expect(res?.error?.code).toBe(-32602);
+    expect(res?.error?.message).toMatch(/Unknown tool/);
+    expect(res?.result).toBeUndefined();
   });
 
-  it("rejects tools/call with missing owner/repo arguments", async () => {
+  it("rejects tools/call with missing owner/repo arguments as -32602", async () => {
     const res = await handleRequest({
       jsonrpc: "2.0",
       id: 4,
       method: "tools/call",
       params: { name: "clone_repo", arguments: { owner: "x" } },
     });
-    const result = res?.result as { isError: boolean; content: Array<{ text: string }> };
-    expect(result.isError).toBe(true);
-    expect(result.content[0]?.text).toMatch(/owner and repo/);
+    expect(res?.error?.code).toBe(-32602);
+    expect(res?.error?.message).toMatch(/owner and repo/);
+    expect(res?.result).toBeUndefined();
+  });
+
+  it("returns result.isError for tool execution failures (vs protocol errors)", async () => {
+    // The cloneRepo call throws when APPSTRATE_WORKSPACE is unset —
+    // that's a runtime failure of the tool, not a protocol violation,
+    // so it surfaces as `result.isError` so the agent renders it the
+    // same way as a successful tool call's content.
+    const originalWs = process.env.APPSTRATE_WORKSPACE;
+    delete process.env.APPSTRATE_WORKSPACE;
+    try {
+      const res = await handleRequest({
+        jsonrpc: "2.0",
+        id: 7,
+        method: "tools/call",
+        params: { name: "clone_repo", arguments: { owner: "o", repo: "r" } },
+      });
+      const result = res?.result as { isError: boolean; content: Array<{ text: string }> };
+      expect(result.isError).toBe(true);
+      expect(result.content[0]?.text).toMatch(/APPSTRATE_WORKSPACE/);
+    } finally {
+      if (originalWs !== undefined) process.env.APPSTRATE_WORKSPACE = originalWs;
+    }
   });
 
   it("returns a -32601 error for an unknown method", async () => {

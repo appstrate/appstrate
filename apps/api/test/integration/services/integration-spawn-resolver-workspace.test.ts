@@ -28,6 +28,7 @@ import { seedPackage, seedInstalledPackage } from "../../helpers/seed.ts";
 import {
   localIntegrationManifest,
   mcpServerManifest,
+  remoteIntegrationManifest,
 } from "../../helpers/integration-manifests.ts";
 
 const INTEG = "@orga/clone-integ";
@@ -167,6 +168,46 @@ describe("resolveIntegrationSpawns — _meta.workspace propagation", () => {
       agentManifest: agentManifest(),
     });
     expect(specs[0]!.workspaceMount).toEqual({ mount: "/scratch", access: "ro" });
+  });
+
+  it("NEVER emits workspaceMount for remote-source integrations (no runner to mount into)", async () => {
+    // Remote-source integrations open an HTTP MCP client against the
+    // declared `source.remote.url` — there is no runner container/process
+    // to bind a volume into, so the spawn spec must never carry
+    // `workspaceMount` even if a mcp-server with the same scoped name
+    // happens to exist in the registry and declares workspace.
+    await seedPackage({
+      id: INTEG,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: remoteIntegrationManifest({
+        name: INTEG,
+        version: "1.0.0",
+        auths: {
+          oauth: {
+            type: "api_key",
+            authorizedUris: ["https://api.example.com/**"],
+            credentialFields: ["api_key"],
+            delivery: { env: { API_KEY: { value: "{$credential.api_key}", sensitive: true } } },
+          },
+        },
+        tools_policy: { clone_repo: {} },
+      }),
+    });
+    await seedInstalledPackage(ctx.defaultAppId, INTEG);
+    // Seed an mcp-server with the SAME name + a workspace declaration —
+    // a remote integration must not consult it.
+    await seedMcpServer(ctx, { mount: "/workspace", access: "rw" });
+    await seedConnection(ctx);
+
+    const specs = await resolveIntegrationSpawns({
+      applicationId: ctx.defaultAppId,
+      actor: { type: "user", id: ctx.user.id },
+      agentManifest: agentManifest(),
+    });
+    expect(specs.length).toBe(1);
+    expect(specs[0]!.workspaceMount).toBeUndefined();
   });
 
   it("defaults mount to '/workspace' when only access is provided", async () => {
