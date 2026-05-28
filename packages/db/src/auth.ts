@@ -588,29 +588,6 @@ function buildAuth(
       enabled: true,
       minPasswordLength: 8,
       requireEmailVerification: smtpEnabled,
-      // Test-only fast password hasher. Better Auth's default is scrypt
-      // (deliberately slow — ~35ms/hash), which dominates the test suite since
-      // most tests sign up a real user per `beforeEach`. When the test harness
-      // sets AUTH_FAST_TEST_HASH=1 (see test/setup/preload.ts), swap in a plain
-      // SHA-256 hash: the round-trip (hash→verify) still works, so every auth
-      // code path keeps full coverage — only the (irrelevant-to-tests) hash
-      // strength changes. Hard-gated on NODE_ENV !== "production" so a leaked
-      // flag can never weaken real password hashing in a production deployment.
-      ...(process.env.AUTH_FAST_TEST_HASH === "1" &&
-        process.env.NODE_ENV !== "production" && {
-          password: {
-            hash: async (password: string): Promise<string> =>
-              new Bun.CryptoHasher("sha256").update(password).digest("hex"),
-            verify: async ({
-              hash,
-              password,
-            }: {
-              hash: string;
-              password: string;
-            }): Promise<boolean> =>
-              new Bun.CryptoHasher("sha256").update(password).digest("hex") === hash,
-          },
-        }),
       ...(smtpEnabled && {
         sendResetPassword: async ({ user, url }) => {
           try {
