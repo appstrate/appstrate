@@ -100,8 +100,24 @@ export function MissingConnectionsModal({
     setPicks((prev) => ({ ...prev, [integrationId]: connectionId }));
   };
 
+  // A `needs_reconnection` / `insufficient_scopes` / `not_connected` modal has
+  // no must_choose picks, so it previously offered only a Close button — the
+  // user had to dismiss the modal and re-run by hand after fixing a connection.
+  // Surface the same Re-run here for any actionable row. must_choose still gates
+  // on a complete pick set; the others just re-fire the run (a fresh 412 keeps
+  // the modal open with the updated error list).
+  const hasActionable = integrationErrors.some(
+    (e) =>
+      e.code === "must_choose_connection" ||
+      e.code === "needs_reconnection" ||
+      e.code === "insufficient_scopes" ||
+      e.code === "not_connected",
+  );
+  const showRetry = !!onRetryWithOverrides && hasActionable;
   const canRetry =
-    !!onRetryWithOverrides && mustChooseCount > 0 && pickedCount === mustChooseCount && !retrying;
+    !!onRetryWithOverrides &&
+    !retrying &&
+    (mustChooseCount === 0 || pickedCount === mustChooseCount);
 
   return (
     <Modal
@@ -113,14 +129,16 @@ export function MissingConnectionsModal({
           <Button variant="outline" onClick={onClose} disabled={retrying}>
             {t("missingConnections.close")}
           </Button>
-          {onRetryWithOverrides && mustChooseCount > 0 && (
+          {showRetry && (
             <Button
               onClick={() => onRetryWithOverrides(picks)}
               disabled={!canRetry}
               data-testid="must-choose-retry"
             >
               {retrying && <Spinner />}
-              {t("missingConnections.mustChoose.retry")}
+              {mustChooseCount > 0
+                ? t("missingConnections.mustChoose.retry")
+                : t("missingConnections.retry")}
             </Button>
           )}
         </div>
@@ -162,6 +180,18 @@ function MissingRow({
   const needsConnections = isMustChooseCode || (isReconnect && !!err.connection_id);
   const { data: connections } = useIntegrationConnections(needsConnections ? packageId : undefined);
   const isMustChoose = err.code === "must_choose_connection";
+  // The dead/under-scoped connection this row acts on (when known).
+  const reconnectConn = err.connection_id
+    ? (connections ?? []).find((c) => c.id === err.connection_id)
+    : undefined;
+  // A `needs_reconnection` row clears itself live the moment its underlying
+  // connection's flag flips false: the renew popup's cache invalidation (and
+  // the `connection_update` SSE) refetch this connection list, so the row
+  // reflects the fix in real time without a manual re-run. Scope upgrades
+  // (`insufficient_scopes`) don't move `needs_reconnection`, so they keep their
+  // CTA until the re-run re-validates — no false "resolved".
+  const resolved =
+    err.code === "needs_reconnection" && !!reconnectConn && !reconnectConn.needs_reconnection;
   // Structural failures (integration not active in the app, package missing
   // or invalid manifest) can't be fixed by connecting — an admin must
   // activate the integration or the agent must drop the dependency. Suppress
@@ -170,12 +200,14 @@ function MissingRow({
     err.code === "integration_not_active" ||
     err.code === "package_not_found" ||
     err.code === "not_installed_or_invalid_manifest";
-  const Icon = isMustChoose ? Users : isReconnect ? AlertTriangle : XCircle;
-  const colorClass = isMustChoose
-    ? "text-amber-500"
-    : isReconnect
+  const Icon = resolved ? Check : isMustChoose ? Users : isReconnect ? AlertTriangle : XCircle;
+  const colorClass = resolved
+    ? "text-emerald-600"
+    : isMustChoose
       ? "text-amber-500"
-      : "text-destructive";
+      : isReconnect
+        ? "text-amber-500"
+        : "text-destructive";
 
   // Pick the auth to act on. `field` is now integration-level only — the
   // legacy `integrations.{id}.{authKey}` form is parsed back-compat but no
@@ -187,9 +219,6 @@ function MissingRow({
   // method-picker dropdown — there is nothing to choose). Falls back to the
   // manifest default only until the connection list loads / for legacy
   // authKey-suffixed fields.
-  const reconnectConn = err.connection_id
-    ? (connections ?? []).find((c) => c.id === err.connection_id)
-    : undefined;
   const targetAuthKey =
     authKey ?? reconnectConn?.auth_key ?? pickDefaultAuth(detail?.manifest.auths);
   const displayName = detail?.manifest.display_name ?? packageId;
@@ -206,7 +235,9 @@ function MissingRow({
             <div className="truncate text-sm font-medium">{displayName}</div>
             <div className={`flex items-center gap-1.5 truncate text-xs ${colorClass}`}>
               <Icon className="size-3" />
-              <span className="truncate">{err.message}</span>
+              <span className="truncate">
+                {resolved ? t("missingConnections.resolved") : err.message}
+              </span>
               {authKey && (
                 <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 font-mono text-[10px]">
                   {authKey}
@@ -215,7 +246,7 @@ function MissingRow({
             </div>
           </div>
         </div>
-        {!isMustChoose && !isStructural && targetAuthKey && (
+        {!isMustChoose && !isStructural && !resolved && targetAuthKey && (
           <InlineConnectButton
             packageId={packageId}
             authKey={targetAuthKey}
