@@ -294,7 +294,7 @@ const expectedEndpoints = [
   "POST /api/uploads",
   "PUT /api/uploads/_content",
 
-  // Credential proxy (AFPS 1.3 BYOI) — registered as router.all() in code,
+  // Credential proxy (AFPS BYOI) — registered as router.all() in code,
   // every verb is documented because upstream provider semantics are method-defined.
   "GET /api/credential-proxy/proxy",
   "POST /api/credential-proxy/proxy",

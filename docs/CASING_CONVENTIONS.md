@@ -41,7 +41,7 @@ Everything that crosses HTTP in JSON or sits at rest in canonical formats.
 - AFPS spec Zod schemas (`afps-spec/packages/schema/src/schemas.ts`)
 - Appstrate validators (`packages/core/src/{validation,integration,mcp-server,form}.ts`)
 
-**Sub-exception — `form.ts` RJSF vendor keys**: `mapAfpsToRjsf` in `packages/core/src/form.ts` reads canonical snake_case wrappers only (`file_constraints`, `ui_hints`, `property_order`, `max_size`); writeback is always snake_case. (The legacy camelCase reader fallback for AFPS 1.x persisted manifests has been removed — the reader is now snake_case-only.) RJSF vendor-namespaced keys (`ui:order`, `ui:widget`, `ui:placeholder`) and RJSF widget options (`accept`, `maxSize`, `multiple`, `maxFiles`) are third-party APIs and intentionally camelCase — out of scope for Zone 1.
+**Sub-exception — `form.ts` RJSF vendor keys**: `mapAfpsToRjsf` in `packages/core/src/form.ts` reads canonical snake_case wrappers only (`file_constraints`, `ui_hints`, `property_order`, `max_size`); writeback is always snake_case. (The legacy camelCase reader fallback for older persisted manifests has been removed — the reader is now snake_case-only.) RJSF vendor-namespaced keys (`ui:order`, `ui:widget`, `ui:placeholder`) and RJSF widget options (`accept`, `maxSize`, `multiple`, `maxFiles`) are third-party APIs and intentionally camelCase — out of scope for Zone 1.
 
 **Why snake_case** (SOTA evidence):
 
@@ -169,7 +169,7 @@ If unsure: "universal" means "appears on >5 different types". Otherwise snake_ca
 
 #### Carve-out 4e — ModelProviderDefinition + provider DTOs
 
-> **Vocabulary note**: "provider" here refers to **model providers** — Appstrate's internal LLM-credential registry (OpenAI, Anthropic, Codex, Claude Code, …). Not to be confused with the retired AFPS 1.x `provider` package type, which became `integration` in AFPS (Appendix D). Model providers are a distinct Appstrate subsystem with its own DTO surface.
+> **Vocabulary note**: "provider" here refers to **model providers** — Appstrate's internal LLM-credential registry (OpenAI, Anthropic, Codex, Claude Code, …). Not to be confused with the AFPS `provider` package type, which AFPS calls `integration`. Model providers are a distinct Appstrate subsystem with its own DTO surface.
 
 **Files**:
 
