@@ -38,25 +38,20 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { createHmac } from "node:crypto";
 import { db } from "@appstrate/db/client";
-import { getEnv } from "@appstrate/env";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import { createTestContext } from "../../../../../../test/helpers/auth.ts";
 import { enforceMagicLinkSignupPolicy } from "../../../auth/guards.ts";
+import { signAuthHmac } from "../../../../../lib/auth-secrets.ts";
 import { createClient, _resetClientCache } from "../../../services/oauth-admin.ts";
 
-// Mirrors `services/pending-client-cookie.ts` — kept inline so the test
-// is agnostic to internal refactors of the cookie helper.
+// Mirrors `services/pending-client-cookie.ts` — signs via the shared
+// `signAuthHmac` so the cookie carries the prefixed `<kid>$<hmac>` form
+// that `verifyAuthHmac` requires (bare HMACs are rejected outright).
 function pendingClientCookie(clientId: string): string {
   const exp = Math.floor(Date.now() / 1000) + 600;
   const payload = `${clientId}.${exp}`;
-  const sig = createHmac("sha256", getEnv().BETTER_AUTH_SECRET)
-    .update(payload)
-    .digest("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
+  const sig = signAuthHmac(payload);
   return `oidc_pending_client=${payload}.${sig}`;
 }
 

@@ -8,7 +8,7 @@
  * the connection list belongs to the user, not to any single org context.
  */
 
-import { db } from "@appstrate/db/client";
+import { db, toRows } from "@appstrate/db/client";
 import { eq, inArray, sql } from "drizzle-orm";
 import {
   applicationPackages,
@@ -117,19 +117,21 @@ async function listAllActorIntegrationConnections(
       uniquePackageIds.map((id) => sql`${id}`),
       sql`, `,
     );
-    const countRows = (await db.execute(sql`
-      SELECT ap.application_id AS app_id,
-             keys.integ AS integration_id,
-             COUNT(*)::int AS agent_count
-      FROM ${applicationPackages} ap
-      INNER JOIN ${packages} p ON p.id = ap.package_id AND p.type = 'agent'
-      INNER JOIN LATERAL jsonb_object_keys(
-        COALESCE(p.draft_manifest -> 'dependencies' -> 'integrations', '{}'::jsonb)
-      ) AS keys(integ) ON TRUE
-      WHERE ap.application_id IN (${appIdList})
-        AND keys.integ IN (${pkgIdList})
-      GROUP BY ap.application_id, keys.integ
-    `)) as unknown as { app_id: string; integration_id: string; agent_count: number }[];
+    const countRows = toRows<{ app_id: string; integration_id: string; agent_count: number }>(
+      await db.execute(sql`
+        SELECT ap.application_id AS app_id,
+               keys.integ AS integration_id,
+               COUNT(*)::int AS agent_count
+        FROM ${applicationPackages} ap
+        INNER JOIN ${packages} p ON p.id = ap.package_id AND p.type = 'agent'
+        INNER JOIN LATERAL jsonb_object_keys(
+          COALESCE(p.draft_manifest -> 'dependencies' -> 'integrations', '{}'::jsonb)
+        ) AS keys(integ) ON TRUE
+        WHERE ap.application_id IN (${appIdList})
+          AND keys.integ IN (${pkgIdList})
+        GROUP BY ap.application_id, keys.integ
+      `),
+    );
     for (const r of countRows) {
       reuseCount.set(`${r.app_id}|${r.integration_id}`, r.agent_count);
     }

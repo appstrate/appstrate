@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach, afterAll } from "bun:test";
+import { it, expect, beforeEach, afterAll } from "bun:test";
+import { describeRequiresPostgres } from "../../helpers/tier.ts";
 import { resolve } from "node:path";
 import { sql } from "drizzle-orm";
 import { db } from "../../helpers/db.ts";
@@ -36,7 +37,9 @@ async function countRows(fullyQualified: string): Promise<number> {
   return Number(res[0]?.n ?? 0);
 }
 
-describe("applyModuleMigrations (Postgres)", () => {
+// Exercises the postgres-only migration path (drizzle schema-qualified tracking
+// tables); skipped in tier0 where the DB is embedded PGlite.
+describeRequiresPostgres("applyModuleMigrations (Postgres)", () => {
   beforeEach(async () => {
     await cleanup();
   });

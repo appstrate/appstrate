@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it, afterEach } from "bun:test";
+import { expect, it, afterEach } from "bun:test";
+import { describeRequiresDocker } from "../../helpers/tier.ts";
 import {
   pullImage,
   createContainer,
@@ -124,7 +125,7 @@ async function createRawContainer(
 
 // ─── pullImage ──────────────────────────────────────────────
 
-describe("pullImage", () => {
+describeRequiresDocker("pullImage", () => {
   it(
     "pulls alpine:3.20 (cached, fast)",
     async () => {
@@ -144,7 +145,7 @@ describe("pullImage", () => {
 
 // ─── createContainer ────────────────────────────────────────
 
-describe("createContainer", () => {
+describeRequiresDocker("createContainer", () => {
   it(
     "creates a container and returns its ID",
     async () => {
@@ -224,7 +225,7 @@ describe("createContainer", () => {
 
 // ─── startContainer ─────────────────────────────────────────
 
-describe("startContainer", () => {
+describeRequiresDocker("startContainer", () => {
   it(
     "starts a container successfully",
     async () => {
@@ -241,7 +242,7 @@ describe("startContainer", () => {
 
 // ─── streamLogs ─────────────────────────────────────────────
 
-describe("streamLogs", () => {
+describeRequiresDocker("streamLogs", () => {
   it(
     "captures stdout output",
     async () => {
@@ -303,7 +304,7 @@ describe("streamLogs", () => {
 
 // ─── waitForExit ────────────────────────────────────────────
 
-describe("waitForExit", () => {
+describeRequiresDocker("waitForExit", () => {
   it(
     "returns exit code 0 for successful command",
     async () => {
@@ -331,7 +332,7 @@ describe("waitForExit", () => {
 
 // ─── stopContainer ──────────────────────────────────────────
 
-describe("stopContainer", () => {
+describeRequiresDocker("stopContainer", () => {
   it(
     "stops a running container",
     async () => {
@@ -354,7 +355,7 @@ describe("stopContainer", () => {
 
 // ─── removeContainer ────────────────────────────────────────
 
-describe("removeContainer", () => {
+describeRequiresDocker("removeContainer", () => {
   it(
     "removes a container",
     async () => {
@@ -381,7 +382,7 @@ describe("removeContainer", () => {
 
 // ─── injectFiles ────────────────────────────────────────────
 
-describe("injectFiles", () => {
+describeRequiresDocker("injectFiles", () => {
   it(
     "injects a file into a container and verifies content via cat",
     async () => {
@@ -443,7 +444,7 @@ describe("injectFiles", () => {
 
 // ─── createNetwork ──────────────────────────────────────────
 
-describe("createNetwork", () => {
+describeRequiresDocker("createNetwork", () => {
   it(
     "creates a bridge network and returns its ID",
     async () => {
@@ -477,7 +478,7 @@ describe("createNetwork", () => {
 
 // ─── connectContainerToNetwork ──────────────────────────────
 
-describe("connectContainerToNetwork", () => {
+describeRequiresDocker("connectContainerToNetwork", () => {
   it(
     "connects a container to a network with aliases",
     async () => {
@@ -505,7 +506,7 @@ describe("connectContainerToNetwork", () => {
 
 // ─── removeNetwork ──────────────────────────────────────────
 
-describe("removeNetwork", () => {
+describeRequiresDocker("removeNetwork", () => {
   it(
     "creates and removes a network",
     async () => {
@@ -531,7 +532,7 @@ describe("removeNetwork", () => {
 
 // ─── getContainerHostPort ───────────────────────────────────
 
-describe("getContainerHostPort", () => {
+describeRequiresDocker("getContainerHostPort", () => {
   it(
     "returns the mapped host port for a container with port binding",
     async () => {
@@ -561,7 +562,7 @@ describe("getContainerHostPort", () => {
 
 // ─── cleanupOrphanedContainers ──────────────────────────────
 
-describe("cleanupOrphanedContainers", () => {
+describeRequiresDocker("cleanupOrphanedContainers", () => {
   it(
     "cleans up labeled containers and networks",
     async () => {
@@ -612,7 +613,7 @@ describe("cleanupOrphanedContainers", () => {
 
 // ─── cleanupOrphanedNetworks ─────────────────────────────────
 
-describe("cleanupOrphanedNetworks", () => {
+describeRequiresDocker("cleanupOrphanedNetworks", () => {
   it(
     "reclaims appstrate-exec-* networks without touching unrelated networks",
     async () => {
@@ -642,7 +643,7 @@ describe("cleanupOrphanedNetworks", () => {
 
 // ─── cleanupOrphanedRunNetworks ──────────────────────────────
 
-describe("cleanupOrphanedRunNetworks", () => {
+describeRequiresDocker("cleanupOrphanedRunNetworks", () => {
   it(
     "only reclaims appstrate-exec-* — leaves egress alone",
     async () => {
@@ -668,7 +669,7 @@ describe("cleanupOrphanedRunNetworks", () => {
 
 // ─── Full lifecycle ─────────────────────────────────────────
 
-describe("Full lifecycle", () => {
+describeRequiresDocker("Full lifecycle", () => {
   it("create -> inject -> start -> streamLogs -> waitForExit -> remove", async () => {
     // Create container with a command that cats an injected file
     const id = await createRawContainer(["sh", "/tmp/run.sh"], { env: ["GREETING=world"] });

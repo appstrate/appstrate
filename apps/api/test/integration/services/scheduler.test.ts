@@ -17,6 +17,7 @@ import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import type { Actor } from "../../../src/lib/actor.ts";
 import { flushRedis, closeRedis } from "../../helpers/redis.ts";
+import { describeRequiresRedis } from "../../helpers/tier.ts";
 import {
   createSchedule,
   listSchedules,
@@ -26,7 +27,8 @@ import {
   deleteSchedule,
 } from "../../../src/services/scheduler.ts";
 
-describe("scheduler service", () => {
+// Real BullMQ repeatable-job semantics — skipped in tier0 (in-memory queue).
+describeRequiresRedis("scheduler service", () => {
   let userId: string;
   let orgId: string;
   let orgSlug: string;

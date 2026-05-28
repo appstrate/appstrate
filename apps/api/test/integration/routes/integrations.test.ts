@@ -569,8 +569,8 @@ describe("OAuth2 connect initiate", () => {
       body: "{}",
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { authUrl: string; state: string };
-    const url = new URL(body.authUrl);
+    const body = (await res.json()) as { auth_url: string; state: string };
+    const url = new URL(body.auth_url);
     expect(url.origin).toBe("https://accounts.google.com");
     expect(url.searchParams.get("client_id")).toBe("abc");
     expect(url.searchParams.get("code_challenge_method")).toBe("S256");

@@ -17,7 +17,7 @@
  */
 
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
-import { db } from "@appstrate/db/client";
+import { db, toRows } from "@appstrate/db/client";
 import {
   applicationPackages,
   endUsers,
@@ -142,22 +142,19 @@ export async function listAgentsConsumingIntegration(
   scope: AppScope,
   integrationId: string,
 ): Promise<ConsumingAgentSummary[]> {
-  const rows = await db.execute(sql`
-    SELECT p.id AS package_id,
-           p.draft_manifest->>'display_name' AS display_name
-    FROM ${applicationPackages} ap
-    INNER JOIN ${packages} p ON p.id = ap.package_id
-    WHERE ap.application_id = ${scope.applicationId}
-      AND p.type = 'agent'
-      AND (p.draft_manifest -> 'dependencies' -> 'integrations') ? ${integrationId}
-    ORDER BY p.id ASC
-  `);
-  return (
-    rows as unknown as {
-      package_id: string;
-      display_name: string | null;
-    }[]
-  ).map((r) => ({
+  const rows = toRows<{ package_id: string; display_name: string | null }>(
+    await db.execute(sql`
+      SELECT p.id AS package_id,
+             p.draft_manifest->>'display_name' AS display_name
+      FROM ${applicationPackages} ap
+      INNER JOIN ${packages} p ON p.id = ap.package_id
+      WHERE ap.application_id = ${scope.applicationId}
+        AND p.type = 'agent'
+        AND (p.draft_manifest -> 'dependencies' -> 'integrations') ? ${integrationId}
+      ORDER BY p.id ASC
+    `),
+  );
+  return rows.map((r) => ({
     packageId: r.package_id,
     display_name: r.display_name ?? r.package_id,
   }));

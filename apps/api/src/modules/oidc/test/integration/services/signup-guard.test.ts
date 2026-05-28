@@ -23,24 +23,17 @@ import { db } from "@appstrate/db/client";
 import { organizationMembers } from "@appstrate/db/schema";
 import { createClient, _resetClientCache } from "../../../services/oauth-admin.ts";
 import { oidcBeforeSignupGuard, oidcAfterSignupHandler } from "../../../auth/signup-guard.ts";
+import { signAuthHmac } from "../../../../../lib/auth-secrets.ts";
 
 // The cookie helpers we're testing — issue a fake Headers for the guard.
 // We rebuild the signed cookie out-of-band so the test is agnostic to
 // how the entry pages encode it; the cookie format lives in
 // `services/pending-client-cookie.ts`.
 async function signedCookieHeader(clientId: string): Promise<Headers> {
-  const { createHmac } = await import("node:crypto");
-  const { getEnv } = await import("@appstrate/env");
   const exp = Math.floor(Date.now() / 1000) + 600;
   const payload = `${clientId}.${exp}`;
-  const sig = createHmac("sha256", getEnv().BETTER_AUTH_SECRET)
-    .update(payload)
-    .digest("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
-  const cookieValue = `${payload}.${sig}`;
-  return new Headers({ cookie: `oidc_pending_client=${cookieValue}` });
+  const sig = signAuthHmac(payload);
+  return new Headers({ cookie: `oidc_pending_client=${payload}.${sig}` });
 }
 
 function expiredCookieHeader(clientId: string, sig = "tampered"): Headers {
@@ -109,16 +102,9 @@ describe("oidcBeforeSignupGuard + pending-client cookie", () => {
     // Build a cookie with a correct HMAC over a past `exp` — the guard
     // still rejects it because the expiry check runs after signature
     // verification.
-    const { createHmac } = await import("node:crypto");
-    const { getEnv } = await import("@appstrate/env");
     const exp = Math.floor(Date.now() / 1000) - 60;
     const payload = `${closedOrgClientId}.${exp}`;
-    const sig = createHmac("sha256", getEnv().BETTER_AUTH_SECRET)
-      .update(payload)
-      .digest("base64")
-      .replace(/\+/g, "-")
-      .replace(/\//g, "_")
-      .replace(/=+$/, "");
+    const sig = signAuthHmac(payload);
     const headers = new Headers({
       cookie: `oidc_pending_client=${payload}.${sig}`,
     });

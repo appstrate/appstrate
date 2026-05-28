@@ -21,6 +21,9 @@ export class LocalEventBuffer implements EventBuffer {
 
   constructor() {
     this.purgeInterval = setInterval(() => this.purgeExpired(), 60_000);
+    // Don't keep the event loop alive on the timer alone (clean test exit;
+    // no effect in prod where the server listener holds the loop open).
+    this.purgeInterval.unref?.();
   }
 
   async put(runId: string, sequence: number, event: RunEvent, ttlSeconds: number): Promise<void> {

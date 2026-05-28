@@ -11,6 +11,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
+import { describeRequiresRedis } from "../../helpers/tier.ts";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import { LocalEventBuffer } from "../../../src/infra/event-buffer/local-event-buffer.ts";
 import { RedisEventBuffer } from "../../../src/infra/event-buffer/redis-event-buffer.ts";
@@ -140,7 +141,7 @@ describe("LocalEventBuffer", () => {
   });
 });
 
-describe("RedisEventBuffer", () => {
+describeRequiresRedis("RedisEventBuffer", () => {
   // Regression: the runner can emit multiple events whose
   // `JSON.stringify(event)` collapses to the same string — e.g. 10 parallel
   // `api_call.called` events that complete in the same millisecond with

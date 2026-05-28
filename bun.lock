@@ -5,7 +5,7 @@
     "": {
       "name": "appstrate",
       "dependencies": {
-        "@afps-spec/schema": "^0.1.0",
+        "@afps-spec/schema": "^0.4.0",
         "@appstrate/core": "workspace:*",
         "@electric-sql/pglite": "^0.4.5",
         "ajv": "^8.20.0",
@@ -184,7 +184,7 @@
         "afps": "./bin/afps.ts",
       },
       "dependencies": {
-        "@afps-spec/schema": "^0.1.0",
+        "@afps-spec/schema": "^0.4.0",
         "@afps-spec/types": "^0.1.0",
         "@appstrate/afps-shared": "workspace:*",
         "fflate": "^0.8.2",
@@ -239,7 +239,7 @@
       "name": "@appstrate/core",
       "version": "2.21.0",
       "dependencies": {
-        "@afps-spec/schema": "^0.1.0",
+        "@afps-spec/schema": "^0.4.0",
         "@appstrate/afps-shared": "^0.1.0",
         "ajv": "^8.20.0",
         "ajv-formats": "^3.0.1",
@@ -412,7 +412,7 @@
     "zod": "4.4.3",
   },
   "packages": {
-    "@afps-spec/schema": ["@afps-spec/schema@0.1.0", "", { "dependencies": { "ajv": "^8.17.1", "semver": "^7.7.4", "zod": "^4.4.3" } }, "sha512-OCBKQvWYxJFp2rMuqiF6kkIWepX5eC86w3RMAO41a+fngdGfax/MAJloXeLl5a8VET6DJyVg8+Zlb/XLuaZWYw=="],
+    "@afps-spec/schema": ["@afps-spec/schema@0.4.0", "", { "dependencies": { "ajv": "^8.17.1", "semver": "^7.7.4", "zod": "^4.4.3" } }, "sha512-Gb8g/okiYZkwNhPoHOw83EnUfWHZKm1UOGFbpTN6kUArWofyESn4JIrG3WVJDtc4T5wLM8P66hBNJP4dzZ8LoA=="],
 
     "@afps-spec/types": ["@afps-spec/types@0.1.0", "", {}, "sha512-0fK0vqhtzr+fRPnze2HPr+Krrx8pZwiOsUDjFswwz/Mr/VfnvWN+xinwzajX17NfFwA8W5a+vY90xO7HL7M9Xg=="],
 

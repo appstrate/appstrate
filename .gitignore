@@ -53,12 +53,6 @@ storage/
 !apps/api/src/data/
 !apps/api/src/data/**
 
-docs/*
-!docs/adr/
-!docs/cli/
-!docs/guides/
-!docs/migrations/
-!docs/CASING_CONVENTIONS.md
 flows/*
 
 claudedocs/

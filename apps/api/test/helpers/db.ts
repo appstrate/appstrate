@@ -6,11 +6,11 @@
  * Provides a Drizzle db instance connected to the test database
  * and helpers for cleaning up between tests.
  */
-import { db } from "@appstrate/db/client";
+import { db, closeDb } from "@appstrate/db/client";
 import { sql } from "drizzle-orm";
 import type { Db } from "@appstrate/db/client";
 
-export { db };
+export { db, closeDb };
 export type { Db };
 
 /**

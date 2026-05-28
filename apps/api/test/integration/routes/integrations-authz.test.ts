@@ -441,8 +441,8 @@ describe("connect/oauth2 reconnect scope-union (incremental consent)", () => {
       body: JSON.stringify({ connection_id: connId }),
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { authUrl: string };
-    const scope = new URL(body.authUrl).searchParams.get("scope") ?? "";
+    const body = (await res.json()) as { auth_url: string };
+    const scope = new URL(body.auth_url).searchParams.get("scope") ?? "";
     const scopes = scope.split(/\s+/);
     // Manifest defaults preserved...
     expect(scopes).toContain("openid");
@@ -462,8 +462,8 @@ describe("connect/oauth2 reconnect scope-union (incremental consent)", () => {
       body: "{}",
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { authUrl: string };
-    const scope = new URL(body.authUrl).searchParams.get("scope") ?? "";
+    const body = (await res.json()) as { auth_url: string };
+    const scope = new URL(body.auth_url).searchParams.get("scope") ?? "";
     const scopes = scope.split(/\s+/);
     expect(scopes).toContain("openid");
     expect(scopes).toContain("email");

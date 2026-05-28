@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { and, eq } from "drizzle-orm";
-import { db, isEmbeddedDb, getPGliteClient, reservePgConnection } from "@appstrate/db/client";
+import { db, isEmbeddedDb, reservePgConnection } from "@appstrate/db/client";
 import { packages, packageVersions } from "@appstrate/db/schema";
 import { expireOldInvitations } from "../services/invitations.ts";
 import { cleanupExpiredKeys } from "../services/api-keys.ts";
@@ -496,58 +496,13 @@ export async function syncSystemPackagesToDb(): Promise<void> {
 
 /**
  * Apply Drizzle migrations programmatically for PGlite (embedded mode).
- * Uses a custom migrator that splits multi-statement SQL files into individual
- * statements, since PGlite does not support multi-statement prepared queries.
+ * Delegates to the shared `applyCorePGliteMigrations` helper so the embedded
+ * boot path and the tier0 test preload run identical migration logic.
  */
 async function applyEmbeddedMigrations(): Promise<void> {
-  const { resolve, join } = await import("node:path");
-  const { readFileSync, existsSync } = await import("node:fs");
-
-  const migrationsDir = resolve(import.meta.dir, "../../../../packages/db/drizzle");
-  const journalPath = join(migrationsDir, "meta/_journal.json");
-
-  if (!existsSync(journalPath)) {
-    logger.warn("No migration journal found, skipping PGlite migrations");
-    return;
-  }
-
-  const pg = getPGliteClient()!;
-
-  // Create migrations tracking table
-  await pg.exec(`
-    CREATE TABLE IF NOT EXISTS "__drizzle_migrations" (
-      id SERIAL PRIMARY KEY,
-      hash TEXT NOT NULL,
-      created_at BIGINT DEFAULT (EXTRACT(EPOCH FROM now()) * 1000)
-    )
-  `);
-
-  // Read journal to get migration order
-  const journal = JSON.parse(readFileSync(journalPath, "utf-8")) as {
-    entries: { idx: number; tag: string }[];
-  };
-
-  // Get already-applied migrations
-  const { rows } = await pg.query<{ hash: string }>('SELECT hash FROM "__drizzle_migrations"');
-  const applied = new Set(rows.map((r) => r.hash));
-
-  for (const entry of journal.entries) {
-    if (applied.has(entry.tag)) continue;
-
-    const sqlFile = join(migrationsDir, `${entry.tag}.sql`);
-    if (!existsSync(sqlFile)) {
-      logger.warn("Migration file not found, skipping", { tag: entry.tag });
-      continue;
-    }
-
-    const content = readFileSync(sqlFile, "utf-8");
-    // PGlite exec() supports multi-statement SQL natively
-    await pg.exec(content.replaceAll("--> statement-breakpoint", ""));
-    // Record migration as applied
-    await pg.query('INSERT INTO "__drizzle_migrations" (hash) VALUES ($1)', [entry.tag]);
-  }
-
-  logger.info("PGlite migrations applied", { count: journal.entries.length - applied.size });
+  const { resolve } = await import("node:path");
+  const { applyCorePGliteMigrations } = await import("./modules/migrate.ts");
+  await applyCorePGliteMigrations(resolve(import.meta.dir, "../../../../packages/db/drizzle"));
 }
 
 /**

@@ -81,6 +81,11 @@ export class LocalQueue<T> implements JobQueue<T> {
     // Evaluate cron schedulers every 30s
     this.cronInterval = setInterval(() => this.evaluateCron(), 30_000);
 
+    // Neither timer should keep the event loop alive on its own — the server
+    // listener does that in prod, and this lets the test process exit cleanly.
+    this.drainInterval.unref?.();
+    this.cronInterval.unref?.();
+
     // Drain any jobs that were added before the worker started
     this.drain();
   }
