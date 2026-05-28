@@ -11,6 +11,8 @@
  * Query's dirty detection (JSON.stringify) correct.
  */
 
+import { API_META_KEY } from "@appstrate/core/integration";
+
 type Rec = Record<string, unknown>;
 
 function asRec(v: unknown): Rec {
@@ -92,11 +94,21 @@ export interface AuthState {
   scopeCatalog: ScopeCatalogEntry[];
   // api_key / basic / custom — credential field names (→ required string props)
   credentialFields: string[];
+  // `_meta["dev.appstrate/api"].auths[key]` present → expose the api_call tool
+  // (credential-injecting HTTP proxy) for this auth. Orthogonal to source.kind.
+  apiCallEnabled: boolean;
 }
 
 const KNOWN_AUTH_TYPES: AuthType[] = ["api_key", "oauth2", "basic", "custom"];
 
-function readAuth(key: string, raw: Rec): AuthState {
+/** Keys present under `_meta["dev.appstrate/api"].auths` — each opts that auth
+ * into the api_call tool. */
+function getApiMetaAuthKeys(manifest: Rec): Set<string> {
+  const api = asRec(asRec(manifest._meta)[API_META_KEY]);
+  return new Set(Object.keys(asRec(api.auths)));
+}
+
+function readAuth(key: string, raw: Rec, apiCallEnabled: boolean): AuthState {
   const type = KNOWN_AUTH_TYPES.includes(raw.type as AuthType) ? (raw.type as AuthType) : "api_key";
   const delivery = asRec(raw.delivery);
   const http = asRec(delivery.http);
@@ -125,12 +137,14 @@ function readAuth(key: string, raw: Rec): AuthState {
       };
     }),
     credentialFields: Object.keys(credProps),
+    apiCallEnabled,
   };
 }
 
 export function getAuths(manifest: Rec): AuthState[] {
   const auths = asRec(manifest.auths);
-  return Object.entries(auths).map(([key, raw]) => readAuth(key, asRec(raw)));
+  const apiKeys = getApiMetaAuthKeys(manifest);
+  return Object.entries(auths).map(([key, raw]) => readAuth(key, asRec(raw), apiKeys.has(key)));
 }
 
 /** Preserve `scope_catalog[].implies` (+ any other per-entry fields) by merging
@@ -221,6 +235,32 @@ function patchAuth(base: Rec, a: AuthState): Rec {
   return out;
 }
 
+/**
+ * Reconcile `_meta["dev.appstrate/api"].auths` against the form's per-auth
+ * `apiCallEnabled` flags. Keys are re-derived from the current auth list, so
+ * renaming/removing an auth auto-prunes dangling meta entries. Existing
+ * per-auth entries (carrying `upload_protocols`, set only via the JSON tab) are
+ * preserved. Empties the block / drops `_meta` entirely when nothing opts in.
+ */
+function setApiMeta(manifest: Rec, list: AuthState[]): Rec {
+  const meta = asRec(manifest._meta);
+  const api = asRec(meta[API_META_KEY]);
+  const existingAuths = asRec(api.auths);
+  const enabled = list.filter((a) => a.key.trim() && a.apiCallEnabled);
+
+  if (enabled.length === 0) {
+    const { [API_META_KEY]: _dropped, ...restMeta } = meta;
+    const next = { ...manifest };
+    if (Object.keys(restMeta).length > 0) next._meta = restMeta;
+    else delete next._meta;
+    return next;
+  }
+
+  const metaAuths: Rec = {};
+  for (const a of enabled) metaAuths[a.key] = asRec(existingAuths[a.key]);
+  return { ...manifest, _meta: { ...meta, [API_META_KEY]: { ...api, auths: metaAuths } } };
+}
+
 export function setAuths(manifest: Rec, list: AuthState[]): Rec {
   const existing = asRec(manifest.auths);
   const auths: Rec = {};
@@ -228,7 +268,7 @@ export function setAuths(manifest: Rec, list: AuthState[]): Rec {
     if (!a.key.trim()) continue;
     auths[a.key] = patchAuth(asRec(existing[a.key]), a);
   }
-  return { ...manifest, auths };
+  return setApiMeta({ ...manifest, auths }, list);
 }
 
 export function emptyAuth(key: string): AuthState {
@@ -245,6 +285,7 @@ export function emptyAuth(key: string): AuthState {
     defaultScopes: [],
     scopeCatalog: [],
     credentialFields: ["api_key"],
+    apiCallEnabled: false,
   };
 }
 

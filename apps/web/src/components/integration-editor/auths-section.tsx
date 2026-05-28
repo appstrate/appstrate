@@ -124,6 +124,22 @@ export function AuthsSection({ manifest, onChange }: AuthsSectionProps) {
             />
           )}
 
+          {/* api_call tool opt-in (`_meta["dev.appstrate/api"].auths[key]`) */}
+          <label className="flex items-start gap-2 text-sm">
+            <Checkbox
+              checked={auth.apiCallEnabled}
+              onCheckedChange={(c) => updateAuth(idx, { apiCallEnabled: Boolean(c) })}
+              className="mt-0.5"
+              data-testid={`auth-api-call-${auth.key}`}
+            />
+            <span className="flex min-w-0 flex-col gap-0.5">
+              <span className="font-medium">{t("integrationEditor.auths.apiCall")}</span>
+              <span className="text-muted-foreground text-xs">
+                {t("integrationEditor.auths.apiCallDesc")}
+              </span>
+            </span>
+          </label>
+
           {/* Credential delivery (HTTP header injection) */}
           <div className="border-border space-y-2 rounded border border-dashed p-2">
             <Label className="text-xs uppercase">{t("integrationEditor.auths.delivery")}</Label>
