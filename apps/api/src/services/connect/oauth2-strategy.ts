@@ -62,11 +62,11 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       );
     }
     const redirectUri = client.redirect_uri ?? `${getEnv().APP_URL}/api/integrations/callback`;
-    // AFPS §7.3 / §7.4 (Appendix D renames): `authorization_endpoint`,
-    // `token_endpoint`, `resource` (was audience), `token_endpoint_auth_method`
-    // (was tokenAuthMethod), `default_scopes`, `code_challenge_methods_supported`
-    // (PKCE; was pkceEnabled), `issuer` (new — discovery). `scope_separator`
-    // moved under `_meta["dev.appstrate/oauth"]`.
+    // AFPS §7.3 / §7.4: `authorization_endpoint`,
+    // `token_endpoint`, `resource`, `token_endpoint_auth_method`,
+    // `default_scopes`, `code_challenge_methods_supported`
+    // (PKCE), `issuer` (discovery). `scope_separator`
+    // lives under `_meta["dev.appstrate/oauth"]`.
     const oauthMeta = (auth._meta?.["dev.appstrate/oauth"] ?? undefined) as
       | { scope_separator?: string }
       | undefined;

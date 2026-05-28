@@ -480,7 +480,7 @@ export function createIntegrationsRouter() {
             connectionId: body.connection_id,
           })
         : [];
-      // AFPS (Appendix D): manifest default scopes are `default_scopes`.
+      // AFPS: manifest default scopes are `default_scopes`.
       const defaultScopes = (auth as { default_scopes?: string[] }).default_scopes ?? [];
       const scopes = [...new Set([...defaultScopes, ...(body.scopes ?? []), ...granted])];
       const strategy = resolveStrategy(auth);

@@ -11,8 +11,8 @@
  * extensions — into typed accessors so call sites stay readable and the snake_case
  * vocabulary lives in exactly one place.
  *
- * Vocabulary (AFPS §7, Appendix D):
- *   - `source.kind: "local" | "remote" | "none"` replaces the 1.x inline `server`.
+ * Vocabulary (AFPS §7):
+ *   - `source.kind: "local" | "remote" | "none"`.
  *   - per-auth OAuth: `authorization_endpoint`, `token_endpoint`, `resource`,
  *     `default_scopes`, `code_challenge_methods_supported`, …
  *   - `delivery.http` is `{ in, name, prefix?, value, encoding?, allow_server_override? }`.

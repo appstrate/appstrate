@@ -15,9 +15,8 @@ export function parseDraftManifest(value: unknown): Partial<Manifest> {
  *
  * The platform's transitive dependency graph is skill-only: agents pull in
  * skills, and skills can depend on other skills. Integrations are resolved
- * through a separate path (`parseManifestIntegrations`), and the legacy
- * `tool`/`provider` package types are gone — so this returns a bare list of
- * skill package IDs rather than a typed multi-category bag.
+ * through a separate path (`parseManifestIntegrations`), so this returns a
+ * bare list of skill package IDs rather than a typed multi-category bag.
  */
 export function extractSkillIdsFromManifest(manifest: Partial<Manifest>): string[] {
   const dependencies = asRecord(manifest.dependencies);
