@@ -2,7 +2,7 @@
 
 `appstrate` is the official command-line tool for installing, configuring, and authenticating against an Appstrate instance. It is a single self-contained binary (Bun runtime embedded) — no Node.js, npm, or pre-installed dependencies required on the host.
 
-Lives at [`apps/cli/`](./) in the monorepo; versioned in lockstep with the platform ([ADR-006](../../docs/adr/ADR-006-cli-device-flow-monorepo.md)).
+Lives at [`apps/cli/`](./) in the monorepo; versioned in lockstep with the platform.
 
 > **Driving this CLI from an AI coding agent?** Read [`AGENTS.md`](./AGENTS.md) first — it distills this reference into a zero-to-first-run recipe, rules of engagement, and a `curl` → `appstrate api` cheat sheet sized for an agent's context window.
 
@@ -173,7 +173,7 @@ On success, the banner names both: `Logged in as … to "Acme" (org_xxx) / app "
 
 1. `POST /api/auth/device/code` → receive `device_code`, `user_code`, `verification_uri_complete`, `expires_in` (10 min), `interval` (5s).
 2. CLI prints the code, opens the verification URI in the browser via the [`open`](https://www.npmjs.com/package/open) package (silent fallback on headless hosts — the URL is still displayed in the terminal).
-3. User authenticates on the instance's `/activate` SSR page and clicks "Autoriser". A realm guard on `/device/approve` rejects cross-audience approval attempts (e.g. an application-level end-user trying to approve a CLI session) — see [ADR-006](../../docs/adr/ADR-006-cli-device-flow-monorepo.md) for rationale.
+3. User authenticates on the instance's `/activate` SSR page and clicks "Autoriser". A realm guard on `/device/approve` rejects cross-audience approval attempts (e.g. an application-level end-user trying to approve a CLI session).
 4. CLI polls `POST /api/auth/cli/token` every `interval` seconds (honoring `slow_down` backoff) until approval. On success: receives an `access_token` (15-minute signed JWT, ES256) + `refresh_token` (30-day opaque rotating token) pair — see issue #165.
 5. CLI decodes the JWT payload locally to extract `sub` (user id) and `email` from its claims. No second round-trip needed — the JWT is the authoritative identity source, and `/api/auth/get-session` does not understand Bearer JWTs (that endpoint is BA's cookie-based session reader).
 6. Tokens are stored in the OS keyring; profile is written to `config.toml`.
@@ -664,4 +664,4 @@ Source at [`apps/cli/`](../../apps/cli/). Tests at `apps/cli/test/` (unit tests,
 
 The release pipeline (`.github/workflows/release.yml`) handles this by running one job per target on a native runner (macOS arm64, macOS x64, Linux x64, Linux arm64) — each job's `bun install` fetches the matching native binding. If you need a binary for a platform other than your host locally, run `bun build --compile` on that target's OS or wait for a GitHub Release.
 
-Architectural decisions in [ADR-006](../../docs/adr/ADR-006-cli-device-flow-monorepo.md); implementation plan in `docs/specs/CLI_IMPLEMENTATION_PLAN.md` (local-only, gitignored); preflight results in `docs/specs/cli-preflight-results.md` (also gitignored).
+Implementation plan in `docs/specs/CLI_IMPLEMENTATION_PLAN.md` (local-only, gitignored); preflight results in `docs/specs/cli-preflight-results.md` (also gitignored).

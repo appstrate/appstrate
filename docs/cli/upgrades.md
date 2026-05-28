@@ -31,8 +31,8 @@ shadowing each other on `$PATH`. This page is the reference matrix.
 
 For most users, the curl channel is the default recommendation: it ships a
 single statically-linked binary with cryptographic provenance (minisign
-signature on `checksums.txt`, see `docs/adr/ADR-006-cli-device-flow-monorepo.md`)
-and the in-place `self-update` flow works without involving any other tool.
+signature on `checksums.txt`) and the in-place `self-update` flow works
+without involving any other tool.
 
 ## Upgrading
 
@@ -191,8 +191,6 @@ parse those outputs stay machine-readable.
 
 ## See also
 
-- [`docs/adr/ADR-006-cli-device-flow-monorepo.md`](../adr/ADR-006-cli-device-flow-monorepo.md)
-  — full design of the CLI distribution model and trust chain.
 - [`scripts/bootstrap.sh`](../../scripts/bootstrap.sh) — the curl
   installer, including the dual-install pre-check.
 - [`scripts/verify.sh`](../../scripts/verify.sh) — the optional

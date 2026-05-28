@@ -211,7 +211,7 @@ harness, but a simple golden-file diff is sufficient for L1-L3.
 
 ## Signing model
 
-Artifact signing follows [ADR-009](../../docs/adr/ADR-009-afps-bundle-signing-ed25519-to-sigstore.md):
+Artifact signing model:
 
 - **v1 — Ed25519 detached (shipped)**. `signature.sig` holds
   `{ alg, keyId, signature, chain? }`; verification pins trust by
