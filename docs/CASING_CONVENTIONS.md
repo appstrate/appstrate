@@ -200,6 +200,13 @@ If unsure: "universal" means "appears on >5 different types". Otherwise snake_ca
 
 **Rule**: PG NOTIFY emits snake_case (matches SQL columns), realtime.ts converts to camelCase before SSE broadcast. Frontend reads camelCase from SSE.
 
+**Channels (all snake→camel via the same transform)**:
+
+- `run_update` — id, packageId, status, userId, endUserId, orgId, applicationId, scheduleId, error, startedAt, completedAt, duration.
+- `run_log` — id, runId, orgId, applicationId, type, level, event, message, data, createdAt.
+- `run_metric` — runId, orgId, applicationId, packageId, tokenUsage, costSoFar.
+- `connection_update` — id, integrationPackageId, authKey, userId, endUserId, applicationId, needsReconnection, deleted, operation. Actor-scoped server-side via subscriber filter on `userId`/`endUserId` (drops cross-actor rows; cross-app already gated by upstream SSE auth).
+
 **Why**: Historical. Not aligned with REST wire (snake_case + universal DB camelCase). Frontend components handle both shapes. Could be unified in future but not a bug.
 
 #### Carve-out 4i — CloudEvents payloads

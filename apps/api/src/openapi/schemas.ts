@@ -33,7 +33,46 @@ export const schemas = {
           properties: {
             field: { type: "string" },
             code: { type: "string" },
+            title: {
+              type: "string",
+              description: "Human-readable title; preserved from the underlying error factory.",
+            },
             message: { type: "string" },
+            // Channel-specific smuggles surfaced by services/integration-connection-resolver.ts:translateResolutionError.
+            // Documented here so SDK consumers can rely on them without reading the resolver source.
+            candidateConnectionIds: {
+              type: "array",
+              items: { type: "string" },
+              description:
+                "Populated on `must_choose_connection`. Connection ids the caller may pick from; pass one back via the request body's `connection_overrides` map to retry the run.",
+            },
+            connection_id: {
+              type: "string",
+              description:
+                "Populated on `needs_reconnection` and `insufficient_scopes`. Forward as `connectionId` on the OAuth re-kickoff so the callback UPDATEs the existing row in place (avoids duplicate INSERT — single-writer contract in `integration-connections.ts:persistCredentialBundle`).",
+            },
+            missing_scopes: {
+              type: "array",
+              items: { type: "string" },
+              description:
+                "Populated on `insufficient_scopes`. OAuth scopes the agent's selected tools require that the connection lacks; forwarded to the OAuth re-consent prompt.",
+            },
+            owned_by_actor: {
+              type: "boolean",
+              description:
+                "Populated on `insufficient_scopes`. True when the under-scoped connection belongs to the calling actor (UI offers an upgrade) vs. a foreign shared row (read-only error).",
+            },
+            required_auth_key: {
+              type: "string",
+              description:
+                "Populated on `auth_key_mismatch`. The agent dep's pinned `auth_key` per AFPS §4.1.",
+            },
+            available_auth_keys: {
+              type: "array",
+              items: { type: "string" },
+              description:
+                "Populated on `auth_key_mismatch`. Auth keys the actor's existing connections use; helps the UI route to the correct connect method.",
+            },
           },
         },
       },
@@ -550,7 +589,12 @@ export const schemas = {
       model_id_override: { type: ["string", "null"] },
       proxy_id_override: { type: ["string", "null"] },
       version_override: { type: ["string", "null"] },
-      connection_overrides: { type: ["object", "null"] },
+      connection_overrides: {
+        type: ["object", "null"],
+        description:
+          'Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Flat map: `{ "@scope/integration": "<connection_id>" }`. Replayed on every fire; loses to admin pins (#1), beats actor-fallback (#4).',
+        additionalProperties: { type: "string" },
+      },
       last_run_at: { type: ["string", "null"], format: "date-time" },
       next_run_at: { type: ["string", "null"], format: "date-time" },
       createdAt: { type: "string", format: "date-time" },

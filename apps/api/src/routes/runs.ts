@@ -247,7 +247,21 @@ export function createRunsRouter() {
           : undefined,
       );
 
-      // Shared preflight: resolve config, validate readiness
+      const {
+        input: parsedInput,
+        uploadedFiles,
+        modelIdOverride,
+        proxyIdOverride,
+        configOverride,
+        connectionOverrides,
+      } = inputResult;
+
+      // Shared preflight: resolve config, validate readiness. Threading
+      // `connectionOverrides` here is what makes the
+      // MissingConnectionsModal retry actually work — readiness sees the
+      // caller's pick and skips the must_choose error on >1 candidates.
+      // Pre-fix, the readiness gate fired must_choose regardless of the
+      // override, so the picker UX loop never exited.
       const {
         config,
         modelId: preflightModelId,
@@ -257,16 +271,8 @@ export function createRunsRouter() {
         applicationId: c.get("applicationId"),
         orgId,
         actor,
+        connectionOverrides: connectionOverrides ?? null,
       });
-
-      const {
-        input: parsedInput,
-        uploadedFiles,
-        modelIdOverride,
-        proxyIdOverride,
-        configOverride,
-        connectionOverrides,
-      } = inputResult;
 
       // Deep-merge any per-run `config` override on top of the persisted
       // application config and re-validate against the manifest schema.

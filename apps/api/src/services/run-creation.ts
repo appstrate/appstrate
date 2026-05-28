@@ -183,6 +183,10 @@ async function createRemoteRun(input: CreateRunInput): Promise<CreateRunResult> 
       config,
       applicationId,
       actor,
+      // Forward overrides so a remote retry with `connection_overrides`
+      // exits the must_choose loop instead of re-firing 412 on the same
+      // candidate set.
+      ...(input.connectionOverrides ? { runOverrides: input.connectionOverrides } : {}),
     });
   } catch (err) {
     return {

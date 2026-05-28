@@ -256,6 +256,49 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     expect(err!.candidateConnectionIds!.sort()).toEqual([conn1, conn2].sort());
   });
 
+  it("must_choose retry: posting connection_overrides exits the 412 loop", async () => {
+    // The whole UX recovery loop: 412 → modal picks a candidate → retry the
+    // POST with `connection_overrides: { [integ]: connId }` → resolver
+    // honours mechanism #2 (run override) → run kickoff proceeds. A
+    // regression in the override→resolver wiring would silently strand
+    // users in the modal even after picking.
+    await seedAgent({
+      id: AGENT,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: buildAgentManifest([INTEGRATION]),
+    });
+    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await seedIntegration(INTEGRATION);
+    const conn1 = await seedConnection(INTEGRATION, ctx.user.id);
+    const conn2 = await seedConnection(INTEGRATION, ctx.user.id);
+
+    // Sanity: same setup as the must_choose test fires 412.
+    const first = await app.request(`/api/agents/${AGENT}/run`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(first.status).toBe(412);
+
+    // Retry with the picked override (flat wire format).
+    const retry = await app.request(`/api/agents/${AGENT}/run`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ connection_overrides: { [INTEGRATION]: conn1 } }),
+    });
+    // Not the 412 envelope — the resolver consumed the override. Downstream
+    // model-config or runner errors may still surface; we only assert the
+    // missing-connection envelope is gone (the contract under test).
+    if (retry.status === 412) {
+      const body = (await retry.json()) as ProblemDetails;
+      expect(body.code).not.toBe("missing_integration_connection");
+    }
+    // The non-picked candidate is irrelevant; the resolver should NOT
+    // re-surface must_choose now that an explicit pick exists.
+    void conn2;
+  });
+
   it("emits 412 with needs_reconnection + connection_id when actor's only candidate is flagged", async () => {
     // The reconnect CTA in MissingConnectionsModal forwards `connection_id`
     // to InlineConnectButton → OAuth state, so the callback UPDATEs the

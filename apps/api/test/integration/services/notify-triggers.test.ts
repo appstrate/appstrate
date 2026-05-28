@@ -140,16 +140,19 @@ describe("NOTIFY triggers (regression)", () => {
     });
     await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, INTEG);
 
+    // Local accumulator — the listener handler stays attached for the
+    // process lifetime (the ListenClient abstraction in db/client.ts hides
+    // postgres.js's unlisten by casting to Promise<void>). `afterAll` drops
+    // the trigger so no more NOTIFYs fire on integration_connections, and
+    // the application_id filter inside the handler scopes to this test only.
     const received: Array<{ operation: string; needs_reconnection: boolean | null }> = [];
-    const unsub = await listenClient.listen("connection_update", (raw) => {
+    await listenClient.listen("connection_update", (raw) => {
       try {
         const payload = JSON.parse(raw) as {
           operation: string;
           application_id: string;
           needs_reconnection: boolean | null;
         };
-        // Scope filter: drop noise from any leftover rows in the test
-        // process so the assertion is bound to *this* test's writes.
         if (payload.application_id !== ctx.defaultAppId) return;
         received.push({
           operation: payload.operation,
@@ -160,48 +163,42 @@ describe("NOTIFY triggers (regression)", () => {
       }
     });
 
-    try {
-      const [row] = await db
-        .insert(integrationConnections)
-        .values({
-          integrationId: INTEG,
-          authKey: "primary",
-          accountId: `acct-${ctx.user.id.slice(0, 6)}`,
-          applicationId: ctx.defaultAppId,
-          userId: ctx.user.id,
-          endUserId: null,
-          credentialsEncrypted: encryptCredentials({ api_key: "v1" }),
-          scopesGranted: [],
-        })
-        .returning({ id: integrationConnections.id });
-      const connId = row!.id;
+    const [row] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationId: INTEG,
+        authKey: "primary",
+        accountId: `acct-${ctx.user.id.slice(0, 6)}`,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        endUserId: null,
+        credentialsEncrypted: encryptCredentials({ api_key: "v1" }),
+        scopesGranted: [],
+      })
+      .returning({ id: integrationConnections.id });
+    const connId = row!.id;
 
-      await db.execute(
-        sql`UPDATE integration_connections SET needs_reconnection = true WHERE id = ${connId}`,
-      );
-      await db.execute(sql`DELETE FROM integration_connections WHERE id = ${connId}`);
+    await db.execute(
+      sql`UPDATE integration_connections SET needs_reconnection = true WHERE id = ${connId}`,
+    );
+    await db.execute(sql`DELETE FROM integration_connections WHERE id = ${connId}`);
 
-      // NOTIFY is async w.r.t. the trigger fire — give the listener a tick.
-      for (let i = 0; i < 20 && received.length < 3; i++) {
-        await new Promise((r) => setTimeout(r, 25));
-      }
-
-      const ops = received.map((r) => r.operation);
-      expect(ops).toContain("INSERT");
-      expect(ops).toContain("UPDATE");
-      expect(ops).toContain("DELETE");
-      // INSERT defaults to needs_reconnection=false; UPDATE flips it true;
-      // DELETE carries NULL by trigger contract.
-      const insert = received.find((r) => r.operation === "INSERT");
-      const update = received.find((r) => r.operation === "UPDATE");
-      const del = received.find((r) => r.operation === "DELETE");
-      expect(insert?.needs_reconnection).toBe(false);
-      expect(update?.needs_reconnection).toBe(true);
-      expect(del?.needs_reconnection).toBeNull();
-    } finally {
-      // listenClient API may differ — best-effort cleanup. If `unsub` is a
-      // function, call it; otherwise rely on afterAll's trigger drop.
-      if (typeof unsub === "function") (unsub as () => void)();
+    // NOTIFY is async w.r.t. the trigger fire — give the listener a tick.
+    for (let i = 0; i < 20 && received.length < 3; i++) {
+      await new Promise((r) => setTimeout(r, 25));
     }
+
+    const ops = received.map((r) => r.operation);
+    expect(ops).toContain("INSERT");
+    expect(ops).toContain("UPDATE");
+    expect(ops).toContain("DELETE");
+    // INSERT defaults to needs_reconnection=false; UPDATE flips it true;
+    // DELETE carries NULL by trigger contract.
+    const insert = received.find((r) => r.operation === "INSERT");
+    const update = received.find((r) => r.operation === "UPDATE");
+    const del = received.find((r) => r.operation === "DELETE");
+    expect(insert?.needs_reconnection).toBe(false);
+    expect(update?.needs_reconnection).toBe(true);
+    expect(del?.needs_reconnection).toBeNull();
   });
 });

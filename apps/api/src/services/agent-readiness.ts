@@ -14,6 +14,7 @@ import { validateConfig } from "./schema.ts";
 import { extractManifestSchemas } from "../lib/manifest-utils.ts";
 import { isPromptEmpty, findMissingDependencies } from "@appstrate/core/validation";
 import { deepMergeConfig } from "@appstrate/core/schema-validation";
+import type { ConnectionOverrides } from "@appstrate/core/integration";
 import { ApiError, type ValidationFieldError } from "../lib/errors.ts";
 import type { Actor } from "../lib/actor.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
@@ -30,6 +31,20 @@ export interface AgentReadinessParams {
    * that resolve the actor from request context may not have one.
    */
   actor: Actor | null;
+  /**
+   * Caller's run-time connection picks (mechanism #2 of the resolver
+   * cascade). Threaded into the readiness check so the must_choose-retry
+   * UX loop in `MissingConnectionsModal` actually completes: without it,
+   * readiness re-fires must_choose on >1 candidates even when the caller
+   * already disambiguated via `connection_overrides` on the request body.
+   */
+  runOverrides?: ConnectionOverrides | null;
+  /**
+   * Schedule's frozen connection picks (mechanism #3). Plumbed for parity
+   * with `run-pipeline.ts:resolveRunConnectionsOrError` — schedules apply
+   * their overrides once at fire time, and readiness should honour them.
+   */
+  scheduleOverrides?: ConnectionOverrides | null;
 }
 
 /**
@@ -42,7 +57,7 @@ export interface AgentReadinessParams {
 export async function collectAgentReadinessErrors(
   params: AgentReadinessParams,
 ): Promise<ValidationFieldError[]> {
-  const { agent, orgId, config, applicationId, actor } = params;
+  const { agent, orgId, config, applicationId, actor, runOverrides, scheduleOverrides } = params;
   const { manifest } = agent;
   const errors: ValidationFieldError[] = [];
 
@@ -72,18 +87,22 @@ export async function collectAgentReadinessErrors(
   // pin > run override > schedule override > fallback, and surfaces
   // structured errors per (integration, authKey). Skipped when the caller
   // has no actor context (integration gating only applies to run kickoff).
+  //
+  // `runOverrides` / `scheduleOverrides` are threaded so the must_choose
+  // recovery loop in `MissingConnectionsModal` can complete: the user
+  // picks a candidate, the modal POSTs `connection_overrides`, readiness
+  // honours the pick instead of re-firing must_choose on the same N>1
+  // candidate set. run-pipeline.ts re-runs the resolver after readiness
+  // (with the same overrides) to produce the persisted snapshot — both
+  // passes see the same inputs so they cannot disagree.
   if (actor) {
     const resolution = await resolveConnectionsForRun({
       agentManifest: manifest as Record<string, unknown>,
       packageId: agent.id,
       actor,
       scope: { orgId, applicationId },
-      // Run/schedule overrides aren't plumbed through readiness today;
-      // they are evaluated at run creation time by run-pipeline.ts so the
-      // snapshot stays in sync with the actual run. Readiness only sees
-      // pin + fallback, which is the conservative view (passes readiness
-      // when at least one connection is accessible — wider checks happen
-      // when the caller binds their override at run creation).
+      ...(runOverrides ? { runOverrides } : {}),
+      ...(scheduleOverrides ? { scheduleOverrides } : {}),
     });
     for (const e of resolution.errors) {
       errors.push(translateResolutionError(e));
