@@ -55,6 +55,9 @@
     "//#verify:openapi": {
       "cache": false
     },
+    "//#verify:compose-defaults": {
+      "cache": false
+    },
     "//#detect:breaking": {
       "cache": false
     },

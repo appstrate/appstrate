@@ -80,54 +80,76 @@ services:
       - "${DOCKER_GID:-0}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # All optional env vars live in `.env.example` (the operator contract).
+    # Defaults are defined ONCE in `packages/env/src/index.ts` (Zod schema)
+    # and passthrough below means an unset host env falls back to that
+    # single source of truth. Only deployment-specific values (infra
+    # plumbing, required secrets, intentional overrides, defensive
+    # workarounds) are declared here.
     environment:
-      - PORT=3000
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-appstrate}:${POSTGRES_PASSWORD}@postgres:5432/appstrate
-      - APP_URL=${APP_URL:-http://localhost:3000}
+      # ── Required secrets (loud-fail when missing) ────────────────
       - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:?Set BETTER_AUTH_SECRET in .env}
       - UPLOAD_SIGNING_SECRET=${UPLOAD_SIGNING_SECRET:?Set UPLOAD_SIGNING_SECRET in .env}
-      - TRUSTED_ORIGINS=${TRUSTED_ORIGINS:-}
-      - SYSTEM_PROVIDER_KEYS=${SYSTEM_PROVIDER_KEYS:-[]}
       - CONNECTION_ENCRYPTION_KEY=${CONNECTION_ENCRYPTION_KEY:?Set CONNECTION_ENCRYPTION_KEY in .env}
-      - RUN_TOKEN_SECRET=${RUN_TOKEN_SECRET:-}
+      # ── Infra plumbing (refers to compose service hostnames) ─────
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-appstrate}:${POSTGRES_PASSWORD}@postgres:5432/appstrate
       # No REDIS_URL → scheduler uses the in-memory BullMQ shim,
       # rate-limiter uses a local EventEmitter, pub/sub is a local Map.
       # OK for single-instance; not safe under horizontal scaling.
+      # No S3 → filesystem storage at the host-mounted path below.
       - FS_STORAGE_PATH=/data/storage
-      - RUN_ADAPTER=${RUN_ADAPTER:-docker}
+      # ── Coupled to YAML semantics ────────────────────────────────
+      # PORT mirrors the `ports:` mapping above; DOCKER_SOCKET mirrors
+      # the `volumes:` mount; PI_IMAGE/SIDECAR_IMAGE couple to
+      # APPSTRATE_VERSION and the GHCR registry (overrides the code
+      # default which points at Docker Hub).
+      - PORT=3000
       - DOCKER_SOCKET=/var/run/docker.sock
-      - LOG_LEVEL=${LOG_LEVEL:-info}
       - PI_IMAGE=ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-latest}
       - SIDECAR_IMAGE=ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-latest}
-      - MODULES=${MODULES:-oidc,webhooks}
-      # ── Auth lockdown (closed-mode self-hosting; see AUTH_MODES.md) ──
-      - AUTH_DISABLE_SIGNUP=${AUTH_DISABLE_SIGNUP:-false}
-      - AUTH_DISABLE_ORG_CREATION=${AUTH_DISABLE_ORG_CREATION:-false}
-      - AUTH_PLATFORM_ADMIN_EMAILS=${AUTH_PLATFORM_ADMIN_EMAILS:-}
-      - AUTH_ALLOWED_SIGNUP_DOMAINS=${AUTH_ALLOWED_SIGNUP_DOMAINS:-}
-      - AUTH_BOOTSTRAP_OWNER_EMAIL=${AUTH_BOOTSTRAP_OWNER_EMAIL:-}
-      - AUTH_BOOTSTRAP_ORG_NAME=${AUTH_BOOTSTRAP_ORG_NAME:-Default}
-      # ── Credential / auth secret rotation (optional) ──
-      - BETTER_AUTH_ACTIVE_KID=${BETTER_AUTH_ACTIVE_KID:-k1}
+      # ── Intentional overrides (YAML default ≠ code default) ──────
+      # RUN_ADAPTER: code default is `process` for OSS dev — a
+      # containerized self-host must run agents in Docker.
+      - RUN_ADAPTER=${RUN_ADAPTER:-docker}
+      # TRUSTED_ORIGINS: code default allows dev localhost ports.
+      # Prod self-host correctly defaults to empty — operator opts in
+      # to their public domain explicitly.
+      - TRUSTED_ORIGINS=${TRUSTED_ORIGINS:-}
+      # ── Sidecar capacity caps (operator-tunable passthrough) ─────
+      # `pickOperatorSidecarEnv` (packages/runner-pi) forwards these
+      # from the platform's `process.env` into spawned sidecar and
+      # agent containers. Without these lines the operator cannot
+      # override the sidecar-side defaults via .env.
+      - SIDECAR_MAX_REQUEST_BODY_BYTES
+      - SIDECAR_MAX_MCP_ENVELOPE_BYTES
+      # ── Defensive workaround for better-auth 1.6+ namespace clash ──
       # NOTE: empty default (NOT `{}`) — better-auth 1.6+ has its own
       # `BETTER_AUTH_SECRETS` env var with CSV `v1:secret` format and crashes
       # boot on a non-CSV value. Empty string is falsy for better-auth and
       # treated as `{}` by `@appstrate/env`. Set this in `.env` only when
       # rotating the kid map; see env docstring in `packages/env/src/index.ts`.
       - BETTER_AUTH_SECRETS=${BETTER_AUTH_SECRETS:-}
-      - CONNECTION_ENCRYPTION_KEY_ID=${CONNECTION_ENCRYPTION_KEY_ID:-k1}
-      - CONNECTION_ENCRYPTION_KEYS=${CONNECTION_ENCRYPTION_KEYS:-{}}
-      # ── AFPS bundle signing (optional) ──
-      - AFPS_TRUST_ROOT=${AFPS_TRUST_ROOT:-[]}
-      - AFPS_SIGNATURE_POLICY=${AFPS_SIGNATURE_POLICY:-off}
-      # ── Sidecar capacity caps (optional, hard ceiling 100 MB) ──
-      - SIDECAR_MAX_REQUEST_BODY_BYTES=${SIDECAR_MAX_REQUEST_BODY_BYTES:-10485760}
-      - SIDECAR_MAX_MCP_ENVELOPE_BYTES=${SIDECAR_MAX_MCP_ENVELOPE_BYTES:-16777216}
-      # ── Remote runner protocol + watchdog (optional) ──
-      - REMOTE_RUN_SINK_DEFAULT_TTL_SECONDS=${REMOTE_RUN_SINK_DEFAULT_TTL_SECONDS:-7200}
-      - REMOTE_RUN_SINK_MAX_TTL_SECONDS=${REMOTE_RUN_SINK_MAX_TTL_SECONDS:-86400}
-      # Defaults live in `packages/env` — passthrough means an unset host
-      # env falls back to the Zod schema's single source of truth.
+      # ── Passthroughs ─────────────────────────────────────────────
+      # Defaults live in `packages/env/src/index.ts`. Unset host env
+      # falls back to the Zod schema's single source of truth.
+      - APP_URL
+      - LOG_LEVEL
+      - MODULES
+      - RUN_TOKEN_SECRET
+      - SYSTEM_PROVIDER_KEYS
+      - AUTH_DISABLE_SIGNUP
+      - AUTH_DISABLE_ORG_CREATION
+      - AUTH_PLATFORM_ADMIN_EMAILS
+      - AUTH_ALLOWED_SIGNUP_DOMAINS
+      - AUTH_BOOTSTRAP_OWNER_EMAIL
+      - AUTH_BOOTSTRAP_ORG_NAME
+      - BETTER_AUTH_ACTIVE_KID
+      - CONNECTION_ENCRYPTION_KEY_ID
+      - CONNECTION_ENCRYPTION_KEYS
+      - AFPS_TRUST_ROOT
+      - AFPS_SIGNATURE_POLICY
+      - REMOTE_RUN_SINK_DEFAULT_TTL_SECONDS
+      - REMOTE_RUN_SINK_MAX_TTL_SECONDS
       - RUN_HEARTBEAT_INTERVAL_SECONDS
       - RUN_STALL_THRESHOLD_SECONDS
       - RUN_WATCHDOG_INTERVAL_SECONDS
