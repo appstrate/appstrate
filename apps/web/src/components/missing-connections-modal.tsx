@@ -178,20 +178,32 @@ function MissingRow({
   // single (non-dropdown) renew button to the right method. Still skipped on the
   // common not_connected rows (no connection_id), saving a round trip there.
   const needsConnections = isMustChooseCode || (isReconnect && !!err.connection_id);
-  const { data: connections } = useIntegrationConnections(needsConnections ? packageId : undefined);
+  const { data: connections, refetch: refetchConnections } = useIntegrationConnections(
+    needsConnections ? packageId : undefined,
+  );
   const isMustChoose = err.code === "must_choose_connection";
   // The dead/under-scoped connection this row acts on (when known).
   const reconnectConn = err.connection_id
     ? (connections ?? []).find((c) => c.id === err.connection_id)
     : undefined;
-  // A `needs_reconnection` row clears itself live the moment its underlying
-  // connection's flag flips false: the renew popup's cache invalidation (and
-  // the `connection_update` SSE) refetch this connection list, so the row
-  // reflects the fix in real time without a manual re-run. Scope upgrades
-  // (`insufficient_scopes`) don't move `needs_reconnection`, so they keep their
-  // CTA until the re-run re-validates — no false "resolved".
+  // The row clears itself live the moment the underlying connection is healthy
+  // again: the renew flow forces a refetch (see `onConnected` below) and the
+  // `connection_update` SSE / popup invalidation also refresh this list, so the
+  // CTA flips to a resolved state without a manual re-run.
+  //   • needs_reconnection → resolved once the flag is cleared.
+  //   • insufficient_scopes (upgrade) → resolved once the granted scopes cover
+  //     every previously-missing scope. The re-consent requests them
+  //     explicitly, so they land literally in `scopes_granted` (a parent that
+  //     only *implies* a missing child won't match — conservative, never a
+  //     false "resolved").
   const resolved =
-    err.code === "needs_reconnection" && !!reconnectConn && !reconnectConn.needs_reconnection;
+    !!reconnectConn &&
+    (err.code === "needs_reconnection"
+      ? !reconnectConn.needs_reconnection
+      : err.code === "insufficient_scopes"
+        ? !reconnectConn.needs_reconnection &&
+          (err.missing_scopes ?? []).every((s) => reconnectConn.scopes_granted.includes(s))
+        : false);
   // Structural failures (integration not active in the app, package missing
   // or invalid manifest) can't be fixed by connecting — an admin must
   // activate the integration or the agent must drop the dependency. Suppress
@@ -260,6 +272,11 @@ function MissingRow({
                   ? "reconnect"
                   : "connect"
             }
+            // Force this row's connection list to refetch the moment the renew
+            // popup closes / a fields connect succeeds, so the row flips to its
+            // resolved state immediately instead of waiting on a global cache
+            // invalidation (or a page reload).
+            onConnected={() => void refetchConnections()}
           />
         )}
         {isMustChoose && !onPick && (

@@ -496,6 +496,12 @@ export const integrationsPaths = {
                   type: "object",
                   additionalProperties: { type: "string" },
                 },
+                connection_id: {
+                  type: "string",
+                  format: "uuid",
+                  description:
+                    "Existing connection to renew in place (api_key/PAT/custom). Omit on a fresh connect — the write then INSERTs a new row.",
+                },
               },
             },
           },

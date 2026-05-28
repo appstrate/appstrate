@@ -285,6 +285,39 @@ describe("api_key connection flow", () => {
     expect(after).toHaveLength(0);
   });
 
+  it("renews an api_key connection in place when connection_id is supplied — no duplicate", async () => {
+    // The renew CTA (MissingConnectionsModal / status cards) forwards the dead
+    // connection's id on the fields flow so the write UPDATEs that row instead
+    // of INSERTing a duplicate (single-writer contract). Without the route
+    // threading connection_id into the strategy ctx, a non-OAuth renew left the
+    // dead row behind and the 412 modal never cleared its CTA.
+    const first = await app.request("/api/integrations/@myorg/gmail/auths/api/connect/fields", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ credentials: { api_key: "AKIA-FIRST" } }),
+    });
+    expect(first.status).toBe(200);
+    const created = (await first.json()) as { id: string };
+
+    const renew = await app.request("/api/integrations/@myorg/gmail/auths/api/connect/fields", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        credentials: { api_key: "AKIA-RENEWED" },
+        connection_id: created.id,
+      }),
+    });
+    expect(renew.status).toBe(200);
+    const renewed = (await renew.json()) as { id: string };
+    expect(renewed.id).toBe(created.id);
+
+    const rows = await db
+      .select()
+      .from(integrationConnections)
+      .where(eq(integrationConnections.integrationId, "@myorg/gmail"));
+    expect(rows).toHaveLength(1);
+  });
+
   it("rejects api_key flow against an oauth2 auth (400)", async () => {
     const res = await app.request("/api/integrations/@myorg/gmail/auths/google/connect/fields", {
       method: "POST",

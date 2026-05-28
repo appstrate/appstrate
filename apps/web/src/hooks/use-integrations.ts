@@ -193,14 +193,22 @@ export function useConnectIntegrationFields() {
       packageId,
       authKey,
       credentials,
+      connectionId,
     }: {
       packageId: string;
       authKey: string;
       credentials: Record<string, string>;
+      connectionId?: string;
     }) =>
       api<IntegrationConnection>(
         `/integrations/${encodeURI(packageId)}/auths/${encodeURI(authKey)}/connect/fields`,
-        { method: "POST", body: JSON.stringify({ credentials }) },
+        {
+          method: "POST",
+          body: JSON.stringify({
+            credentials,
+            ...(connectionId ? { connection_id: connectionId } : {}),
+          }),
+        },
       ),
     onSuccess: (_data, vars) => {
       toast.success(t("integration.connect.success"));
@@ -208,6 +216,9 @@ export function useConnectIntegrationFields() {
       qc.invalidateQueries({
         queryKey: [...KEY(orgId, applicationId), "detail", vars.packageId],
       });
+      // Cross-app connectors page (/preferences/connectors) — keep parity with
+      // the OAuth popup path so a fields connect/renew refreshes that list too.
+      qc.invalidateQueries({ queryKey: ["me-connections"] });
     },
     onError: () => toast.error(t("integration.connect.error")),
   });

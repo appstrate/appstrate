@@ -86,6 +86,13 @@ interface InlineConnectButtonProps {
    * represents one method — offering the other methods there is nonsense.
    */
   lockToAuthKey?: boolean;
+  /**
+   * Fired after a connect/renew attempt resolves (OAuth popup closed or a
+   * fields connect succeeded). The OAuth popup can't distinguish success from
+   * a user cancel, so consumers should treat this as "re-read the truth"
+   * (e.g. refetch) rather than an assertion of success.
+   */
+  onConnected?: () => void;
 }
 
 export function InlineConnectButton({
@@ -98,6 +105,7 @@ export function InlineConnectButton({
   forceAccountSelect,
   connectionId,
   lockToAuthKey,
+  onConnected,
 }: InlineConnectButtonProps) {
   const { t } = useTranslation(["agents", "settings"]);
   const { data: detail } = useIntegrationDetail(packageId);
@@ -130,7 +138,9 @@ export function InlineConnectButton({
         ...(scopes ? { scopes } : {}),
         ...(forceAccountSelect ? { forceAccountSelect: true } : {}),
         ...(connectionId ? { connectionId } : {}),
-      });
+      })
+        .then(() => onConnected?.())
+        .catch(() => {});
     } else {
       setFieldsAuthKey(key);
     }
@@ -197,6 +207,8 @@ export function InlineConnectButton({
           authKey={fieldsAuthKey}
           auth={fieldsAuth}
           displayName={displayName}
+          {...(connectionId ? { connectionId } : {})}
+          {...(onConnected ? { onConnected: () => onConnected() } : {})}
         />
       )}
     </>
