@@ -263,7 +263,14 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["packages"] });
       if (type === "agent") qc.invalidateQueries({ queryKey: ["agents"] });
-      if (type === "integration") qc.invalidateQueries({ queryKey: ["integrations"] });
+      // An agent's tools drive the required OAuth scopes, so editing them
+      // changes the per-integration agent-resolution verdict (e.g. a connection
+      // flips to insufficient_scopes / needs reconnection). Invalidate the
+      // integrations subtree on agent edits too, not only integration edits, so
+      // the Connections tab verdict + badges refresh without a page reload.
+      if (type === "agent" || type === "integration") {
+        qc.invalidateQueries({ queryKey: ["integrations"] });
+      }
       qc.invalidateQueries({ queryKey: ["version-info"] });
       navigate(packageDetailPath(type, packageId));
     },

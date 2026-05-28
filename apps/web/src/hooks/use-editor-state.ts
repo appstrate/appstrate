@@ -110,7 +110,13 @@ export function useEditorState<S extends EditorStateBase>(
       }),
     });
     qc.invalidateQueries({ queryKey: ["packages"] });
-    if (packageType === "agent") qc.invalidateQueries({ queryKey: ["agents"] });
+    if (packageType === "agent") {
+      qc.invalidateQueries({ queryKey: ["agents"] });
+      // Tools → required scopes → per-integration agent-resolution verdict.
+      // Refresh the integrations subtree so the Connections tab reflects a
+      // newly-required reconnection/upgrade without a page reload.
+      qc.invalidateQueries({ queryKey: ["integrations"] });
+    }
   }, [state, isEdit, packageId, packageType, qc, toWireBody]);
 
   const handleSubmit = useCallback(
