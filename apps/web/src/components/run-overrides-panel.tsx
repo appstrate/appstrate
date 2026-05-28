@@ -20,9 +20,9 @@ import { usePackageVersions } from "../hooks/use-packages";
 import { useProvidersRegistry } from "../hooks/use-model-provider-credentials";
 import { findProviderByApiShapeAndBaseUrl } from "../lib/provider-registry-helpers";
 import { getProviderIcon } from "./icons";
-import { useIntegrationDetail, useIntegrationConnections } from "../hooks/use-integrations";
+import { useIntegrationDetail } from "../hooks/use-integrations";
 import { connectableAuthKeysForAgent } from "@appstrate/core/integration";
-import { connectionDisplayLabel } from "./integration-connect/connection-label";
+import { IntegrationConnectionPicker } from "./integration-connect/integration-connection-picker";
 
 const INHERIT = "__inherit__";
 const NONE = "__none__";
@@ -234,7 +234,7 @@ export function RunOverridesPanel({
 
       {versions && versions.length > 0 && (
         <div className="space-y-2">
-          <Label>{t("run.overrides.version_label", { ns: "agents" })}</Label>
+          <Label>{t("run.overrides.versionLabel", { ns: "agents" })}</Label>
           <Select value={versionSelectValue} onValueChange={setVersion}>
             <SelectTrigger>
               <SelectValue />
@@ -280,6 +280,7 @@ export function RunOverridesPanel({
 
       {agentIntegrations && agentIntegrations.length > 0 && (
         <ScheduleConnectionOverridesSection
+          agentPackageId={packageId}
           integrations={agentIntegrations}
           value={value.connection_overrides ?? {}}
           onChange={(next) => {
@@ -306,22 +307,23 @@ export function RunOverridesPanel({
 
 /**
  * Per-integration picker section that drives `value.connection_overrides`.
- * Renders one select per (integration, declared authKey) listing the
- * actor's accessible (own + shared) connections. "Inherit" leaves the
- * resolver's default cascade in charge (admin pin → user fallback at
- * fire time). Each pick freezes the choice into the schedule row.
+ * Renders the shared `IntegrationConnectionPicker` (one dropdown per
+ * integration) in `override` mode: selecting writes the pick into the
+ * flat `connection_overrides` map, "inherit" clears it. The pick freezes
+ * into the schedule row on save (cascade layer 4 — below admin pins,
+ * above member pins).
  *
- * The wire format is flat (one pick per integration — the chosen
- * connection carries its own `auth_key`), so when an integration
- * declares multiple authKeys the visible per-auth selects collapse on
- * write: the last non-empty pick wins per integration. The connection
- * picked via the most-recently-changed select becomes the override.
+ * Identical UX to the agent page's connection picker — same candidate
+ * list, scope/lock verdicts and inline connect flow — only the
+ * persistence target differs (transient form value vs. member pin).
  */
 function ScheduleConnectionOverridesSection({
+  agentPackageId,
   integrations,
   value,
   onChange,
 }: {
+  agentPackageId: string;
   integrations: AgentIntegrationRef[];
   value: Record<string, string>;
   onChange: (next: Record<string, string>) => void;
@@ -335,11 +337,8 @@ function ScheduleConnectionOverridesSection({
         {integrations.map((integ) => (
           <IntegrationOverrideRow
             key={integ.id}
+            agentPackageId={agentPackageId}
             integration={integ}
-            // The flat wire format carries one pick per integration; the
-            // per-auth select rows just surface candidates filtered by
-            // their auth_key. The current pick is the integration-level
-            // value if any.
             value={value[integ.id] ?? ""}
             onChange={(connId) => {
               const next = { ...value };
@@ -355,77 +354,40 @@ function ScheduleConnectionOverridesSection({
 }
 
 function IntegrationOverrideRow({
+  agentPackageId,
   integration,
   value,
   onChange,
 }: {
+  agentPackageId: string;
   integration: AgentIntegrationRef;
-  /** Currently-picked connection id (across all auth methods); empty = inherit. */
+  /** Currently-picked connection id; empty = inherit. */
   value: string;
   onChange: (next: string) => void;
 }) {
-  const { t } = useTranslation(["agents"]);
   const { data: detail } = useIntegrationDetail(integration.id);
-  const { data: connections } = useIntegrationConnections(integration.id);
   const displayName = detail?.manifest.display_name ?? integration.id;
-  const connectableAuthKeys = detail
-    ? connectableAuthKeysForAgent(detail.manifest, integration.tools)
-    : [];
 
-  if (connectableAuthKeys.length === 0) return null;
+  // Gate the row on whether the agent can connect this integration at all
+  // (declared auth the actor can start a flow on, given its tool selection).
+  // Mirrors the run-time `integration_not_active`/no-auth gates so the
+  // schedule editor never offers an override for an unconnectable integration.
+  if (!detail) return null;
+  if (connectableAuthKeysForAgent(detail.manifest, integration.tools).length === 0) return null;
 
   return (
     <div className="space-y-1.5" data-testid={`schedule-conn-row-${integration.id}`}>
       <div className="text-xs font-medium">{displayName}</div>
-      {connectableAuthKeys.map((authKey) => {
-        const candidates = (connections ?? []).filter((c) => c.auth_key === authKey);
-        if (candidates.length === 0) {
-          return (
-            <div
-              key={authKey}
-              className="text-muted-foreground flex items-center gap-2 text-[0.7rem]"
-            >
-              <span className="bg-muted rounded px-1.5 py-0.5 font-mono text-[10px]">
-                {authKey}
-              </span>
-              <span>{t("schedule.connectionOverrides.noCandidate")}</span>
-            </div>
-          );
-        }
-        // The select for THIS authKey is "active" only when the
-        // integration-level pick belongs to one of its candidates;
-        // otherwise it shows "Inherit". This keeps the per-auth row
-        // visualisation while honouring the flat (per-integration) wire
-        // format: switching the select for another authKey replaces the
-        // integration pick rather than adding a second one.
-        const current = candidates.some((c) => c.id === value) ? value : "";
-        return (
-          <div key={authKey} className="flex items-center gap-2">
-            <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 font-mono text-[10px]">
-              {authKey}
-            </span>
-            <select
-              value={current}
-              onChange={(e) => onChange(e.target.value)}
-              className="border-border bg-background flex-1 rounded border px-2 py-1 text-xs"
-              data-testid={`schedule-conn-select-${integration.id}-${authKey}`}
-              aria-label={t("schedule.connectionOverrides.selectAria", { authKey })}
-            >
-              <option value="">{t("schedule.connectionOverrides.inherit")}</option>
-              {candidates.map((c) => {
-                const display = connectionDisplayLabel(c);
-                return (
-                  <option key={c.id} value={c.id}>
-                    {c.shared_with_org
-                      ? t("schedule.connectionOverrides.sharedSuffix", { label: display })
-                      : display}
-                  </option>
-                );
-              })}
-            </select>
-          </div>
-        );
-      })}
+      <IntegrationConnectionPicker
+        integrationId={integration.id}
+        agentPackageId={agentPackageId}
+        manifest={detail.manifest}
+        authStatuses={detail.auths}
+        displayName={displayName}
+        agentTools={integration.tools}
+        agentScopes={undefined}
+        persistence={{ mode: "override", value, onChange }}
+      />
     </div>
   );
 }

@@ -6,6 +6,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { PackageType } from "@appstrate/core/validation";
 import type { VersionDetailResponse } from "@appstrate/shared-types";
 import { DraftDiffView } from "./draft-diff-view";
+import { companionDisplayFile } from "@/lib/package-files";
 
 interface DiffTabProps {
   type: PackageType;
@@ -23,7 +24,9 @@ export function DiffTab({ type, latestVersion, currentManifest, currentContent }
     latestVersion.content != null &&
     currentContent != null &&
     latestVersion.content !== currentContent;
-  const contentLabel = t(`editor.tabContent.${type}`);
+  // Only rendered when hasContentChanges (a content file exists), so the
+  // companion is always defined here; "" is an unreachable fallback for TS.
+  const contentLabel = companionDisplayFile(type)?.name ?? "";
 
   const [subTab, setSubTab] = useState<"manifest" | "content">(
     hasManifestChanges ? "manifest" : "content",

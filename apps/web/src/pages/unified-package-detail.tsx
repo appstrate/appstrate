@@ -23,6 +23,7 @@ import { useCurrentApplicationId } from "../hooks/use-current-application";
 import { LoadingState } from "../components/page-states";
 import { getVersionRedirect, hasActualChanges } from "../lib/version-helpers";
 import { packageDetailPath } from "../lib/package-paths";
+import { primaryDisplayFile, companionDisplayFile } from "../lib/package-files";
 import { AlertTriangle } from "lucide-react";
 
 // Shared components
@@ -64,20 +65,6 @@ type DetailTab =
   | "usedBy";
 
 const EMPTY_CONFIG_SCHEMA: JSONSchemaObject = { type: "object", properties: {} };
-
-/** Primary companion file name per package type. */
-const COMPANION_FILE_NAME: Record<PackageType, string> = {
-  agent: "prompt.md",
-  skill: "SKILL.md",
-  // mcp-server packages have no formally-required companion (§2.5 only
-  // mandates the server payload). The AFPS CLI's `afps bundle --doc` emits
-  // `SERVER.md` for the optional human-facing doc; align the UI on the same
-  // name so the file shown matches what the CLI ships.
-  "mcp-server": "SERVER.md",
-  // Phase 1.0 — INTEGRATION.md is the optional agent-facing doc;
-  // manifest.json carries the authoritative spec.
-  integration: "INTEGRATION.md",
-};
 
 // ─── Agent Run Button (inline, no wrapper) ────────────────────────────
 
@@ -265,11 +252,13 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   }
   const { isHistoricalVersion } = versionResult;
 
-  // Companion file for the dropdown (built from existing API fields)
+  // Companion file for the dropdown (built from existing API fields). Only
+  // types with a content-sourced file have one — mcp-server (manifest-only)
+  // has no companion, so the dropdown shows the manifest alone.
+  const companion = companionDisplayFile(type);
   const companionContent = isHistoricalVersion ? versionDetail?.content : currentContent;
-  const companionFile = companionContent
-    ? { name: COMPANION_FILE_NAME[type], content: companionContent }
-    : undefined;
+  const companionFile =
+    companion && companionContent ? { name: companion.name, content: companionContent } : undefined;
 
   // ── Version-aware config schema ──
   // When viewing a historical version, use that version's config schema (or empty if none).
@@ -324,7 +313,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const pkgTabs: Array<{ id: DetailTab; label: string }> = [
     {
       id: "content",
-      label: t(`editor.tabContent.${type}`),
+      label: primaryDisplayFile(type).name,
     },
     { id: "usedBy", label: t("packages.usedBy") },
   ];
@@ -510,15 +499,32 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       {type === "agent" && tab === "memory" && <AgentMemoryTab packageId={packageId} />}
       {type === "agent" && tab === "api" && <AgentApiTab packageId={packageId} />}
 
-      {type !== "agent" && tab === "content" && pkgDetail && (
-        <div className="border-border bg-card rounded-lg border p-4">
-          <pre className="text-muted-foreground bg-muted/50 overflow-x-auto rounded-md p-3 font-mono text-xs whitespace-pre-wrap">
-            {isHistoricalVersion && versionDetail?.content != null
-              ? versionDetail.content
-              : pkgDetail.content}
-          </pre>
-        </div>
-      )}
+      {type !== "agent" &&
+        tab === "content" &&
+        pkgDetail &&
+        (() => {
+          // The primary file's source decides what the content tab renders:
+          // manifest-sourced types (mcp-server) show the manifest verbatim —
+          // they have no content file; content-sourced types show their stored
+          // content (prompt.md, SKILL.md, …).
+          const body =
+            primaryDisplayFile(type).source === "manifest"
+              ? JSON.stringify(
+                  (isHistoricalVersion ? versionDetail?.manifest : pkgDetail.manifest) ?? {},
+                  null,
+                  2,
+                )
+              : isHistoricalVersion && versionDetail?.content != null
+                ? versionDetail.content
+                : pkgDetail.content;
+          return (
+            <div className="border-border bg-card rounded-lg border p-4">
+              <pre className="text-muted-foreground bg-muted/50 overflow-x-auto rounded-md p-3 font-mono text-xs whitespace-pre-wrap">
+                {body}
+              </pre>
+            </div>
+          );
+        })()}
 
       {type !== "agent" &&
         tab === "usedBy" &&
