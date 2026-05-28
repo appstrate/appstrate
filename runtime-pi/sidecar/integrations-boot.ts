@@ -102,6 +102,21 @@ import type { WorkspaceHandle } from "@appstrate/core/platform-types";
  * warning at spawn time). Strict shape validation: a foreign-shaped
  * JSON triggers a one-time warn but doesn't abort boot.
  */
+/**
+ * Reduce a URL to `host + path` for log surfaces — drops query string
+ * (signed credentials commonly land there) and credentials in the
+ * userinfo component. Falls back to "<unparseable>" when the value
+ * isn't a parseable URL so a logging path never throws.
+ */
+function safeUrlForLog(url: string): string {
+  try {
+    const u = new URL(url);
+    return `${u.protocol}//${u.host}${u.pathname}`;
+  } catch {
+    return "<unparseable>";
+  }
+}
+
 function decodeWorkspaceHandle(): WorkspaceHandle | null {
   const raw = process.env.WORKSPACE_HANDLE_JSON;
   if (!raw) return null;
@@ -671,16 +686,29 @@ async function spawnAndConnectLocalIntegration(params: {
       // (0.0.0.0 for bridged networks, 127.0.0.1 when it shares the parent NS).
       host: adapterCtx.listenerBindHost,
       onEvent: (event) => {
-        // Filter sensitive bits (URLs may carry signed query params).
-        const safe =
-          event.kind === "request-forwarded"
-            ? {
-                kind: event.kind,
-                status: event.status,
-                authKey: event.authKey,
-                retried: event.retried,
-              }
-            : event;
+        // Surface enough to debug auth-injection bugs without leaking
+        // signed query params. URL is reduced to `host + path` (no
+        // query); `headerInjected` (bool only — never the value) tells
+        // operators a missing-auth scenario apart from an upstream
+        // 401 in one glance.
+        const safe = (() => {
+          if (event.kind === "request-forwarded") {
+            const u = safeUrlForLog(event.url);
+            return {
+              kind: event.kind,
+              method: event.method,
+              url: u,
+              status: event.status,
+              authKey: event.authKey,
+              headerInjected: event.headerInjected,
+              retried: event.retried,
+            };
+          }
+          if (event.kind === "request-refused" || event.kind === "upstream-error") {
+            return { ...event, url: safeUrlForLog(event.url) };
+          }
+          return event;
+        })();
         logger.info(`${logLabel} mitm event`, { integrationId: spec.integrationId, ...safe });
       },
     });

@@ -120,9 +120,18 @@ export type MitmListenerEvent =
   | {
       kind: "request-forwarded";
       url: string;
+      method: string;
       status: number;
       authKey: string | null;
       retried: boolean;
+      /**
+       * Whether the planner produced a header to inject (i.e. the auth
+       * matched the URL AND the resolved credential value was non-empty).
+       * The value itself is NEVER surfaced — `true`/`false` only — so a
+       * platform operator reading the log line can tell a missing-auth
+       * scenario apart from an upstream 401 in a single glance.
+       */
+      headerInjected: boolean;
     }
   | { kind: "request-refused"; url: string; reason: string }
   | { kind: "tls-error"; error: string }
@@ -696,9 +705,11 @@ async function handleInnerRequest(
         emit({
           kind: "request-forwarded",
           url: targetUrl,
+          method: req.method,
           status: response.status,
           authKey: action2.matchedAuth?.authKey ?? null,
           retried: true,
+          headerInjected: action2.injectedHeader !== null,
         });
         return passthroughResponse(response);
       } catch (err) {
@@ -710,9 +721,11 @@ async function handleInnerRequest(
   emit({
     kind: "request-forwarded",
     url: targetUrl,
+    method: req.method,
     status: response.status,
     authKey: action.matchedAuth?.authKey ?? null,
     retried: false,
+    headerInjected: action.injectedHeader !== null,
   });
   return passthroughResponse(response);
 }
