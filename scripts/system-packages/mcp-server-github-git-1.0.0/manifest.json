@@ -6,7 +6,7 @@
   "schema_version": "0.1",
   "manifest_version": "0.3",
   "display_name": "GitHub Git (MCP server)",
-  "description": "Full git working-tree MCP server backed by the `git` CLI baked into the bun runner image. Tools cover the clone → edit → commit → push → open-PR loop against any GitHub repo the user has access to, using the OAuth2 GITHUB_TOKEN minted by the companion @appstrate/github-git integration. Files land on the per-run shared workspace at /workspace — the agent edits them via the platform runtime tools (Bash/Read/Edit) and uses this server only for the git/GitHub plumbing. Pairs with @appstrate/github-clone when all you need is a read-only tarball; this one is for read/write flows that culminate in a pull request.",
+  "description": "Full git working-tree MCP server backed by the `git` CLI baked into the bun runner image. Tools cover the clone → edit → commit → push → open-PR loop against any GitHub repo the user has access to, using the OAuth2 GITHUB_TOKEN minted by the companion @appstrate/github-git integration. Files land on the per-run shared workspace at /workspace — the agent edits them via the platform runtime tools (Bash/Read/Edit) and uses this server only for the git/GitHub plumbing.",
   "author": "Appstrate",
   "license": "Apache-2.0",
   "server": {

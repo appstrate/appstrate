@@ -36,9 +36,9 @@
  *     unknown" git error without forcing every agent to set them by
  *     hand.
  *
- * Why hand-rolled (not @modelcontextprotocol/sdk): identical reasoning
- * as the github-clone server — bundle stays ~10 KB, no node_modules in
- * the runner image, the wire surface we need is three RPC methods.
+ * Why hand-rolled (not @modelcontextprotocol/sdk): bundle stays ~10 KB,
+ * no node_modules in the runner image, the wire surface we need is
+ * three RPC methods (initialize, tools/list, tools/call).
  */
 
 import { mkdir, readFile as _readFile, writeFile as _writeFile } from "node:fs/promises";
@@ -57,9 +57,8 @@ const DIFF_TRUNCATE_BYTES = 200 * 1024;
 
 /**
  * Resolve a workspace-relative path to an absolute path; throw on any
- * traversal attempt or escape. Mirrors the github-clone server's
- * `resolveDest` — same contract, same defence-in-depth: strip leading
- * slashes (workspace-relative semantics), reject literal `..` segments,
+ * traversal attempt or escape. Defence-in-depth: strip leading slashes
+ * (workspace-relative semantics), reject literal `..` segments, then
  * belt-and-suspenders check that the resolved path stays under root.
  */
 export function resolveInWorkspace(workspaceRoot: string, rel: string | undefined): string {

@@ -4,7 +4,7 @@
   "type": "integration",
   "schema_version": "0.1",
   "display_name": "GitHub Git",
-  "description": "Clone-edit-commit-push-PR loop on any GitHub repo the user has access to. Backs the @appstrate/github-git-mcp local mcp-server: the sidecar mints an OAuth2 access token with `repo` scope, injects it as GITHUB_TOKEN, attaches the per-run workspace volume to the runner, and the server shells out to `git` for working-tree operations + the GitHub REST API for pull-request creation. Files land on disk under /workspace — the agent reads/edits them with the platform runtime tools (Bash/Read/Edit). Pair with @appstrate/github-clone when all you need is a read-only tarball.",
+  "description": "Clone-edit-commit-push-PR loop on any GitHub repo the user has access to. Backs the @appstrate/github-git-mcp local mcp-server: the sidecar mints an OAuth2 access token with `repo` scope, injects it as GITHUB_TOKEN, attaches the per-run workspace volume to the runner, and the server shells out to `git` for working-tree operations + the GitHub REST API for pull-request creation. Files land on disk under /workspace — the agent reads/edits them with the platform runtime tools (Bash/Read/Edit).",
   "license": "Apache-2.0",
   "source": {
     "kind": "local",
