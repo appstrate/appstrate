@@ -62,6 +62,13 @@ describe("classifyGitError", () => {
     expect(hint).toMatch(/HTTPS_PROXY|sidecar proxy/);
   });
 
+  it("hints GIT_SSL_CAINFO missing on SSL cert errors", () => {
+    const hint = classifyGitError(
+      "fatal: unable to access: SSL certificate problem: unable to get local issuer certificate",
+    );
+    expect(hint).toMatch(/GIT_SSL_CAINFO/);
+  });
+
   it("hints token rejection on 401", () => {
     const hint = classifyGitError(
       "remote: HTTP 401 Authentication failed for 'https://github.com/owner/repo.git/'",

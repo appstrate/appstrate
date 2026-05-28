@@ -136,6 +136,12 @@ export function classifyGitError(stderr: string): string | undefined {
       "Verify HTTPS_PROXY is set in the runner env (sidecar injects it via buildMitmEnvBlock)."
     );
   }
+  if (/SSL certificate problem|unable to get local issuer/i.test(stderr)) {
+    return (
+      "git rejected the MITM TLS cert — `GIT_SSL_CAINFO` is not set in the runner env. " +
+      "The sidecar should inject it via buildMitmEnvBlock; verify the platform is on a build that includes the GIT_SSL_CAINFO addition."
+    );
+  }
   if (/Authentication failed|401|403/i.test(stderr)) {
     return "GitHub rejected the bearer token — confirm the OAuth connection still has `repo` scope and hasn't expired.";
   }

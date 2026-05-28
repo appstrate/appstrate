@@ -197,7 +197,11 @@ export function resolveBundleEntry(bundleRoot: string, entryPoint: string): stri
  * Names are the standardised conventions honoured by Node (via
  * undici-style dispatchers + NODE_TLS_REJECT_UNAUTHORIZED), Python
  * (requests / httpx / urllib via REQUESTS_CA_BUNDLE / SSL_CERT_FILE),
- * and most CLI HTTP clients (curl).
+ * curl (CURL_CA_BUNDLE), and git (GIT_SSL_CAINFO — git wraps libcurl
+ * but uses its OWN env var, ignoring CURL_CA_BUNDLE/SSL_CERT_FILE).
+ * Without GIT_SSL_CAINFO a mcp-server that shells out to `git`
+ * (clone/fetch/push over HTTPS) sees `SSL certificate problem: unable
+ * to get local issuer certificate` even with the MITM proxy reachable.
  */
 export function buildMitmEnvBlock(
   proxyUrl: string,
@@ -214,5 +218,6 @@ export function buildMitmEnvBlock(
     SSL_CERT_FILE: caCertPathInRuntime,
     REQUESTS_CA_BUNDLE: caCertPathInRuntime,
     CURL_CA_BUNDLE: caCertPathInRuntime,
+    GIT_SSL_CAINFO: caCertPathInRuntime,
   };
 }
