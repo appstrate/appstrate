@@ -27,9 +27,8 @@ import { MAX_REQUEST_BODY_SIZE } from "../helpers.ts";
 import type { CredentialsResponse } from "../helpers.ts";
 
 // The multipart body shape is exercised through the generic
-// `{ns}__api_call` integration tool — the only credential-injecting MCP
-// tool now that the AFPS provider package type is retired. The
-// integration's credentials carry the same authorizedUris the
+// `{ns}__api_call` integration tool — the credential-injecting MCP tool.
+// The integration's credentials carry the same authorizedUris the
 // api_call tests used.
 const integrationCreds = (): CredentialsResponse => ({
   credentials: { access_token: "tok-abc" },
