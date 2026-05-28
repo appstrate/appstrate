@@ -9,6 +9,7 @@ import type { PackageType } from "@appstrate/core/validation";
 import { useAuth } from "../hooks/use-auth";
 import { useOrg, usePackageOwnership } from "../hooks/use-org";
 import { packageDetailPath, packageListPath } from "../lib/package-paths";
+import { primaryDisplayFile } from "../lib/package-files";
 import { useEditorState, type EditorStateBase } from "../hooks/use-editor-state";
 import { UnsavedChangesModal } from "../components/unsaved-changes-modal";
 
@@ -159,7 +160,7 @@ function AgentEditorInner({
 
   const agentTabs: Array<{ id: GenericEditorTab; label: string }> = [
     { id: "general", label: t("editor.tabGeneral") },
-    { id: "prompt", label: t("editor.tabContent.agent") },
+    { id: "prompt", label: primaryDisplayFile("agent").name },
     { id: "schema", label: t("editor.tabSchema") },
     { id: "skills", label: t("editor.tabSkills") },
     { id: "integrations", label: t("editor.tabIntegrations") },
@@ -343,7 +344,7 @@ function PackageEditorInner({
 
   const pkgTabs: Array<{ id: GenericEditorTab; label: string }> = [
     { id: "general", label: t("editor.tabGeneral") },
-    { id: "content", label: t(`editor.tabContent.${type}`) },
+    { id: "content", label: primaryDisplayFile(type).name },
     { id: "json", label: t("editor.tabJson") },
   ];
 
