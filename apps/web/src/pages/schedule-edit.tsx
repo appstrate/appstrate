@@ -58,7 +58,7 @@ export function ScheduleEditPage() {
           version_override: schedule.version_override ?? null,
           connection_overrides: (schedule.connection_overrides ?? null) as Record<
             string,
-            Record<string, string>
+            string
           > | null,
         }}
         inputSchema={deps?.inputSchema}

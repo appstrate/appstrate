@@ -112,6 +112,15 @@ function openRealtimeStream(
     orgId: string;
     applicationId: string;
     isAdmin: boolean;
+    /**
+     * Actor identity carried into the subscriber so the
+     * `connection_update` channel (and any future per-actor channel) can
+     * fan out only the rows the caller owns. Set from the SSE auth
+     * result — either `userId` (dashboard session or API key) or
+     * `endUserId` (impersonation), never both.
+     */
+    userId?: string;
+    endUserId?: string;
   },
   verbose: boolean,
 ) {
@@ -216,6 +225,7 @@ export function createRealtimeRouter() {
         orgId: validated.orgId,
         applicationId: validated.applicationId,
         isAdmin: true,
+        userId: validated.userId,
       },
       verbose,
     );
@@ -238,6 +248,7 @@ export function createRealtimeRouter() {
         orgId: validated.orgId,
         applicationId: validated.applicationId,
         isAdmin: true,
+        userId: validated.userId,
       },
       verbose,
     );
@@ -258,6 +269,7 @@ export function createRealtimeRouter() {
         orgId: validated.orgId,
         applicationId: validated.applicationId,
         isAdmin: true,
+        userId: validated.userId,
       },
       verbose,
     );

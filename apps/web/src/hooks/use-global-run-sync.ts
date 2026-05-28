@@ -7,6 +7,34 @@ import { useCurrentApplicationId } from "./use-current-application";
 import { invalidateRunAndNotificationQueries } from "./use-notifications";
 import { type EnrichedRun, type RunStatus, TERMINAL_RUN_STATUSES } from "@appstrate/shared-types";
 
+/**
+ * Patch caches when an `integration_connections` row changes (INSERT /
+ * UPDATE / DELETE) — drives the live "Reconnection required" badge on
+ * the connectors page, the agent picker verdict, the integration detail
+ * connection list, and the agent status cards. Without this they refresh
+ * only on window focus and stay stale across tabs.
+ *
+ * Server-side actor filter in `services/realtime.ts:connection_update`
+ * means we only see our own rows; cross-actor invalidations (e.g.
+ * someone else sharing a connection) still rely on a focus refetch,
+ * which is acceptable because the run-time resolver gate enforces the
+ * server-side truth anyway.
+ */
+function handleConnectionUpdate(qc: QueryClient, orgId: string, applicationId: string) {
+  // Connectors page (`/preferences/connectors`) — the orange
+  // "Reconnection required" badge reads off this key. The hook
+  // (`use-me-connections.ts`) keys flat, so we invalidate flat.
+  qc.invalidateQueries({ queryKey: ["me-connections"] });
+  // Integration list (sidebar status, integrations page count) +
+  // detail subtree (auth statuses, connection lists, agent-resolution
+  // verdicts). Subtree-invalidate by ["integrations", orgId, appId] —
+  // the per-integration key shape is
+  // `[...KEY(orgId, appId), "detail" | "connections" | "agent-resolution", …]`
+  // so the prefix match cascades to every sub-key, including the
+  // resolution verdict that powers the agent picker dropdown.
+  qc.invalidateQueries({ queryKey: ["integrations", orgId, applicationId] });
+}
+
 function handleSSEMessage(qc: QueryClient, orgId: string, applicationId: string, raw: string) {
   try {
     const newRow = JSON.parse(raw) as Record<string, unknown>;
@@ -98,6 +126,8 @@ export function useGlobalRunSync() {
             }
             if (event === "run_update" && data) {
               handleSSEMessage(qcRef.current, orgId, applicationId, data);
+            } else if (event === "connection_update" && data) {
+              handleConnectionUpdate(qcRef.current, orgId, applicationId);
             }
           }
         }

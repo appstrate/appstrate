@@ -495,8 +495,8 @@ export const schemas = {
       connection_overrides: {
         type: ["object", "null"],
         description:
-          "Frozen per-(integration, authKey) connection picks for this run (#199 mechanism #3). Loses to admin pins.",
-        additionalProperties: true,
+          'Per-integration connection picks for this run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (#1).',
+        additionalProperties: { type: "string" },
       },
     },
   },

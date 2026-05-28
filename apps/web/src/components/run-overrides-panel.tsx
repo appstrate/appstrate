@@ -37,12 +37,15 @@ export interface RunOverridesValue {
   /** Per-run version label or dist-tag override. */
   version_override?: string;
   /**
-   * Per-(integration, authKey) connection picks — frozen at schedule
-   * create/edit so every fire uses the same row. Loses to admin pins;
-   * beats schedule-less fallback + per-run overrides on the actor.
-   * Shape: `{ "@scope/integration": { "<authKey>": "<connection_id>" } }`.
+   * Per-integration connection picks — frozen at schedule create/edit so
+   * every fire uses the same row. Loses to admin pins; beats
+   * schedule-less fallback + per-run overrides on the actor. Flat map:
+   * `{ "@scope/integration": "<connection_id>" }`. The chosen connection
+   * carries its own `auth_key`; the picker UI surfaces one row per
+   * declared authKey for readability but writes one value per integration
+   * (last write wins per integration — matches the wire format).
    */
-  connection_overrides?: Record<string, Record<string, string>>;
+  connection_overrides?: Record<string, string>;
 }
 
 interface AgentIntegrationRef {
@@ -280,13 +283,12 @@ export function RunOverridesPanel({
           integrations={agentIntegrations}
           value={value.connection_overrides ?? {}}
           onChange={(next) => {
-            const compacted: Record<string, Record<string, string>> = {};
-            for (const [intId, perAuth] of Object.entries(next)) {
-              const cleaned: Record<string, string> = {};
-              for (const [authKey, connId] of Object.entries(perAuth)) {
-                if (connId) cleaned[authKey] = connId;
-              }
-              if (Object.keys(cleaned).length > 0) compacted[intId] = cleaned;
+            // Drop falsy entries — empty string === "Inherit", which is
+            // the absence of an override; sending it would be a spurious
+            // pick the resolver would have to disambiguate.
+            const compacted: Record<string, string> = {};
+            for (const [intId, connId] of Object.entries(next)) {
+              if (connId) compacted[intId] = connId;
             }
             if (Object.keys(compacted).length === 0) {
               const { connection_overrides: _omit, ...rest } = value;
@@ -304,10 +306,16 @@ export function RunOverridesPanel({
 
 /**
  * Per-integration picker section that drives `value.connection_overrides`.
- * Renders one select per (integration, required authKey) listing the
+ * Renders one select per (integration, declared authKey) listing the
  * actor's accessible (own + shared) connections. "Inherit" leaves the
  * resolver's default cascade in charge (admin pin → user fallback at
  * fire time). Each pick freezes the choice into the schedule row.
+ *
+ * The wire format is flat (one pick per integration — the chosen
+ * connection carries its own `auth_key`), so when an integration
+ * declares multiple authKeys the visible per-auth selects collapse on
+ * write: the last non-empty pick wins per integration. The connection
+ * picked via the most-recently-changed select becomes the override.
  */
 function ScheduleConnectionOverridesSection({
   integrations,
@@ -315,8 +323,8 @@ function ScheduleConnectionOverridesSection({
   onChange,
 }: {
   integrations: AgentIntegrationRef[];
-  value: Record<string, Record<string, string>>;
-  onChange: (next: Record<string, Record<string, string>>) => void;
+  value: Record<string, string>;
+  onChange: (next: Record<string, string>) => void;
 }) {
   const { t } = useTranslation(["agents"]);
   return (
@@ -328,8 +336,17 @@ function ScheduleConnectionOverridesSection({
           <IntegrationOverrideRow
             key={integ.id}
             integration={integ}
-            value={value[integ.id] ?? {}}
-            onChange={(authValues) => onChange({ ...value, [integ.id]: authValues })}
+            // The flat wire format carries one pick per integration; the
+            // per-auth select rows just surface candidates filtered by
+            // their auth_key. The current pick is the integration-level
+            // value if any.
+            value={value[integ.id] ?? ""}
+            onChange={(connId) => {
+              const next = { ...value };
+              if (connId) next[integ.id] = connId;
+              else delete next[integ.id];
+              onChange(next);
+            }}
           />
         ))}
       </div>
@@ -343,8 +360,9 @@ function IntegrationOverrideRow({
   onChange,
 }: {
   integration: AgentIntegrationRef;
-  value: Record<string, string>;
-  onChange: (next: Record<string, string>) => void;
+  /** Currently-picked connection id (across all auth methods); empty = inherit. */
+  value: string;
+  onChange: (next: string) => void;
 }) {
   const { t } = useTranslation(["agents"]);
   const { data: detail } = useIntegrationDetail(integration.id);
@@ -374,7 +392,13 @@ function IntegrationOverrideRow({
             </div>
           );
         }
-        const current = value[authKey] ?? "";
+        // The select for THIS authKey is "active" only when the
+        // integration-level pick belongs to one of its candidates;
+        // otherwise it shows "Inherit". This keeps the per-auth row
+        // visualisation while honouring the flat (per-integration) wire
+        // format: switching the select for another authKey replaces the
+        // integration pick rather than adding a second one.
+        const current = candidates.some((c) => c.id === value) ? value : "";
         return (
           <div key={authKey} className="flex items-center gap-2">
             <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 font-mono text-[10px]">
@@ -382,12 +406,7 @@ function IntegrationOverrideRow({
             </span>
             <select
               value={current}
-              onChange={(e) => {
-                const next = { ...value };
-                if (e.target.value === "") delete next[authKey];
-                else next[authKey] = e.target.value;
-                onChange(next);
-              }}
+              onChange={(e) => onChange(e.target.value)}
               className="border-border bg-background flex-1 rounded border px-2 py-1 text-xs"
               data-testid={`schedule-conn-select-${integration.id}-${authKey}`}
               aria-label={t("schedule.connection_overrides.selectAria", { authKey })}

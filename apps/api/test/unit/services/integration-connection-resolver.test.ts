@@ -394,6 +394,9 @@ describe("resolveConnections — health checks", () => {
       pins: [],
     });
     expect(result.errors[0]!.code).toBe("needs_reconnection");
+    // Surface the dead connection id so the reconnect modal can pass it
+    // through the OAuth callback (update existing row, not insert duplicate).
+    expect(result.errors[0]!.connectionId).toBe(c.id);
   });
 
   it("needs_reconnection fires for pinned + override paths too", () => {
@@ -404,6 +407,7 @@ describe("resolveConnections — health checks", () => {
       pins: [pin(c.id)],
     });
     expect(pinResult.errors[0]!.code).toBe("needs_reconnection");
+    expect(pinResult.errors[0]!.connectionId).toBe(c.id);
   });
 });
 

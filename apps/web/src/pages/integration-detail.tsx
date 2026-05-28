@@ -66,6 +66,7 @@ import {
   useUpsertIntegrationOrgDefault,
   useDeleteIntegrationOrgDefault,
   type IntegrationAuthStatus,
+  type IntegrationAuthType,
   type IntegrationConnection,
   type IntegrationManifestView,
   type IntegrationManifestAuth,
@@ -394,7 +395,18 @@ function AuthSection({
       ) : (
         <div className="space-y-2">
           {status.connections.map((c) => (
-            <ConnectionRow key={c.id} connection={c} packageId={packageId} />
+            <ConnectionRow
+              key={c.id}
+              connection={c}
+              packageId={packageId}
+              authKey={status.auth_key}
+              authType={status.type}
+              // Renew via OAuth needs an admin-registered client; a
+              // member-facing card with `clientMissing` already hides the
+              // connect CTA — pass the same gate to ConnectionRow so the
+              // renew button isn't a guaranteed 403.
+              canRenew={isOAuth && !clientMissing}
+            />
           ))}
         </div>
       )}
@@ -776,9 +788,18 @@ function PinManagementSection({ packageId }: { packageId: string }) {
 function ConnectionRow({
   connection,
   packageId,
+  authKey,
+  authType,
+  canRenew,
 }: {
   connection: IntegrationConnection;
   packageId: string;
+  /** Auth key the connection is bound to — forwarded to the renew CTA. */
+  authKey: string;
+  /** Auth type from the manifest — gates the renew CTA to oauth2 only. */
+  authType: IntegrationAuthType;
+  /** False when no OAuth client is registered yet — admin must set one up first. */
+  canRenew: boolean;
 }) {
   const { t } = useTranslation("settings");
   const updateConnection = useUpdateIntegrationConnection();
@@ -885,7 +906,23 @@ function ConnectionRow({
                 </Badge>
               )}
               {connection.needs_reconnection && (
-                <Badge variant="destructive">{t("integration.auth.needsReconnection")}</Badge>
+                <>
+                  <Badge variant="destructive">{t("integration.auth.needsReconnection")}</Badge>
+                  {canRenew && authType === "oauth2" && (
+                    <InlineConnectButton
+                      packageId={packageId}
+                      authKey={authKey}
+                      intent="reconnect"
+                      // Threading the existing row id is what makes the OAuth
+                      // callback UPDATE-in-place rather than INSERT a duplicate
+                      // (integration-connections.ts:721 "explicit connectionId
+                      // = update; no id = insert").
+                      connectionId={connection.id}
+                      lockToAuthKey
+                      size="sm"
+                    />
+                  )}
+                </>
               )}
             </div>
             {connection.scopes_granted.length > 0 && (

@@ -364,6 +364,12 @@ function checkHealth(
   if (conn.needsReconnection) {
     return errorOf(args, {
       code: "needs_reconnection",
+      // Thread the connection id so the modal's reconnect CTA can pass
+      // it back through the OAuth callback as the `connectionId` of the
+      // existing row to UPDATE — without it, the callback INSERTs a
+      // duplicate row (integration-connections.ts:721 "explicit
+      // connectionId = update; no id = insert").
+      connectionId: conn.id,
       message: `Connection for ${args.integrationId} needs to be reconnected.`,
     });
   }
@@ -586,6 +592,11 @@ export function translateResolutionError(e: ConnectionResolutionError): Validati
           ...(e.ownedByActor !== undefined ? { owned_by_actor: e.ownedByActor } : {}),
         }
       : {}),
+    // Surface the dead connection id on needs_reconnection so the modal's
+    // reconnect CTA can UPDATE the existing row in place. Omitting it makes
+    // the OAuth callback INSERT a duplicate (single-writer contract in
+    // integration-connections.ts).
+    ...(e.code === "needs_reconnection" && e.connectionId ? { connection_id: e.connectionId } : {}),
     // AFPS §4.1 — surface the pinned `auth_key` (the agent dep's choice)
     // and which auth_keys the actor's existing connections use, so the UI
     // can guide the user to connect via the right auth method.

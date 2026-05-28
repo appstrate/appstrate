@@ -61,6 +61,7 @@
   "detail.integrationMemberPicker.connectedBy": "Connectée par {{owner}}",
   "detail.integrationMemberPicker.sharedBadge": "Partagée",
   "detail.integrationMemberPicker.needsReconnection": "Reconnexion requise",
+  "detail.integrationMemberPicker.renew": "Renouveler",
   "detail.integrationMemberPicker.adminLocked": "Verrouillée par un admin",
   "detail.integrationMemberPicker.addConnection": "Ajouter une connexion",
   "detail.integrationMemberPicker.addVia": "Ajouter via {{label}}",

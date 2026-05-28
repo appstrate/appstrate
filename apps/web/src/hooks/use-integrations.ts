@@ -31,6 +31,7 @@ export type {
   AgentIntegrationEntry,
   IntegrationAgentResolution,
   IntegrationAuthStatus,
+  IntegrationAuthType,
   IntegrationCandidate,
   IntegrationConnection,
   IntegrationDetail,

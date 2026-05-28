@@ -39,11 +39,13 @@ export interface RunAgentParams {
   input?: Record<string, unknown>;
   version?: string;
   /**
-   * Per-(integration, authKey) connection picks for THIS run (#199
-   * mechanism #2). Shape: `{ "@scope/integration": { "<authKey>": "<connectionId>" } }`.
-   * Surfaced from the must_choose modal picker.
+   * Per-integration connection picks for THIS run (#199 mechanism #2).
+   * Flat map: `{ "@scope/integration": "<connectionId>" }` — one pick per
+   * integration; the chosen connection carries its own `auth_key`. Wire
+   * format validated by `input-parser.ts`. Surfaced from the must_choose
+   * modal picker.
    */
-  connectionOverrides?: Record<string, Record<string, string>>;
+  connectionOverrides?: Record<string, string>;
 }
 
 export function useRunAgent(packageId: string) {

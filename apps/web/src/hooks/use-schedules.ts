@@ -74,7 +74,7 @@ export function useCreateSchedule(packageId: string) {
       model_id_override?: string | null;
       proxy_id_override?: string | null;
       version_override?: string | null;
-      connection_overrides?: Record<string, Record<string, string>> | null;
+      connection_overrides?: Record<string, string> | null;
     }) => {
       return api<ScheduleWireDto>(`/agents/${packageId}/schedules`, {
         method: "POST",
@@ -103,7 +103,7 @@ export function useUpdateSchedule() {
       model_id_override?: string | null;
       proxy_id_override?: string | null;
       version_override?: string | null;
-      connection_overrides?: Record<string, Record<string, string>> | null;
+      connection_overrides?: Record<string, string> | null;
     }) => {
       return api<ScheduleWireDto>(`/schedules/${id}`, {
         method: "PUT",

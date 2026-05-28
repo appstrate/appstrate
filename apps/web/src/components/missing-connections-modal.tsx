@@ -26,11 +26,11 @@ import { useIntegrationDetail, useIntegrationConnections } from "../hooks/use-in
  * the row renders a clickable picker; selections accumulate in modal
  * state and the footer's "Re-run with picks" button fires the parent's
  * `onRetryWithOverrides` callback with the full
- * `{ integrationId: { authKey: connectionId } }` map.
+ * `{ integrationId: connectionId }` flat map (mechanism #2).
  */
 
 export interface MissingIntegrationFieldError {
-  field: string; // `integrations.{packageId}` or `integrations.{packageId}.{authKey}`
+  field: string; // `integrations.{packageId}` (integration-level — auth_key lives on the candidate row)
   code:
     | "not_connected"
     | "needs_reconnection"
@@ -46,9 +46,23 @@ export interface MissingIntegrationFieldError {
   missing_scopes?: string[];
   /** Candidate connection ids — populated on must_choose_connection. */
   candidateConnectionIds?: string[];
+  /**
+   * The dead/under-scoped connection id — populated on `needs_reconnection`
+   * and `insufficient_scopes`. Forwarded to `InlineConnectButton.connectionId`
+   * so the OAuth callback UPDATEs the existing row instead of INSERTing a
+   * duplicate (single-writer contract in `integration-connections.ts`).
+   */
+  connection_id?: string;
 }
 
-export type ConnectionOverridesMap = Record<string, Record<string, string>>;
+/**
+ * Per-run connection picks, flat map keyed by integration id. Matches the
+ * wire format the run route expects on `connection_overrides` (mechanism #2,
+ * validated by `input-parser.ts`: `Record<integrationId, connectionId>`). The
+ * chosen connection carries its own `auth_key`; storing it twice would let
+ * the two diverge.
+ */
+export type ConnectionOverridesMap = Record<string, string>;
 
 interface MissingConnectionsModalProps {
   open: boolean;
@@ -78,16 +92,12 @@ export function MissingConnectionsModal({
   const mustChooseCount = integrationErrors.filter(
     (e) => e.code === "must_choose_connection",
   ).length;
-  const pickedCount = Object.values(picks).reduce((sum, m) => sum + Object.keys(m).length, 0);
+  const pickedCount = Object.keys(picks).length;
 
-  const pickFor = (integrationId: string, authKey: string): string | undefined =>
-    picks[integrationId]?.[authKey];
+  const pickFor = (integrationId: string): string | undefined => picks[integrationId];
 
-  const setPick = (integrationId: string, authKey: string, connectionId: string) => {
-    setPicks((prev) => ({
-      ...prev,
-      [integrationId]: { ...(prev[integrationId] ?? {}), [authKey]: connectionId },
-    }));
+  const setPick = (integrationId: string, connectionId: string) => {
+    setPicks((prev) => ({ ...prev, [integrationId]: connectionId }));
   };
 
   const canRetry =
@@ -137,8 +147,8 @@ function MissingRow({
   onPick,
 }: {
   err: MissingIntegrationFieldError;
-  pickFor: (integrationId: string, authKey: string) => string | undefined;
-  onPick?: (integrationId: string, authKey: string, connectionId: string) => void;
+  pickFor: (integrationId: string) => string | undefined;
+  onPick?: (integrationId: string, connectionId: string) => void;
 }) {
   const { t } = useTranslation(["agents"]);
   const { packageId, authKey } = parseField(err.field);
@@ -164,15 +174,16 @@ function MissingRow({
       ? "text-amber-500"
       : "text-destructive";
 
-  // Pick the auth to act on. The field carries it for needs_reconnection /
-  // insufficient_scopes / must_choose_connection. For not_connected the
-  // field is integration-level — fall back to the first oauth2 / first
-  // declared (mirrors the AgentIntegrationsBlock heuristic).
+  // Pick the auth to act on. `field` is now integration-level only — the
+  // legacy `integrations.{id}.{authKey}` form is parsed back-compat but no
+  // longer emitted. The chosen connection carries its own `auth_key`; we
+  // only need an authKey for the reconnect/upgrade/connect CTA (to drive
+  // the OAuth method), which falls back to the manifest default.
   const targetAuthKey = authKey ?? pickDefaultAuth(detail?.manifest.auths);
   const displayName = detail?.manifest.display_name ?? packageId;
   const candidateIds = err.candidateConnectionIds ?? [];
   const candidates = (connections ?? []).filter((c) => candidateIds.includes(c.id));
-  const pickedId = isMustChoose && authKey ? pickFor(packageId, authKey) : undefined;
+  const pickedId = isMustChoose ? pickFor(packageId) : undefined;
 
   return (
     <div className="border-border bg-card flex flex-col gap-2 rounded-md border px-3 py-2">
@@ -197,6 +208,7 @@ function MissingRow({
             packageId={packageId}
             authKey={targetAuthKey}
             {...(err.missing_scopes ? { scopes: err.missing_scopes } : {})}
+            {...(err.connection_id ? { connectionId: err.connection_id } : {})}
             intent={
               err.code === "insufficient_scopes"
                 ? "upgrade"
@@ -223,14 +235,12 @@ function MissingRow({
             {candidates.map((c) => {
               const name = connectionDisplayLabel(c);
               const isPicked = c.id === pickedId;
-              const clickable = !!onPick && !!authKey;
+              const clickable = !!onPick;
               return (
                 <li key={c.id}>
                   <button
                     type="button"
-                    onClick={
-                      clickable && authKey ? () => onPick!(packageId, authKey, c.id) : undefined
-                    }
+                    onClick={clickable ? () => onPick!(packageId, c.id) : undefined}
                     disabled={!clickable}
                     className={
                       "flex w-full items-center gap-2 rounded px-2 py-1 text-left text-xs transition " +
