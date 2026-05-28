@@ -151,7 +151,7 @@ export async function listPackageVersions(packageId: string) {
     })
     .from(packageVersions)
     .where(eq(packageVersions.packageId, packageId))
-    .orderBy(desc(packageVersions.createdAt));
+    .orderBy(desc(packageVersions.createdAt), desc(packageVersions.id));
 
   return rows.map((r) => ({
     ...r,
