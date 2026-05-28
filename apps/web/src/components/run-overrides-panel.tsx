@@ -329,8 +329,8 @@ function ScheduleConnectionOverridesSection({
   const { t } = useTranslation(["agents"]);
   return (
     <div className="space-y-2">
-      <Label>{t("schedule.connection_overrides.label")}</Label>
-      <p className="text-muted-foreground text-xs">{t("schedule.connection_overrides.hint")}</p>
+      <Label>{t("schedule.connectionOverrides.label")}</Label>
+      <p className="text-muted-foreground text-xs">{t("schedule.connectionOverrides.hint")}</p>
       <div className="border-border bg-card space-y-3 rounded-md border p-3">
         {integrations.map((integ) => (
           <IntegrationOverrideRow
@@ -388,7 +388,7 @@ function IntegrationOverrideRow({
               <span className="bg-muted rounded px-1.5 py-0.5 font-mono text-[10px]">
                 {authKey}
               </span>
-              <span>{t("schedule.connection_overrides.noCandidate")}</span>
+              <span>{t("schedule.connectionOverrides.noCandidate")}</span>
             </div>
           );
         }
@@ -409,15 +409,15 @@ function IntegrationOverrideRow({
               onChange={(e) => onChange(e.target.value)}
               className="border-border bg-background flex-1 rounded border px-2 py-1 text-xs"
               data-testid={`schedule-conn-select-${integration.id}-${authKey}`}
-              aria-label={t("schedule.connection_overrides.selectAria", { authKey })}
+              aria-label={t("schedule.connectionOverrides.selectAria", { authKey })}
             >
-              <option value="">{t("schedule.connection_overrides.inherit")}</option>
+              <option value="">{t("schedule.connectionOverrides.inherit")}</option>
               {candidates.map((c) => {
                 const display = connectionDisplayLabel(c);
                 return (
                   <option key={c.id} value={c.id}>
                     {c.shared_with_org
-                      ? t("schedule.connection_overrides.sharedSuffix", { label: display })
+                      ? t("schedule.connectionOverrides.sharedSuffix", { label: display })
                       : display}
                   </option>
                 );

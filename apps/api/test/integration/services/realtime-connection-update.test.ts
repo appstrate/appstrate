@@ -14,7 +14,7 @@
  * `notify-triggers.test.ts`; this file exercises the LISTEN side.
  */
 
-import { describe, it, expect, beforeAll, beforeEach, afterEach, mock } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, mock } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
@@ -72,6 +72,20 @@ describe("realtime — connection_update channel (actor + tenant filter)", () =>
     // real NOTIFY events; the test would be vacuous without it.
     await createNotifyTriggers(db);
     await initRealtime();
+  });
+
+  // Drop the triggers we installed so they do not leak to other test files.
+  // `createNotifyTriggers` installs all three (runs, run_logs,
+  // integration_connections); the full suite runs in a single Bun process and a
+  // surviving trigger fires extra NOTIFY events into sibling suites, tripping
+  // their `toHaveBeenCalledTimes(N)` assertions by one. Mirrors the teardown in
+  // `notify-triggers.test.ts` (see its comment for the CI-flake history).
+  afterAll(async () => {
+    await db.execute(sql`DROP TRIGGER IF EXISTS runs_notify_trigger ON runs`);
+    await db.execute(sql`DROP TRIGGER IF EXISTS run_logs_notify_trigger ON run_logs`);
+    await db.execute(
+      sql`DROP TRIGGER IF EXISTS integration_connections_notify_trigger ON integration_connections`,
+    );
   });
 
   beforeEach(async () => {
