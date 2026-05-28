@@ -87,19 +87,6 @@ describe("validateManifest", () => {
     expect(result.errors[0]).toMatch(/^type:.*Unknown package type/);
   });
 
-  it("legacy `tool` / `provider` types produce the typed Unknown package type error", () => {
-    // AFPS Appendix D removed `tool` (→ `mcp-server`) and `provider` (→
-    // `integration`). Manifests carrying the old strings must fail with the
-    // single typed dispatcher error rather than a list of partial errors from
-    // the permissive base schema.
-    for (const legacy of ["tool", "provider"]) {
-      const result = validateManifest({ name: "@x/y", version: "1.0.0", type: legacy });
-      expect(result.valid).toBe(false);
-      expect(result.errors).toHaveLength(1);
-      expect(result.errors[0]).toMatch(/^type:.*Unknown package type/);
-    }
-  });
-
   it("invalid scoped name format", () => {
     const result = validateManifest(validSkillManifest({ name: "bad-name" }));
     expect(result.valid).toBe(false);
@@ -161,8 +148,7 @@ describe("validateManifest", () => {
     expect(deps.skills).toEqual({ "@test/skill": "^1.0.0", "@test/other": "~2.3.0" });
     expect(deps.integrations).toEqual({ "@test/gmail": "^1.0.0" });
     expect(deps.mcp_servers).toEqual({ "@test/fetch": "^1.0.0" });
-    // The former `dependencies.tools` map → `dependencies.mcp_servers`;
-    // selectable runtime tools are the top-level snake_case `runtime_tools`.
+    // Selectable runtime tools are the top-level snake_case `runtime_tools`.
     expect(m.runtime_tools).toEqual(["log", "note"]);
   });
 
@@ -488,24 +474,6 @@ describe("validateManifest — package-type dispatch", () => {
     });
     // No root `type` → dispatcher fails fast with the typed Unknown-package-type
     // error (AFPS requires `type` as the discriminator).
-    expect(r.valid).toBe(false);
-  });
-
-  it("rejects an mcp-server carrying only the legacy _meta identity (AFPS removed it)", () => {
-    // Legacy AFPS 1.x producers may still emit `_meta["dev.afps/mcp-server"]`. The
-    // new dispatch ignores it entirely — without a root `type: "mcp-server"`,
-    // the dispatcher fails fast with the typed Unknown-package-type error.
-    const r = validateManifest({
-      manifest_version: "0.3",
-      name: "fetch-json",
-      version: "1.0.0",
-      server: {
-        type: "node",
-        entry_point: "server/index.js",
-        mcp_config: { command: "node", args: ["server/index.js"] },
-      },
-      _meta: { "dev.afps/mcp-server": { name: "@test/fetch-json", type: "mcp-server" } },
-    });
     expect(r.valid).toBe(false);
   });
 

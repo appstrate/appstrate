@@ -31,7 +31,7 @@ function supportsTemplateRendering(schemaVersion: string | undefined): boolean {
 }
 
 /**
- * Heuristic matching the AFPS 1.3 file-field convention: a JSON Schema
+ * Heuristic matching the AFPS file-field convention: a JSON Schema
  * node is a "file" when it is a string with `format: uri` and a
  * `contentMediaType`, or an array of such items.
  */

@@ -21,7 +21,7 @@ import type { DependencyRef } from "@afps-spec/types";
  *
  * The bundle builder resolves each declared dep to exactly one version,
  * so a single name should map to a single package. When multiple
- * versions of the same name are present (not expected under AFPS 1.3
+ * versions of the same name are present (not expected under AFPS
  * but tolerated), the first one encountered wins — iteration order is
  * deterministic (Map preserves insertion order).
  */

@@ -14,7 +14,7 @@ export type LogLevel = "info" | "warn" | "error";
  * Aggregated state at the end of a run.
  *
  * Built by the runtime by reducing the stream of {@link RunEvent} values
- * against the canonical AFPS 1.3 semantics:
+ * against the canonical AFPS semantics:
  *
  * - `memory.added` events append to `memories`
  * - `pinned.set` events upsert by `key` into `pinned` (last-write-wins per key)
@@ -92,8 +92,8 @@ export type { TokenUsage };
 export interface Memory {
   content: string;
   /**
-   * AFPS 1.4+ scope dimension for the unified persistence store.
-   * 1.4 emitters MAY omit the field — consumers default to `"actor"`.
+   * AFPS scope dimension for the unified persistence store.
+   * Emitters MAY omit the field — consumers default to `"actor"`.
    */
   scope?: "actor" | "shared";
 }
@@ -105,7 +105,7 @@ export interface Memory {
  */
 export interface PinnedSlot {
   content: unknown;
-  /** AFPS 1.4+ — per-slot persistence scope; defaults to `"actor"`. */
+  /** AFPS per-slot persistence scope; defaults to `"actor"`. */
   scope?: "actor" | "shared";
 }
 

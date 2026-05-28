@@ -71,8 +71,6 @@ export type InvitationStatus = z.infer<typeof zInvitationStatusEnum>;
 export const packageTypeValues = [
   "agent",
   "skill",
-  // INTEGRATIONS_PROPOSAL §4.1. The legacy `tool`/`provider` values were
-  // dropped from the enum during the provider→integration migration (squashed into the 0000_init baseline).
   "integration",
   // AFPS §3.4 — a standalone MCP Bundle (MCPB) package that an
   // integration's `source.kind: "local"` references via `source.server`.

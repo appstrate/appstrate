@@ -2,7 +2,7 @@
 // Copyright 2026 Appstrate
 
 /**
- * AFPS 1.3 Runner surface.
+ * AFPS Runner surface.
  *
  * A {@link Runner} takes a loaded bundle + execution context, wires the
  * spec resolvers ({@link SkillResolver} and the bundled context source),
