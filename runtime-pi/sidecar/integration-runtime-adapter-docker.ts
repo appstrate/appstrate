@@ -133,12 +133,15 @@ function planContainer(spec: IntegrationSpawnSpec, bundleRoot: string): Containe
 }
 
 async function killContainer(containerId: string): Promise<void> {
-  // SIGKILL rather than `stop` — the integration MCP server's only
-  // contract is to read JSON-RPC from stdin; graceful SIGTERM gives
-  // nothing back and `--rm` cleans up either way. Errors are swallowed:
-  // cleanup runs in shutdown paths where the orphan reaper is the
-  // safety net.
-  await dockerExec(["kill", containerId]).catch(() => {});
+  // `rm -f` instead of `kill`: a container that crashed between
+  // `docker create` and `docker start -ai` (e.g. `docker cp` failed
+  // while staging the bundle) is in the `created` state with no PID 1,
+  // so `docker kill` returns an error and `--rm` never fires (it only
+  // triggers on container *exit*). `rm -f` works on any state and
+  // collapses the kill+remove into one call. Errors stay swallowed —
+  // the orphan reaper (label `appstrate.managed=true`) is the safety
+  // net for sidecar crashes.
+  await dockerExec(["rm", "-f", containerId]).catch(() => {});
 }
 
 /**
