@@ -16,6 +16,7 @@ COPY apps/api/package.json apps/api/
 COPY apps/cli/package.json apps/cli/
 COPY apps/web/package.json apps/web/
 COPY packages/afps-runtime/package.json packages/afps-runtime/
+COPY packages/afps-shared/package.json packages/afps-shared/
 COPY packages/connect/package.json packages/connect/
 COPY packages/core/package.json packages/core/
 COPY packages/db/package.json packages/db/
@@ -89,6 +90,11 @@ COPY --from=build /app/packages/core/package.json ./packages/core/
 # AFPS runtime (renderPlatformPrompt, bundle assembly, event sinks — used by API at runtime)
 COPY --from=build /app/packages/afps-runtime/src ./packages/afps-runtime/src
 COPY --from=build /app/packages/afps-runtime/package.json ./packages/afps-runtime/
+
+# AFPS shared (zero-dep leaf — companion-files, semver, integrity, credential-template, …)
+# Required by @appstrate/core, @appstrate/afps-runtime, @appstrate/connect at runtime.
+COPY --from=build /app/packages/afps-shared/src ./packages/afps-shared/src
+COPY --from=build /app/packages/afps-shared/package.json ./packages/afps-shared/
 
 # Runner-pi adapter (buildRuntimePiEnv — used by API's Pi orchestrator at runtime)
 COPY --from=build /app/packages/runner-pi/src ./packages/runner-pi/src

@@ -26,6 +26,7 @@ WORKDIR /build
 COPY package.json bun.lock ./
 COPY patches/ patches/
 COPY packages/afps-runtime/package.json  packages/afps-runtime/
+COPY packages/afps-shared/package.json   packages/afps-shared/
 COPY packages/connect/package.json       packages/connect/
 COPY packages/core/package.json          packages/core/
 COPY packages/db/package.json            packages/db/
@@ -64,6 +65,7 @@ RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
 #                                             mcp.ts / ssrf.ts
 COPY packages/connect/src        packages/connect/src
 COPY packages/afps-runtime/src   packages/afps-runtime/src
+COPY packages/afps-shared/src    packages/afps-shared/src
 COPY packages/mcp-transport/src  packages/mcp-transport/src
 COPY packages/core/src           packages/core/src
 

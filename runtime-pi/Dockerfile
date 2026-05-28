@@ -28,6 +28,7 @@ WORKDIR /build
 COPY package.json bun.lock ./
 COPY patches/ patches/
 COPY packages/afps-runtime/package.json  packages/afps-runtime/
+COPY packages/afps-shared/package.json   packages/afps-shared/
 COPY packages/connect/package.json       packages/connect/
 COPY packages/core/package.json          packages/core/
 COPY packages/db/package.json            packages/db/
@@ -77,6 +78,7 @@ RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
 # safety since other scripts under /runtime/{extensions,mcp}/ still
 # import via the symlinked paths).
 COPY packages/afps-runtime/src    packages/afps-runtime/src
+COPY packages/afps-shared/src     packages/afps-shared/src
 COPY packages/connect/src         packages/connect/src
 COPY packages/core/src            packages/core/src
 COPY packages/mcp-transport/src   packages/mcp-transport/src
@@ -175,18 +177,22 @@ COPY --chown=pi:pi packages/runner-pi/src               ./packages/runner-pi/src
 COPY --chown=pi:pi packages/runner-pi/package.json      ./packages/runner-pi/
 COPY --chown=pi:pi packages/core/src                    ./packages/core/src
 COPY --chown=pi:pi packages/core/package.json           ./packages/core/
+COPY --chown=pi:pi packages/afps-shared/src             ./packages/afps-shared/src
+COPY --chown=pi:pi packages/afps-shared/package.json    ./packages/afps-shared/
 
 # Restore the `@appstrate/*` workspace symlinks materialised by
 # `bun install` (docker COPY dereferences them into real directories).
 RUN mkdir -p node_modules/@appstrate \
- && rm -rf  node_modules/@appstrate/afps-runtime node_modules/@appstrate/mcp-transport node_modules/@appstrate/runner-pi node_modules/@appstrate/core \
+ && rm -rf  node_modules/@appstrate/afps-runtime node_modules/@appstrate/afps-shared node_modules/@appstrate/mcp-transport node_modules/@appstrate/runner-pi node_modules/@appstrate/core \
  && ln -s   /runtime/packages/afps-runtime  node_modules/@appstrate/afps-runtime \
+ && ln -s   /runtime/packages/afps-shared   node_modules/@appstrate/afps-shared \
  && ln -s   /runtime/packages/mcp-transport node_modules/@appstrate/mcp-transport \
  && ln -s   /runtime/packages/runner-pi     node_modules/@appstrate/runner-pi \
  && ln -s   /runtime/packages/core          node_modules/@appstrate/core \
  && chown -h pi:pi \
         node_modules/@appstrate \
         node_modules/@appstrate/afps-runtime \
+        node_modules/@appstrate/afps-shared \
         node_modules/@appstrate/mcp-transport \
         node_modules/@appstrate/runner-pi \
         node_modules/@appstrate/core
