@@ -217,7 +217,7 @@ describe("openPrTool — GitHub REST API contract", () => {
 
   it("surfaces non-2xx status from GitHub with the upstream message", async () => {
     const stub: typeof fetch = (async () =>
-      new Response("validation failed", { status: 422 })) as typeof fetch;
+      new Response("validation failed", { status: 422 })) as unknown as typeof fetch;
     await expect(
       openPrTool(
         { owner: "owner", repo: "repo", head: "x", base: "main", title: "T" },
@@ -309,7 +309,10 @@ describe("cloneTool — local bare-repo roundtrip", () => {
       await writeFile(join(seedDir, "README.md"), "# hello\n");
       await run(["add", "."], seedDir);
       await run(["commit", "-m", "init"], seedDir);
-      await run(["init", "--bare", bareRepo]);
+      // `-b main` forces the bare repo HEAD to refs/heads/main; without
+      // it git uses init.defaultBranch (often `master` on CI runners),
+      // so the post-push `git clone` would leave the working tree empty.
+      await run(["init", "--bare", "-b", "main", bareRepo]);
       await run(["remote", "add", "origin", bareRepo], seedDir);
       await run(["push", "origin", "main"], seedDir);
 
