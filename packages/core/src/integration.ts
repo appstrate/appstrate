@@ -928,7 +928,14 @@ export interface ConnectionResolutionError {
   code: ConnectionResolutionErrorCode;
   /** Candidate connection ids when `code === "must_choose_connection"`. */
   candidateConnectionIds?: string[];
-  /** The under-scoped connection when `code === "insufficient_scopes"`. */
+  /**
+   * The connection the error is bound to:
+   *   - `insufficient_scopes` → the under-scoped connection (target of OAuth upgrade).
+   *   - `needs_reconnection` → the dead connection (target of OAuth reconnect).
+   * Threaded into the OAuth re-kickoff `state` so the callback UPDATEs the
+   * existing row instead of INSERTing a duplicate (integration-connections.ts
+   * "explicit connectionId = update; no id = insert").
+   */
   connectionId?: string;
   /** Scopes the agent needs that the connection lacks (insufficient_scopes). */
   missingScopes?: string[];

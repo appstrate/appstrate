@@ -48,6 +48,13 @@ interface FieldsConnectModalProps {
   authKey: string;
   auth: IntegrationManifestAuth;
   displayName: string;
+  /**
+   * Existing connection id to UPDATE in place (renew). Omitted on a fresh
+   * connect — the write then INSERTs a new row. Mirrors the OAuth path's
+   * `connectionId` so a non-OAuth renew (api_key/PAT/custom) reuses the dead
+   * row instead of creating a duplicate.
+   */
+  connectionId?: string;
   /** Fired with the created connection on a successful connect (before close). */
   onConnected?: (connection: IntegrationConnection) => void;
 }
@@ -59,6 +66,7 @@ export function FieldsConnectModal({
   authKey,
   auth,
   displayName,
+  connectionId,
   onConnected,
 }: FieldsConnectModalProps) {
   const { t } = useTranslation("settings");
@@ -70,7 +78,7 @@ export function FieldsConnectModal({
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     mutation.mutate(
-      { packageId, authKey, credentials: values },
+      { packageId, authKey, credentials: values, ...(connectionId ? { connectionId } : {}) },
       {
         onSuccess: (connection) => {
           onConnected?.(connection);

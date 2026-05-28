@@ -364,6 +364,12 @@ function checkHealth(
   if (conn.needsReconnection) {
     return errorOf(args, {
       code: "needs_reconnection",
+      // Thread the connection id so the modal's reconnect CTA can pass
+      // it back through the OAuth callback as the `connectionId` of the
+      // existing row to UPDATE — without it, the callback INSERTs a
+      // duplicate row (integration-connections.ts:721 "explicit
+      // connectionId = update; no id = insert").
+      connectionId: conn.id,
       message: `Connection for ${args.integrationId} needs to be reconnected.`,
     });
   }
@@ -485,30 +491,6 @@ export async function resolveConnectionsForRun(
   });
 }
 
-/** Per-run connection snapshot: resolved picks (null when none) + any errors. */
-export interface RunConnectionSnapshot {
-  resolved: ResolvedConnectionMap | null;
-  errors: ConnectionResolutionError[];
-}
-
-/**
- * Resolve the per-run connection snapshot for a kickoff: run the mechanism
- * cascade, then project an empty map to `null` ("no integrations declared / no
- * picks"). Shared by the classic run pipeline and the remote run-creation path
- * so the resolution call + the empty→null projection live once; each caller
- * maps `errors` to its own transport (412 ApiError vs structured result),
- * mirroring how `runPreflightGates` centralizes the shared preflight gates.
- */
-export async function resolveRunConnectionSnapshot(
-  input: ResolveConnectionsForRunInput,
-): Promise<RunConnectionSnapshot> {
-  const resolution = await resolveConnectionsForRun(input);
-  return {
-    resolved: Object.keys(resolution.resolved).length > 0 ? resolution.resolved : null,
-    errors: resolution.errors,
-  };
-}
-
 /**
  * The fully-formed `missing_integration_connection` 412 payload, transport-
  * agnostic. Both run-kickoff paths (run-pipeline throws an `ApiError`,
@@ -532,27 +514,29 @@ export type ResolveRunConnectionsOutcome =
  * the canonical `missing_integration_connection` 412 payload. Returns a
  * discriminated union so each caller adapts the error to its own transport —
  * `run-pipeline.ts` rethrows it as an `ApiError`, `run-creation.ts` maps it
- * into its `{ ok: false, error }` result convention. The snapshot resolution
- * + the empty→null projection + the error mapping live here once so the two
+ * into its `{ ok: false, error }` result convention. The resolution + the
+ * empty→null projection + the error mapping live here once so the two
  * kickoff paths can never drift on the 412 shape.
  */
 export async function resolveRunConnectionsOrError(
   input: ResolveConnectionsForRunInput,
 ): Promise<ResolveRunConnectionsOutcome> {
-  const snapshot = await resolveRunConnectionSnapshot(input);
-  if (snapshot.errors.length > 0) {
+  const resolution = await resolveConnectionsForRun(input);
+  if (resolution.errors.length > 0) {
     return {
       ok: false,
       error: {
         status: 412,
         code: "missing_integration_connection",
         title: "Missing Integration Connection",
-        detail: snapshot.errors[0]!.message,
-        errors: snapshot.errors.map(translateResolutionError),
+        detail: resolution.errors[0]!.message,
+        errors: resolution.errors.map(translateResolutionError),
       },
     };
   }
-  return { ok: true, resolved: snapshot.resolved };
+  // Project an empty map to `null` ("no integrations declared / no picks").
+  const resolved = Object.keys(resolution.resolved).length > 0 ? resolution.resolved : null;
+  return { ok: true, resolved };
 }
 
 /**
@@ -586,6 +570,11 @@ export function translateResolutionError(e: ConnectionResolutionError): Validati
           ...(e.ownedByActor !== undefined ? { owned_by_actor: e.ownedByActor } : {}),
         }
       : {}),
+    // Surface the dead connection id on needs_reconnection so the modal's
+    // reconnect CTA can UPDATE the existing row in place. Omitting it makes
+    // the OAuth callback INSERT a duplicate (single-writer contract in
+    // integration-connections.ts).
+    ...(e.code === "needs_reconnection" && e.connectionId ? { connection_id: e.connectionId } : {}),
     // AFPS §4.1 — surface the pinned `auth_key` (the agent dep's choice)
     // and which auth_keys the actor's existing connections use, so the UI
     // can guide the user to connect via the right auth method.

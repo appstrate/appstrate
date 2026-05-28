@@ -61,10 +61,13 @@ export interface ScheduleSaveData {
   version_override?: string | null;
   /**
    * Per-integration connection picks frozen on the schedule row
-   * (`package_schedules.connection_overrides`). Same wire shape as the
-   * run-route's `connection_overrides`; `null` clears on edit.
+   * (`package_schedules.connection_overrides`). Flat map keyed by
+   * integration id: `{ "@scope/integration": "<connection_id>" }`. Same
+   * wire shape as the run-route's `connection_overrides` (validated by
+   * `routes/schedules.ts`'s `z.record(z.string(), z.string())`); `null`
+   * clears on edit.
    */
-  connection_overrides?: Record<string, Record<string, string>> | null;
+  connection_overrides?: Record<string, string> | null;
 }
 
 interface ScheduleFormProps {
@@ -79,7 +82,7 @@ interface ScheduleFormProps {
     model_id_override?: string | null;
     proxy_id_override?: string | null;
     version_override?: string | null;
-    connection_overrides?: Record<string, Record<string, string>> | null;
+    connection_overrides?: Record<string, string> | null;
   };
   inputSchema?: JSONSchemaObject;
   /** Agent's config schema — drives the override panel's config form. */

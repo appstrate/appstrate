@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
 import { AlertTriangle, XCircle, Puzzle, Users, Check } from "lucide-react";
 import { Modal } from "./modal";
 import { Button } from "@/components/ui/button";
@@ -26,11 +25,11 @@ import { useIntegrationDetail, useIntegrationConnections } from "../hooks/use-in
  * the row renders a clickable picker; selections accumulate in modal
  * state and the footer's "Re-run with picks" button fires the parent's
  * `onRetryWithOverrides` callback with the full
- * `{ integrationId: { authKey: connectionId } }` map.
+ * `{ integrationId: connectionId }` flat map (mechanism #2).
  */
 
 export interface MissingIntegrationFieldError {
-  field: string; // `integrations.{packageId}` or `integrations.{packageId}.{authKey}`
+  field: string; // `integrations.{packageId}` (integration-level — auth_key lives on the candidate row)
   code:
     | "not_connected"
     | "needs_reconnection"
@@ -46,20 +45,30 @@ export interface MissingIntegrationFieldError {
   missing_scopes?: string[];
   /** Candidate connection ids — populated on must_choose_connection. */
   candidateConnectionIds?: string[];
+  /**
+   * The dead/under-scoped connection id — populated on `needs_reconnection`
+   * and `insufficient_scopes`. Forwarded to `InlineConnectButton.connectionId`
+   * so the OAuth callback UPDATEs the existing row instead of INSERTing a
+   * duplicate (single-writer contract in `integration-connections.ts`).
+   */
+  connection_id?: string;
 }
 
-export type ConnectionOverridesMap = Record<string, Record<string, string>>;
+/**
+ * Per-run connection picks, flat map keyed by integration id. Matches the
+ * wire format the run route expects on `connection_overrides` (mechanism #2,
+ * validated by `input-parser.ts`: `Record<integrationId, connectionId>`). The
+ * chosen connection carries its own `auth_key`; storing it twice would let
+ * the two diverge.
+ */
+export type ConnectionOverridesMap = Record<string, string>;
 
 interface MissingConnectionsModalProps {
   open: boolean;
   onClose: () => void;
   errors: MissingIntegrationFieldError[];
-  /**
-   * Re-run with the picked overrides. Only required to enable the
-   * must_choose picker — when omitted, the picker falls back to a
-   * read-only "Manage connections" link.
-   */
-  onRetryWithOverrides?: (overrides: ConnectionOverridesMap) => void;
+  /** Re-run with the picked overrides (drives the must_choose picker). */
+  onRetryWithOverrides: (overrides: ConnectionOverridesMap) => void;
   /** Disables the retry button while the new run is in flight. */
   retrying?: boolean;
 }
@@ -78,20 +87,29 @@ export function MissingConnectionsModal({
   const mustChooseCount = integrationErrors.filter(
     (e) => e.code === "must_choose_connection",
   ).length;
-  const pickedCount = Object.values(picks).reduce((sum, m) => sum + Object.keys(m).length, 0);
+  const pickedCount = Object.keys(picks).length;
 
-  const pickFor = (integrationId: string, authKey: string): string | undefined =>
-    picks[integrationId]?.[authKey];
+  const pickFor = (integrationId: string): string | undefined => picks[integrationId];
 
-  const setPick = (integrationId: string, authKey: string, connectionId: string) => {
-    setPicks((prev) => ({
-      ...prev,
-      [integrationId]: { ...(prev[integrationId] ?? {}), [authKey]: connectionId },
-    }));
+  const setPick = (integrationId: string, connectionId: string) => {
+    setPicks((prev) => ({ ...prev, [integrationId]: connectionId }));
   };
 
-  const canRetry =
-    !!onRetryWithOverrides && mustChooseCount > 0 && pickedCount === mustChooseCount && !retrying;
+  // A `needs_reconnection` / `insufficient_scopes` / `not_connected` modal has
+  // no must_choose picks, so it previously offered only a Close button — the
+  // user had to dismiss the modal and re-run by hand after fixing a connection.
+  // Surface the same Re-run here for any actionable row. must_choose still gates
+  // on a complete pick set; the others just re-fire the run (a fresh 412 keeps
+  // the modal open with the updated error list).
+  const hasActionable = integrationErrors.some(
+    (e) =>
+      e.code === "must_choose_connection" ||
+      e.code === "needs_reconnection" ||
+      e.code === "insufficient_scopes" ||
+      e.code === "not_connected",
+  );
+  const showRetry = hasActionable;
+  const canRetry = !retrying && (mustChooseCount === 0 || pickedCount === mustChooseCount);
 
   return (
     <Modal
@@ -103,14 +121,16 @@ export function MissingConnectionsModal({
           <Button variant="outline" onClick={onClose} disabled={retrying}>
             {t("missingConnections.close")}
           </Button>
-          {onRetryWithOverrides && mustChooseCount > 0 && (
+          {showRetry && (
             <Button
               onClick={() => onRetryWithOverrides(picks)}
               disabled={!canRetry}
               data-testid="must-choose-retry"
             >
               {retrying && <Spinner />}
-              {t("missingConnections.mustChoose.retry")}
+              {mustChooseCount > 0
+                ? t("missingConnections.mustChoose.retry")
+                : t("missingConnections.retry")}
             </Button>
           )}
         </div>
@@ -119,12 +139,7 @@ export function MissingConnectionsModal({
       <p className="text-muted-foreground mb-3 text-sm">{t("missingConnections.intro")}</p>
       <div className="space-y-2">
         {integrationErrors.map((err, i) => (
-          <MissingRow
-            key={`${err.field}-${i}`}
-            err={err}
-            pickFor={pickFor}
-            onPick={onRetryWithOverrides ? setPick : undefined}
-          />
+          <MissingRow key={`${err.field}-${i}`} err={err} pickFor={pickFor} onPick={setPick} />
         ))}
       </div>
     </Modal>
@@ -137,18 +152,44 @@ function MissingRow({
   onPick,
 }: {
   err: MissingIntegrationFieldError;
-  pickFor: (integrationId: string, authKey: string) => string | undefined;
-  onPick?: (integrationId: string, authKey: string, connectionId: string) => void;
+  pickFor: (integrationId: string) => string | undefined;
+  onPick: (integrationId: string, connectionId: string) => void;
 }) {
   const { t } = useTranslation(["agents"]);
-  const { packageId, authKey } = parseField(err.field);
+  const packageId = parseField(err.field);
   const { data: detail } = useIntegrationDetail(packageId);
-  const isMustChooseCode = err.code === "must_choose_connection";
-  // Only fetch the connection list when we need to render the picker — saves
-  // an extra round trip on the common not_connected / needs_reconnection rows.
-  const { data: connections } = useIntegrationConnections(isMustChooseCode ? packageId : undefined);
-  const isReconnect = err.code === "needs_reconnection" || err.code === "insufficient_scopes";
   const isMustChoose = err.code === "must_choose_connection";
+  const isReconnect = err.code === "needs_reconnection" || err.code === "insufficient_scopes";
+  // Fetch the connection list when we render the must_choose picker, or when a
+  // reconnect/upgrade row needs the dead connection's own auth_key to bind a
+  // single (non-dropdown) renew button to the right method. Still skipped on the
+  // common not_connected rows (no connection_id), saving a round trip there.
+  const needsConnections = isMustChoose || (isReconnect && !!err.connection_id);
+  const { data: connections, refetch: refetchConnections } = useIntegrationConnections(
+    needsConnections ? packageId : undefined,
+  );
+  // The dead/under-scoped connection this row acts on (when known).
+  const reconnectConn = err.connection_id
+    ? (connections ?? []).find((c) => c.id === err.connection_id)
+    : undefined;
+  // The row clears itself live the moment the underlying connection is healthy
+  // again: the renew flow forces a refetch (see `onConnected` below) and the
+  // `connection_update` SSE / popup invalidation also refresh this list, so the
+  // CTA flips to a resolved state without a manual re-run.
+  //   • needs_reconnection → resolved once the flag is cleared.
+  //   • insufficient_scopes (upgrade) → resolved once the granted scopes cover
+  //     every previously-missing scope. The re-consent requests them
+  //     explicitly, so they land literally in `scopes_granted` (a parent that
+  //     only *implies* a missing child won't match — conservative, never a
+  //     false "resolved").
+  const resolved =
+    !!reconnectConn &&
+    (err.code === "needs_reconnection"
+      ? !reconnectConn.needs_reconnection
+      : err.code === "insufficient_scopes"
+        ? !reconnectConn.needs_reconnection &&
+          (err.missing_scopes ?? []).every((s) => reconnectConn.scopes_granted.includes(s))
+        : false);
   // Structural failures (integration not active in the app, package missing
   // or invalid manifest) can't be fixed by connecting — an admin must
   // activate the integration or the agent must drop the dependency. Suppress
@@ -157,22 +198,27 @@ function MissingRow({
     err.code === "integration_not_active" ||
     err.code === "package_not_found" ||
     err.code === "not_installed_or_invalid_manifest";
-  const Icon = isMustChoose ? Users : isReconnect ? AlertTriangle : XCircle;
-  const colorClass = isMustChoose
-    ? "text-amber-500"
-    : isReconnect
+  const Icon = resolved ? Check : isMustChoose ? Users : isReconnect ? AlertTriangle : XCircle;
+  const colorClass = resolved
+    ? "text-emerald-600"
+    : isMustChoose
       ? "text-amber-500"
-      : "text-destructive";
+      : isReconnect
+        ? "text-amber-500"
+        : "text-destructive";
 
-  // Pick the auth to act on. The field carries it for needs_reconnection /
-  // insufficient_scopes / must_choose_connection. For not_connected the
-  // field is integration-level — fall back to the first oauth2 / first
-  // declared (mirrors the AgentIntegrationsBlock heuristic).
-  const targetAuthKey = authKey ?? pickDefaultAuth(detail?.manifest.auths);
+  // Pick the auth to act on. `field` is integration-level (`integrations.{id}`);
+  // the chosen connection carries its own `auth_key`. We only need an authKey
+  // for the reconnect/upgrade/connect CTA (to drive the OAuth method). On a
+  // reconnect/upgrade the dead connection already pins a method, so resolve its
+  // auth_key for a single button bound to that method (no method-picker — there
+  // is nothing to choose); fall back to the manifest default until the
+  // connection list loads.
+  const targetAuthKey = reconnectConn?.auth_key ?? pickDefaultAuth(detail?.manifest.auths);
   const displayName = detail?.manifest.display_name ?? packageId;
   const candidateIds = err.candidateConnectionIds ?? [];
   const candidates = (connections ?? []).filter((c) => candidateIds.includes(c.id));
-  const pickedId = isMustChoose && authKey ? pickFor(packageId, authKey) : undefined;
+  const pickedId = isMustChoose ? pickFor(packageId) : undefined;
 
   return (
     <div className="border-border bg-card flex flex-col gap-2 rounded-md border px-3 py-2">
@@ -183,20 +229,19 @@ function MissingRow({
             <div className="truncate text-sm font-medium">{displayName}</div>
             <div className={`flex items-center gap-1.5 truncate text-xs ${colorClass}`}>
               <Icon className="size-3" />
-              <span className="truncate">{err.message}</span>
-              {authKey && (
-                <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 font-mono text-[10px]">
-                  {authKey}
-                </span>
-              )}
+              <span className="truncate">
+                {resolved ? t("missingConnections.resolved") : err.message}
+              </span>
             </div>
           </div>
         </div>
-        {!isMustChoose && !isStructural && targetAuthKey && (
+        {!isMustChoose && !isStructural && !resolved && targetAuthKey && (
           <InlineConnectButton
             packageId={packageId}
             authKey={targetAuthKey}
             {...(err.missing_scopes ? { scopes: err.missing_scopes } : {})}
+            {...(err.connection_id ? { connectionId: err.connection_id } : {})}
+            {...(isReconnect ? { lockToAuthKey: true } : {})}
             intent={
               err.code === "insufficient_scopes"
                 ? "upgrade"
@@ -204,41 +249,33 @@ function MissingRow({
                   ? "reconnect"
                   : "connect"
             }
+            // Force this row's connection list to refetch the moment the renew
+            // popup closes / a fields connect succeeds, so the row flips to its
+            // resolved state immediately instead of waiting on a global cache
+            // invalidation (or a page reload).
+            onConnected={() => void refetchConnections()}
           />
-        )}
-        {isMustChoose && !onPick && (
-          <Button asChild size="sm" variant="outline">
-            <Link to={`/integrations/${packageId}`}>{t("missingConnections.mustChoose.cta")}</Link>
-          </Button>
         )}
       </div>
       {isMustChoose && candidates.length > 0 && (
         <div className="border-border/60 mt-1 border-t pt-2">
           <p className="text-muted-foreground mb-1.5 text-[0.7rem]">
-            {onPick
-              ? t("missingConnections.mustChoose.pickPrompt", { count: candidates.length })
-              : t("missingConnections.mustChoose.candidates", { count: candidates.length })}
+            {t("missingConnections.mustChoose.pickPrompt", { count: candidates.length })}
           </p>
           <ul className="space-y-1">
             {candidates.map((c) => {
               const name = connectionDisplayLabel(c);
               const isPicked = c.id === pickedId;
-              const clickable = !!onPick && !!authKey;
               return (
                 <li key={c.id}>
                   <button
                     type="button"
-                    onClick={
-                      clickable && authKey ? () => onPick!(packageId, authKey, c.id) : undefined
-                    }
-                    disabled={!clickable}
+                    onClick={() => onPick(packageId, c.id)}
                     className={
                       "flex w-full items-center gap-2 rounded px-2 py-1 text-left text-xs transition " +
                       (isPicked
                         ? "border-primary bg-primary/10 border"
-                        : clickable
-                          ? "bg-muted/40 hover:bg-muted cursor-pointer"
-                          : "bg-muted/40 cursor-default")
+                        : "bg-muted/40 hover:bg-muted cursor-pointer")
                     }
                     data-testid={`must-choose-candidate-${c.id}`}
                   >
@@ -260,18 +297,7 @@ function MissingRow({
   );
 }
 
-function parseField(field: string): { packageId: string; authKey: string | null } {
-  // `integrations.@scope/name` or `integrations.@scope/name.authKey`
-  const tail = field.slice("integrations.".length);
-  // packageId always starts with `@scope/name` — split on the last `.` AFTER
-  // the slash so the auth-key parser doesn't trip on the scope's `@`.
-  const slashIdx = tail.indexOf("/");
-  if (slashIdx < 0) return { packageId: tail, authKey: null };
-  const afterSlash = tail.slice(slashIdx + 1);
-  const dotIdx = afterSlash.indexOf(".");
-  if (dotIdx < 0) return { packageId: tail, authKey: null };
-  return {
-    packageId: tail.slice(0, slashIdx + 1 + dotIdx),
-    authKey: afterSlash.slice(dotIdx + 1),
-  };
+/** Extract the integration package id from the `integrations.{packageId}` field path. */
+function parseField(field: string): string {
+  return field.slice("integrations.".length);
 }

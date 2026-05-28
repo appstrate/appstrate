@@ -704,6 +704,15 @@ export interface PersistCredentialInput {
  * the same `(packageId, authKey, accountId, app, owner)` tuple and silently
  * overwrote rows when `accountId` defaulted to "default". The current model
  * trusts the caller's intent — explicit connectionId = update; no id = insert.
+ *
+ * Callers that pass explicit `connectionId` for UPDATE: token refresh paths,
+ * dashboard renew CTAs (agent-page MemberConnectionPicker per-row Renew,
+ * integration-detail ConnectionRow reconnect), and the run-kickoff
+ * MissingConnectionsModal reconnect button. The latter two consume the
+ * `connection_id` field smuggled on `needs_reconnection` / `insufficient_scopes`
+ * ProblemDetails by `integration-connection-resolver.ts:translateResolutionError`
+ * and forward it through the OAuth state record so the callback lands here on
+ * the `update-owned` path.
  */
 export async function persistCredentialBundle(
   target: PersistTarget,

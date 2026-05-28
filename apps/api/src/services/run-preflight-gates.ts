@@ -12,7 +12,7 @@
  *      the capped value into the container env without mutating the DB.
  *
  * Why a dedicated module: platform (`run-pipeline.prepareAndExecuteRun`)
- * and remote (`run-creation.createRemoteRun`) used to duplicate all the
+ * and remote (`run-creation.createRun`) used to duplicate all the
  * gates, with the usual drift risk (rate / concurrency / hook ordering).
  * Centralising the checks here guarantees a single change surface.
  */

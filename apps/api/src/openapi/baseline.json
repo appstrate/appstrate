@@ -3822,7 +3822,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["manifest", "auths", "tool_catalog"],
+                  "required": ["manifest", "auths", "tool_catalog", "allow_undeclared_tools"],
                   "properties": {
                     "manifest": {
                       "type": "object",
@@ -3970,6 +3970,9 @@
                           }
                         }
                       }
+                    },
+                    "allow_undeclared_tools": {
+                      "type": "boolean"
                     }
                   }
                 }
@@ -4438,6 +4441,11 @@
                     "additionalProperties": {
                       "type": "string"
                     }
+                  },
+                  "connection_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Existing connection to renew in place (api_key/PAT/custom). Omit on a fresh connect — the write then INSERTs a new row."
                   }
                 }
               }
@@ -15793,8 +15801,45 @@
                 "code": {
                   "type": "string"
                 },
+                "title": {
+                  "type": "string",
+                  "description": "Human-readable title; preserved from the underlying error factory."
+                },
                 "message": {
                   "type": "string"
+                },
+                "candidateConnectionIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Populated on `must_choose_connection`. Connection ids the caller may pick from; pass one back via the request body's `connection_overrides` map to retry the run."
+                },
+                "connection_id": {
+                  "type": "string",
+                  "description": "Populated on `needs_reconnection` and `insufficient_scopes`. Forward as `connectionId` on the OAuth re-kickoff so the callback UPDATEs the existing row in place (avoids duplicate INSERT — single-writer contract in `integration-connections.ts:persistCredentialBundle`)."
+                },
+                "missing_scopes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Populated on `insufficient_scopes`. OAuth scopes the agent's selected tools require that the connection lacks; forwarded to the OAuth re-consent prompt."
+                },
+                "owned_by_actor": {
+                  "type": "boolean",
+                  "description": "Populated on `insufficient_scopes`. True when the under-scoped connection belongs to the calling actor (UI offers an upgrade) vs. a foreign shared row (read-only error)."
+                },
+                "required_auth_key": {
+                  "type": "string",
+                  "description": "Populated on `auth_key_mismatch`. The agent dep's pinned `auth_key` per AFPS §4.1."
+                },
+                "available_auth_keys": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Populated on `auth_key_mismatch`. Auth keys the actor's existing connections use; helps the UI route to the correct connect method."
                 }
               }
             }
@@ -16235,11 +16280,19 @@
                       "type": "string"
                     },
                     "tools": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      },
-                      "description": "Niveau 2 tool allowlist (optional)"
+                      "oneOf": [
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        {
+                          "type": "string",
+                          "enum": ["*"]
+                        }
+                      ],
+                      "description": "Niveau 2 tool allowlist (optional). Either an array of selected tool names or the AFPS §4.4 wildcard literal '*' opting the agent into every upstream tool (requires integration's `allow_undeclared_tools: true`)."
                     },
                     "scopes": {
                       "type": "array",
@@ -16521,8 +16574,10 @@
           },
           "connection_overrides": {
             "type": ["object", "null"],
-            "description": "Frozen per-(integration, authKey) connection picks for this run (#199 mechanism #3). Loses to admin pins.",
-            "additionalProperties": true
+            "description": "Per-integration connection picks for this run (flat-connections mechanism #2). Flat map: `{ \"@scope/integration\": \"<connection_id>\" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (#1).",
+            "additionalProperties": {
+              "type": "string"
+            }
           }
         }
       },
@@ -16626,7 +16681,11 @@
             "type": ["string", "null"]
           },
           "connection_overrides": {
-            "type": ["object", "null"]
+            "type": ["object", "null"],
+            "description": "Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Flat map: `{ \"@scope/integration\": \"<connection_id>\" }`. Replayed on every fire; loses to admin pins (#1), beats actor-fallback (#4).",
+            "additionalProperties": {
+              "type": "string"
+            }
           },
           "last_run_at": {
             "type": ["string", "null"],

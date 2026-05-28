@@ -122,12 +122,20 @@ export interface PreflightResult {
 /**
  * Resolve package config and validate agent readiness.
  * Shared by the POST /run route and the scheduler's triggerScheduledRun.
+ *
+ * Connection overrides are forwarded to readiness so a caller that
+ * disambiguates a must_choose situation via `connection_overrides` on
+ * the run body / schedule row gets past the readiness gate on retry
+ * (otherwise readiness re-fires must_choose on the same N>1 candidate
+ * set and the picker UX loop never exits).
  */
 export async function resolveRunPreflight(params: {
   agent: LoadedPackage;
   applicationId: string;
   orgId: string;
   actor: Actor | null;
+  connectionOverrides?: ConnectionOverrides | null;
+  scheduleConnectionOverrides?: ConnectionOverrides | null;
 }): Promise<PreflightResult> {
   const { agent, applicationId, orgId, actor } = params;
 
@@ -139,6 +147,10 @@ export async function resolveRunPreflight(params: {
     config: packageConfig.config,
     applicationId,
     actor,
+    ...(params.connectionOverrides ? { runOverrides: params.connectionOverrides } : {}),
+    ...(params.scheduleConnectionOverrides
+      ? { scheduleOverrides: params.scheduleConnectionOverrides }
+      : {}),
   });
 
   return {
@@ -200,11 +212,13 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   //  - the credentials resolver (sidecar MITM refresh) honours that pick
   //    long after kickoff via runs.resolved_connections.
   //
-  // Readiness already ran in resolveRunPreflight WITHOUT overrides — this
-  // pass adds the per-run picks. Any error here is hard 412: either the
-  // override points at an invalid id (caller's mistake), or a race after
-  // readiness mutated DB state (connection deleted / pin shifted). Either
-  // way the caller needs structured feedback, not a silent fallback.
+  // Readiness already ran in resolveRunPreflight WITH the same overrides
+  // (so the must_choose retry exits its loop). This second pass produces
+  // the persisted resolution snapshot and re-checks under the current DB
+  // state — any error here is hard 412: either the override points at an
+  // invalid id (caller's mistake), or a race after readiness mutated DB
+  // state (connection deleted / pin shifted). Either way the caller
+  // needs structured feedback, not a silent fallback.
   let resolvedConnections: ResolvedConnectionMap | null = null;
   if (actor) {
     const outcome = await resolveRunConnectionsOrError({

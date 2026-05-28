@@ -39,11 +39,13 @@ export interface RunAgentParams {
   input?: Record<string, unknown>;
   version?: string;
   /**
-   * Per-(integration, authKey) connection picks for THIS run (#199
-   * mechanism #2). Shape: `{ "@scope/integration": { "<authKey>": "<connectionId>" } }`.
-   * Surfaced from the must_choose modal picker.
+   * Per-integration connection picks for THIS run (#199 mechanism #2).
+   * Flat map: `{ "@scope/integration": "<connectionId>" }` — one pick per
+   * integration; the chosen connection carries its own `auth_key`. Wire
+   * format validated by `input-parser.ts`. Surfaced from the must_choose
+   * modal picker.
    */
-  connectionOverrides?: Record<string, Record<string, string>>;
+  connectionOverrides?: Record<string, string>;
 }
 
 export function useRunAgent(packageId: string) {
@@ -261,7 +263,14 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["packages"] });
       if (type === "agent") qc.invalidateQueries({ queryKey: ["agents"] });
-      if (type === "integration") qc.invalidateQueries({ queryKey: ["integrations"] });
+      // An agent's tools drive the required OAuth scopes, so editing them
+      // changes the per-integration agent-resolution verdict (e.g. a connection
+      // flips to insufficient_scopes / needs reconnection). Invalidate the
+      // integrations subtree on agent edits too, not only integration edits, so
+      // the Connections tab verdict + badges refresh without a page reload.
+      if (type === "agent" || type === "integration") {
+        qc.invalidateQueries({ queryKey: ["integrations"] });
+      }
       qc.invalidateQueries({ queryKey: ["version-info"] });
       navigate(packageDetailPath(type, packageId));
     },

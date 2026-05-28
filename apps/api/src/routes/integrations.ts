@@ -91,6 +91,11 @@ export const connectFieldsSchema = z.object({
   credentials: z.record(z.string(), z.unknown()).refine((c) => Object.keys(c).length > 0, {
     message: "credentials must contain at least one field",
   }),
+  // Renew an existing connection in place (api_key/PAT/custom): the OAuth
+  // flow smuggles this on `needs_reconnection`; the fields flow takes the same
+  // id so the write UPDATEs the dead row instead of INSERTing a duplicate
+  // (single-writer contract, integration-connections.ts:persistCredentialBundle).
+  connection_id: z.uuid().optional(),
 });
 
 export const connectOAuthSchema = z.object({
@@ -409,7 +414,13 @@ export function createIntegrationsRouter() {
         const conn = await resolveStrategy(auth, {
           connectToolExecutor: createConnectRunExecutor(),
         }).complete(
-          { scope, actor, integrationId: packageId, authKey },
+          {
+            scope,
+            actor,
+            integrationId: packageId,
+            authKey,
+            ...(body.connection_id ? { connectionId: body.connection_id } : {}),
+          },
           { kind: "fields", credentials: body.credentials },
         );
         await recordAuditFromContext(c, {

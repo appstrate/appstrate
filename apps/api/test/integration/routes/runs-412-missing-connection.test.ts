@@ -256,6 +256,95 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     expect(err!.candidateConnectionIds!.sort()).toEqual([conn1, conn2].sort());
   });
 
+  it("must_choose retry: posting connection_overrides exits the 412 loop", async () => {
+    // The whole UX recovery loop: 412 → modal picks a candidate → retry the
+    // POST with `connection_overrides: { [integ]: connId }` → resolver
+    // honours mechanism #2 (run override) → run kickoff proceeds. A
+    // regression in the override→resolver wiring would silently strand
+    // users in the modal even after picking.
+    await seedAgent({
+      id: AGENT,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: buildAgentManifest([INTEGRATION]),
+    });
+    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await seedIntegration(INTEGRATION);
+    const conn1 = await seedConnection(INTEGRATION, ctx.user.id);
+    // Second candidate (unbound) — its existence is what makes the resolver
+    // enter must_choose; the retry must NOT re-surface it once a pick exists.
+    await seedConnection(INTEGRATION, ctx.user.id);
+
+    // Sanity: same setup as the must_choose test fires 412.
+    const first = await app.request(`/api/agents/${AGENT}/run`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(first.status).toBe(412);
+
+    // Retry with the picked override (flat wire format).
+    const retry = await app.request(`/api/agents/${AGENT}/run`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ connection_overrides: { [INTEGRATION]: conn1 } }),
+    });
+    // 412 is reserved exclusively for the missing_integration_connection
+    // envelope, so asserting the retry is NOT 412 directly proves the
+    // resolver consumed the override and exited the must_choose loop. A
+    // regression in the override→resolver wiring would re-fire 412 here.
+    // (Downstream model-config errors surface as 400, not 412 — fine.)
+    expect(retry.status).not.toBe(412);
+  });
+
+  it("emits 412 with needs_reconnection + connection_id when actor's only candidate is flagged", async () => {
+    // The reconnect CTA in MissingConnectionsModal forwards `connection_id`
+    // to InlineConnectButton → OAuth state, so the callback UPDATEs the
+    // existing row in `integration-connections.ts:persistCredentialBundle`
+    // (target.kind === "update-owned") instead of INSERTing a duplicate.
+    await seedAgent({
+      id: AGENT,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: buildAgentManifest([INTEGRATION]),
+    });
+    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await seedIntegration(INTEGRATION);
+
+    const [row] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationId: INTEGRATION,
+        authKey: "primary",
+        accountId: `acct-${ctx.user.id.slice(0, 6)}`,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        endUserId: null,
+        credentialsEncrypted: encryptCredentials({ api_key: "stale" }),
+        scopesGranted: [],
+        needsReconnection: true,
+      })
+      .returning({ id: integrationConnections.id });
+    const deadConnectionId = row!.id;
+
+    const res = await app.request(`/api/agents/${AGENT}/run`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+
+    expect(res.status).toBe(412);
+    const body = (await res.json()) as ProblemDetails;
+    expect(body.code).toBe("missing_integration_connection");
+
+    const err = body.errors!.find((e) => e.field === `integrations.${INTEGRATION}`);
+    expect(err).toBeDefined();
+    expect(err!.code).toBe("needs_reconnection");
+    // The smuggled connection_id is the wire contract the reconnect modal
+    // consumes — without it the OAuth callback INSERTs a duplicate row.
+    expect(err!.connection_id).toBe(deadConnectionId);
+  });
+
   it("happy path: returns NON-412 status when the actor has exactly one accessible connection", async () => {
     // Sanity foil — proves the 412 only fires when there's a real gap.
     // Note: the run may still hit a downstream error (e.g. no model

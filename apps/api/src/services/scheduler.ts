@@ -296,6 +296,11 @@ async function triggerScheduledRun(
         applicationId,
         orgId,
         actor,
+        // Schedule freezes per-integration picks at create time; forward
+        // them so readiness honours the same disambiguation the run
+        // pipeline will use a few lines down (matches the "single source
+        // of truth" intent of overrides).
+        scheduleConnectionOverrides: overrides.connectionOverrides ?? null,
       });
 
       config = preflight.config;

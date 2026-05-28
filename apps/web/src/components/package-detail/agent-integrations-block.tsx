@@ -491,15 +491,18 @@ function MemberConnectionPicker({
     await refresh();
   };
 
-  const triggerConnect = async (authKey: string) => {
+  const triggerConnect = async (authKey: string, opts?: { connectionId?: string }) => {
     const auth = auths[authKey];
     if (!auth) return;
     if (auth.type === "oauth2") {
       // Snapshot the accessible set so we can identify the just-created
       // connection afterwards — the OAuth popup can't return its id, and a
       // cancelled popup adds nothing, leaving the prior resolution intact.
+      // On a renew (connectionId supplied) the callback UPDATEs in place
+      // and the snapshot diff is empty — we skip the post-popup pin step.
       const before = new Set(candidates.map((c) => c.id));
       const hadPin = !!memberPinnedConnectionId;
+      const isRenew = !!opts?.connectionId;
       // Forward the agent's per-tool inferred scopes so consent asks for what
       // THIS agent needs — not just the integration's manifest defaults (the
       // integration detail page is the surface that connects at defaults).
@@ -508,9 +511,13 @@ function MemberConnectionPicker({
         packageId: integrationId,
         authKey,
         ...(scopes.length ? { scopes } : {}),
-        forceAccountSelect: true,
+        // Account picker is noise on a renew — the user is re-authorising the
+        // existing identity, not picking a new one. Force-pick stays on fresh
+        // connects so "Add another" actually offers a different account.
+        ...(isRenew ? {} : { forceAccountSelect: true }),
+        ...(opts?.connectionId ? { connectionId: opts.connectionId } : {}),
       });
-      if (hadPin) {
+      if (isRenew || hadPin) {
         await refresh();
         return;
       }
@@ -521,6 +528,10 @@ function MemberConnectionPicker({
       if (added) await selectConnection(added.id);
       else await refresh();
     } else {
+      // api_key / basic / custom — no row-update path via the credentials
+      // modal yet; we surface the connect modal. The modal's `connectionId`
+      // wiring is OAuth-only for now (matches the single-writer convergence
+      // in integration-connections.ts for non-OAuth auths).
       setFieldsAuthKey(authKey);
     }
   };
@@ -599,6 +610,12 @@ function MemberConnectionPicker({
           {candidates.map((c) => {
             const tl = typeLabel(c.auth_key);
             const isDefault = !current && resolvedConnectionId === c.id;
+            // Only the connection owner can renew via OAuth — a foreign
+            // shared connection's tokens belong to someone else. We still
+            // let the actor pin a foreign needs_reconnection row (their
+            // pick survives once the owner renews it).
+            const canRenew =
+              c.needs_reconnection && c.is_own && auths[c.auth_key]?.type === "oauth2";
             return (
               <DropdownMenuItem
                 key={c.id}
@@ -611,7 +628,7 @@ function MemberConnectionPicker({
                 data-testid={`member-pick-option-${c.id}`}
               >
                 <Check className={`size-3.5 ${resolvedConnectionId === c.id ? "" : "opacity-0"}`} />
-                <div className="flex min-w-0 flex-col">
+                <div className="flex min-w-0 flex-1 flex-col">
                   <div className="flex items-center gap-1.5">
                     <span className="truncate font-medium">{connectionDisplayLabel(c)}</span>
                     {tl && (
@@ -641,6 +658,26 @@ function MemberConnectionPicker({
                       ` · ${t("detail.integrationMemberPicker.needsReconnection")}`}
                   </span>
                 </div>
+                {canRenew && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="ml-1 h-6 gap-1 px-2 text-[0.65rem] text-amber-600 hover:text-amber-700 dark:text-amber-400"
+                    disabled={oauthPending}
+                    onClick={(e) => {
+                      // Block the DropdownMenuItem's onSelect so the renew
+                      // click doesn't also pin the dead row.
+                      e.preventDefault();
+                      e.stopPropagation();
+                      void triggerConnect(c.auth_key, { connectionId: c.id });
+                    }}
+                    data-testid={`member-pick-renew-${c.id}`}
+                    aria-label={t("detail.integrationMemberPicker.renew")}
+                  >
+                    <RefreshCw className="size-3" />
+                    {t("detail.integrationMemberPicker.renew")}
+                  </Button>
+                )}
               </DropdownMenuItem>
             );
           })}
