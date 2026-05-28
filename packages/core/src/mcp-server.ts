@@ -59,23 +59,173 @@ const userConfigEntrySchema = z
  */
 export const mcpServerManifestSchema = afpsMcpServerManifestSchema.superRefine((m, ctx) => {
   const userConfig = (m as { user_config?: unknown }).user_config;
-  if (!userConfig || typeof userConfig !== "object" || Array.isArray(userConfig)) return;
-  for (const [key, entry] of Object.entries(userConfig as Record<string, unknown>)) {
-    const result = userConfigEntrySchema.safeParse(entry);
-    if (!result.success) {
-      for (const issue of result.error.issues) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["user_config", key, ...issue.path],
-          message: issue.message,
-        });
+  if (userConfig && typeof userConfig === "object" && !Array.isArray(userConfig)) {
+    for (const [key, entry] of Object.entries(userConfig as Record<string, unknown>)) {
+      const result = userConfigEntrySchema.safeParse(entry);
+      if (!result.success) {
+        for (const issue of result.error.issues) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["user_config", key, ...issue.path],
+            message: issue.message,
+          });
+        }
       }
     }
+  }
+
+  // Install-time check for the shared-workspace opt-in. The
+  // {@link getMcpServerWorkspaceMount} parser throws synchronously on
+  // malformed entries; surface those errors here so the platform's
+  // POST/PUT /api/packages/mcp-server validators catch them at upload
+  // time rather than at the first run that would spawn the server.
+  try {
+    getMcpServerWorkspaceMount(m as McpServerManifest);
+  } catch (err) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["_meta", MCP_SERVER_WORKSPACE_META_KEY],
+      message: err instanceof Error ? err.message : String(err),
+    });
   }
 });
 
 /** The `_meta` key carrying Appstrate-specific mcp-server runtime hints. */
 export const MCP_SERVER_APPSTRATE_META_KEY = "dev.appstrate/mcp-server";
+
+/** The `_meta` key carrying the shared-workspace opt-in declaration. */
+export const MCP_SERVER_WORKSPACE_META_KEY = "dev.appstrate/workspace";
+
+/**
+ * Per-run shared workspace declaration parsed from an mcp-server
+ * manifest. Opt-in: an mcp-server without this `_meta` entry runs
+ * with no access to the agent's filesystem (the current default).
+ * When present, the platform mounts the per-run shared workspace
+ * (a Docker volume in tier 3, a host directory in tier 0-2) at the
+ * requested path on the runner.
+ *
+ * `mount` is the absolute POSIX path inside the runner container/
+ * process where the workspace materialises. Defaults to `/workspace`
+ * (matches the agent's CWD) — operators should keep the default
+ * unless their runner image carves out a non-standard layout.
+ *
+ * `access` is the manifest-author's intent:
+ *   - `"ro"` — read-only mount, the server can read files written by
+ *     the agent but cannot mutate them. Safer default for inspection
+ *     tools (linters, formatters running in dry-run mode).
+ *   - `"rw"` — read-write mount, the server writes results back to
+ *     disk for the agent to consume. Required for clone, build,
+ *     download tools.
+ */
+export interface McpServerWorkspaceMount {
+  readonly mount: string;
+  readonly access: "ro" | "rw";
+}
+
+const DEFAULT_WORKSPACE_MOUNT = "/workspace";
+
+/**
+ * POSIX-only path normaliser — collapses `./` segments and resolves
+ * `..` against parents in-place, preserves leading `/`, strips
+ * trailing `/` (except for the root). Local to this module so the
+ * core package stays node-builtin-free and works in browsers (some
+ * core consumers are bundled into the web app).
+ *
+ * NOT a general-purpose normaliser — only handles the cases the
+ * workspace-mount validator needs to defend against: trailing
+ * slashes, redundant `./`, and `..` segments that would otherwise
+ * slip past a literal-string check.
+ */
+function normalizeMount(path: string): string {
+  const parts = path.split("/");
+  const out: string[] = [];
+  for (const part of parts) {
+    if (part === "" || part === ".") continue;
+    if (part === "..") {
+      // Preserve `..` in the output so the downstream check still
+      // sees it and rejects. A "pop on .." behaviour would
+      // collapse the segment and silently neutralise the attack.
+      out.push("..");
+      continue;
+    }
+    out.push(part);
+  }
+  return "/" + out.join("/");
+}
+
+/**
+ * Parse the shared-workspace opt-in declared on an mcp-server manifest.
+ * Returns `undefined` when absent (default: no workspace access).
+ *
+ * Validation is strict — a malformed entry is rejected rather than
+ * silently degraded. The platform's install-time package validator
+ * surfaces this via the schema check, so by the time
+ * `getMcpServerWorkspaceMount` runs at spawn time the manifest is
+ * trusted; any error here indicates a contract drift between the
+ * validator and the parser and should fail loudly.
+ *
+ * Rules:
+ *   - `mount` MUST be an absolute POSIX path (`startsWith("/")`)
+ *   - `mount` MUST NOT contain `..` traversal segments
+ *   - `mount` MUST NOT be a kernel-managed prefix (`/proc/`, `/sys/`,
+ *     `/dev/`, `/etc/`) — those would break the runner container
+ *   - `access` MUST be `"ro"` or `"rw"`; defaults to `"ro"` when
+ *     omitted (least-privilege)
+ */
+export function getMcpServerWorkspaceMount(
+  manifest: McpServerManifest,
+): McpServerWorkspaceMount | undefined {
+  const meta = (manifest as { _meta?: Record<string, unknown> })._meta;
+  if (!meta || typeof meta !== "object") return undefined;
+  const entry = meta[MCP_SERVER_WORKSPACE_META_KEY];
+  if (entry == null) return undefined;
+  if (typeof entry !== "object" || Array.isArray(entry)) {
+    throw new Error(
+      `${MCP_SERVER_WORKSPACE_META_KEY}: expected object, got ${Array.isArray(entry) ? "array" : typeof entry}`,
+    );
+  }
+  const raw = entry as { mount?: unknown; access?: unknown };
+
+  const rawMount =
+    typeof raw.mount === "string" && raw.mount.length > 0 ? raw.mount : DEFAULT_WORKSPACE_MOUNT;
+  if (!rawMount.startsWith("/")) {
+    throw new Error(`${MCP_SERVER_WORKSPACE_META_KEY}.mount: must be an absolute POSIX path`);
+  }
+  // Reject control characters (NUL, newlines, CR, tab) — they would
+  // either break the shell-quoted `-v vol:path` flag or smuggle a
+  // second mount on injection-prone consumers. Rejecting at the
+  // source removes the need for every downstream to remember.
+  // eslint-disable-next-line no-control-regex -- detecting control characters in user input is the point
+  if (/[\x00-\x1f]/.test(rawMount)) {
+    throw new Error(`${MCP_SERVER_WORKSPACE_META_KEY}.mount: control characters are not allowed`);
+  }
+  // Normalise (collapses `a/./b` and `a/b/../c`) BEFORE the `..`
+  // check so a sneakily-nested `/work/../../etc` is caught even
+  // though it doesn't carry a literal top-level `..` segment.
+  const mount = normalizeMount(rawMount);
+  if (mount.split("/").some((seg) => seg === "..")) {
+    throw new Error(
+      `${MCP_SERVER_WORKSPACE_META_KEY}.mount: path-traversal segments are not allowed`,
+    );
+  }
+  const forbiddenPrefixes = ["/proc/", "/sys/", "/dev/", "/etc/"];
+  if (forbiddenPrefixes.some((p) => mount === p.replace(/\/$/, "") || mount.startsWith(p))) {
+    throw new Error(
+      `${MCP_SERVER_WORKSPACE_META_KEY}.mount: refused kernel-managed mount target ${mount}`,
+    );
+  }
+
+  let access: "ro" | "rw";
+  if (raw.access === undefined) {
+    access = "ro";
+  } else if (raw.access === "ro" || raw.access === "rw") {
+    access = raw.access;
+  } else {
+    throw new Error(`${MCP_SERVER_WORKSPACE_META_KEY}.access: must be "ro" or "rw"`);
+  }
+
+  return { mount, access };
+}
 
 /**
  * Read the Appstrate runtime override from `_meta["dev.appstrate/mcp-server"]

@@ -202,11 +202,46 @@ export interface WorkloadSpec {
 export interface IsolationBoundary {
   readonly id: string;
   readonly name: string;
+  /**
+   * Per-run shared workspace handle. Backs `/workspace` on the agent
+   * container and (opt-in via mcp-server `_meta["dev.appstrate/workspace"]`)
+   * on per-integration runner containers. Shape varies by orchestrator:
+   *
+   *   - Docker: `{ kind: "volume", name: string }` — a named Docker
+   *     volume created alongside the per-run network.
+   *   - Process: `{ kind: "directory", path: string }` — a host
+   *     directory under `os.tmpdir()/appstrate-ws-<runId>/`.
+   *
+   * Always present for orchestrators that support shared workspaces;
+   * absent for orchestrators that don't (current built-ins always
+   * provide one — the field is non-optional in practice but the union
+   * keeps the door open for future orchestrators).
+   */
+  readonly workspace: WorkspaceHandle;
 }
+
+/**
+ * Opaque handle that the orchestrator hands to its sidecar so the
+ * sidecar can ask the integration runtime adapter to mount the same
+ * workspace under a runner container. The shape is orchestrator-specific
+ * — sidecar code branches on `kind` (not on `RUN_ADAPTER`) so a future
+ * orchestrator can introduce a third workspace shape without touching
+ * the adapter dispatch.
+ */
+export type WorkspaceHandle =
+  | { readonly kind: "volume"; readonly name: string }
+  | { readonly kind: "directory"; readonly path: string };
 
 export interface CleanupReport {
   workloads: number;
   isolationBoundaries: number;
+  /**
+   * Per-run shared workspaces (Docker named volumes or host
+   * directories under `os.tmpdir()`) reclaimed by the sweep. Counted
+   * alongside boundaries so operators see the full per-run resource
+   * footprint, not just network leaks.
+   */
+  workspaces: number;
 }
 
 export type StopResult = "stopped" | "not_found" | "already_stopped";

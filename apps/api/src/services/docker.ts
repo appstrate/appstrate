@@ -17,6 +17,16 @@ const DOCKER_API_TIMEOUT_MS = 30_000;
  */
 export const EXEC_NETWORK_PREFIX = "appstrate-exec-";
 
+/**
+ * Naming prefix for per-run shared workspace volumes. The orchestrator
+ * creates `${WORKSPACE_VOLUME_PREFIX}${runId}` alongside the per-run
+ * isolation network so the agent container and any opt-in mcp-server
+ * runner containers can share a filesystem under `/workspace`. Same
+ * shape as `EXEC_NETWORK_PREFIX` so the orphan reaper logic stays
+ * symmetric across the two resource types.
+ */
+export const WORKSPACE_VOLUME_PREFIX = "appstrate-ws-";
+
 // Support both unix socket (/var/run/docker.sock) and TCP (http://host:port).
 // Bun supports fetch() with unix: option for Unix sockets.
 // Pass timeoutMs=false for long-running calls (streamLogs, waitForExit).
@@ -502,11 +512,168 @@ export async function removeNetwork(networkId: string): Promise<void> {
   await assertDockerOk(res, "remove network", [404]);
 }
 
+// --- Docker Volume operations ---
+
+/**
+ * Create a Docker named volume scoped to a single run. The volume backs
+ * `/workspace` on the agent container and (when opt-in via mcp-server
+ * `_meta["dev.appstrate/workspace"]`) on per-integration runner
+ * containers. Always carries `appstrate.run=<runId>` +
+ * `appstrate.managed=true` labels so the orphan reaper can reclaim
+ * volumes leaked by crashed runs.
+ *
+ * `driverOpts` lets the orchestrator request a tmpfs-backed volume
+ * (`{ type: "tmpfs", device: "tmpfs", o: "size=512m" }`) in production
+ * where workspace contents are ephemeral and RAM-backed cleanup is
+ * desirable. Plain local-driver volumes are the default.
+ */
+export async function createVolume(
+  name: string,
+  options?: {
+    labels?: Record<string, string>;
+    driver?: string;
+    driverOpts?: Record<string, string>;
+  },
+): Promise<string> {
+  const labels: Record<string, string> = {
+    "appstrate.managed": "true",
+    ...(options?.labels ?? {}),
+  };
+
+  const res = await dockerFetch("/volumes/create", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      Name: name,
+      Driver: options?.driver ?? "local",
+      DriverOpts: options?.driverOpts ?? {},
+      Labels: labels,
+    }),
+  });
+
+  await assertDockerOk(res, `create volume ${name}`);
+
+  const data = (await res.json()) as { Name: string };
+  return data.Name;
+}
+
+/**
+ * Remove a Docker volume by name. Returns silently on 404 (already gone)
+ * and 409 (still in use — Docker refuses to delete attached volumes,
+ * caller is responsible for ensuring no container references it).
+ */
+export async function removeVolume(name: string): Promise<void> {
+  const res = await dockerFetch(`/volumes/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+  });
+
+  await assertDockerOk(res, "remove volume", [404, 409]);
+}
+
+/**
+ * List + remove orphaned per-run workspace volumes (`appstrate-ws-*`).
+ * Safe to call mid-operation: Docker refuses to delete volumes that
+ * still have containers attached, so live runs are untouched. Used by
+ * the boot-time orphan sweep alongside `cleanupOrphanedNetworks`.
+ */
+export async function cleanupOrphanedVolumes(): Promise<number> {
+  return removeVolumesMatching((name) => name.startsWith(WORKSPACE_VOLUME_PREFIX));
+}
+
+/**
+ * Run a short-lived container synchronously and clean it up. Used by
+ * the orchestrator for init steps that don't fit the long-lived
+ * agent/sidecar lifecycle: setting volume ownership, pre-warming a
+ * mount, etc. Auto-removes on exit; surfaces a non-zero exit code as
+ * a typed error so callers can fail the run rather than silently
+ * proceeding with a half-initialised volume.
+ *
+ * Pull-on-miss is left to the caller (call `ensureImage` first if the
+ * image isn't guaranteed present) — most call sites use a baked-in
+ * tiny image (busybox/alpine) that's pre-pulled at boot.
+ */
+export async function runEphemeralCommand(options: {
+  image: string;
+  cmd: string[];
+  binds?: string[];
+  runId?: string;
+}): Promise<void> {
+  await ensureImage(options.image);
+
+  const createRes = await dockerFetch("/containers/create", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      Image: options.image,
+      Cmd: options.cmd,
+      Tty: false,
+      HostConfig: {
+        // AutoRemove deliberately OFF — Docker removes the container
+        // the moment its main process exits, racing the `waitForExit`
+        // poll (which inspects /containers/<id>/json every 2s). Without
+        // the container row, the poll sees 404 and reports the
+        // sentinel exit code 137 even on a clean `true` invocation.
+        // We remove explicitly after `waitForExit` resolves so the
+        // exit code is always observable.
+        AutoRemove: false,
+        SecurityOpt: ["no-new-privileges"],
+        CapDrop: ["ALL"],
+        // chown needs CHOWN cap restored — narrow grant for the init
+        // step; runEphemeralCommand has only one caller today (the
+        // workspace-volume init), so this stays trivially auditable.
+        // If more callers appear with different cap needs, surface
+        // `capAdd` through the options.
+        CapAdd: ["CHOWN", "FOWNER"],
+        ...(options.binds && options.binds.length > 0 ? { Binds: options.binds } : {}),
+      },
+      Labels: {
+        "appstrate.managed": "true",
+        "appstrate.adapter": "ephemeral",
+        ...(options.runId ? { "appstrate.run": options.runId } : {}),
+      },
+    }),
+  });
+  await assertDockerOk(createRes, "create ephemeral container");
+  const { Id: containerId } = (await createRes.json()) as { Id: string };
+
+  try {
+    const startRes = await dockerFetch(`/containers/${containerId}/start`, {
+      method: "POST",
+    });
+    await assertDockerOk(startRes, "start ephemeral container");
+
+    const exitCode = await waitForExit(containerId);
+    if (exitCode !== 0) {
+      throw new Error(
+        `Ephemeral container ${options.image} exited with code ${exitCode} (cmd: ${options.cmd.join(" ")})`,
+      );
+    }
+  } finally {
+    // Always clean up the container, even on a non-zero exit (caller
+    // sees the throw + we still leave no leak behind).
+    await removeContainer(containerId).catch(() => {});
+  }
+}
+
+async function removeVolumesMatching(predicate: (name: string) => boolean): Promise<number> {
+  const res = await dockerFetch("/volumes");
+  if (!res.ok) return 0;
+
+  const data = (await res.json()) as { Volumes?: Array<{ Name: string }> | null };
+  const volumes = data.Volumes ?? [];
+  const targets = volumes.filter((v) => predicate(v.Name));
+  if (targets.length === 0) return 0;
+
+  const results = await Promise.allSettled(targets.map((v) => removeVolume(v.Name)));
+  return results.filter((r) => r.status === "fulfilled").length;
+}
+
 // --- Orphaned container cleanup ---
 
 export async function cleanupOrphanedContainers(): Promise<{
   containers: number;
   networks: number;
+  volumes: number;
 }> {
   // Clean up orphaned containers
   const filters = JSON.stringify({ label: ["appstrate.managed=true"] });
@@ -529,7 +696,13 @@ export async function cleanupOrphanedContainers(): Promise<{
   // (crash, kill -9, Docker auto-cleanup) but their network persisted.
   const networkCount = await cleanupOrphanedNetworks();
 
-  return { containers: containers.length, networks: networkCount };
+  // Workspace volumes leak in the same way networks do — a run that
+  // exits hard before its orchestrator can call removeIsolationBoundary
+  // leaves the named volume behind. Reap after the container sweep so
+  // Docker's "volume in use" check (409) doesn't refuse the delete.
+  const volumeCount = await cleanupOrphanedVolumes();
+
+  return { containers: containers.length, networks: networkCount, volumes: volumeCount };
 }
 
 /**

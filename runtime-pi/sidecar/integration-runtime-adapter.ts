@@ -19,6 +19,7 @@
 import { normalize, join, posix } from "node:path";
 
 import type { SubprocessTransport } from "@appstrate/mcp-transport";
+import type { WorkspaceHandle } from "@appstrate/core/platform-types";
 import type { IntegrationSpawnSpec } from "./integrations-boot.ts";
 
 /**
@@ -62,9 +63,29 @@ export interface SpawnIntegrationOptions {
   readonly bundleRoot: string;
   /** MITM context (proxy URL + CA file path). `null` = env-delivery only. */
   readonly mitm: RuntimeMitmContext | null;
+  /**
+   * Per-run shared workspace handle decoded from the sidecar's
+   * `WORKSPACE_HANDLE_JSON` env var. Adapters mount/expose it under
+   * the runner's filesystem ONLY when the spec's referenced mcp-server
+   * opted in via `_meta["dev.appstrate/workspace"]` (carried on
+   * `spec.workspaceMount`). `null` when the launching orchestrator
+   * provided no workspace handle (legacy launch paths, custom
+   * orchestrators) — adapters then degrade to no-mount and the
+   * opt-in mcp-server runs without workspace access (logged warning).
+   */
+  readonly workspaceHandle: WorkspaceHandle | null;
   /** Stderr line emitter wired by the caller (typically logger.info). */
   readonly onStderrLine: (line: string) => void;
 }
+
+/**
+ * Canonical env-var name the spawned runner reads to locate the shared
+ * workspace. Exposed by both adapters so mcp-server code stays
+ * adapter-agnostic — the path differs between docker (the in-runner
+ * mount point declared on `_meta.workspace`) and process (the host
+ * tmpdir path), but the env-var contract is uniform.
+ */
+export const WORKSPACE_ENV_VAR = "APPSTRATE_WORKSPACE";
 
 export interface SpawnedIntegration {
   /** MCP JSON-RPC transport the caller wires its `Client` against. */

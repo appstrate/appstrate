@@ -43,6 +43,7 @@ import { isToolsWildcard, parseManifestIntegrations } from "@appstrate/core/depe
 import {
   getMcpServerRuntime,
   getMcpServerMcpConfigEnv,
+  getMcpServerWorkspaceMount,
   renderMcpConfigEnv,
 } from "@appstrate/core/mcp-server";
 import type { IntegrationSpawnSpec, ApiCallSpec } from "@appstrate/core/sidecar-types";
@@ -419,7 +420,45 @@ async function resolveOne(
     ...(deliveries.fileMounts && Object.keys(deliveries.fileMounts).length > 0
       ? { fileMounts: deliveries.fileMounts }
       : {}),
+    // Opt-in shared workspace mount declared on the referenced
+    // mcp-server. Only emitted for local sources — remote and
+    // serverless integrations have no runner container/process to
+    // mount into. A malformed `_meta` throws synchronously here so a
+    // bad manifest fails fast at run kickoff rather than producing a
+    // silently-degraded spawn that the operator can't diagnose.
+    ...(referencedMcpServer && specSourceKind === "local"
+      ? resolveWorkspaceMount(integrationId, referencedMcpServer)
+      : {}),
   };
+}
+
+/**
+ * Render the optional `workspaceMount` field on the spawn spec from
+ * the referenced mcp-server's `_meta["dev.appstrate/workspace"]`. The
+ * core parser throws on malformed entries; we surface that as a
+ * skipped integration with a structured log so the run boot reports
+ * the misconfig without aborting the entire run.
+ */
+function resolveWorkspaceMount(
+  integrationId: string,
+  mcpServer: NonNullable<Awaited<ReturnType<typeof fetchMcpServerManifest>>>,
+): { workspaceMount?: NonNullable<IntegrationSpawnSpec["workspaceMount"]> } {
+  let mount: ReturnType<typeof getMcpServerWorkspaceMount>;
+  try {
+    mount = getMcpServerWorkspaceMount(mcpServer);
+  } catch (err) {
+    logger.warn(
+      "mcp-server _meta.workspace is malformed; integration will spawn without workspace mount",
+      {
+        integrationId,
+        mcpServer: (mcpServer as { name?: string }).name,
+        error: err instanceof Error ? err.message : String(err),
+      },
+    );
+    return {};
+  }
+  if (!mount) return {};
+  return { workspaceMount: { mount: mount.mount, access: mount.access } };
 }
 
 interface ResolvedDeliveries {

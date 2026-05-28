@@ -1,0 +1,79 @@
+{
+  "name": "@appstrate/github-clone",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.1",
+  "display_name": "GitHub Clone",
+  "description": "Clone a GitHub repository into the agent's per-run shared workspace using an OAuth2 access token. Backs the @appstrate/github-clone-mcp local mcp-server: the sidecar resolves the user's OAuth token, injects it as GITHUB_TOKEN, attaches the per-run workspace volume to the runner, and the server downloads the GitHub tarball directly to /workspace. The repo contents land on disk — they never enter the LLM context. Pair with the runtime tools (Bash/Read/Edit) for any local code work an agent needs to do on a real repo.",
+  "license": "Apache-2.0",
+  "source": {
+    "kind": "local",
+    "server": {
+      "name": "@appstrate/github-clone-mcp",
+      "version": "^1.0.0"
+    }
+  },
+  "auths": {
+    "oauth": {
+      "type": "oauth2",
+      "authorization_endpoint": "https://github.com/login/oauth/authorize",
+      "token_endpoint": "https://github.com/login/oauth/access_token",
+      "userinfo_endpoint": "https://api.github.com/user",
+      "default_scopes": ["repo", "read:user"],
+      "token_endpoint_auth_method": "client_secret_post",
+      "identity_claims": {
+        "accountId": "$.login",
+        "sub": "$.id",
+        "login": "$.login",
+        "name": "$.name",
+        "email": "$.email",
+        "avatarUrl": "$.avatar_url"
+      },
+      "scope_catalog": [
+        {
+          "value": "public_repo",
+          "label": "Public repos",
+          "description": "Clone public repositories (read-only tarball access)."
+        },
+        {
+          "value": "repo",
+          "label": "All repos",
+          "description": "Clone private + public repositories.",
+          "implies": ["public_repo"]
+        },
+        {
+          "value": "read:user",
+          "label": "Read profile",
+          "description": "Read the authenticated user's profile (used to label the connection)."
+        }
+      ],
+      "authorized_uris": ["https://api.github.com/**", "https://codeload.github.com/**"],
+      "delivery": {
+        "env": {
+          "GITHUB_TOKEN": {
+            "value": "{$credential.access_token}",
+            "sensitive": true
+          }
+        }
+      },
+
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": " "
+        }
+      }
+    }
+  },
+  "tools_policy": {
+    "clone_repo": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    }
+  }
+}

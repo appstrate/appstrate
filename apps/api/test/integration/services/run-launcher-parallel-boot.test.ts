@@ -68,11 +68,15 @@ function createTimingFake(config: TimingFakeConfig): {
     async initialize() {},
     async shutdown() {},
     async cleanupOrphans(): Promise<CleanupReport> {
-      return { workloads: 0, isolationBoundaries: 0 };
+      return { workloads: 0, isolationBoundaries: 0, workspaces: 0 };
     },
     async ensureImages() {},
     async createIsolationBoundary(runId: string): Promise<IsolationBoundary> {
-      return { id: `net_${runId}`, name: `appstrate-exec-${runId}` };
+      return {
+        id: `net_${runId}`,
+        name: `appstrate-exec-${runId}`,
+        workspace: { kind: "directory", path: `/tmp/test-ws-${runId}` },
+      };
     },
     async removeIsolationBoundary() {},
     async createSidecar(

@@ -19,6 +19,7 @@
  */
 
 import { mkdir, rm, readdir, open as fsOpen } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { getEnv } from "@appstrate/env";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -36,6 +37,49 @@ import type {
 const DATA_DIR = resolve("./data/runs");
 const SIDECAR_ENTRY = join(import.meta.dir, "../../../../../runtime-pi/sidecar/server.ts");
 const AGENT_ENTRY = join(import.meta.dir, "../../../../../runtime-pi/entrypoint.ts");
+
+/**
+ * Naming prefix for per-run shared workspace directories. Mirrors the
+ * Docker volume prefix in {@link docker.WORKSPACE_VOLUME_PREFIX} so the
+ * boot-time orphan reaper can scan tmpdir() and reclaim leaked
+ * directories from crashed runs using the same convention.
+ */
+const WORKSPACE_DIR_PREFIX = "appstrate-ws-";
+
+/** Compute the host path for a run's workspace directory. */
+function workspaceDirFor(runId: string): string {
+  return join(tmpdir(), `${WORKSPACE_DIR_PREFIX}${runId}`);
+}
+
+/**
+ * Scan `os.tmpdir()` for orphaned per-run workspace directories
+ * (`appstrate-ws-*`) and remove them. Boot-time recovery only — runs
+ * marked failed by `lib/boot.ts` are by definition not holding any of
+ * these dirs, so removing them is safe. Returns the count of dirs
+ * reclaimed for the {@link CleanupReport}.
+ */
+async function reapOrphanWorkspaceDirs(): Promise<number> {
+  let entries: string[];
+  try {
+    entries = (await readdir(tmpdir())) as unknown as string[];
+  } catch {
+    return 0;
+  }
+  let count = 0;
+  for (const name of entries) {
+    if (!name.startsWith(WORKSPACE_DIR_PREFIX)) continue;
+    const path = join(tmpdir(), name);
+    try {
+      await rm(path, { recursive: true, force: true });
+      count++;
+    } catch {
+      // Permission errors / other-user-owned dirs are silently
+      // skipped — tmpdir on shared hosts may carry workspaces from
+      // other UIDs, which are not ours to reap.
+    }
+  }
+  return count;
+}
 
 /** Poll interval for tailing the stdout file (ms). */
 const TAIL_POLL_MS = 50;
@@ -136,7 +180,12 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     try {
       entries = (await readdir(DATA_DIR)) as unknown as string[];
     } catch {
-      return { workloads: 0, isolationBoundaries: 0 };
+      // Even when DATA_DIR is missing entirely, sweep tmpdir for
+      // orphan workspace dirs from crashed runs — they live outside
+      // DATA_DIR so the absence of DATA_DIR doesn't imply absence of
+      // leaked workspaces.
+      const workspaces = await reapOrphanWorkspaceDirs();
+      return { workloads: 0, isolationBoundaries: 0, workspaces };
     }
 
     for (const name of entries) {
@@ -167,26 +216,44 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
       isolationBoundaries++;
     }
 
-    return { workloads, isolationBoundaries };
+    const workspaces = await reapOrphanWorkspaceDirs();
+    return { workloads, isolationBoundaries, workspaces };
   }
 
   async createIsolationBoundary(runId: string): Promise<IsolationBoundary> {
     const dir = join(DATA_DIR, runId);
-    await mkdir(dir, { recursive: true });
-    return { id: dir, name: `process-${runId}` };
+    // Create both the pidfile boundary dir and the shared workspace
+    // dir in parallel — independent fs operations, no ordering
+    // constraint. Workspace lives under os.tmpdir() rather than
+    // DATA_DIR so a host-side `rm -rf data/` doesn't accidentally
+    // wipe the workspace for an active run.
+    const workspacePath = workspaceDirFor(runId);
+    await Promise.all([
+      mkdir(dir, { recursive: true }),
+      mkdir(workspacePath, { recursive: true, mode: 0o755 }),
+    ]);
+    return {
+      id: dir,
+      name: `process-${runId}`,
+      workspace: { kind: "directory", path: workspacePath },
+    };
   }
 
   async removeIsolationBoundary(boundary: IsolationBoundary): Promise<void> {
-    try {
-      await rm(boundary.id, { recursive: true, force: true });
-    } catch {
-      // Best-effort cleanup
-    }
+    // Race boundary teardown and workspace teardown — independent
+    // paths, errors swallowed individually so a stuck workspace can't
+    // block the pidfile dir cleanup.
+    await Promise.allSettled([
+      rm(boundary.id, { recursive: true, force: true }),
+      boundary.workspace.kind === "directory"
+        ? rm(boundary.workspace.path, { recursive: true, force: true })
+        : Promise.resolve(),
+    ]);
   }
 
   async createSidecar(
     runId: string,
-    _boundary: IsolationBoundary,
+    boundary: IsolationBoundary,
     spec: SidecarLaunchSpec,
   ): Promise<WorkloadHandle> {
     const [port, platformApiUrl] = await Promise.all([
@@ -200,6 +267,10 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
       PORT: String(port),
       PLATFORM_API_URL: platformApiUrl,
       RUN_TOKEN: spec.runToken,
+      // Hand the workspace handle to the sidecar so its integration
+      // runtime adapter can wire the same shared surface into runner
+      // subprocesses that opt in via mcp-server _meta.workspace.
+      WORKSPACE_HANDLE_JSON: JSON.stringify(boundary.workspace),
     };
     // This run is NOT containerized (process orchestrator), so its integrations
     // must spawn as host subprocesses too. The sidecar selects its integration
@@ -271,7 +342,15 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
   }
 
   async createWorkload(spec: WorkloadSpec, boundary: IsolationBoundary): Promise<WorkloadHandle> {
-    const workDir = join(boundary.id, "workspace");
+    // The agent's workspace is the per-run shared directory created by
+    // createIsolationBoundary so spawned mcp-server runner subprocesses
+    // (which receive WORKSPACE_DIR via the sidecar) read and write the
+    // exact same filesystem surface as the agent. Non-agent roles keep
+    // the legacy per-boundary subdirectory.
+    const workDir =
+      spec.role === "agent" && boundary.workspace.kind === "directory"
+        ? boundary.workspace.path
+        : join(boundary.id, "workspace");
     await mkdir(workDir, { recursive: true });
 
     if (spec.files) {

@@ -339,6 +339,14 @@ export function mcpServerManifest(opts: {
    * `delivery.env.<var>.user_config_key` names the placeholder key here.
    */
   mcpConfigEnv?: Record<string, string>;
+  /**
+   * Shared-workspace opt-in (`_meta["dev.appstrate/workspace"]`).
+   * When set, the spawn resolver populates
+   * `IntegrationSpawnSpec.workspaceMount` from this declaration; the
+   * sidecar then mounts the per-run shared workspace into the runner
+   * (Docker volume in tier 3, host directory in tier 0-2).
+   */
+  workspace?: { mount?: string; access?: "ro" | "rw" };
 }): Record<string, unknown> {
   const type = opts.serverType ?? "node";
   const entryPoint = opts.entryPoint ?? "main.js";
@@ -360,8 +368,13 @@ export function mcpServerManifest(opts: {
       mcp_config: mcpConfig,
     },
   };
+  const meta: Record<string, unknown> = {};
   if (opts.appstrateRuntime) {
-    manifest._meta = { "dev.appstrate/mcp-server": { runtime: opts.appstrateRuntime } };
+    meta["dev.appstrate/mcp-server"] = { runtime: opts.appstrateRuntime };
   }
+  if (opts.workspace) {
+    meta["dev.appstrate/workspace"] = opts.workspace;
+  }
+  if (Object.keys(meta).length > 0) manifest._meta = meta;
   return manifest;
 }

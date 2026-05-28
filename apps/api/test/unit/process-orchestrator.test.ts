@@ -66,9 +66,50 @@ describe("ProcessOrchestrator", () => {
       await orchestrator.removeIsolationBoundary(boundary);
       await orchestrator.removeIsolationBoundary(boundary); // should not throw
     });
+
+    it("attaches a shared workspace directory under os.tmpdir()", async () => {
+      orchestrator = new ProcessOrchestrator();
+      await orchestrator.initialize();
+
+      const boundary = await orchestrator.createIsolationBoundary("test-run-ws");
+      expect(boundary.workspace.kind).toBe("directory");
+      if (boundary.workspace.kind !== "directory") throw new Error("unreachable");
+      expect(boundary.workspace.path).toContain("appstrate-ws-test-run-ws");
+      expect(existsSync(boundary.workspace.path)).toBe(true);
+
+      await orchestrator.removeIsolationBoundary(boundary);
+      expect(existsSync(boundary.workspace.path)).toBe(false);
+    });
   });
 
   describe("createWorkload", () => {
+    it("agent role uses the boundary's shared workspace path as workdir", async () => {
+      orchestrator = new ProcessOrchestrator();
+      await orchestrator.initialize();
+      const boundary = await orchestrator.createIsolationBoundary("test-run-shared");
+      if (boundary.workspace.kind !== "directory") throw new Error("expected directory workspace");
+
+      await orchestrator.createWorkload(
+        {
+          runId: "test-run-shared",
+          role: "agent",
+          image: "unused",
+          env: {},
+          resources: { memoryBytes: 0, nanoCpus: 0 },
+          files: { items: [{ name: "x.txt", content: Buffer.from("y") }], targetDir: "/" },
+        },
+        boundary,
+      );
+
+      // The file should land under the shared workspace, NOT under
+      // boundary.id/workspace — that's the contract the sidecar relies
+      // on to share the workspace surface with spawned runners.
+      expect(existsSync(`${boundary.workspace.path}/x.txt`)).toBe(true);
+      expect(existsSync(`${boundary.id}/workspace/x.txt`)).toBe(false);
+
+      await orchestrator.removeIsolationBoundary(boundary);
+    });
+
     it("writes injected files to workspace", async () => {
       orchestrator = new ProcessOrchestrator();
       await orchestrator.initialize();
@@ -96,8 +137,11 @@ describe("ProcessOrchestrator", () => {
       expect(handle.runId).toBe("test-run-3");
       expect(handle.role).toBe("agent");
 
-      // Verify files were written
-      const workDir = `${boundary.id}/workspace`;
+      // Verify files were written into the shared workspace (agent
+      // role uses boundary.workspace.path; see "agent role uses the
+      // boundary's shared workspace path" above).
+      if (boundary.workspace.kind !== "directory") throw new Error("expected directory workspace");
+      const workDir = boundary.workspace.path;
       expect(existsSync(`${workDir}/agent-package.afps`)).toBe(true);
       expect(existsSync(`${workDir}/documents/readme.md`)).toBe(true);
 
@@ -119,10 +163,15 @@ describe("ProcessOrchestrator", () => {
       await resetDataDir();
     });
 
-    it("returns zero counts when DATA_DIR is empty", async () => {
+    it("returns zero workloads + boundaries when DATA_DIR is empty (workspace reap is incidental)", async () => {
       orchestrator = new ProcessOrchestrator();
       const report = await orchestrator.cleanupOrphans();
-      expect(report).toEqual({ workloads: 0, isolationBoundaries: 0 });
+      expect(report.workloads).toBe(0);
+      expect(report.isolationBoundaries).toBe(0);
+      // Workspaces reap sweeps os.tmpdir() globally — concurrent tests
+      // creating workspace dirs (or leftovers from prior runs) can
+      // contribute, so we don't pin the count.
+      expect(report.workspaces).toBeGreaterThanOrEqual(0);
     });
 
     it("removes a boundary directory whose pidfile points at a dead pid", async () => {
@@ -185,7 +234,12 @@ describe("ProcessOrchestrator", () => {
       orchestrator = new ProcessOrchestrator();
       await orchestrator.cleanupOrphans();
       const second = await orchestrator.cleanupOrphans();
-      expect(second).toEqual({ workloads: 0, isolationBoundaries: 0 });
+      // First sweep wiped the dir + any orphan workspaces; the second
+      // call sees no boundary residue but tmpdir() workspaces from
+      // *other* concurrent tests can still show up. Pin the boundary
+      // + workload zeros; leave workspaces unconstrained.
+      expect(second.workloads).toBe(0);
+      expect(second.isolationBoundaries).toBe(0);
     });
   });
 

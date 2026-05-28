@@ -94,22 +94,109 @@ export class DockerOrchestrator implements ContainerOrchestrator {
   }
 
   async cleanupOrphans(): Promise<CleanupReport> {
-    const { containers, networks } = await docker.cleanupOrphanedContainers();
-    return { workloads: containers, isolationBoundaries: networks };
+    const { containers, networks, volumes } = await docker.cleanupOrphanedContainers();
+    return { workloads: containers, isolationBoundaries: networks, workspaces: volumes };
   }
 
   async createIsolationBoundary(runId: string): Promise<IsolationBoundary> {
+    const env = getEnv();
     const name = `${docker.EXEC_NETWORK_PREFIX}${runId}`;
-    const id = await createNetworkWithPoolRetry(
-      () => docker.createNetwork(name, { internal: true }),
-      () => docker.cleanupOrphanedRunNetworks(),
-      logger,
-    );
-    return { id, name };
+    const volumeName = `${docker.WORKSPACE_VOLUME_PREFIX}${runId}`;
+
+    // Create the per-run network + workspace volume in parallel — both
+    // are independent Docker resources and either may hit pool/quota
+    // pressure, so racing them shaves real ms off run boot. Network
+    // creation retries on `address pool exhausted`; volume creation
+    // pre-reaps any stale `appstrate-ws-<runId>` residue from a hard
+    // crash so a name collision can't 409 on a quick-restart loop.
+    const [networkId] = await Promise.all([
+      createNetworkWithPoolRetry(
+        () => docker.createNetwork(name, { internal: true }),
+        () => docker.cleanupOrphanedRunNetworks(),
+        logger,
+      ),
+      (async () => {
+        // Pre-reap defends against the kill-9-then-immediate-restart
+        // window where the orchestrator's `removeIsolationBoundary`
+        // never ran. The remove is best-effort (404 swallowed) so
+        // first-time creation costs at most one extra `volume rm`
+        // round trip.
+        await docker.removeVolume(volumeName).catch(() => {});
+        return docker.createVolume(volumeName, {
+          labels: { "appstrate.run": runId },
+          ...(env.WORKSPACE_TMPFS_SIZE_MB > 0
+            ? {
+                driverOpts: {
+                  type: "tmpfs",
+                  device: "tmpfs",
+                  o: `size=${env.WORKSPACE_TMPFS_SIZE_MB}m`,
+                },
+              }
+            : {}),
+        });
+      })(),
+    ]);
+
+    // Chown the freshly created volume to the agent's `pi` user (UID
+    // 1001 — see runtime-pi/Dockerfile L144 `adduser ... -u 1001 pi`,
+    // contract-locked by the workspace volume tests in
+    // apps/api/test/integration/services/docker-api.test.ts). Docker
+    // named volumes default to root-owned on first mount, which
+    // would block the agent from writing to /workspace. A one-shot
+    // busybox container with the volume mounted is the canonical
+    // pattern: cheap (cached image, ~150ms warm), portable across
+    // drivers, and avoids baking workspace setup into the agent
+    // image's startup path.
+    //
+    // Subtle Docker quirk: `chown` against the mount-point root only
+    // sticks across remounts when the volume has at least one file
+    // inside (otherwise Docker resets the mount-point uid:gid from
+    // the image's directory metadata on each subsequent mount). The
+    // `touch /workspace/.appstrate-init` is the marker file that
+    // pins the chown — small, predictable, hidden from agent
+    // discovery via the leading dot. Without this marker, the agent
+    // sees `/workspace` as root-owned and can't write to its CWD.
+    //
+    // Failure handling: if the chown step throws (image missing,
+    // daemon flake), tear down the freshly-created network + volume
+    // BEFORE rethrowing so the orchestrator doesn't leak a half-
+    // initialised boundary. The caller never sees the partial
+    // resources and the orphan reaper has nothing to do.
+    try {
+      await docker.runEphemeralCommand({
+        image: env.WORKSPACE_INIT_IMAGE,
+        cmd: [
+          "sh",
+          "-c",
+          "touch /workspace/.appstrate-init && chown 1001:1001 /workspace /workspace/.appstrate-init",
+        ],
+        binds: [`${volumeName}:/workspace`],
+        runId,
+      });
+    } catch (err) {
+      await Promise.allSettled([docker.removeNetwork(networkId), docker.removeVolume(volumeName)]);
+      throw err;
+    }
+
+    return {
+      id: networkId,
+      name,
+      workspace: { kind: "volume", name: volumeName },
+    };
   }
 
   async removeIsolationBoundary(boundary: IsolationBoundary): Promise<void> {
-    await docker.removeNetwork(boundary.id);
+    // Network and volume teardown are independent — race them so a
+    // slow volume delete (e.g. tmpfs scrubbing many small files) doesn't
+    // serialize the network reclaim. Failures are swallowed individually
+    // so a leaked volume can't prevent the network from being torn down
+    // (the orphan reaper picks up either residue on the next sweep).
+    await Promise.allSettled([
+      docker.removeNetwork(boundary.id),
+      boundary.workspace.kind === "volume"
+        ? docker.removeVolume(boundary.workspace.name)
+        : Promise.resolve(),
+    ]);
   }
 
   async createSidecar(
@@ -132,6 +219,14 @@ export class DockerOrchestrator implements ContainerOrchestrator {
       // orphan reaper match them back to the parent run.
       RUN_ID: runId,
       PLATFORM_API_URL: platformApiUrl,
+      // Workspace handle the sidecar passes to the integration runtime
+      // adapter so runner containers opting in via mcp-server
+      // `_meta["dev.appstrate/workspace"]` can mount the same surface as
+      // the agent. Shape is the WorkspaceHandle discriminated union —
+      // sidecar branches on `kind` (volume vs directory) so a future
+      // orchestrator can introduce a third shape without touching
+      // adapter dispatch.
+      WORKSPACE_HANDLE_JSON: JSON.stringify(boundary.workspace),
     };
     if (spec.proxyUrl) sidecarEnv.PROXY_URL = spec.proxyUrl;
     if (spec.modelContextWindow != null) {
@@ -290,6 +385,18 @@ export class DockerOrchestrator implements ContainerOrchestrator {
     // out and would fail the agent's first `emitRuntimeReady` POST.
     const platformNetwork = spec.egress ? await docker.detectPlatformNetwork() : null;
 
+    // Mount the per-run workspace into the agent container at
+    // /workspace (already exists as the agent's CWD, chowned to `pi`
+    // at image build time). The boundary's init step set the volume's
+    // top-level ownership to UID 1001 so the agent can write
+    // immediately. Only the `agent` role gets the mount — the sidecar
+    // never reads workspace bytes, and other potential roles
+    // (debug-shell, etc.) opt in explicitly when introduced.
+    const workspaceBinds =
+      spec.role === "agent" && boundary.workspace.kind === "volume"
+        ? [`${boundary.workspace.name}:/workspace`]
+        : [];
+
     const containerId = await docker.createContainer(spec.runId, spec.env, {
       image: spec.image,
       adapterName: spec.role,
@@ -298,6 +405,7 @@ export class DockerOrchestrator implements ContainerOrchestrator {
       pidsLimit: spec.resources.pidsLimit,
       networkId: spec.egress ? this.egressNetworkId! : boundary.id,
       networkAlias: spec.role,
+      ...(workspaceBinds.length > 0 ? { binds: workspaceBinds } : {}),
       ...(spec.egress
         ? { extraHosts: platformNetwork ? [] : ["host.docker.internal:host-gateway"] }
         : {}),

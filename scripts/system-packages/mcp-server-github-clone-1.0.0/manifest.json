@@ -1,0 +1,38 @@
+{
+  "$schema": "https://schemas.afps.dev/v0/mcp-server.schema.json",
+  "name": "@appstrate/github-clone-mcp",
+  "version": "1.0.0",
+  "type": "mcp-server",
+  "schema_version": "0.1",
+  "manifest_version": "0.3",
+  "display_name": "GitHub Clone (MCP server)",
+  "description": "Single-tool MCP server that downloads a GitHub repository tarball into the agent's shared workspace using the user's OAuth2 access token. Pairs with the @appstrate/github-clone integration package — credentials are env-delivered (GITHUB_TOKEN), the runner attaches the per-run workspace volume via the platform's _meta workspace opt-in, and the agent reads the cloned tree directly from /workspace.",
+  "author": "Appstrate",
+  "license": "Apache-2.0",
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.ts",
+    "mcp_config": {
+      "command": "bun",
+      "args": ["server/index.ts"]
+    }
+  },
+  "tools": [
+    {
+      "name": "clone_repo",
+      "description": "Download a GitHub repository tarball into the shared agent workspace. Uses the OAuth-issued GITHUB_TOKEN. Returns a small JSON receipt (path, files, bytes) — the actual file contents land on disk so they never enter the LLM context."
+    }
+  ],
+  "_meta": {
+    "dev.appstrate/mcp-server": {
+      "runtime": "bun"
+    },
+    "dev.appstrate/workspace": {
+      "mount": "/workspace",
+      "access": "rw"
+    },
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    }
+  }
+}
