@@ -108,7 +108,11 @@ function mockOrchestrator(opts: { stdoutLines: string[]; exitCode?: number; hang
   const orch: Partial<ContainerOrchestrator> = {
     async createIsolationBoundary(runId: string): Promise<IsolationBoundary> {
       calls.createdBoundaries.push(runId);
-      return { id: `net-${runId}`, name: `net-${runId}` };
+      return {
+        id: `net-${runId}`,
+        name: `net-${runId}`,
+        workspace: { kind: "directory", path: `/tmp/test-ws-${runId}` },
+      };
     },
     async createSidecar(
       runId: string,

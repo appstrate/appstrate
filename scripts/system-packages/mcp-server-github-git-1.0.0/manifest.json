@@ -1,0 +1,62 @@
+{
+  "$schema": "https://schemas.afps.dev/v0/mcp-server.schema.json",
+  "name": "@appstrate/github-git-mcp",
+  "version": "1.0.0",
+  "type": "mcp-server",
+  "schema_version": "0.1",
+  "manifest_version": "0.3",
+  "display_name": "GitHub Git (MCP server)",
+  "description": "Full git working-tree MCP server backed by the `git` CLI baked into the bun runner image. Tools cover the clone → edit → commit → push → open-PR loop against any GitHub repo the user has access to, using the OAuth2 GITHUB_TOKEN minted by the companion @appstrate/github-git integration. Files land on the per-run shared workspace at /workspace — the agent edits them via the platform runtime tools (Bash/Read/Edit) and uses this server only for the git/GitHub plumbing.",
+  "author": "Appstrate",
+  "license": "Apache-2.0",
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.ts",
+    "mcp_config": {
+      "command": "bun",
+      "args": ["server/index.ts"]
+    }
+  },
+  "tools": [
+    {
+      "name": "clone",
+      "description": "Clone a GitHub repository into the per-run shared workspace. Configures the remote with the OAuth token via `http.extraheader` so subsequent push/fetch calls authenticate without leaking the token into .git/config. Returns the absolute clone path."
+    },
+    {
+      "name": "checkout_branch",
+      "description": "Switch to a branch in a cloned repo, creating it (optionally off `base`) when `create=true`."
+    },
+    {
+      "name": "status",
+      "description": "Return `git status --short` for a cloned repo. Use before commit to verify what will land."
+    },
+    {
+      "name": "diff",
+      "description": "Return `git diff` (or `git diff --staged` when `staged=true`) for a cloned repo. Truncated at 200KB to avoid context bloat."
+    },
+    {
+      "name": "commit",
+      "description": "Stage paths (`paths` array, defaults to all changes) and create a commit with the given message. Configures user.name/user.email on the local repo from the GitHub identity (login + noreply email) when unset."
+    },
+    {
+      "name": "push",
+      "description": "Push the current branch to origin. Sets the upstream on first push. Returns the remote ref."
+    },
+    {
+      "name": "open_pr",
+      "description": "Open a pull request via the GitHub REST API. `head` is the branch with the changes (your fork or this repo's branch); `base` defaults to the repository's default branch. Returns the PR number + url."
+    }
+  ],
+  "_meta": {
+    "dev.appstrate/mcp-server": {
+      "runtime": "bun"
+    },
+    "dev.appstrate/workspace": {
+      "mount": "/workspace",
+      "access": "rw"
+    },
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    }
+  }
+}

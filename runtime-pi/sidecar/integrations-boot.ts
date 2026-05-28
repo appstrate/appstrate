@@ -37,6 +37,7 @@ import { unzipSync } from "fflate";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { ListRootsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import {
   createInProcessPair,
   createMcpHttpClient,
@@ -91,6 +92,56 @@ import type {
   IntegrationBootBreadcrumb,
   IntegrationBootReport,
 } from "@appstrate/core/sidecar-types";
+import type { WorkspaceHandle } from "@appstrate/core/platform-types";
+
+/**
+ * Decode the workspace handle from the launching orchestrator's
+ * `WORKSPACE_HANDLE_JSON` env var. Returns `null` when the var is
+ * absent or malformed — the sidecar then degrades to no-workspace
+ * (any opt-in mcp-server runs without workspace access, logged as a
+ * warning at spawn time). Strict shape validation: a foreign-shaped
+ * JSON triggers a one-time warn but doesn't abort boot.
+ */
+/**
+ * Reduce a URL to `host + path` for log surfaces — drops query string
+ * (signed credentials commonly land there) and credentials in the
+ * userinfo component. Falls back to "<unparseable>" when the value
+ * isn't a parseable URL so a logging path never throws.
+ */
+function safeUrlForLog(url: string): string {
+  try {
+    const u = new URL(url);
+    return `${u.protocol}//${u.host}${u.pathname}`;
+  } catch {
+    return "<unparseable>";
+  }
+}
+
+function decodeWorkspaceHandle(): WorkspaceHandle | null {
+  const raw = process.env.WORKSPACE_HANDLE_JSON;
+  if (!raw) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    logger.warn("WORKSPACE_HANDLE_JSON: failed to parse; degrading to no-workspace", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object") return null;
+  const handle = parsed as { kind?: unknown; name?: unknown; path?: unknown };
+  if (handle.kind === "volume" && typeof handle.name === "string" && handle.name.length > 0) {
+    return { kind: "volume", name: handle.name };
+  }
+  if (handle.kind === "directory" && typeof handle.path === "string" && handle.path.length > 0) {
+    return { kind: "directory", path: handle.path };
+  }
+  logger.warn("WORKSPACE_HANDLE_JSON: unrecognised shape; degrading to no-workspace", {
+    kind: typeof handle.kind === "string" ? handle.kind : "<missing>",
+  });
+  return null;
+}
 
 /**
  * Where the sidecar fetches integration bundles from. The platform
@@ -590,6 +641,14 @@ async function spawnAndConnectLocalIntegration(params: {
   source: IntegrationCredentialsSource | null;
   /** Per-run CA materials; null disables MITM (env-delivery-only path). */
   ca: RunCaMaterials | null;
+  /**
+   * Per-run shared workspace handle decoded from the sidecar's
+   * `WORKSPACE_HANDLE_JSON` env var (set by the platform orchestrator).
+   * Passed verbatim to `adapter.spawn`; the adapter wires it into the
+   * runner only when the spec's `workspaceMount` is also set (opt-in
+   * by the referenced mcp-server's `_meta["dev.appstrate/workspace"]`).
+   */
+  workspaceHandle: WorkspaceHandle | null;
   /** Front this integration with a MITM listener (also needs `ca` + `source`). */
   wantsMitm: boolean;
   /** Allowlist for `host.register`. `[]` exposes nothing (connect-run). */
@@ -627,16 +686,29 @@ async function spawnAndConnectLocalIntegration(params: {
       // (0.0.0.0 for bridged networks, 127.0.0.1 when it shares the parent NS).
       host: adapterCtx.listenerBindHost,
       onEvent: (event) => {
-        // Filter sensitive bits (URLs may carry signed query params).
-        const safe =
-          event.kind === "request-forwarded"
-            ? {
-                kind: event.kind,
-                status: event.status,
-                authKey: event.authKey,
-                retried: event.retried,
-              }
-            : event;
+        // Surface enough to debug auth-injection bugs without leaking
+        // signed query params. URL is reduced to `host + path` (no
+        // query); `headerInjected` (bool only — never the value) tells
+        // operators a missing-auth scenario apart from an upstream
+        // 401 in one glance.
+        const safe = (() => {
+          if (event.kind === "request-forwarded") {
+            const u = safeUrlForLog(event.url);
+            return {
+              kind: event.kind,
+              method: event.method,
+              url: u,
+              status: event.status,
+              authKey: event.authKey,
+              headerInjected: event.headerInjected,
+              retried: event.retried,
+            };
+          }
+          if (event.kind === "request-refused" || event.kind === "upstream-error") {
+            return { ...event, url: safeUrlForLog(event.url) };
+          }
+          return event;
+        })();
         logger.info(`${logLabel} mitm event`, { integrationId: spec.integrationId, ...safe });
       },
     });
@@ -666,6 +738,7 @@ async function spawnAndConnectLocalIntegration(params: {
     spec,
     bundleRoot: root,
     mitm: mitmCtx,
+    workspaceHandle: params.workspaceHandle,
     onStderrLine: (line) => {
       logger.info(`${logLabel} integration stderr`, { integrationId: spec.integrationId, line });
     },
@@ -674,7 +747,43 @@ async function spawnAndConnectLocalIntegration(params: {
   const spawnMs = performance.now() - spawnStart;
 
   const connectStart = performance.now();
-  const client = new Client({ name: "appstrate-sidecar-integration-host", version: "0.1.0" });
+  const client = new Client(
+    { name: "appstrate-sidecar-integration-host", version: "0.1.0" },
+    // Advertise MCP Roots capability when the spec declares a workspace
+    // mount and the launching orchestrator carried a handle. The server
+    // (mcp-server runner) can then call roots/list to discover the
+    // shared workspace root and bound its filesystem operations to it.
+    // SOTA-consistent: cyanheads/git-mcp-server, modelcontextprotocol/
+    // servers/filesystem all rely on the Roots protocol for boundary
+    // discovery instead of trusting CWD or hardcoded paths.
+    //
+    // `listChanged: false` is deliberate: the workspace boundary is
+    // static for the lifetime of a run — the orchestrator mounts a
+    // single per-run volume at boot and never reconfigures it. Setting
+    // `true` would force every Roots-aware server to subscribe to a
+    // notification channel that will never fire. If multi-root or
+    // dynamic remounting ever lands, flip this to `true` and emit
+    // `notifications/roots/list_changed` from the mount-change path.
+    spec.workspaceMount && params.workspaceHandle
+      ? { capabilities: { roots: { listChanged: false } } }
+      : undefined,
+  );
+  if (spec.workspaceMount && params.workspaceHandle) {
+    const rootUri = `file://${spec.workspaceMount.mount}`;
+    client.setRequestHandler(ListRootsRequestSchema, async () => ({
+      roots: [
+        {
+          uri: rootUri,
+          name: "workspace",
+          _meta: {
+            "dev.appstrate/workspace": {
+              access: spec.workspaceMount!.access,
+            },
+          },
+        },
+      ],
+    }));
+  }
   const connectPromise = client.connect(spawnedIntegration.transport);
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   const timeoutPromise = new Promise<never>((_, reject) => {
@@ -808,6 +917,21 @@ export async function bootIntegrations(
   const adapterPrepareStart = performance.now();
   const adapterCtx = await adapter.prepare(runId);
   const adapterPrepareMs = performance.now() - adapterPrepareStart;
+  // Decode the workspace handle once for the whole run — same handle is
+  // shared by every opt-in integration runner. The agent already has
+  // the underlying workspace mounted; this surfaces it to mcp-server
+  // runners that declared `_meta["dev.appstrate/workspace"]`.
+  const workspaceHandle = decodeWorkspaceHandle();
+  if (workspaceHandle) {
+    breadcrumbs.push({
+      message: `shared workspace available (${workspaceHandle.kind})`,
+      level: "info",
+      data:
+        workspaceHandle.kind === "volume"
+          ? { kind: workspaceHandle.kind, name: workspaceHandle.name }
+          : { kind: workspaceHandle.kind, path: workspaceHandle.path },
+    });
+  }
   logger.info("integration runtime selected", {
     adapter: adapter.id,
     listenerBindHost: adapterCtx.listenerBindHost,
@@ -1095,6 +1219,7 @@ export async function bootIntegrations(
         bundleFetchOpts,
         source,
         ca: runCa,
+        workspaceHandle,
         wantsMitm,
         allowedTools: spec.toolAllowlist,
         // R8a — propagate `hidden_tools` so the host filters them out at
@@ -1318,7 +1443,13 @@ export async function runConnectOnce(
     // needed so `getUpstreamClient` resolves the login tool) and `wantsMitm`
     // forced on.
     const { allocatedNs, mitmSource } = await spawnAndConnectLocalIntegration({
-      spec,
+      // connect-run never reaches an agent — the integration spawns only
+      // long enough to mint a session, so workspace exposure is a
+      // non-goal. Strip any `workspaceMount` the resolver attached so the
+      // runtime adapter sees no opt-in: passing the mount + a null handle
+      // would otherwise trip the adapter's "declared mount but no handle"
+      // ERROR on every connect run for a workspace-opted-in mcp-server.
+      spec: spec.workspaceMount ? { ...spec, workspaceMount: undefined } : spec,
       runId,
       adapter,
       adapterCtx,
@@ -1326,6 +1457,9 @@ export async function runConnectOnce(
       bundleFetchOpts,
       source,
       ca,
+      // Always pass null to keep the connect-run path workspace-free
+      // regardless of the launching orchestrator's env.
+      workspaceHandle: null,
       wantsMitm: true,
       allowedTools: [],
       logLabel: "connect-run",

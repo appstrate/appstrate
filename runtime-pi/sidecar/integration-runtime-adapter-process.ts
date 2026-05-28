@@ -24,6 +24,7 @@ import {
   buildMitmEnvBlock,
   registerIntegrationRuntimeAdapter,
   resolveBundleEntry,
+  WORKSPACE_ENV_VAR,
   type IntegrationRuntimeAdapter,
   type RuntimeAdapterRunContext,
   type SpawnIntegrationOptions,
@@ -227,13 +228,43 @@ export function createProcessIntegrationRuntimeAdapter(): IntegrationRuntimeAdap
     },
 
     async spawn(options: SpawnIntegrationOptions): Promise<SpawnedIntegration> {
-      const { runId, spec, bundleRoot, mitm, onStderrLine } = options;
+      const { runId, spec, bundleRoot, mitm, workspaceHandle, onStderrLine } = options;
       const plan = planSubprocess(spec, bundleRoot);
       const procEnv: Record<string, string> = { ...spec.spawnEnv };
       if (mitm) {
         // Subprocess sees the host fs directly; pass the CA path through
         // unchanged (no docker cp).
         Object.assign(procEnv, buildMitmEnvBlock(mitm.proxyUrl, mitm.caCertHostPath));
+      }
+      // Per-run shared workspace exposure for the subprocess. Unlike
+      // docker mode (which bind-mounts a volume), the subprocess just
+      // reads the host directory path directly via env var. The mcp-
+      // server code uses APPSTRATE_WORKSPACE uniformly across both
+      // modes so a single implementation works.
+      //
+      // Note: `access: "ro"` is advisory only on the process adapter —
+      // there is no kernel-enforced read-only bind. Servers that need
+      // hard enforcement should run in docker mode where the bind
+      // mount's `:ro` flag denies writes at the syscall layer.
+      if (spec.workspaceMount) {
+        if (workspaceHandle?.kind === "directory") {
+          procEnv[WORKSPACE_ENV_VAR] = workspaceHandle.path;
+        } else {
+          // ERROR-level (symmetry with the docker adapter): an opt-in
+          // mcp-server whose runtime env lacks the workspace will
+          // either crash on first tool call or silently misbehave —
+          // operators need to see this on the first run, not buried
+          // in a debug log.
+          logger.error(
+            "spec declares workspaceMount but launching orchestrator carried no directory handle; runner spawned WITHOUT workspace — opt-in mcp-server tools will fail",
+            {
+              integrationId: spec.integrationId,
+              haveHandle: workspaceHandle?.kind ?? "none",
+              declaredMount: spec.workspaceMount.mount,
+              declaredAccess: spec.workspaceMount.access,
+            },
+          );
+        }
       }
       // AFPS §7.6 (CC-5) — materialise `delivery.files` entries
       // before the subprocess starts so the entrypoint sees them at boot.

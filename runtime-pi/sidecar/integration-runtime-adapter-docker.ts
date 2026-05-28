@@ -23,6 +23,7 @@ import {
   buildMitmEnvBlock,
   registerIntegrationRuntimeAdapter,
   resolveBundleEntry,
+  WORKSPACE_ENV_VAR,
   type IntegrationRuntimeAdapter,
   type RuntimeAdapterRunContext,
   type SpawnIntegrationOptions,
@@ -132,12 +133,15 @@ function planContainer(spec: IntegrationSpawnSpec, bundleRoot: string): Containe
 }
 
 async function killContainer(containerId: string): Promise<void> {
-  // SIGKILL rather than `stop` — the integration MCP server's only
-  // contract is to read JSON-RPC from stdin; graceful SIGTERM gives
-  // nothing back and `--rm` cleans up either way. Errors are swallowed:
-  // cleanup runs in shutdown paths where the orphan reaper is the
-  // safety net.
-  await dockerExec(["kill", containerId]).catch(() => {});
+  // `rm -f` instead of `kill`: a container that crashed between
+  // `docker create` and `docker start -ai` (e.g. `docker cp` failed
+  // while staging the bundle) is in the `created` state with no PID 1,
+  // so `docker kill` returns an error and `--rm` never fires (it only
+  // triggers on container *exit*). `rm -f` works on any state and
+  // collapses the kill+remove into one call. Errors stay swallowed —
+  // the orphan reaper (label `appstrate.managed=true`) is the safety
+  // net for sidecar crashes.
+  await dockerExec(["rm", "-f", containerId]).catch(() => {});
 }
 
 /**
@@ -295,7 +299,7 @@ export function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapt
     },
 
     async spawn(options: SpawnIntegrationOptions): Promise<SpawnedIntegration> {
-      const { runId, spec, bundleRoot, mitm, onStderrLine } = options;
+      const { runId, spec, bundleRoot, mitm, workspaceHandle, onStderrLine } = options;
       const plan = planContainer(spec, bundleRoot);
       const safeNs = spec.namespace.replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
       const containerName = `appstrate-integ-${safeNs}-${runId.slice(0, 8)}-${Date.now()}`;
@@ -307,6 +311,41 @@ export function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapt
       if (mitm) {
         for (const [k, v] of Object.entries(buildMitmEnvBlock(mitm.proxyUrl, CA_CONTAINER_PATH))) {
           envFlags.push("-e", `${k}=${v}`);
+        }
+      }
+
+      // Per-run shared workspace mount. Wired ONLY when the spec's
+      // referenced mcp-server opted in via _meta.workspace AND the
+      // launching orchestrator carried a workspace handle of the right
+      // shape (volume for docker). A volume mismatch (spec says yes,
+      // handle says no / wrong-kind) is logged as a warning and the
+      // runner spawns without workspace access rather than aborting
+      // the run.
+      const volumeFlags: string[] = [];
+      if (spec.workspaceMount) {
+        if (workspaceHandle?.kind === "volume") {
+          const roSuffix = spec.workspaceMount.access === "ro" ? ":ro" : "";
+          volumeFlags.push("-v", `${workspaceHandle.name}:${spec.workspaceMount.mount}${roSuffix}`);
+          envFlags.push("-e", `${WORKSPACE_ENV_VAR}=${spec.workspaceMount.mount}`);
+        } else {
+          // ERROR-level (not warn): the mcp-server author explicitly
+          // opted into a shared workspace via `_meta.workspace` AND
+          // the platform's MCP Roots advertisement will tell its
+          // protocol client the path is available — but the actual
+          // bind is missing. A SOTA mcp-server that caches roots/list
+          // would then issue write calls against an unmounted path,
+          // failing in ways that look like server bugs rather than
+          // misconfig. Surface loudly so operators see it on the
+          // first run, not the tenth.
+          logger.error(
+            "spec declares workspaceMount but launching orchestrator carried no volume handle; runner spawned WITHOUT workspace — opt-in mcp-server tools will fail",
+            {
+              integrationId: spec.integrationId,
+              haveHandle: workspaceHandle?.kind ?? "none",
+              declaredMount: spec.workspaceMount.mount,
+              declaredAccess: spec.workspaceMount.access,
+            },
+          );
         }
       }
 
@@ -338,6 +377,7 @@ export function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapt
         "--pids-limit",
         "128",
         ...networkFlags,
+        ...volumeFlags,
         ...labelFlags,
         ...envFlags,
         plan.image,

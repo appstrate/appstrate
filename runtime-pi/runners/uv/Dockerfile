@@ -46,20 +46,26 @@ LABEL org.opencontainers.image.title="Appstrate MCP Runner (uv)" \
 # `python3` ship in the base image. /bundle is the conventional mount
 # point — the sidecar `docker cp`s the extracted bundle here before
 # `docker start`.
+#
+# Runner user pinned at UID 1001 (see bun runner Dockerfile for the
+# rationale) so the per-run shared workspace volume stays writable
+# across the agent + every runner sharing it.
 RUN apk add --no-cache ca-certificates && \
+    addgroup -g 1001 runner && \
+    adduser -D -u 1001 -G runner -s /bin/sh runner && \
     mkdir -p /bundle && \
-    chown nobody:nobody /bundle
+    chown runner:runner /bundle
 
 # `uv run` honours per-bundle dependency declarations (pyproject.toml,
 # requirements.txt, PEP-723 inline metadata) and writes its cache under
 # the user's home. Pointing `UV_CACHE_DIR` at `/bundle/.uv-cache` keeps
 # the cache inside the bundle's writable mount and avoids permission
-# errors from `nobody`'s default home.
+# errors from the runner's default home.
 ENV UV_CACHE_DIR=/bundle/.uv-cache \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-USER nobody:nobody
+USER runner:runner
 WORKDIR /bundle
 
 # `uv run` is the entrypoint; the CMD (passed by the sidecar as the

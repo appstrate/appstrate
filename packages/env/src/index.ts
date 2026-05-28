@@ -334,6 +334,18 @@ const envSchema = z
     PI_IMAGE: z.string().default("appstrate-pi:latest"),
     SIDECAR_IMAGE: z.string().default("appstrate-sidecar:latest"),
 
+    // Per-run workspace volume init image. A minimal image (~5 MB) used
+    // once per run to chown the freshly created Docker volume to UID
+    // 1001 (the agent's `pi` user). Override only if your environment
+    // can't pull from Docker Hub or you want a pre-baked busybox.
+    WORKSPACE_INIT_IMAGE: z.string().default("busybox:1.37"),
+
+    // Tmpfs size cap (megabytes) for the per-run workspace volume.
+    // Tmpfs is RAM-backed, fast to allocate/destroy, and self-quoted —
+    // ideal for ephemeral per-run scratch space. Set to 0 to fall back
+    // to the local volume driver (host disk, no built-in quota).
+    WORKSPACE_TMPFS_SIZE_MB: z.coerce.number().int().min(0).max(8192).default(512),
+
     // Redis (optional — falls back to in-memory adapters when absent)
     REDIS_URL: z.string().optional(),
 

@@ -408,6 +408,32 @@ export interface IntegrationSpawnSpec {
      */
     reauthOn?: number[];
   };
+  /**
+   * Per-run shared workspace mount declared on the referenced
+   * mcp-server's `_meta["dev.appstrate/workspace"]`. Opt-in: omitted
+   * when the mcp-server didn't declare it (the runner has no access
+   * to the agent's filesystem — the historical default and current
+   * behaviour for every system integration).
+   *
+   * When present, the sidecar's integration runtime adapter mounts the
+   * per-run shared workspace (Docker volume in tier 3, host directory
+   * in tier 0-2) at `mount` inside the runner with the requested
+   * `access` mode. The actual workspace handle (volume name / host
+   * path) travels separately via `WORKSPACE_HANDLE_JSON` on the
+   * sidecar's env so a single workspace can back N opt-in runners +
+   * the agent without each spec carrying a redundant copy.
+   *
+   * Only meaningful for `sourceKind: "local"` — remote MCP servers
+   * have no runner to mount into; serverless (`source.kind: "none"`)
+   * integrations have no runner either. The spawn resolver silently
+   * drops this field for non-local sources.
+   */
+  workspaceMount?: {
+    /** Absolute POSIX path inside the runner. Validated by `getMcpServerWorkspaceMount`. */
+    readonly mount: string;
+    /** `"rw"` allows writes; `"ro"` is the least-privilege default. */
+    readonly access: "ro" | "rw";
+  };
 }
 
 /**

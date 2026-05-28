@@ -25,11 +25,17 @@ LABEL org.opencontainers.image.title="Appstrate MCP Runner (Binary)" \
 
 # libstdc++ / libgcc cover the C++/glibc-shim symbols statically-linked
 # Go/Rust binaries usually skip but cgo-linked or Bun-compiled ones need.
+#
+# Runner user pinned at UID 1001 (see bun runner Dockerfile for the
+# rationale) so the per-run shared workspace volume stays writable
+# across the agent + every runner sharing it.
 RUN apk add --no-cache ca-certificates libstdc++ libgcc && \
+    addgroup -g 1001 runner && \
+    adduser -D -u 1001 -G runner -s /bin/sh runner && \
     mkdir -p /bundle && \
-    chown nobody:nobody /bundle
+    chown runner:runner /bundle
 
-USER nobody:nobody
+USER runner:runner
 WORKDIR /bundle
 
 # The sidecar passes the absolute container path of the binary as the

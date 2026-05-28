@@ -103,6 +103,7 @@ describe("buildMitmEnvBlock", () => {
       SSL_CERT_FILE: caPath,
       REQUESTS_CA_BUNDLE: caPath,
       CURL_CA_BUNDLE: caPath,
+      GIT_SSL_CAINFO: caPath,
     });
   });
 

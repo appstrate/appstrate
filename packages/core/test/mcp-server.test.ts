@@ -13,7 +13,9 @@
 import { describe, it, expect } from "bun:test";
 import {
   getMcpServerRuntime,
+  getMcpServerWorkspaceMount,
   mcpServerManifestSchema,
+  MCP_SERVER_WORKSPACE_META_KEY,
   type McpServerManifest,
 } from "../src/mcp-server.ts";
 
@@ -81,6 +83,139 @@ describe("mcpServerManifestSchema — user_config MCPB inner shape (local refine
       expect(
         r.error.issues.some(
           (i) => i.path[0] === "user_config" && i.path[1] === "foo" && i.path.includes("type"),
+        ),
+      ).toBe(true);
+    }
+  });
+});
+
+describe("getMcpServerWorkspaceMount", () => {
+  it("returns undefined when _meta.workspace is absent (default: no workspace access)", () => {
+    expect(getMcpServerWorkspaceMount(manifest())).toBeUndefined();
+    expect(getMcpServerWorkspaceMount(manifest({}))).toBeUndefined();
+  });
+
+  it("parses a well-formed entry with rw access", () => {
+    const m = manifest({
+      [MCP_SERVER_WORKSPACE_META_KEY]: { mount: "/workspace", access: "rw" },
+    });
+    expect(getMcpServerWorkspaceMount(m)).toEqual({ mount: "/workspace", access: "rw" });
+  });
+
+  it("defaults access to 'ro' (least-privilege) when omitted", () => {
+    const m = manifest({ [MCP_SERVER_WORKSPACE_META_KEY]: { mount: "/data" } });
+    expect(getMcpServerWorkspaceMount(m)).toEqual({ mount: "/data", access: "ro" });
+  });
+
+  it("defaults mount to '/workspace' when only access is provided", () => {
+    const m = manifest({ [MCP_SERVER_WORKSPACE_META_KEY]: { access: "rw" } });
+    expect(getMcpServerWorkspaceMount(m)).toEqual({ mount: "/workspace", access: "rw" });
+  });
+
+  it("rejects an array-shaped entry (must be an object)", () => {
+    const m = manifest({
+      [MCP_SERVER_WORKSPACE_META_KEY]: [] as unknown as Record<string, unknown>,
+    });
+    expect(() => getMcpServerWorkspaceMount(m)).toThrow(/expected object/);
+  });
+
+  it("rejects a non-absolute mount path", () => {
+    const m = manifest({ [MCP_SERVER_WORKSPACE_META_KEY]: { mount: "workspace" } });
+    expect(() => getMcpServerWorkspaceMount(m)).toThrow(/absolute POSIX path/);
+  });
+
+  it("rejects a mount containing a `..` traversal segment", () => {
+    const m = manifest({ [MCP_SERVER_WORKSPACE_META_KEY]: { mount: "/work/../etc" } });
+    expect(() => getMcpServerWorkspaceMount(m)).toThrow(/path-traversal/);
+  });
+
+  it("rejects a mount containing nested `..` smuggled past a literal-segment check", () => {
+    // `/work/foo/./../../etc` does NOT contain a top-level `..`
+    // segment when split naively — but the normaliser collapses
+    // `./` and reveals the `..` so the downstream check fires.
+    const m = manifest({
+      [MCP_SERVER_WORKSPACE_META_KEY]: { mount: "/work/foo/./../../etc" },
+    });
+    expect(() => getMcpServerWorkspaceMount(m)).toThrow(/path-traversal/);
+  });
+
+  it("normalises redundant `./` + trailing slashes without false-rejecting", () => {
+    const m = manifest({
+      [MCP_SERVER_WORKSPACE_META_KEY]: { mount: "/workspace/./sub//", access: "rw" },
+    });
+    expect(getMcpServerWorkspaceMount(m)).toEqual({
+      mount: "/workspace/sub",
+      access: "rw",
+    });
+  });
+
+  it("rejects a mount with control characters (NUL, newline, CR, tab)", () => {
+    for (const bad of ["/workspace\x00", "/workspace\n", "/workspace\r/sub", "/work\tspace"]) {
+      const m = manifest({ [MCP_SERVER_WORKSPACE_META_KEY]: { mount: bad } });
+      expect(() => getMcpServerWorkspaceMount(m)).toThrow(/control characters/);
+    }
+  });
+
+  it("rejects a mount under a kernel-managed prefix", () => {
+    for (const mount of ["/proc/self", "/sys/kernel", "/dev/null", "/etc/foo"]) {
+      const m = manifest({ [MCP_SERVER_WORKSPACE_META_KEY]: { mount } });
+      expect(() => getMcpServerWorkspaceMount(m)).toThrow(/kernel-managed/);
+    }
+  });
+
+  it("rejects an invalid access value", () => {
+    const m = manifest({
+      [MCP_SERVER_WORKSPACE_META_KEY]: { mount: "/workspace", access: "admin" },
+    });
+    expect(() => getMcpServerWorkspaceMount(m)).toThrow(/access.*ro.*rw/);
+  });
+
+  it("rejects a root mount target (including paths that canonicalise to '/')", () => {
+    for (const mount of ["/", "//", "/.", "/./"]) {
+      const m = manifest({ [MCP_SERVER_WORKSPACE_META_KEY]: { mount } });
+      expect(() => getMcpServerWorkspaceMount(m)).toThrow(/root/);
+    }
+  });
+
+  it("rejects a non-string mount instead of silently coercing to the default", () => {
+    for (const mount of [42, ["/data"], {}, ""]) {
+      const m = manifest({
+        [MCP_SERVER_WORKSPACE_META_KEY]: { mount: mount as unknown as string },
+      });
+      expect(() => getMcpServerWorkspaceMount(m)).toThrow(/non-empty string/);
+    }
+  });
+});
+
+describe("mcpServerManifestSchema — _meta.workspace install-time validation", () => {
+  it("accepts a manifest with a valid workspace declaration", () => {
+    const m = {
+      ...manifest({ [MCP_SERVER_WORKSPACE_META_KEY]: { mount: "/workspace", access: "rw" } }),
+      server: {
+        type: "node",
+        entry_point: "./server.ts",
+        mcp_config: { command: "node", args: ["./server.ts"] },
+      },
+    };
+    const r = mcpServerManifestSchema.safeParse(m);
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects a manifest with a malformed workspace declaration at install time", () => {
+    const m = {
+      ...manifest({ [MCP_SERVER_WORKSPACE_META_KEY]: { mount: "../escape" } }),
+      server: {
+        type: "node",
+        entry_point: "./server.ts",
+        mcp_config: { command: "node", args: ["./server.ts"] },
+      },
+    };
+    const r = mcpServerManifestSchema.safeParse(m);
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      expect(
+        r.error.issues.some(
+          (i) => i.path[0] === "_meta" && i.path[1] === MCP_SERVER_WORKSPACE_META_KEY,
         ),
       ).toBe(true);
     }
