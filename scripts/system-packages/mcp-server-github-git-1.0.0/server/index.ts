@@ -103,15 +103,23 @@ interface RunGitOptions {
  * Throws on non-zero exit so call sites stay flat — the error message
  * carries the full stderr so JSON-RPC consumers see the real reason
  * (vs. a generic "git failed").
+ *
+ * Inherits process.env wholesale — the MCP runner container is on an
+ * internal-only bridge with no direct egress; the sidecar injects
+ * `HTTPS_PROXY` + `CURL_CA_BUNDLE` (`buildMitmEnvBlock`) so HTTP
+ * clients route through the platform's TLS-terminating proxy. Stripping
+ * the env would make `git clone` attempt a direct connection and fail
+ * with a DNS / connection error. Token + GIT_TERMINAL_PROMPT layered on
+ * top per call.
  */
 async function runGit(args: string[], opts: RunGitOptions = {}): Promise<GitResult> {
-  const env: Record<string, string> = {
-    PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
-    HOME: process.env.HOME ?? "/tmp",
-    GIT_TERMINAL_PROMPT: "0",
-    // Force git to fail rather than block waiting on an interactive
-    // credential prompt — there is no terminal in the runner.
-  };
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v !== undefined) env[k] = v;
+  }
+  // Force git to fail rather than block waiting on an interactive
+  // credential prompt — there is no terminal in the runner.
+  env.GIT_TERMINAL_PROMPT = "0";
   if (opts.token) {
     env.GIT_CONFIG_COUNT = "1";
     env.GIT_CONFIG_KEY_0 = "http.extraheader";
