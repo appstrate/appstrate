@@ -23,9 +23,12 @@ import { join } from "node:path";
 
 import {
   resolveInWorkspace,
+  assertSafeRefArg,
   handleRequest,
   openPrTool,
   cloneTool,
+  checkoutBranchTool,
+  pushTool,
   classifyGitError,
 } from "../../../../scripts/system-packages/mcp-server-github-git-1.0.0/server/index.ts";
 
@@ -46,6 +49,56 @@ describe("resolveInWorkspace", () => {
   it("rejects `..` segments", () => {
     expect(() => resolveInWorkspace("/tmp/ws", "../escape")).toThrow(/path-traversal/);
     expect(() => resolveInWorkspace("/tmp/ws", "ok/../etc")).toThrow(/path-traversal/);
+  });
+});
+
+// ─────────────────────── git ref/branch injection ────────────────────
+
+describe("assertSafeRefArg — git option/refspec injection guard", () => {
+  it("accepts ordinary refs, branches, tags, and SHAs", () => {
+    for (const ok of ["main", "feature/x", "v1.2.3", "release-2024", "deadbeef", "a/b/c"]) {
+      expect(assertSafeRefArg(ok, "ref")).toBe(ok);
+    }
+  });
+
+  it("rejects a leading-dash value git would parse as an option", () => {
+    for (const bad of ["-f", "--orphan", "-B", "--upload-pack=touch /tmp/pwned"]) {
+      expect(() => assertSafeRefArg(bad, "ref")).toThrow(/must not start with "-"/);
+    }
+  });
+
+  it("rejects refspec/whitespace/control chars", () => {
+    for (const bad of [":main", "+refs/heads/x", "a b", "a\tb", "a\nb", "a\x00b"]) {
+      expect(() => assertSafeRefArg(bad, "branch")).toThrow(
+        /characters not allowed|must not start/,
+      );
+    }
+  });
+
+  it("rejects an empty value", () => {
+    expect(() => assertSafeRefArg("", "ref")).toThrow(/must not be empty/);
+  });
+});
+
+describe("tool handlers reject injected ref/branch before spawning git", () => {
+  const ctx = { workspaceRoot: "/tmp/ws-injection-test" };
+
+  it("checkout_branch refuses a dash-leading branch", async () => {
+    await expect(checkoutBranchTool({ repo: "r", branch: "-f" }, ctx)).rejects.toThrow(
+      /branch must not start with "-"/,
+    );
+  });
+
+  it("checkout_branch refuses a dash-leading base on create", async () => {
+    await expect(
+      checkoutBranchTool({ repo: "r", branch: "ok", create: true, base: "--orphan" }, ctx),
+    ).rejects.toThrow(/base must not start with "-"/);
+  });
+
+  it("push refuses a refspec-style branch (remote-branch-deletion guard)", async () => {
+    await expect(pushTool({ repo: "r", branch: ":main" }, ctx)).rejects.toThrow(
+      /characters not allowed/,
+    );
   });
 });
 

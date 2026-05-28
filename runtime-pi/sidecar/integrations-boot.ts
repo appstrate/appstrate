@@ -1443,7 +1443,13 @@ export async function runConnectOnce(
     // needed so `getUpstreamClient` resolves the login tool) and `wantsMitm`
     // forced on.
     const { allocatedNs, mitmSource } = await spawnAndConnectLocalIntegration({
-      spec,
+      // connect-run never reaches an agent — the integration spawns only
+      // long enough to mint a session, so workspace exposure is a
+      // non-goal. Strip any `workspaceMount` the resolver attached so the
+      // runtime adapter sees no opt-in: passing the mount + a null handle
+      // would otherwise trip the adapter's "declared mount but no handle"
+      // ERROR on every connect run for a workspace-opted-in mcp-server.
+      spec: spec.workspaceMount ? { ...spec, workspaceMount: undefined } : spec,
       runId,
       adapter,
       adapterCtx,
@@ -1451,10 +1457,8 @@ export async function runConnectOnce(
       bundleFetchOpts,
       source,
       ca,
-      // connect-run never reaches an agent — the integration spawns
-      // only long enough to mint a session, so workspace exposure is a
-      // non-goal. Always pass null to keep the connect-run path
-      // workspace-free regardless of the launching orchestrator's env.
+      // Always pass null to keep the connect-run path workspace-free
+      // regardless of the launching orchestrator's env.
       workspaceHandle: null,
       wantsMitm: true,
       allowedTools: [],

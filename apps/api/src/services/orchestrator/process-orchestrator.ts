@@ -241,7 +241,10 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     const workspacePath = workspaceDirFor(runId);
     await Promise.all([
       mkdir(dir, { recursive: true }),
-      mkdir(workspacePath, { recursive: true, mode: 0o755 }),
+      // 0o700: the workspace sits under the shared `os.tmpdir()` and
+      // holds the agent's run inputs/outputs — keep it readable only by
+      // the platform uid, not world-readable to other local users.
+      mkdir(workspacePath, { recursive: true, mode: 0o700 }),
     ]);
     return {
       id: dir,

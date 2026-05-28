@@ -618,15 +618,21 @@ export async function runEphemeralCommand(options: {
   binds?: string[];
   runId?: string;
   /**
-   * Hard ceiling on the run lifecycle (pull + create + start + wait).
-   * Defaults to 60s — long enough for an image pull on a cold cache,
-   * short enough to fail a stuck init before it blocks the orchestrator.
+   * Ceiling on the post-pull lifecycle (create + start + wait).
+   * Defaults to 60s — short enough to fail a stuck init before it
+   * blocks the orchestrator. The preceding `ensureImage` pull is NOT
+   * bounded by this (Docker's pull has no abort handle here); a cold
+   * pull eats into the budget so `wait` may get 0ms and time out
+   * immediately, but the pull itself runs to completion or its own
+   * failure.
    */
   timeoutMs?: number;
 }): Promise<void> {
   const timeoutMs = options.timeoutMs ?? 60_000;
-  const deadline = Date.now() + timeoutMs;
   await ensureImage(options.image);
+  // Start the clock AFTER the (unbounded) pull so a cold pull doesn't
+  // silently consume the create+start+wait budget.
+  const deadline = Date.now() + timeoutMs;
 
   const createRes = await dockerFetch("/containers/create", {
     method: "POST",
@@ -664,6 +670,7 @@ export async function runEphemeralCommand(options: {
   await assertDockerOk(createRes, "create ephemeral container");
   const { Id: containerId } = (await createRes.json()) as { Id: string };
 
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const startRes = await dockerFetch(`/containers/${containerId}/start`, {
       method: "POST",
@@ -671,8 +678,8 @@ export async function runEphemeralCommand(options: {
     await assertDockerOk(startRes, "start ephemeral container");
 
     const remaining = deadline - Date.now();
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timer = setTimeout(
         () =>
           reject(
             new Error(
@@ -680,8 +687,8 @@ export async function runEphemeralCommand(options: {
             ),
           ),
         Math.max(remaining, 0),
-      ),
-    );
+      );
+    });
     const exitCode = await Promise.race([waitForExit(containerId), timeoutPromise]);
     if (exitCode !== 0) {
       throw new Error(
@@ -689,8 +696,11 @@ export async function runEphemeralCommand(options: {
       );
     }
   } finally {
-    // Always clean up the container, even on a non-zero exit (caller
-    // sees the throw + we still leave no leak behind).
+    // Clear the timeout so a resolved-on-exit call doesn't keep a timer
+    // (and the event loop) alive until the deadline, and always clean
+    // up the container — even on non-zero exit the caller sees the
+    // throw and we leave no leak behind.
+    if (timer) clearTimeout(timer);
     await removeContainer(containerId).catch(() => {});
   }
 }

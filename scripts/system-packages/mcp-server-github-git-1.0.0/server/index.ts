@@ -41,13 +41,8 @@
  * three RPC methods (initialize, tools/list, tools/call).
  */
 
-import { mkdir, readFile as _readFile, writeFile as _writeFile } from "node:fs/promises";
-import { dirname, join, resolve, sep, posix } from "node:path";
-
-// Unused fs helpers kept as named imports so TS doesn't strip the
-// types when later additions need them. They're inert otherwise.
-void _readFile;
-void _writeFile;
+import { mkdir } from "node:fs/promises";
+import { dirname, resolve, sep } from "node:path";
 
 const GITHUB_API = "https://api.github.com";
 const GITHUB_HOST = "https://github.com";
@@ -80,6 +75,42 @@ export function resolveInWorkspace(workspaceRoot: string, rel: string | undefine
  */
 export function defaultDestForRepo(_owner: string, repo: string): string {
   return repo;
+}
+
+/**
+ * Screen an agent-supplied ref/branch value before it lands in a
+ * positional `git` argument. git treats a leading `-` as a CLI option
+ * and `:` as refspec syntax, so an unguarded value reaches git as a
+ * flag/refspec rather than a ref:
+ *
+ *   - `ref: "-f"`        → `git checkout -f`        → discards the
+ *     working tree (confirmed data loss on the shared workspace)
+ *   - `ref: "--orphan"`  → `git checkout --orphan`  → unintended state
+ *   - `branch: ":main"`  → `git push origin :main`  → deletes the
+ *     remote branch without `force`
+ *
+ * Tools spawn git via an argv array (no shell), so this is about git's
+ * own option/refspec parsing — not shell injection. Reject rather than
+ * sanitise: a value that looks like a flag or refspec is never a ref
+ * the agent legitimately meant.
+ */
+export function assertSafeRefArg(value: string, label: string): string {
+  if (value.length === 0) {
+    throw new Error(`${label} must not be empty`);
+  }
+  if (value.startsWith("-")) {
+    throw new Error(`${label} must not start with "-": git would parse it as an option`);
+  }
+  if (value.startsWith("+")) {
+    throw new Error(`${label} must not start with "+": git would parse it as a force refspec`);
+  }
+  // Control chars + refspec/whitespace separators are never valid in a
+  // ref or branch name (git check-ref-format rejects them too).
+  // eslint-disable-next-line no-control-regex -- screening control chars is the point
+  if (/[\x00-\x1f\s:]/.test(value)) {
+    throw new Error(`${label} contains characters not allowed in a git ref/branch`);
+  }
+  return value;
 }
 
 // ────────────────────── git invocation helpers ──────────────────────
@@ -316,6 +347,7 @@ export async function cloneTool(
   // becomes a real ergonomic problem. Default to a full clone — KISS.
   await runGit(["clone", url, target]);
   if (args.ref) {
+    assertSafeRefArg(args.ref, "ref");
     await runGit(["checkout", args.ref], { cwd: target });
   }
   const head = await runGit(["rev-parse", "--abbrev-ref", "HEAD"], { cwd: target });
@@ -334,10 +366,11 @@ export async function checkoutBranchTool(
   ctx: { workspaceRoot: string },
 ): Promise<{ branch: string }> {
   const cwd = resolveInWorkspace(ctx.workspaceRoot, args.repo);
+  assertSafeRefArg(args.branch, "branch");
   const gitArgs = ["switch"];
   if (args.create) {
     gitArgs.push("-c", args.branch);
-    if (args.base) gitArgs.push(args.base);
+    if (args.base) gitArgs.push(assertSafeRefArg(args.base, "base"));
   } else {
     gitArgs.push(args.branch);
   }
@@ -454,6 +487,9 @@ export async function pushTool(
   const cwd = resolveInWorkspace(ctx.workspaceRoot, args.repo);
   const branch =
     args.branch ?? (await runGit(["rev-parse", "--abbrev-ref", "HEAD"], { cwd })).stdout.trim();
+  // Guard agent-supplied branch only — a value read back from
+  // `rev-parse` is git's own output and already a valid ref.
+  if (args.branch !== undefined) assertSafeRefArg(args.branch, "branch");
   const gitArgs = ["push", "-u", "origin", branch];
   if (args.force) gitArgs.push("--force-with-lease");
   await runGit(gitArgs, { cwd });
@@ -500,11 +536,6 @@ export async function openPrTool(
   );
   return { number: pr.number, url: pr.html_url, head: pr.head.ref, base: pr.base.ref };
 }
-
-// `posix.join` retained as a hint that mount paths are POSIX-only
-// (the runner is Linux). The actual `resolveInWorkspace` uses node's
-// platform-aware `resolve`/`sep` because Bun tests run on macOS too.
-void posix;
 
 // ─────────────────────── MCP stdio JSON-RPC loop ─────────────────────
 
@@ -926,7 +957,3 @@ if (isEntry) {
 export function _resetCachedIdentityForTests(): void {
   cachedIdentity = null;
 }
-
-// `join` is used implicitly by node's `resolve` on POSIX but exported
-// from path for clarity. Mark it used so TS strip doesn't warn.
-void join;

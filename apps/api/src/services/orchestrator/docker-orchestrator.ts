@@ -109,7 +109,13 @@ export class DockerOrchestrator implements ContainerOrchestrator {
     // creation retries on `address pool exhausted`; volume creation
     // pre-reaps any stale `appstrate-ws-<runId>` residue from a hard
     // crash so a name collision can't 409 on a quick-restart loop.
-    const [networkId] = await Promise.all([
+    //
+    // `allSettled` (not `all`): with `all`, a reject on one branch
+    // resolves the call while the *other* branch's already-created
+    // resource is silently orphaned (reclaimed only by the next boot
+    // sweep). Settle both, then on any failure tear down whichever
+    // succeeded before rethrowing so a partial create leaks nothing.
+    const [networkResult, volumeResult] = await Promise.allSettled([
       createNetworkWithPoolRetry(
         () => docker.createNetwork(name, { internal: true }),
         () => docker.cleanupOrphanedRunNetworks(),
@@ -139,6 +145,21 @@ export class DockerOrchestrator implements ContainerOrchestrator {
         });
       })(),
     ]);
+
+    if (networkResult.status === "rejected" || volumeResult.status === "rejected") {
+      // One side may have succeeded — reclaim it before propagating.
+      await Promise.allSettled([
+        networkResult.status === "fulfilled"
+          ? docker.removeNetwork(networkResult.value)
+          : Promise.resolve(),
+        volumeResult.status === "fulfilled" ? docker.removeVolume(volumeName) : Promise.resolve(),
+      ]);
+      throw networkResult.status === "rejected"
+        ? networkResult.reason
+        : (volumeResult as PromiseRejectedResult).reason;
+    }
+
+    const networkId = networkResult.value;
 
     // Chown the freshly created volume to the agent's `pi` user (UID
     // 1001 — see runtime-pi/Dockerfile L144 `adduser ... -u 1001 pi`,

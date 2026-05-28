@@ -171,14 +171,14 @@ Opt-in surface (`mcp-server` manifest):
 {
   "_meta": {
     "dev.appstrate/workspace": {
-      "mount": "/workspace", // absolute POSIX, no `..`, no kernel prefixes (`/proc`, `/sys`, `/dev`)
+      "mount": "/workspace", // absolute POSIX; rejects `..`, control chars, root (`/`), kernel prefixes (`/proc`, `/sys`, `/dev`, `/etc`)
       "access": "rw", // "ro" (default) | "rw"
     },
   },
 }
 ```
 
-Parsed by `getMcpServerWorkspaceMount` (`@appstrate/core/mcp-server`); validation runs at install-time in `mcpServerManifestSchema.superRefine` so a malformed mount is rejected before publish.
+Parsed by `getMcpServerWorkspaceMount` (`@appstrate/core/mcp-server`); validation runs at install-time in `mcpServerManifestSchema.superRefine` so a malformed mount is rejected before publish. Validation rules: `mount` must be a non-empty string when present (a non-string is rejected, not silently coerced to the default), an absolute POSIX path, free of `..` traversal segments and control chars, and neither root (`/`) nor a kernel-managed prefix. `access` defaults to `"ro"` (least-privilege). Note the `ro`/`rw` mode is kernel-enforced only on the docker adapter (the `:ro` bind flag); on the process adapter (tier 0-2) it is advisory — there is no read-only bind for a host directory, so a server needing hard write-denial must run in docker mode.
 
 End-to-end topology:
 
@@ -202,7 +202,9 @@ Sidecar (integrations-boot)
 
 **UID 1001 invariant** (cross-cuts security + workspace writes): the agent's `pi` user and ALL five runner images (`runtime-pi/runners/{bun,node,python,binary,uv}`) ship as UID 1001 / GID 1001. The init step that chowns the empty volume on first mount uses a marker file (Docker resets `uid:gid` on first mount of a fresh named volume to the daemon's defaults, typically root:root, which would 403 the agent). Adding a new runner image MUST keep this alignment or workspace writes silently fail with `Permission denied`. The github-git MCP server additionally prepends `-c safe.directory='*'` to every `git` invocation because git refuses to operate on a working tree whose uid differs from the EUID, even when the uid is correct — a defensive belt against ownership drift across image rebuilds.
 
-**Cleanup**: `cleanupOrphanedVolumes()` mirrors the network reaper — runs at platform boot, removes any `appstrate-ws-*` volume whose corresponding run has terminated. Sidecar shutdown does NOT explicitly remove the volume (the platform owns the lifecycle), only the runner containers.
+**Cleanup**: `cleanupOrphanedVolumes()` mirrors the network reaper — runs at platform boot, removes any `appstrate-ws-*` volume whose corresponding run has terminated. Sidecar shutdown does NOT explicitly remove the volume (the platform owns the lifecycle), only the runner containers. Boundary creation (`DockerOrchestrator.createIsolationBoundary`) races the network + volume create via `Promise.allSettled` and tears down whichever side succeeded if the other rejects, so a partial create never orphans a resource ahead of the boot reaper.
+
+**git ref/branch injection guard** (github-git server, `assertSafeRefArg`): every agent-supplied value that lands in a positional `git` argument (`clone.ref`, `checkout_branch.branch`/`base`, `push.branch`) is screened before the spawn. git treats a leading `-`/`+` as an option/force-refspec and `:` as a refspec separator, so an unguarded value (`ref: "-f"` → `git checkout -f` discards the working tree; `branch: ":main"` → `git push origin :main` deletes the remote branch) would reach git as a flag/refspec rather than a ref. Tools spawn git via an argv array (no shell), so this is purely git's own option/refspec parsing — not shell injection — but the blast radius (working-tree data loss, remote branch deletion) is real, hence reject-not-sanitise. Workspace-relative paths are independently floored by `resolveInWorkspace` (strip leading slash, reject `..`, re-assert the resolved path stays under the workspace root).
 
 ### AFPS Integrations — connection model
 

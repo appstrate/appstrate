@@ -169,6 +169,22 @@ describe("getMcpServerWorkspaceMount", () => {
     });
     expect(() => getMcpServerWorkspaceMount(m)).toThrow(/access.*ro.*rw/);
   });
+
+  it("rejects a root mount target (including paths that canonicalise to '/')", () => {
+    for (const mount of ["/", "//", "/.", "/./"]) {
+      const m = manifest({ [MCP_SERVER_WORKSPACE_META_KEY]: { mount } });
+      expect(() => getMcpServerWorkspaceMount(m)).toThrow(/root/);
+    }
+  });
+
+  it("rejects a non-string mount instead of silently coercing to the default", () => {
+    for (const mount of [42, ["/data"], {}, ""]) {
+      const m = manifest({
+        [MCP_SERVER_WORKSPACE_META_KEY]: { mount: mount as unknown as string },
+      });
+      expect(() => getMcpServerWorkspaceMount(m)).toThrow(/non-empty string/);
+    }
+  });
 });
 
 describe("mcpServerManifestSchema — _meta.workspace install-time validation", () => {

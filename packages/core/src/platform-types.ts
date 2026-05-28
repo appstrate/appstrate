@@ -212,10 +212,10 @@ export interface IsolationBoundary {
    *   - Process: `{ kind: "directory", path: string }` — a host
    *     directory under `os.tmpdir()/appstrate-ws-<runId>/`.
    *
-   * Always present for orchestrators that support shared workspaces;
-   * absent for orchestrators that don't (current built-ins always
-   * provide one — the field is non-optional in practice but the union
-   * keeps the door open for future orchestrators).
+   * Non-optional: every built-in orchestrator provides a handle. The
+   * `WorkspaceHandle` union (not an optional field) is what keeps the
+   * door open for a future orchestrator to add a third shape without
+   * touching call sites that already branch on `kind`.
    */
   readonly workspace: WorkspaceHandle;
 }

@@ -142,18 +142,23 @@ function canonicaliseMount(path: string): string {
  * Parse the shared-workspace opt-in declared on an mcp-server manifest.
  * Returns `undefined` when absent (default: no workspace access).
  *
- * Validation is strict — a malformed entry is rejected rather than
+ * Validation is strict — a malformed entry throws rather than being
  * silently degraded. The platform's install-time package validator
- * surfaces this via the schema check, so by the time
- * `getMcpServerWorkspaceMount` runs at spawn time the manifest is
- * trusted; any error here indicates a contract drift between the
- * validator and the parser and should fail loudly.
+ * (`mcpServerManifestSchema` superRefine) runs this and surfaces the
+ * throw as a schema issue, so a bad `_meta.workspace` is normally
+ * rejected at upload. Spawn-time callers (`integration-spawn-resolver`)
+ * run it again as defence-in-depth and may degrade safely (drop the
+ * mount + log) rather than abort a whole run on a manifest that
+ * slipped past the validator.
  *
  * Rules:
+ *   - `mount`, when present, MUST be a non-empty string (omitted →
+ *     defaults to `/workspace`)
  *   - `mount` MUST be an absolute POSIX path (`startsWith("/")`)
- *   - `mount` MUST NOT contain `..` traversal segments
- *   - `mount` MUST NOT be a kernel-managed prefix (`/proc/`, `/sys/`,
- *     `/dev/`, `/etc/`) — those would break the runner container
+ *   - `mount` MUST NOT contain `..` traversal segments or control chars
+ *   - `mount` MUST NOT be root (`/`) or a kernel-managed prefix
+ *     (`/proc/`, `/sys/`, `/dev/`, `/etc/`) — those would break or
+ *     shadow the runner's rootfs
  *   - `access` MUST be `"ro"` or `"rw"`; defaults to `"ro"` when
  *     omitted (least-privilege)
  */
@@ -171,8 +176,16 @@ export function getMcpServerWorkspaceMount(
   }
   const raw = entry as { mount?: unknown; access?: unknown };
 
-  const rawMount =
-    typeof raw.mount === "string" && raw.mount.length > 0 ? raw.mount : DEFAULT_WORKSPACE_MOUNT;
+  // `mount` omitted → default. Present but not a non-empty string →
+  // reject rather than silently coerce to the default, so a typo
+  // (`mount: ["/data"]`, `mount: 42`) surfaces at install time instead
+  // of producing a `/workspace` mount the author never asked for.
+  if (raw.mount !== undefined && (typeof raw.mount !== "string" || raw.mount.length === 0)) {
+    throw new Error(
+      `${MCP_SERVER_WORKSPACE_META_KEY}.mount: must be a non-empty string when present`,
+    );
+  }
+  const rawMount = typeof raw.mount === "string" ? raw.mount : DEFAULT_WORKSPACE_MOUNT;
   if (!rawMount.startsWith("/")) {
     throw new Error(`${MCP_SERVER_WORKSPACE_META_KEY}.mount: must be an absolute POSIX path`);
   }
@@ -194,6 +207,11 @@ export function getMcpServerWorkspaceMount(
     );
   }
   const mount = canonicaliseMount(rawMount);
+  // Root (`/`, or anything that canonicalises to it like `//` or `/.`)
+  // would shadow the entire runner rootfs — never a sane mount target.
+  if (mount === "/") {
+    throw new Error(`${MCP_SERVER_WORKSPACE_META_KEY}.mount: refused root ("/") mount target`);
+  }
   const forbiddenPrefixes = ["/proc/", "/sys/", "/dev/", "/etc/"];
   if (forbiddenPrefixes.some((p) => mount === p.replace(/\/$/, "") || mount.startsWith(p))) {
     throw new Error(
