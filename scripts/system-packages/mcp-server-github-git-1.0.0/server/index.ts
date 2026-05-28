@@ -158,16 +158,23 @@ export function classifyGitError(stderr: string): string | undefined {
  * Spawn `git`. Returns stdout/stderr/exit code. Throws on non-zero
  * exit with a classified hint when one applies.
  *
- * Auth + transport: the github-git integration declares `delivery.http`
- * so the sidecar mints a per-run MITM listener and injects
- * `HTTPS_PROXY` + `CURL_CA_BUNDLE` (`buildMitmEnvBlock`) into the
- * runner env. Every git HTTPS request from the runner is intercepted
- * by the MITM, which appends `Authorization: Bearer <token>` and
- * forwards to GitHub. The MCP server never sees the token — it just
- * lets libcurl honour the standard proxy env vars. Inheriting
- * `process.env` wholesale is what makes this work; stripping the env
- * (the original mistake on this server) would leave git with no
- * proxy and no DNS path to github.com.
+ * Transport + auth: the github-git integration declares `delivery.http`
+ * with `prefix: "Basic "`, `value: "x-access-token:{$credential
+ * .access_token}"`, `encoding: "base64"`. The sidecar's per-run MITM
+ * proxy renders that to `Authorization: Basic
+ * <base64('x-access-token:<token>')>` and injects it on every request
+ * matching the integration's `authorized_uris` — the format GitHub's
+ * git smart-HTTP layer actually accepts (Bearer works for the REST
+ * API but is rejected by `/info/refs` + `/git-upload-pack` +
+ * `/git-receive-pack`). The MITM also sets `HTTPS_PROXY` +
+ * `CURL_CA_BUNDLE` + `GIT_SSL_CAINFO` in the runner env. We inherit
+ * `process.env` wholesale so libcurl / git honour all of them;
+ * stripping the env would break both transport and auth simultaneously.
+ *
+ * The token therefore NEVER lands in the MCP server: it lives on the
+ * sidecar side and gets injected per-request. The server only spawns
+ * git and reads the response. This is the same trust model as every
+ * other workspace integration (gmail-mcp, github-mcp).
  *
  * Always prepends `-c safe.directory='*'` — git refuses to operate on
  * a working tree whose ownership differs from the calling uid. Even

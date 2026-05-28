@@ -56,8 +56,9 @@
         "http": {
           "in": "header",
           "name": "Authorization",
-          "prefix": "Bearer ",
-          "value": "{$credential.access_token}"
+          "prefix": "Basic ",
+          "value": "x-access-token:{$credential.access_token}",
+          "encoding": "base64"
         }
       },
 
