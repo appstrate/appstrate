@@ -268,7 +268,6 @@ export function createRunsRemoteRouter() {
       const runId = `run_${crypto.randomUUID()}`;
       const runner = await resolveRunnerContext(c);
       const result = await createRun({
-        origin: "remote",
         runId,
         orgId,
         applicationId,

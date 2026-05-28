@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
 import { AlertTriangle, XCircle, Puzzle, Users, Check } from "lucide-react";
 import { Modal } from "./modal";
 import { Button } from "@/components/ui/button";
@@ -68,12 +67,8 @@ interface MissingConnectionsModalProps {
   open: boolean;
   onClose: () => void;
   errors: MissingIntegrationFieldError[];
-  /**
-   * Re-run with the picked overrides. Only required to enable the
-   * must_choose picker — when omitted, the picker falls back to a
-   * read-only "Manage connections" link.
-   */
-  onRetryWithOverrides?: (overrides: ConnectionOverridesMap) => void;
+  /** Re-run with the picked overrides (drives the must_choose picker). */
+  onRetryWithOverrides: (overrides: ConnectionOverridesMap) => void;
   /** Disables the retry button while the new run is in flight. */
   retrying?: boolean;
 }
@@ -113,11 +108,8 @@ export function MissingConnectionsModal({
       e.code === "insufficient_scopes" ||
       e.code === "not_connected",
   );
-  const showRetry = !!onRetryWithOverrides && hasActionable;
-  const canRetry =
-    !!onRetryWithOverrides &&
-    !retrying &&
-    (mustChooseCount === 0 || pickedCount === mustChooseCount);
+  const showRetry = hasActionable;
+  const canRetry = !retrying && (mustChooseCount === 0 || pickedCount === mustChooseCount);
 
   return (
     <Modal
@@ -147,12 +139,7 @@ export function MissingConnectionsModal({
       <p className="text-muted-foreground mb-3 text-sm">{t("missingConnections.intro")}</p>
       <div className="space-y-2">
         {integrationErrors.map((err, i) => (
-          <MissingRow
-            key={`${err.field}-${i}`}
-            err={err}
-            pickFor={pickFor}
-            onPick={onRetryWithOverrides ? setPick : undefined}
-          />
+          <MissingRow key={`${err.field}-${i}`} err={err} pickFor={pickFor} onPick={setPick} />
         ))}
       </div>
     </Modal>
@@ -166,22 +153,21 @@ function MissingRow({
 }: {
   err: MissingIntegrationFieldError;
   pickFor: (integrationId: string) => string | undefined;
-  onPick?: (integrationId: string, connectionId: string) => void;
+  onPick: (integrationId: string, connectionId: string) => void;
 }) {
   const { t } = useTranslation(["agents"]);
-  const { packageId, authKey } = parseField(err.field);
+  const packageId = parseField(err.field);
   const { data: detail } = useIntegrationDetail(packageId);
-  const isMustChooseCode = err.code === "must_choose_connection";
+  const isMustChoose = err.code === "must_choose_connection";
   const isReconnect = err.code === "needs_reconnection" || err.code === "insufficient_scopes";
   // Fetch the connection list when we render the must_choose picker, or when a
   // reconnect/upgrade row needs the dead connection's own auth_key to bind a
   // single (non-dropdown) renew button to the right method. Still skipped on the
   // common not_connected rows (no connection_id), saving a round trip there.
-  const needsConnections = isMustChooseCode || (isReconnect && !!err.connection_id);
+  const needsConnections = isMustChoose || (isReconnect && !!err.connection_id);
   const { data: connections, refetch: refetchConnections } = useIntegrationConnections(
     needsConnections ? packageId : undefined,
   );
-  const isMustChoose = err.code === "must_choose_connection";
   // The dead/under-scoped connection this row acts on (when known).
   const reconnectConn = err.connection_id
     ? (connections ?? []).find((c) => c.id === err.connection_id)
@@ -221,18 +207,14 @@ function MissingRow({
         ? "text-amber-500"
         : "text-destructive";
 
-  // Pick the auth to act on. `field` is now integration-level only — the
-  // legacy `integrations.{id}.{authKey}` form is parsed back-compat but no
-  // longer emitted. The chosen connection carries its own `auth_key`; we
-  // only need an authKey for the reconnect/upgrade/connect CTA (to drive
-  // the OAuth method), which falls back to the manifest default.
-  // On a reconnect/upgrade the dead connection already pins a method; resolve
-  // its auth_key so the renew CTA is a single button bound to that method (no
-  // method-picker dropdown — there is nothing to choose). Falls back to the
-  // manifest default only until the connection list loads / for legacy
-  // authKey-suffixed fields.
-  const targetAuthKey =
-    authKey ?? reconnectConn?.auth_key ?? pickDefaultAuth(detail?.manifest.auths);
+  // Pick the auth to act on. `field` is integration-level (`integrations.{id}`);
+  // the chosen connection carries its own `auth_key`. We only need an authKey
+  // for the reconnect/upgrade/connect CTA (to drive the OAuth method). On a
+  // reconnect/upgrade the dead connection already pins a method, so resolve its
+  // auth_key for a single button bound to that method (no method-picker — there
+  // is nothing to choose); fall back to the manifest default until the
+  // connection list loads.
+  const targetAuthKey = reconnectConn?.auth_key ?? pickDefaultAuth(detail?.manifest.auths);
   const displayName = detail?.manifest.display_name ?? packageId;
   const candidateIds = err.candidateConnectionIds ?? [];
   const candidates = (connections ?? []).filter((c) => candidateIds.includes(c.id));
@@ -250,11 +232,6 @@ function MissingRow({
               <span className="truncate">
                 {resolved ? t("missingConnections.resolved") : err.message}
               </span>
-              {authKey && (
-                <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 font-mono text-[10px]">
-                  {authKey}
-                </span>
-              )}
             </div>
           </div>
         </div>
@@ -279,37 +256,26 @@ function MissingRow({
             onConnected={() => void refetchConnections()}
           />
         )}
-        {isMustChoose && !onPick && (
-          <Button asChild size="sm" variant="outline">
-            <Link to={`/integrations/${packageId}`}>{t("missingConnections.mustChoose.cta")}</Link>
-          </Button>
-        )}
       </div>
       {isMustChoose && candidates.length > 0 && (
         <div className="border-border/60 mt-1 border-t pt-2">
           <p className="text-muted-foreground mb-1.5 text-[0.7rem]">
-            {onPick
-              ? t("missingConnections.mustChoose.pickPrompt", { count: candidates.length })
-              : t("missingConnections.mustChoose.candidates", { count: candidates.length })}
+            {t("missingConnections.mustChoose.pickPrompt", { count: candidates.length })}
           </p>
           <ul className="space-y-1">
             {candidates.map((c) => {
               const name = connectionDisplayLabel(c);
               const isPicked = c.id === pickedId;
-              const clickable = !!onPick;
               return (
                 <li key={c.id}>
                   <button
                     type="button"
-                    onClick={clickable ? () => onPick!(packageId, c.id) : undefined}
-                    disabled={!clickable}
+                    onClick={() => onPick(packageId, c.id)}
                     className={
                       "flex w-full items-center gap-2 rounded px-2 py-1 text-left text-xs transition " +
                       (isPicked
                         ? "border-primary bg-primary/10 border"
-                        : clickable
-                          ? "bg-muted/40 hover:bg-muted cursor-pointer"
-                          : "bg-muted/40 cursor-default")
+                        : "bg-muted/40 hover:bg-muted cursor-pointer")
                     }
                     data-testid={`must-choose-candidate-${c.id}`}
                   >
@@ -331,18 +297,7 @@ function MissingRow({
   );
 }
 
-function parseField(field: string): { packageId: string; authKey: string | null } {
-  // `integrations.@scope/name` or `integrations.@scope/name.authKey`
-  const tail = field.slice("integrations.".length);
-  // packageId always starts with `@scope/name` — split on the last `.` AFTER
-  // the slash so the auth-key parser doesn't trip on the scope's `@`.
-  const slashIdx = tail.indexOf("/");
-  if (slashIdx < 0) return { packageId: tail, authKey: null };
-  const afterSlash = tail.slice(slashIdx + 1);
-  const dotIdx = afterSlash.indexOf(".");
-  if (dotIdx < 0) return { packageId: tail, authKey: null };
-  return {
-    packageId: tail.slice(0, slashIdx + 1 + dotIdx),
-    authKey: afterSlash.slice(dotIdx + 1),
-  };
+/** Extract the integration package id from the `integrations.{packageId}` field path. */
+function parseField(field: string): string {
+  return field.slice("integrations.".length);
 }

@@ -1,25 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unified run creation — single entry point for every runs-creating route.
+ * Remote run creation — entry point for the remote-runner route
+ * (`POST /api/runs/remote`). The caller (CLI, GitHub Action, ...) is the
+ * runner: we run readiness + preflight, mint sink credentials, create the
+ * `runs` row in `pending`, and return the credentials. Status transitions
+ * flow back through the HMAC-signed event route (§run-event-ingestion).
  *
- * - `origin: "platform"` — the platform spawns a Docker container that
- *                          talks the exact same HMAC-signed event protocol
- *                          as any remote runner. Delegates to
- *                          {@link prepareAndExecuteRun} for the heavy
- *                          container plan + fire-and-forget execution.
- * - `origin: "remote"`   — the caller (CLI, GitHub Action, ...) is the
- *                          runner. We mint sink credentials, create the
- *                          `runs` row in `pending`, and return the
- *                          credentials. Status transitions flow through
- *                          the signed-event route (§run-event-ingestion).
- *
- * Both origins share:
- *   - Platform run limits (org rate, concurrency, timeout ceiling)
- *   - `beforeRun` module hook (billing/quota/feature-gate rejects)
- *   - Provider readiness (the agent needs configured credentials to run)
- *   - `onRunStatusChange` event firing (consumers stay origin-agnostic)
- *   - HMAC-signed event ingestion at `POST /api/runs/:runId/events`
+ * Platform-origin runs (the platform spawns the Docker container) do NOT
+ * pass through here — they go straight to {@link prepareAndExecuteRun}
+ * from `runs.ts` / `scheduler.ts` / `inline-run.ts`. Both paths share the
+ * same building blocks: `runPreflightGates` (rate/concurrency/timeout +
+ * `beforeRun` hook), the connection-cascade resolver, the state-layer
+ * `createRun` insert, and the `onRunStatusChange` event.
  *
  * Spec: docs/specs/REMOTE_CLI_UNIFIED_RUNNER_PLAN.md §6.2.
  */
@@ -29,8 +22,7 @@ import { getEnv } from "@appstrate/env";
 import { mintSinkCredentials, type SinkCredentials } from "../lib/mint-sink-credentials.ts";
 import type { LoadedPackage } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
-import type { FileReference, UploadedFile } from "./run-launcher/types.ts";
-import { prepareAndExecuteRun, extractRunAgentDenorm } from "./run-pipeline.ts";
+import { extractRunAgentDenorm } from "./run-pipeline.ts";
 import { validateAgentReadiness } from "./agent-readiness.ts";
 import { resolveRunConnectionsOrError } from "./integration-connection-resolver.ts";
 import type { ResolvedConnectionMap } from "@appstrate/core/integration";
@@ -38,15 +30,11 @@ import { createRun as createRunRow } from "./state/runs.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 import { isInlineShadowPackageId } from "./inline-run.ts";
 import { runPreflightGates } from "./run-preflight-gates.ts";
-import { ApiError } from "../lib/errors.ts";
-import type { RunOrigin } from "@appstrate/db/schema";
 import { getErrorMessage } from "@appstrate/core/errors";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-export type { RunOrigin };
 
 export interface SinkRequest {
   /** Client-requested TTL in seconds. Clamped to REMOTE_RUN_SINK_MAX_TTL_SECONDS. */
@@ -61,33 +49,24 @@ export { mintSinkCredentials };
 export type { SinkCredentials };
 
 export interface CreateRunInput {
-  origin: RunOrigin;
   runId: string;
   orgId: string;
   applicationId: string;
   actor: Actor | null;
   agent: LoadedPackage;
   input?: Record<string, unknown> | null;
-  files?: FileReference[];
   config: Record<string, unknown>;
   modelId?: string | null;
   proxyId?: string | null;
   apiKeyId?: string;
-  scheduleId?: string;
   overrideVersionLabel?: string;
-  uploadedFiles?: UploadedFile[];
   /**
    * Caller's per-(integration, authKey) connection picks for THIS run
    * (#199). Flows into the resolver's mechanism #2 at kickoff and is
    * persisted on `runs.connection_overrides` for audit + replay.
    */
   connectionOverrides?: Record<string, string> | null;
-  /**
-   * Schedule-frozen overrides loaded from `package_schedules.connection_overrides`
-   * (scheduler path only). Resolver mechanism #3.
-   */
-  scheduleConnectionOverrides?: Record<string, string> | null;
-  /** Only meaningful when `origin === "remote"` — ignored for platform origin. */
+  /** Client-requested sink TTL. */
   sink?: SinkRequest;
   /** CLI-provided execution environment metadata (os, cli version, git sha, ...). */
   contextSnapshot?: Record<string, unknown>;
@@ -100,7 +79,6 @@ export type CreateRunResult =
   | {
       ok: true;
       runId: string;
-      /** Present only for `origin: "remote"`. */
       sinkCredentials?: SinkCredentials;
     }
   | {
@@ -109,59 +87,15 @@ export type CreateRunResult =
     };
 
 // ---------------------------------------------------------------------------
-// Public entry point
+// Public entry point — preflight, mint sink, insert row, no execution
 // ---------------------------------------------------------------------------
 
 /**
- * Create a run. For platform origin, delegates to {@link prepareAndExecuteRun}
- * (builds the container plan + mints sink credentials + fires the container).
- * For remote origin, runs the same preflight gates, mints sink credentials,
- * creates the `runs` row in `pending`, and returns — the CLI executes on its
- * own host and posts events back.
+ * Create a remote run: run readiness + preflight gates, mint sink
+ * credentials, insert the `runs` row in `pending`, and return — the CLI
+ * executes on its own host and posts signed events back.
  */
 export async function createRun(input: CreateRunInput): Promise<CreateRunResult> {
-  if (input.origin === "platform") {
-    try {
-      const result = await prepareAndExecuteRun({
-        runId: input.runId,
-        agent: input.agent,
-        orgId: input.orgId,
-        actor: input.actor,
-        input: input.input ?? null,
-        files: input.files,
-        config: input.config,
-        modelId: input.modelId,
-        proxyId: input.proxyId,
-        applicationId: input.applicationId,
-        apiKeyId: input.apiKeyId,
-        scheduleId: input.scheduleId,
-        overrideVersionLabel: input.overrideVersionLabel,
-        uploadedFiles: input.uploadedFiles,
-        connectionOverrides: input.connectionOverrides ?? null,
-        scheduleConnectionOverrides: input.scheduleConnectionOverrides ?? null,
-        runnerName: input.runnerName ?? null,
-        runnerKind: input.runnerKind ?? null,
-      });
-      return { ok: true, runId: result.runId };
-    } catch (err) {
-      if (err instanceof ApiError) {
-        return {
-          ok: false,
-          error: { code: err.code, message: err.message, status: err.status },
-        };
-      }
-      throw err;
-    }
-  }
-
-  return createRemoteRun(input);
-}
-
-// ---------------------------------------------------------------------------
-// Remote origin — preflight, mint sink, insert row, no execution
-// ---------------------------------------------------------------------------
-
-async function createRemoteRun(input: CreateRunInput): Promise<CreateRunResult> {
   const {
     runId,
     orgId,
@@ -209,11 +143,11 @@ async function createRemoteRun(input: CreateRunInput): Promise<CreateRunResult> 
   const { agent } = gates;
 
   // --- Snapshot the connection cascade (#199, remote-path mirror of
-  //     run-pipeline). Any resolver error is hard 412: readiness already
-  //     ran without overrides, so a failure here is either the caller's
-  //     pick pointing at an inaccessible id or a between-readiness-and-now
-  //     race (deleted connection, new admin pin). Either way the runner
-  //     gets a structured agent_not_ready it can surface verbatim.
+  //     run-pipeline). Readiness above ran with the same overrides, so a
+  //     failure here is either the caller's pick pointing at an inaccessible
+  //     id or a between-readiness-and-now race (deleted connection, new admin
+  //     pin). Either way the runner gets a structured agent_not_ready it can
+  //     surface verbatim.
   let resolvedConnections: ResolvedConnectionMap | null = null;
   if (actor) {
     const outcome = await resolveRunConnectionsOrError({
@@ -222,7 +156,9 @@ async function createRemoteRun(input: CreateRunInput): Promise<CreateRunResult> 
       actor,
       scope: { orgId, applicationId },
       runOverrides: input.connectionOverrides ?? null,
-      scheduleOverrides: input.scheduleConnectionOverrides ?? null,
+      // Remote runs are never scheduled, so there is no frozen schedule
+      // override on this path (mechanism #3 applies to platform runs only).
+      scheduleOverrides: null,
     });
     if (!outcome.ok) {
       // Remote runners get a flat `agent_not_ready` they can surface verbatim

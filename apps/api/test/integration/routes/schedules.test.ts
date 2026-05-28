@@ -193,6 +193,79 @@ describe("Schedules API", () => {
     });
   });
 
+  describe("connection_overrides shape (flat per-integration map)", () => {
+    // Regression guard for the schedule half of the connection-renewal flow.
+    // The wire shape is a FLAT `Record<integrationId, connectionId>` matching
+    // the run route — `routes/schedules.ts` validates it with
+    // `z.record(z.string(), z.string())`. The frontend previously sent the
+    // nested `Record<int, Record<authKey, conn>>` shape, which 400'd. These
+    // tests pin both directions so a revert to the nested schema fails CI.
+    // Connection ids need not resolve to real rows: the route validates the
+    // shape only and freezes the map; resolution happens at fire time.
+
+    it("accepts a flat connection_overrides map on create and round-trips it", async () => {
+      const fid = agentId("co-create");
+      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, fid);
+
+      const overrides = { "@runorg/svc": "conn_abc123" };
+      const res = await app.request(`/api/agents/${fid}/schedules`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cron_expression: "0 9 * * 1-5",
+          connection_overrides: overrides,
+        }),
+      });
+
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as any;
+      expect(body.connection_overrides).toEqual(overrides);
+    });
+
+    it("rejects the legacy nested connection_overrides shape with 400", async () => {
+      const fid = agentId("co-nested");
+      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, fid);
+
+      const res = await app.request(`/api/agents/${fid}/schedules`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cron_expression: "0 9 * * 1-5",
+          // Old nested shape: integrationId → { authKey → connectionId }.
+          connection_overrides: { "@runorg/svc": { primary: "conn_abc123" } },
+        }),
+      });
+
+      expect(res.status).toBe(400);
+    });
+
+    it("updates connection_overrides via PUT and round-trips the flat map", async () => {
+      const fid = agentId("co-update");
+      const agent = await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      const schedule = await seedSchedule({
+        packageId: agent.id,
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        cronExpression: "0 * * * *",
+        name: "co-sched",
+      });
+
+      const overrides = { "@runorg/svc": "conn_xyz789" };
+      const res = await app.request(`/api/schedules/${schedule.id}`, {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ connection_overrides: overrides }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.connection_overrides).toEqual(overrides);
+    });
+  });
+
   describe("PUT /api/schedules/:id", () => {
     it("updates schedule name and cron", async () => {
       const fid = agentId("upd-agent");

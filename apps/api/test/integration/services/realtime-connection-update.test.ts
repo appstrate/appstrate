@@ -36,6 +36,22 @@ import { sql } from "drizzle-orm";
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+/**
+ * Poll until `predicate()` is true or the timeout elapses. Used for the
+ * positive paths where a NOTIFY → LISTEN round-trip must have flushed — a
+ * fixed `wait()` is flaky under CI load, so we poll and only proceed once
+ * the event has actually been delivered. Negative paths (asserting a
+ * subscriber was NOT called) keep a fixed grace window instead — there is
+ * no "delivered" state to poll for.
+ */
+async function waitFor(predicate: () => boolean, timeoutMs = 2000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await wait(10);
+  }
+}
+
 const INTEG = "@isoorg/svc";
 
 function buildIntegrationManifest(id: string) {
@@ -145,6 +161,7 @@ describe("realtime — connection_update channel (actor + tenant filter)", () =>
     });
 
     await insertConnection({ userId: ctx.user.id, applicationId: ctx.defaultAppId });
+    await waitFor(() => send.mock.calls.length >= 1);
 
     expect(send).toHaveBeenCalled();
     const evt = send.mock.calls[0]![0]!;
@@ -245,12 +262,13 @@ describe("realtime — connection_update channel (actor + tenant filter)", () =>
     });
 
     const id = await insertConnection({ userId: ctx.user.id, applicationId: ctx.defaultAppId });
+    await waitFor(() => send.mock.calls.some((c) => c[0]!.data.operation === "INSERT"));
     await db.execute(
       sql`UPDATE integration_connections SET needs_reconnection = true WHERE id = ${id}`,
     );
-    await wait(50);
+    await waitFor(() => send.mock.calls.some((c) => c[0]!.data.operation === "UPDATE"));
     await db.execute(sql`DELETE FROM integration_connections WHERE id = ${id}`);
-    await wait(50);
+    await waitFor(() => send.mock.calls.some((c) => c[0]!.data.operation === "DELETE"));
 
     const ops = send.mock.calls.map((c) => c[0]!.data.operation);
     expect(ops).toContain("INSERT");

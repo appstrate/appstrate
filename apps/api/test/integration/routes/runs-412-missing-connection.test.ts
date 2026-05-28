@@ -271,7 +271,9 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
     await seedIntegration(INTEGRATION);
     const conn1 = await seedConnection(INTEGRATION, ctx.user.id);
-    const conn2 = await seedConnection(INTEGRATION, ctx.user.id);
+    // Second candidate (unbound) — its existence is what makes the resolver
+    // enter must_choose; the retry must NOT re-surface it once a pick exists.
+    await seedConnection(INTEGRATION, ctx.user.id);
 
     // Sanity: same setup as the must_choose test fires 412.
     const first = await app.request(`/api/agents/${AGENT}/run`, {
@@ -287,16 +289,12 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({ connection_overrides: { [INTEGRATION]: conn1 } }),
     });
-    // Not the 412 envelope — the resolver consumed the override. Downstream
-    // model-config or runner errors may still surface; we only assert the
-    // missing-connection envelope is gone (the contract under test).
-    if (retry.status === 412) {
-      const body = (await retry.json()) as ProblemDetails;
-      expect(body.code).not.toBe("missing_integration_connection");
-    }
-    // The non-picked candidate is irrelevant; the resolver should NOT
-    // re-surface must_choose now that an explicit pick exists.
-    void conn2;
+    // 412 is reserved exclusively for the missing_integration_connection
+    // envelope, so asserting the retry is NOT 412 directly proves the
+    // resolver consumed the override and exited the must_choose loop. A
+    // regression in the override→resolver wiring would re-fire 412 here.
+    // (Downstream model-config errors surface as 400, not 412 — fine.)
+    expect(retry.status).not.toBe(412);
   });
 
   it("emits 412 with needs_reconnection + connection_id when actor's only candidate is flagged", async () => {
