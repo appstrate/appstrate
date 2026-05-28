@@ -39,9 +39,12 @@ LABEL org.opencontainers.image.title="Appstrate MCP Runner (Bun)" \
       org.opencontainers.image.created="${BUILD_CREATED}"
 
 # ca-certificates — TLS trust store for outbound API calls. Bun ships in
-# the base image. /bundle is the conventional mount point — the sidecar
-# `docker cp`s the extracted bundle here before `docker start`.
-RUN apk add --no-cache ca-certificates && \
+# the base image. git + openssh-client cover bun mcp-servers that shell
+# out to `git` for working-tree operations (clone, branch, commit, push)
+# — adds ~25MB on alpine, dwarfed by the bun runtime itself. /bundle is
+# the conventional mount point — the sidecar `docker cp`s the extracted
+# bundle here before `docker start`.
+RUN apk add --no-cache ca-certificates git openssh-client && \
     mkdir -p /bundle && \
     chown nobody:nobody /bundle
 
