@@ -1608,7 +1608,7 @@ function enforceAuthorizedUris(meta: ApiCallMeta, target: string): void {
 }
 
 /**
- * AFPS 1.3-spec URL allowlist matcher:
+ * AFPS-spec URL allowlist matcher:
  *   - literal URLs (no wildcards)   → exact equality
  *   - `*`  (single path segment)    → regex `[^/]*`
  *   - `**` (any substring)          → regex `.*`

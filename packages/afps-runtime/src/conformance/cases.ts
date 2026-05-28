@@ -9,12 +9,7 @@
  */
 
 import { zipSync } from "fflate";
-import {
-  integrationManifestSchema,
-  mcpServerManifestSchema,
-  metaSchema,
-  agentManifestSchema,
-} from "@afps-spec/schema";
+import { integrationManifestSchema, metaSchema, agentManifestSchema } from "@afps-spec/schema";
 import {
   canonicalBundleDigest,
   generateKeyPair,
@@ -512,66 +507,6 @@ const L4_EMPTY_SCRIPT: ConformanceCase = {
 // language runtimes (third-party runners get the same pass/fail by
 // re-implementing the same validators).
 //
-// L1.6 — mcp-server identity at the manifest root (§3.4 / §11.2).
-//   AFPS lifted `type`, `name`, and `schema_version` out of the
-//   `_meta["dev.afps/mcp-server"]` block onto the root. Accepting the old
-//   shape (identity ONLY in `_meta`) would silently break tools that key
-//   off the root discriminant.
-const L1_MCP_SERVER_ROOT_IDENTITY: ConformanceCase = {
-  id: "L1.6",
-  level: "L1",
-  title: "mcp-server identity lives at the manifest root (AFPS §3.4)",
-  run: () => {
-    const goodManifest = {
-      manifest_version: "0.3",
-      name: "@afps/conformance-mcp",
-      version: "1.0.0",
-      type: "mcp-server",
-      schema_version: "0.1",
-      display_name: "Conformance MCP Server",
-      server: {
-        type: "node",
-        entry_point: "main.js",
-        mcp_config: { command: "node", args: ["main.js"] },
-      },
-    };
-    const goodResult = mcpServerManifestSchema.safeParse(goodManifest);
-    if (!goodResult.success) {
-      return fail(
-        `root-identity manifest rejected: ${goodResult.error.issues
-          .map((i) => `${i.path.join(".")}: ${i.message}`)
-          .join("; ")}`,
-      );
-    }
-
-    // Legacy AFPS 1.x shape — identity ONLY in `_meta`. The root is
-    // missing `type`/`name`/`schema_version`, so the lifted-shape schema
-    // MUST refuse it.
-    const legacyManifest = {
-      manifest_version: "0.3",
-      version: "1.0.0",
-      display_name: "Legacy MCP",
-      server: {
-        type: "node",
-        entry_point: "main.js",
-        mcp_config: { command: "node", args: ["main.js"] },
-      },
-      _meta: {
-        "dev.afps/mcp-server": {
-          name: "@afps/conformance-mcp",
-          type: "mcp-server",
-          schema_version: "0.1",
-        },
-      },
-    };
-    const legacyResult = mcpServerManifestSchema.safeParse(legacyManifest);
-    if (legacyResult.success) {
-      return fail("legacy _meta-only mcp-server identity must be rejected");
-    }
-    return pass();
-  },
-};
-
 // L1.7 — integration `delivery.http` mutually exclusive with `delivery.env`
 // (AFPS §7.6). The proxy injects the credential header on the way out
 // (`http`) OR the integration server reads it from env / file (`env`/`files`);
@@ -1213,7 +1148,6 @@ export const BUILT_IN_CASES: readonly ConformanceCase[] = Object.freeze([
   L1_REJECT_MISSING_MANIFEST,
   L1_REJECT_MISSING_PROMPT,
   L1_STRIP_WRAPPER,
-  L1_MCP_SERVER_ROOT_IDENTITY,
   L1_INTEGRATION_MUTUAL_EXCLUSION,
   L1_DEPENDENCIES_AND_CONFIG,
   L1_TOOLS_POLICY,

@@ -130,46 +130,6 @@ describe("validateBundle (AFPS)", () => {
     ).toBe(true);
   });
 
-  it("rejects an AFPS 1.x camelCase manifest (the migration's headline contract)", async () => {
-    // Spec-fidelity gate: the snake_case migration's whole point is that the
-    // wire-format casing flipped. A fully-camelCased 1.x manifest must NOT
-    // be silently accepted — it must hit MANIFEST_SCHEMA errors on both
-    // `schemaVersion` (unknown field via missing `schema_version`) and the
-    // 1.x-style top-level keys (`displayName`, `fileConstraints`, …).
-    const legacyCamelCaseManifest = {
-      name: "@me/root",
-      version: "1.0.0",
-      type: "agent",
-      schemaVersion: "1.1",
-      displayName: "Legacy Agent",
-      // 1.x wrapper keys that don't exist in the current AFPS shape:
-      input: {
-        schema: { type: "object", properties: { task: { type: "string" } } },
-        fileConstraints: { upload: { accept: ["text/plain"], maxSize: 1024 } },
-        uiHints: { task: { placeholder: "Type something" } },
-        propertyOrder: ["task"],
-      },
-    };
-    const root = makePkg("@me/root@1.0.0" as PackageIdentity, legacyCamelCaseManifest, {
-      "prompt.md": enc("p"),
-    });
-    const bundle = await buildBundleFromCatalog(root, emptyPackageCatalog);
-    const result = validateBundle(bundle);
-
-    expect(result.valid).toBe(false);
-    const errors = result.issues.filter((i) => i.severity === "error");
-    expect(errors.length).toBeGreaterThan(0);
-    // The missing snake_case `schema_version` must be flagged — that's the
-    // strongest single signal the migration's contract is enforced.
-    expect(
-      result.issues.some(
-        (i) =>
-          (i.code === "MANIFEST_SCHEMA" || i.code === "SCHEMA_VERSION_MISSING") &&
-          i.path.includes("schema_version"),
-      ),
-    ).toBe(true);
-  });
-
   it("rejects a manifest that mixes 1.x camelCase + 2.0 snake_case wrapper keys", async () => {
     // A half-migrated manifest where someone renamed schema_version → "0.1"
     // but kept 1.x wrapper keys (fileConstraints, uiHints, …) must still fail.

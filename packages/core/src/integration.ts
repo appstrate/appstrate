@@ -11,8 +11,8 @@
  * cross-field MUST rules that AFPS leaves to the consumer (scope-catalog
  * subset, per-tool auth-key disambiguation, connect.login output gating).
  *
- * Field vocabulary is snake_case (§Appendix D). The integration manifest
- * itself is read as AFPS canonical only — there is no 1.x camelCase
+ * Field vocabulary is snake_case (AFPS). The integration manifest
+ * itself is read as AFPS canonical snake_case only — there is no camelCase
  * reading path on this schema. Reads and writes everywhere are AFPS
  * canonical.
  *

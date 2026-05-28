@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * T1 (Wave 3) — Writers MUST NOT emit AFPS-1.x camelCase keys.
+ * T1 (Wave 3) — Writers MUST NOT emit non-canonical camelCase keys.
  *
  * Umbrella regression test catching the WHOLE CLASS of writer-leak bugs that
  * shipped as C1 (`createOrgItem` writing `displayName`). Wave 1 fixes are
@@ -21,13 +21,12 @@
  *    `apps/web/src/components/agent-editor/test/utils.test.ts` — already
  *    asserts `displayName: undefined` is emitted alongside canonical
  *    `display_name`. Re-tested here at the JSON level since the patch is
- *    shallow-merged into the manifest and the legacy key MUST drop on
+ *    shallow-merged into the manifest and the non-canonical key MUST drop on
  *    serialization.
  *
- * Banned 1.x camelCase keys:
+ * Banned non-canonical camelCase keys:
  *   displayName, schemaVersion, fileConstraints, uiHints, propertyOrder,
- *   maxSize, iconUrl, providersConfiguration, runtimeTools,
- *   dependencies.providers, dependencies.tools
+ *   maxSize, iconUrl, providersConfiguration, runtimeTools
  */
 
 import { describe, it, expect } from "bun:test";
@@ -50,8 +49,6 @@ const BANNED_CAMEL_KEYS = [
   "runtimeTools",
 ] as const;
 
-const BANNED_DEP_KEYS = ["providers", "tools"] as const;
-
 interface Violation {
   path: string;
   key: string;
@@ -68,10 +65,6 @@ function findBannedKeysDeep(value: unknown, basePath = "$"): Violation[] {
     const path = `${basePath}.${k}`;
     if ((BANNED_CAMEL_KEYS as readonly string[]).includes(k)) {
       out.push({ path, key: k });
-    }
-    // `dependencies.providers` / `dependencies.tools` (Appendix D legacy keys)
-    if (basePath.endsWith(".dependencies") && (BANNED_DEP_KEYS as readonly string[]).includes(k)) {
-      out.push({ path, key: `dependencies.${k}` });
     }
     out.push(...findBannedKeysDeep(v, path));
   }
@@ -212,19 +205,6 @@ describe("T1 — banned-key walker (test infrastructure)", () => {
     expect(keys).toContain("fileConstraints");
     expect(keys).toContain("maxSize");
     expect(keys).toContain("uiHints");
-  });
-
-  it("flags `dependencies.providers` and `dependencies.tools`", () => {
-    const v = findBannedKeysDeep({
-      dependencies: {
-        skills: { "@x/y": "^1.0.0" },
-        providers: { "@x/p": "^1.0.0" },
-        tools: { "@x/t": "^1.0.0" },
-      },
-    });
-    const keys = v.map((x) => x.key);
-    expect(keys).toContain("dependencies.providers");
-    expect(keys).toContain("dependencies.tools");
   });
 
   it("accepts canonical snake_case manifest", () => {

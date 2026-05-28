@@ -63,7 +63,7 @@ export const scopedNameRegex: RegExp = (() => {
   return /^@[a-z0-9]([a-z0-9-]*[a-z0-9])?\/[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 })();
 
-/** Zod enum for supported AFPS package types (`tool`/`provider` removed; `mcp-server` added). Canonical export re-exposed from `@afps-spec/schema`. */
+/** Zod enum for supported AFPS package types. Canonical export re-exposed from `@afps-spec/schema`. */
 export const packageTypeEnum = afpsPackageTypeEnum;
 /** Union type of supported package types. */
 export type PackageType = z.infer<typeof packageTypeEnum>;
@@ -214,7 +214,7 @@ const agentManifestObjectSchema = afpsAgentManifestObjectSchema.extend({
   // AFPS requires author (MUST, non-empty) for publication; core relaxes it
   // for local drafts (the agent-editor stores `author: ""` until the user
   // fills it in). Accepts both the AFPS §3.1 structured-object form and
-  // the legacy bare string (including the empty-string draft sentinel).
+  // the bare-string form (including the empty-string draft sentinel).
   author: z.union([z.string(), authorObjectSchema]).optional(),
   description: z.string().optional(),
   keywords: z.array(z.string()).optional(),
@@ -229,7 +229,7 @@ const agentManifestObjectSchema = afpsAgentManifestObjectSchema.extend({
   // First-party runtime tools enabled for this agent — all opt-in, none
   // auto-injected (`output` included). `output` is required to be present
   // only when an output schema is declared (enforced by the superRefine
-  // below). Snake_case `runtime_tools` (was 1.x `runtimeTools`). This is an
+  // below). Snake_case `runtime_tools`. This is an
   // Appstrate manifest extension with no AFPS equivalent — kept as a
   // documented top-level snake_case field rather than namespaced under
   // `_meta`, because it is woven through the run pipeline (catalog
@@ -356,12 +356,12 @@ function parseWithSchema(
  * @returns Validation result with parsed manifest on success, or error messages on failure
  */
 export function validateManifest(raw: unknown): ValidateManifestResult {
-  // AFPS (Appendix D): `type` is the canonical discriminator and MUST be
-  // one of `agent | skill | mcp-server | integration`. Legacy strings (`tool`,
-  // `provider`) and a missing `type` are dispatcher-level errors, not partial
-  // base-schema validation failures — fail fast with a single structured Zod
-  // issue keyed on `["type"]` so callers/UI get a typed signal rather than a
-  // permissive list of base-schema field errors.
+  // AFPS: `type` is the canonical discriminator and MUST be one of
+  // `agent | skill | mcp-server | integration`. An unknown or missing `type`
+  // is a dispatcher-level error, not a partial base-schema validation
+  // failure — fail fast with a single structured Zod issue keyed on
+  // `["type"]` so callers/UI get a typed signal rather than a permissive
+  // list of base-schema field errors.
   if (!raw || typeof raw !== "object") {
     return {
       valid: false,
@@ -373,20 +373,18 @@ export function validateManifest(raw: unknown): ValidateManifestResult {
   const obj = raw as Record<string, unknown>;
   const type = obj.type;
 
-  // AFPS (§3.4 / §11.2): mcp-server identity was lifted from
-  // `_meta["dev.afps/mcp-server"]` to the manifest root. `type: "mcp-server"`,
-  // `name`, `schema_version`, and `dependencies` now live at the root; the
-  // `_meta["dev.afps/mcp-server"]` block was removed entirely. Dispatch
-  // purely on the root `type` discriminator.
+  // AFPS (§3.4): mcp-server identity lives at the manifest root —
+  // `type: "mcp-server"`, `name`, `schema_version`, and `dependencies` are
+  // all root fields. Dispatch purely on the root `type` discriminator.
   if (type === "mcp-server") return parseWithSchema(mcpServerManifestSchema, raw);
   if (type === "agent") return parseWithSchema(agentManifestSchema, raw);
   if (type === "skill") return parseWithSchema(skillManifestSchema, raw);
   if (type === "integration") return parseWithSchema(integrationManifestSchema, raw);
 
-  // Unknown / missing type: emit a single typed issue and stop. The legacy
-  // `tool` / `provider` strings (AFPS Appendix D — `tool → mcp-server`,
-  // `provider → integration`) land here and produce the same typed error
-  // rather than a confusing list of partial base-schema errors.
+  // Unknown / missing type: emit a single typed issue and stop. Any value
+  // that isn't one of the four canonical package types lands here and
+  // produces the typed error rather than a confusing list of partial
+  // base-schema errors.
   const received =
     typeof type === "string" ? `"${type}"` : type === undefined ? "missing" : String(type);
   return {
@@ -456,9 +454,9 @@ export interface ManifestAuthorObject {
 
 /**
  * Structured repository shape (AFPS §3.1) — npm-aligned object form.
- * The legacy bare-string form maps to `repositoryUrl` for back-compat;
- * publishers using the object form get both `repositoryUrl` (mirrors
- * `repository.url`) and `repository` (full object).
+ * The bare-string form maps to `repositoryUrl`; publishers using the object
+ * form get both `repositoryUrl` (mirrors `repository.url`) and `repository`
+ * (full object).
  */
 export interface ManifestRepositoryObject {
   type: string;
