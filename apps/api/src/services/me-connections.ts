@@ -18,7 +18,7 @@ import {
   packages,
   applications,
 } from "@appstrate/db/schema";
-import type { Actor } from "../lib/actor.ts";
+import { actorFilter, type Actor } from "../lib/actor.ts";
 import type { MeConnectionEntry, MeConnectionSourceGroup } from "@appstrate/shared-types";
 import { asRecord } from "@appstrate/core/safe-json";
 import { toISORequired } from "../lib/date-helpers.ts";
@@ -31,10 +31,7 @@ import { getPackageDisplayName } from "../lib/package-helpers.ts";
 async function listAllActorIntegrationConnections(
   actor: Actor,
 ): Promise<MeConnectionSourceGroup[]> {
-  const ownerPredicate =
-    actor.type === "user"
-      ? eq(integrationConnections.userId, actor.id)
-      : eq(integrationConnections.endUserId, actor.id);
+  const ownerPredicate = actorFilter(actor, integrationConnections);
 
   const rows = await db
     .select({
