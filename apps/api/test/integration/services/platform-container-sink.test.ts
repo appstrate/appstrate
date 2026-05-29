@@ -42,7 +42,7 @@ import { runPlatformContainer } from "../../../src/services/run-launcher/pi.ts";
 import {
   executeAgentInBackground,
   type ExecuteAgentInBackgroundInput,
-} from "../../../src/routes/runs.ts";
+} from "../../../src/services/run-launcher/execute-background.ts";
 import { finalizeRun, getRunSinkContext } from "../../../src/services/run-event-ingestion.ts";
 import { mintSinkCredentials } from "../../../src/lib/mint-sink-credentials.ts";
 import type { AppstrateRunPlan } from "../../../src/services/run-launcher/types.ts";

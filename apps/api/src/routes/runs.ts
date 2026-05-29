@@ -2,10 +2,8 @@
 
 import { z } from "zod";
 import { Hono } from "hono";
-import { logger } from "../lib/logger.ts";
-import type { LoadedPackage, AppEnv } from "../types/index.ts";
+import type { AppEnv } from "../types/index.ts";
 import {
-  updateRun,
   getRun,
   getRunFull,
   getRunningRunsForPackage,
@@ -13,17 +11,11 @@ import {
   listPackageRuns,
   listRunLogs,
 } from "../services/state/runs.ts";
-import { getErrorMessage } from "@appstrate/core/errors";
-import type { AppstrateRunPlan, UploadedFile } from "../services/run-launcher/types.ts";
-import type { ExecutionContext } from "@appstrate/afps-runtime/types";
-import { runPlatformContainer } from "../services/run-launcher/pi.ts";
-import type { PlatformContainerResult } from "../services/run-launcher/pi.ts";
-import type { ContainerOrchestrator } from "../services/orchestrator/index.ts";
 import { getVersionDetail } from "../services/package-versions.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { mergeAndValidateConfigOverride } from "../services/agent-readiness.ts";
-import { trackRun, untrackRun, abortRun } from "../services/run-tracker.ts";
+import { abortRun } from "../services/run-tracker.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
 import { notFound, conflict } from "../lib/errors.ts";
@@ -31,178 +23,14 @@ import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
-import { emitEvent } from "../lib/modules/module-loader.ts";
 import { prepareAndExecuteRun, resolveRunPreflight } from "../services/run-pipeline.ts";
 import { resolveRunnerContext } from "../lib/runner-context.ts";
 import { getActor } from "../lib/actor.ts";
 import { getAppScope } from "../lib/scope.ts";
 import { getInlineRunLimits } from "../services/run-limits.ts";
-import {
-  triggerInlineRun,
-  isInlineShadowPackageId,
-  type InlineRunBody,
-} from "../services/inline-run.ts";
+import { triggerInlineRun, type InlineRunBody } from "../services/inline-run.ts";
 import { runInlinePreflight } from "../services/inline-run-preflight.ts";
 import { synthesiseFinalize } from "../services/run-event-ingestion.ts";
-import type { SinkCredentials } from "../lib/mint-sink-credentials.ts";
-
-// --- Background run (decoupled from client) ---
-
-export interface ExecuteAgentInBackgroundInput {
-  runId: string;
-  orgId: string;
-  applicationId: string;
-  agent: LoadedPackage;
-  context: ExecutionContext;
-  plan: AppstrateRunPlan;
-  agentPackage?: Buffer | null;
-  inputFiles?: UploadedFile[];
-  modelSource?: string | null;
-  /** Sink credentials minted by `run-pipeline.ts` and persisted on the run row. */
-  sinkCredentials: SinkCredentials;
-  /**
-   * Injectable orchestrator — production leaves this unset and the
-   * global singleton drives Docker. Tests inject a fake orchestrator to
-   * exercise the lifecycle without a real container runtime.
-   */
-  orchestrator?: ContainerOrchestrator;
-}
-
-/**
- * Drive a platform-origin container through its lifecycle. This function is
- * pure orchestration — no DB writes beyond the initial `running` flip + the
- * terminal synthesis when the container doesn't finalise itself.
- *
- * All event + state persistence happens inside the container (via
- * {@link HttpSink}) or inside {@link finalizeRun} (the convergence
- * point). The only state this function owns is the in-process abort
- * controller used to propagate user-triggered cancellation to the
- * Docker workload.
- */
-export async function executeAgentInBackground(
-  input: ExecuteAgentInBackgroundInput,
-): Promise<void> {
-  const {
-    runId,
-    orgId,
-    applicationId,
-    agent,
-    context,
-    plan,
-    agentPackage,
-    inputFiles,
-    modelSource,
-    sinkCredentials,
-  } = input;
-
-  const scope = { orgId, applicationId };
-  const startTime = Date.now();
-  const controller = trackRun(runId);
-  const { signal } = controller;
-  const packageEphemeral = isInlineShadowPackageId(agent.id);
-
-  try {
-    // Status flip — pending → running — is the ONE lifecycle transition
-    // the platform still owns (the container can't authoritatively
-    // announce itself running because it doesn't know when the server
-    // actually accepted its first event). Everything terminal flows
-    // through finalizeRun.
-    await updateRun(scope, runId, { status: "running" });
-    void emitEvent("onRunStatusChange", {
-      orgId,
-      runId,
-      packageId: agent.id,
-      applicationId,
-      status: "started",
-      packageEphemeral,
-      ...(modelSource ? { modelSource } : {}),
-    });
-
-    const runPlan: AppstrateRunPlan = {
-      ...plan,
-      agentPackage: agentPackage ?? undefined,
-      inputFiles,
-    };
-
-    let lifecycle: PlatformContainerResult;
-    try {
-      lifecycle = await runPlatformContainer({
-        runId,
-        context,
-        plan: runPlan,
-        sinkCredentials,
-        signal,
-        ...(input.orchestrator ? { orchestrator: input.orchestrator } : {}),
-      });
-    } catch (err) {
-      // Orchestrator-level failure (Docker unreachable, image missing, ...)
-      // before the container even exited. Cancel case is handled below in
-      // the `finally` — we only synthesise a terminal failure here for
-      // genuine infrastructure errors.
-      if (signal.aborted) return;
-      const message = getErrorMessage(err);
-      logger.error("runPlatformContainer threw — synthesising failed terminal", {
-        runId,
-        error: message,
-      });
-      await synthesiseFinalize(runId, {
-        status: "failed",
-        error: { message, stack: err instanceof Error ? err.stack : undefined },
-        durationMs: Date.now() - startTime,
-      });
-      return;
-    }
-
-    // Container exited normally. If it finalised itself over HTTP, our
-    // synthesis is a CAS no-op. If it didn't (crash, timeout, cancel),
-    // we fill in the terminal state the platform observed.
-    if (lifecycle.cancelled) {
-      // Cancel route already routed the run through `synthesiseFinalize`,
-      // which CAS'd the sink closed and ran `afterRun`. Nothing to do here.
-      return;
-    }
-
-    if (lifecycle.timedOut) {
-      await synthesiseFinalize(runId, {
-        status: "timeout",
-        error: { message: `Run timed out after ${plan.timeout}s` },
-        durationMs: Date.now() - startTime,
-      });
-      return;
-    }
-
-    if (lifecycle.exitCode !== 0) {
-      await synthesiseFinalize(runId, {
-        status: "failed",
-        error: {
-          message: `Agent container exited with code ${lifecycle.exitCode}`,
-        },
-        durationMs: Date.now() - startTime,
-      });
-      return;
-    }
-
-    // Exit code 0 — the container ran to completion and should have
-    // called finalize itself. Defensively synthesise success so a
-    // container that forgot to finalise still reaches a terminal state;
-    // the CAS makes this a no-op when the container did call finalize.
-    await synthesiseFinalize(runId, {
-      status: "success",
-      durationMs: Date.now() - startTime,
-    });
-  } catch (err) {
-    if (signal.aborted) return;
-    const message = err instanceof Error ? err.message : "Unknown error";
-    logger.error("Unhandled error in executeAgentInBackground", { runId, error: message });
-    await synthesiseFinalize(runId, {
-      status: "failed",
-      error: { message, stack: err instanceof Error ? err.stack : undefined },
-      durationMs: Date.now() - startTime,
-    });
-  } finally {
-    untrackRun(runId);
-  }
-}
 
 // --- Router ---
 

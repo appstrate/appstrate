@@ -919,7 +919,6 @@ export type ResolvedConnectionMap = Record<string, ResolvedConnection>;
 export type ConnectionResolutionErrorCode =
   | "not_connected"
   | "needs_reconnection"
-  | "connection_blocked_by_admin"
   | "pinned_connection_unavailable"
   | "override_connection_unavailable"
   | "must_choose_connection"
@@ -943,6 +942,13 @@ export interface ConnectionResolutionError {
   connectionId?: string;
   /** Scopes the agent needs that the connection lacks (insufficient_scopes). */
   missingScopes?: string[];
+  /**
+   * The cascade layer that resolved the (failing) connection, when the error
+   * is bound to a specific connection (`insufficient_scopes`). Lets callers
+   * derive the pick status directly instead of re-comparing `connectionId`
+   * against re-fetched pin ids.
+   */
+  source?: ConnectionResolutionSource;
   /** True when the resolved connection belongs to the current actor. */
   ownedByActor?: boolean;
   /**

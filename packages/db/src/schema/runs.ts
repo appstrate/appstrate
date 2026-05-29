@@ -443,10 +443,9 @@ export const llmUsage = pgTable(
  * provider id, target host, HTTP status, and duration for observability /
  * abuse-detection / per-org telemetry.
  *
- * `cost_usd` is 0 today and excluded from `computeRunCost` — see
- * `apps/api/src/services/credential-proxy-usage.ts` header. When a metered
- * credential provider ships, route its cost rows through `llm_usage` with a
- * new `source` enum value rather than resurrecting a SUM here, so the
+ * No cost column: this is an audit ledger, not a billing ledger. When a
+ * metered credential provider ships, route its cost rows through `llm_usage`
+ * with a new `source` enum value rather than adding a SUM here, so the
  * single-ledger invariant for `runs.cost` is preserved.
  *
  * `request_id` is the dedup key: the credential-proxy route derives one per
@@ -479,7 +478,6 @@ export const credentialProxyUsage = pgTable(
     targetHost: text("target_host"),
     httpStatus: integer("http_status"),
     durationMs: integer("duration_ms"),
-    costUsd: doublePrecision("cost_usd").notNull().default(0),
     requestId: text("request_id").notNull().unique(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },

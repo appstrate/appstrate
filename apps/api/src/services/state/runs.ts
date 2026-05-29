@@ -5,6 +5,7 @@ import {
   and,
   ne,
   gt,
+  lt,
   or,
   desc,
   isNull,
@@ -25,10 +26,12 @@ import {
   endUsers,
   apiKeys,
   schedules,
+  llmUsage,
   runStatusValues,
   activeRunStatusValues,
   type RunStatus,
 } from "@appstrate/db/schema";
+import { getEnv } from "@appstrate/env";
 import { logger } from "../../lib/logger.ts";
 import { listResponse, type ListResponse } from "../../lib/list-response.ts";
 import { scopedWhere } from "../../lib/db-helpers.ts";
@@ -140,13 +143,19 @@ type EnrichedRunRow = {
  *     instead of being erased at Hono's untyped `c.json()` boundary.
  *  2. DB-only columns are intentionally NOT projected. In particular
  *     `sinkSecretEncrypted` (an AES-256-GCM credential ciphertext),
- *     `sinkExpiresAt`, `sinkClosedAt`, `lastHeartbeatAt`, and
- *     `resolvedConnections` are internal server state that must never reach
- *     a client. The previous spread-the-whole-row mapper leaked all five.
+ *     `sinkExpiresAt`, `sinkClosedAt`, `lastHeartbeatAt`, `lastEventSequence`
+ *     (an internal ordering counter for the signed-event ingestion path —
+ *     never part of the public run shape), and `resolvedConnections` are
+ *     internal server state that must never reach a client. The previous
+ *     spread-the-whole-row mapper leaked the credential ciphertext.
  *
  * The DB TS field names stay camelCase (Better Auth blocker); universal
  * DB-convention fields (id, *Id, *At) stay camelCase on the wire per Phase 3.
  */
+// The explicit `: RunWireDto` return annotation is the drift guard: tsc fails
+// if the mapper produces a field not on the wire DTO (the original bug leaked
+// `sinkSecretEncrypted` via a spread) or the wrong type for one. A new runs
+// column is only exposed if it is added here AND to `RunWireDto` deliberately.
 function runRowToWireDto(row: typeof runs.$inferSelect): RunWireDto {
   return {
     id: row.id,
@@ -412,6 +421,30 @@ export async function updateRun(
         extra: [eq(runs.id, id)],
       }),
     );
+}
+
+/**
+ * Compute the total attributable spend for a run from the unified
+ * `llm_usage` ledger (proxy + runner rows). Called by `finalizeRun` to
+ * cache the canonical `runs.cost` value at terminal time. This is the
+ * SINGLE read path for aggregate run cost — no caller should SUM the
+ * ledger directly. `credential_proxy_usage` is intentionally NOT summed:
+ * it holds no cost. When the first metered integration ships, route its
+ * rows through `llm_usage` with a new `source` enum value (e.g.
+ * `credential_proxy`) — that keeps the single ledger invariant and
+ * avoids adding a redundant SUM here.
+ *
+ * One scalar SUM over the `(run_id)` index — cheap even on long runs.
+ */
+export async function computeRunCost(runId: string): Promise<number> {
+  const [llm] = await db
+    .select({
+      total: sql<string>`COALESCE(SUM(${llmUsage.costUsd}), 0)`,
+    })
+    .from(llmUsage)
+    .where(eq(llmUsage.runId, runId));
+
+  return Number(llm?.total ?? 0);
 }
 
 export type RecentRunsField = RunHistoryField;
@@ -888,14 +921,23 @@ export async function listRunLogs(args: {
  * any LLM tokens already burned by the crashed-runner before the crash
  * would silently never be billed (cloud's `afterRun` would never see them).
  *
- * ⚠️ Single-instance only — in multi-instance deployments, this lists ALL
- * instances' in-flight runs. Multi-instance support requires per-instance
- * run tracking.
+ * Excludes runs a sibling instance is actively heartbeating: a run whose
+ * `last_heartbeat_at` is within the watchdog stall threshold is being
+ * driven by some live instance (this one or another), so finalizing it
+ * here would terminate another instance's in-flight run. Only runs whose
+ * heartbeat has already slipped past the stall threshold (the same cutoff
+ * the watchdog uses to declare a runner stalled) are treated as orphans.
+ *
+ * ⚠️ Best-effort multi-instance guard only — heartbeat freshness cannot
+ * distinguish "another instance owns this" from "this instance owns it but
+ * crashed mid-run". Full multi-instance correctness requires a per-instance
+ * `instance_id` column to attribute ownership; that is deferred.
  */
 export async function listOrphanRunIds(): Promise<string[]> {
+  const cutoff = new Date(Date.now() - getEnv().RUN_STALL_THRESHOLD_SECONDS * 1000);
   const rows = await db
     .select({ id: runs.id })
     .from(runs)
-    .where(inArray(runs.status, [...activeRunStatusValues]));
+    .where(and(inArray(runs.status, [...activeRunStatusValues]), lt(runs.lastHeartbeatAt, cutoff)));
   return rows.map((r) => r.id);
 }

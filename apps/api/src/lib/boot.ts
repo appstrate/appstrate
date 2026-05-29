@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { and, eq } from "drizzle-orm";
 import { db, isEmbeddedDb, reservePgConnection } from "@appstrate/db/client";
-import { packages, packageVersions } from "@appstrate/db/schema";
 import { expireOldInvitations } from "../services/invitations.ts";
 import { cleanupExpiredKeys } from "../services/api-keys.ts";
 import { cleanupExpiredUploads, startUploadGc } from "../services/uploads.ts";
@@ -33,16 +31,7 @@ import { initSystemModelProviderKeys } from "../services/model-registry.ts";
 import { registerModelProviders } from "../services/model-providers/registry.ts";
 import { initRunLimits } from "../services/run-limits.ts";
 import { initProxyLimits } from "../services/proxy-limits.ts";
-import {
-  initSystemPackages,
-  getSystemPackages,
-  getAllSystemPackageVersions,
-  type SystemPackageEntry,
-} from "../services/system-packages.ts";
-import { createVersionAndUpload } from "../services/package-versions.ts";
-import { computeIntegrity } from "@appstrate/core/integrity";
-import { uploadPackageFiles, SYSTEM_STORAGE_NAMESPACE } from "../services/package-items/storage.ts";
-import { storageFolderForType } from "../services/package-items/config.ts";
+import { initSystemPackages, syncSystemPackagesToDb } from "../services/system-packages.ts";
 import { listOrphanRunIds } from "../services/state/runs.ts";
 import { synthesiseFinalize } from "../services/run-event-ingestion.ts";
 import { initScheduleWorker } from "../services/scheduler.ts";
@@ -329,157 +318,6 @@ export async function boot(): Promise<void> {
 async function loadAndSyncSystemPackages(): Promise<void> {
   await initSystemPackages();
   await syncSystemPackagesToDb();
-}
-
-/**
- * Sync the already-loaded system-package registry to the DB. Public so
- * integration tests can drive it independently of `initSystemPackages`
- * (which reads from disk) — the test injects fixtures via the
- * `_setSystemPackagesForTesting` helper, then drives this function and
- * asserts the resulting DB state.
- *
- * - UPSERT one `packages` row per packageId at the canonical (highest semver) version
- * - Register every loaded version in `package_versions` (idempotent)
- * - Refuse-overwrite on integrity drift without a version bump (the safety gate)
- */
-export async function syncSystemPackagesToDb(): Promise<void> {
-  const canonicalPackages = getSystemPackages();
-  const allVersions = getAllSystemPackageVersions();
-  if (canonicalPackages.size === 0) return;
-
-  let syncedPackages = 0;
-  let syncedVersions = 0;
-
-  // Step 1 — UPSERT one `packages` row per packageId, using the canonical
-  // (highest semver) version. This drives `draftManifest`/`draftContent`,
-  // file uploads, and the public package-list UI.
-  const syncCanonical = async (id: string, entry: SystemPackageEntry) => {
-    const { manifest, type, version } = entry;
-
-    // `updatedAt` is bumped only when this canonical version is genuinely
-    // new — re-boots over an unchanged set must remain side-effect-free
-    // for downstream consumers that watch `updatedAt`.
-    const [existingVersion] = await db
-      .select({ id: packageVersions.id })
-      .from(packageVersions)
-      .where(and(eq(packageVersions.packageId, id), eq(packageVersions.version, version)))
-      .limit(1);
-    const isNewVersion = !existingVersion;
-
-    await db
-      .insert(packages)
-      .values({
-        id,
-        orgId: null,
-        type,
-        source: "system",
-        draftManifest: manifest as unknown as Record<string, unknown>,
-        draftContent: entry.content,
-      })
-      .onConflictDoUpdate({
-        target: packages.id,
-        set: {
-          // `type` must heal in place: a packageId can change type across
-          // versions, so a reseed updates it rather than keeping the stale
-          // value (which would drop the row out of its catalogue list).
-          type,
-          draftManifest: manifest as unknown as Record<string, unknown>,
-          draftContent: entry.content,
-          source: "system",
-          orgId: null,
-          ...(isNewVersion ? { updatedAt: new Date() } : {}),
-        },
-      });
-
-    if (Object.keys(entry.files).length > 1) {
-      await uploadPackageFiles(
-        storageFolderForType(type),
-        SYSTEM_STORAGE_NAMESPACE,
-        id,
-        entry.files,
-      );
-    }
-
-    syncedPackages++;
-  };
-
-  // Step 2 — register every loaded version in `package_versions` so semver
-  // ranges (e.g. `^1.0.0`) keep resolving when a newer major ships
-  // alongside the legacy line. createVersionAndUpload is idempotent
-  // (skip-if-exists).
-  //
-  // Published versions are immutable. `zipArtifact` produces reproducible
-  // bytes, so a source rebuilt at the same version yields the same integrity
-  // hash — any drift from the stored row therefore means the source content
-  // changed without a version bump (a developer mistake), not rebuild noise.
-  // We refuse to overwrite the published bytes and log an actionable error
-  // instead; the previously-loaded version stays authoritative until the
-  // version is bumped.
-  const syncVersion = async (entry: SystemPackageEntry) => {
-    const freshIntegrity = computeIntegrity(new Uint8Array(entry.zipBuffer));
-
-    const [existing] = await db
-      .select({ integrity: packageVersions.integrity })
-      .from(packageVersions)
-      .where(
-        and(
-          eq(packageVersions.packageId, entry.packageId),
-          eq(packageVersions.version, entry.version),
-        ),
-      )
-      .limit(1);
-
-    if (existing && existing.integrity !== freshIntegrity) {
-      logger.error(
-        "System package content changed without a version bump — refusing to " +
-          "overwrite a published, immutable version. Bump the version in the " +
-          "source manifest; the previously-loaded bytes remain authoritative.",
-        {
-          packageId: entry.packageId,
-          version: entry.version,
-          dbIntegrity: existing.integrity,
-          sourceIntegrity: freshIntegrity,
-        },
-      );
-      return;
-    }
-
-    await createVersionAndUpload({
-      packageId: entry.packageId,
-      version: entry.version,
-      createdBy: null,
-      zipBuffer: entry.zipBuffer,
-      manifest: entry.manifest as unknown as Record<string, unknown>,
-    });
-    syncedVersions++;
-  };
-
-  await Promise.all(
-    Array.from(canonicalPackages).map(([id, entry]) =>
-      syncCanonical(id, entry).catch((err) => {
-        logger.warn("Failed to sync canonical system package", {
-          packageId: id,
-          error: getErrorMessage(err),
-        });
-      }),
-    ),
-  );
-  await Promise.all(
-    allVersions.map((entry) =>
-      syncVersion(entry).catch((err) => {
-        logger.warn("Failed to register system package version", {
-          packageId: entry.packageId,
-          version: entry.version,
-          error: getErrorMessage(err),
-        });
-      }),
-    ),
-  );
-
-  logger.info("System packages synced", {
-    packages: syncedPackages,
-    versions: syncedVersions,
-  });
 }
 
 /**

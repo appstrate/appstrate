@@ -34,6 +34,7 @@ import type {
   CleanupReport,
   StopResult,
 } from "@appstrate/core/platform-types";
+import { applySpecToSidecarEnv } from "./sidecar-env.ts";
 
 const DATA_DIR = resolve("./data/runs");
 const SIDECAR_ENTRY = join(import.meta.dir, "../../../../../runtime-pi/sidecar/server.ts");
@@ -295,41 +296,7 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     if (!env.INTEGRATION_RUNTIME_ADAPTER) {
       env.INTEGRATION_RUNTIME_ADAPTER = "process";
     }
-    if (spec.proxyUrl) env.PROXY_URL = spec.proxyUrl;
-    if (spec.modelContextWindow != null) {
-      env.MODEL_CONTEXT_WINDOW = String(spec.modelContextWindow);
-    }
-    if (spec.modelMaxTokens != null) {
-      env.MODEL_MAX_TOKENS = String(spec.modelMaxTokens);
-    }
-    if (spec.llm) {
-      if (spec.llm.authMode === "oauth") {
-        // OAuth wire format: ship the LlmProxyOauthConfig as JSON. server.ts
-        // parses it into config.llm at boot so handleOauthLlmRequest can run
-        // from the first request.
-        env.PI_LLM_OAUTH_CONFIG_JSON = JSON.stringify(spec.llm);
-      } else {
-        env.PI_BASE_URL = spec.llm.baseUrl;
-        env.PI_API_KEY = spec.llm.apiKey;
-        env.PI_PLACEHOLDER = spec.llm.placeholder;
-      }
-    }
-    // Phase 1.4 — integrations the sidecar will spawn + multiplex.
-    if (spec.integrations && spec.integrations.length > 0) {
-      env.INTEGRATIONS_TO_SPAWN_JSON = JSON.stringify(spec.integrations);
-    }
-    // Platform runtime tools (output/log/note/pin/report) the sidecar hosts
-    // as in-process MCP tools, plus the output schema they validate against.
-    if (spec.runtimeTools && spec.runtimeTools.length > 0) {
-      env.RUNTIME_TOOLS_JSON = JSON.stringify(spec.runtimeTools);
-    }
-    if (spec.outputSchema) {
-      env.OUTPUT_SCHEMA = JSON.stringify(spec.outputSchema);
-    }
-    // P4 — connect-run mode. Sidecar runs `runConnectOnce` then exits.
-    if (spec.connectLoginSpec) {
-      env.CONNECT_LOGIN_JSON = JSON.stringify(spec.connectLoginSpec);
-    }
+    applySpecToSidecarEnv(spec, env);
 
     const proc = Bun.spawn(["bun", "run", SIDECAR_ENTRY], {
       env,

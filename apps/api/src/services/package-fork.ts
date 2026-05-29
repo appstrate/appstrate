@@ -4,7 +4,7 @@ import { parseScopedName, isOwnedByOrg } from "@appstrate/core/naming";
 import type { PackageType } from "@appstrate/core/validation";
 
 import { zipArtifact } from "@appstrate/core/zip";
-import { getOrgItem, getPackageById, createOrgItem } from "./package-items/crud.ts";
+import { getPackageById, createOrgItem } from "./package-items/crud.ts";
 import { uploadPackageFiles } from "./package-items/storage.ts";
 import { CONFIG_BY_TYPE, type PackageTypeConfig } from "./package-items/config.ts";
 
@@ -42,34 +42,16 @@ export async function forkPackage(
   const parsed = parseScopedName(sourcePackageId);
   if (!parsed) return { code: "NOT_FOUND" };
 
-  const detectedType = await getPackageType(orgId, sourcePackageId);
-  const cfg = detectedType ? CONFIG_BY_TYPE[detectedType] : undefined;
-  if (!cfg) {
-    // Try to find the package to get its type
-    const raw = await getPackageById(sourcePackageId);
-    if (!raw) return { code: "NOT_FOUND" };
-    const typeCfg = CONFIG_BY_TYPE[raw.type as PackageType];
-    if (!typeCfg) return { code: "UNKNOWN_TYPE", type: raw.type };
-    return forkWithConfig(
-      orgId,
-      orgSlug,
-      sourcePackageId,
-      customName ?? parsed.name,
-      typeCfg,
-      userId,
-    );
-  }
+  // Read the package row directly — `packages.type` already holds the type,
+  // so there's no need to probe each CONFIG_BY_TYPE candidate. The lookup is
+  // org-agnostic by design: system packages (orgId=null) are legitimately
+  // forkable and carry no per-org access control here.
+  const raw = await getPackageById(sourcePackageId);
+  if (!raw) return { code: "NOT_FOUND" };
+  const cfg = CONFIG_BY_TYPE[raw.type as PackageType];
+  if (!cfg) return { code: "UNKNOWN_TYPE", type: raw.type };
 
   return forkWithConfig(orgId, orgSlug, sourcePackageId, customName ?? parsed.name, cfg, userId);
-}
-
-async function getPackageType(orgId: string, packageId: string): Promise<PackageType | null> {
-  // Try each config type to find the package in the org context
-  for (const [type, cfg] of Object.entries(CONFIG_BY_TYPE)) {
-    const item = await getOrgItem(orgId, packageId, cfg);
-    if (item) return type as PackageType;
-  }
-  return null;
 }
 
 async function forkWithConfig(

@@ -422,6 +422,69 @@ describe("POST /api/packages/import-bundle — import", () => {
     expect(body.detail).toContain("@srctamper/c@1.0.0");
   });
 
+  it("maps a post-install failure to 400 post_install_failed and leaves no orphan packages row", async () => {
+    // Export a valid bundle, then tamper the ROOT manifest to declare a
+    // self-dependency (`@scope/root` depends on itself). That passes schema
+    // validation + bundle read but trips `assertNoCycle` inside
+    // `createVersionAndUpload` during post-install — AFTER the importer has
+    // inserted the root's `packages` row. The importer must (a) surface a
+    // clean 400 `post_install_failed` (not a raw 500) and (b) delete the
+    // just-inserted orphan row so no un-runnable package (row with no
+    // version) survives.
+    const sourceCtx = await createTestContext({ orgSlug: "srcorphan" });
+    const { bundle } = await seedAndExportBundle({
+      ctx: sourceCtx,
+      rootId: "@srcorphan/root",
+      skillA: "@srcorphan/skill-a",
+      skillB: "@srcorphan/skill-b",
+    });
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "destorphan" });
+
+    // Rebuild the root package with a self-referencing skill dependency.
+    const rootIdentity = "@srcorphan/root@1.0.0" as never;
+    const rootPkg = bundle.packages.get(rootIdentity);
+    expect(rootPkg).toBeDefined();
+    const manifestBytes = rootPkg!.files.get("manifest.json")!;
+    const manifest = JSON.parse(new TextDecoder().decode(manifestBytes)) as Record<string, unknown>;
+    (manifest as { dependencies: Record<string, unknown> }).dependencies = {
+      skills: { "@srcorphan/root": "^1.0.0" },
+    };
+    const files = new Map(rootPkg!.files);
+    files.set("manifest.json", enc(JSON.stringify(manifest, null, 2)));
+    const tampered: Bundle = { ...bundle, packages: new Map(bundle.packages) };
+    tampered.packages.set(rootIdentity, { ...rootPkg!, files });
+    const tamperedBytes = writeBundleToBuffer(tampered);
+
+    const form = new FormData();
+    form.append("file", new Blob([tamperedBytes]), "bundle.afps-bundle");
+    const res = await app.request("/api/packages/import-bundle", {
+      method: "POST",
+      body: form,
+      headers: authHeaders(ctx),
+    });
+
+    // Clean 4xx (same shape as single-import), NOT a raw 500.
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe("post_install_failed");
+
+    // No orphan packages row for the failed root.
+    const [orphan] = await db
+      .select({ id: packages.id })
+      .from(packages)
+      .where(eq(packages.id, "@srcorphan/root"))
+      .limit(1);
+    expect(orphan).toBeUndefined();
+    // And certainly no version row for it.
+    const [ver] = await db
+      .select({ id: packageVersions.id })
+      .from(packageVersions)
+      .where(eq(packageVersions.packageId, "@srcorphan/root"))
+      .limit(1);
+    expect(ver).toBeUndefined();
+  });
+
   it("rejects non-multipart requests with 400", async () => {
     const res = await app.request("/api/packages/import-bundle", {
       method: "POST",

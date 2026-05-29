@@ -27,8 +27,6 @@ import { validateAgentReadiness } from "./agent-readiness.ts";
 import { resolveRunConnectionsOrError } from "./integration-connection-resolver.ts";
 import type { ResolvedConnectionMap } from "@appstrate/core/integration";
 import { createRun as createRunRow } from "./state/runs.ts";
-import { emitEvent } from "../lib/modules/module-loader.ts";
-import { isInlineShadowPackageId } from "./inline-run.ts";
 import { runPreflightGates } from "./run-preflight-gates.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 
@@ -216,15 +214,12 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
     },
   );
 
-  // --- Status-change event (consumers stay origin-agnostic) ---
-  void emitEvent("onRunStatusChange", {
-    orgId,
-    runId,
-    packageId: agent.id,
-    applicationId,
-    status: "started",
-    packageEphemeral: isInlineShadowPackageId(agent.id),
-  });
+  // The `run.started` status-change event is NOT emitted here. The DB row
+  // is still `pending` at this point — the run only transitions to
+  // `running` when the runner posts its first signed event. Emitting
+  // `started` now would fire the webhook before the actual DB transition
+  // (and never again when it happened). `persistEventAndAdvance` emits
+  // `onRunStatusChange` for remote-origin runs at the real transition.
 
   return { ok: true, runId, sinkCredentials: credentials };
 }

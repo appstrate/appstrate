@@ -323,7 +323,7 @@ export async function setDefaultModel(orgId: string, modelDbId: string | null): 
 
 /**
  * Canonical resolved-model shape — produced by {@link resolveModel} /
- * {@link loadModel}, consumed by the env-builder. Passed through to the
+ * {@link loadModel}, consumed by the run-context-builder. Passed through to the
  * run executor verbatim as `AppstrateRunPlan.llmConfig`; the executor
  * only reads inference fields. `accountId` is set for OAuth credentials
  * whose provider hook surfaced an identity claim — the sidecar re-reads

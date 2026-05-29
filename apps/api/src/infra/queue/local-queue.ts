@@ -10,6 +10,7 @@
  */
 
 import { logger } from "../../lib/logger.ts";
+import { computeNextRun } from "../../lib/cron.ts";
 import type {
   JobQueue,
   JobHandler,
@@ -31,7 +32,25 @@ interface CronScheduler<T> {
   pattern: string;
   tz: string;
   jobTemplate: { name: string; data: T };
+  /**
+   * Last time this scheduler fired a job (epoch ms). Prevents double-firing
+   * within a window. Initialised to the registration time so no occurrence
+   * before the scheduler existed is replayed on process (re)start.
+   */
+  lastFiredAt: number;
 }
+
+/** Cron poll cadence (ms). The evaluator runs on this interval. */
+const CRON_POLL_INTERVAL_MS = 30_000;
+
+/**
+ * Max occurrences a single scheduler may enqueue in one poll. Covers normal
+ * drift (a few missed minutes) while bounding the catch-up burst after a long
+ * process freeze — a 1h stall on `* * * * *` must not enqueue 60 unthrottled
+ * jobs at once. Excess missed occurrences are coalesced (skipped, logged), not
+ * replayed, matching how a cron daemon behaves after the machine wakes.
+ */
+const MAX_CRON_CATCHUP_PER_POLL = 5;
 
 export class LocalQueue<T> implements JobQueue<T> {
   private pending: PendingJob<T>[] = [];
@@ -42,6 +61,13 @@ export class LocalQueue<T> implements JobQueue<T> {
   private cronInterval: ReturnType<typeof setInterval> | null = null;
   private drainInterval: ReturnType<typeof setInterval> | null = null;
   private shuttingDown = false;
+  /**
+   * Wall-clock time (epoch ms) of the previous cron poll. The next poll's
+   * window floor advances from here rather than a fixed `now - interval`, so a
+   * late/drifted poll (GC, blocked drain) still inspects the whole elapsed gap
+   * instead of dropping the uncovered sliver. Set when the worker starts.
+   */
+  private lastCronPollAt = 0;
 
   constructor(private readonly name: string) {}
 
@@ -63,6 +89,10 @@ export class LocalQueue<T> implements JobQueue<T> {
       pattern: pattern.pattern,
       tz: pattern.tz ?? "UTC",
       jobTemplate,
+      // Anchor at registration time so the first poll's window never reaches
+      // back before the scheduler existed — an occurrence that fell just
+      // before startup/registration is not replayed on (re)start.
+      lastFiredAt: Date.now(),
     });
   }
 
@@ -78,8 +108,10 @@ export class LocalQueue<T> implements JobQueue<T> {
     // Drain pending jobs every 500ms
     this.drainInterval = setInterval(() => this.drain(), 500);
 
-    // Evaluate cron schedulers every 30s
-    this.cronInterval = setInterval(() => this.evaluateCron(), 30_000);
+    // Evaluate cron schedulers every poll interval. Anchor the first window's
+    // floor at start time so a poll never reaches back before the worker ran.
+    this.lastCronPollAt = Date.now();
+    this.cronInterval = setInterval(() => this.evaluateCron(), CRON_POLL_INTERVAL_MS);
 
     // Neither timer should keep the event loop alive on its own — the server
     // listener does that in prod, and this lets the test process exit cleanly.
@@ -170,121 +202,63 @@ export class LocalQueue<T> implements JobQueue<T> {
   }
 
   /**
-   * Simple cron evaluator — checks if any scheduler should fire.
-   * Uses a minute-granularity check against the current time.
+   * Cron evaluator — enqueues every occurrence of each scheduler that fell in
+   * the window `(prevPoll, now]`. Uses `computeNextRun` (cron-parser) so
+   * validation (`isValidCron`) and execution share one parser: presets
+   * (`@daily`), aliases (`MON`), and 6-field expressions all behave
+   * identically.
+   *
+   * `computeNextRun` is forward-looking — it always returns a time strictly
+   * after its base. The window floor advances from the *actual* previous poll
+   * (`lastCronPollAt`), not a fixed `now - interval`, so a late/drifted poll
+   * still covers the whole elapsed gap. We then walk `computeNextRun` from the
+   * base, enqueuing each occurrence `<= now`, so a window spanning more than
+   * one occurrence (under drift) fires them all instead of just the first.
+   * `lastFiredAt` bounds the base so an occurrence is never replayed across
+   * overlapping polls.
    */
   private evaluateCron(): void {
     if (this.shuttingDown || !this.handler) return;
 
-    const now = new Date();
+    const now = Date.now();
+    const windowStart = this.lastCronPollAt;
     for (const scheduler of this.schedulers.values()) {
-      if (this.shouldFire(scheduler.pattern, scheduler.tz, now)) {
-        const id = `cron_${scheduler.id}_${Date.now()}`;
+      // Base the forward-looking walk at the window floor, but never before the
+      // last fire so we don't replay an occurrence already enqueued.
+      let cursor = Math.max(windowStart, scheduler.lastFiredAt);
+      // Walk every occurrence in (cursor, now], capped at
+      // MAX_CRON_CATCHUP_PER_POLL so a long freeze can't enqueue a huge
+      // synchronous burst. Each step strictly advances cursor.
+      let fired = 0;
+      for (; fired < MAX_CRON_CATCHUP_PER_POLL; fired++) {
+        const next = computeNextRun(scheduler.pattern, scheduler.tz, new Date(cursor));
+        if (!next || next.getTime() > now) break;
+        const fireAt = next.getTime();
+        scheduler.lastFiredAt = fireAt;
+        cursor = fireAt;
         const job: QueueJob<T> = {
-          id,
+          id: `cron_${scheduler.id}_${fireAt}`,
           name: scheduler.jobTemplate.name,
           data: scheduler.jobTemplate.data,
           attemptsMade: 0,
         };
         this.pending.push({ job });
-        logger.debug(`${this.name} cron fired`, { schedulerId: scheduler.id });
+        logger.debug(`${this.name} cron fired`, { schedulerId: scheduler.id, fireAt });
+      }
+      // Hit the cap with occurrences still pending → coalesce the backlog:
+      // skip to `now` so we don't replay it next poll, and surface the drop.
+      if (fired === MAX_CRON_CATCHUP_PER_POLL) {
+        const more = computeNextRun(scheduler.pattern, scheduler.tz, new Date(cursor));
+        if (more && more.getTime() <= now) {
+          scheduler.lastFiredAt = now;
+          logger.warn(`${this.name} cron catch-up capped, coalescing backlog`, {
+            schedulerId: scheduler.id,
+            cap: MAX_CRON_CATCHUP_PER_POLL,
+          });
+        }
       }
     }
+    this.lastCronPollAt = now;
     this.drain();
-  }
-
-  /**
-   * Check if a cron expression should fire for the current minute.
-   * Supports standard 5-field cron: minute hour dom month dow.
-   */
-  private shouldFire(cronExpr: string, tz: string, now: Date): boolean {
-    try {
-      // Get current time in the target timezone
-      const parts = new Intl.DateTimeFormat("en-US", {
-        timeZone: tz,
-        hour: "numeric",
-        minute: "numeric",
-        day: "numeric",
-        month: "numeric",
-        weekday: "short",
-        hour12: false,
-      })
-        .formatToParts(now)
-        .reduce(
-          (acc, p) => {
-            acc[p.type] = p.value;
-            return acc;
-          },
-          {} as Record<string, string>,
-        );
-
-      const minute = parseInt(parts.minute ?? "0");
-      const hour = parseInt(parts.hour ?? "0");
-      const day = parseInt(parts.day ?? "1");
-      const month = parseInt(parts.month ?? "1");
-      const dowMap: Record<string, number> = {
-        Sun: 0,
-        Mon: 1,
-        Tue: 2,
-        Wed: 3,
-        Thu: 4,
-        Fri: 5,
-        Sat: 6,
-      };
-      const dow = dowMap[parts.weekday ?? "Sun"] ?? 0;
-
-      const fields = cronExpr.trim().split(/\s+/);
-      if (fields.length < 5) return false;
-
-      return (
-        this.matchField(fields[0]!, minute, 0, 59) &&
-        this.matchField(fields[1]!, hour, 0, 23) &&
-        this.matchField(fields[2]!, day, 1, 31) &&
-        this.matchField(fields[3]!, month, 1, 12) &&
-        this.matchField(fields[4]!, dow, 0, 6, true)
-      );
-    } catch {
-      return false;
-    }
-  }
-
-  // Match a single cron field against a value. Supports *, star/N, N-M, comma lists.
-  // For day-of-week: normalizes 7 → 0 (both represent Sunday in standard cron).
-  private matchField(
-    field: string,
-    value: number,
-    _min: number,
-    _max: number,
-    isDow = false,
-  ): boolean {
-    if (field === "*") return true;
-
-    return field.split(",").some((part) => {
-      // Step: */N or N-M/S
-      const [range, stepStr] = part.split("/");
-      const step = stepStr ? parseInt(stepStr) : undefined;
-
-      if (range === "*" && step) {
-        return value % step === 0;
-      }
-
-      // Range: N-M — normalize 7 → 0 for day-of-week bounds
-      if (range!.includes("-")) {
-        let [lo, hi] = range!.split("-").map(Number);
-        if (isDow) {
-          if (lo === 7) lo = 0;
-          if (hi === 7) hi = 0;
-        }
-        if (step) {
-          return value >= lo! && value <= hi! && (value - lo!) % step === 0;
-        }
-        return value >= lo! && value <= hi!;
-      }
-
-      // Exact value — normalize 7 → 0 for day-of-week
-      let parsed = parseInt(range!);
-      if (isDow && parsed === 7) parsed = 0;
-      return parsed === value;
-    });
   }
 }

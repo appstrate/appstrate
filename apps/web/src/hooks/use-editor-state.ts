@@ -110,6 +110,7 @@ export function useEditorState<S extends EditorStateBase>(
       }),
     });
     qc.invalidateQueries({ queryKey: ["packages"] });
+    qc.invalidateQueries({ queryKey: ["version-info"] });
     if (packageType === "agent") {
       qc.invalidateQueries({ queryKey: ["agents"] });
       // Tools → required scopes → per-integration agent-resolution verdict.

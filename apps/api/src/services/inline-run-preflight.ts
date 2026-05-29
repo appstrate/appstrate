@@ -142,7 +142,7 @@ export async function runInlinePreflight(params: {
   if (manifest) {
     // Inline manifests only embed registry ID refs for skills; resolve
     // them against the org/system catalog up-front so both the readiness
-    // probe here AND the downstream run pipeline (env-builder reads
+    // probe here AND the downstream run pipeline (run-context-builder reads
     // agent.skills) see the same resolved list.
     resolvedDeps = await resolveManifestCatalogDeps(manifest, orgId);
     const probeAgent = buildShadowLoadedPackage(

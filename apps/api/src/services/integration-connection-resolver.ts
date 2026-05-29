@@ -409,6 +409,7 @@ function checkHealth(
       connectionId: conn.id,
       missingScopes: missing,
       ownedByActor,
+      source,
       message: `Connection for ${args.integrationId} is missing required permissions: ${missing.join(", ")}.`,
     });
   }
@@ -606,7 +607,6 @@ export function translateResolutionError(e: ConnectionResolutionError): Validati
 const TITLE_BY_CODE: Record<ConnectionResolutionError["code"], string> = {
   not_connected: "Integration Not Connected",
   needs_reconnection: "Needs Reconnection",
-  connection_blocked_by_admin: "Connection Blocked by Admin",
   pinned_connection_unavailable: "Pinned Connection Unavailable",
   override_connection_unavailable: "Override Connection Unavailable",
   must_choose_connection: "Multiple Connections Available — Pick One",

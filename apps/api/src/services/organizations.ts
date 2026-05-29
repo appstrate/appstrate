@@ -107,7 +107,7 @@ export async function updateOrganization(
   return toOrgResult(row);
 }
 
-export { orgSettingsSchema } from "@appstrate/shared-types";
+export { orgSettingsSchema } from "@appstrate/core/permissions";
 import type { OrgSettings } from "@appstrate/shared-types";
 export type { OrgSettings };
 

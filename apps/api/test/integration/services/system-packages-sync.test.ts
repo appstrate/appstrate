@@ -33,12 +33,10 @@
  *     canonical on `packages`.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
-import { syncSystemPackagesToDb } from "../../../src/lib/boot.ts";
 import {
-  _setSystemPackagesForTesting,
-  _resetSystemPackagesForTesting,
+  syncSystemPackagesToDb,
   type SystemPackageEntry,
 } from "../../../src/services/system-packages.ts";
 import { zipArtifact } from "@appstrate/core/zip";
@@ -86,7 +84,7 @@ function makeFixtureEntry(opts: FixtureOpts): SystemPackageEntry {
   };
 }
 
-/** Build a Map → versions tuple suitable for `_setSystemPackagesForTesting`. */
+/** Build a Map → versions tuple suitable for `syncSystemPackagesToDb`. */
 function buildRegistry(entries: SystemPackageEntry[]): {
   canonical: Map<string, SystemPackageEntry>;
   versions: SystemPackageEntry[];
@@ -119,10 +117,6 @@ describe("syncSystemPackagesToDb", () => {
     await truncateAll();
   });
 
-  afterEach(() => {
-    _resetSystemPackagesForTesting();
-  });
-
   // ─── Insert path ───────────────────────────────────────
 
   it("inserts new system packages with orgId=null + source='system'", async () => {
@@ -132,9 +126,8 @@ describe("syncSystemPackagesToDb", () => {
       type: "skill",
     });
     const { canonical, versions } = buildRegistry([skill]);
-    _setSystemPackagesForTesting(canonical, versions);
 
-    await syncSystemPackagesToDb();
+    await syncSystemPackagesToDb(canonical, versions);
 
     const [pkg] = await db
       .select({
@@ -168,14 +161,9 @@ describe("syncSystemPackagesToDb", () => {
       id: "@sys-test/skill-idem",
       version: "1.0.0",
     });
-    _setSystemPackagesForTesting(
-      ...(Object.values(buildRegistry([skill])) as [
-        Map<string, SystemPackageEntry>,
-        SystemPackageEntry[],
-      ]),
-    );
+    const { canonical, versions } = buildRegistry([skill]);
 
-    await syncSystemPackagesToDb();
+    await syncSystemPackagesToDb(canonical, versions);
 
     const [first] = await db
       .select({ updatedAt: packages.updatedAt })
@@ -185,7 +173,7 @@ describe("syncSystemPackagesToDb", () => {
     const firstUpdatedAt = first!.updatedAt;
 
     // Re-run with the SAME fixture (same bytes, same version).
-    await syncSystemPackagesToDb();
+    await syncSystemPackagesToDb(canonical, versions);
 
     const [second] = await db
       .select({ updatedAt: packages.updatedAt })
@@ -213,13 +201,10 @@ describe("syncSystemPackagesToDb", () => {
       version: "1.0.0",
       contentBytes: "ORIGINAL content",
     });
-    _setSystemPackagesForTesting(
-      ...(Object.values(buildRegistry([original])) as [
-        Map<string, SystemPackageEntry>,
-        SystemPackageEntry[],
-      ]),
-    );
-    await syncSystemPackagesToDb();
+    {
+      const { canonical, versions } = buildRegistry([original]);
+      await syncSystemPackagesToDb(canonical, versions);
+    }
 
     const [originalRow] = await db
       .select({ integrity: packageVersions.integrity })
@@ -240,13 +225,10 @@ describe("syncSystemPackagesToDb", () => {
       version: "1.0.0", // same version!
       contentBytes: "TAMPERED content — different bytes",
     });
-    _setSystemPackagesForTesting(
-      ...(Object.values(buildRegistry([drifted])) as [
-        Map<string, SystemPackageEntry>,
-        SystemPackageEntry[],
-      ]),
-    );
-    await syncSystemPackagesToDb();
+    {
+      const { canonical, versions } = buildRegistry([drifted]);
+      await syncSystemPackagesToDb(canonical, versions);
+    }
 
     // The DB row keeps the ORIGINAL integrity — the drift was refused.
     const [afterDrift] = await db
@@ -283,13 +265,11 @@ describe("syncSystemPackagesToDb", () => {
     // sync 1.0.0 first, then add 1.1.0 and re-sync. Both must end registered.
     {
       const { canonical, versions } = buildRegistry([v1]);
-      _setSystemPackagesForTesting(canonical, versions);
-      await syncSystemPackagesToDb();
+      await syncSystemPackagesToDb(canonical, versions);
     }
     {
       const { canonical, versions } = buildRegistry([v1, v11]);
-      _setSystemPackagesForTesting(canonical, versions);
-      await syncSystemPackagesToDb();
+      await syncSystemPackagesToDb(canonical, versions);
     }
 
     const versionRows = await db
@@ -328,13 +308,10 @@ describe("syncSystemPackagesToDb", () => {
     });
 
     // First sync: both clean.
-    _setSystemPackagesForTesting(
-      ...(Object.values(buildRegistry([healthy, willDrift])) as [
-        Map<string, SystemPackageEntry>,
-        SystemPackageEntry[],
-      ]),
-    );
-    await syncSystemPackagesToDb();
+    {
+      const { canonical, versions } = buildRegistry([healthy, willDrift]);
+      await syncSystemPackagesToDb(canonical, versions);
+    }
 
     // Second sync: drifter has new bytes at the same version; healthy unchanged.
     const drifted = makeFixtureEntry({
@@ -342,13 +319,10 @@ describe("syncSystemPackagesToDb", () => {
       version: "1.0.0",
       contentBytes: "v2 bytes (drift!)",
     });
-    _setSystemPackagesForTesting(
-      ...(Object.values(buildRegistry([healthy, drifted])) as [
-        Map<string, SystemPackageEntry>,
-        SystemPackageEntry[],
-      ]),
-    );
-    await syncSystemPackagesToDb();
+    {
+      const { canonical, versions } = buildRegistry([healthy, drifted]);
+      await syncSystemPackagesToDb(canonical, versions);
+    }
 
     // healthy is still there.
     const [healthyRow] = await db

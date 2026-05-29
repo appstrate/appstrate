@@ -698,13 +698,11 @@ export async function resolveAgentIntegrationPick(args: {
         resolvedMissingScopes = err.missingScopes ?? [];
         resolvedOwnedByActor = err.ownedByActor ?? false;
         status =
-          adminPinnedConnectionId && adminPinnedConnectionId === err.connectionId
+          err.source === "admin_pin" || err.source === "org_default_enforced"
             ? "admin_locked"
-            : orgDefaultEnforced && orgDefaultConnectionId === err.connectionId
-              ? "admin_locked"
-              : memberPinnedConnectionId && memberPinnedConnectionId === err.connectionId
-                ? "pinned"
-                : "auto";
+            : err.source === "member_pin"
+              ? "pinned"
+              : "auto";
         break;
       case "must_choose_connection":
         status = "must_choose";

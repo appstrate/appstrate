@@ -8,6 +8,13 @@
       "when": 1779844679760,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1780062003189,
+      "tag": "0001_drop_credential_proxy_usage_cost_usd",
+      "breakpoints": true
     }
   ]
 }

@@ -7,7 +7,7 @@ import { listResponse } from "../lib/list-response.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { isSystemModel, getSystemModelProviderKeys } from "../services/model-registry.ts";
-import { modelCostSchema } from "@appstrate/shared-types";
+import { modelCostSchema } from "@appstrate/core/module";
 import {
   listOrgModels,
   createOrgModel,

@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { getEnv } from "@appstrate/env";
 import { logger } from "../lib/logger.ts";
-import { modelCostSchema } from "@appstrate/shared-types";
+import { modelCostSchema } from "@appstrate/core/module";
 import type { ModelMetadata } from "@appstrate/shared-types";
 import { getModelProvider } from "./model-providers/registry.ts";
 

@@ -60,7 +60,7 @@ import { sql } from "drizzle-orm";
 import type { AppScope } from "../../lib/scope.ts";
 import { appendRunLog, updateRun } from "../state/runs.ts";
 import { logger } from "../../lib/logger.ts";
-import { accumulateTokenUsage } from "@appstrate/shared-types";
+import { accumulateTokenUsage } from "@appstrate/core/token-usage";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { TokenUsage } from "./types.ts";
 import { scheduleRunMetricBroadcast } from "../run-metric-broadcaster.ts";

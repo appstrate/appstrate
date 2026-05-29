@@ -20,13 +20,15 @@
  * This helper is transaction-aware insofar as each package is inserted
  * by `postInstallPackage` which uses `createVersionAndUpload` —
  * duplicates are caught before any storage write and surfaced to the
- * caller. Partial failures (e.g. half the packages succeed, then one
- * conflicts) are left in place: new inserts are harmless, and the
- * failed package is reported. For strict atomicity, a full-import
- * transaction will be added once storage becomes CAS (§Phase 4).
+ * caller. A genuine version-creation failure on any package ABORTS the
+ * whole import (the error propagates) rather than committing a `packages`
+ * row with no version (an un-runnable orphan) — earlier-inserted packages
+ * remain (new inserts are harmless). For strict all-or-nothing atomicity,
+ * a full-import transaction will be added once storage becomes CAS
+ * (§Phase 4).
  */
 
-import { zipSync, type AsyncZippableFile } from "fflate";
+import { zipSync, unzipSync, type AsyncZippableFile } from "fflate";
 import type { Bundle, BundlePackage } from "@appstrate/afps-runtime/bundle";
 import {
   extractRootFromAfps,
@@ -37,7 +39,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { parsePackageZip } from "@appstrate/core/zip";
 import { db } from "@appstrate/db/client";
 import { packages, packageVersions } from "@appstrate/db/schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, notExists, sql } from "drizzle-orm";
 import { conflict, invalidRequest } from "../lib/errors.ts";
 import { isSystemPackage } from "./system-packages.ts";
 import { postInstallPackage } from "./post-install-package.ts";
@@ -80,31 +82,24 @@ export function reconstructPackageZip(pkg: BundlePackage): Uint8Array {
 
 /**
  * Heuristic: a `.afps-bundle` archive contains a `bundle.json` entry at
- * its root; a raw `.afps` archive contains `manifest.json`. The central
- * directory scan is cheap — we don't decompress until we know which
- * reader to call.
+ * its root; a raw `.afps` archive contains `manifest.json`. We enumerate
+ * entry names via the ZIP central directory (`unzipSync` with a `filter`
+ * that only matches `bundle.json`) — this reads the directory at the end
+ * of the file without decompressing any content. Returns true iff a
+ * root-level `bundle.json` entry is present.
+ *
+ * Total function: `unzipSync` THROWS `invalid zip data` on non-ZIP,
+ * truncated, or empty input. We swallow that and return false so such
+ * input falls through to the raw `.afps` reader, which raises a typed
+ * error instead of a raw throw. The function never throws.
  */
 function looksLikeAfpsBundle(bytes: Uint8Array): boolean {
-  // Super-cheap scan: find the literal string "bundle.json" in the
-  // first few KiB of the archive. ZIP central directories live at the
-  // END of the file, but filenames are also emitted in local file
-  // headers near the START — so this works on typical small archives.
-  // False-positives are impossible (a `.afps` has no such filename) and
-  // a false-negative falls through to the bundle reader which will
-  // raise `BUNDLE_JSON_MISSING` — an acceptable error shape.
-  const needle = new TextEncoder().encode("bundle.json");
-  const hay = bytes.subarray(0, Math.min(bytes.byteLength, 65536));
-  for (let i = 0; i + needle.length <= hay.byteLength; i++) {
-    let match = true;
-    for (let j = 0; j < needle.length; j++) {
-      if (hay[i + j] !== needle[j]) {
-        match = false;
-        break;
-      }
-    }
-    if (match) return true;
+  try {
+    const matched = unzipSync(bytes, { filter: (f) => f.name === "bundle.json" });
+    return Object.prototype.hasOwnProperty.call(matched, "bundle.json");
+  } catch {
+    return false;
   }
-  return false;
 }
 
 /**
@@ -305,7 +300,10 @@ export async function importBundle(
     // it alone — the imported version becomes a parallel snapshot
     // attached to that pre-existing package (safe because integrity
     // matched OR the row is new). Don't clobber another org's draft.
-    await db
+    // `.returning` tells us whether THIS call actually inserted the row
+    // (vs. hit the conflict) so a post-install failure only rolls back
+    // the orphan we created — never a pre-existing foreign-org row.
+    const insertedRows = await db
       .insert(packages)
       .values({
         id: packageId,
@@ -316,18 +314,44 @@ export async function importBundle(
         draftContent: parsedZip.content,
         createdBy: userId,
       })
-      .onConflictDoNothing({ target: packages.id });
+      .onConflictDoNothing({ target: packages.id })
+      .returning({ id: packages.id });
+    const insertedThisRow = insertedRows.length > 0;
 
-    await postInstallPackage({
-      packageType: parsedZip.type,
-      packageId,
-      orgId: scope.orgId,
-      userId,
-      content: parsedZip.content,
-      files: parsedZip.files,
-      zipBuffer: Buffer.from(reconstructed),
-      version,
-    });
+    try {
+      await postInstallPackage({
+        packageType: parsedZip.type,
+        packageId,
+        orgId: scope.orgId,
+        userId,
+        content: parsedZip.content,
+        files: parsedZip.files,
+        zipBuffer: Buffer.from(reconstructed),
+        version,
+      });
+    } catch (err) {
+      // Post-install (version snapshot + storage upload) failed. If this
+      // import just created the packages row, delete the orphan so we don't
+      // leave an un-runnable package with no version. A single self-guarding
+      // DELETE (`NOT EXISTS` any package_versions) is atomic — it can't race a
+      // concurrent import that commits a version in the window, which a
+      // separate SELECT-then-DELETE would cascade-delete. Then rethrow.
+      if (insertedThisRow) {
+        await db.delete(packages).where(
+          and(
+            eq(packages.id, packageId),
+            eq(packages.orgId, scope.orgId),
+            notExists(
+              db
+                .select({ one: sql`1` })
+                .from(packageVersions)
+                .where(eq(packageVersions.packageId, packageId)),
+            ),
+          ),
+        );
+      }
+      throw err;
+    }
 
     const [newVer] = await db
       .select({ id: packageVersions.id })
