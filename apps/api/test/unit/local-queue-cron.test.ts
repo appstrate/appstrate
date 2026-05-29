@@ -27,13 +27,23 @@ async function fires(pattern: string, now: Date, tz?: string): Promise<boolean> 
   q.process(async (job: QueueJob<{ v: string }>) => {
     processed.push(job.data.v);
   });
-  await q.upsertScheduler(
-    "s",
-    { pattern, ...(tz ? { tz } : {}) },
-    { name: "cron-job", data: { v: "fired" } },
-  );
 
+  // `lastFiredAt` is anchored to the registration time, so register the
+  // scheduler at a clock just before the firing window — otherwise the
+  // anchor (real wall-clock) would sit after the pinned `now` and the
+  // forward-looking lookup would never reach the occurrence.
   const realNow = Date.now;
+  Date.now = () => now.getTime() - 60_000;
+  try {
+    await q.upsertScheduler(
+      "s",
+      { pattern, ...(tz ? { tz } : {}) },
+      { name: "cron-job", data: { v: "fired" } },
+    );
+  } finally {
+    Date.now = realNow;
+  }
+
   Date.now = () => now.getTime();
   try {
     q.evaluateCron();
@@ -67,6 +77,25 @@ function withPinnedNow<R>(at: Date, fn: () => R): R {
     Date.now = realNow;
   }
 }
+
+/** Run async `fn` with `Date.now` pinned to `at`, restoring it afterward. */
+async function withPinnedNowAsync<R>(at: Date, fn: () => Promise<R>): Promise<R> {
+  const realNow = Date.now;
+  Date.now = () => at.getTime();
+  try {
+    return await fn();
+  } finally {
+    Date.now = realNow;
+  }
+}
+
+/**
+ * Register a scheduler at a clock just before `FIRING_NOW`. `lastFiredAt` is
+ * anchored to registration time, so registering at real wall-clock would put
+ * the anchor after the pinned `FIRING_NOW` and suppress the fire. One minute
+ * before keeps the anchor before the window the tests poll.
+ */
+const REGISTERED_AT = new Date(FIRING_NOW.getTime() - 60_000);
 
 // ---------------------------------------------------------------------------
 // Firing behavior — does the scheduled job actually run in its window?
@@ -145,10 +174,8 @@ describe("LocalQueue cron scheduler", () => {
     });
 
     // Use * * * * * (every minute) — evaluateCron checks the current window
-    await q.upsertScheduler(
-      "s1",
-      { pattern: "* * * * *" },
-      { name: "cron-job", data: { v: "fired" } },
+    await withPinnedNowAsync(REGISTERED_AT, () =>
+      q.upsertScheduler("s1", { pattern: "* * * * *" }, { name: "cron-job", data: { v: "fired" } }),
     );
 
     withPinnedNow(FIRING_NOW, () => q.evaluateCron());
@@ -168,10 +195,8 @@ describe("LocalQueue cron scheduler", () => {
 
     // A once-a-minute schedule polled twice in quick succession (both polls
     // share the same minute boundary) must enqueue the occurrence only once.
-    await q.upsertScheduler(
-      "s-once",
-      { pattern: "* * * * *" },
-      { name: "cron-job", data: { v: "x" } },
+    await withPinnedNowAsync(REGISTERED_AT, () =>
+      q.upsertScheduler("s-once", { pattern: "* * * * *" }, { name: "cron-job", data: { v: "x" } }),
     );
 
     withPinnedNow(FIRING_NOW, () => {
@@ -192,12 +217,43 @@ describe("LocalQueue cron scheduler", () => {
       processed.push(job.data.v);
     });
 
-    await q.upsertScheduler("s2", { pattern: "* * * * *" }, { name: "cron-job", data: { v: "x" } });
+    await withPinnedNowAsync(REGISTERED_AT, () =>
+      q.upsertScheduler("s2", { pattern: "* * * * *" }, { name: "cron-job", data: { v: "x" } }),
+    );
     await q.removeScheduler("s2");
 
     withPinnedNow(FIRING_NOW, () => q.evaluateCron());
     await new Promise((r) => setTimeout(r, 300));
     expect(processed).toEqual([]);
+    await q.shutdown();
+  });
+
+  it("does not replay an occurrence from before registration on the first poll", async () => {
+    const q = new LocalQueue<{ v: string }>("test-cron") as any;
+    const processed: string[] = [];
+
+    q.process(async (job: QueueJob<{ v: string }>) => {
+      processed.push(job.data.v);
+    });
+
+    // Register at 10:30:05 — just AFTER the 10:30:00 occurrence of a
+    // once-a-minute schedule. The first poll, 10s later, must NOT replay the
+    // 10:30:00 occurrence that fell before the scheduler existed (boot-replay
+    // regression).
+    const registeredAt = new Date("2026-01-15T10:30:05Z");
+    await withPinnedNowAsync(registeredAt, () =>
+      q.upsertScheduler("s-boot", { pattern: "* * * * *" }, { name: "job", data: { v: "x" } }),
+    );
+
+    withPinnedNow(new Date("2026-01-15T10:30:15Z"), () => q.evaluateCron());
+    await new Promise((r) => setTimeout(r, 300));
+    expect(processed).toEqual([]);
+
+    // The next occurrence (10:31:00) DOES fire once its window arrives.
+    withPinnedNow(new Date("2026-01-15T10:31:10Z"), () => q.evaluateCron());
+    await new Promise((r) => setTimeout(r, 300));
+    expect(processed).toEqual(["x"]);
+
     await q.shutdown();
   });
 
@@ -209,8 +265,12 @@ describe("LocalQueue cron scheduler", () => {
       processed.push(job.data.v);
     });
 
-    await q.upsertScheduler("s3", { pattern: "* * * * *" }, { name: "job", data: { v: "old" } });
-    await q.upsertScheduler("s3", { pattern: "* * * * *" }, { name: "job", data: { v: "new" } });
+    await withPinnedNowAsync(REGISTERED_AT, () =>
+      q.upsertScheduler("s3", { pattern: "* * * * *" }, { name: "job", data: { v: "old" } }),
+    );
+    await withPinnedNowAsync(REGISTERED_AT, () =>
+      q.upsertScheduler("s3", { pattern: "* * * * *" }, { name: "job", data: { v: "new" } }),
+    );
 
     withPinnedNow(FIRING_NOW, () => q.evaluateCron());
     await new Promise((r) => setTimeout(r, 300));

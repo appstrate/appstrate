@@ -87,10 +87,19 @@ export function reconstructPackageZip(pkg: BundlePackage): Uint8Array {
  * that only matches `bundle.json`) — this reads the directory at the end
  * of the file without decompressing any content. Returns true iff a
  * root-level `bundle.json` entry is present.
+ *
+ * Total function: `unzipSync` THROWS `invalid zip data` on non-ZIP,
+ * truncated, or empty input. We swallow that and return false so such
+ * input falls through to the raw `.afps` reader, which raises a typed
+ * error instead of a raw throw. The function never throws.
  */
 function looksLikeAfpsBundle(bytes: Uint8Array): boolean {
-  const matched = unzipSync(bytes, { filter: (f) => f.name === "bundle.json" });
-  return Object.prototype.hasOwnProperty.call(matched, "bundle.json");
+  try {
+    const matched = unzipSync(bytes, { filter: (f) => f.name === "bundle.json" });
+    return Object.prototype.hasOwnProperty.call(matched, "bundle.json");
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -291,7 +300,10 @@ export async function importBundle(
     // it alone — the imported version becomes a parallel snapshot
     // attached to that pre-existing package (safe because integrity
     // matched OR the row is new). Don't clobber another org's draft.
-    await db
+    // `.returning` tells us whether THIS call actually inserted the row
+    // (vs. hit the conflict) so a post-install failure only rolls back
+    // the orphan we created — never a pre-existing foreign-org row.
+    const insertedRows = await db
       .insert(packages)
       .values({
         id: packageId,
@@ -302,18 +314,41 @@ export async function importBundle(
         draftContent: parsedZip.content,
         createdBy: userId,
       })
-      .onConflictDoNothing({ target: packages.id });
+      .onConflictDoNothing({ target: packages.id })
+      .returning({ id: packages.id });
+    const insertedThisRow = insertedRows.length > 0;
 
-    await postInstallPackage({
-      packageType: parsedZip.type,
-      packageId,
-      orgId: scope.orgId,
-      userId,
-      content: parsedZip.content,
-      files: parsedZip.files,
-      zipBuffer: Buffer.from(reconstructed),
-      version,
-    });
+    try {
+      await postInstallPackage({
+        packageType: parsedZip.type,
+        packageId,
+        orgId: scope.orgId,
+        userId,
+        content: parsedZip.content,
+        files: parsedZip.files,
+        zipBuffer: Buffer.from(reconstructed),
+        version,
+      });
+    } catch (err) {
+      // Post-install (version snapshot + storage upload) failed. If this
+      // import just created the packages row, delete the orphan so we don't
+      // leave an un-runnable package with no version. Guard on the absence
+      // of any package_versions rows so we never remove a package that
+      // already had a usable version. Then rethrow for the route to map.
+      if (insertedThisRow) {
+        const existingVersions = await db
+          .select({ id: packageVersions.id })
+          .from(packageVersions)
+          .where(eq(packageVersions.packageId, packageId))
+          .limit(1);
+        if (existingVersions.length === 0) {
+          await db
+            .delete(packages)
+            .where(and(eq(packages.id, packageId), eq(packages.orgId, scope.orgId)));
+        }
+      }
+      throw err;
+    }
 
     const [newVer] = await db
       .select({ id: packageVersions.id })

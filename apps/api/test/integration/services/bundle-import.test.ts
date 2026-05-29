@@ -19,7 +19,7 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { zipSync } from "fflate";
-import { writeBundleToBuffer } from "@appstrate/afps-runtime/bundle";
+import { writeBundleToBuffer, BundleError } from "@appstrate/afps-runtime/bundle";
 import type { Bundle, BundlePackage } from "@appstrate/afps-runtime/bundle";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import {
@@ -132,6 +132,41 @@ describe("readOrBuildBundle dispatch", () => {
     });
     expect(reread.root).toBe(oneShot.root);
     expect(reread.packages.size).toBe(oneShot.packages.size);
+  });
+
+  it("does not throw raw on non-ZIP / garbage bytes — detector returns false, reader raises a typed error", async () => {
+    // `looksLikeAfpsBundle` calls `unzipSync`, which THROWS `invalid zip data`
+    // on non-ZIP input. The detector must swallow that and return false so the
+    // bytes fall through to the raw `.afps` reader, which raises a TYPED
+    // `BundleError` (ARCHIVE_INVALID) rather than letting fflate's raw `Error`
+    // bubble straight out of the detector to a 500.
+    const garbage = new Uint8Array([0x00, 0x01, 0x02, 0x03, 0xff, 0xfe]);
+    let err: unknown;
+    try {
+      await readOrBuildBundle(garbage, {
+        orgId: "00000000-0000-0000-0000-000000000000",
+        applicationId: "00000000-0000-0000-0000-000000000000",
+      });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(BundleError);
+    expect((err as BundleError).code).toBe("ARCHIVE_INVALID");
+  });
+
+  it("does not throw on an empty buffer (detector returns false)", async () => {
+    // Empty input is the degenerate non-ZIP case — `unzipSync` throws, the
+    // detector must still return false (not throw) and fall through.
+    let err: unknown;
+    try {
+      await readOrBuildBundle(new Uint8Array(0), {
+        orgId: "00000000-0000-0000-0000-000000000000",
+        applicationId: "00000000-0000-0000-0000-000000000000",
+      });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(BundleError);
   });
 
   it("recognises a .afps-bundle whose first entry exceeds 64 KiB (central-directory scan)", async () => {

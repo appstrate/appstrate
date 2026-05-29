@@ -32,7 +32,11 @@ interface CronScheduler<T> {
   pattern: string;
   tz: string;
   jobTemplate: { name: string; data: T };
-  /** Last time this scheduler fired a job (epoch ms). Prevents double-firing within a window. */
+  /**
+   * Last time this scheduler fired a job (epoch ms). Prevents double-firing
+   * within a window. Initialised to the registration time so no occurrence
+   * before the scheduler existed is replayed on process (re)start.
+   */
   lastFiredAt: number;
 }
 
@@ -69,7 +73,10 @@ export class LocalQueue<T> implements JobQueue<T> {
       pattern: pattern.pattern,
       tz: pattern.tz ?? "UTC",
       jobTemplate,
-      lastFiredAt: 0,
+      // Anchor at registration time so the first poll's window never reaches
+      // back before the scheduler existed — an occurrence that fell just
+      // before startup/registration is not replayed on (re)start.
+      lastFiredAt: Date.now(),
     });
   }
 

@@ -1490,7 +1490,23 @@ export function createPackagesRouter() {
     const applicationId = c.get("applicationId");
     const userId = c.get("user").id;
 
-    const result = await handleImportBundle(bytes, { orgId, applicationId }, userId);
+    let result: Awaited<ReturnType<typeof handleImportBundle>>;
+    try {
+      result = await handleImportBundle(bytes, { orgId, applicationId }, userId);
+    } catch (err) {
+      // Typed errors (ApiError — conflicts, invalid request) propagate as-is.
+      // A raw post-install/version-creation failure becomes the same clean 4xx
+      // as the single-import route rather than a 500.
+      if (err instanceof ApiError) throw err;
+      const message = getErrorMessage(err);
+      logger.error("Bundle import post-install failed", { orgId, error: message });
+      throw new ApiError({
+        status: 400,
+        code: "post_install_failed",
+        title: "Post-Install Failed",
+        detail: message,
+      });
+    }
     return c.json(result, 201);
   });
 

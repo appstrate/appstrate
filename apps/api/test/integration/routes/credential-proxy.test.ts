@@ -420,3 +420,97 @@ describe("POST /api/credential-proxy/proxy — cookie-session rejection (ACCEPTE
     expect(upstreamCalls).toBe(0);
   });
 });
+
+describe("POST /api/credential-proxy/proxy — response capping (X-Truncated header)", () => {
+  let ctx: TestContext;
+  let apiKey: string;
+
+  beforeEach(async () => {
+    await truncateAll();
+    await flushRedis();
+    ctx = await createTestContext({ orgSlug: "cporg" });
+    await seedIntegrationWithConnection(ctx);
+    apiKey = await mintProxyKey(ctx);
+  });
+  afterEach(() => restoreFetch());
+
+  // The route caps non-streaming responses at `limits.max_response_bytes`
+  // (default 50 MiB) and sets `X-Truncated: true` once the capped body is
+  // drained. The service test (`credential-proxy-truncation.test.ts`)
+  // exercises `proxyCall`'s live `truncated` getter; this asserts the ROUTE
+  // actually emits the header on a capped non-streaming response.
+  const CAP = 50 * 1024 * 1024;
+
+  /** A streaming body that lazily emits `total` bytes in 1 MiB chunks. */
+  function oversizedBody(total: number): ReadableStream<Uint8Array> {
+    const chunk = new Uint8Array(1024 * 1024); // 1 MiB
+    let sent = 0;
+    return new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (sent >= total) {
+          controller.close();
+          return;
+        }
+        const remaining = total - sent;
+        controller.enqueue(remaining >= chunk.byteLength ? chunk : chunk.subarray(0, remaining));
+        sent += chunk.byteLength;
+      },
+    });
+  }
+
+  it("sets X-Truncated: true on a capped non-streaming response", async () => {
+    // Upstream returns more than the cap → the route's capping transform
+    // stops at the cap and the route emits X-Truncated. No x-stream-response
+    // header → the buffered (non-streaming) path.
+    mockUpstream(
+      async () =>
+        new Response(oversizedBody(CAP + 1024), {
+          status: 200,
+          headers: { "content-type": "application/octet-stream" },
+        }),
+    );
+
+    const res = await app.request("/api/credential-proxy/proxy", {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "X-Org-Id": ctx.orgId,
+        "X-Application-Id": ctx.defaultAppId,
+        "X-Integration-Id": INTEGRATION_ID,
+        "X-Target": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+        "X-Session-Id": uuidV4(),
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("X-Truncated")).toBe("true");
+    // Drain the (capped) body so the response stream is fully consumed.
+    const buf = await res.arrayBuffer();
+    expect(buf.byteLength).toBe(CAP);
+  });
+
+  it("does not set X-Truncated when the body fits under the cap", async () => {
+    mockUpstream(
+      async () =>
+        new Response('{"messages":[]}', {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+
+    const res = await app.request("/api/credential-proxy/proxy", {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "X-Org-Id": ctx.orgId,
+        "X-Application-Id": ctx.defaultAppId,
+        "X-Integration-Id": INTEGRATION_ID,
+        "X-Target": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+        "X-Session-Id": uuidV4(),
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("X-Truncated")).toBeNull();
+  });
+});
