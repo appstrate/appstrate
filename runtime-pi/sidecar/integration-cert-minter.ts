@@ -32,7 +32,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { tmpdir } from "node:os";
-import { randomUUID } from "node:crypto";
+import { randomUUID, randomBytes } from "node:crypto";
 import {
   runOpenssl as runOpensslExec,
   readPem as readPemExec,
@@ -79,6 +79,13 @@ export interface CertMinter {
   readonly cacheSize: number;
   /** Drop every cached cert. Tests use this; production rarely needs it. */
   resetCache(): void;
+  /**
+   * Wipe the on-disk session workdir — including the staged CA **private
+   * key** (`ca.key`). MUST be called at run teardown: on the process adapter
+   * `os.tmpdir()` is not tmpfs, so without this the per-run CA signing key
+   * (a forgeable trust anchor for that run's MITM CA) survives on the host.
+   */
+  dispose(): Promise<void>;
 }
 
 export class CertMintError extends Error {
@@ -181,6 +188,14 @@ export function createCertMinter(options: CertMinterOptions): CertMinter {
     resetCache() {
       cache.clear();
     },
+    async dispose() {
+      cache.clear();
+      staged = null;
+      // rm -rf the whole session workdir (ca.crt + ca.key + any leaf
+      // remnants). Best-effort: a failed unlink is logged-by-caller, never
+      // throws teardown.
+      await fs.rm(sessionDir, { recursive: true, force: true }).catch(() => {});
+    },
   };
 
   return minter;
@@ -208,7 +223,12 @@ async function mintLeaf(
   const csrPath = path.join(sessionDir, `leaf-${id}.csr`);
   const extPath = path.join(sessionDir, `leaf-${id}.ext`);
   const certPath = path.join(sessionDir, `leaf-${id}.crt`);
-  const serialPath = path.join(sessionDir, "ca.srl");
+  // Random 128-bit serial per leaf instead of `-CAcreateserial`/`ca.srl`.
+  // The shared serial file is a read-modify-write that races when the MITM
+  // listener mints leaves for distinct SNI hosts concurrently — two mints
+  // could read the same serial and emit colliding-serial certs under one CA,
+  // or corrupt `ca.srl`. A random serial removes the shared state entirely.
+  const serial = `0x${randomBytes(16).toString("hex")}`;
 
   try {
     await runOpenssl(spawn, opensslBin, ["genrsa", "-out", keyPath, "2048"]);
@@ -244,9 +264,8 @@ async function mintLeaf(
       input.caCertPath,
       "-CAkey",
       input.caKeyPath,
-      "-CAcreateserial",
-      "-CAserial",
-      serialPath,
+      "-set_serial",
+      serial,
       "-days",
       String(input.days),
       "-sha256",

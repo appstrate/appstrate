@@ -1359,6 +1359,10 @@ export async function bootIntegrations(
         } catch {
           // ignore — best-effort
         }
+        // Wipe the minter's on-disk session workdir (the staged CA *private
+        // key*). On the process adapter os.tmpdir() is not tmpfs, so without
+        // this the per-run CA signing key survives on the host.
+        await runCa.minter.dispose();
       }
     },
   };
@@ -1418,6 +1422,7 @@ export async function runConnectOnce(
   const clients: AppstrateMcpClient[] = [];
   const mitmListeners: MitmListenerHandle[] = [];
   let runCaCertHostPath: string | null = null;
+  let runCaMinter: CertMinter | null = null;
 
   try {
     // Per-run CA — connect-login ALWAYS needs the MITM (the login secret is
@@ -1425,6 +1430,7 @@ export async function runConnectOnce(
     // `bootIntegrations` we let a CA failure throw rather than degrade.
     const ca = await prepareRunCa(runId, "afps-ca-connect-");
     runCaCertHostPath = ca.certHostPath;
+    runCaMinter = ca.minter;
 
     // Hoist the single credentials source for this connect-run (mirrors
     // `bootIntegrations`). connect-login ALWAYS needs the MITM, so the source
@@ -1514,6 +1520,7 @@ export async function runConnectOnce(
         // ignore — listener already torn down
       }
     }
+    if (runCaMinter) await runCaMinter.dispose();
     if (runCaCertHostPath) {
       try {
         await rm(runCaCertHostPath, { force: true });
