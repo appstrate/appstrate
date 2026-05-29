@@ -44,7 +44,17 @@ interface CreateVersionParams {
   createdBy: string | null;
 }
 
-/** Create a new version with semver, integrity, manifest snapshot. Auto-manages "latest" dist-tag. */
+/**
+ * Create a new version with semver, integrity, manifest snapshot. Auto-manages
+ * "latest" dist-tag.
+ *
+ * Returns `null` ONLY for the legitimate no-op cases — an invalid semver, a
+ * version that already exists (with no row to return), or a forward-only
+ * rejection. A genuine DB failure THROWS so callers can distinguish a real
+ * error from a benign skip (e.g. so the ZIP-cleanup path in
+ * {@link createVersionAndUpload} fires and the import doesn't commit an
+ * orphaned packages row without a version).
+ */
 export async function createPackageVersion(params: CreateVersionParams): Promise<{
   id: number;
   version: string;
@@ -56,76 +66,65 @@ export async function createPackageVersion(params: CreateVersionParams): Promise
     return null;
   }
 
-  try {
-    return await db.transaction(async (tx) => {
-      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${packageId}))`);
+  return await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${packageId}))`);
 
-      // Forward-only enforcement (include yanked — duplicates must be rejected even if yanked)
-      const allExisting = await tx
-        .select({ version: packageVersions.version })
-        .from(packageVersions)
-        .where(eq(packageVersions.packageId, packageId));
+    // Forward-only enforcement (include yanked — duplicates must be rejected even if yanked)
+    const allExisting = await tx
+      .select({ version: packageVersions.version })
+      .from(packageVersions)
+      .where(eq(packageVersions.packageId, packageId));
 
-      const [currentLatest] = await tx
-        .select({ version: packageVersions.version })
-        .from(packageDistTags)
-        .innerJoin(packageVersions, eq(packageDistTags.versionId, packageVersions.id))
-        .where(and(eq(packageDistTags.packageId, packageId), eq(packageDistTags.tag, "latest")))
-        .limit(1);
+    const [currentLatest] = await tx
+      .select({ version: packageVersions.version })
+      .from(packageDistTags)
+      .innerJoin(packageVersions, eq(packageDistTags.versionId, packageVersions.id))
+      .where(and(eq(packageDistTags.packageId, packageId), eq(packageDistTags.tag, "latest")))
+      .limit(1);
 
-      const outcome = planCreateVersionOutcome(
-        version,
-        allExisting.map((v) => v.version),
-        currentLatest?.version ?? null,
-      );
-
-      if (outcome.action === "exists") {
-        logger.warn("Version already exists", { packageId, version });
-        const [existingRow] = await tx
-          .select({ id: packageVersions.id, version: packageVersions.version })
-          .from(packageVersions)
-          .where(
-            and(eq(packageVersions.packageId, packageId), eq(packageVersions.version, version)),
-          )
-          .limit(1);
-        return existingRow ?? null;
-      }
-      if (outcome.action === "rejected") {
-        logger.warn("Version rejected", {
-          packageId,
-          version,
-          error: outcome.error,
-          highest: outcome.error === "VERSION_NOT_HIGHER" ? outcome.highest : undefined,
-        });
-        return null;
-      }
-
-      const [row] = await tx
-        .insert(packageVersions)
-        .values({ packageId, version, integrity, artifactSize, manifest, createdBy })
-        .returning({ id: packageVersions.id, version: packageVersions.version });
-
-      // Auto-manage "latest" dist-tag
-      if (outcome.shouldUpdateLatest) {
-        await tx
-          .insert(packageDistTags)
-          .values({ packageId, tag: "latest", versionId: row!.id })
-          .onConflictDoUpdate({
-            target: [packageDistTags.packageId, packageDistTags.tag],
-            set: { versionId: row!.id, updatedAt: new Date() },
-          });
-      }
-
-      return { id: row!.id, version: row!.version };
-    });
-  } catch (err) {
-    logger.error("Failed to create package version", {
-      packageId,
+    const outcome = planCreateVersionOutcome(
       version,
-      error: getErrorMessage(err),
-    });
-    return null;
-  }
+      allExisting.map((v) => v.version),
+      currentLatest?.version ?? null,
+    );
+
+    if (outcome.action === "exists") {
+      logger.warn("Version already exists", { packageId, version });
+      const [existingRow] = await tx
+        .select({ id: packageVersions.id, version: packageVersions.version })
+        .from(packageVersions)
+        .where(and(eq(packageVersions.packageId, packageId), eq(packageVersions.version, version)))
+        .limit(1);
+      return existingRow ?? null;
+    }
+    if (outcome.action === "rejected") {
+      logger.warn("Version rejected", {
+        packageId,
+        version,
+        error: outcome.error,
+        highest: outcome.error === "VERSION_NOT_HIGHER" ? outcome.highest : undefined,
+      });
+      return null;
+    }
+
+    const [row] = await tx
+      .insert(packageVersions)
+      .values({ packageId, version, integrity, artifactSize, manifest, createdBy })
+      .returning({ id: packageVersions.id, version: packageVersions.version });
+
+    // Auto-manage "latest" dist-tag
+    if (outcome.shouldUpdateLatest) {
+      await tx
+        .insert(packageDistTags)
+        .values({ packageId, tag: "latest", versionId: row!.id })
+        .onConflictDoUpdate({
+          target: [packageDistTags.packageId, packageDistTags.tag],
+          set: { versionId: row!.id, updatedAt: new Date() },
+        });
+    }
+
+    return { id: row!.id, version: row!.version };
+  });
 }
 
 // ─────────────────────────────────────────────

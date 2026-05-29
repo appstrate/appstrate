@@ -334,17 +334,20 @@ async function loadAndSyncSystemPackages(): Promise<void> {
 /**
  * Sync the already-loaded system-package registry to the DB. Public so
  * integration tests can drive it independently of `initSystemPackages`
- * (which reads from disk) — the test injects fixtures via the
- * `_setSystemPackagesForTesting` helper, then drives this function and
- * asserts the resulting DB state.
+ * (which reads from disk) — production calls it with no args and it reads
+ * the module-state registry; tests pass fixtures directly via the optional
+ * `canonical` / `versions` params, then assert the resulting DB state.
  *
  * - UPSERT one `packages` row per packageId at the canonical (highest semver) version
  * - Register every loaded version in `package_versions` (idempotent)
  * - Refuse-overwrite on integrity drift without a version bump (the safety gate)
  */
-export async function syncSystemPackagesToDb(): Promise<void> {
-  const canonicalPackages = getSystemPackages();
-  const allVersions = getAllSystemPackageVersions();
+export async function syncSystemPackagesToDb(
+  canonical?: ReadonlyMap<string, SystemPackageEntry>,
+  versions?: readonly SystemPackageEntry[],
+): Promise<void> {
+  const canonicalPackages = canonical ?? getSystemPackages();
+  const allVersions = versions ?? getAllSystemPackageVersions();
   if (canonicalPackages.size === 0) return;
 
   let syncedPackages = 0;

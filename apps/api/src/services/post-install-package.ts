@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { logger } from "../lib/logger.ts";
 import { parseManifestFromFiles } from "../lib/manifest-parser.ts";
 import { createVersionAndUpload } from "./package-versions.ts";
 import {
@@ -9,7 +8,6 @@ import {
   getOrgItem,
   type CreateItemInput,
 } from "./package-items/crud.ts";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { uploadPackageFiles } from "./package-items/storage.ts";
 import { CONFIG_BY_TYPE, type PackageTypeConfig } from "./package-items/config.ts";
 import { isValidVersion } from "@appstrate/core/semver";
@@ -93,18 +91,15 @@ export async function postInstallPackage(params: {
     await uploadPackageFiles("mcp-servers", orgId, packageId, files);
   }
 
-  try {
-    await createVersionAndUpload({
-      packageId,
-      version,
-      createdBy: userId,
-      zipBuffer,
-      manifest,
-    });
-  } catch (err) {
-    logger.error("Failed to create package version", {
-      packageId,
-      error: getErrorMessage(err),
-    });
-  }
+  // No try/catch: a genuine version-creation failure MUST propagate so the
+  // caller (e.g. bundle import) aborts rather than committing a `packages`
+  // row with no version (an un-runnable orphan). `createVersionAndUpload`
+  // already cleans up its uploaded ZIP on DB failure before re-throwing.
+  await createVersionAndUpload({
+    packageId,
+    version,
+    createdBy: userId,
+    zipBuffer,
+    manifest,
+  });
 }

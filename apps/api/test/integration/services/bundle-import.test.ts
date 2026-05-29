@@ -133,6 +133,31 @@ describe("readOrBuildBundle dispatch", () => {
     expect(reread.root).toBe(oneShot.root);
     expect(reread.packages.size).toBe(oneShot.packages.size);
   });
+
+  it("recognises a .afps-bundle whose first entry exceeds 64 KiB (central-directory scan)", async () => {
+    // Regression for the byte-scan heuristic: the writer emits package
+    // files (sorted) BEFORE `bundle.json`, so a package carrying a >64 KiB
+    // STORE'd file pushes `bundle.json`'s local header past the old
+    // 64 KiB front-of-file scan window → false negative. Enumerating the
+    // central directory finds it regardless of position.
+    const bigPrompt = "x".repeat(100 * 1024); // 100 KiB → exceeds the 64 KiB window
+    const raw = buildRawAfps({ name: "@x/agent", type: "agent", version: "1.0.0" }, bigPrompt);
+    const ctx = await createTestContext({ orgSlug: "bundle-big" });
+    const oneShot = await readOrBuildBundle(raw, {
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+    });
+    const wrapped = writeBundleToBuffer(oneShot);
+    expect(wrapped.byteLength).toBeGreaterThan(65536);
+
+    // Must be read AS a bundle (not mis-promoted as a single-package afps).
+    const reread = await readOrBuildBundle(wrapped, {
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+    });
+    expect(reread.root).toBe(oneShot.root);
+    expect(reread.packages.size).toBe(oneShot.packages.size);
+  });
 });
 
 describe("detectBundleConflicts", () => {

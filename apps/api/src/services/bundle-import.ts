@@ -20,13 +20,15 @@
  * This helper is transaction-aware insofar as each package is inserted
  * by `postInstallPackage` which uses `createVersionAndUpload` —
  * duplicates are caught before any storage write and surfaced to the
- * caller. Partial failures (e.g. half the packages succeed, then one
- * conflicts) are left in place: new inserts are harmless, and the
- * failed package is reported. For strict atomicity, a full-import
- * transaction will be added once storage becomes CAS (§Phase 4).
+ * caller. A genuine version-creation failure on any package ABORTS the
+ * whole import (the error propagates) rather than committing a `packages`
+ * row with no version (an un-runnable orphan) — earlier-inserted packages
+ * remain (new inserts are harmless). For strict all-or-nothing atomicity,
+ * a full-import transaction will be added once storage becomes CAS
+ * (§Phase 4).
  */
 
-import { zipSync, type AsyncZippableFile } from "fflate";
+import { zipSync, unzipSync, type AsyncZippableFile } from "fflate";
 import type { Bundle, BundlePackage } from "@appstrate/afps-runtime/bundle";
 import {
   extractRootFromAfps,
@@ -80,31 +82,15 @@ export function reconstructPackageZip(pkg: BundlePackage): Uint8Array {
 
 /**
  * Heuristic: a `.afps-bundle` archive contains a `bundle.json` entry at
- * its root; a raw `.afps` archive contains `manifest.json`. The central
- * directory scan is cheap — we don't decompress until we know which
- * reader to call.
+ * its root; a raw `.afps` archive contains `manifest.json`. We enumerate
+ * entry names via the ZIP central directory (`unzipSync` with a `filter`
+ * that only matches `bundle.json`) — this reads the directory at the end
+ * of the file without decompressing any content. Returns true iff a
+ * root-level `bundle.json` entry is present.
  */
 function looksLikeAfpsBundle(bytes: Uint8Array): boolean {
-  // Super-cheap scan: find the literal string "bundle.json" in the
-  // first few KiB of the archive. ZIP central directories live at the
-  // END of the file, but filenames are also emitted in local file
-  // headers near the START — so this works on typical small archives.
-  // False-positives are impossible (a `.afps` has no such filename) and
-  // a false-negative falls through to the bundle reader which will
-  // raise `BUNDLE_JSON_MISSING` — an acceptable error shape.
-  const needle = new TextEncoder().encode("bundle.json");
-  const hay = bytes.subarray(0, Math.min(bytes.byteLength, 65536));
-  for (let i = 0; i + needle.length <= hay.byteLength; i++) {
-    let match = true;
-    for (let j = 0; j < needle.length; j++) {
-      if (hay[i + j] !== needle[j]) {
-        match = false;
-        break;
-      }
-    }
-    if (match) return true;
-  }
-  return false;
+  const matched = unzipSync(bytes, { filter: (f) => f.name === "bundle.json" });
+  return Object.prototype.hasOwnProperty.call(matched, "bundle.json");
 }
 
 /**
