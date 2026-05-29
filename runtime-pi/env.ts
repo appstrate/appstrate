@@ -62,13 +62,6 @@ export interface RuntimeEnv {
    */
   traceparent?: string;
   /**
-   * Per-run Bearer token for the MCP HTTP transport. When unset, the
-   * MCP client connects unauthenticated — relies on Docker network
-   * isolation only. Reuses the platform's existing `RUN_TOKEN` env to
-   * avoid minting a separate secret.
-   */
-  runToken?: string;
-  /**
    * Wall-clock budget for the initial MCP handshake against the sidecar
    * (in milliseconds). Wraps both the connect retry loop and the final
    * attempt. Operators on slow registries can widen this when cold
@@ -304,6 +297,5 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     mcpConnectDeadlineMs,
     outputSchemaRaw: source.OUTPUT_SCHEMA || undefined,
     traceparent: source.TRACEPARENT || undefined,
-    runToken: source.RUN_TOKEN || undefined,
   };
 }

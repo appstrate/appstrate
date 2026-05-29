@@ -394,8 +394,11 @@ if (sidecarUrl) {
     // worst-case cold container pulls (#406 acceptance criteria: 20–45s
     // boots are routine). Operators on slow registries can widen via
     // `APPSTRATE_MCP_CONNECT_DEADLINE_MS`.
+    // The sidecar's /mcp endpoint gates inbound requests by the per-run
+    // Docker network + Host-header check (`validateMcpHostHeader`); it does
+    // NOT verify a bearer token, so the agent connects unauthenticated. (An
+    // earlier RUN_TOKEN-as-bearer path was wired but never validated — dropped.)
     mcpClient = await createMcpHttpClient(`${sidecarUrl.replace(/\/$/, "")}/mcp`, {
-      ...(env.runToken ? { bearerToken: env.runToken } : {}),
       clientInfo: { name: "appstrate-runtime-pi", version: "1.0" },
       retry: {
         deadlineMs: env.mcpConnectDeadlineMs,
