@@ -471,6 +471,13 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
 
       const packageId = validatedManifest.name;
 
+      // Scope no longer gates creation, but a system package id must never be shadowed by an
+      // org-owned row — the boot sync upserts system rows by id and would later overwrite it
+      // (orgId→null). Mirror the system-package guard the update/delete/version handlers apply.
+      if (isSystemPackage(packageId)) {
+        throw forbidden(`'${packageId}' is a system package and cannot be created`);
+      }
+
       // Check for name collision
       const existingIds = await getAllPackageIds(orgId);
       if (existingIds.includes(packageId)) {
