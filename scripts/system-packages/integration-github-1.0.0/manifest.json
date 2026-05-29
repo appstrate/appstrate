@@ -48,7 +48,11 @@
           "label": "Update GitHub Actions workflows"
         }
       ],
-      "authorized_uris": ["https://api.github.com/**"],
+      "authorized_uris": [
+        "https://api.github.com/**",
+        "https://codeload.github.com/**",
+        "https://*.githubusercontent.com/**"
+      ],
       "delivery": {
         "http": {
           "in": "header",
