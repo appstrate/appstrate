@@ -12,10 +12,18 @@ export function isValidCron(cronExpression: string): boolean {
   }
 }
 
-/** Compute next run date from a cron expression. */
-export function computeNextRun(cronExpression: string, timezone: string): Date | null {
+/**
+ * Compute the next run date from a cron expression, strictly after `from`
+ * (defaults to now). cron-parser is forward-looking: `next()` always returns a
+ * time after the base, so callers wanting to detect a missed occurrence should
+ * pass a base in the past and compare the result against the present.
+ */
+export function computeNextRun(cronExpression: string, timezone: string, from?: Date): Date | null {
   try {
-    const interval = parseExpression(cronExpression, { tz: timezone });
+    const interval = parseExpression(cronExpression, {
+      tz: timezone,
+      ...(from ? { currentDate: from } : {}),
+    });
     return interval.next().toDate();
   } catch {
     return null;

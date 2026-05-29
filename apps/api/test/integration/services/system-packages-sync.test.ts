@@ -35,8 +35,10 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
-import { syncSystemPackagesToDb } from "../../../src/lib/boot.ts";
-import { type SystemPackageEntry } from "../../../src/services/system-packages.ts";
+import {
+  syncSystemPackagesToDb,
+  type SystemPackageEntry,
+} from "../../../src/services/system-packages.ts";
 import { zipArtifact } from "@appstrate/core/zip";
 import { packages, packageVersions } from "@appstrate/db/schema";
 import { eq, and } from "drizzle-orm";

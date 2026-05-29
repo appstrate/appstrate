@@ -10,6 +10,7 @@
  */
 
 import { logger } from "../../lib/logger.ts";
+import { computeNextRun } from "../../lib/cron.ts";
 import type {
   JobQueue,
   JobHandler,
@@ -31,7 +32,12 @@ interface CronScheduler<T> {
   pattern: string;
   tz: string;
   jobTemplate: { name: string; data: T };
+  /** Last time this scheduler fired a job (epoch ms). Prevents double-firing within a window. */
+  lastFiredAt: number;
 }
+
+/** Cron poll cadence (ms). The evaluator runs on this interval. */
+const CRON_POLL_INTERVAL_MS = 30_000;
 
 export class LocalQueue<T> implements JobQueue<T> {
   private pending: PendingJob<T>[] = [];
@@ -63,6 +69,7 @@ export class LocalQueue<T> implements JobQueue<T> {
       pattern: pattern.pattern,
       tz: pattern.tz ?? "UTC",
       jobTemplate,
+      lastFiredAt: 0,
     });
   }
 
@@ -78,8 +85,8 @@ export class LocalQueue<T> implements JobQueue<T> {
     // Drain pending jobs every 500ms
     this.drainInterval = setInterval(() => this.drain(), 500);
 
-    // Evaluate cron schedulers every 30s
-    this.cronInterval = setInterval(() => this.evaluateCron(), 30_000);
+    // Evaluate cron schedulers every poll interval
+    this.cronInterval = setInterval(() => this.evaluateCron(), CRON_POLL_INTERVAL_MS);
 
     // Neither timer should keep the event loop alive on its own — the server
     // listener does that in prod, and this lets the test process exit cleanly.
@@ -170,121 +177,40 @@ export class LocalQueue<T> implements JobQueue<T> {
   }
 
   /**
-   * Simple cron evaluator — checks if any scheduler should fire.
-   * Uses a minute-granularity check against the current time.
+   * Cron evaluator — fires any scheduler whose next computed run falls within
+   * the current poll window. Uses `computeNextRun` (cron-parser) so validation
+   * (`isValidCron`) and execution share one parser: presets (`@daily`),
+   * aliases (`MON`), and 6-field expressions all behave identically.
+   *
+   * `computeNextRun` is forward-looking — it always returns a time strictly
+   * after its base. To detect a run that should have fired during the window
+   * we ending now, we compute the next run from `(now - pollWindow)` as the
+   * base and fire when that run is `<= now`. `lastFiredAt` bounds the base so a
+   * scheduler can't re-fire the same occurrence on overlapping/late polls.
    */
   private evaluateCron(): void {
     if (this.shuttingDown || !this.handler) return;
 
-    const now = new Date();
+    const now = Date.now();
+    const windowStart = now - CRON_POLL_INTERVAL_MS;
     for (const scheduler of this.schedulers.values()) {
-      if (this.shouldFire(scheduler.pattern, scheduler.tz, now)) {
-        const id = `cron_${scheduler.id}_${Date.now()}`;
-        const job: QueueJob<T> = {
-          id,
-          name: scheduler.jobTemplate.name,
-          data: scheduler.jobTemplate.data,
-          attemptsMade: 0,
-        };
-        this.pending.push({ job });
-        logger.debug(`${this.name} cron fired`, { schedulerId: scheduler.id });
-      }
+      // Base the forward-looking lookup at the window start, but never before
+      // the last fire so we don't replay an occurrence already enqueued.
+      const base = Math.max(windowStart, scheduler.lastFiredAt);
+      const next = computeNextRun(scheduler.pattern, scheduler.tz, new Date(base));
+      if (!next || next.getTime() > now) continue;
+
+      scheduler.lastFiredAt = now;
+      const id = `cron_${scheduler.id}_${now}`;
+      const job: QueueJob<T> = {
+        id,
+        name: scheduler.jobTemplate.name,
+        data: scheduler.jobTemplate.data,
+        attemptsMade: 0,
+      };
+      this.pending.push({ job });
+      logger.debug(`${this.name} cron fired`, { schedulerId: scheduler.id });
     }
     this.drain();
-  }
-
-  /**
-   * Check if a cron expression should fire for the current minute.
-   * Supports standard 5-field cron: minute hour dom month dow.
-   */
-  private shouldFire(cronExpr: string, tz: string, now: Date): boolean {
-    try {
-      // Get current time in the target timezone
-      const parts = new Intl.DateTimeFormat("en-US", {
-        timeZone: tz,
-        hour: "numeric",
-        minute: "numeric",
-        day: "numeric",
-        month: "numeric",
-        weekday: "short",
-        hour12: false,
-      })
-        .formatToParts(now)
-        .reduce(
-          (acc, p) => {
-            acc[p.type] = p.value;
-            return acc;
-          },
-          {} as Record<string, string>,
-        );
-
-      const minute = parseInt(parts.minute ?? "0");
-      const hour = parseInt(parts.hour ?? "0");
-      const day = parseInt(parts.day ?? "1");
-      const month = parseInt(parts.month ?? "1");
-      const dowMap: Record<string, number> = {
-        Sun: 0,
-        Mon: 1,
-        Tue: 2,
-        Wed: 3,
-        Thu: 4,
-        Fri: 5,
-        Sat: 6,
-      };
-      const dow = dowMap[parts.weekday ?? "Sun"] ?? 0;
-
-      const fields = cronExpr.trim().split(/\s+/);
-      if (fields.length < 5) return false;
-
-      return (
-        this.matchField(fields[0]!, minute, 0, 59) &&
-        this.matchField(fields[1]!, hour, 0, 23) &&
-        this.matchField(fields[2]!, day, 1, 31) &&
-        this.matchField(fields[3]!, month, 1, 12) &&
-        this.matchField(fields[4]!, dow, 0, 6, true)
-      );
-    } catch {
-      return false;
-    }
-  }
-
-  // Match a single cron field against a value. Supports *, star/N, N-M, comma lists.
-  // For day-of-week: normalizes 7 → 0 (both represent Sunday in standard cron).
-  private matchField(
-    field: string,
-    value: number,
-    _min: number,
-    _max: number,
-    isDow = false,
-  ): boolean {
-    if (field === "*") return true;
-
-    return field.split(",").some((part) => {
-      // Step: */N or N-M/S
-      const [range, stepStr] = part.split("/");
-      const step = stepStr ? parseInt(stepStr) : undefined;
-
-      if (range === "*" && step) {
-        return value % step === 0;
-      }
-
-      // Range: N-M — normalize 7 → 0 for day-of-week bounds
-      if (range!.includes("-")) {
-        let [lo, hi] = range!.split("-").map(Number);
-        if (isDow) {
-          if (lo === 7) lo = 0;
-          if (hi === 7) hi = 0;
-        }
-        if (step) {
-          return value >= lo! && value <= hi! && (value - lo!) % step === 0;
-        }
-        return value >= lo! && value <= hi!;
-      }
-
-      // Exact value — normalize 7 → 0 for day-of-week
-      let parsed = parseInt(range!);
-      if (isDow && parsed === 7) parsed = 0;
-      return parsed === value;
-    });
   }
 }
