@@ -27,7 +27,10 @@
 import { and, eq, or, inArray, isNull } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { integrationConnections, integrationPins, applicationPackages } from "@appstrate/db/schema";
-import type { InferSelectModel } from "drizzle-orm";
+import type {
+  IntegrationConnectionRow as ConnectionRow,
+  IntegrationPinRow as PinRow,
+} from "@appstrate/db/schema";
 import {
   parseManifestIntegrations,
   type ManifestIntegrationEntry,
@@ -49,9 +52,6 @@ import { fetchIntegrationManifest } from "./integration-service.ts";
 import { listOrgDefaultsForResolver } from "./integration-org-defaults-service.ts";
 
 // ─────────────────────────────────── Types ────────────────────────────────────
-
-type ConnectionRow = InferSelectModel<typeof integrationConnections>;
-type PinRow = InferSelectModel<typeof integrationPins>;
 
 /**
  * Per-integration requirement compiled from the agent manifest. With the

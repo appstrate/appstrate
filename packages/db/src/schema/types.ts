@@ -9,8 +9,10 @@ import type {
   packageVersionDependencies,
   applicationPackages,
 } from "./packages.ts";
-import type { runs, runLogs, schedules } from "./runs.ts";
+import type { runs, runLogs, schedules, packagePersistence } from "./runs.ts";
 import type { applications, endUsers } from "./applications.ts";
+import type { integrationConnections } from "./integrations.ts";
+import type { integrationPins } from "./integration-pins.ts";
 import type { user, session, account, verification } from "./auth.ts";
 import type {
   organizations,
@@ -65,3 +67,9 @@ export type Session = InferSelectModel<typeof session>;
 export type Account = InferSelectModel<typeof account>;
 
 export type Verification = InferSelectModel<typeof verification>;
+
+export type PackagePersistenceRow = InferSelectModel<typeof packagePersistence>;
+
+export type IntegrationConnectionRow = InferSelectModel<typeof integrationConnections>;
+
+export type IntegrationPinRow = InferSelectModel<typeof integrationPins>;

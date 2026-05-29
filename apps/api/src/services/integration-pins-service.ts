@@ -27,7 +27,10 @@ import {
   packages,
   user,
 } from "@appstrate/db/schema";
-import type { InferSelectModel } from "drizzle-orm";
+import type {
+  IntegrationConnectionRow as ConnectionRow,
+  IntegrationPinRow as PinRow,
+} from "@appstrate/db/schema";
 import type {
   AccessibleIntegrationConnection,
   ConsumingAgentSummary,
@@ -55,9 +58,6 @@ import {
 export type PinSummary = IntegrationPin;
 export type SharedConnectionSummary = AccessibleIntegrationConnection;
 export type { ConsumingAgentSummary };
-
-type PinRow = InferSelectModel<typeof integrationPins>;
-type ConnectionRow = InferSelectModel<typeof integrationConnections>;
 
 // ─────────────────────────── block_user_connections toggle ────────────────────
 
