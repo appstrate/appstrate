@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { modelCostSchema, tokenUsageSchema } from "@appstrate/shared-types";
+import { modelCostSchema } from "@appstrate/core/module";
+import { tokenUsageSchema } from "@appstrate/core/token-usage";
 import type { TokenUsage } from "@appstrate/shared-types";
 import type { ResourceEntry as ToolMeta } from "@appstrate/shared-types";
 import type { JSONSchemaObject } from "@appstrate/core/form";

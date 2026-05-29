@@ -125,6 +125,4 @@ but the credentials are unrecoverable until the key is restored.
 
 ## Dependencies
 
-- `@appstrate/db` — Database access for credential storage
 - `@appstrate/env` — `CONNECTION_ENCRYPTION_KEY` (+ optional rotation envs) for credential encryption
-- `@appstrate/shared-types` — Integration and connection type definitions

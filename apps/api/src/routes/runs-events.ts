@@ -25,7 +25,7 @@ import { invalidRequest } from "../lib/errors.ts";
 import { rateLimitByRunId } from "../middleware/rate-limit.ts";
 import { verifyRunSignature } from "../middleware/verify-run-signature.ts";
 import { ingestRunEvent, finalizeRun } from "../services/run-event-ingestion.ts";
-import { tokenUsageSchema } from "@appstrate/shared-types";
+import { tokenUsageSchema } from "@appstrate/core/token-usage";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
 import { getEnv } from "@appstrate/env";
 import type { AppEnv } from "../types/index.ts";

@@ -36,6 +36,8 @@
  * platform ships the **policy**.
  */
 
+import { z } from "zod";
+
 // ---------------------------------------------------------------------------
 // Core resource catalog (static — owned by the platform)
 //
@@ -182,6 +184,12 @@ export const ORG_ROLES = ["owner", "admin", "member", "viewer"] as const;
 
 /** Org role string union — `"owner" | "admin" | "member" | "viewer"`. */
 export type OrgRole = (typeof ORG_ROLES)[number];
+
+/** Zod validator for the per-org `settings` JSONB shape. */
+export const orgSettingsSchema = z.object({
+  apiVersion: z.string().optional(),
+  dashboardSsoEnabled: z.boolean().optional(),
+});
 
 // ---------------------------------------------------------------------------
 // Module permission aggregator — runtime registry shared by apps/api and

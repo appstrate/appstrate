@@ -10,6 +10,7 @@
  * Hono routers. It is declared as an optional peer dependency.
  */
 
+import { z } from "zod";
 import type { Hono } from "hono";
 import type { ValidationFieldError } from "./api-errors.ts";
 import type { Logger } from "./logger.ts";
@@ -532,6 +533,17 @@ export interface ModelCost {
   /** USD per 1M cache-write tokens (Anthropic-style prompt caching). */
   cacheWrite?: number;
 }
+
+/**
+ * Zod validator for {@link ModelCost}. `cacheRead` / `cacheWrite` are optional —
+ * providers without prompt caching simply omit them.
+ */
+export const modelCostSchema = z.object({
+  input: z.number().nonnegative(),
+  output: z.number().nonnegative(),
+  cacheRead: z.number().nonnegative().optional(),
+  cacheWrite: z.number().nonnegative().optional(),
+});
 
 /** OAuth2 endpoints + client config for OAuth-authenticated providers. */
 export interface ModelProviderOAuthConfig {

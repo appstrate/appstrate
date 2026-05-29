@@ -76,7 +76,6 @@
     "./sidecar-types": "./src/sidecar-types.ts",
     "./pairing-token": "./src/pairing-token.ts",
     "./jwt": "./src/jwt.ts",
-    "./back-compat": "./src/back-compat.ts",
     "./credential-template": "./src/credential-template.ts"
   },
   "dependencies": {

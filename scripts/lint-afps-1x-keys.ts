@@ -84,7 +84,7 @@ const BANNED_KEYS = [
 ];
 
 // Path-substring exemptions: documented back-compat surfaces.
-const EXEMPT_PATHS = ["packages/core/src/back-compat.ts"];
+const EXEMPT_PATHS: string[] = [];
 
 function isTestFile(filePath: string): boolean {
   return (
