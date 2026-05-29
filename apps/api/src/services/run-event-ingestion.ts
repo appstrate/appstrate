@@ -445,58 +445,70 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
     actorFromIds(actorRow?.userId ?? null, actorRow?.endUserId ?? null),
   );
 
-  if (result.memories?.length) {
-    // Split memories by declared scope and write each non-empty bucket
-    // to the unified store. The store IS the store — exceptions
-    // propagate so finalize fails loudly on persistence faults.
-    const sharedContent: string[] = [];
-    const actorContent: string[] = [];
-    for (const m of result.memories) {
-      if (m.scope === "shared") sharedContent.push(m.content);
-      else actorContent.push(m.content);
+  // Post-CAS best-effort: the run is already terminal in `runs`. Memory and
+  // pinned-slot persistence is agent-authored side-data — a transient store
+  // fault here must NOT strand the status-change broadcast below (the only
+  // signal that updates the UI / fires webhooks) nor 500 the runner for a run
+  // that is already committed terminal. Log + swallow, like the run-log writes
+  // further down. (Persistence faults are surfaced via the error log for ops.)
+  try {
+    if (result.memories?.length) {
+      // Split memories by declared scope and write each non-empty bucket.
+      const sharedContent: string[] = [];
+      const actorContent: string[] = [];
+      for (const m of result.memories) {
+        if (m.scope === "shared") sharedContent.push(m.content);
+        else actorContent.push(m.content);
+      }
+
+      if (actorContent.length > 0) {
+        await addUnifiedMemories(
+          run.packageId,
+          run.applicationId,
+          run.orgId,
+          persistenceScope,
+          actorContent,
+          run.id,
+        );
+      }
+      if (sharedContent.length > 0) {
+        await addUnifiedMemories(
+          run.packageId,
+          run.applicationId,
+          run.orgId,
+          { type: "shared" },
+          sharedContent,
+          run.id,
+        );
+      }
     }
 
-    if (actorContent.length > 0) {
-      await addUnifiedMemories(
-        run.packageId,
-        run.applicationId,
-        run.orgId,
-        persistenceScope,
-        actorContent,
-        run.id,
-      );
+    // Unified-persistence pinned-slot write — the single store for every
+    // named pinned slot the agent wrote via `pin({ key, content })`,
+    // including the carry-over `"checkpoint"` slot. Honors the AFPS
+    // scope when the runtime stamped one onto each slot; falls back to
+    // the run's actor scope.
+    if (result.pinned) {
+      for (const [key, slot] of Object.entries(result.pinned)) {
+        const slotScope = slot.scope === "shared" ? { type: "shared" as const } : persistenceScope;
+        await upsertPinned(
+          run.packageId,
+          run.applicationId,
+          run.orgId,
+          slotScope,
+          key,
+          slot.content,
+          run.id,
+        );
+      }
     }
-    if (sharedContent.length > 0) {
-      await addUnifiedMemories(
-        run.packageId,
-        run.applicationId,
-        run.orgId,
-        { type: "shared" },
-        sharedContent,
-        run.id,
-      );
-    }
+  } catch (err) {
+    logger.error("finalize: memory/pinned persistence failed (run already terminal)", {
+      runId: run.id,
+      err: getErrorMessage(err),
+    });
   }
 
-  // Unified-persistence pinned-slot write — the single store for every
-  // named pinned slot the agent wrote via `pin({ key, content })`,
-  // including the carry-over `"checkpoint"` slot. Honors the AFPS
-  // scope when the runtime stamped one onto each slot; falls back to
-  // the run's actor scope.
-  if (result.pinned) {
-    for (const [key, slot] of Object.entries(result.pinned)) {
-      const slotScope = slot.scope === "shared" ? { type: "shared" as const } : persistenceScope;
-      await upsertPinned(
-        run.packageId,
-        run.applicationId,
-        run.orgId,
-        slotScope,
-        key,
-        slot.content,
-        run.id,
-      );
-    }
-  }
   // Post-CAS best-effort: the run is already terminal in `runs`. A
   // transient log INSERT failure here is logged and swallowed — the UI
   // shows the run as complete from the row-level state regardless.

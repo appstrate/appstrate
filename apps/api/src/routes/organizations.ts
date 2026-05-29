@@ -495,9 +495,16 @@ router.put("/:orgId/members/:userId", async (c) => {
   return c.json({ userId: targetUserId, role: data.role });
 });
 
-// GET /api/orgs/:orgId/settings — get org settings
+// GET /api/orgs/:orgId/settings — get org settings (any member)
 router.get("/:orgId/settings", async (c) => {
+  const user = c.get("user");
   const orgId = c.req.param("orgId");
+
+  // Membership gate — without it any cookie-session user could read an
+  // arbitrary org's settings by passing its id (apiKeyOrgScopeGuard only
+  // pins API keys, not sessions). Mirrors the PUT handler below.
+  const member = await getOrgMember(orgId, user.id);
+  if (!member) throw forbidden("Not a member of this organization");
 
   const settings = await getOrgSettings(orgId);
   return c.json(settings);
