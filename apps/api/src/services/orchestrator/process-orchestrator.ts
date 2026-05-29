@@ -29,6 +29,7 @@ import type {
   WorkloadHandle,
   WorkloadSpec,
   IsolationBoundary,
+  InjectableFile,
   SidecarLaunchSpec,
   CleanupReport,
   StopResult,
@@ -355,6 +356,23 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     return { id, runId, role: "sidecar" };
   }
 
+  async seedWorkspace(boundary: IsolationBoundary, files: InjectableFile[]): Promise<void> {
+    if (files.length === 0) return;
+    if (boundary.workspace.kind !== "directory") {
+      throw new Error(
+        `process orchestrator expected a directory workspace, got '${boundary.workspace.kind}'`,
+      );
+    }
+    // The agent's CWD is the boundary workspace directory; write the files
+    // straight into it (no volume mount, no shadowing — the host filesystem
+    // is the surface). Mirrors the Docker orchestrator's volume populate.
+    for (const file of files) {
+      const filePath = join(boundary.workspace.path, file.name);
+      await mkdir(join(filePath, ".."), { recursive: true });
+      await Bun.write(filePath, file.content);
+    }
+  }
+
   async createWorkload(spec: WorkloadSpec, boundary: IsolationBoundary): Promise<WorkloadHandle> {
     // The agent's workspace is the per-run shared directory created by
     // createIsolationBoundary so spawned mcp-server runner subprocesses
@@ -366,14 +384,6 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
         ? boundary.workspace.path
         : join(boundary.id, "workspace");
     await mkdir(workDir, { recursive: true });
-
-    if (spec.files) {
-      for (const file of spec.files.items) {
-        const filePath = join(workDir, file.name);
-        await mkdir(join(filePath, ".."), { recursive: true });
-        await Bun.write(filePath, file.content);
-      }
-    }
 
     const id = `workload-${spec.runId}-${spec.role}`;
     const sidecarPort = this.sidecarPorts.get(spec.runId);

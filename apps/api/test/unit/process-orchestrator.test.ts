@@ -82,24 +82,14 @@ describe("ProcessOrchestrator", () => {
     });
   });
 
-  describe("createWorkload", () => {
-    it("agent role uses the boundary's shared workspace path as workdir", async () => {
+  describe("seedWorkspace", () => {
+    it("writes files into the boundary's shared workspace path, not boundary.id/workspace", async () => {
       orchestrator = new ProcessOrchestrator();
       await orchestrator.initialize();
       const boundary = await orchestrator.createIsolationBoundary("test-run-shared");
       if (boundary.workspace.kind !== "directory") throw new Error("expected directory workspace");
 
-      await orchestrator.createWorkload(
-        {
-          runId: "test-run-shared",
-          role: "agent",
-          image: "unused",
-          env: {},
-          resources: { memoryBytes: 0, nanoCpus: 0 },
-          files: { items: [{ name: "x.txt", content: Buffer.from("y") }], targetDir: "/" },
-        },
-        boundary,
-      );
+      await orchestrator.seedWorkspace(boundary, [{ name: "x.txt", content: Buffer.from("y") }]);
 
       // The file should land under the shared workspace, NOT under
       // boundary.id/workspace — that's the contract the sidecar relies
@@ -110,43 +100,22 @@ describe("ProcessOrchestrator", () => {
       await orchestrator.removeIsolationBoundary(boundary);
     });
 
-    it("writes injected files to workspace", async () => {
+    it("materialises the AFPS bundle + nested document paths into the workspace", async () => {
       orchestrator = new ProcessOrchestrator();
       await orchestrator.initialize();
 
       const boundary = await orchestrator.createIsolationBoundary("test-run-3");
-
-      const handle = await orchestrator.createWorkload(
-        {
-          runId: "test-run-3",
-          role: "agent",
-          image: "unused-in-process-mode",
-          env: { TEST_VAR: "hello" },
-          resources: { memoryBytes: 0, nanoCpus: 0 },
-          files: {
-            items: [
-              { name: "agent-package.afps", content: Buffer.from("fake-zip") },
-              { name: "documents/readme.md", content: Buffer.from("# Test") },
-            ],
-            targetDir: "/workspace",
-          },
-        },
-        boundary,
-      );
-
-      expect(handle.runId).toBe("test-run-3");
-      expect(handle.role).toBe("agent");
-
-      // Verify files were written into the shared workspace (agent
-      // role uses boundary.workspace.path; see "agent role uses the
-      // boundary's shared workspace path" above).
       if (boundary.workspace.kind !== "directory") throw new Error("expected directory workspace");
+
+      await orchestrator.seedWorkspace(boundary, [
+        { name: "agent-package.afps", content: Buffer.from("fake-zip") },
+        { name: "documents/readme.md", content: Buffer.from("# Test") },
+      ]);
+
       const workDir = boundary.workspace.path;
       expect(existsSync(`${workDir}/agent-package.afps`)).toBe(true);
       expect(existsSync(`${workDir}/documents/readme.md`)).toBe(true);
 
-      // Cleanup: kill the spawned process
-      await orchestrator.removeWorkload(handle);
       await orchestrator.removeIsolationBoundary(boundary);
     });
   });

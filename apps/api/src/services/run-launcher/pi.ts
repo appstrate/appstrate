@@ -244,9 +244,18 @@ export async function runPlatformContainer(
       skipSidecar ? [getEnv().PI_IMAGE] : [getEnv().PI_IMAGE, getEnv().SIDECAR_IMAGE],
     );
 
-    // Sidecar + agent setup in parallel (identical to the legacy path —
-    // the only behavioural change is WHERE the agent's events end up).
-    // When `skipSidecar`, we only create the agent workload.
+    // Sidecar + agent + workspace seeding in parallel. Seeding materialises
+    // the AFPS bundle + input documents into the run's workspace surface; it
+    // is its own lifecycle step (not a field on the agent's WorkloadSpec)
+    // because delivery targets the workspace, not a container — injecting into
+    // the created-but-unstarted agent container writes to a layer the
+    // `/workspace` volume mount then shadows at start, silently dropping the
+    // bundle (skills never materialise) and input docs. It must only complete
+    // before `startWorkload` (inside waitForWorkload), never before
+    // createWorkload, so it races alongside the create calls here. Seeding the
+    // surface is also what a hot-plug-less backend needs (Firecracker: no
+    // virtio-fs, drives attached pre-boot) — it implements `seedWorkspace` and
+    // nothing in this flow moves. When `skipSidecar`, we only create the agent.
     const [sidecar, agent] = await Promise.all([
       skipSidecar ? Promise.resolve(undefined) : orch.createSidecar(runId, boundary, sidecarSpec),
       orch.createWorkload(
@@ -256,10 +265,6 @@ export async function runPlatformContainer(
           image: getEnv().PI_IMAGE,
           env: containerEnv,
           resources: { memoryBytes: 1536 * 1024 * 1024, nanoCpus: 2_000_000_000 },
-          files:
-            filesToInject.length > 0
-              ? { items: filesToInject, targetDir: "/workspace" }
-              : undefined,
           // Without a sidecar there is no egress proxy — the agent must
           // reach the upstream LLM and the platform sink directly, so it
           // goes on the egress network instead of the internal boundary.
@@ -267,6 +272,7 @@ export async function runPlatformContainer(
         },
         boundary,
       ),
+      filesToInject.length > 0 ? orch.seedWorkspace(boundary, filesToInject) : Promise.resolve(),
     ]);
     sidecarHandle = sidecar;
     agentHandle = agent;
