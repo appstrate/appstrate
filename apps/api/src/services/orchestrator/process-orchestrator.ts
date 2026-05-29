@@ -356,11 +356,7 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     return { id, runId, role: "sidecar" };
   }
 
-  async seedWorkspace(
-    boundary: IsolationBoundary,
-    files: InjectableFile[],
-    targetSubdir?: string,
-  ): Promise<void> {
+  async seedWorkspace(boundary: IsolationBoundary, files: InjectableFile[]): Promise<void> {
     if (files.length === 0) return;
     if (boundary.workspace.kind !== "directory") {
       throw new Error(
@@ -370,11 +366,8 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     // The agent's CWD is the boundary workspace directory; write the files
     // straight into it (no volume mount, no shadowing — the host filesystem
     // is the surface). Mirrors the Docker orchestrator's volume populate.
-    const root = targetSubdir
-      ? join(boundary.workspace.path, targetSubdir)
-      : boundary.workspace.path;
     for (const file of files) {
-      const filePath = join(root, file.name);
+      const filePath = join(boundary.workspace.path, file.name);
       await mkdir(join(filePath, ".."), { recursive: true });
       await Bun.write(filePath, file.content);
     }

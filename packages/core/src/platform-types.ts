@@ -283,14 +283,11 @@ export interface ContainerOrchestrator {
    * Decoupled from {@link createWorkload} on purpose: hot-plug-less backends
    * (Firecracker has no virtio-fs and no block hot-plug) have no running
    * container to inject into, so file delivery must target the workspace
-   * surface itself, not a workload. `targetSubdir` is resolved relative to
-   * the workspace root (`/workspace` on container backends).
+   * surface itself, not a workload. File paths are resolved relative to the
+   * workspace root (`/workspace` on container backends); sub-paths travel in
+   * the file names themselves (e.g. `documents/foo.pdf`).
    */
-  seedWorkspace(
-    boundary: IsolationBoundary,
-    files: InjectableFile[],
-    targetSubdir?: string,
-  ): Promise<void>;
+  seedWorkspace(boundary: IsolationBoundary, files: InjectableFile[]): Promise<void>;
 
   /**
    * Create + start a sidecar container for the given run. The orchestrator

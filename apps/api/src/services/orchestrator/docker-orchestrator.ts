@@ -452,20 +452,15 @@ export class DockerOrchestrator implements ContainerOrchestrator {
    * is the portable fix. The process orchestrator overrides this with a
    * plain host-directory write.
    */
-  async seedWorkspace(
-    boundary: IsolationBoundary,
-    files: InjectableFile[],
-    targetSubdir?: string,
-  ): Promise<void> {
+  async seedWorkspace(boundary: IsolationBoundary, files: InjectableFile[]): Promise<void> {
     if (files.length === 0) return;
     if (boundary.workspace.kind !== "volume") {
       throw new Error(
         `docker orchestrator expected a volume workspace, got '${boundary.workspace.kind}'`,
       );
     }
-    const targetDir = targetSubdir ? `/workspace/${targetSubdir}` : "/workspace";
     const runId = boundary.workspace.name.replace(docker.WORKSPACE_VOLUME_PREFIX, "");
-    await docker.populateVolume(boundary.workspace.name, files, targetDir, runId);
+    await docker.populateVolume(boundary.workspace.name, files, "/workspace", runId);
   }
 
   async startWorkload(handle: WorkloadHandle): Promise<void> {

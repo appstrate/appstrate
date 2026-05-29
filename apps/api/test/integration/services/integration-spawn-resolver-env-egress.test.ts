@@ -5,11 +5,14 @@
  *
  * A `delivery.env` local-source integration (the server holds its own
  * credentials and authenticates itself — e.g. a form/session login) sits on
- * the per-run network with no direct egress in docker mode. The resolver must
- * emit a forward-only `httpDeliveryAuths` entry (empty injection plan, carrying
- * `authorizedUris`) so the sidecar mounts a MITM listener as a zero-trust
- * egress gate — enforcing `authorized_uris` while injecting NOTHING (the env
- * credentials are delivered separately via `spawnEnv`).
+ * the per-run network with no direct egress in docker mode. Its only route out
+ * is the per-integration MITM listener, which a `delivery.env` auth wouldn't
+ * otherwise mount (it resolves no injection plan). The resolver must emit a
+ * forward-only `httpDeliveryAuths` entry (empty injection plan, carrying
+ * `authorizedUris`) purely to mount that listener — the runner's egress route.
+ * It injects NOTHING (the env credentials are delivered separately via
+ * `spawnEnv`); the MITM's SSRF floor is the hard egress boundary, not
+ * `authorized_uris` (which only scopes credential injection in the delivery path).
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";

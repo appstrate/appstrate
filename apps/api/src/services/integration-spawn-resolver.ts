@@ -803,26 +803,33 @@ async function resolveDeliveries(
     }
   }
 
-  // ─── egress gate for env-delivery local runners (no header injection) ───
+  // ─── egress route for env-delivery local runners (no header injection) ───
   // A local-source runner sits on the per-run network (`internal: true` in
-  // docker mode) with NO direct egress. `delivery.http` integrations reach
-  // their upstream for free via the MITM listener their plan mounts; a
-  // `delivery.env` integration (the server holds its own credentials and
-  // authenticates itself, e.g. a form/session login) otherwise has no path to
-  // its declared `authorized_uris`. Mount a forward-only MITM listener — an
-  // `httpDeliveryAuths` entry with an empty injection plan — so the runner can
-  // reach its authorized hosts. The listener still enforces `authorized_uris`
-  // (zero-trust egress) and injects NOTHING (empty headerName → the planner
-  // skips injection; the live credentials endpoint already surfaces the auth's
-  // `authorizedUris` for any delivery shape). Mirrors the run-start connect.tool
+  // docker mode) with NO direct egress; its only route out is the
+  // per-integration MITM listener. A `delivery.http` integration gets that
+  // listener for free (its injection plan mounts one). A `delivery.env`
+  // integration (the server holds its own credentials and authenticates
+  // itself, e.g. a form/session login) resolves no injection plan, so without
+  // this it gets no listener — and no way out. Emit a forward-only
+  // `httpDeliveryAuths` entry (empty injection plan) purely to mount the
+  // listener, giving the runner its egress route. It injects NOTHING (empty
+  // headerName → the planner skips injection); the env credentials are
+  // delivered separately via `spawnEnv`. Mirrors the run-start connect.tool
   // placeholder above.
   //
-  // Scope is deliberately narrow: `delivery.env` only, and NEVER `mtls`. The
-  // MITM terminates upstream TLS, so routing an mtls client-cert handshake
-  // through it would break it (same reason `mtls + delivery.http` is rejected
-  // at install) — `delivery.files`/mtls runners must reach upstream directly.
-  // Skipped when an http plan already mounted the listener, when nothing
-  // resolved, or when the integration declares no outbound surface.
+  // Note on scope: the MITM is NOT an `authorized_uris` allowlist — it forwards
+  // to any external host and only hard-blocks internal/cloud-metadata targets
+  // (SSRF floor, enforced at CONNECT in integration-mitm-listener.ts). In the
+  // delivery path `authorized_uris` scopes which auth's credential gets
+  // injected, not which hosts are reachable; we carry it through verbatim
+  // (harmless when empty or `allow_all_uris`, since this entry injects nothing).
+  //
+  // Restricted to `delivery.env`, and NEVER `mtls`: the MITM terminates upstream
+  // TLS, so routing an mtls client-cert handshake through it would break it
+  // (same reason `mtls + delivery.http` is rejected at install) —
+  // `delivery.files`/mtls runners must reach upstream directly. Skipped when an
+  // http plan already mounted the listener, when nothing resolved, or when the
+  // integration declares no outbound surface.
   const isLocalSource = getIntegrationSourceKind(manifest) === "local";
   const usesEnvDelivery = !!auth.delivery?.env && Object.keys(auth.delivery.env).length > 0;
   const declaresEgress = (auth.authorized_uris?.length ?? 0) > 0 || auth.allow_all_uris === true;
