@@ -50,7 +50,7 @@ import {
 } from "../services/package-versions.ts";
 import { agentDetailHandler } from "./agent-detail-handler.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
-import { requireOwnedPackage, requireOrgPackage, checkScopeMatch } from "../middleware/guards.ts";
+import { requirePackageInOrg } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getRunningRunsForPackage } from "../services/state/runs.ts";
 import { logger } from "../lib/logger.ts";
@@ -470,9 +470,6 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       }
 
       const packageId = validatedManifest.name;
-
-      const scopeErr = checkScopeMatch(c, packageId);
-      if (scopeErr) throw scopeErr;
 
       // Check for name collision
       const existingIds = await getAllPackageIds(orgId);
@@ -1150,19 +1147,19 @@ export function createPackagesRouter() {
     router.get(`/${path}/:scope{@[^/]+}/:name/versions/info`, makeVersionInfoHandler(rcfg));
     router.post(
       `/${path}/:scope{@[^/]+}/:name/versions`,
-      requireOwnedPackage(),
+      requirePackageInOrg(),
       writeGuard,
       makeCreateVersionHandler(rcfg),
     );
     router.post(
       `/${path}/:scope{@[^/]+}/:name/versions/:version/restore`,
-      requireOwnedPackage(),
+      requirePackageInOrg(),
       writeGuard,
       makeRestoreVersionHandler(rcfg),
     );
     router.delete(
       `/${path}/:scope{@[^/]+}/:name/versions/:version`,
-      requireOwnedPackage(),
+      requirePackageInOrg(),
       deleteGuard,
       makeDeleteVersionHandler(rcfg),
     );
@@ -1171,20 +1168,20 @@ export function createPackagesRouter() {
     router.get(`/${path}/:scope{@[^/]+}/:name`, rcfg.getHandler ?? makeGetHandler(rcfg));
     router.put(
       `/${path}/:scope{@[^/]+}/:name`,
-      requireOwnedPackage(),
+      requirePackageInOrg(),
       writeGuard,
       makeUpdateHandler(rcfg),
     );
     router.delete(
       `/${path}/:scope{@[^/]+}/:name`,
-      requireOrgPackage(),
+      requirePackageInOrg(),
       deleteGuard,
       makeDeleteHandler(rcfg),
     );
     // Unscoped IDs
     router.get(`/${path}/:id`, rcfg.getHandler ?? makeGetHandler(rcfg));
-    router.put(`/${path}/:id`, requireOwnedPackage(), writeGuard, makeUpdateHandler(rcfg));
-    router.delete(`/${path}/:id`, requireOrgPackage(), deleteGuard, makeDeleteHandler(rcfg));
+    router.put(`/${path}/:id`, requirePackageInOrg(), writeGuard, makeUpdateHandler(rcfg));
+    router.delete(`/${path}/:id`, requirePackageInOrg(), deleteGuard, makeDeleteHandler(rcfg));
   }
 
   // --- Fork route ---

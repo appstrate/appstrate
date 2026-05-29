@@ -47,7 +47,6 @@ import { ForkPackageModal } from "../components/fork-package-modal";
 import { ConfirmModal } from "../components/confirm-modal";
 import { usePermissions } from "../hooks/use-permissions";
 import { usePackageDetail, useDeletePackage, usePackageDownload } from "../hooks/use-packages";
-import { usePackageOwnership } from "../hooks/use-org";
 import {
   useIntegrationDetail,
   useActivateIntegration,
@@ -1127,7 +1126,6 @@ export function IntegrationDetailPage() {
   const { data: detail, isLoading, error } = useIntegrationDetail(packageId || undefined);
   const { data: pkg } = usePackageDetail("integration", packageId || undefined);
   const { data: integrations } = useIntegrations();
-  const { isOwned } = usePackageOwnership(packageId || undefined);
   const activate = useActivateIntegration();
   const deactivate = useDeactivateIntegration();
   const deletePkg = useDeletePackage("integration");
@@ -1148,7 +1146,8 @@ export function IntegrationDetailPage() {
   const source = pkg?.source ?? summary?.source ?? "local";
   const version = pkg?.version ?? m.version;
   const isBuiltIn = source === "system";
-  const isImported = !isBuiltIn && !isOwned;
+  // Org-owned packages are editable regardless of scope name; only system packages are read-only.
+  const isOwned = !isBuiltIn;
   const onActivate = () => activate.mutate(packageId);
 
   return (
@@ -1191,7 +1190,6 @@ export function IntegrationDetailPage() {
               type="integration"
               manifest={m as unknown as Record<string, unknown>}
               isOwned={isOwned}
-              isImported={isImported}
               isBuiltIn={isBuiltIn}
               isHistoricalVersion={false}
               downloadVersion={version}
