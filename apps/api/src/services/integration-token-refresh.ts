@@ -124,10 +124,7 @@ async function doRefresh(
   ctx: IntegrationRefreshContext,
 ): Promise<IntegrationRefreshResult> {
   const current = decryptCredentialsToStringMap(credentialsEncrypted);
-  // The OAuth callback stores tokens under snake_case (refresh_token) AND
-  // camelCase (refreshToken) depending on how the storage path was reached.
-  // Read both.
-  const refreshToken = current.refresh_token ?? current.refreshToken;
+  const refreshToken = current.refresh_token;
   if (!refreshToken) {
     // We only reach `doRefresh` when a refresh was actually warranted — the
     // caller is either inside the proactive lead window (token expiring) or
@@ -154,7 +151,7 @@ async function doRefresh(
   try {
     ({ parsed, raw: tokenData } = await performRefreshTokenExchange(ctx, refreshToken, {
       label: `Integration token refresh for '${packageId}' auth '${authKey}'`,
-      accessTokenFallback: current.access_token ?? current.accessToken,
+      accessTokenFallback: current.access_token,
     }));
   } catch (err) {
     // Flip needsReconnection on a revoked refresh token so the dashboard
@@ -167,17 +164,13 @@ async function doRefresh(
     throw err;
   }
 
-  // Persist both snake_case AND camelCase aliases so downstream code paths
-  // that read either spelling (e.g. delivery.env `from: "accessToken"`) keep
-  // working without surprise. `parseTokenResponse` may return `undefined`
-  // for refreshToken on flows that don't rotate it — preserve whatever the
-  // current ciphertext held in that case so the next refresh still works.
+  // `parseTokenResponse` may return `undefined` for refreshToken on flows
+  // that don't rotate it — preserve whatever the current ciphertext held in
+  // that case so the next refresh still works.
   const finalRefreshToken = parsed.refreshToken ?? refreshToken;
   const newCreds: Record<string, string> = {
     access_token: parsed.accessToken,
-    accessToken: parsed.accessToken,
     refresh_token: finalRefreshToken,
-    refreshToken: finalRefreshToken,
   };
   const expiresAt = parsed.expiresAt ? new Date(parsed.expiresAt) : null;
 
