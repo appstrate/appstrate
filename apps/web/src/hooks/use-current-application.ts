@@ -21,7 +21,7 @@ export function useCurrentApplicationId(): string | null {
 const CORE_APP_SCOPED_KEYS = [
   "packages",
   "agents",
-  "agent-memories",
+  "agent-persistence",
   "agent-model",
   "agent-proxy",
   "runs",

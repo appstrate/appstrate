@@ -5,6 +5,7 @@ import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
 import { invalidateRunAndNotificationQueries } from "./use-notifications";
+import { parseSSEFrames } from "../lib/sse-parser";
 import { type EnrichedRun, type RunStatus, TERMINAL_RUN_STATUSES } from "@appstrate/shared-types";
 
 /**
@@ -113,17 +114,10 @@ export function useGlobalRunSync() {
           const { done, value } = await reader.read();
           if (done) break;
 
-          buf += decoder.decode(value, { stream: true });
-          const parts = buf.split("\n\n");
-          buf = parts.pop()!;
+          const { frames, buffer } = parseSSEFrames(decoder.decode(value, { stream: true }), buf);
+          buf = buffer;
 
-          for (const part of parts) {
-            let event = "";
-            let data = "";
-            for (const line of part.split("\n")) {
-              if (line.startsWith("event:")) event = line.slice(6).trim();
-              else if (line.startsWith("data:")) data = line.slice(5).trim();
-            }
+          for (const { event, data } of frames) {
             if (event === "run_update" && data) {
               handleSSEMessage(qcRef.current, orgId, applicationId, data);
             } else if (event === "connection_update" && data) {
