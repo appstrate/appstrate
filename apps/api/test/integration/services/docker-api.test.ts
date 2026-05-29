@@ -503,7 +503,11 @@ describeRequiresDocker("populateVolume", () => {
       runId,
     );
 
-    // A FRESH container mounting the volume must see both files.
+    // A FRESH container mounting the volume must see both files — and read
+    // them as the agent's NON-root user (the runtime-pi image runs as uid 1001
+    // `pi`). The seeded files are written by the tar archive as a different uid;
+    // reading as 1001 proves the mode bits (0644 / 0755 dirs) actually let the
+    // agent read its own bundle. Reading as root would mask a permission gap.
     const readerId = trackContainer(
       await createContainer(
         runId,
@@ -511,6 +515,7 @@ describeRequiresDocker("populateVolume", () => {
         {
           image: "busybox:1.37",
           adapterName: "test-reader",
+          user: "1001",
           cmd: [
             "sh",
             "-c",
