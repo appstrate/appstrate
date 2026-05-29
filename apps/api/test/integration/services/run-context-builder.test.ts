@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Integration tests for env-builder service.
+ * Integration tests for run-context-builder service.
  *
  * Tests ModelNotConfiguredError and signRunToken using the real
  * module graph (no mock.module needed — preload sets up DB/Redis/env).
  */
 
 import { describe, expect, it } from "bun:test";
-import { ModelNotConfiguredError } from "../../../src/services/env-builder.ts";
+import { ModelNotConfiguredError } from "../../../src/services/run-context-builder.ts";
 import { signRunToken, parseSignedToken } from "../../../src/lib/run-token.ts";
 
 // ─── ModelNotConfiguredError ────────────────────────────────

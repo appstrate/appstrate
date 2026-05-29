@@ -6,19 +6,17 @@
  * Two distinct concerns share this module:
  *
  *   1. {@link insertCredentialProxyUsage} — append one audit row to
- *      `credential_proxy_usage` per upstream integration call. Today every
- *      row carries `cost_usd = 0` because no integration is metered; the
- *      table is an audit / observability ledger (integration, target host,
- *      HTTP status, duration), not a billing ledger.
+ *      `credential_proxy_usage` per upstream integration call. The table is
+ *      an audit / observability ledger (integration, target host, HTTP
+ *      status, duration), not a billing ledger — it carries no cost column.
  *
  *   2. {@link computeRunCost} — single read path for the canonical
  *      `runs.cost` value. Reads only `llm_usage` (proxy + runner rows).
- *      `credential_proxy_usage.cost_usd` is intentionally NOT summed:
- *      it is always 0, and including a constant-zero SUM in the run
- *      finalize hot path is dead work. When the first metered integration
- *      ships, route its rows through `llm_usage` with a new `source`
- *      enum value (e.g. `credential_proxy`) — that keeps the single
- *      ledger invariant and avoids resurrecting a redundant SUM here.
+ *      `credential_proxy_usage` is intentionally NOT summed: it holds no
+ *      cost. When the first metered integration ships, route its rows
+ *      through `llm_usage` with a new `source` enum value (e.g.
+ *      `credential_proxy`) — that keeps the single ledger invariant and
+ *      avoids adding a redundant SUM here.
  */
 
 import { eq, sql } from "drizzle-orm";
@@ -39,7 +37,6 @@ export interface InsertCredentialProxyUsageInput {
   targetHost: string | null;
   httpStatus: number | null;
   durationMs: number | null;
-  costUsd: number;
   requestId: string;
 }
 
@@ -64,7 +61,6 @@ export async function insertCredentialProxyUsage(
         targetHost: input.targetHost,
         httpStatus: input.httpStatus,
         durationMs: input.durationMs,
-        costUsd: input.costUsd,
         requestId: input.requestId,
       })
       .onConflictDoNothing({ target: credentialProxyUsage.requestId });

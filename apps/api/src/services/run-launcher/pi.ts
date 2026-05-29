@@ -158,7 +158,7 @@ export async function runPlatformContainer(
       ...(llmConfig.maxTokens != null ? { modelMaxTokens: llmConfig.maxTokens } : {}),
       // Phase 1.4 — integrations the sidecar will spawn + multiplex onto
       // the agent-facing `/mcp` surface. Resolved upstream by
-      // `resolveIntegrationSpawns` (env-builder).
+      // `resolveIntegrationSpawns` (run-context-builder).
       ...(plan.integrations && plan.integrations.length > 0
         ? { integrations: plan.integrations }
         : {}),

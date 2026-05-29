@@ -6,7 +6,7 @@
  */
 
 import { logger } from "../lib/logger.ts";
-import { buildRunContext, ModelNotConfiguredError } from "./env-builder.ts";
+import { buildRunContext, ModelNotConfiguredError } from "./run-context-builder.ts";
 import { createRun } from "./state/runs.ts";
 import { getPackageConfig } from "./application-packages.ts";
 import { executeAgentInBackground } from "../routes/runs.ts";
@@ -208,7 +208,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   // --- Step 2: Connection resolution snapshot (#199) ---
   //
   // Apply the 4-mechanism cascade once at kickoff so:
-  //  - the spawn loader (env-builder) pins the same row admin/run intended,
+  //  - the spawn loader (run-context-builder) pins the same row admin/run intended,
   //  - the credentials resolver (sidecar MITM refresh) honours that pick
   //    long after kickoff via runs.resolved_connections.
   //

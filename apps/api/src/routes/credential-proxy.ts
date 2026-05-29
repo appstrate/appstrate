@@ -79,7 +79,7 @@ const ACCEPTED_AUTH_METHODS: ReadonlySet<string> = new Set([
   "oauth2-dashboard",
 ]);
 
-import { getCookieJarStore } from "../services/credential-proxy/cookie-jar.ts";
+import { getCookieJarStore } from "../infra/index.ts";
 import { getCredentialProxyLimits } from "../services/proxy-limits.ts";
 
 export function createCredentialProxyRouter() {
@@ -303,7 +303,6 @@ export function createCredentialProxyRouter() {
           targetHost: safeTargetHost(target),
           httpStatus: result.status,
           durationMs,
-          costUsd: 0,
           requestId: c.get("requestId"),
         });
 
@@ -353,9 +352,17 @@ export function createCredentialProxyRouter() {
           });
         }
 
+        // Buffer the (already size-capped) body before responding: the
+        // `truncated` flag only flips once the capped stream is consumed, so
+        // we must drain it here to know whether to emit `X-Truncated: true`.
+        // The cap bounds this buffer to `limits.max_response_bytes`.
+        let responseBody: ArrayBuffer | null = null;
+        if (result.body) {
+          responseBody = await new Response(result.body).arrayBuffer();
+        }
         if (result.truncated) responseHeaders.set("X-Truncated", "true");
 
-        return new Response(result.body, {
+        return new Response(responseBody, {
           status: result.status,
           headers: responseHeaders,
         });

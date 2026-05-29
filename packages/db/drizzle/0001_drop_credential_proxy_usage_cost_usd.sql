@@ -1,0 +1,1 @@
+ALTER TABLE "credential_proxy_usage" DROP COLUMN "cost_usd";

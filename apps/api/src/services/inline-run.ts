@@ -99,7 +99,7 @@ export async function insertShadowPackage(params: InsertShadowPackageParams): Pr
  * Build a `LoadedPackage` from an already-inserted shadow row. Inline
  * manifests only embed ID refs, so callers must pass the resolved
  * skills/tools (via `resolveManifestCatalogDeps`) when the returned
- * package will flow into the run pipeline — otherwise `env-builder`
+ * package will flow into the run pipeline — otherwise `run-context-builder`
  * will see empty arrays and skip skill/tool injection into the
  * container. Defaults to empty arrays for callers that only need the
  * shape (e.g. deserialization, tests).

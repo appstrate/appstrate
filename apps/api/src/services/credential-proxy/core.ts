@@ -51,7 +51,7 @@ const OUTBOUND_TIMEOUT_MS = 30_000;
 
 /**
  * Minimal async cookie-jar shape consumed by {@link proxyCall}. The full
- * store implementation lives in `./cookie-jar.ts`; we only depend on the
+ * store implementation lives in `infra/cookie-jar/`; we only depend on the
  * narrow contract here so the core stays free of infra imports.
  */
 export interface CookieJarAdapter {
@@ -383,8 +383,18 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
 
   const cap = input.maxResponseBytes ?? 0;
   if (cap > 0 && res.body) {
-    const { body: capped, truncated } = capResponseBody(res.body, cap);
-    return { status: res.status, headers: res.headers, body: capped, truncated };
+    const capped = capResponseBody(res.body, cap);
+    // `truncated` flips only once the stream is consumed by the caller, so
+    // forward it as a live getter — snapshotting it here (the old
+    // `const { truncated } = …`) always captured the initial `false`.
+    return {
+      status: res.status,
+      headers: res.headers,
+      body: capped.body,
+      get truncated() {
+        return capped.truncated;
+      },
+    };
   }
 
   return {
@@ -400,14 +410,14 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
  * is sliced at the exact boundary — downstream consumers never see more
  * than `maxBytes` cumulative bytes.
  *
- * `truncated` is a flag object so the caller can read it after the stream
- * completes. It flips to `true` the moment the cap fires; it stays `false`
- * if the upstream ends naturally under the cap.
+ * `truncated` is exposed as a getter so the caller reads the up-to-date value
+ * after the stream has been consumed. It flips to `true` the moment the cap
+ * fires; it stays `false` if the upstream ends naturally under the cap.
  */
 function capResponseBody(
   source: ReadableStream<Uint8Array>,
   maxBytes: number,
-): { body: ReadableStream<Uint8Array>; truncated: boolean } {
+): { body: ReadableStream<Uint8Array>; readonly truncated: boolean } {
   const state = { truncated: false };
   let sent = 0;
   const reader = source.getReader();
@@ -438,13 +448,14 @@ function capResponseBody(
     },
   });
   // Expose the flag via a getter so the caller reads the up-to-date value
-  // after the stream has been consumed.
+  // after the stream has been consumed. The explicit return type (no cast)
+  // keeps the getter typed without an `as` lie.
   return {
     body,
     get truncated() {
       return state.truncated;
     },
-  } as { body: ReadableStream<Uint8Array>; truncated: boolean };
+  };
 }
 
 /** @internal Exported for unit testing */

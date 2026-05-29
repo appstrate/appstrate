@@ -33,6 +33,7 @@ import {
 import { gone, notFound } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import { hasRedis } from "../../infra/mode.ts";
+import { getCache } from "../../infra/index.ts";
 import { getRedisConnection } from "../../lib/redis.ts";
 import { randomBytes } from "node:crypto";
 import { OAUTH_REFRESH_LEAD_MS, type OAuthTokenResponse } from "@appstrate/core/sidecar-types";
@@ -207,15 +208,20 @@ async function refreshUnderDistributedLock(
     return doRefresh(credentialId, expectedOrgId);
   }
 
-  const redis = getRedisConnection();
+  // Acquire via the infra cache primitive (RedisCache maps SET…NX 'OK'→true).
+  // We are inside the `hasRedis()` guard, so getCache() resolves to RedisCache.
+  const cache = await getCache();
   const lockKey = `oauth-refresh:${credentialId}`;
   const lockId = randomBytes(16).toString("hex");
   const acquireDeadline = Date.now() + 30_000;
   let acquired = false;
 
   while (Date.now() < acquireDeadline) {
-    const result = await redis.set(lockKey, lockId, "EX", REFRESH_LOCK_TTL_SECONDS, "NX");
-    if (result === "OK") {
+    const ok = await cache.set(lockKey, lockId, {
+      ttlSeconds: REFRESH_LOCK_TTL_SECONDS,
+      nx: true,
+    });
+    if (ok) {
       acquired = true;
       break;
     }
@@ -251,7 +257,9 @@ async function refreshUnderDistributedLock(
     // Best-effort release. If the EVAL fails (Redis hiccup), the TTL
     // ensures the lock auto-expires within REFRESH_LOCK_TTL_SECONDS.
     try {
-      await redis.eval(RELEASE_LOCK_SCRIPT, 1, lockKey, lockId);
+      // Raw connection: the infra cache has no compare-and-delete (Lua eval)
+      // primitive, so the safe lock release goes straight to ioredis.
+      await getRedisConnection().eval(RELEASE_LOCK_SCRIPT, 1, lockKey, lockId);
     } catch (err) {
       logger.warn("oauth model provider: refresh lock release failed", {
         credentialId,
