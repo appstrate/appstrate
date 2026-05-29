@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Link, Navigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../hooks/use-auth";
 import { useAgents } from "../hooks/use-packages";
@@ -34,11 +34,6 @@ export function DashboardPage() {
   if (error) return <ErrorState message={error.message} />;
 
   const runs = runsData?.data ?? [];
-
-  // No runs → redirect to agents page
-  if (runs.length === 0) {
-    return <Navigate to="/agents" replace />;
-  }
 
   // Build agent lookup map
   const agentMap = new Map<
