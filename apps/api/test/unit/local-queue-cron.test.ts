@@ -4,36 +4,47 @@
  * Tests for LocalQueue cron scheduling.
  *
  * Asserts OBSERVABLE behavior: given a scheduler whose next run falls inside
- * the current poll window, does `evaluateCron` actually enqueue + run the job?
- * The evaluator delegates to `computeNextRun` (cron-parser), so the cases here
- * cover the same expression shapes the old hand-rolled parser did — exact
- * minute/hour, day-of-month, month, day-of-week (incl. the `7`→Sunday alias),
- * timezone offsets — PLUS the cases that parser silently dropped: 1-token
- * presets (`@daily`) and named aliases (`MON`).
+ * the poll window `(prevPoll, now]`, does `evaluateCron` actually enqueue + run
+ * the job? The evaluator delegates to `computeNextRun` (cron-parser), so the
+ * cases here cover the same expression shapes the old hand-rolled parser did —
+ * exact minute/hour, day-of-month, month, day-of-week (incl. the `7`→Sunday
+ * alias), timezone offsets — PLUS the cases that parser silently dropped:
+ * 1-token presets (`@daily`) and named aliases (`MON`).
+ *
+ * The window floor is the PREVIOUS poll time (`lastCronPollAt`), which the
+ * worker sets to the start time on `process()` and advances on each poll. In
+ * these unit tests we pin `Date.now` and set `lastCronPollAt` directly to model
+ * the preceding poll, rather than running the real interval timer.
  */
 
 import { describe, it, expect } from "bun:test";
 import { LocalQueue } from "../../src/infra/queue/local-queue.ts";
 import type { QueueJob } from "../../src/infra/queue/interface.ts";
 
+/** Default poll cadence used by the queue (ms) — the standard window width. */
+const POLL_MS = 30_000;
+
 /**
- * Drive one cron evaluation at a fixed wall-clock `now` and report whether the
- * pattern fired. `evaluateCron` reads `Date.now()` and bases its lookup on the
- * preceding poll window, so we pin `Date.now` to `now` for the call.
+ * Drive one cron evaluation at a fixed wall-clock `now` and report how many
+ * times the pattern fired. Models a poll whose window floor is `windowMs`
+ * before `now` (default = the real 30s cadence).
  */
-async function fires(pattern: string, now: Date, tz?: string): Promise<boolean> {
+async function firesCount(
+  pattern: string,
+  now: Date,
+  tz?: string,
+  windowMs: number = POLL_MS,
+): Promise<number> {
   const q = new LocalQueue<{ v: string }>("test-cron") as any;
   const processed: string[] = [];
   q.process(async (job: QueueJob<{ v: string }>) => {
     processed.push(job.data.v);
   });
 
-  // `lastFiredAt` is anchored to the registration time, so register the
-  // scheduler at a clock just before the firing window — otherwise the
-  // anchor (real wall-clock) would sit after the pinned `now` and the
-  // forward-looking lookup would never reach the occurrence.
   const realNow = Date.now;
-  Date.now = () => now.getTime() - 60_000;
+  // Register at the window floor so `lastFiredAt` (anchored to registration)
+  // never sits after the occurrences this poll should see.
+  Date.now = () => now.getTime() - windowMs;
   try {
     await q.upsertScheduler(
       "s",
@@ -44,6 +55,8 @@ async function fires(pattern: string, now: Date, tz?: string): Promise<boolean> 
     Date.now = realNow;
   }
 
+  // Model the previous poll at the window floor, then poll at `now`.
+  q.lastCronPollAt = now.getTime() - windowMs;
   Date.now = () => now.getTime();
   try {
     q.evaluateCron();
@@ -53,19 +66,13 @@ async function fires(pattern: string, now: Date, tz?: string): Promise<boolean> 
 
   await new Promise((r) => setTimeout(r, 200));
   await q.shutdown();
-  return processed.includes("fired");
+  return processed.filter((v) => v === "fired").length;
 }
 
-/**
- * An instant whose preceding 30s poll window [now-30s, now] is guaranteed to
- * contain a minute boundary — so a `* * * * *` schedule deterministically
- * fires when `evaluateCron` runs at this clock. (`Date.now` at an arbitrary
- * wall-clock second can land a window between two minute boundaries, missing a
- * once-a-minute schedule — fine in production where polls repeat, flaky in a
- * single-shot unit test.) 10s past a minute boundary keeps the boundary inside
- * the window.
- */
-const FIRING_NOW = new Date("2026-01-15T10:30:10Z");
+/** Convenience: did the pattern fire at least once in its window? */
+async function fires(pattern: string, now: Date, tz?: string): Promise<boolean> {
+  return (await firesCount(pattern, now, tz)) > 0;
+}
 
 /** Run `fn` with `Date.now` pinned to `at`, restoring it afterward. */
 function withPinnedNow<R>(at: Date, fn: () => R): R {
@@ -89,12 +96,10 @@ async function withPinnedNowAsync<R>(at: Date, fn: () => Promise<R>): Promise<R>
   }
 }
 
-/**
- * Register a scheduler at a clock just before `FIRING_NOW`. `lastFiredAt` is
- * anchored to registration time, so registering at real wall-clock would put
- * the anchor after the pinned `FIRING_NOW` and suppress the fire. One minute
- * before keeps the anchor before the window the tests poll.
- */
+const FIRING_NOW = new Date("2026-01-15T10:30:10Z");
+/** Models the previous poll one window before `FIRING_NOW`. */
+const PREV_POLL = new Date(FIRING_NOW.getTime() - POLL_MS);
+/** Register before the window so the registration anchor doesn't suppress it. */
 const REGISTERED_AT = new Date(FIRING_NOW.getTime() - 60_000);
 
 // ---------------------------------------------------------------------------
@@ -102,8 +107,6 @@ const REGISTERED_AT = new Date(FIRING_NOW.getTime() - 60_000);
 // ---------------------------------------------------------------------------
 
 describe("LocalQueue cron firing", () => {
-  // The poll window is [now-30s, now]. A "30 10 * * *" run at 10:30:00 fires
-  // when the poll lands anywhere in 10:30:00–10:30:30.
   it("fires at exact minute/hour inside the window", async () => {
     expect(await fires("30 10 * * *", new Date("2026-01-15T10:30:10Z"))).toBe(true);
   });
@@ -158,6 +161,16 @@ describe("LocalQueue cron firing", () => {
     expect(await fires("0 0 * * MON", new Date("2026-01-19T00:00:10Z"))).toBe(true);
     expect(await fires("0 0 * * MON", new Date("2026-01-18T00:00:10Z"))).toBe(false);
   });
+
+  // Drift: a poll that arrives late (event-loop pressure, blocked drain) sees a
+  // window wider than the cadence. Every occurrence inside it must fire — not
+  // just the first. Here a 115s-late poll spans two minute boundaries.
+  it("fires every occurrence in a drifted (wider-than-cadence) window", async () => {
+    // prev poll 10:30:10, poll lands at 10:32:05 → window covers 10:31 + 10:32
+    expect(
+      await firesCount("* * * * *", new Date("2026-01-15T10:32:05Z"), undefined, 115_000),
+    ).toBe(2);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -173,11 +186,11 @@ describe("LocalQueue cron scheduler", () => {
       processed.push(job.data.v);
     });
 
-    // Use * * * * * (every minute) — evaluateCron checks the current window
     await withPinnedNowAsync(REGISTERED_AT, () =>
       q.upsertScheduler("s1", { pattern: "* * * * *" }, { name: "cron-job", data: { v: "fired" } }),
     );
 
+    q.lastCronPollAt = PREV_POLL.getTime();
     withPinnedNow(FIRING_NOW, () => q.evaluateCron());
 
     await new Promise((r) => setTimeout(r, 300));
@@ -193,12 +206,11 @@ describe("LocalQueue cron scheduler", () => {
       processed.push(job.data.v);
     });
 
-    // A once-a-minute schedule polled twice in quick succession (both polls
-    // share the same minute boundary) must enqueue the occurrence only once.
     await withPinnedNowAsync(REGISTERED_AT, () =>
       q.upsertScheduler("s-once", { pattern: "* * * * *" }, { name: "cron-job", data: { v: "x" } }),
     );
 
+    q.lastCronPollAt = PREV_POLL.getTime();
     withPinnedNow(FIRING_NOW, () => {
       q.evaluateCron();
       q.evaluateCron();
@@ -222,6 +234,7 @@ describe("LocalQueue cron scheduler", () => {
     );
     await q.removeScheduler("s2");
 
+    q.lastCronPollAt = PREV_POLL.getTime();
     withPinnedNow(FIRING_NOW, () => q.evaluateCron());
     await new Promise((r) => setTimeout(r, 300));
     expect(processed).toEqual([]);
@@ -239,17 +252,19 @@ describe("LocalQueue cron scheduler", () => {
     // Register at 10:30:05 — just AFTER the 10:30:00 occurrence of a
     // once-a-minute schedule. The first poll, 10s later, must NOT replay the
     // 10:30:00 occurrence that fell before the scheduler existed (boot-replay
-    // regression).
+    // regression). Models the worker anchoring lastCronPollAt at start.
     const registeredAt = new Date("2026-01-15T10:30:05Z");
     await withPinnedNowAsync(registeredAt, () =>
       q.upsertScheduler("s-boot", { pattern: "* * * * *" }, { name: "job", data: { v: "x" } }),
     );
+    q.lastCronPollAt = registeredAt.getTime();
 
     withPinnedNow(new Date("2026-01-15T10:30:15Z"), () => q.evaluateCron());
     await new Promise((r) => setTimeout(r, 300));
     expect(processed).toEqual([]);
 
-    // The next occurrence (10:31:00) DOES fire once its window arrives.
+    // The next occurrence (10:31:00) DOES fire once its window arrives. The
+    // floor has advanced to the first poll's time, no manual reset needed.
     withPinnedNow(new Date("2026-01-15T10:31:10Z"), () => q.evaluateCron());
     await new Promise((r) => setTimeout(r, 300));
     expect(processed).toEqual(["x"]);
@@ -272,6 +287,7 @@ describe("LocalQueue cron scheduler", () => {
       q.upsertScheduler("s3", { pattern: "* * * * *" }, { name: "job", data: { v: "new" } }),
     );
 
+    q.lastCronPollAt = PREV_POLL.getTime();
     withPinnedNow(FIRING_NOW, () => q.evaluateCron());
     await new Promise((r) => setTimeout(r, 300));
     expect(processed).toEqual(["new"]);

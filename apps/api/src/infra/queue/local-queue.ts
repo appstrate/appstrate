@@ -52,6 +52,13 @@ export class LocalQueue<T> implements JobQueue<T> {
   private cronInterval: ReturnType<typeof setInterval> | null = null;
   private drainInterval: ReturnType<typeof setInterval> | null = null;
   private shuttingDown = false;
+  /**
+   * Wall-clock time (epoch ms) of the previous cron poll. The next poll's
+   * window floor advances from here rather than a fixed `now - interval`, so a
+   * late/drifted poll (GC, blocked drain) still inspects the whole elapsed gap
+   * instead of dropping the uncovered sliver. Set when the worker starts.
+   */
+  private lastCronPollAt = 0;
 
   constructor(private readonly name: string) {}
 
@@ -92,7 +99,9 @@ export class LocalQueue<T> implements JobQueue<T> {
     // Drain pending jobs every 500ms
     this.drainInterval = setInterval(() => this.drain(), 500);
 
-    // Evaluate cron schedulers every poll interval
+    // Evaluate cron schedulers every poll interval. Anchor the first window's
+    // floor at start time so a poll never reaches back before the worker ran.
+    this.lastCronPollAt = Date.now();
     this.cronInterval = setInterval(() => this.evaluateCron(), CRON_POLL_INTERVAL_MS);
 
     // Neither timer should keep the event loop alive on its own — the server
@@ -184,40 +193,49 @@ export class LocalQueue<T> implements JobQueue<T> {
   }
 
   /**
-   * Cron evaluator — fires any scheduler whose next computed run falls within
-   * the current poll window. Uses `computeNextRun` (cron-parser) so validation
-   * (`isValidCron`) and execution share one parser: presets (`@daily`),
-   * aliases (`MON`), and 6-field expressions all behave identically.
+   * Cron evaluator — enqueues every occurrence of each scheduler that fell in
+   * the window `(prevPoll, now]`. Uses `computeNextRun` (cron-parser) so
+   * validation (`isValidCron`) and execution share one parser: presets
+   * (`@daily`), aliases (`MON`), and 6-field expressions all behave
+   * identically.
    *
    * `computeNextRun` is forward-looking — it always returns a time strictly
-   * after its base. To detect a run that should have fired during the window
-   * we ending now, we compute the next run from `(now - pollWindow)` as the
-   * base and fire when that run is `<= now`. `lastFiredAt` bounds the base so a
-   * scheduler can't re-fire the same occurrence on overlapping/late polls.
+   * after its base. The window floor advances from the *actual* previous poll
+   * (`lastCronPollAt`), not a fixed `now - interval`, so a late/drifted poll
+   * still covers the whole elapsed gap. We then walk `computeNextRun` from the
+   * base, enqueuing each occurrence `<= now`, so a window spanning more than
+   * one occurrence (under drift) fires them all instead of just the first.
+   * `lastFiredAt` bounds the base so an occurrence is never replayed across
+   * overlapping polls.
    */
   private evaluateCron(): void {
     if (this.shuttingDown || !this.handler) return;
 
     const now = Date.now();
-    const windowStart = now - CRON_POLL_INTERVAL_MS;
+    const windowStart = this.lastCronPollAt;
     for (const scheduler of this.schedulers.values()) {
-      // Base the forward-looking lookup at the window start, but never before
-      // the last fire so we don't replay an occurrence already enqueued.
-      const base = Math.max(windowStart, scheduler.lastFiredAt);
-      const next = computeNextRun(scheduler.pattern, scheduler.tz, new Date(base));
-      if (!next || next.getTime() > now) continue;
-
-      scheduler.lastFiredAt = now;
-      const id = `cron_${scheduler.id}_${now}`;
-      const job: QueueJob<T> = {
-        id,
-        name: scheduler.jobTemplate.name,
-        data: scheduler.jobTemplate.data,
-        attemptsMade: 0,
-      };
-      this.pending.push({ job });
-      logger.debug(`${this.name} cron fired`, { schedulerId: scheduler.id });
+      // Base the forward-looking walk at the window floor, but never before the
+      // last fire so we don't replay an occurrence already enqueued.
+      let cursor = Math.max(windowStart, scheduler.lastFiredAt);
+      // Walk every occurrence in (cursor, now]. Bounded: each step strictly
+      // advances cursor and the window is seconds-to-minutes wide.
+      for (;;) {
+        const next = computeNextRun(scheduler.pattern, scheduler.tz, new Date(cursor));
+        if (!next || next.getTime() > now) break;
+        const fireAt = next.getTime();
+        scheduler.lastFiredAt = fireAt;
+        cursor = fireAt;
+        const job: QueueJob<T> = {
+          id: `cron_${scheduler.id}_${fireAt}`,
+          name: scheduler.jobTemplate.name,
+          data: scheduler.jobTemplate.data,
+          attemptsMade: 0,
+        };
+        this.pending.push({ job });
+        logger.debug(`${this.name} cron fired`, { schedulerId: scheduler.id, fireAt });
+      }
     }
+    this.lastCronPollAt = now;
     this.drain();
   }
 }
