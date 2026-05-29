@@ -39,12 +39,12 @@ import { ForkPackageModal } from "../components/fork-package-modal";
 // Agent-specific components
 import { AgentActions } from "../components/package-detail/agent-actions";
 import {
-  AgentConnectorsTab,
   AgentRunsTab,
   AgentSchedulesTab,
   AgentMemoryTab,
   AgentApiTab,
 } from "../components/package-detail/agent-tabs";
+import { AgentConnectionsSection } from "../components/package-detail/agent-connections-section";
 import { AgentConfigurationTab } from "../components/package-detail/agent-configuration-tab";
 import { RunAgentButton } from "../components/run-agent-button";
 import { PackageCard } from "../components/package-card";
@@ -53,7 +53,7 @@ import { useModels, useAgentModel } from "../hooks/use-models";
 import { useProxies } from "../hooks/use-proxies";
 
 type DetailTab =
-  | "connectors"
+  | "connections"
   | "runs"
   | "configuration"
   | "schedules"
@@ -198,7 +198,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   // ── State ──
   const allValidTabs: DetailTab[] = [
-    "connectors",
+    "connections",
     "runs",
     "configuration",
     "schedules",
@@ -301,7 +301,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   const agentTabs: Array<{ id: DetailTab; label: string }> = [
     { id: "runs", label: t("detail.tabRuns") },
-    { id: "connectors", label: t("detail.tabConnectors") },
+    { id: "connections", label: t("detail.tabConnections") },
     ...(effectiveShowConfigTab
       ? [{ id: "configuration" as DetailTab, label: t("detail.tabConfiguration") }]
       : []),
@@ -485,8 +485,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           isHistorical={isHistoricalVersion}
         />
       )}
-      {type === "agent" && tab === "connectors" && (
-        <AgentConnectorsTab packageId={packageId} detail={agentDetail} />
+      {type === "agent" && tab === "connections" && agentDetail && (
+        <AgentConnectionsSection packageId={packageId} detail={agentDetail} />
       )}
       {type === "agent" && tab === "runs" && (
         <AgentRunsTab

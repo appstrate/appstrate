@@ -220,6 +220,57 @@ async function doRefresh(
 }
 
 /**
+ * Discriminated outcome of {@link refreshAndClassify}. Wraps the
+ * {@link forceRefreshIntegrationConnection} call + the
+ * `RefreshError && kind==="revoked"` classification that both integration
+ * credential resolvers share, so each can map the outcome to its own
+ * transport surface (the MITM resolver → 410/502 ApiError; the
+ * credential-proxy resolver → IntegrationCredentialRevokedError / null)
+ * without duplicating the try/catch taxonomy.
+ *
+ * - `refreshed`: the refresh succeeded; `result` carries the new fields,
+ *   expiresAt, and scope-shrink signals.
+ * - `revoked`: the refresh token was revoked upstream (RFC 6749 §5.2
+ *   `invalid_grant`); the helper has already flipped `needsReconnection`.
+ * - `transient`: any other failure (network, 5xx, parse). The cached
+ *   credential may still be usable; the connection row is untouched.
+ */
+export type RefreshClassification =
+  | { status: "refreshed"; result: IntegrationRefreshResult }
+  | { status: "revoked"; error: RefreshError }
+  | { status: "transient"; error: unknown };
+
+/**
+ * Run {@link forceRefreshIntegrationConnection} and classify the outcome into
+ * the {@link RefreshClassification} discriminated union. Never throws — the
+ * caller maps each branch to its own transport error. Shared by the MITM
+ * credentials resolver and the credential-proxy resolver.
+ */
+export async function refreshAndClassify(
+  connectionId: string,
+  packageIdForLog: string,
+  authKeyForLog: string,
+  credentialsEncrypted: string,
+  refreshContext: IntegrationRefreshContext,
+): Promise<RefreshClassification> {
+  try {
+    const result = await forceRefreshIntegrationConnection(
+      connectionId,
+      packageIdForLog,
+      authKeyForLog,
+      credentialsEncrypted,
+      refreshContext,
+    );
+    return { status: "refreshed", result };
+  } catch (err) {
+    if (err instanceof RefreshError && err.kind === "revoked") {
+      return { status: "revoked", error: err };
+    }
+    return { status: "transient", error: err };
+  }
+}
+
+/**
  * Decrypt an integration connection's credential blob into a flat string
  * map, returning `null` (with a warning) on failure rather than throwing.
  * Shared by the MITM credentials resolver and the credential-proxy resolver.

@@ -20,7 +20,6 @@
  */
 
 import {
-  RefreshError,
   resolveAfpsHttpDelivery,
   type AfpsHttpDelivery as ConnectAfpsHttpDelivery,
   type HttpDeliveryPlan,
@@ -38,7 +37,7 @@ import type { Actor } from "../lib/actor.ts";
 import {
   buildIntegrationOAuthRefreshContext,
   decryptIntegrationConnectionFields,
-  forceRefreshIntegrationConnection,
+  refreshAndClassify,
 } from "./integration-token-refresh.ts";
 import {
   assertIntegrationActive,
@@ -158,80 +157,37 @@ export async function resolveLiveIntegrationCredentials(
       context.applicationId,
     );
     if (refreshContext) {
-      try {
-        // Re-acquisition = fast-path refresh_token POST. `needsRefresh`
-        // already gated type=oauth2, so this is the only refreshable auth.
-        const refreshed = await forceRefreshIntegrationConnection(
-          connection.id,
+      // Re-acquisition = fast-path refresh_token POST. `needsRefresh`
+      // already gated type=oauth2, so this is the only refreshable auth.
+      const classified = await refreshAndClassify(
+        connection.id,
+        integrationId,
+        authKey,
+        connection.credentialsEncrypted,
+        refreshContext,
+      );
+      if (classified.status === "revoked") {
+        // 410 here propagates to the sidecar, which translates back
+        // to a 401 to the integration's MCP client. The
+        // needsReconnection flag has already been set by the helper.
+        // Matches the model-provider token endpoint's revoked semantics.
+        logger.warn("Integration token refresh revoked", {
+          runId: context.runId,
           integrationId,
           authKey,
-          connection.credentialsEncrypted,
-          refreshContext,
+          status: classified.error.status,
+        });
+        throw gone(
+          "INTEGRATION_CONNECTION_NEEDS_RECONNECTION",
+          `Integration '${integrationId}' auth '${authKey}' needs re-connection (refresh token revoked)`,
         );
-        fields = refreshed.fields;
-        expiresAtEpochMs = refreshed.expiresAt ? refreshed.expiresAt.getTime() : null;
-
-        // Niveau 2 Phase 6 — IdP-side scope shrink awareness. When the
-        // refresh response narrowed `scopesGranted` (user revoked some
-        // permissions in their account settings between issuance and
-        // refresh), cross-check against the union of `requiredScopes`
-        // across every installed agent and flip `needsReconnection`
-        // if the actor has dropped below that floor. Fast-path: skip
-        // the agent scan unless the refresh actually shrank scopes.
-        if (refreshed.shrinkDetected && refreshed.scopesGranted !== null) {
-          const granted = refreshed.scopesGranted;
-          const { required } = await computeRequiredScopes({
-            scope: { orgId: context.orgId, applicationId: context.applicationId },
-            integrationId: integrationId,
-            authKey,
-          });
-          // Expand the granted set through the manifest `implies` hierarchy
-          // before diffing — a parent grant (e.g. GitHub `repo`) covers the
-          // children it implies (`public_repo`), so a raw membership check
-          // would falsely flag the connection as below the required floor.
-          const expandedGranted = expandScopesGranted(granted, manifest, authKey);
-          const missing = required.filter((s) => !expandedGranted.includes(s));
-          if (missing.length > 0) {
-            await markIntegrationConnectionNeedsReconnection(connection.id);
-            logger.warn("Integration scope shrink dropped below required floor", {
-              runId: context.runId,
-              integrationId,
-              authKey,
-              granted,
-              required,
-              missing,
-            });
-          } else {
-            logger.info("Integration scope shrink absorbed (still covers required)", {
-              runId: context.runId,
-              integrationId,
-              authKey,
-              granted,
-              required,
-            });
-          }
-        }
-      } catch (err) {
-        if (err instanceof RefreshError && err.kind === "revoked") {
-          // 410 here propagates to the sidecar, which translates back
-          // to a 401 to the integration's MCP client. The
-          // needsReconnection flag has already been set by the helper.
-          // Matches the model-provider token endpoint's revoked semantics.
-          logger.warn("Integration token refresh revoked", {
-            runId: context.runId,
-            integrationId,
-            authKey,
-            status: err.status,
-          });
-          throw gone(
-            "INTEGRATION_CONNECTION_NEEDS_RECONNECTION",
-            `Integration '${integrationId}' auth '${authKey}' needs re-connection (refresh token revoked)`,
-          );
-        }
+      }
+      if (classified.status === "transient") {
         // Transient failure (network, upstream 5xx, parse error). The
         // cached credential may still be usable; surfacing 502 lets the
         // sidecar's `refreshOnUnauthorized` cooldown back off without
         // poisoning the connection row.
+        const err = classified.error;
         logger.warn("Integration token refresh transient error", {
           runId: context.runId,
           integrationId,
@@ -241,6 +197,51 @@ export async function resolveLiveIntegrationCredentials(
         throw badGateway(
           `Integration '${integrationId}' auth '${authKey}' token refresh failed upstream (transient)`,
         );
+      }
+
+      const refreshed = classified.result;
+      fields = refreshed.fields;
+      expiresAtEpochMs = refreshed.expiresAt ? refreshed.expiresAt.getTime() : null;
+
+      // Niveau 2 Phase 6 — IdP-side scope shrink awareness. When the
+      // refresh response narrowed `scopesGranted` (user revoked some
+      // permissions in their account settings between issuance and
+      // refresh), cross-check against the union of `requiredScopes`
+      // across every installed agent and flip `needsReconnection`
+      // if the actor has dropped below that floor. Fast-path: skip
+      // the agent scan unless the refresh actually shrank scopes.
+      if (refreshed.shrinkDetected && refreshed.scopesGranted !== null) {
+        const granted = refreshed.scopesGranted;
+        const { required } = await computeRequiredScopes({
+          scope: { orgId: context.orgId, applicationId: context.applicationId },
+          integrationId: integrationId,
+          authKey,
+        });
+        // Expand the granted set through the manifest `implies` hierarchy
+        // before diffing — a parent grant (e.g. GitHub `repo`) covers the
+        // children it implies (`public_repo`), so a raw membership check
+        // would falsely flag the connection as below the required floor.
+        const expandedGranted = expandScopesGranted(granted, manifest, authKey);
+        const missing = required.filter((s) => !expandedGranted.includes(s));
+        if (missing.length > 0) {
+          await markIntegrationConnectionNeedsReconnection(connection.id);
+          logger.warn("Integration scope shrink dropped below required floor", {
+            runId: context.runId,
+            integrationId,
+            authKey,
+            granted,
+            required,
+            missing,
+          });
+        } else {
+          logger.info("Integration scope shrink absorbed (still covers required)", {
+            runId: context.runId,
+            integrationId,
+            authKey,
+            granted,
+            required,
+          });
+        }
       }
     }
   }

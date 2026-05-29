@@ -21,6 +21,7 @@ import { logger } from "./logger.ts";
 import type { IntegrationSpawnSpec } from "./integrations-boot.ts";
 import {
   buildMitmEnvBlock,
+  isPathSafeForMount,
   registerIntegrationRuntimeAdapter,
   resolveBundleEntry,
   WORKSPACE_ENV_VAR,
@@ -182,30 +183,13 @@ async function killContainer(containerId: string): Promise<void> {
  *   - `/.docker/`, `/.dockerenv` — Docker-private surfaces.
  */
 export function isContainerPathSafeForMount(containerPath: string): boolean {
-  if (!containerPath.startsWith("/")) return false;
-  // Forbidden top-level dirs.
-  const forbiddenPrefixes = ["/dev/", "/proc/", "/sys/", "/.docker/"];
-  for (const p of forbiddenPrefixes) {
-    if (containerPath === p.replace(/\/$/, "") || containerPath.startsWith(p)) {
-      return false;
-    }
-  }
-  // Forbidden specific files (passwd/shadow/sudoers families).
-  const forbiddenFiles = [
-    "/etc/passwd",
-    "/etc/passwd-",
-    "/etc/shadow",
-    "/etc/shadow-",
-    "/etc/sudoers",
-    "/etc/gshadow",
-    "/etc/group",
-    "/etc/group-",
-    "/.dockerenv",
-  ];
-  if (forbiddenFiles.includes(containerPath)) return false;
-  // Forbidden sudoers subtree.
-  if (containerPath.startsWith("/etc/sudoers.d/")) return false;
-  return true;
+  // Shared floor + Docker-private surfaces: `/.docker/` (prefix) and
+  // `/.dockerenv` (file) on top of the kernel-managed +
+  // privilege-escalation floor enforced by `isPathSafeForMount`.
+  return isPathSafeForMount(containerPath, {
+    extraForbiddenPrefixes: ["/.docker/"],
+    extraForbiddenFiles: ["/.dockerenv"],
+  });
 }
 
 async function materializeFileMountsInContainer(

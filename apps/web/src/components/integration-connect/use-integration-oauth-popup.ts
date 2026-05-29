@@ -85,7 +85,7 @@ export function useIntegrationOAuthPopup() {
         }
         // The popup resolves only on a successful connect. Invalidate the
         // integration + user-connection caches so every consumer (status
-        // cards, pickers, the connectors page) reflects the new connection
+        // cards, pickers, the connections page) reflects the new connection
         // without waiting for a window-focus refetch. `useInitiateIntegrationOAuth`
         // only kicks off the redirect — the connection is created in the popup.
         await Promise.all([

@@ -35,8 +35,6 @@
  *     always wins — discovery is a fallback, not an override.
  */
 
-import { extractErrorMessage } from "./utils.ts";
-
 export interface OAuthEndpointResolution {
   authorizationEndpoint?: string;
   tokenEndpoint?: string;
@@ -189,12 +187,7 @@ export async function resolveOAuthEndpoints(
     // configured issuer string. Reject + try the next probe on mismatch.
     // This MUST happen before any field is trusted from the document.
     if (typeof doc.issuer !== "string" || trimTrailingSlash(doc.issuer) !== configuredIssuer) {
-      // Discovery is best-effort — log and continue.
-      void extractErrorMessage(
-        new Error(
-          `Discovery issuer mismatch: configured=${configuredIssuer} got=${String(doc.issuer)}`,
-        ),
-      );
+      // Discovery is best-effort — reject + try the next probe on mismatch.
       continue;
     }
     if (
@@ -292,9 +285,8 @@ async function fetchDiscoveryDocument(url: string): Promise<DiscoveryDocument | 
     const json = (await res.json()) as unknown;
     if (!json || typeof json !== "object") return null;
     return json as DiscoveryDocument;
-  } catch (err) {
+  } catch {
     // Best-effort: discovery failures fall back to manual endpoints. Swallow.
-    void extractErrorMessage(err);
     return null;
   }
 }

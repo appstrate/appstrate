@@ -27,7 +27,7 @@
   "detail.clearRunsConfirm": "Supprimer tous les runs de cet agent ? Cette action est irréversible.",
   "detail.emptyRuns": "Aucun run",
   "detail.emptySchedule": "Aucune planification",
-  "detail.tabConnectors": "Connexions",
+  "detail.tabConnections": "Connexions",
   "detail.emptyConnections": "Aucune connexion requise",
   "detail.emptyConnectionsHint": "Cet agent ne dépend d'aucune intégration",
   "detail.integrationConnect": "Connecter",

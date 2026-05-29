@@ -23,7 +23,7 @@ import {
 } from "./token-utils.ts";
 import type { OAuthStateStore } from "./types.ts";
 import type { OAuthTokenContentType } from "./token-utils.ts";
-import { extractErrorMessage } from "./utils.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 /**
  * Superset of `OAuthTokenAuthMethod` from `@appstrate/core/validation`:
@@ -131,7 +131,7 @@ export async function exchangeAuthorizationCode(
     });
   } catch (err) {
     throw new OAuthCallbackError(
-      `Token exchange network error for '${input.errorLabel}': ${extractErrorMessage(err)}`,
+      `Token exchange network error for '${input.errorLabel}': ${getErrorMessage(err)}`,
       "transient",
       input.errorLabel,
     );

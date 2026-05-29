@@ -1012,22 +1012,12 @@ export async function getIntegrationAuthStatuses(
       }
     }
   }
+  // The resolver already emits the snake_case wire shape
+  // (`policy.required_scopes`), so the catalog passes through verbatim.
   const toolCatalog: IntegrationToolCatalogEntry[] = resolveIntegrationToolCatalog({
     integration: manifest,
     mcpServerTools,
-  }).map((entry) => ({
-    name: entry.name,
-    ...(entry.description !== undefined ? { description: entry.description } : {}),
-    ...(entry.policy
-      ? {
-          policy: {
-            ...(entry.policy.requiredScopes !== undefined
-              ? { required_scopes: entry.policy.requiredScopes }
-              : {}),
-          },
-        }
-      : {}),
-  }));
+  });
 
   const allConnections = await listIntegrationConnections(scope, packageId, actor);
   const oauthClients = await db

@@ -10,7 +10,7 @@ import { type EnrichedRun, type RunStatus, TERMINAL_RUN_STATUSES } from "@appstr
 /**
  * Patch caches when an `integration_connections` row changes (INSERT /
  * UPDATE / DELETE) — drives the live "Reconnection required" badge on
- * the connectors page, the agent picker verdict, the integration detail
+ * the connections page, the agent picker verdict, the integration detail
  * connection list, and the agent status cards. Without this they refresh
  * only on window focus and stay stale across tabs.
  *
@@ -21,7 +21,7 @@ import { type EnrichedRun, type RunStatus, TERMINAL_RUN_STATUSES } from "@appstr
  * server-side truth anyway.
  */
 function handleConnectionUpdate(qc: QueryClient, orgId: string, applicationId: string) {
-  // Connectors page (`/preferences/connectors`) — the orange
+  // Connections page (`/preferences/connections`) — the orange
   // "Reconnection required" badge reads off this key. The hook
   // (`use-me-connections.ts`) keys flat, so we invalidate flat.
   qc.invalidateQueries({ queryKey: ["me-connections"] });
