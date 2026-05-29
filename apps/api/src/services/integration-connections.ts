@@ -37,7 +37,7 @@ import {
 import { logger } from "../lib/logger.ts";
 import { notFound, conflict, invalidRequest } from "../lib/errors.ts";
 import type { AppScope } from "../lib/scope.ts";
-import { actorInsert } from "../lib/actor.ts";
+import { actorInsert, actorFilter } from "../lib/actor.ts";
 import type { Actor } from "@appstrate/connect";
 import {
   resolveIntegrationToolCatalog,
@@ -176,10 +176,7 @@ async function loadActorConnection(
   authKey: string,
   context: { applicationId: string; actor: Actor; connectionId?: string },
 ): Promise<ActorConnectionRow | null> {
-  const ownerPredicate =
-    context.actor.type === "user"
-      ? eq(integrationConnections.userId, context.actor.id)
-      : eq(integrationConnections.endUserId, context.actor.id);
+  const ownerPredicate = actorFilter(context.actor, integrationConnections);
   const rows = await db
     .select({
       id: integrationConnections.id,
@@ -240,10 +237,7 @@ async function loadAccessibleConnectionById(
   connectionId: string,
   context: { applicationId: string; actor: Actor },
 ): Promise<ResolvedConnectionRow | null> {
-  const ownerPredicate =
-    context.actor.type === "user"
-      ? eq(integrationConnections.userId, context.actor.id)
-      : eq(integrationConnections.endUserId, context.actor.id);
+  const ownerPredicate = actorFilter(context.actor, integrationConnections);
   const [row] = await db
     .select({
       id: integrationConnections.id,
@@ -790,10 +784,7 @@ export async function persistCredentialBundle(
 
   if (target.kind === "update-owned") {
     await assertAppBelongsToOrg(target.scope);
-    const { userId, endUserId } = actorInsert(target.actor);
-    const ownerPredicate = userId
-      ? eq(integrationConnections.userId, userId)
-      : eq(integrationConnections.endUserId, endUserId!);
+    const ownerPredicate = actorFilter(target.actor, integrationConnections);
     const ownerScope = and(
       eq(integrationConnections.id, target.connectionId),
       eq(integrationConnections.applicationId, target.scope.applicationId),
@@ -894,10 +885,7 @@ export async function listIntegrationConnections(
   actor: Actor,
 ): Promise<IntegrationConnectionSummary[]> {
   await assertAppBelongsToOrg(scope);
-  const { userId, endUserId } = actorInsert(actor);
-  const ownerPredicate = userId
-    ? eq(integrationConnections.userId, userId)
-    : eq(integrationConnections.endUserId, endUserId!);
+  const ownerPredicate = actorFilter(actor, integrationConnections);
   const rows = await db
     .select()
     .from(integrationConnections)
@@ -920,10 +908,7 @@ export async function deleteIntegrationConnection(
   connectionId: string,
   actor: Actor,
 ): Promise<void> {
-  const { userId, endUserId } = actorInsert(actor);
-  const ownerPredicate = userId
-    ? eq(integrationConnections.userId, userId)
-    : eq(integrationConnections.endUserId, endUserId!);
+  const ownerPredicate = actorFilter(actor, integrationConnections);
   const deleted = await db
     .delete(integrationConnections)
     .where(
