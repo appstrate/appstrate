@@ -115,7 +115,7 @@ describe("resolveIntegrationToolCatalog", () => {
     });
     expect(out).toHaveLength(2);
     const fetchEcho = out.find((e) => e.name === "fetch_echo")!;
-    expect(fetchEcho.policy?.requiredScopes).toEqual({ primary: ["read"] });
+    expect(fetchEcho.policy?.required_scopes).toEqual({ primary: ["read"] });
     const kvSet = out.find((e) => e.name === "kv_set")!;
     expect(kvSet.policy).toBeUndefined();
   });
@@ -165,7 +165,7 @@ describe("resolveIntegrationToolCatalog", () => {
       }),
     });
     expect(out.map((e) => e.name)).toEqual(["policy_only"]);
-    expect(out[0]!.policy?.requiredScopes).toEqual({ primary: ["read"] });
+    expect(out[0]!.policy?.required_scopes).toEqual({ primary: ["read"] });
   });
 });
 

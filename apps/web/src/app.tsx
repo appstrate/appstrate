@@ -50,7 +50,7 @@ import { PreferencesLayout } from "./pages/preferences/layout";
 import { PreferencesGeneralPage } from "./pages/preferences/general";
 import { PreferencesAppearancePage } from "./pages/preferences/appearance";
 import { PreferencesSecurityPage } from "./pages/preferences/security";
-import { PreferencesConnectorsPage } from "./pages/preferences/connectors";
+import { PreferencesConnectionsPage } from "./pages/preferences/connections";
 import { PreferencesDevicesPage } from "./pages/preferences/devices";
 import { LibraryPage } from "./pages/library-page";
 import { LoginPage } from "./pages/login";
@@ -414,7 +414,7 @@ export function App() {
               <Route path="appearance" element={<PreferencesAppearancePage />} />
               <Route path="security" element={<PreferencesSecurityPage />} />
               <Route path="devices" element={<PreferencesDevicesPage />} />
-              <Route path="connectors" element={<PreferencesConnectorsPage />} />
+              <Route path="connections" element={<PreferencesConnectionsPage />} />
             </Route>
             {features.webhooks && (
               <>

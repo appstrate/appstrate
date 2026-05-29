@@ -325,6 +325,9 @@ export const mePaths = {
       ],
       responses: {
         "204": { description: "Pin cleared (or never existed)" },
+        "400": {
+          description: "Missing required query param (agentPackageId or integrationPackageId).",
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
       },
     },

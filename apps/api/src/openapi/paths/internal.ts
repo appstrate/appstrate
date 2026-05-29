@@ -53,6 +53,7 @@ export const internalPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
   },
@@ -123,6 +124,7 @@ export const internalPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
   },
@@ -228,6 +230,7 @@ export const internalPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "410": {
           description:
@@ -272,6 +275,7 @@ export const internalPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "410": {
           description: "Refresh token revoked upstream — same semantics as the GET endpoint.",
@@ -315,6 +319,7 @@ export const internalPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": {
           description:
             "Agent does not reference this mcp-server through an installed integration, or no published version exists.",

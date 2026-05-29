@@ -29,6 +29,8 @@ import type {
 } from "@appstrate/connect";
 import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
 import { logger } from "../lib/logger.ts";
+import { withRedisLock } from "../lib/distributed-lock.ts";
+import { OAUTH_REFRESH_LEAD_MS } from "@appstrate/core/sidecar-types";
 import {
   persistCredentialBundle,
   markIntegrationConnectionNeedsReconnection,
@@ -101,12 +103,45 @@ export async function forceRefreshIntegrationConnection(
   const cached = inflightRefreshes.get(connectionId);
   if (cached) return cached;
 
-  const promise = doRefresh(
-    connectionId,
-    packageIdForLog,
-    authKeyForLog,
-    credentialsEncrypted,
-    refreshContext,
+  // Two dedup layers, mirroring the model-provider refresh path:
+  //   1. in-process singleflight (`inflightRefreshes`) — collapses callers in
+  //      this API instance;
+  //   2. cross-process Redis lock + post-acquire re-read — serializes across
+  //      instances so a rotating refresh_token isn't double-spent (which would
+  //      falsely flag a valid connection `needsReconnection`). No-op on Tier 0/1.
+  const promise = withRedisLock(
+    `intg-refresh:${connectionId}`,
+    { ttlSeconds: 45, acquireTimeoutMs: 30_000, label: "intg-refresh" },
+    async () => {
+      // Re-read under the lock: a peer instance may have already refreshed
+      // while we waited. If the stored token is now comfortably unexpired,
+      // return it without burning the (possibly just-rotated) refresh_token.
+      const [row] = await db
+        .select({
+          credentialsEncrypted: integrationConnections.credentialsEncrypted,
+          expiresAt: integrationConnections.expiresAt,
+        })
+        .from(integrationConnections)
+        .where(eq(integrationConnections.id, connectionId))
+        .limit(1);
+      if (row?.expiresAt && row.expiresAt.getTime() - Date.now() > OAUTH_REFRESH_LEAD_MS) {
+        return {
+          fields: decryptCredentialsToStringMap(row.credentialsEncrypted),
+          expiresAt: row.expiresAt,
+          scopesGranted: null,
+          shrinkDetected: false,
+        };
+      }
+      // Refresh against the freshest stored ciphertext (a peer may have rotated
+      // the refresh_token even if the access token is near expiry).
+      return doRefresh(
+        connectionId,
+        packageIdForLog,
+        authKeyForLog,
+        row?.credentialsEncrypted ?? credentialsEncrypted,
+        refreshContext,
+      );
+    },
   );
   inflightRefreshes.set(connectionId, promise);
   try {
@@ -217,6 +252,57 @@ async function doRefresh(
   );
 
   return { fields: newCreds, expiresAt, scopesGranted: responseScopes, shrinkDetected };
+}
+
+/**
+ * Discriminated outcome of {@link refreshAndClassify}. Wraps the
+ * {@link forceRefreshIntegrationConnection} call + the
+ * `RefreshError && kind==="revoked"` classification that both integration
+ * credential resolvers share, so each can map the outcome to its own
+ * transport surface (the MITM resolver → 410/502 ApiError; the
+ * credential-proxy resolver → IntegrationCredentialRevokedError / null)
+ * without duplicating the try/catch taxonomy.
+ *
+ * - `refreshed`: the refresh succeeded; `result` carries the new fields,
+ *   expiresAt, and scope-shrink signals.
+ * - `revoked`: the refresh token was revoked upstream (RFC 6749 §5.2
+ *   `invalid_grant`); the helper has already flipped `needsReconnection`.
+ * - `transient`: any other failure (network, 5xx, parse). The cached
+ *   credential may still be usable; the connection row is untouched.
+ */
+export type RefreshClassification =
+  | { status: "refreshed"; result: IntegrationRefreshResult }
+  | { status: "revoked"; error: RefreshError }
+  | { status: "transient"; error: unknown };
+
+/**
+ * Run {@link forceRefreshIntegrationConnection} and classify the outcome into
+ * the {@link RefreshClassification} discriminated union. Never throws — the
+ * caller maps each branch to its own transport error. Shared by the MITM
+ * credentials resolver and the credential-proxy resolver.
+ */
+export async function refreshAndClassify(
+  connectionId: string,
+  packageIdForLog: string,
+  authKeyForLog: string,
+  credentialsEncrypted: string,
+  refreshContext: IntegrationRefreshContext,
+): Promise<RefreshClassification> {
+  try {
+    const result = await forceRefreshIntegrationConnection(
+      connectionId,
+      packageIdForLog,
+      authKeyForLog,
+      credentialsEncrypted,
+      refreshContext,
+    );
+    return { status: "refreshed", result };
+  } catch (err) {
+    if (err instanceof RefreshError && err.kind === "revoked") {
+      return { status: "revoked", error: err };
+    }
+    return { status: "transient", error: err };
+  }
 }
 
 /**

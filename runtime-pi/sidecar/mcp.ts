@@ -741,6 +741,24 @@ function buildSidecarTools(options: MountMcpOptions): {
         substituteBody?: boolean;
       };
 
+      // The MCP SDK does NOT validate `tools/call` arguments against the
+      // descriptor's `inputSchema`, so `target` may be absent or a
+      // non-string. Guard before it reaches executeApiCall →
+      // substituteVars(undefined) → opaque `undefined.replace` TypeError
+      // (surfaced as JSON-RPC -32603 instead of a structured tool error).
+      if (typeof args.target !== "string" || args.target.length === 0) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `${ctx.label}: 'target' is required and must be a non-empty string (the request URL or path).`,
+            },
+          ],
+          isError: true,
+          _meta: API_CALL_PREFLIGHT_META,
+        };
+      }
+
       const method = args.method ?? "GET";
 
       // Refuse `body` on GET/HEAD explicitly rather than silently

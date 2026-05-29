@@ -216,7 +216,7 @@ export function useConnectIntegrationFields() {
       qc.invalidateQueries({
         queryKey: [...KEY(orgId, applicationId), "detail", vars.packageId],
       });
-      // Cross-app connectors page (/preferences/connectors) — keep parity with
+      // Cross-app connections page (/preferences/connections) — keep parity with
       // the OAuth popup path so a fields connect/renew refreshes that list too.
       qc.invalidateQueries({ queryKey: ["me-connections"] });
     },

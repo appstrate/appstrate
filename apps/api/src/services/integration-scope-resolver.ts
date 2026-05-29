@@ -8,12 +8,12 @@
  * unions the scopes contributed by each:
  *
  *   - `tools[]` declared by the agent → look up
- *     `integration.tools_policy[t].requiredScopes[authKey]` (the per-auth map)
+ *     `integration.tools_policy[t].required_scopes[authKey]` (the per-auth map)
  *     and union them.
  *   - `scopes[]` declared by the agent → unioned as-is.
  *   - Agent declared the integration with no `integrations_configuration`
  *     entry (or one without `tools[]`) → contribute the union of *every*
- *     declared tool's `requiredScopes` for this auth (= "all tools
+ *     declared tool's `required_scopes` for this auth (= "all tools
  *     allowed" default that mirrors Phase 3's runtime allowlist
  *     semantics).
  *

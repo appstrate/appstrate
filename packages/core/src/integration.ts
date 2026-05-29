@@ -431,10 +431,14 @@ export function getConnectToolNames(manifest: IntegrationManifest): string[] {
   return names;
 }
 
-/** Effective per-tool policy as carried in `integration.tools_policy[name]`. */
+/**
+ * Effective per-tool policy as carried in `integration.tools_policy[name]`.
+ * Wire-bound (snake_case): this rides the `IntegrationDetail.tool_catalog`
+ * HTTP payload verbatim and the frontend reads `policy.required_scopes`.
+ */
 export interface IntegrationToolPolicy {
   /** Per-auth scopes the tool requires: `{ <auth_key>: scopes[] }`. */
-  requiredScopes?: Readonly<Record<string, readonly string[]>>;
+  required_scopes?: Readonly<Record<string, readonly string[]>>;
 }
 
 /** One entry in the resolved agent-facing tool catalog. */
@@ -504,7 +508,7 @@ export function resolveIntegrationToolCatalog(
     out.push({
       ...entry,
       policy: {
-        requiredScopes: raw.required_scopes as IntegrationToolPolicy["requiredScopes"],
+        required_scopes: raw.required_scopes as IntegrationToolPolicy["required_scopes"],
       },
     });
   }

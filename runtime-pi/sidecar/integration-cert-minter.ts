@@ -34,10 +34,9 @@ import * as path from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID, randomBytes } from "node:crypto";
 import {
-  runOpenssl as runOpensslExec,
-  readPem as readPemExec,
   resolveBunSpawn as resolveBunSpawnExec,
   secondsToDaysCeil,
+  mintLeafCert,
   type OpensslSpawnFn,
   type OpensslExecError,
 } from "./openssl-exec.ts";
@@ -110,9 +109,6 @@ export type CertMintErrorCode =
 // error class so call sites stay class-agnostic.
 const makeError: OpensslExecError = (code, message, stderr) =>
   new CertMintError(code as CertMintErrorCode, message, stderr);
-const runOpenssl = (spawn: OpensslSpawnFn, bin: string, args: string[]) =>
-  runOpensslExec(spawn, bin, args, makeError);
-const readPem = (filePath: string, label: string) => readPemExec(filePath, label, makeError);
 const resolveBunSpawn = () => resolveBunSpawnExec(makeError);
 
 // ─────────────────────────────────────────────
@@ -220,8 +216,6 @@ async function mintLeaf(
 ): Promise<MintedLeaf> {
   const id = randomUUID().slice(0, 8);
   const keyPath = path.join(sessionDir, `leaf-${id}.key`);
-  const csrPath = path.join(sessionDir, `leaf-${id}.csr`);
-  const extPath = path.join(sessionDir, `leaf-${id}.ext`);
   const certPath = path.join(sessionDir, `leaf-${id}.crt`);
   // Random 128-bit serial per leaf instead of `-CAcreateserial`/`ca.srl`.
   // The shared serial file is a read-modify-write that races when the MITM
@@ -231,62 +225,26 @@ async function mintLeaf(
   const serial = `0x${randomBytes(16).toString("hex")}`;
 
   try {
-    await runOpenssl(spawn, opensslBin, ["genrsa", "-out", keyPath, "2048"]);
-    await runOpenssl(spawn, opensslBin, [
-      "req",
-      "-new",
-      "-key",
+    const { keyPem, certPem } = await mintLeafCert({
+      spawn,
+      bin: opensslBin,
+      workDir: sessionDir,
+      cn: input.host,
+      sans: [input.host],
+      days: input.days,
+      caCertPath: input.caCertPath,
+      caKeyPath: input.caKeyPath,
+      serial: { mode: "set", value: serial },
       keyPath,
-      "-subj",
-      `/CN=${input.host}`,
-      "-out",
-      csrPath,
-    ]);
-
-    // Extension file carries the spec-required AKI + SAN + EKU=serverAuth.
-    const extfile = [
-      "authorityKeyIdentifier=keyid,issuer",
-      "subjectKeyIdentifier=hash",
-      "basicConstraints=CA:FALSE",
-      "keyUsage=critical,digitalSignature,keyEncipherment",
-      "extendedKeyUsage=serverAuth",
-      `subjectAltName=DNS:${input.host}`,
-      "",
-    ].join("\n");
-    await fs.writeFile(extPath, extfile, { encoding: "utf-8", mode: 0o600 });
-
-    await runOpenssl(spawn, opensslBin, [
-      "x509",
-      "-req",
-      "-in",
-      csrPath,
-      "-CA",
-      input.caCertPath,
-      "-CAkey",
-      input.caKeyPath,
-      "-set_serial",
-      serial,
-      "-days",
-      String(input.days),
-      "-sha256",
-      "-extfile",
-      extPath,
-      "-out",
       certPath,
-    ]);
-
-    const [certPem, keyPem] = await Promise.all([
-      readPem(certPath, "leafCert"),
-      readPem(keyPath, "leafKey"),
-    ]);
+      makeError,
+    });
     return { host: input.host, certPem, keyPem };
   } finally {
     // Best-effort cleanup — leave nothing behind on the happy path. On
     // failure the per-leaf files stay so an operator can rerun openssl
     // by hand. The CA key staged at session level is independent.
-    await Promise.all(
-      [keyPath, csrPath, extPath, certPath].map((p) => fs.rm(p, { force: true }).catch(() => {})),
-    );
+    await Promise.all([keyPath, certPath].map((p) => fs.rm(p, { force: true }).catch(() => {})));
   }
 }
 

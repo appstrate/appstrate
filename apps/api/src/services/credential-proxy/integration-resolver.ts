@@ -23,7 +23,6 @@
  */
 
 import {
-  RefreshError,
   resolveAfpsHttpDelivery,
   buildProxyCredentialsPayload,
   type AfpsHttpDelivery as ConnectAfpsHttpDelivery,
@@ -41,7 +40,7 @@ import { fetchIntegrationManifest } from "../integration-service.ts";
 import {
   buildIntegrationOAuthRefreshContext,
   decryptIntegrationConnectionFields,
-  forceRefreshIntegrationConnection,
+  refreshAndClassify,
 } from "../integration-token-refresh.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 
@@ -138,28 +137,24 @@ export async function forceRefreshIntegrationProxyCredentials(
   );
   if (!refreshContext) return null;
 
-  try {
-    // Re-acquisition = fast-path refresh_token POST. `authDef.type` is gated
-    // to oauth2 above, so this is the only refreshable auth.
-    const refreshed = await forceRefreshIntegrationConnection(
-      connection.id,
-      input.integrationId,
-      connection.authKey,
-      connection.credentialsEncrypted,
-      refreshContext,
+  // Re-acquisition = fast-path refresh_token POST. `authDef.type` is gated
+  // to oauth2 above, so this is the only refreshable auth.
+  const classified = await refreshAndClassify(
+    connection.id,
+    input.integrationId,
+    connection.authKey,
+    connection.credentialsEncrypted,
+    refreshContext,
+  );
+  if (classified.status === "revoked") {
+    throw new IntegrationCredentialRevokedError(
+      `Integration '${input.integrationId}' auth '${connection.authKey}' needs re-connection (refresh token revoked)`,
     );
-    const fields = refreshed.fields;
-    const payload = buildPayloadFromFields(manifest, connection.authKey, fields);
-    if (!payload) return null;
-    return { payload, connectionId: connection.id, authKey: connection.authKey };
-  } catch (err) {
-    if (err instanceof RefreshError && err.kind === "revoked") {
-      throw new IntegrationCredentialRevokedError(
-        `Integration '${input.integrationId}' auth '${connection.authKey}' needs re-connection (refresh token revoked)`,
-      );
-    }
+  }
+  if (classified.status === "transient") {
     // Transient failure — surface as not-refreshed; the route keeps the
     // original 401.
+    const err = classified.error;
     logger.warn("credential-proxy: integration token refresh transient error", {
       integrationId: input.integrationId,
       authKey: connection.authKey,
@@ -167,6 +162,11 @@ export async function forceRefreshIntegrationProxyCredentials(
     });
     return null;
   }
+
+  const fields = classified.result.fields;
+  const payload = buildPayloadFromFields(manifest, connection.authKey, fields);
+  if (!payload) return null;
+  return { payload, connectionId: connection.id, authKey: connection.authKey };
 }
 
 // ─────────────────────────────────────────────

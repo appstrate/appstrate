@@ -53,6 +53,7 @@
  */
 
 import { createServer as netCreateServer, connect as netConnect, type Socket } from "node:net";
+import { isBlockedHost, isBlockedUrl, OUTBOUND_TIMEOUT_MS } from "./helpers.ts";
 import type {
   HttpDeliveryPlan,
   IntegrationCredentialsPayload,
@@ -193,7 +194,12 @@ export function createIntegrationMitmListener(
         fetch: (req) =>
           handleInnerRequest(req, sniHost, options.credentials, fetchFn, maxRequestBytes, emit),
       });
-    })();
+    })().catch((err) => {
+      // Don't let a transient mint/bring-up failure poison this host for the
+      // rest of the run: evict the rejected promise so the next CONNECT retries.
+      tlsServers.delete(sniHost);
+      throw err;
+    });
     tlsServers.set(sniHost, p);
     return p;
   };
@@ -259,6 +265,16 @@ async function handleInboundConnection(
     // Per-connection handlers own teardown.
   });
 
+  // Arm a read timeout for the CONNECT-preamble + ClientHello phase. A silent
+  // or stalled client must not pin a socket + pending promise for the whole
+  // run. Disarmed once we switch to raw relay (the tunnel is legitimately
+  // long-lived). `destroy()` fires `close`, which settles the read promises.
+  const HANDSHAKE_READ_TIMEOUT_MS = 30_000;
+  rawSocket.setTimeout(HANDSHAKE_READ_TIMEOUT_MS, () => {
+    emit({ kind: "connect-rejected", reason: "handshake read timeout" });
+    rawSocket.destroy();
+  });
+
   // 1. Parse the CONNECT preamble.
   let preamble = Buffer.alloc(0);
   const MAX_PREAMBLE = 8 * 1024;
@@ -266,10 +282,16 @@ async function handleInboundConnection(
     | { ok: true; host: string; port: number; remainder: Buffer }
     | { ok: false; reply: string; reason: string }
   >((resolve) => {
+    const onClose = () => {
+      rawSocket.off("data", onData);
+      resolve({ ok: false, reply: "", reason: "socket closed before CONNECT preamble" });
+    };
+    rawSocket.once("close", onClose);
     const onData = (chunk: Buffer) => {
       preamble = Buffer.concat([preamble, chunk]);
       if (preamble.length > MAX_PREAMBLE) {
         rawSocket.off("data", onData);
+        rawSocket.off("close", onClose);
         resolve({
           ok: false,
           reply: "HTTP/1.1 400 Bad Request\r\n\r\n",
@@ -280,6 +302,7 @@ async function handleInboundConnection(
       const end = preamble.indexOf("\r\n\r\n");
       if (end === -1) return;
       rawSocket.off("data", onData);
+      rawSocket.off("close", onClose);
       const headers = preamble.subarray(0, end).toString("utf-8");
       const remainder = preamble.subarray(end + 4);
       const firstLine = headers.split("\r\n")[0] ?? "";
@@ -321,12 +344,30 @@ async function handleInboundConnection(
   //    per-SNI server so the handshake completes there.
   let clientHello = result.remainder;
   if (clientHello.length === 0 || extractSni(clientHello) === null) {
-    clientHello = await collectUntilSniParses(rawSocket, clientHello);
+    try {
+      clientHello = await collectUntilSniParses(rawSocket, clientHello);
+    } catch (err) {
+      emit({ kind: "tls-error", error: `ClientHello read failed: ${(err as Error).message}` });
+      rawSocket.destroy();
+      return;
+    }
   }
 
   const sniHost = extractSni(clientHello);
   if (!sniHost) {
     emit({ kind: "tls-error", error: "could not extract SNI from ClientHello" });
+    rawSocket.destroy();
+    return;
+  }
+
+  // SSRF floor: refuse to mint a leaf or relay for a blocked target (cloud
+  // IMDS, RFC1918, loopback, link-local, …). The SNI host is controlled by
+  // the untrusted integration MCP code, and the sidecar's egress reaches the
+  // host network + cloud metadata — so this must run BEFORE any cert mint.
+  // Mirrors the credential-proxy SSRF guard; external egress stays open
+  // (the per-integration MITM model intentionally forwards to external hosts).
+  if (isBlockedHost(sniHost)) {
+    emit({ kind: "tls-error", error: `SNI host blocked by SSRF policy: ${sniHost}` });
     rawSocket.destroy();
     return;
   }
@@ -342,7 +383,9 @@ async function handleInboundConnection(
   }
 
   // 4. Relay raw bytes. We have to write the captured ClientHello to
-  //    the upstream first, then pipe both directions.
+  //    the upstream first, then pipe both directions. Disarm the handshake
+  //    read timeout — the tunnel is now legitimately long-lived.
+  rawSocket.setTimeout(0);
   const upstream = netConnect(tlsServer.port, tlsServer.hostname, () => {
     if (clientHello.length > 0) upstream.write(clientHello);
     rawSocket.pipe(upstream);
@@ -380,6 +423,7 @@ async function collectUntilSniParses(rawSocket: Socket, seed: Buffer): Promise<B
     };
     rawSocket.on("data", onData);
     rawSocket.on("error", reject);
+    rawSocket.once("close", () => reject(new Error("socket closed before SNI")));
   });
 }
 
@@ -656,6 +700,14 @@ async function handleInnerRequest(
     action.injectedHeader,
   );
 
+  // SSRF defense-in-depth: the SNI host was checked at CONNECT, but the
+  // connect-login substitution above can rewrite `targetUrl` — re-check the
+  // final URL before egress (mirrors credential-proxy).
+  if (isBlockedUrl(targetUrl)) {
+    emit({ kind: "request-refused", url: targetUrl, reason: "target blocked by SSRF policy" });
+    return new Response("MITM listener: target blocked by SSRF policy", { status: 403 });
+  }
+
   let response: Response;
   try {
     response = await fetchFn(targetUrl, {
@@ -663,6 +715,7 @@ async function handleInnerRequest(
       headers: outboundHeaders,
       ...(body.byteLength > 0 ? { body } : {}),
       redirect: "manual",
+      signal: AbortSignal.timeout(OUTBOUND_TIMEOUT_MS),
     });
   } catch (err) {
     emit({ kind: "upstream-error", url: targetUrl, error: (err as Error).message });
@@ -701,6 +754,7 @@ async function handleInnerRequest(
           headers: outbound2,
           ...(body.byteLength > 0 ? { body } : {}),
           redirect: "manual",
+          signal: AbortSignal.timeout(OUTBOUND_TIMEOUT_MS),
         });
         emit({
           kind: "request-forwarded",

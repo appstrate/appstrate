@@ -21,6 +21,7 @@ import { logger } from "./logger.ts";
 import type { IntegrationSpawnSpec } from "./integrations-boot.ts";
 import {
   buildMitmEnvBlock,
+  isPathSafeForMount,
   registerIntegrationRuntimeAdapter,
   resolveBundleEntry,
   WORKSPACE_ENV_VAR,
@@ -78,7 +79,17 @@ interface DockerExecSubprocess {
 type DockerExecSpawn = (
   cmd: string[],
   opts: { stdin: "ignore"; stdout: "pipe"; stderr: "pipe" },
-) => DockerExecSubprocess;
+) => DockerExecSubprocess & { kill: (signal?: number | string) => void };
+
+/**
+ * Upper bound on any single `docker` CLI invocation. A wedged docker daemon
+ * would otherwise hang integration boot unbounded (no timeout on
+ * `proc.exited`), leaking the subprocess. 60s is generous: `docker cp` of a
+ * large bundle is legitimately slow, but a healthy daemon answers create/
+ * exec/cp well within this. On expiry we kill the subprocess and reject so
+ * the per-spec try/catch in `integrations-boot.ts` records it in `failed[]`.
+ */
+const DOCKER_EXEC_TIMEOUT_MS = 60_000;
 
 async function dockerExec(args: string[]): Promise<string> {
   const bunSpawn = (globalThis as unknown as { Bun?: { spawn?: DockerExecSpawn } }).Bun?.spawn;
@@ -88,15 +99,36 @@ async function dockerExec(args: string[]): Promise<string> {
     stdout: "pipe",
     stderr: "pipe",
   });
-  const [stdout, stderr, code] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
-  if (code !== 0) {
-    throw new Error(`docker ${args[0]} failed (exit ${code}): ${stderr.trim() || stdout.trim()}`);
+  // Race `proc.exited` against a timer. On expiry, kill the subprocess and
+  // reject; on the normal path, clear the timer so it doesn't keep the
+  // process alive.
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timeoutId = setTimeout(() => {
+      proc.kill();
+      reject(
+        new Error(
+          `docker ${args[0]} timed out after ${DOCKER_EXEC_TIMEOUT_MS}ms (daemon unresponsive)`,
+        ),
+      );
+    }, DOCKER_EXEC_TIMEOUT_MS);
+  });
+  try {
+    const [stdout, stderr, code] = await Promise.race([
+      Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+        proc.exited,
+      ]),
+      timeout,
+    ]);
+    if (code !== 0) {
+      throw new Error(`docker ${args[0]} failed (exit ${code}): ${stderr.trim() || stdout.trim()}`);
+    }
+    return stdout.trim();
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
   }
-  return stdout.trim();
 }
 
 function planContainer(spec: IntegrationSpawnSpec, bundleRoot: string): ContainerPlan {
@@ -182,30 +214,13 @@ async function killContainer(containerId: string): Promise<void> {
  *   - `/.docker/`, `/.dockerenv` — Docker-private surfaces.
  */
 export function isContainerPathSafeForMount(containerPath: string): boolean {
-  if (!containerPath.startsWith("/")) return false;
-  // Forbidden top-level dirs.
-  const forbiddenPrefixes = ["/dev/", "/proc/", "/sys/", "/.docker/"];
-  for (const p of forbiddenPrefixes) {
-    if (containerPath === p.replace(/\/$/, "") || containerPath.startsWith(p)) {
-      return false;
-    }
-  }
-  // Forbidden specific files (passwd/shadow/sudoers families).
-  const forbiddenFiles = [
-    "/etc/passwd",
-    "/etc/passwd-",
-    "/etc/shadow",
-    "/etc/shadow-",
-    "/etc/sudoers",
-    "/etc/gshadow",
-    "/etc/group",
-    "/etc/group-",
-    "/.dockerenv",
-  ];
-  if (forbiddenFiles.includes(containerPath)) return false;
-  // Forbidden sudoers subtree.
-  if (containerPath.startsWith("/etc/sudoers.d/")) return false;
-  return true;
+  // Shared floor + Docker-private surfaces: `/.docker/` (prefix) and
+  // `/.dockerenv` (file) on top of the kernel-managed +
+  // privilege-escalation floor enforced by `isPathSafeForMount`.
+  return isPathSafeForMount(containerPath, {
+    extraForbiddenPrefixes: ["/.docker/"],
+    extraForbiddenFiles: ["/.dockerenv"],
+  });
 }
 
 async function materializeFileMountsInContainer(
@@ -217,51 +232,66 @@ async function materializeFileMountsInContainer(
   const tempDir = await mkdtemp(join(tmpdir(), "appstrate-files-"));
   hostTempFiles.push(tempDir);
 
-  for (const [containerPath, entry] of Object.entries(fileMounts)) {
-    // R8a — refuse paths into kernel-managed / privilege-escalation
-    // surfaces. The platform-side validator already strips `..` /
-    // relative paths; this is the second floor.
-    if (!isContainerPathSafeForMount(containerPath)) {
-      throw new Error(
-        `integration-runtime-adapter-docker: refused to mount credential file at unsafe container path ${containerPath}`,
-      );
+  // The temp dir holds decoded (decrypted) credential bytes on the host fs
+  // (not tmpfs). The caller only registers it for cleanup AFTER we return
+  // successfully — so if any `writeFile` / `docker exec` / `docker cp`
+  // throws mid-way, we must remove it here before re-throwing, otherwise
+  // the decrypted bytes leak on disk for good. The happy-path cleanup
+  // contract is unchanged: on success we return the dir and the caller
+  // owns its lifecycle.
+  try {
+    for (const [containerPath, entry] of Object.entries(fileMounts)) {
+      // R8a — refuse paths into kernel-managed / privilege-escalation
+      // surfaces. The platform-side validator already strips `..` /
+      // relative paths; this is the second floor.
+      if (!isContainerPathSafeForMount(containerPath)) {
+        throw new Error(
+          `integration-runtime-adapter-docker: refused to mount credential file at unsafe container path ${containerPath}`,
+        );
+      }
+      // Decode bytes from the base64 wire form.
+      const bytes = Buffer.from(entry.content_b64, "base64");
+      // Random host-side filename — the container path is reconstructed
+      // separately, so we don't leak the manifest path into the host fs.
+      const hostFile = join(tempDir, `f-${hostTempFiles.length}`);
+      await writeFile(hostFile, bytes);
+      // chmod on the host side so the runner reads the file with the
+      // requested mode after `docker cp` (cp preserves perms from source).
+      const modeOctal = parseInt(entry.mode, 8);
+      if (!Number.isNaN(modeOctal)) {
+        await chmod(hostFile, modeOctal);
+      }
+      // R8a — pre-create the parent dir inside the container so `docker cp`
+      // succeeds when the manifest path goes deeper than the runner image's
+      // baked-in tree (e.g. `/etc/appstrate/certs/`). The container is in
+      // `Created` state before `docker start`; `docker exec` against it works
+      // since Docker 1.13 (exec runs `runc exec` which doesn't require the
+      // PID 1 process to be live — it creates a new process namespace
+      // member). We swallow errors (some older runtimes refuse exec on a
+      // not-yet-started container) and fall back to the historical behaviour
+      // where `docker cp` itself errors out — the run boot then fails fast
+      // with a clear message that surfaces in the boot report.
+      const parent = posix.dirname(containerPath);
+      if (parent !== "/" && parent !== ".") {
+        // `mkdir -p` is idempotent and works on every base image
+        // (busybox/alpine/slim). Using `--user 0` would require an
+        // elevated runner; we accept the default user (`node` / `python`
+        // / `nobody` depending on image) — the runner has write
+        // permissions to its own writable layer regardless.
+        await dockerExec(["exec", containerId, "mkdir", "-p", parent]).catch(() => {
+          // Older docker / not-yet-started container: ignore. The
+          // subsequent `docker cp` will surface the missing-parent error
+          // itself if the directory truly doesn't exist.
+        });
+      }
+      await dockerExec(["cp", hostFile, `${containerId}:${containerPath}`]);
     }
-    // Decode bytes from the base64 wire form.
-    const bytes = Buffer.from(entry.content_b64, "base64");
-    // Random host-side filename — the container path is reconstructed
-    // separately, so we don't leak the manifest path into the host fs.
-    const hostFile = join(tempDir, `f-${hostTempFiles.length}`);
-    await writeFile(hostFile, bytes);
-    // chmod on the host side so the runner reads the file with the
-    // requested mode after `docker cp` (cp preserves perms from source).
-    const modeOctal = parseInt(entry.mode, 8);
-    if (!Number.isNaN(modeOctal)) {
-      await chmod(hostFile, modeOctal);
-    }
-    // R8a — pre-create the parent dir inside the container so `docker cp`
-    // succeeds when the manifest path goes deeper than the runner image's
-    // baked-in tree (e.g. `/etc/appstrate/certs/`). The container is in
-    // `Created` state before `docker start`; `docker exec` against it works
-    // since Docker 1.13 (exec runs `runc exec` which doesn't require the
-    // PID 1 process to be live — it creates a new process namespace
-    // member). We swallow errors (some older runtimes refuse exec on a
-    // not-yet-started container) and fall back to the historical behaviour
-    // where `docker cp` itself errors out — the run boot then fails fast
-    // with a clear message that surfaces in the boot report.
-    const parent = posix.dirname(containerPath);
-    if (parent !== "/" && parent !== ".") {
-      // `mkdir -p` is idempotent and works on every base image
-      // (busybox/alpine/slim). Using `--user 0` would require an
-      // elevated runner; we accept the default user (`node` / `python`
-      // / `nobody` depending on image) — the runner has write
-      // permissions to its own writable layer regardless.
-      await dockerExec(["exec", containerId, "mkdir", "-p", parent]).catch(() => {
-        // Older docker / not-yet-started container: ignore. The
-        // subsequent `docker cp` will surface the missing-parent error
-        // itself if the directory truly doesn't exist.
-      });
-    }
-    await dockerExec(["cp", hostFile, `${containerId}:${containerPath}`]);
+  } catch (err) {
+    // Failed before returning the dir to the caller's collector — wipe the
+    // decrypted credential bytes ourselves, then re-throw so the per-spec
+    // try/catch in `integrations-boot.ts` records the failure.
+    await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    throw err;
   }
 
   return hostTempFiles;

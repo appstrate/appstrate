@@ -48,6 +48,7 @@ import {
   readPem as readPemExec,
   resolveBunSpawn as resolveBunSpawnExec,
   secondsToDaysCeil,
+  mintLeafCert,
   type OpensslSpawnFn,
   type OpensslExecError,
 } from "./openssl-exec.ts";
@@ -125,9 +126,7 @@ export function createOpensslCertGenerator(options: OpensslGeneratorOptions = {}
     const caKeyPath = path.join(session, "ca.key");
     const caCertPath = path.join(session, "ca.crt");
     const serverKeyPath = path.join(session, "server.key");
-    const serverCsrPath = path.join(session, "server.csr");
     const serverCertPath = path.join(session, "server.crt");
-    const extfilePath = path.join(session, "server.ext");
     const serialPath = path.join(session, "ca.srl");
 
     let cleanedUp = false;
@@ -165,59 +164,25 @@ export function createOpensslCertGenerator(options: OpensslGeneratorOptions = {}
         caCertPath,
       ]);
 
-      // ─── Leaf key + CSR ───
-      await runOpenssl(spawn, opensslBin, ["genrsa", "-out", serverKeyPath, "2048"]);
-      await runOpenssl(spawn, opensslBin, [
-        "req",
-        "-new",
-        "-key",
-        serverKeyPath,
-        "-subj",
-        `/CN=${req.serverCommonName}`,
-        "-out",
-        serverCsrPath,
-      ]);
-
-      // ─── Ext file for the leaf — AKI is mandatory ───
-      const sanLines = buildSanLine(req.serverCommonName, req.serverSans ?? []);
-      const extfile = [
-        "authorityKeyIdentifier=keyid,issuer",
-        "subjectKeyIdentifier=hash",
-        "basicConstraints=CA:FALSE",
-        "keyUsage=critical,digitalSignature,keyEncipherment",
-        "extendedKeyUsage=serverAuth",
-        `subjectAltName=${sanLines}`,
-        "",
-      ].join("\n");
-      await fs.writeFile(extfilePath, extfile, { encoding: "utf-8", mode: 0o600 });
-
-      // ─── Sign the leaf ───
-      await runOpenssl(spawn, opensslBin, [
-        "x509",
-        "-req",
-        "-in",
-        serverCsrPath,
-        "-CA",
+      // ─── Leaf key + CSR + ext file + sign (AKI mandatory) ───
+      const { keyPem: serverKeyPem, certPem: serverCertPem } = await mintLeafCert({
+        spawn,
+        bin: opensslBin,
+        workDir: session,
+        cn: req.serverCommonName,
+        sans: [req.serverCommonName, ...(req.serverSans ?? [])],
+        days,
         caCertPath,
-        "-CAkey",
         caKeyPath,
-        "-CAcreateserial",
-        "-CAserial",
-        serialPath,
-        "-days",
-        String(days),
-        "-sha256",
-        "-extfile",
-        extfilePath,
-        "-out",
-        serverCertPath,
-      ]);
+        serial: { mode: "createserial", serialPath },
+        keyPath: serverKeyPath,
+        certPath: serverCertPath,
+        makeError,
+      });
 
-      const [caCertPem, caKeyPem, serverCertPem, serverKeyPem] = await Promise.all([
+      const [caCertPem, caKeyPem] = await Promise.all([
         readPem(caCertPath, "caCertPem"),
         readPem(caKeyPath, "caKeyPem"),
-        readPem(serverCertPath, "serverCertPem"),
-        readPem(serverKeyPath, "serverKeyPem"),
       ]);
 
       return { caCertPem, caKeyPem, serverCertPem, serverKeyPem };
@@ -225,28 +190,4 @@ export function createOpensslCertGenerator(options: OpensslGeneratorOptions = {}
       await cleanup();
     }
   };
-}
-
-// ─────────────────────────────────────────────
-// Internals
-// ─────────────────────────────────────────────
-
-/**
- * Build the SAN line passed to openssl. SANs are deduped (case-insensitive
- * on the DNS portion) so the leaf cert stays compact.
- */
-function buildSanLine(cn: string, sans: readonly string[]): string {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  const push = (host: string) => {
-    const trimmed = host.trim();
-    if (!trimmed) return;
-    const k = trimmed.toLowerCase();
-    if (seen.has(k)) return;
-    seen.add(k);
-    out.push(`DNS:${trimmed}`);
-  };
-  push(cn);
-  for (const s of sans) push(s);
-  return out.join(",");
 }

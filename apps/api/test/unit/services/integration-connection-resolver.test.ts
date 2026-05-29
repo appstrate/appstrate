@@ -25,11 +25,10 @@ import {
   type IntegrationRequirement,
 } from "../../../src/services/integration-connection-resolver.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
-import type { InferSelectModel } from "drizzle-orm";
-import type { integrationConnections, integrationPins } from "@appstrate/db/schema";
-
-type ConnectionRow = InferSelectModel<typeof integrationConnections>;
-type PinRow = InferSelectModel<typeof integrationPins>;
+import type {
+  IntegrationConnectionRow as ConnectionRow,
+  IntegrationPinRow as PinRow,
+} from "@appstrate/db/schema";
 
 // ─────────────────────────── Fixtures ─────────────────────────────────────────
 
