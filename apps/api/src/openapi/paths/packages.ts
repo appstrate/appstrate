@@ -101,7 +101,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Import a package from ZIP",
       description:
-        "Import a package (agent, skill, or integration) from a ZIP file. The ZIP must contain a valid manifest.json. The package scope does not need to match your organization — cross-org packages are imported read-only (fork to modify). Rate-limited to 10 requests/minute. Returns 409 if the target package has unpublished draft changes — re-submit with ?force=true to overwrite.",
+        "Import a package (agent, skill, or integration) from a ZIP file. The ZIP must contain a valid manifest.json. The package scope does not need to match your organization; imported packages are owned by your org and remain editable regardless of their scope name. Rate-limited to 10 requests/minute. Returns 409 if the target package has unpublished draft changes — re-submit with ?force=true to overwrite.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -216,7 +216,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Import a package from a GitHub URL",
       description:
-        "Import a package (agent, skill, or integration) from a public GitHub repository URL. The URL must point to a directory containing a valid manifest.json. The package scope does not need to match your organization — cross-org packages are imported read-only (fork to modify). Rate-limited to 10 requests/minute.",
+        "Import a package (agent, skill, or integration) from a public GitHub repository URL. The URL must point to a directory containing a valid manifest.json. The package scope does not need to match your organization; imported packages are owned by your org and remain editable regardless of their scope name. Rate-limited to 10 requests/minute.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -1370,7 +1370,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Fork a package to your organization",
       description:
-        "Create an editable copy of a non-owned package under the current organization's scope. The fork is based on the latest published version of the source package — the version manifest, content, and ZIP are copied. A local published version is automatically created. Returns 400 if the source has no published version.",
+        "Create a copy of a package the org does not already own (e.g. a read-only system package) under the current organization's scope. Org-owned packages are editable in place regardless of their scope name, so forking is only needed for packages the org does not own. The fork is based on the latest published version of the source package — the version manifest, content, and ZIP are copied. A local published version is automatically created. Returns 400 if the source has no published version.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },

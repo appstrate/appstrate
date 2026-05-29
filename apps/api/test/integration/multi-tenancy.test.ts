@@ -52,7 +52,7 @@ describe("Multi-tenancy isolation", () => {
         }),
       });
 
-      // 403: requireOwnedPackage rejects scope mismatch before handler runs
+      // 403: requirePackageInOrg rejects cross-org DB ownership before handler runs
       expect([403, 404]).toContain(res.status);
     });
 
@@ -64,7 +64,7 @@ describe("Multi-tenancy isolation", () => {
         headers: authHeaders(orgB),
       });
 
-      // 403: requireOwnedPackage rejects scope mismatch before handler runs
+      // 403: requirePackageInOrg rejects cross-org DB ownership before handler runs
       expect([403, 404]).toContain(res.status);
     });
 
@@ -203,7 +203,7 @@ describe("Multi-tenancy isolation", () => {
         headers: authHeaders(orgB),
       });
 
-      // 403 (scope mismatch via requireOwnedPackage) or 404
+      // 403 (cross-org DB ownership via requirePackageInOrg) or 404
       expect([403, 404]).toContain(res.status);
     });
   });

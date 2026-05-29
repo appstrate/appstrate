@@ -25,6 +25,7 @@
 import { and, asc, count, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packagePersistence } from "@appstrate/db/schema";
+import type { PackagePersistenceRow } from "@appstrate/db/schema";
 import type { Actor } from "../../lib/actor.ts";
 import { packagePersistenceContentSchema } from "../../lib/jsonb-schemas.ts";
 
@@ -69,26 +70,17 @@ export type PersistenceScope =
   | { type: "end_user"; id: string }
   | { type: "shared" };
 
-export interface Memory {
-  id: number;
-  content: unknown;
-  runId: string | null;
-  createdAt: Date;
-  pinned: boolean;
-  actorType: "user" | "end_user" | "shared";
-  actorId: string | null;
-}
+export type Memory = Pick<
+  PackagePersistenceRow,
+  "id" | "content" | "runId" | "createdAt" | "pinned" | "actorType" | "actorId"
+>;
 
-export interface PinnedSlotRow {
-  id: number;
-  key: string;
-  content: unknown;
-  runId: string | null;
-  actorType: "user" | "end_user" | "shared";
-  actorId: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-}
+// `key` is narrowed to non-null: the pinned-slot query filters `key IS NOT NULL`
+// (archive rows carry `key: null`), so the row type's nullable `key` is replaced.
+export type PinnedSlotRow = Pick<
+  PackagePersistenceRow,
+  "id" | "content" | "runId" | "actorType" | "actorId" | "createdAt" | "updatedAt"
+> & { key: string };
 
 // --- Actor ↔ storage translation --------------------------------------------
 

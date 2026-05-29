@@ -187,6 +187,56 @@ export function resolveBundleEntry(bundleRoot: string, entryPoint: string): stri
 }
 
 /**
+ * R8a — shared safe-path floor for `delivery.files` credential mounts,
+ * used by every spawning adapter (process, docker, future VM backends).
+ *
+ * Refuses kernel-managed surfaces (`/dev`, `/proc`, `/sys`) and the
+ * well-known privilege-escalation files (the passwd/shadow/sudoers/group
+ * families + the `/etc/sudoers.d/` subtree). The platform-side resolver
+ * (`isSafeDeliveryFilePath`) already strips relative paths + `..`
+ * traversal + NUL bytes + pure root before any of this runs; this is a
+ * second floor enforced at spawn time.
+ *
+ * Adapters extend the floor with their own surfaces via `extraForbidden*`
+ * — the docker adapter adds `/.docker/` (prefix) and `/.dockerenv` (file)
+ * for Docker-private paths. Matching semantics are preserved exactly:
+ * a prefix matches when the path equals the prefix without its trailing
+ * slash OR starts with the prefix; a file matches on exact equality.
+ */
+export function isPathSafeForMount(
+  path: string,
+  {
+    extraForbiddenPrefixes = [],
+    extraForbiddenFiles = [],
+  }: { extraForbiddenPrefixes?: string[]; extraForbiddenFiles?: string[] } = {},
+): boolean {
+  if (!path.startsWith("/")) return false;
+  // Forbidden top-level dirs (shared floor + adapter extras).
+  const forbiddenPrefixes = ["/dev/", "/proc/", "/sys/", ...extraForbiddenPrefixes];
+  for (const p of forbiddenPrefixes) {
+    if (path === p.replace(/\/$/, "") || path.startsWith(p)) {
+      return false;
+    }
+  }
+  // Forbidden specific files (passwd/shadow/sudoers/group families + extras).
+  const forbiddenFiles = [
+    "/etc/passwd",
+    "/etc/passwd-",
+    "/etc/shadow",
+    "/etc/shadow-",
+    "/etc/sudoers",
+    "/etc/gshadow",
+    "/etc/group",
+    "/etc/group-",
+    ...extraForbiddenFiles,
+  ];
+  if (forbiddenFiles.includes(path)) return false;
+  // Forbidden sudoers subtree.
+  if (path.startsWith("/etc/sudoers.d/")) return false;
+  return true;
+}
+
+/**
  * Build the standard MITM-proxy env block. Adapters call this with the
  * proxy URL the runner targets and the path the CA cert lands at inside
  * the runner's filesystem (the path differs by adapter — Docker copies

@@ -22,6 +22,7 @@ import { logger } from "./logger.ts";
 import type { IntegrationSpawnSpec } from "./integrations-boot.ts";
 import {
   buildMitmEnvBlock,
+  isPathSafeForMount,
   registerIntegrationRuntimeAdapter,
   resolveBundleEntry,
   WORKSPACE_ENV_VAR,
@@ -115,26 +116,10 @@ function planSubprocess(spec: IntegrationSpawnSpec, bundleRoot: string): Subproc
  * host configs.
  */
 export function isHostPathSafeForMount(hostPath: string): boolean {
-  if (!hostPath.startsWith("/")) return false;
-  const forbiddenPrefixes = ["/dev/", "/proc/", "/sys/"];
-  for (const p of forbiddenPrefixes) {
-    if (hostPath === p.replace(/\/$/, "") || hostPath.startsWith(p)) {
-      return false;
-    }
-  }
-  const forbiddenFiles = [
-    "/etc/passwd",
-    "/etc/passwd-",
-    "/etc/shadow",
-    "/etc/shadow-",
-    "/etc/sudoers",
-    "/etc/gshadow",
-    "/etc/group",
-    "/etc/group-",
-  ];
-  if (forbiddenFiles.includes(hostPath)) return false;
-  if (hostPath.startsWith("/etc/sudoers.d/")) return false;
-  return true;
+  // Process adapter uses the shared floor with no extra surfaces — the
+  // subprocess shares the host fs, so only the kernel-managed +
+  // privilege-escalation floor applies.
+  return isPathSafeForMount(hostPath);
 }
 
 export async function materializeFileMountsOnHost(

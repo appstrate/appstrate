@@ -31,9 +31,9 @@ export function PreferencesLayout() {
               label: t("preferences.tabDevices"),
             },
             {
-              to: "/preferences/connectors",
+              to: "/preferences/connections",
               icon: Plug,
-              label: t("preferences.tabConnectors"),
+              label: t("preferences.tabConnections"),
             },
           ],
         },

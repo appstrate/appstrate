@@ -25,13 +25,13 @@ function statusBadge(t: ReturnType<typeof useTranslation>["t"], conn: MeConnecti
   if (conn.needs_reconnection) {
     return (
       <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-px text-[0.65rem] text-amber-600">
-        {t("connectors.statusNeedsReconnection")}
+        {t("connections.statusNeedsReconnection")}
       </span>
     );
   }
   return (
     <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-px text-[0.65rem] text-emerald-700">
-      {t("connectors.statusConnected")}
+      {t("connections.statusConnected")}
     </span>
   );
 }
@@ -62,9 +62,9 @@ function LabelEditor({
           setEditing(true);
         }}
         className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 text-xs"
-        title={t("connectors.editLabel")}
+        title={t("connections.editLabel")}
       >
-        <span>{current ?? t("connectors.unnamed")}</span>
+        <span>{current ?? t("connections.unnamed")}</span>
         <Pencil className="h-3 w-3" />
       </button>
     );
@@ -88,7 +88,7 @@ function LabelEditor({
         }}
         className="h-7 w-40 text-xs"
         disabled={saving}
-        placeholder={t("connectors.labelPlaceholder")}
+        placeholder={t("connections.labelPlaceholder")}
       />
       <Button size="icon" variant="ghost" className="h-6 w-6" onClick={commit} disabled={saving}>
         <Check className="h-3 w-3" />
@@ -132,14 +132,14 @@ function ConnectionRow({
   // Identity (account email / profile name)
   if (conn.identity) {
     rows.push({
-      label: t("connectors.account"),
+      label: t("connections.account"),
       value: conn.identity,
     });
   }
 
   // Org + application
   rows.push({
-    label: t("connectors.orgLabel"),
+    label: t("connections.orgLabel"),
     value: (
       <>
         <span>{conn.org.name}</span>
@@ -153,24 +153,24 @@ function ConnectionRow({
   // one connection per agent?" confusion.
   if (typeof conn.reused_by_agents === "number") {
     rows.push({
-      label: t("connectors.reusedByLabel"),
+      label: t("connections.reusedByLabel"),
       value:
         conn.reused_by_agents === 0
-          ? t("connectors.reusedByNone")
-          : t("connectors.reusedByCount", { count: conn.reused_by_agents }),
+          ? t("connections.reusedByNone")
+          : t("connections.reusedByCount", { count: conn.reused_by_agents }),
     });
   }
 
   // Connected at
   rows.push({
-    label: t("connectors.connectedAtLabel"),
+    label: t("connections.connectedAtLabel"),
     value: conn.connected_at ? formatDateField(conn.connected_at) : "—",
   });
 
   // Scopes
   if (conn.scopes_granted.length > 0) {
     rows.push({
-      label: t("connectors.scopesLabel"),
+      label: t("connections.scopesLabel"),
       value: conn.scopes_granted.join(", "),
     });
   }
@@ -184,13 +184,13 @@ function ConnectionRow({
             <LabelEditor current={conn.label} saving={updating} onSave={onUpdateLabel} />
           ) : (
             <span className="text-foreground text-sm font-medium">
-              {conn.label ?? conn.identity ?? t("connectors.unnamed")}
+              {conn.label ?? conn.identity ?? t("connections.unnamed")}
             </span>
           )}
           {statusBadge(t, conn)}
           {conn.shared_with_org && (
             <span className="rounded-full border border-blue-500/40 bg-blue-500/10 px-2 py-px text-[0.65rem] text-blue-700">
-              {t("connectors.sharedBadge")}
+              {t("connections.sharedBadge")}
             </span>
           )}
         </div>
@@ -214,7 +214,7 @@ function ConnectionRow({
               disabled={updating}
               onChange={(e) => onToggleShare(e.target.checked)}
             />
-            <span>{t("connectors.shareWithOrgLabel")}</span>
+            <span>{t("connections.shareWithOrgLabel")}</span>
           </label>
         )}
       </div>
@@ -263,11 +263,11 @@ function SourceGroupCard({
             <div className="flex items-center gap-2">
               <h3 className="text-[0.95rem] font-semibold">{group.display_name}</h3>
               <span className="text-muted-foreground border-border rounded-full border bg-transparent px-2 py-px text-[0.65rem] tracking-wide uppercase">
-                {t("connectors.kindIntegration")}
+                {t("connections.kindIntegration")}
               </span>
             </div>
             <span className="text-muted-foreground text-sm">
-              {t("connectors.connectionCount", { count: group.total_connections })}
+              {t("connections.connectionCount", { count: group.total_connections })}
             </span>
           </div>
         </div>
@@ -296,7 +296,7 @@ function SourceGroupCard({
 // Page
 // ─────────────────────────────────────────────
 
-export function PreferencesConnectorsPage() {
+export function PreferencesConnectionsPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { data: groups, isLoading } = useMyConnections();
 
@@ -337,30 +337,30 @@ export function PreferencesConnectorsPage() {
     <>
       <div className="mb-4 flex items-center justify-between">
         <div className="text-muted-foreground text-sm font-medium">
-          {t("connectors.myConnections")}
+          {t("connections.myConnections")}
         </div>
         <span className="text-muted-foreground text-xs">
-          {t("connectors.total_connections", { count: totalConnections })}
+          {t("connections.total_connections", { count: totalConnections })}
         </span>
       </div>
 
       <div className="border-border bg-card mb-4 rounded-lg border p-5">
         <p className="text-muted-foreground text-sm">
-          {t("connectors.descriptionUnified")}{" "}
+          {t("connections.descriptionUnified")}{" "}
           <Link to="/integrations" className="text-primary text-sm no-underline hover:underline">
-            {t("connectors.connectMore")}
+            {t("connections.connectMore")}
           </Link>
         </p>
       </div>
 
       {(groups ?? []).length === 0 ? (
         <EmptyState
-          message={t("connectors.noConnections")}
-          hint={t("connectors.noConnectionsHint")}
+          message={t("connections.noConnections")}
+          hint={t("connections.noConnectionsHint")}
           icon={Unplug}
         >
           <Link to="/integrations">
-            <Button variant="outline">{t("connectors.goToConnectors")}</Button>
+            <Button variant="outline">{t("connections.goToConnections")}</Button>
           </Link>
         </EmptyState>
       ) : (
@@ -419,7 +419,7 @@ export function PreferencesConnectorsPage() {
         title={t("btn.confirm", { ns: "common" })}
         description={(() => {
           if (!confirmState) return "";
-          const base = t("connectors.deleteConfirm", {
+          const base = t("connections.deleteConfirm", {
             name: confirmState.displayName,
             account: confirmState.identity ?? "",
           });
@@ -427,7 +427,7 @@ export function PreferencesConnectorsPage() {
           // intentionally choose between deleting (here) vs changing the
           // agent-side pick (on the agent page).
           if (confirmState.reused_by_agents > 0) {
-            return `${base}\n\n${t("connectors.deleteConfirmImpact", {
+            return `${base}\n\n${t("connections.deleteConfirmImpact", {
               count: confirmState.reused_by_agents,
             })}`;
           }

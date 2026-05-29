@@ -37,7 +37,6 @@ interface PackageActionsDropdownProps {
   manifest?: Record<string, unknown>;
   companionFile?: { name: string; content: string };
   isOwned: boolean;
-  isImported?: boolean;
   isBuiltIn: boolean;
   isHistoricalVersion: boolean;
   downloadVersion?: string;
@@ -79,7 +78,6 @@ export function PackageActionsDropdown({
   manifest,
   companionFile,
   isOwned,
-  isImported,
   isBuiltIn,
   isHistoricalVersion,
   downloadVersion,
@@ -182,7 +180,7 @@ export function PackageActionsDropdown({
             </DropdownMenuItem>
           )}
 
-          {/* ── Fork (non-owned packages, including system) ── */}
+          {/* ── Fork — only read-only system packages (org-owned ones are edited directly) ── */}
           {isMember && !isOwned && onFork && (
             <DropdownMenuItem onSelect={onFork}>
               <GitFork size={14} />
@@ -223,50 +221,45 @@ export function PackageActionsDropdown({
           )}
 
           {/* ── Deactivate / Uninstall / Delete ── */}
-          {isAdmin &&
-            (canDeactivate || canUninstall || (!isBuiltIn && (isOwned || isImported))) && (
-              <>
-                <DropdownMenuSeparator />
-                {canDeactivate && onDeactivate && (
-                  <DropdownMenuItem onSelect={onDeactivate} disabled={deactivatePending}>
-                    <PowerOff size={14} />
-                    {t("integrations.btn.deactivate", { ns: "settings" })}
-                  </DropdownMenuItem>
-                )}
-                {canUninstall && onUninstall && (
-                  <DropdownMenuItem
-                    onSelect={onUninstall}
-                    className="text-destructive focus:text-destructive"
-                  >
-                    <PackageMinus size={14} />
-                    {t("packages.uninstall", { ns: "settings" })}
-                  </DropdownMenuItem>
-                )}
-                {!isBuiltIn && (isOwned || isImported) && isAgent && onDeleteAgent && (
-                  <DropdownMenuItem
-                    onSelect={onDeleteAgent}
-                    disabled={runningRuns > 0}
-                    className="text-destructive focus:text-destructive"
-                  >
-                    <Trash2 size={14} />
-                    {t("btn.delete")}
-                  </DropdownMenuItem>
-                )}
-                {!isBuiltIn &&
-                  (isOwned || isImported) &&
-                  !isAgent &&
-                  canDeletePackage &&
-                  onDeletePackage && (
-                    <DropdownMenuItem
-                      onSelect={onDeletePackage}
-                      className="text-destructive focus:text-destructive"
-                    >
-                      <Trash2 size={14} />
-                      {t("btn.delete")}
-                    </DropdownMenuItem>
-                  )}
-              </>
-            )}
+          {isAdmin && (canDeactivate || canUninstall || (!isBuiltIn && isOwned)) && (
+            <>
+              <DropdownMenuSeparator />
+              {canDeactivate && onDeactivate && (
+                <DropdownMenuItem onSelect={onDeactivate} disabled={deactivatePending}>
+                  <PowerOff size={14} />
+                  {t("integrations.btn.deactivate", { ns: "settings" })}
+                </DropdownMenuItem>
+              )}
+              {canUninstall && onUninstall && (
+                <DropdownMenuItem
+                  onSelect={onUninstall}
+                  className="text-destructive focus:text-destructive"
+                >
+                  <PackageMinus size={14} />
+                  {t("packages.uninstall", { ns: "settings" })}
+                </DropdownMenuItem>
+              )}
+              {!isBuiltIn && isOwned && isAgent && onDeleteAgent && (
+                <DropdownMenuItem
+                  onSelect={onDeleteAgent}
+                  disabled={runningRuns > 0}
+                  className="text-destructive focus:text-destructive"
+                >
+                  <Trash2 size={14} />
+                  {t("btn.delete")}
+                </DropdownMenuItem>
+              )}
+              {!isBuiltIn && isOwned && !isAgent && canDeletePackage && onDeletePackage && (
+                <DropdownMenuItem
+                  onSelect={onDeletePackage}
+                  className="text-destructive focus:text-destructive"
+                >
+                  <Trash2 size={14} />
+                  {t("btn.delete")}
+                </DropdownMenuItem>
+              )}
+            </>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
 

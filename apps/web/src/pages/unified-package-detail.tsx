@@ -16,7 +16,6 @@ import {
 } from "../hooks/use-packages";
 import type { AgentDetail, OrgPackageItemDetail, PackageType } from "@appstrate/shared-types";
 import type { JSONSchemaObject } from "@appstrate/core/form";
-import { usePackageOwnership } from "../hooks/use-org";
 import { usePermissions } from "../hooks/use-permissions";
 import { usePackageInstallState, useTogglePackageInstall } from "../hooks/use-library";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
@@ -39,12 +38,12 @@ import { ForkPackageModal } from "../components/fork-package-modal";
 // Agent-specific components
 import { AgentActions } from "../components/package-detail/agent-actions";
 import {
-  AgentConnectorsTab,
   AgentRunsTab,
   AgentSchedulesTab,
   AgentMemoryTab,
   AgentApiTab,
 } from "../components/package-detail/agent-tabs";
+import { AgentConnectionsSection } from "../components/package-detail/agent-connections-section";
 import { AgentConfigurationTab } from "../components/package-detail/agent-configuration-tab";
 import { RunAgentButton } from "../components/run-agent-button";
 import { PackageCard } from "../components/package-card";
@@ -53,7 +52,7 @@ import { useModels, useAgentModel } from "../hooks/use-models";
 import { useProxies } from "../hooks/use-proxies";
 
 type DetailTab =
-  | "connectors"
+  | "connections"
   | "runs"
   | "configuration"
   | "schedules"
@@ -138,7 +137,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     version: versionParam,
   } = useParams<{ scope: string; name: string; version?: string }>();
   const packageId = `${scope}/${name}`;
-  const { isOwned } = usePackageOwnership(packageId);
   const { isAdmin } = usePermissions();
   const isVersionView = !!versionParam;
 
@@ -162,6 +160,10 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const hasUnarchivedChanges =
     agentDetail?.has_unarchived_changes ?? pkgDetail?.has_unarchived_changes;
   const forkedFrom = agentDetail?.forked_from ?? pkgDetail?.forked_from ?? null;
+  // Mutability is gated on whether the org owns the package row, not on its scope name.
+  // Every package returned here is already org-scoped server-side, so anything that is not a
+  // read-only system package is freely editable/deletable (registry checks happen at publish).
+  const isOwned = source !== "system";
 
   const { data: versionDetail, isLoading: versionLoading } = useVersionDetail(
     type,
@@ -198,7 +200,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   // ── State ──
   const allValidTabs: DetailTab[] = [
-    "connectors",
+    "connections",
     "runs",
     "configuration",
     "schedules",
@@ -295,13 +297,12 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   // ── Render ──
   const isBuiltIn = source === "system";
-  const isImported = !!detail && !isOwned && !isBuiltIn;
 
   // Determine available tabs based on type
 
   const agentTabs: Array<{ id: DetailTab; label: string }> = [
     { id: "runs", label: t("detail.tabRuns") },
-    { id: "connectors", label: t("detail.tabConnectors") },
+    { id: "connections", label: t("detail.tabConnections") },
     ...(effectiveShowConfigTab
       ? [{ id: "configuration" as DetailTab, label: t("detail.tabConfiguration") }]
       : []),
@@ -356,7 +357,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
               }
               companionFile={companionFile}
               isOwned={isOwned}
-              isImported={isImported}
               isHistoricalVersion={isHistoricalVersion}
               downloadVersion={downloadVersion}
               downloadPackage={downloadPackage}
@@ -376,7 +376,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                 }
                 companionFile={companionFile}
                 isOwned={isOwned}
-                isImported={isImported}
                 isBuiltIn={isBuiltIn}
                 isHistoricalVersion={isHistoricalVersion}
                 downloadVersion={downloadVersion}
@@ -485,8 +484,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           isHistorical={isHistoricalVersion}
         />
       )}
-      {type === "agent" && tab === "connectors" && (
-        <AgentConnectorsTab packageId={packageId} detail={agentDetail} />
+      {type === "agent" && tab === "connections" && agentDetail && (
+        <AgentConnectionsSection packageId={packageId} detail={agentDetail} />
       )}
       {type === "agent" && tab === "runs" && (
         <AgentRunsTab

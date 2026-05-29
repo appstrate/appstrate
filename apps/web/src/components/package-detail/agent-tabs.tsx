@@ -16,7 +16,6 @@ import {
   type JSONSchema7,
 } from "@appstrate/core/form";
 import { useOrg } from "../../hooks/use-org";
-import { AgentConnectionsSection } from "./agent-connections-section";
 import { RunList } from "../run-list";
 import { ScheduleCard } from "../schedule-card";
 import { RunAgentButton } from "../run-agent-button";
@@ -90,17 +89,6 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
       )}
     </>
   );
-}
-
-export function AgentConnectorsTab({
-  packageId,
-  detail,
-}: {
-  packageId: string;
-  detail?: import("@appstrate/shared-types").AgentDetail;
-}) {
-  if (!detail) return null;
-  return <AgentConnectionsSection packageId={packageId} detail={detail} />;
 }
 
 export function AgentMemoryTab({ packageId }: { packageId: string }) {

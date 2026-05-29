@@ -47,7 +47,6 @@ import { ForkPackageModal } from "../components/fork-package-modal";
 import { ConfirmModal } from "../components/confirm-modal";
 import { usePermissions } from "../hooks/use-permissions";
 import { usePackageDetail, useDeletePackage, usePackageDownload } from "../hooks/use-packages";
-import { usePackageOwnership } from "../hooks/use-org";
 import {
   useIntegrationDetail,
   useActivateIntegration,
@@ -86,17 +85,10 @@ function OAuthClientForm({
   packageId,
   authKey,
   authDecl,
-  legacyCallbackUrlHint,
 }: {
   packageId: string;
   authKey: string;
   authDecl?: IntegrationManifestAuth;
-  /**
-   * Deprecated top-level `setup_guide.callback_url_hint` fallback. AFPS §7.10
-   * moved this hint under `auths.<key>.callback_url_hint`, but consumers MUST
-   * keep accepting the old top-level form for manifests in the wild.
-   */
-  legacyCallbackUrlHint?: string;
 }) {
   const { t } = useTranslation("settings");
   const { data: client, isLoading } = useIntegrationOAuthClient(packageId, authKey);
@@ -205,13 +197,10 @@ function OAuthClientForm({
                 onChange={(e) => setRedirectUri(e.target.value)}
                 placeholder={client?.redirect_uri ?? ""}
               />
-              {/* AFPS §7.10 — surface `auths.<key>.callback_url_hint`,
-                  falling back to the deprecated top-level
-                  `setup_guide.callback_url_hint` (consumers MUST keep
-                  accepting the legacy form for manifests in the wild).
+              {/* AFPS §7.10 — surface `auths.<key>.callback_url_hint`.
                   Read-only display; the actual redirectUri value lives in
                   the input above. */}
-              {(authDecl?.callback_url_hint ?? legacyCallbackUrlHint) && (
+              {authDecl?.callback_url_hint && (
                 <p
                   className="text-muted-foreground text-[0.7rem]"
                   data-testid={`callback-url-hint-${authKey}`}
@@ -219,9 +208,7 @@ function OAuthClientForm({
                   <span className="font-semibold">
                     {t("integration.oauthClient.callbackUrlHint")}:
                   </span>{" "}
-                  <span className="font-mono">
-                    {authDecl?.callback_url_hint ?? legacyCallbackUrlHint}
-                  </span>
+                  <span className="font-mono">{authDecl.callback_url_hint}</span>
                 </p>
               )}
             </div>
@@ -295,14 +282,11 @@ function AuthSection({
   status,
   authDecl,
   isAdmin,
-  legacyCallbackUrlHint,
 }: {
   packageId: string;
   status: IntegrationAuthStatus;
   authDecl: IntegrationManifestAuth;
   isAdmin: boolean;
-  /** Deprecated `setup_guide.callback_url_hint` fallback per AFPS §7.10. */
-  legacyCallbackUrlHint?: string;
 }) {
   const { t } = useTranslation("settings");
   const isOAuth = status.type === "oauth2";
@@ -354,12 +338,7 @@ function AuthSection({
           a fix that's right here, not in another tab. */}
       {isOAuth && isAdmin && (
         <div className="mb-3">
-          <OAuthClientForm
-            packageId={packageId}
-            authKey={status.auth_key}
-            authDecl={authDecl}
-            legacyCallbackUrlHint={legacyCallbackUrlHint}
-          />
+          <OAuthClientForm packageId={packageId} authKey={status.auth_key} authDecl={authDecl} />
         </div>
       )}
 
@@ -1127,7 +1106,6 @@ export function IntegrationDetailPage() {
   const { data: detail, isLoading, error } = useIntegrationDetail(packageId || undefined);
   const { data: pkg } = usePackageDetail("integration", packageId || undefined);
   const { data: integrations } = useIntegrations();
-  const { isOwned } = usePackageOwnership(packageId || undefined);
   const activate = useActivateIntegration();
   const deactivate = useDeactivateIntegration();
   const deletePkg = useDeletePackage("integration");
@@ -1148,7 +1126,8 @@ export function IntegrationDetailPage() {
   const source = pkg?.source ?? summary?.source ?? "local";
   const version = pkg?.version ?? m.version;
   const isBuiltIn = source === "system";
-  const isImported = !isBuiltIn && !isOwned;
+  // Org-owned packages are editable regardless of scope name; only system packages are read-only.
+  const isOwned = !isBuiltIn;
   const onActivate = () => activate.mutate(packageId);
 
   return (
@@ -1191,7 +1170,6 @@ export function IntegrationDetailPage() {
               type="integration"
               manifest={m as unknown as Record<string, unknown>}
               isOwned={isOwned}
-              isImported={isImported}
               isBuiltIn={isBuiltIn}
               isHistoricalVersion={false}
               downloadVersion={version}
@@ -1279,15 +1257,6 @@ export function IntegrationDetailPage() {
                       status={authStatus}
                       authDecl={declared}
                       isAdmin={isAdmin}
-                      legacyCallbackUrlHint={
-                        // AFPS §7.10 — legacy top-level fallback. Consumers MUST
-                        // keep accepting the deprecated form for old manifests.
-                        (
-                          m as {
-                            setup_guide?: { callback_url_hint?: string };
-                          }
-                        ).setup_guide?.callback_url_hint
-                      }
                     />
                   );
                 })

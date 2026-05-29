@@ -640,8 +640,11 @@ export interface StoreConnectionInput {
  *
  *   - `insert`       — first acquisition (OAuth2 callback / fields submit).
  *   - `update-owned` — user-initiated reconnect / scope upgrade. Owner-scoped
- *                      WHERE (id + applicationId + actor identity); throws
- *                      `notFound` when the row isn't the caller's.
+ *                      WHERE (id + applicationId + actor identity + the
+ *                      (packageId, authKey) the credentials belong to); throws
+ *                      `notFound` when the row isn't the caller's OR belongs to
+ *                      a different integration/auth (a caller-supplied id can
+ *                      never overwrite an unrelated connection of theirs).
  *   - `update-by-id` — system write-back (proactive token refresh). Keyed by
  *                      id only — the id came from an already-authorized
  *                      resolution — and silently no-ops when the row is gone
@@ -649,7 +652,16 @@ export interface StoreConnectionInput {
  */
 export type PersistTarget =
   | { kind: "insert"; scope: AppScope; actor: Actor }
-  | { kind: "update-owned"; scope: AppScope; actor: Actor; connectionId: string }
+  | {
+      kind: "update-owned";
+      scope: AppScope;
+      actor: Actor;
+      connectionId: string;
+      /** The (packageId, authKey) the credentials belong to — re-stamped into
+       * the WHERE so a mismatched `connectionId` matches zero rows. */
+      packageId: string;
+      authKey: string;
+    }
   | { kind: "update-by-id"; connectionId: string };
 
 /**
@@ -772,6 +784,7 @@ export async function persistCredentialBundle(
   }
 
   // UPDATE — shared column set; WHERE differs by target.
+  const clearsReconnection = !(input.needsReconnection ?? false);
   const set: Partial<typeof integrationConnections.$inferInsert> = {
     credentialsEncrypted: ciphertext,
     expiresAt: input.expiresAt ?? null,
@@ -785,9 +798,17 @@ export async function persistCredentialBundle(
   if (target.kind === "update-owned") {
     await assertAppBelongsToOrg(target.scope);
     const ownerPredicate = actorFilter(target.actor, integrationConnections);
+    // Owner-scoped reconnect: id + application + actor identity, PLUS the
+    // (packageId, authKey) the new credentials belong to. Without the latter
+    // two, a caller-supplied `connectionId` could overwrite ANY connection they
+    // own — including one for a different integration — with this integration's
+    // credentials. Re-stamping them in the WHERE makes a mismatched id match
+    // zero rows → the caller gets `notFound`, never a cross-integration clobber.
     const ownerScope = and(
       eq(integrationConnections.id, target.connectionId),
       eq(integrationConnections.applicationId, target.scope.applicationId),
+      eq(integrationConnections.integrationId, target.packageId),
+      eq(integrationConnections.authKey, target.authKey),
       ownerPredicate,
     );
     // Identity guard: a reconnect / scope-upgrade must stay on the SAME
@@ -819,10 +840,21 @@ export async function persistCredentialBundle(
   }
 
   // update-by-id (system write-back) — keyed by id only, silent no-op on miss.
-  await db
-    .update(integrationConnections)
-    .set(set)
-    .where(eq(integrationConnections.id, target.connectionId));
+  // Monotonic clear: the proactive refresh write-back always passes
+  // `needsReconnection: false`, which would race-clobber a `true` set
+  // concurrently by `markIntegrationConnectionNeedsReconnection` (scope-shrink /
+  // revoke). When this write CLEARS the flag, gate the row on
+  // `needs_reconnection = false` so a concurrently-set `true` is preserved — the
+  // refresh simply no-ops on that row (a flagged connection's cached credentials
+  // are stale anyway, so skipping the write-back is harmless). An explicit
+  // `true` write (or any non-clearing write) stays unconditional.
+  const byIdWhere = clearsReconnection
+    ? and(
+        eq(integrationConnections.id, target.connectionId),
+        eq(integrationConnections.needsReconnection, false),
+      )
+    : eq(integrationConnections.id, target.connectionId);
+  await db.update(integrationConnections).set(set).where(byIdWhere);
   return null;
 }
 
@@ -863,7 +895,14 @@ export async function saveIntegrationConnection(
   };
   const summary = input.connectionId
     ? await persistCredentialBundle(
-        { kind: "update-owned", scope, actor: input.actor, connectionId: input.connectionId },
+        {
+          kind: "update-owned",
+          scope,
+          actor: input.actor,
+          connectionId: input.connectionId,
+          packageId: input.packageId,
+          authKey: input.authKey,
+        },
         persistInput,
       )
     : await persistCredentialBundle(
@@ -1012,22 +1051,12 @@ export async function getIntegrationAuthStatuses(
       }
     }
   }
+  // The resolver already emits the snake_case wire shape
+  // (`policy.required_scopes`), so the catalog passes through verbatim.
   const toolCatalog: IntegrationToolCatalogEntry[] = resolveIntegrationToolCatalog({
     integration: manifest,
     mcpServerTools,
-  }).map((entry) => ({
-    name: entry.name,
-    ...(entry.description !== undefined ? { description: entry.description } : {}),
-    ...(entry.policy
-      ? {
-          policy: {
-            ...(entry.policy.requiredScopes !== undefined
-              ? { required_scopes: entry.policy.requiredScopes }
-              : {}),
-          },
-        }
-      : {}),
-  }));
+  });
 
   const allConnections = await listIntegrationConnections(scope, packageId, actor);
   const oauthClients = await db

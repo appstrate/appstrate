@@ -421,24 +421,27 @@ describe("Packages API", () => {
       expect(res.status).toBe(401);
     });
 
-    it("returns 403 when scope does not match org", async () => {
+    it("creates an agent under a foreign scope (scope no longer gates creation)", async () => {
       const res = await app.request("/api/packages/agents", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           manifest: {
-            name: "@wrongorg/mismatched-agent",
+            name: "@otherscope/foreign-agent",
             version: "0.1.0",
             type: "agent",
             schema_version: "0.1",
-            display_name: "Mismatched Agent",
-            description: "Wrong scope",
+            display_name: "Foreign Scope Agent",
+            description: "Different scope, same org",
           },
-          content: "wrong scope prompt",
+          content: "foreign scope prompt",
         }),
       });
 
-      expect(res.status).toBe(403);
+      // The package is created under the caller's org regardless of its scope name.
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as { packageId: string };
+      expect(body.packageId).toBe("@otherscope/foreign-agent");
     });
   });
 
@@ -655,6 +658,51 @@ describe("Packages API", () => {
       });
 
       expect(res.status).toBe(403);
+    });
+
+    it("updates a package the org owns even when its scope differs from the org slug", async () => {
+      // Seeded under ctx's org (pkgorg) but with a foreign scope — e.g. an imported package.
+      const agent = await seedAgent({
+        id: "@otherscope/imported-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
+
+      const res = await app.request("/api/packages/agents/@otherscope/imported-agent", {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          manifest: {
+            name: "@otherscope/imported-agent",
+            version: "0.2.0",
+            type: "agent",
+            schema_version: "0.1",
+            display_name: "Edited Imported Agent",
+            description: "Edited despite foreign scope",
+          },
+          content: "edited prompt",
+          lock_version: agent.lockVersion,
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { lock_version: number };
+      expect(body.lock_version).toBeGreaterThan(agent.lockVersion!);
+    });
+
+    it("deletes a package the org owns even when its scope differs from the org slug", async () => {
+      await seedAgent({
+        id: "@otherscope/deletable-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
+
+      const res = await app.request("/api/packages/agents/@otherscope/deletable-agent", {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+
+      expect([200, 204]).toContain(res.status);
     });
   });
 

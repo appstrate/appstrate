@@ -2,7 +2,6 @@
 
 import type { Context, Next } from "hono";
 import type { AppEnv } from "../types/index.ts";
-import { isOwnedByOrg } from "@appstrate/core/naming";
 import { getPackage, getPackageWithAccess } from "../services/package-catalog.ts";
 import { getPackageById } from "../services/package-items/crud.ts";
 import { getRunningRunsForPackage } from "../services/state/runs.ts";
@@ -69,22 +68,12 @@ function extractPackageId(c: Context<AppEnv>): string {
   return packageId;
 }
 
-/** Middleware: reject with 403 if the package scope doesn't match the org slug.
- *  Use for content mutation (edit, publish versions) where scope identity matters. */
-export function requireOwnedPackage() {
-  return async (c: Context<AppEnv>, next: Next) => {
-    const packageId = extractPackageId(c);
-    const orgSlug = c.get("orgSlug");
-    if (!isOwnedByOrg(packageId, orgSlug)) {
-      throw forbidden("Cannot modify a package not owned by your organization. Fork it instead.");
-    }
-    return next();
-  };
-}
-
 /** Middleware: reject with 404/403 if the package doesn't belong to the current org in the DB.
- *  Use for lifecycle operations (delete) where DB ownership matters, not scope. */
-export function requireOrgPackage() {
+ *  Use for any package mutation (edit, publish/delete versions, delete) — gating is on DB
+ *  ownership (`orgId`), NOT on the package's scope name. A package whose scope differs from the
+ *  org slug (e.g. imported cross-org) is still freely mutable as long as the org owns the row;
+ *  registry-side identity/integrity checks happen at publish time, not local modification. */
+export function requirePackageInOrg() {
   return async (c: Context<AppEnv>, next: Next) => {
     const packageId = extractPackageId(c);
     const orgId = c.get("orgId");
@@ -93,24 +82,10 @@ export function requireOrgPackage() {
       throw notFound(`Package '${packageId}' not found`);
     }
     if (row.orgId !== orgId) {
-      throw forbidden("Cannot delete a package not in your organization.");
+      throw forbidden("Cannot modify a package not in your organization.");
     }
     return next();
   };
-}
-
-/** Check that a packageId scope matches the current org. Returns an ApiError or null. */
-export function checkScopeMatch(c: Context<AppEnv>, packageId: string): ApiError | null {
-  const orgSlug = c.get("orgSlug");
-  if (!isOwnedByOrg(packageId, orgSlug)) {
-    return new ApiError({
-      status: 403,
-      code: "scope_mismatch",
-      title: "Scope Mismatch",
-      detail: `Package scope must match your organization (@${orgSlug})`,
-    });
-  }
-  return null;
 }
 
 /** Middleware: for API key callers, reject with 403 when the `:orgId` route

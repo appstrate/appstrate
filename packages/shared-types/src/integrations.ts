@@ -7,7 +7,7 @@
  * side can drift the other.
  */
 
-import type { IntegrationManifest } from "@appstrate/core/integration";
+import type { IntegrationManifest, IntegrationToolCatalogEntry } from "@appstrate/core/integration";
 
 export type IntegrationManifestView = IntegrationManifest;
 export type IntegrationManifestAuth = NonNullable<IntegrationManifest["auths"]>[string];
@@ -84,14 +84,12 @@ export interface IntegrationAuthStatus {
  * connect.tool primitives. Falls back to the integration's sparse
  * `tools_policy{}` keys when the mcp-server is unavailable. Per-tool `policy`
  * is attached verbatim from `integration.tools_policy[name]` when declared.
+ *
+ * Re-exported from `@appstrate/core` rather than duplicated: the resolver
+ * already emits this exact wire shape (snake_case `policy.required_scopes`),
+ * so backend producer and frontend consumer read one definition.
  */
-export interface IntegrationToolCatalogEntry {
-  name: string;
-  description?: string;
-  policy?: {
-    required_scopes?: Readonly<Record<string, readonly string[]>>;
-  };
-}
+export type { IntegrationToolCatalogEntry };
 
 export interface IntegrationDetail {
   manifest: IntegrationManifestView;

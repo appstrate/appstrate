@@ -7,7 +7,7 @@ import { usePackageDetail } from "../hooks/use-packages";
 import type { OrgPackageItemDetail } from "@appstrate/shared-types";
 import type { PackageType } from "@appstrate/core/validation";
 import { useAuth } from "../hooks/use-auth";
-import { useOrg, usePackageOwnership } from "../hooks/use-org";
+import { useOrg } from "../hooks/use-org";
 import { packageDetailPath, packageListPath } from "../lib/package-paths";
 import { primaryDisplayFile } from "../lib/package-files";
 import { useEditorState, type EditorStateBase } from "../hooks/use-editor-state";
@@ -523,7 +523,6 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { currentOrg } = useOrg();
-  const { isOwned } = usePackageOwnership(packageId);
   const isEdit = !!scope;
 
   // Load detail for editing
@@ -545,12 +544,9 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
     return <Navigate to="/agents" replace />;
   }
 
+  // Only system packages are read-only. Org-owned packages are editable regardless of their
+  // scope name (registry integrity checks happen at publish time, not local edit).
   if (isEdit && detail && (detail as { source?: string }).source === "system") {
-    navigate(packageDetailPath(type, packageId!), { replace: true });
-    return null;
-  }
-
-  if (isEdit && !isOwned) {
     navigate(packageDetailPath(type, packageId!), { replace: true });
     return null;
   }

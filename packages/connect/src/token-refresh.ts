@@ -9,7 +9,7 @@ import {
   type OAuthTokenContentType,
   type ParsedTokenResponse,
 } from "./token-utils.ts";
-import { extractErrorMessage } from "./utils.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 export interface RefreshContext {
   /**
@@ -121,7 +121,7 @@ export async function performRefreshTokenExchange(
       signal: AbortSignal.timeout(30_000),
     });
   } catch (err) {
-    throw new RefreshError(`${opts.label} network error: ${extractErrorMessage(err)}`, "transient");
+    throw new RefreshError(`${opts.label} network error: ${getErrorMessage(err)}`, "transient");
   }
 
   if (!response.ok) {

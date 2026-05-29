@@ -3,7 +3,7 @@
 /**
  * R1 — user-scope connection mutations.
  *
- * The unified `/preferences/connectors` page (now backed by
+ * The unified `/preferences/connections` page (now backed by
  * `useMyConnections()`) lists a user's connections across every org/app
  * they belong to. The mutation endpoints are app-scoped (X-Application-Id
  * is part of every connection write path) so each mutation here passes
@@ -21,7 +21,7 @@ import { buildUpdateConnectionRequest } from "./use-integrations";
 
 /**
  * Unified user-scope connection list (integration connections), grouped by
- * source package. Backs the `/preferences/connectors` page. Crosses
+ * source package. Backs the `/preferences/connections` page. Crosses
  * orgs/applications: no header context required.
  */
 export function useMyConnections() {

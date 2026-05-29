@@ -22,7 +22,6 @@ export function AgentActions({
   manifest,
   companionFile,
   isOwned,
-  isImported,
   isHistoricalVersion,
   downloadVersion,
   downloadPackage,
@@ -34,7 +33,6 @@ export function AgentActions({
   manifest?: Record<string, unknown>;
   companionFile?: { name: string; content: string };
   isOwned: boolean;
-  isImported?: boolean;
   isHistoricalVersion: boolean;
   downloadVersion: string | undefined;
   downloadPackage: (v: string) => void;
@@ -95,7 +93,6 @@ export function AgentActions({
         manifest={manifest}
         companionFile={companionFile}
         isOwned={isOwned}
-        isImported={isImported}
         isBuiltIn={detail.source === "system"}
         isHistoricalVersion={isHistoricalVersion}
         downloadVersion={downloadVersion}

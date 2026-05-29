@@ -32,10 +32,7 @@ import {
 } from "./credentials.ts";
 import { gone, notFound } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
-import { hasRedis } from "../../infra/mode.ts";
-import { getCache } from "../../infra/index.ts";
-import { getRedisConnection } from "../../lib/redis.ts";
-import { randomBytes } from "node:crypto";
+import { withRedisLock } from "../../lib/distributed-lock.ts";
 import { OAUTH_REFRESH_LEAD_MS, type OAuthTokenResponse } from "@appstrate/core/sidecar-types";
 
 /**
@@ -52,19 +49,6 @@ const REFRESH_LOCK_TTL_SECONDS = 45;
  * this map is the only serialization needed.
  */
 const inflightRefreshes = new Map<string, Promise<OAuthTokenResponse>>();
-
-/**
- * Lua script for safe lock release: only deletes the key if its value
- * matches the lock-id we wrote. Prevents releasing a lock acquired by
- * another instance after our TTL expired.
- */
-const RELEASE_LOCK_SCRIPT = `
-if redis.call("GET", KEYS[1]) == ARGV[1] then
-  return redis.call("DEL", KEYS[1])
-else
-  return 0
-end
-`;
 
 /** Credential row + decrypted blob + registry overlay. Internal helper return shape. */
 interface CredentialState {
@@ -204,69 +188,26 @@ async function refreshUnderDistributedLock(
   credentialId: string,
   expectedOrgId?: string,
 ): Promise<OAuthTokenResponse> {
-  if (!hasRedis()) {
-    return doRefresh(credentialId, expectedOrgId);
-  }
-
-  // Acquire via the infra cache primitive (RedisCache maps SET…NX 'OK'→true).
-  // We are inside the `hasRedis()` guard, so getCache() resolves to RedisCache.
-  const cache = await getCache();
-  const lockKey = `oauth-refresh:${credentialId}`;
-  const lockId = randomBytes(16).toString("hex");
-  const acquireDeadline = Date.now() + 30_000;
-  let acquired = false;
-
-  while (Date.now() < acquireDeadline) {
-    const ok = await cache.set(lockKey, lockId, {
-      ttlSeconds: REFRESH_LOCK_TTL_SECONDS,
-      nx: true,
-    });
-    if (ok) {
-      acquired = true;
-      break;
-    }
-    // Wait briefly before retrying — the lock-winner is talking to upstream
-    // (~hundreds of ms) so polling at 100ms keeps tail latency reasonable
-    // without hammering Redis.
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-
-  if (!acquired) {
-    logger.warn("oauth model provider: refresh lock acquisition timed out, proceeding unlocked", {
-      credentialId,
-    });
-    return doRefresh(credentialId, expectedOrgId);
-  }
-
-  try {
-    // Lock-winner may have written a fresh token while we were waiting.
-    // Re-read; if the access token is now within the refresh window, the
-    // resolver caller still gets a valid token without us calling upstream.
-    const state = await loadCredentialState(credentialId, expectedOrgId);
-    if (state.blob.needsReconnection) {
-      throw gone(
-        "OAUTH_CONNECTION_NEEDS_RECONNECTION",
-        `OAuth credential ${credentialId} needs reconnection`,
-      );
-    }
-    if (state.blob.expiresAt && state.blob.expiresAt - Date.now() > OAUTH_REFRESH_LEAD_MS) {
-      return buildResolvedToken(state);
-    }
-    return await doRefresh(credentialId, expectedOrgId);
-  } finally {
-    // Best-effort release. If the EVAL fails (Redis hiccup), the TTL
-    // ensures the lock auto-expires within REFRESH_LOCK_TTL_SECONDS.
-    try {
-      // Raw connection: the infra cache has no compare-and-delete (Lua eval)
-      // primitive, so the safe lock release goes straight to ioredis.
-      await getRedisConnection().eval(RELEASE_LOCK_SCRIPT, 1, lockKey, lockId);
-    } catch (err) {
-      logger.warn("oauth model provider: refresh lock release failed", {
-        credentialId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
+  return withRedisLock(
+    `oauth-refresh:${credentialId}`,
+    { ttlSeconds: REFRESH_LOCK_TTL_SECONDS, acquireTimeoutMs: 30_000, label: "oauth-refresh" },
+    async () => {
+      // Lock-winner may have written a fresh token while we were waiting.
+      // Re-read; if the access token is now within the refresh window, the
+      // resolver caller still gets a valid token without us calling upstream.
+      const state = await loadCredentialState(credentialId, expectedOrgId);
+      if (state.blob.needsReconnection) {
+        throw gone(
+          "OAUTH_CONNECTION_NEEDS_RECONNECTION",
+          `OAuth credential ${credentialId} needs reconnection`,
+        );
+      }
+      if (state.blob.expiresAt && state.blob.expiresAt - Date.now() > OAUTH_REFRESH_LEAD_MS) {
+        return buildResolvedToken(state);
+      }
+      return doRefresh(credentialId, expectedOrgId);
+    },
+  );
 }
 
 async function doRefresh(
