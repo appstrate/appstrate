@@ -13,6 +13,7 @@ import {
   getModules,
   getModuleContributions,
   getModuleModelProviders,
+  callAllHooks,
 } from "./modules/module-loader.ts";
 import { getModuleRegistry, buildModuleInitContext } from "./modules/registry.ts";
 import { registerEmailOverrides } from "@appstrate/emails";
@@ -112,27 +113,14 @@ export async function boot(): Promise<void> {
       registerEmailOverrides(mod.emailOverrides);
     }
   }
-  // Broadcast `beforeSignup` to EVERY loaded module (not first-match-wins
-  // like other hooks). The cloud module's free-tier gate AND the OIDC
-  // module's per-client signup policy both need to run on every signup;
-  // first throw aborts the user creation. Iteration is inline (rather
-  // than going through `callHook`) because the semantics differ from the
-  // generic first-match-wins path in `module-loader.ts`.
-  setBeforeSignupHook(async (email, ctx) => {
-    for (const mod of getModules().values()) {
-      const hook = mod.hooks?.beforeSignup;
-      if (hook) await hook(email, ctx);
-    }
-  });
-  // Broadcast `afterSignup` to every loaded module too — OIDC uses it to
-  // auto-join the newly created user to the org pinned by the in-flight
-  // OAuth client so the onward /authorize redirect completes cleanly.
-  setAfterSignupHook(async (user, ctx) => {
-    for (const mod of getModules().values()) {
-      const hook = mod.hooks?.afterSignup;
-      if (hook) await hook(user, ctx);
-    }
-  });
+  // `beforeSignup` / `afterSignup` broadcast to EVERY loaded module (not
+  // first-match-wins like the other hooks) via `callAllHooks`: the cloud
+  // free-tier gate AND the OIDC per-client signup policy both run on every
+  // signup, and a throwing `beforeSignup` aborts user creation. OIDC's
+  // `afterSignup` auto-joins the new user to the org pinned by the in-flight
+  // OAuth client so the onward /authorize redirect completes.
+  setBeforeSignupHook((email, ctx) => callAllHooks("beforeSignup", email, ctx));
+  setAfterSignupHook((user, ctx) => callAllHooks("afterSignup", user, ctx));
   // Self-hosting bootstrap side effects (issue #228). Fires only when
   // `createBootstrapOrg` actually inserted the org row. Mirrors the post-
   // create sequence in `routes/organizations.ts` so the bootstrap owner

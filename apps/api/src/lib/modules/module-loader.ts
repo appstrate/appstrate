@@ -638,6 +638,24 @@ export async function callHook<K extends keyof ModuleHooks>(
   return undefined;
 }
 
+/**
+ * Broadcast a hook to EVERY loaded module (vs {@link callHook}'s
+ * first-match-wins). For the rare hooks whose semantics are "every module
+ * participates" — currently `beforeSignup` / `afterSignup`, where the cloud
+ * free-tier gate AND the OIDC per-client signup policy both must run on each
+ * signup. Errors PROPAGATE (unlike {@link emitEvent}): a throwing
+ * `beforeSignup` aborts user creation, which is the gate's whole purpose.
+ */
+export async function callAllHooks<K extends keyof ModuleHooks>(
+  name: K,
+  ...args: Parameters<ModuleHooks[K]>
+): Promise<void> {
+  for (const mod of _modules.values()) {
+    const hook = (mod.hooks as Record<string, AnyHandler> | undefined)?.[name];
+    if (hook) await hook(...args);
+  }
+}
+
 /** Check if any loaded module provides a given hook. */
 export function hasHook(name: keyof ModuleHooks): boolean {
   for (const mod of _modules.values()) {
