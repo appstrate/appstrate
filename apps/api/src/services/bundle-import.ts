@@ -39,7 +39,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { parsePackageZip } from "@appstrate/core/zip";
 import { db } from "@appstrate/db/client";
 import { packages, packageVersions } from "@appstrate/db/schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, notExists, sql } from "drizzle-orm";
 import { conflict, invalidRequest } from "../lib/errors.ts";
 import { isSystemPackage } from "./system-packages.ts";
 import { postInstallPackage } from "./post-install-package.ts";
@@ -332,20 +332,23 @@ export async function importBundle(
     } catch (err) {
       // Post-install (version snapshot + storage upload) failed. If this
       // import just created the packages row, delete the orphan so we don't
-      // leave an un-runnable package with no version. Guard on the absence
-      // of any package_versions rows so we never remove a package that
-      // already had a usable version. Then rethrow for the route to map.
+      // leave an un-runnable package with no version. A single self-guarding
+      // DELETE (`NOT EXISTS` any package_versions) is atomic — it can't race a
+      // concurrent import that commits a version in the window, which a
+      // separate SELECT-then-DELETE would cascade-delete. Then rethrow.
       if (insertedThisRow) {
-        const existingVersions = await db
-          .select({ id: packageVersions.id })
-          .from(packageVersions)
-          .where(eq(packageVersions.packageId, packageId))
-          .limit(1);
-        if (existingVersions.length === 0) {
-          await db
-            .delete(packages)
-            .where(and(eq(packages.id, packageId), eq(packages.orgId, scope.orgId)));
-        }
+        await db.delete(packages).where(
+          and(
+            eq(packages.id, packageId),
+            eq(packages.orgId, scope.orgId),
+            notExists(
+              db
+                .select({ one: sql`1` })
+                .from(packageVersions)
+                .where(eq(packageVersions.packageId, packageId)),
+            ),
+          ),
+        );
       }
       throw err;
     }

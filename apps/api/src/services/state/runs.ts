@@ -152,6 +152,10 @@ type EnrichedRunRow = {
  * The DB TS field names stay camelCase (Better Auth blocker); universal
  * DB-convention fields (id, *Id, *At) stay camelCase on the wire per Phase 3.
  */
+// The explicit `: RunWireDto` return annotation is the drift guard: tsc fails
+// if the mapper produces a field not on the wire DTO (the original bug leaked
+// `sinkSecretEncrypted` via a spread) or the wrong type for one. A new runs
+// column is only exposed if it is added here AND to `RunWireDto` deliberately.
 function runRowToWireDto(row: typeof runs.$inferSelect): RunWireDto {
   return {
     id: row.id,
@@ -193,20 +197,6 @@ function runRowToWireDto(row: typeof runs.$inferSelect): RunWireDto {
     connection_overrides: row.connectionOverrides,
   };
 }
-
-// Compile-time guard against mapper↔type drift. `RunWireDto` is hand-
-// maintained in `@appstrate/shared-types` (consumed by registry/cloud/
-// portal — it cannot depend on apps/api, so the mapper's return type
-// cannot be the source). These bidirectional assignability assertions
-// fail tsc if `runRowToWireDto`'s shape and `RunWireDto` ever diverge —
-// a new schema column silently exposed or omitted now breaks the build.
-const _assertMapperAssignableToDto: RunWireDto = null as unknown as ReturnType<
-  typeof runRowToWireDto
->;
-const _assertDtoAssignableToMapper: ReturnType<typeof runRowToWireDto> =
-  null as unknown as RunWireDto;
-void _assertMapperAssignableToDto;
-void _assertDtoAssignableToMapper;
 
 function mapEnrichedRun(r: EnrichedRunRow): EnrichedRun {
   return {

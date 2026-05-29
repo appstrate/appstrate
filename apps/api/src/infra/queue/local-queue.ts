@@ -43,6 +43,15 @@ interface CronScheduler<T> {
 /** Cron poll cadence (ms). The evaluator runs on this interval. */
 const CRON_POLL_INTERVAL_MS = 30_000;
 
+/**
+ * Max occurrences a single scheduler may enqueue in one poll. Covers normal
+ * drift (a few missed minutes) while bounding the catch-up burst after a long
+ * process freeze — a 1h stall on `* * * * *` must not enqueue 60 unthrottled
+ * jobs at once. Excess missed occurrences are coalesced (skipped, logged), not
+ * replayed, matching how a cron daemon behaves after the machine wakes.
+ */
+const MAX_CRON_CATCHUP_PER_POLL = 5;
+
 export class LocalQueue<T> implements JobQueue<T> {
   private pending: PendingJob<T>[] = [];
   private schedulers = new Map<string, CronScheduler<T>>();
@@ -217,9 +226,11 @@ export class LocalQueue<T> implements JobQueue<T> {
       // Base the forward-looking walk at the window floor, but never before the
       // last fire so we don't replay an occurrence already enqueued.
       let cursor = Math.max(windowStart, scheduler.lastFiredAt);
-      // Walk every occurrence in (cursor, now]. Bounded: each step strictly
-      // advances cursor and the window is seconds-to-minutes wide.
-      for (;;) {
+      // Walk every occurrence in (cursor, now], capped at
+      // MAX_CRON_CATCHUP_PER_POLL so a long freeze can't enqueue a huge
+      // synchronous burst. Each step strictly advances cursor.
+      let fired = 0;
+      for (; fired < MAX_CRON_CATCHUP_PER_POLL; fired++) {
         const next = computeNextRun(scheduler.pattern, scheduler.tz, new Date(cursor));
         if (!next || next.getTime() > now) break;
         const fireAt = next.getTime();
@@ -233,6 +244,18 @@ export class LocalQueue<T> implements JobQueue<T> {
         };
         this.pending.push({ job });
         logger.debug(`${this.name} cron fired`, { schedulerId: scheduler.id, fireAt });
+      }
+      // Hit the cap with occurrences still pending → coalesce the backlog:
+      // skip to `now` so we don't replay it next poll, and surface the drop.
+      if (fired === MAX_CRON_CATCHUP_PER_POLL) {
+        const more = computeNextRun(scheduler.pattern, scheduler.tz, new Date(cursor));
+        if (more && more.getTime() <= now) {
+          scheduler.lastFiredAt = now;
+          logger.warn(`${this.name} cron catch-up capped, coalescing backlog`, {
+            schedulerId: scheduler.id,
+            cap: MAX_CRON_CATCHUP_PER_POLL,
+          });
+        }
       }
     }
     this.lastCronPollAt = now;

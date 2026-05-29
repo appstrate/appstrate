@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { z } from "zod";
+import type { z } from "zod";
 import type { ModelCost } from "@appstrate/core/module";
 import type { TokenUsage } from "@appstrate/core/token-usage";
 
