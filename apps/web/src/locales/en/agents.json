@@ -357,7 +357,7 @@
   "fork.errorOwned": "You already own this package",
   "fork.errorCollision": "A package with this name already exists",
   "fork.errorNoPublishedVersion": "This package has no published version and cannot be forked",
-  "ownership.readOnly": "This package belongs to another organization (read-only)",
+  "ownership.readOnly": "Read-only system package. Fork it to customize.",
   "ownership.forkedFrom": "Forked from ",
   "detail.tabConfiguration": "Default settings",
   "detail.tabConfigurationHint": "These settings apply to every run. Override them per-run via the CLI, the API, or a schedule.",

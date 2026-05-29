@@ -16,7 +16,6 @@ import {
 } from "../hooks/use-packages";
 import type { AgentDetail, OrgPackageItemDetail, PackageType } from "@appstrate/shared-types";
 import type { JSONSchemaObject } from "@appstrate/core/form";
-import { usePackageOwnership } from "../hooks/use-org";
 import { usePermissions } from "../hooks/use-permissions";
 import { usePackageInstallState, useTogglePackageInstall } from "../hooks/use-library";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
@@ -138,7 +137,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     version: versionParam,
   } = useParams<{ scope: string; name: string; version?: string }>();
   const packageId = `${scope}/${name}`;
-  const { isOwned } = usePackageOwnership(packageId);
   const { isAdmin } = usePermissions();
   const isVersionView = !!versionParam;
 
@@ -162,6 +160,10 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const hasUnarchivedChanges =
     agentDetail?.has_unarchived_changes ?? pkgDetail?.has_unarchived_changes;
   const forkedFrom = agentDetail?.forked_from ?? pkgDetail?.forked_from ?? null;
+  // Mutability is gated on whether the org owns the package row, not on its scope name.
+  // Every package returned here is already org-scoped server-side, so anything that is not a
+  // read-only system package is freely editable/deletable (registry checks happen at publish).
+  const isOwned = source !== "system";
 
   const { data: versionDetail, isLoading: versionLoading } = useVersionDetail(
     type,
@@ -295,7 +297,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   // ── Render ──
   const isBuiltIn = source === "system";
-  const isImported = !!detail && !isOwned && !isBuiltIn;
 
   // Determine available tabs based on type
 
@@ -356,7 +357,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
               }
               companionFile={companionFile}
               isOwned={isOwned}
-              isImported={isImported}
               isHistoricalVersion={isHistoricalVersion}
               downloadVersion={downloadVersion}
               downloadPackage={downloadPackage}
@@ -376,7 +376,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                 }
                 companionFile={companionFile}
                 isOwned={isOwned}
-                isImported={isImported}
                 isBuiltIn={isBuiltIn}
                 isHistoricalVersion={isHistoricalVersion}
                 downloadVersion={downloadVersion}
