@@ -395,6 +395,7 @@ export function createCredentialProxyRouter() {
 
 const PROXY_CONTROL_HEADERS = new Set([
   "x-integration",
+  "x-integration-id",
   "x-target",
   "x-session-id",
   "x-substitute-body",

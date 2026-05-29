@@ -171,6 +171,7 @@ function validateMcpHostHeader(req: Request): Response | undefined {
  */
 const API_CALL_FORBIDDEN_HEADERS = new Set<string>([
   "x-integration",
+  "x-integration-id",
   "x-target",
   "x-substitute-body",
   "x-stream-response",
