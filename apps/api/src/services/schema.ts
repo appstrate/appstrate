@@ -15,6 +15,25 @@ import { validateConfig as validateConfigCore } from "@appstrate/core/schema-val
 // rely on server-only concerns (file-field stripping, output overload).
 const ajv = createAjv({ coerceTypes: true });
 
+// Compiled-validator cache. `validateInput`/`validateOutput`/
+// `validateConnectionCredentials` run on hot paths (per run, per connect)
+// and rebuild a fresh `effectiveSchema` object each call, so AJV's own
+// by-reference cache never hits — compilation (the expensive step) ran every
+// time. Key by the schema's canonical JSON so structurally-equal schemas
+// share one compiled validator. Bounded to cap memory in a long-lived process.
+const validatorCache = new Map<string, ReturnType<typeof ajv.compile>>();
+const MAX_CACHED_VALIDATORS = 500;
+function compileCached(schema: object): ReturnType<typeof ajv.compile> {
+  const key = JSON.stringify(schema);
+  let validate = validatorCache.get(key);
+  if (!validate) {
+    validate = ajv.compile(schema);
+    if (validatorCache.size >= MAX_CACHED_VALIDATORS) validatorCache.clear();
+    validatorCache.set(key, validate);
+  }
+  return validate;
+}
+
 // AJV with coerceTypes coerces null → "" for strings, which incorrectly passes
 // `required` checks. Strip empty/null values so AJV sees them as missing.
 function stripEmptyRequired(
@@ -104,8 +123,8 @@ function runValidate(
     };
   }
 
-  // 3. Compile + validate
-  const validate = ajv.compile(effectiveSchema);
+  // 3. Compile (cached) + validate
+  const validate = compileCached(effectiveSchema);
   const valid = validate(effectiveData);
 
   // 4. Per-kind error mapping
@@ -164,7 +183,7 @@ export function validateConnectionCredentials(
   // Mirror the input path: AJV coerceTypes lets "" satisfy `required`, so
   // strip empty/null values for required keys before validating.
   const effectiveData = stripEmptyRequired(credentials, required);
-  const validate = ajv.compile(schema);
+  const validate = compileCached(schema);
   if (validate(effectiveData)) return { valid: true, errors: [], data: credentials };
   const errors = (validate.errors || []).map((e) => ({
     field:
