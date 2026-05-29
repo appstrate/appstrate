@@ -259,10 +259,24 @@ type ResolveOneResult =
   | { kind: "resolved"; value: ResolvedConnection }
   | { kind: "error"; error: ConnectionResolutionError };
 
+/**
+ * Look up a connection by id in the index, treating a row that belongs to a
+ * DIFFERENT integration as not-found. Pins/overrides (cascade layers 1-6)
+ * carry a caller-supplied connection id; without this guard a run/schedule
+ * override (or pin) pointing at an accessible connection of another
+ * integration would be accepted and its credentials injected under the wrong
+ * integration's auth — an intra-tenant confused-deputy. Layer 7 (fallback)
+ * already filters by integrationId, so it does not need this.
+ */
+function ownedConn(args: ResolveOneArgs, id: string): ConnectionRow | undefined {
+  const conn = args.connectionIndex.get(id);
+  return conn && conn.integrationId === args.integrationId ? conn : undefined;
+}
+
 function resolveOne(args: ResolveOneArgs): ResolveOneResult {
   // 1. Admin pin (highest precedence — locks the choice for every actor).
   if (args.adminPinId) {
-    const conn = args.connectionIndex.get(args.adminPinId);
+    const conn = ownedConn(args, args.adminPinId);
     if (!conn) {
       return errorOf(args, {
         code: "pinned_connection_unavailable",
@@ -275,7 +289,7 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
   // 2. Org default ENFORCE — org-wide force, locks every actor on every
   // agent. Beaten only by the per-agent admin pin above.
   if (args.orgDefault?.enforce) {
-    const conn = args.connectionIndex.get(args.orgDefault.connectionId);
+    const conn = ownedConn(args, args.orgDefault.connectionId);
     if (!conn) {
       return errorOf(args, {
         code: "pinned_connection_unavailable",
@@ -287,7 +301,7 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
 
   // 3. Run override.
   if (args.runOverrideId) {
-    const conn = args.connectionIndex.get(args.runOverrideId);
+    const conn = ownedConn(args, args.runOverrideId);
     if (!conn) {
       return errorOf(args, {
         code: "override_connection_unavailable",
@@ -299,7 +313,7 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
 
   // 4. Schedule override.
   if (args.scheduleOverrideId) {
-    const conn = args.connectionIndex.get(args.scheduleOverrideId);
+    const conn = ownedConn(args, args.scheduleOverrideId);
     if (!conn) {
       return errorOf(args, {
         code: "override_connection_unavailable",
@@ -311,7 +325,7 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
 
   // 5. Member pin — actor's persisted preference for this agent.
   if (args.memberPinId) {
-    const conn = args.connectionIndex.get(args.memberPinId);
+    const conn = ownedConn(args, args.memberPinId);
     if (!conn) {
       return errorOf(args, {
         code: "pinned_connection_unavailable",
@@ -325,7 +339,7 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
   // missing connection (deleted/unshared) silently falls through to the
   // fallback rather than erroring, since the default is non-binding.
   if (args.orgDefault) {
-    const conn = args.connectionIndex.get(args.orgDefault.connectionId);
+    const conn = ownedConn(args, args.orgDefault.connectionId);
     if (conn) return checkHealth(args, conn, "org_default");
   }
 

@@ -754,6 +754,56 @@ describe("MITM listener — telemetry", () => {
   });
 });
 
+describe("MITM listener — SSRF floor", () => {
+  runIfOpenssl(
+    "refuses a CONNECT whose SNI is a blocked target (cloud IMDS) without minting or forwarding",
+    async () => {
+      const bundle = await makeCaBundle();
+      const minter = createCertMinter({
+        caCertPem: bundle.pems.caCertPem,
+        caKeyPem: bundle.pems.caKeyPem,
+      });
+      const events: MitmListenerEvent[] = [];
+      const creds: MitmCredentialSource = {
+        current: () => payload("v", "oauth2", { access_token: "t" }, ["https://**/**"]),
+        deliveryPlans: () => ({ v: plan("Authorization", "t") }),
+      };
+      const recorded = makeRecordingFetch(async () => new Response("ok", { status: 200 }));
+
+      const listener = createIntegrationMitmListener({
+        caBundle: bundle,
+        minter,
+        credentials: creds,
+        fetch: recorded.fetch,
+        onEvent: (e) => events.push(e),
+      });
+      await listener.ready;
+      try {
+        const addr = listener.address();
+        // The link-local cloud metadata address — `isBlockedHost` blocks
+        // 169.254.0.0/16. The listener must destroy the socket right after
+        // SNI extraction, so the TLS handshake never completes.
+        await expect(
+          drivenFetch({
+            listenerPort: addr.port,
+            sni: "169.254.169.254",
+            caCertPem: bundle.pems.caCertPem,
+            method: "GET",
+            path: "/latest/meta-data/iam/security-credentials/",
+            headers: {},
+          }),
+        ).rejects.toThrow();
+
+        expect(events.some((e) => e.kind === "tls-error")).toBe(true);
+        // No leaf minted, no upstream fetch — egress never happened.
+        expect(recorded.calls.length).toBe(0);
+      } finally {
+        await listener.close();
+      }
+    },
+  );
+});
+
 describe("MITM listener — proxyUrl shape", () => {
   runIfOpenssl("emits a ready-to-use http://host:port URL", async () => {
     const bundle = await makeCaBundle();

@@ -104,6 +104,16 @@ export function requireNonEmptyCredentials(credentials: Record<string, unknown>)
  */
 export function connectionTarget(ctx: ConnectContext): PersistTarget {
   return ctx.connectionId
-    ? { kind: "update-owned", scope: ctx.scope, actor: ctx.actor, connectionId: ctx.connectionId }
+    ? {
+        kind: "update-owned",
+        scope: ctx.scope,
+        actor: ctx.actor,
+        connectionId: ctx.connectionId,
+        // Re-stamp (integrationId, authKey) into the update target so a
+        // caller-supplied `connectionId` for a different integration matches
+        // zero rows instead of overwriting an unrelated connection.
+        packageId: ctx.integrationId,
+        authKey: ctx.authKey,
+      }
     : { kind: "insert", scope: ctx.scope, actor: ctx.actor };
 }

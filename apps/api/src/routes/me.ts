@@ -44,7 +44,7 @@ import {
 } from "../services/integration-pins-service.ts";
 import { deleteIntegrationConnection } from "../services/integration-connections.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
-import { parseBody, unauthorized } from "../lib/errors.ts";
+import { parseBody, unauthorized, invalidRequest } from "../lib/errors.ts";
 import { listResponse } from "../lib/list-response.ts";
 
 const router = new Hono<AppEnv>();
@@ -218,7 +218,7 @@ router.delete("/integration-pins", requireAppContext(), async (c) => {
   const agentPackageId = c.req.query("agentPackageId");
   const integrationId = c.req.query("integrationPackageId");
   if (!agentPackageId || !integrationId) {
-    throw unauthorized("agentPackageId and integrationPackageId query params are required");
+    throw invalidRequest("agentPackageId and integrationPackageId query params are required");
   }
   const result = await deleteMemberPin(scope, agentPackageId, integrationId, user.id);
   if (result.deleted) {
@@ -252,6 +252,14 @@ router.delete("/integration-pins", requireAppContext(), async (c) => {
 router.delete("/connections/:connectionId", async (c) => {
   const connectionId = c.req.param("connectionId")!;
   const actor = getActor(c);
+
+  // The id hits a `uuid` column — a non-UUID would raise PG `22P02` and surface
+  // as a 500. Validate first and short-circuit to 204: same non-disclosure
+  // intent as the "row not found" branch below (no information leak to a caller
+  // probing ids).
+  if (!z.uuid().safeParse(connectionId).success) {
+    return c.body(null, 204);
+  }
 
   // /me/* skips org/app context middleware — derive applicationId from
   // the connection row itself. Ownership is enforced by the service via

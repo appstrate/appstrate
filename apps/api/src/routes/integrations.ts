@@ -711,6 +711,12 @@ export function createIntegrationsRouter() {
       const connectionId = c.req.param("connectionId")!;
       const scope = getAppScope(c);
       const actor = getActor(c);
+      // `connectionId` hits a `uuid` column — a non-UUID raises PG `22P02` and
+      // surfaces as a 500. Validate first and collapse to the same `notFound`
+      // the missing-row branch returns (no information leak / no 500).
+      if (!z.uuid().safeParse(connectionId).success) {
+        throw notFound(`Connection '${connectionId}' not found`);
+      }
       const ownership = await loadConnectionOwnership(connectionId);
       if (!ownership || ownership.applicationId !== scope.applicationId) {
         throw notFound(`Connection '${connectionId}' not found`);

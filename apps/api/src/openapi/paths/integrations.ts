@@ -494,7 +494,7 @@ export const integrationsPaths = {
               properties: {
                 credentials: {
                   type: "object",
-                  additionalProperties: { type: "string" },
+                  additionalProperties: true,
                 },
                 connection_id: {
                   type: "string",

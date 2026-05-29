@@ -12,8 +12,10 @@
  * uniqueness key — OAuth and api_key connections are interchangeable at
  * runtime.
  *
- * All admin-only operations — the route layer enforces `requireAdmin()`,
- * this layer assumes the caller already has the role.
+ * All admin-only operations — the route layer enforces
+ * `requirePermission("integrations", "install")` plus an org admin/owner check
+ * (`assertOrgAdmin` in `routes/integrations.ts`); this layer assumes the caller
+ * already has the role.
  */
 
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
