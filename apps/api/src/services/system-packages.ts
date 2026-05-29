@@ -66,8 +66,8 @@ export function getSystemPackages(): ReadonlyMap<string, SystemPackageEntry> {
   return systemPackages;
 }
 
-/** Every loaded entry across all versions — used by the boot sync to register each in `package_versions`. */
-export function getAllSystemPackageVersions(): readonly SystemPackageEntry[] {
+/** Every loaded entry across all versions — read by `syncSystemPackagesToDb` to register each in `package_versions`. */
+function getAllSystemPackageVersions(): readonly SystemPackageEntry[] {
   return systemPackageVersions;
 }
 

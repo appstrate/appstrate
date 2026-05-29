@@ -293,4 +293,34 @@ describe("LocalQueue cron scheduler", () => {
     expect(processed).toEqual(["new"]);
     await q.shutdown();
   });
+
+  it("caps catch-up burst and coalesces the backlog (no unbounded burst, no replay)", async () => {
+    const q = new LocalQueue<{ v: string }>("test-cron") as any;
+    const processed: string[] = [];
+
+    q.process(async (job: QueueJob<{ v: string }>) => {
+      processed.push(job.data.v);
+    });
+
+    // A long freeze: prev poll ~6.5 min ago. A once-a-minute schedule has 7
+    // pending occurrences in (floor, now] — more than the per-poll cap (5).
+    const floor = new Date(FIRING_NOW.getTime() - 400_000); // 10:23:30
+    await withPinnedNowAsync(floor, () =>
+      q.upsertScheduler("s-burst", { pattern: "* * * * *" }, { name: "job", data: { v: "x" } }),
+    );
+    q.lastCronPollAt = floor.getTime();
+
+    withPinnedNow(FIRING_NOW, () => q.evaluateCron());
+    await new Promise((r) => setTimeout(r, 400));
+    // Capped at 5, not the 7 that fell in the window.
+    expect(processed.length).toBe(5);
+
+    // Backlog was coalesced (lastFiredAt advanced to now) — a second poll at
+    // the same clock replays nothing.
+    withPinnedNow(FIRING_NOW, () => q.evaluateCron());
+    await new Promise((r) => setTimeout(r, 300));
+    expect(processed.length).toBe(5);
+
+    await q.shutdown();
+  });
 });

@@ -375,10 +375,9 @@ export interface UpdateOAuthCredentialTokensInput {
  * `mutate` → re-encrypt → update (org-scoped). `mutate` returns the next blob.
  * A missing row or non-`oauth` kind is a no-op (handled by the pre-guards
  * here, before `mutate` runs). The denormalized `expiresAt` column is mirrored
- * ONLY when
- * the next blob's `expiresAt` differs from the existing one — so callers that
- * don't touch expiry (e.g. {@link markCredentialNeedsReconnection}) leave the
- * column untouched.
+ * ONLY when the next blob's `expiresAt` differs from the existing one — so
+ * callers that don't touch expiry (e.g. {@link markCredentialNeedsReconnection})
+ * leave the column untouched.
  */
 async function updateOAuthBlob(
   orgId: string,
