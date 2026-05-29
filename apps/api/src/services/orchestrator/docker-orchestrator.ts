@@ -7,6 +7,7 @@ import type {
   WorkloadHandle,
   WorkloadSpec,
   IsolationBoundary,
+  InjectableFile,
   SidecarLaunchSpec,
   CleanupReport,
   StopResult,
@@ -439,11 +440,32 @@ export class DockerOrchestrator implements ContainerOrchestrator {
       await docker.connectContainerToNetwork(platformNetwork.networkId, containerId);
     }
 
-    if (spec.files && spec.files.items.length > 0) {
-      await docker.injectFiles(containerId, spec.files.items, spec.files.targetDir);
-    }
-
     return new DockerWorkloadHandle(containerId, spec.runId, spec.role);
+  }
+
+  /**
+   * Populate the per-run named volume before the agent starts. Injecting
+   * into the created-but-not-started agent container instead would write to
+   * its rw-layer, which the `/workspace` volume mount shadows at start —
+   * silently dropping the AFPS bundle (skills never materialise) and any
+   * input documents. Routing through a helper that mounts the live volume
+   * is the portable fix. The process orchestrator overrides this with a
+   * plain host-directory write.
+   */
+  async seedWorkspace(
+    boundary: IsolationBoundary,
+    files: InjectableFile[],
+    targetSubdir?: string,
+  ): Promise<void> {
+    if (files.length === 0) return;
+    if (boundary.workspace.kind !== "volume") {
+      throw new Error(
+        `docker orchestrator expected a volume workspace, got '${boundary.workspace.kind}'`,
+      );
+    }
+    const targetDir = targetSubdir ? `/workspace/${targetSubdir}` : "/workspace";
+    const runId = boundary.workspace.name.replace(docker.WORKSPACE_VOLUME_PREFIX, "");
+    await docker.populateVolume(boundary.workspace.name, files, targetDir, runId);
   }
 
   async startWorkload(handle: WorkloadHandle): Promise<void> {

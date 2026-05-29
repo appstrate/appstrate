@@ -150,6 +150,12 @@ export interface CreateContainerOptions {
    * `USER nobody:nobody` image directive intact for every other path.
    */
   user?: string;
+  /**
+   * Override the image's default `CMD`. Used by the workspace-populate
+   * helper to hold a generic image (busybox) open with a `sleep` so the
+   * volume stays mounted while files are archived into it.
+   */
+  cmd?: string[];
 }
 
 export async function createContainer(
@@ -174,6 +180,7 @@ export async function createContainer(
     Image: options.image,
     Env: env,
     Tty: false,
+    ...(options.cmd ? { Cmd: options.cmd } : {}),
     ExposedPorts: options.exposedPorts,
     HostConfig: {
       Memory: options.memory ?? 1024 * 1024 * 1024,
@@ -375,6 +382,51 @@ export async function injectFiles(
   );
 
   await assertDockerOk(res, "inject files into container");
+}
+
+/**
+ * Populate a named volume with files BEFORE any consumer container starts.
+ *
+ * Archive-PUT (`injectFiles`) into a *stopped* container whose volume is
+ * declared-but-not-mounted writes to the image rw-layer, which the volume
+ * mount then shadows at start — the files vanish. The portable, daemon-only
+ * fix (per Docker's own guidance) is to mount the volume into a short-lived
+ * helper that is RUNNING, so the archive lands in the live volume. The
+ * helper holds the mount open with `sleep`; we stop+remove it once the
+ * files are in. No host-path access, so it works on Docker Desktop's VM,
+ * rootless, and remote daemons alike.
+ */
+export async function populateVolume(
+  volumeName: string,
+  files: Array<{ name: string; content: Buffer }>,
+  targetDir: string,
+  runId: string,
+): Promise<void> {
+  if (files.length === 0) return;
+  const image = getEnv().WORKSPACE_INIT_IMAGE;
+  await ensureImage(image);
+
+  const helperId = await createContainer(
+    runId,
+    {},
+    {
+      image,
+      adapterName: "ws-populate",
+      // Hold the volume mount open long enough for the archive PUT. The
+      // container is stopped explicitly the moment injection returns, so
+      // the sleep duration is just a safety ceiling, never waited on.
+      cmd: ["sh", "-c", "sleep 120"],
+      binds: [`${volumeName}:/workspace`],
+    },
+  );
+
+  try {
+    await startContainer(helperId);
+    await injectFiles(helperId, files, targetDir);
+  } finally {
+    await stopContainer(helperId, 0).catch(() => {});
+    await removeContainer(helperId).catch(() => {});
+  }
 }
 
 /** Create a tar header for a single file entry. */

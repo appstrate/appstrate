@@ -100,6 +100,7 @@ function createFakeOrchestrator(config: FakeOrchestratorConfig = {}): FakeOrches
       return boundary;
     },
     async removeIsolationBoundary() {},
+    async seedWorkspace() {},
     async createSidecar(
       runId: string,
       _boundary: IsolationBoundary,

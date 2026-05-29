@@ -22,6 +22,7 @@ import {
   getContainerHostPort,
   removeVolume,
   runEphemeralCommand,
+  populateVolume,
   WORKSPACE_VOLUME_PREFIX,
 } from "../../../src/services/docker.ts";
 
@@ -462,6 +463,82 @@ describeRequiresDocker("injectFiles", () => {
       const id = await createRawContainer(["true"]);
       await injectFiles(id, [], "/tmp");
       // No error thrown
+    },
+    TIMEOUT,
+  );
+});
+
+// ─── populateVolume ─────────────────────────────────────────
+
+describeRequiresDocker("populateVolume", () => {
+  it("seeds a named volume so a container mounting it sees the files (mount does not shadow them)", async () => {
+    // Regression guard for the workspace-seeding shadow bug: injecting
+    // into a created-but-unstarted container's `/workspace` wrote to the
+    // image rw-layer, which the named-volume mount then shadowed at start —
+    // dropping the AFPS bundle (skills never materialised) + input docs.
+    // populateVolume routes through a helper that mounts the live volume,
+    // so the bytes land IN the volume and survive into the agent.
+    const runId = `test-${uid()}`;
+    const volName = trackVolume(`${WORKSPACE_VOLUME_PREFIX}${runId}`);
+    await createVolume(volName, {});
+
+    // Pre-seed a marker so the volume is non-empty at first mount, exactly
+    // like the real per-run boundary (`.appstrate-init`) — the condition
+    // that makes Docker SKIP the rw-layer→volume copy and exposed the bug.
+    await runEphemeralCommand({
+      image: "busybox:1.37",
+      cmd: ["sh", "-c", "touch /workspace/.appstrate-init"],
+      binds: [`${volName}:/workspace`],
+      runId,
+    });
+
+    const content = "fake-afps-bundle-bytes";
+    await populateVolume(
+      volName,
+      [
+        { name: "agent-package.afps", content: Buffer.from(content) },
+        { name: "documents/readme.md", content: Buffer.from("# doc") },
+      ],
+      "/workspace",
+      runId,
+    );
+
+    // A FRESH container mounting the volume must see both files.
+    const readerId = trackContainer(
+      await createContainer(
+        runId,
+        {},
+        {
+          image: "busybox:1.37",
+          adapterName: "test-reader",
+          cmd: [
+            "sh",
+            "-c",
+            "cat /workspace/agent-package.afps && cat /workspace/documents/readme.md",
+          ],
+          binds: [`${volName}:/workspace`],
+        },
+      ),
+    );
+    await startContainer(readerId);
+
+    const lines: string[] = [];
+    for await (const line of streamLogs(readerId)) {
+      lines.push(line);
+    }
+    const output = lines.join("\n");
+    expect(output).toContain(content);
+    expect(output).toContain("# doc");
+  }, 30_000);
+
+  it(
+    "does nothing when files array is empty",
+    async () => {
+      const runId = `test-${uid()}`;
+      const volName = trackVolume(`${WORKSPACE_VOLUME_PREFIX}${runId}`);
+      await createVolume(volName, {});
+      await populateVolume(volName, [], "/workspace", runId);
+      // No helper container spawned, no error thrown.
     },
     TIMEOUT,
   );
