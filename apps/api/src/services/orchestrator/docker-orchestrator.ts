@@ -16,6 +16,7 @@ import { createNetworkWithPoolRetry } from "../docker-errors.ts";
 import { logger } from "../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { SIDECAR_MEMORY_BYTES, SIDECAR_NANO_CPUS } from "./constants.ts";
+import { applySpecToSidecarEnv } from "./sidecar-env.ts";
 
 class DockerWorkloadHandle implements WorkloadHandle {
   constructor(
@@ -252,49 +253,12 @@ export class DockerOrchestrator implements ContainerOrchestrator {
       // adapter dispatch.
       WORKSPACE_HANDLE_JSON: JSON.stringify(boundary.workspace),
     };
-    if (spec.proxyUrl) sidecarEnv.PROXY_URL = spec.proxyUrl;
-    if (spec.modelContextWindow != null) {
-      sidecarEnv.MODEL_CONTEXT_WINDOW = String(spec.modelContextWindow);
-    }
-    if (spec.modelMaxTokens != null) {
-      sidecarEnv.MODEL_MAX_TOKENS = String(spec.modelMaxTokens);
-    }
-    if (spec.llm) {
-      if (spec.llm.authMode === "oauth") {
-        // OAuth wire format: ship the LlmProxyOauthConfig as JSON so
-        // server.ts parses it into config.llm at boot. Without this,
-        // /llm/* returns 503 "LLM proxy not configured".
-        sidecarEnv.PI_LLM_OAUTH_CONFIG_JSON = JSON.stringify(spec.llm);
-      } else {
-        sidecarEnv.PI_BASE_URL = spec.llm.baseUrl;
-        sidecarEnv.PI_API_KEY = spec.llm.apiKey;
-        sidecarEnv.PI_PLACEHOLDER = spec.llm.placeholder;
-      }
-    }
-    // Phase 1.4 — integrations the sidecar will spawn + multiplex onto
-    // the agent's MCP surface. Each entry carries the bundle bytes +
-    // resolved spawn env (with live OAuth tokens / API keys).
-    if (spec.integrations && spec.integrations.length > 0) {
-      sidecarEnv.INTEGRATIONS_TO_SPAWN_JSON = JSON.stringify(spec.integrations);
-    }
-    // Platform runtime tools (output/log/note/pin/report) the sidecar hosts
-    // as in-process MCP tools, plus the output schema they validate against.
-    if (spec.runtimeTools && spec.runtimeTools.length > 0) {
-      sidecarEnv.RUNTIME_TOOLS_JSON = JSON.stringify(spec.runtimeTools);
-    }
-    if (spec.outputSchema) {
-      sidecarEnv.OUTPUT_SCHEMA = JSON.stringify(spec.outputSchema);
-    }
+    applySpecToSidecarEnv(spec, sidecarEnv);
     // The sidecar selects its integration runtime purely from this var (no
     // auto-detection). Pin it to mirror this orchestrator's RUN_ADAPTER so a
     // containerized run spawns its integrations as containers too. Respect an
     // explicit operator override carried in from the environment.
     sidecarEnv.INTEGRATION_RUNTIME_ADAPTER = process.env.INTEGRATION_RUNTIME_ADAPTER ?? "docker";
-    // P4 — connect-run mode. When set, the sidecar runs `runConnectOnce`
-    // against this single integration and exits (no agent /mcp server).
-    if (spec.connectLoginSpec) {
-      sidecarEnv.CONNECT_LOGIN_JSON = JSON.stringify(spec.connectLoginSpec);
-    }
 
     // Create sidecar on egress network (primary) so it has DNS + internet.
     // Then connect to run network (internal) with "sidecar" alias for agent DNS.

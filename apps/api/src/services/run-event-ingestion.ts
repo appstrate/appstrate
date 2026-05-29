@@ -34,7 +34,7 @@ import { logger } from "../lib/logger.ts";
 import { getCache, getEventBuffer } from "../infra/index.ts";
 import { getEnv } from "@appstrate/env";
 import { persistRunEvent, writeRunnerLedgerRow } from "./run-launcher/appstrate-event-sink.ts";
-import { updateRun, appendRunLog } from "./state/runs.ts";
+import { updateRun, appendRunLog, computeRunCost } from "./state/runs.ts";
 import {
   addMemories as addUnifiedMemories,
   upsertPinned,
@@ -48,7 +48,6 @@ import { asJSONSchemaObject } from "@appstrate/core/form";
 import { callHook, emitEvent } from "../lib/modules/module-loader.ts";
 import { isInlineShadowPackageId } from "./inline-run.ts";
 import type { RunStatusChangeParams } from "@appstrate/core/module";
-import { computeRunCost } from "./credential-proxy-usage.ts";
 import { assertSinkOpen, verifyRunSignatureHeaders } from "../lib/run-signature.ts";
 import { clearRunMetricBroadcastState } from "./run-metric-broadcaster.ts";
 import type { TokenUsage } from "@appstrate/shared-types";
@@ -128,6 +127,31 @@ export async function getRunSinkContext(runId: string): Promise<RunSinkContext |
 // Pulling them out of this module keeps the signature-verification unit
 // tests from requiring the db client's env invariants.
 
+/**
+ * Re-read `runs.last_event_sequence` from the DB and, if it advanced past
+ * the caller's in-memory snapshot, update `run.lastEventSequence` in place.
+ * Returns whether the value advanced.
+ *
+ * Concurrent POSTs each load their own snapshot in the verify-signature
+ * middleware before any of them persists, so a parallel burst sees the
+ * same stale value: only one wins the fast-path CAS, the others observe a
+ * false gap-at-head. Refreshing from DB lets the loser's drain recompute
+ * `next` against actual DB state instead of stranding buffered events
+ * until finalize's gap_fill.
+ */
+async function refreshSequence(run: RunSinkContext): Promise<boolean> {
+  const [fresh] = await db
+    .select({ s: runs.lastEventSequence })
+    .from(runs)
+    .where(eq(runs.id, run.id))
+    .limit(1);
+  if (fresh && fresh.s > run.lastEventSequence) {
+    run.lastEventSequence = fresh.s;
+    return true;
+  }
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // Ingestion — single signed event
 // ---------------------------------------------------------------------------
@@ -194,18 +218,10 @@ async function ingestInner(
     return { status: "persisted", sequence };
   }
 
-  // Refresh the in-memory snapshot from DB and try a drain. Concurrent
-  // POSTs each load their own snapshot in the verify-signature middleware
-  // before any of them persists, so a parallel burst sees the same stale
-  // value: only one wins the fast path, the others end up here. Without a
+  // Refresh the in-memory snapshot from DB and try a drain. Without this
   // refresh + drain attempt, buffered events sit until finalize's gap_fill
   // — collapsing real-time activity into a single visual burst.
-  const [fresh] = await db
-    .select({ s: runs.lastEventSequence })
-    .from(runs)
-    .where(eq(runs.id, run.id))
-    .limit(1);
-  if (fresh && fresh.s > run.lastEventSequence) run.lastEventSequence = fresh.s;
+  await refreshSequence(run);
   await drainBufferedEvents(run);
 
   return run.lastEventSequence >= sequence
@@ -733,16 +749,30 @@ async function persistEventAndAdvance(
     // against the actual DB state — otherwise it bails out on a false
     // gap-at-head and strands every subsequent buffered event until
     // finalize's gap_fill.
-    const [fresh] = await db
-      .select({ s: runs.lastEventSequence })
-      .from(runs)
-      .where(eq(runs.id, run.id))
-      .limit(1);
-    if (fresh && fresh.s > run.lastEventSequence) run.lastEventSequence = fresh.s;
+    await refreshSequence(run);
     return;
   }
 
   run.lastEventSequence = sequence;
+
+  // Emit `run.started` for remote-origin runs at the moment the DB
+  // actually transitions pending → running (the first ingested event).
+  // Platform-origin runs already emit `started` from
+  // `executeAgentInBackground` when they flip the row, so they are
+  // excluded here to avoid a duplicate. Remote runs no longer emit at
+  // row-insert time (run-creation.ts) — that fired before the DB
+  // transition and never again when it actually happened.
+  if (firstEvent && run.runOrigin === "remote") {
+    void emitEvent("onRunStatusChange", {
+      orgId: run.orgId,
+      runId: run.id,
+      packageId: run.packageId,
+      applicationId: run.applicationId,
+      status: "started",
+      packageEphemeral: isInlineShadowPackageId(run.packageId),
+      ...(run.modelSource !== null ? { modelSource: run.modelSource } : {}),
+    });
+  }
 }
 
 async function bufferEvent(runId: string, sequence: number, event: RunEvent): Promise<void> {
@@ -786,15 +816,7 @@ async function drainBufferedEvents(
     // before giving up; otherwise concurrent buffer-path drainers (one
     // per bursty parallel-call event) all observe a false gap, exit
     // early, and the buffer sits until finalize.
-    const [fresh] = await db
-      .select({ s: runs.lastEventSequence })
-      .from(runs)
-      .where(eq(runs.id, run.id))
-      .limit(1);
-    if (fresh && fresh.s > run.lastEventSequence) {
-      run.lastEventSequence = fresh.s;
-      continue;
-    }
+    if (await refreshSequence(run)) continue;
     return;
   }
 }

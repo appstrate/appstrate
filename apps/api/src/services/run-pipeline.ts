@@ -9,7 +9,7 @@ import { logger } from "../lib/logger.ts";
 import { buildRunContext, ModelNotConfiguredError } from "./run-context-builder.ts";
 import { createRun } from "./state/runs.ts";
 import { getPackageConfig } from "./application-packages.ts";
-import { executeAgentInBackground } from "../routes/runs.ts";
+import { executeAgentInBackground } from "./run-launcher/execute-background.ts";
 import { validateAgentReadiness } from "./agent-readiness.ts";
 import { resolveRunConnectionsOrError } from "./integration-connection-resolver.ts";
 import type { ConnectionOverrides, ResolvedConnectionMap } from "@appstrate/core/integration";

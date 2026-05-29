@@ -1271,3 +1271,123 @@ describe("runs liveness — unified last_heartbeat_at bumps", () => {
     expect(res.status).toBe(401);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Remote-origin `run.started` timing (finding #26). Remote runs no longer
+// emit `started` at row-insert time (run-creation.ts) — that fired before
+// the DB transitioned and never fired again when it actually happened.
+// The `onRunStatusChange { status: "started" }` event now fires from
+// `persistEventAndAdvance` at the moment the row flips pending → running
+// (first ingested event). Platform-origin runs still emit from
+// `executeAgentInBackground` and must NOT double-emit here.
+// ---------------------------------------------------------------------------
+describe("remote run.started — emitted at first event, not at row insert", () => {
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    resetModules();
+    ctx = await createTestContext({ email: "started@test.dev", orgSlug: "started-org" });
+    await seedPackage({ orgId: ctx.orgId, id: "@test/started-agent", type: "agent" });
+  });
+
+  afterAll(() => {
+    resetModules();
+  });
+
+  async function captureStartedEvents(): Promise<{
+    started: () => RunStatusChangeParams[];
+  }> {
+    const seen: RunStatusChangeParams[] = [];
+    const mod: AppstrateModule = {
+      manifest: { id: "started-spy", name: "Started Spy", version: "1.0.0" },
+      async init() {},
+      events: {
+        onRunStatusChange: async (params) => {
+          if (params.status === "started") seen.push(params);
+        },
+      },
+    };
+    await loadModulesFromInstances([mod], {
+      databaseUrl: null,
+      redisUrl: null,
+      appUrl: "http://localhost:3000",
+      isEmbeddedDb: true,
+      applyMigrations: async () => {},
+      getSendMail: async () => () => {},
+      getOrgAdminEmails: async () => [],
+      services: {} as never,
+    });
+    return { started: () => seen };
+  }
+
+  async function seedPendingRemoteRun(): Promise<string> {
+    const runId = `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+    await db.insert(runs).values({
+      id: runId,
+      packageId: "@test/started-agent",
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      status: "pending",
+      runOrigin: "remote",
+      sinkSecretEncrypted: encrypt(RUN_SECRET),
+      sinkExpiresAt: new Date(Date.now() + 3600_000),
+      startedAt: new Date(),
+      tokenUsage: { input_tokens: 100, output_tokens: 50 } as unknown as Record<string, number>,
+    });
+    return runId;
+  }
+
+  it("does not fire run.started for a remote run until the first event is ingested", async () => {
+    const { started } = await captureStartedEvents();
+    const runId = await seedPendingRemoteRun();
+
+    // No event yet — the row was created `pending`; nothing should have
+    // emitted `started` (the old insert-time emit is gone).
+    await new Promise((r) => setTimeout(r, 0));
+    expect(started()).toHaveLength(0);
+
+    // First signed event arrives → DB flips pending → running.
+    const envelope = buildEnvelope(
+      runId,
+      "appstrate.progress",
+      { message: "first", timestamp: Date.now() },
+      1,
+    );
+    const res = await postEvent(runId, envelope);
+    expect(res.status).toBe(200);
+
+    // emitEvent is fire-and-forget — let the microtask/timer queue drain.
+    await new Promise((r) => setTimeout(r, 0));
+
+    const events = started();
+    expect(events).toHaveLength(1);
+    expect(events[0]!.runId).toBe(runId);
+    expect(events[0]!.status).toBe("started");
+
+    // And the row actually transitioned to running.
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("running");
+  });
+
+  it("emits run.started only once across subsequent events", async () => {
+    const { started } = await captureStartedEvents();
+    const runId = await seedPendingRemoteRun();
+
+    for (const seq of [1, 2, 3]) {
+      const res = await postEvent(
+        runId,
+        buildEnvelope(
+          runId,
+          "appstrate.progress",
+          { message: `e${seq}`, timestamp: Date.now() },
+          seq,
+        ),
+      );
+      expect(res.status).toBe(200);
+    }
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(started()).toHaveLength(1);
+  });
+});
