@@ -129,11 +129,10 @@
     @apply text-muted-foreground mb-1 block text-sm;
   }
 
-  /* Base button styling for unstyled buttons */
-  button {
-    @apply inline-flex items-center justify-center rounded-md px-3 py-1.5 text-sm font-medium transition-colors;
-    @apply text-muted-foreground hover:text-foreground hover:bg-accent;
-  }
+  /* Disabled affordance for every button (component or bare). Appearance is
+     owned by each button's own classes (ui/button variants or explicit
+     utilities) — no global button reset, so nothing to override on Radix
+     controls or to conflict with <Button>. */
   button:disabled {
     @apply pointer-events-none opacity-50;
   }
@@ -141,13 +140,6 @@
   /* Checkbox reset — don't apply full-width input styles */
   input[type="checkbox"] {
     @apply w-auto;
-  }
-
-  /* Radix Checkbox/Switch/Radio renders as <button> — reset global button padding */
-  button[role="checkbox"],
-  button[role="switch"],
-  button[role="radio"] {
-    @apply p-0;
   }
 
   /* Links */

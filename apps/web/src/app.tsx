@@ -63,6 +63,7 @@ import { MagicLinkPage } from "./pages/magic-link";
 import { ErrorBoundary } from "./components/error-boundary";
 import { AppSidebar } from "./components/app-sidebar";
 import { NotificationBell } from "./components/notification-bell";
+import { ThemeToggle } from "./components/theme-toggle";
 import { LoadingState } from "./components/page-states";
 
 import { useAuth } from "./hooks/use-auth";
@@ -114,7 +115,8 @@ function MainLayout() {
             </Link>
           </div>
           <div className="flex-1" />
-          <div className="px-4">
+          <div className="flex items-center gap-1 px-4">
+            <ThemeToggle />
             <NotificationBell />
           </div>
         </header>
