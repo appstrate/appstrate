@@ -1,0 +1,62 @@
+{
+  "name": "@appstrate/notion-mcp",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.1",
+  "display_name": "Notion (MCP)",
+  "description": "Notion integration backed by Notion's official remote MCP server (mcp.notion.com/mcp). The sidecar opens a Streamable HTTP MCP client and injects the actor's OAuth2 access token as `Authorization: Bearer …`. Auth uses the MCP-spec flow — RFC 9728 protected-resource discovery + RFC 7591 dynamic client registration + PKCE, public client (no secret) — so no OAuth app is created by hand: the operator installs the connector and each member clicks Connect. Currently in public beta upstream.",
+  "license": "Apache-2.0",
+  "source": {
+    "kind": "remote",
+    "remote": {
+      "url": "https://mcp.notion.com/mcp",
+      "transport": "streamable-http"
+    }
+  },
+  "auths": {
+    "oauth": {
+      "type": "oauth2",
+      "issuer": "https://mcp.notion.com",
+      "default_scopes": [],
+      "token_endpoint_auth_method": "none",
+      "authorized_uris": ["https://mcp.notion.com/**"],
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer ",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": " ",
+          "dynamic_registration": true
+        },
+        "dev.appstrate/auth": {
+          "required": true
+        }
+      }
+    }
+  },
+  "tools_policy": {
+    "search": {},
+    "fetch": {},
+    "create-pages": {},
+    "update-page": {},
+    "move-pages": {},
+    "duplicate-page": {},
+    "create-database": {},
+    "update-database": {},
+    "create-comment": {},
+    "get-comments": {},
+    "get-users": {},
+    "get-self": {},
+    "get-user": {}
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    }
+  }
+}

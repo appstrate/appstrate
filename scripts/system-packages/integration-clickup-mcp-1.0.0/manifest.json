@@ -16,10 +16,9 @@
   "auths": {
     "oauth": {
       "type": "oauth2",
-      "authorization_endpoint": "https://app.clickup.com/api",
-      "token_endpoint": "https://api.clickup.com/api/v2/oauth/token",
-      "default_scopes": [],
-      "token_endpoint_auth_method": "client_secret_post",
+      "issuer": "https://mcp.clickup.com",
+      "default_scopes": ["read", "write"],
+      "token_endpoint_auth_method": "none",
       "authorized_uris": ["https://mcp.clickup.com/**"],
       "delivery": {
         "http": {
@@ -31,7 +30,8 @@
       },
       "_meta": {
         "dev.appstrate/oauth": {
-          "scope_separator": " "
+          "scope_separator": " ",
+          "dynamic_registration": true
         },
         "dev.appstrate/auth": {
           "required": true

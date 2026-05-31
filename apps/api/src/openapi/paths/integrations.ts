@@ -160,6 +160,7 @@ const authStatusSchema = {
     "resource",
     "connections",
     "has_oauth_client",
+    "supports_dynamic_registration",
   ],
   properties: {
     auth_key: { type: "string" },
@@ -178,6 +179,11 @@ const authStatusSchema = {
     },
     connections: { type: "array", items: integrationConnectionSchema },
     has_oauth_client: { type: "boolean" },
+    supports_dynamic_registration: {
+      type: "boolean",
+      description:
+        'True when the auth opts into MCP-spec dynamic client registration (`_meta["dev.appstrate/oauth"].dynamic_registration`). The connect flow self-registers an OAuth client on first use.',
+    },
   },
 } as const;
 

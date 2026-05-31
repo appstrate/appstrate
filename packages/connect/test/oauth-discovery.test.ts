@@ -398,3 +398,48 @@ describe("resolveOAuthEndpoints — discovery vs manual", () => {
     expect(fetchCountAfterSecondCall).toBe(0);
   });
 });
+
+describe("resolveOAuthEndpoints — registration_endpoint projection (RFC 7591)", () => {
+  it("projects registration_endpoint from the AS metadata document", async () => {
+    const result = await withFetch(
+      (async () =>
+        jsonResponse({
+          issuer: "https://mcp.example.com",
+          authorization_endpoint: "https://mcp.example.com/oauth/authorize",
+          token_endpoint: "https://mcp.example.com/oauth/token",
+          registration_endpoint: "https://mcp.example.com/oauth/register",
+          code_challenge_methods_supported: ["S256"],
+        })) as unknown as typeof fetch,
+      () => resolveOAuthEndpoints({ issuer: "https://mcp.example.com" }),
+    );
+    expect(result.registrationEndpoint).toBe("https://mcp.example.com/oauth/register");
+    expect(result.authorizationEndpoint).toBe("https://mcp.example.com/oauth/authorize");
+  });
+
+  it("leaves registrationEndpoint undefined when the AS omits it", async () => {
+    const result = await withFetch(
+      (async () =>
+        jsonResponse({
+          issuer: "https://idp.example.com",
+          authorization_endpoint: "https://idp.example.com/authorize",
+          token_endpoint: "https://idp.example.com/token",
+        })) as unknown as typeof fetch,
+      () => resolveOAuthEndpoints({ issuer: "https://idp.example.com" }),
+    );
+    expect(result.registrationEndpoint).toBeUndefined();
+  });
+
+  it("ignores a malformed (non-URL) registration_endpoint", async () => {
+    const result = await withFetch(
+      (async () =>
+        jsonResponse({
+          issuer: "https://idp.example.com",
+          authorization_endpoint: "https://idp.example.com/authorize",
+          token_endpoint: "https://idp.example.com/token",
+          registration_endpoint: "not a url",
+        })) as unknown as typeof fetch,
+      () => resolveOAuthEndpoints({ issuer: "https://idp.example.com" }),
+    );
+    expect(result.registrationEndpoint).toBeUndefined();
+  });
+});

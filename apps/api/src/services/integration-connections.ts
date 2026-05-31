@@ -33,7 +33,13 @@ import {
   encryptCredentials,
   encryptCredentialEnvelope,
   decryptCredentials,
+  resolveOAuthEndpoints,
+  discoverProtectedResourceMetadata,
+  registerDynamicClient,
+  DynamicClientRegistrationError,
 } from "@appstrate/connect";
+import { getEnv } from "@appstrate/env";
+import { isBlockedUrl } from "@appstrate/core/ssrf";
 import { logger } from "../lib/logger.ts";
 import { notFound, conflict, invalidRequest } from "../lib/errors.ts";
 import type { AppScope } from "../lib/scope.ts";
@@ -44,7 +50,11 @@ import {
   type IntegrationManifest,
 } from "@appstrate/core/integration";
 import type { IntegrationToolCatalogEntry } from "@appstrate/shared-types";
-import { getLocalServerRef } from "./integration-manifest-helpers.ts";
+import {
+  getLocalServerRef,
+  getRemoteSource,
+  toSupportedTokenEndpointAuthMethod,
+} from "./integration-manifest-helpers.ts";
 import { fetchMcpServerManifest } from "./integration-service.ts";
 import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
 import type { IntegrationAuthStatus } from "@appstrate/shared-types";
@@ -454,6 +464,185 @@ export async function getIntegrationOAuthClient(
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+// ─────────────────────────────────────────────
+// Auto-DCR (MCP-spec dynamic client registration)
+// ─────────────────────────────────────────────
+
+/**
+ * The OAuth connect config resolved for the initiate call, plus the client
+ * to authenticate as. For dynamic-registration integrations the endpoints +
+ * resource are discovered (RFC 9728 → RFC 8414) and threaded back so the
+ * initiate call uses them; for classic integrations they stay `undefined` and
+ * the caller falls back to the manifest's declared values.
+ */
+export interface ResolvedOAuthConnect {
+  /**
+   * `null` when no client is registered and dynamic registration is either not
+   * opted-in or unavailable — the caller surfaces the "register an OAuth
+   * client" error.
+   */
+  client: IntegrationOAuthClientWithSecret | null;
+  /** Discovered/declared issuer (overrides the manifest when set). */
+  issuer?: string;
+  authorizationEndpoint?: string;
+  tokenEndpoint?: string;
+  /** RFC 8707 resource indicator (discovered for MCP, else manifest `resource`). */
+  resource?: string;
+}
+
+/** Read the `dynamic_registration` opt-in off an auth's `_meta["dev.appstrate/oauth"]`. */
+function readDynamicRegistrationFlag(auth: AfpsManifestAuth): boolean {
+  const meta = auth._meta?.["dev.appstrate/oauth"];
+  return !!(
+    meta &&
+    typeof meta === "object" &&
+    (meta as { dynamic_registration?: unknown }).dynamic_registration === true
+  );
+}
+
+/**
+ * Resolve the OAuth connect config for an auth, auto-registering a client via
+ * RFC 7591 Dynamic Client Registration when the auth opts in
+ * (`_meta["dev.appstrate/oauth"].dynamic_registration: true`) and none is
+ * pre-registered. This is the MCP-spec onboarding path: an operator installs
+ * the connector, the first actor clicks Connect, and Appstrate self-registers
+ * — no hand-created OAuth app, no client secret.
+ *
+ * Discovery chain (when the manifest doesn't declare endpoints):
+ *   `source.remote.url` → RFC 9728 protected-resource metadata
+ *   (`resource` + `authorization_servers`) → RFC 8414 AS metadata
+ *   (`authorization_endpoint` / `token_endpoint` / `registration_endpoint`).
+ *
+ * Best-effort: any discovery/registration failure returns the existing client
+ * (or `null`), letting the caller fall back to the classic "register a client"
+ * error. Never throws for the dynamic path — classic integrations are
+ * unaffected (flag off ⇒ early return with the existing lookup).
+ */
+export async function ensureIntegrationOAuthClient(
+  scope: AppScope,
+  packageId: string,
+  authKey: string,
+  manifest: IntegrationManifest,
+  auth: AfpsManifestAuth,
+  redirectUri: string,
+): Promise<ResolvedOAuthConnect> {
+  const existing = await getIntegrationOAuthClient(scope, packageId, authKey);
+
+  // Classic path: dynamic registration not requested — behave exactly as
+  // before (endpoints come from the manifest in the caller).
+  if (!readDynamicRegistrationFlag(auth)) {
+    return { client: existing };
+  }
+
+  // Resolve the AS issuer + RFC 8707 resource. The protected-resource metadata
+  // (RFC 9728) is authoritative for the canonical `resource` (the token's
+  // audience — a mismatch makes the access token unusable against the MCP
+  // server) and advertises the AS issuer. Discover it whenever the integration
+  // exposes a remote MCP URL; the manifest is a fallback (the author may pin the
+  // issuer, but the discovered resource wins). Best-effort — discovery failure
+  // falls back to the manifest values.
+  let issuer = auth.issuer;
+  let resource = auth.resource;
+  const remote = getRemoteSource(manifest);
+  if (remote?.url) {
+    const md = await discoverProtectedResourceMetadata({ resourceServerUrl: remote.url });
+    if (md) {
+      issuer = issuer ?? md.authorizationServers[0];
+      resource = md.resource ?? resource;
+    }
+  }
+
+  // Fill authorize/token/registration endpoints from issuer discovery
+  // (RFC 8414). Manifest endpoints, when declared, win.
+  const endpoints = await resolveOAuthEndpoints({
+    ...(issuer ? { issuer } : {}),
+    ...(auth.authorization_endpoint ? { authorizationEndpoint: auth.authorization_endpoint } : {}),
+    ...(auth.token_endpoint ? { tokenEndpoint: auth.token_endpoint } : {}),
+  });
+
+  const resolved: ResolvedOAuthConnect = {
+    client: existing,
+    ...(issuer ? { issuer } : {}),
+    ...(endpoints.authorizationEndpoint
+      ? { authorizationEndpoint: endpoints.authorizationEndpoint }
+      : {}),
+    ...(endpoints.tokenEndpoint ? { tokenEndpoint: endpoints.tokenEndpoint } : {}),
+    ...(resource ? { resource } : {}),
+  };
+
+  // Client already registered — nothing to mint; just return discovered config.
+  if (existing) return resolved;
+
+  // No registration endpoint discovered — can't auto-register; let the caller
+  // surface the existing "register a client" error.
+  const registrationEndpoint = endpoints.registrationEndpoint;
+  if (!registrationEndpoint) {
+    logger.warn("auto-DCR: no registration_endpoint discovered", { packageId, authKey, issuer });
+    return resolved;
+  }
+
+  // SSRF guard — the endpoint is manifest/discovery-derived and we POST to it.
+  // Refuse loopback / RFC1918 / link-local / metadata targets.
+  if (isBlockedUrl(registrationEndpoint)) {
+    logger.warn("auto-DCR: registration_endpoint blocked by SSRF guard", {
+      packageId,
+      authKey,
+      registrationEndpoint,
+    });
+    return resolved;
+  }
+
+  // Narrow the concurrency window: re-check in case a parallel Connect just
+  // registered a client for the same (app, package, authKey).
+  const racedClient = await getIntegrationOAuthClient(scope, packageId, authKey);
+  if (racedClient) return { ...resolved, client: racedClient };
+
+  const host = (() => {
+    try {
+      return new URL(getEnv().APP_URL).host;
+    } catch {
+      return "appstrate";
+    }
+  })();
+
+  try {
+    const dcrAuthMethod = toSupportedTokenEndpointAuthMethod(auth.token_endpoint_auth_method);
+    const registration = await registerDynamicClient({
+      registrationEndpoint,
+      redirectUri,
+      clientName: `Appstrate (${host})`,
+      ...(auth.default_scopes && auth.default_scopes.length > 0
+        ? { scopes: auth.default_scopes }
+        : {}),
+      ...(dcrAuthMethod ? { tokenEndpointAuthMethod: dcrAuthMethod } : {}),
+    });
+    await upsertIntegrationOAuthClient(scope, packageId, authKey, {
+      clientId: registration.clientId,
+      clientSecret: registration.clientSecret ?? "",
+      redirectUri,
+    });
+    logger.info("auto-DCR: registered OAuth client", {
+      packageId,
+      authKey,
+      clientId: registration.clientId,
+    });
+    const client = await getIntegrationOAuthClient(scope, packageId, authKey);
+    return { ...resolved, client };
+  } catch (err) {
+    if (err instanceof DynamicClientRegistrationError) {
+      logger.warn("auto-DCR: dynamic client registration failed", {
+        packageId,
+        authKey,
+        registrationEndpoint,
+        status: err.status,
+        err: err.message,
+      });
+      return resolved;
+    }
+    throw err;
+  }
 }
 
 export async function deleteIntegrationOAuthClient(
@@ -1088,6 +1277,9 @@ export async function getIntegrationAuthStatuses(
       resource,
       connections: allConnections.filter((c) => c.auth_key === key),
       has_oauth_client: oauthClientKeys.has(key),
+      // Auto-DCR opt-in — the connect flow self-registers a client, so the UI
+      // enables Connect even when no client is pre-registered.
+      supports_dynamic_registration: readDynamicRegistrationFlag(auth),
     };
   });
 

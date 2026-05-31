@@ -290,7 +290,10 @@ function AuthSection({
 }) {
   const { t } = useTranslation("settings");
   const isOAuth = status.type === "oauth2";
-  const clientMissing = isOAuth && !status.has_oauth_client;
+  // Auto-DCR auths self-register a client on first connect, so a missing
+  // pre-registered client is not a blocker for them.
+  const clientMissing =
+    isOAuth && !status.has_oauth_client && !status.supports_dynamic_registration;
 
   return (
     <div className="bg-card rounded-lg border p-4" data-testid={`auth-section-${status.auth_key}`}>

@@ -75,6 +75,13 @@ export interface IntegrationAuthStatus {
   connections: IntegrationConnection[];
   /** True when this auth has an admin-registered OAuth2 client (oauth2 only). */
   has_oauth_client: boolean;
+  /**
+   * True when this auth opts into MCP-spec dynamic client registration
+   * (`_meta["dev.appstrate/oauth"].dynamic_registration`). The connect flow
+   * self-registers an OAuth client on first use, so the UI treats the auth as
+   * connectable even without a pre-registered client.
+   */
+  supports_dynamic_registration: boolean;
 }
 
 /**
