@@ -200,11 +200,11 @@ function MissingRow({
     err.code === "not_installed_or_invalid_manifest";
   const Icon = resolved ? Check : isMustChoose ? Users : isReconnect ? AlertTriangle : XCircle;
   const colorClass = resolved
-    ? "text-emerald-600"
+    ? "text-success"
     : isMustChoose
-      ? "text-amber-500"
+      ? "text-warning"
       : isReconnect
-        ? "text-amber-500"
+        ? "text-warning"
         : "text-destructive";
 
   // Pick the auth to act on. `field` is integration-level (`integrations.{id}`);

@@ -120,6 +120,6 @@ export const typeColors: Record<string, string> = {
 
 /** Text color by severity level (overrides type color when set). */
 export const levelColors: Record<string, string> = {
-  warn: "text-amber-400",
+  warn: "text-warning",
   error: "text-destructive",
 };

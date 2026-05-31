@@ -121,17 +121,15 @@ export function OrgSettingsBillingPage() {
       </div>
 
       {billing.status === "past_due" && (
-        <div className="mb-4 rounded-lg border border-yellow-500/50 bg-yellow-500/10 p-4 text-sm">
-          <p className="font-medium text-yellow-600 dark:text-yellow-400">
-            {t("billing.pastDueWarning")}
-          </p>
+        <div className="border-warning/50 bg-warning/10 mb-4 rounded-lg border p-4 text-sm">
+          <p className="text-warning font-medium">{t("billing.pastDueWarning")}</p>
           <p className="text-muted-foreground mt-1">{t("billing.pastDueDescription")}</p>
         </div>
       )}
 
       {billing.status === "canceling" && billing.period_end && (
-        <div className="mb-4 rounded-lg border border-yellow-500/50 bg-yellow-500/10 p-4 text-sm">
-          <p className="font-medium text-yellow-600 dark:text-yellow-400">
+        <div className="border-warning/50 bg-warning/10 mb-4 rounded-lg border p-4 text-sm">
+          <p className="text-warning font-medium">
             {t("billing.cancelingWarning", { date: formatDateField(billing.period_end, "date") })}
           </p>
         </div>

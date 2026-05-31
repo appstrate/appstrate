@@ -72,12 +72,12 @@ export function PinnedSlotCard({ slot, onDelete, isDeleting }: PinnedSlotCardPro
     >
       <div className="flex flex-wrap items-center gap-2 px-3 py-2">
         <Pin
-          className={`h-3.5 w-3.5 shrink-0 ${isCheckpoint ? "text-primary" : "text-emerald-500"}`}
+          className={`h-3.5 w-3.5 shrink-0 ${isCheckpoint ? "text-primary" : "text-success"}`}
           aria-hidden
         />
         <code
           className={`rounded px-1.5 py-0.5 font-mono text-xs font-medium ${
-            isCheckpoint ? "bg-primary/10 text-primary" : "bg-emerald-500/10 text-emerald-500"
+            isCheckpoint ? "bg-primary/10 text-primary" : "bg-success/10 text-success"
           }`}
         >
           {slot.key}
@@ -100,7 +100,7 @@ export function PinnedSlotCard({ slot, onDelete, isDeleting }: PinnedSlotCardPro
             title={t("btn.copy", { ns: "common" })}
           >
             {copied ? (
-              <Check className="h-3.5 w-3.5 text-emerald-500" />
+              <Check className="text-success h-3.5 w-3.5" />
             ) : (
               <Copy className="h-3.5 w-3.5" />
             )}

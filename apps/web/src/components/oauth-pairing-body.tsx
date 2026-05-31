@@ -126,7 +126,7 @@ export function OAuthPairingBody({ providerId, onConnected }: OAuthPairingBodyPr
           <span>{t("credentials.oauth.generatingCommand")}</span>
         </div>
       ) : isExpired ? (
-        <div className="flex flex-col gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">
+        <div className="border-warning/40 bg-warning/10 text-warning flex flex-col gap-3 rounded-md border p-3 text-xs">
           <p>{t("credentials.oauth.pairingExpired")}</p>
           <Button type="button" variant="outline" size="sm" onClick={handleRegenerate}>
             <RefreshCw className="mr-1.5 h-3.5 w-3.5" />

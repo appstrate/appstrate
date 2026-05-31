@@ -251,7 +251,7 @@ export function AgentApiTab({ packageId }: { packageId: string }) {
           <div className="flex items-center gap-2">
             <span className="text-muted-foreground shrink-0">{t("api.selectKey")} :</span>
             {rawKey ? (
-              <code className="truncate rounded bg-emerald-500/10 px-2 py-0.5 font-mono text-xs text-emerald-400">
+              <code className="bg-success/10 text-success truncate rounded px-2 py-0.5 font-mono text-xs">
                 {rawKey.slice(0, 12)}
                 {"•".repeat(20)}
               </code>
@@ -273,8 +273,8 @@ export function AgentApiTab({ packageId }: { packageId: string }) {
 
       {/* Key just created banner */}
       {rawKey && (
-        <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 px-4 py-3">
-          <p className="text-sm text-emerald-400">{t("api.keyCreated")}</p>
+        <div className="border-success/30 bg-success/5 rounded-md border px-4 py-3">
+          <p className="text-success text-sm">{t("api.keyCreated")}</p>
         </div>
       )}
 

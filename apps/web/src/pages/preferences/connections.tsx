@@ -24,13 +24,13 @@ import type { MeConnectionEntry, MeConnectionSourceGroup } from "@appstrate/shar
 function statusBadge(t: ReturnType<typeof useTranslation>["t"], conn: MeConnectionEntry) {
   if (conn.needs_reconnection) {
     return (
-      <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-px text-[0.65rem] text-amber-600">
+      <span className="border-warning/40 bg-warning/10 text-warning rounded-full border px-2 py-px text-[0.65rem]">
         {t("connections.statusNeedsReconnection")}
       </span>
     );
   }
   return (
-    <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-px text-[0.65rem] text-emerald-700">
+    <span className="border-success/40 bg-success/10 text-success rounded-full border px-2 py-px text-[0.65rem]">
       {t("connections.statusConnected")}
     </span>
   );
@@ -189,7 +189,7 @@ function ConnectionRow({
           )}
           {statusBadge(t, conn)}
           {conn.shared_with_org && (
-            <span className="rounded-full border border-blue-500/40 bg-blue-500/10 px-2 py-px text-[0.65rem] text-blue-700">
+            <span className="border-info/40 bg-info/10 text-info rounded-full border px-2 py-px text-[0.65rem]">
               {t("connections.sharedBadge")}
             </span>
           )}

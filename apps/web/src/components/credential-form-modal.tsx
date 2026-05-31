@@ -289,7 +289,7 @@ function CredentialFormBody({
               {testMutation.isPending ? <Spinner /> : t("credentials.test")}
             </Button>
             {testResult && (
-              <span className={`text-sm ${testResult.ok ? "text-green-500" : "text-destructive"}`}>
+              <span className={`text-sm ${testResult.ok ? "text-success" : "text-destructive"}`}>
                 {testResult.ok
                   ? t("credentials.testSuccess", { latency: testResult.latency })
                   : t("credentials.testFailed", { message: testResult.message })}

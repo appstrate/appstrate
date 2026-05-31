@@ -152,7 +152,7 @@ function OAuthClientForm({
           <span
             className={
               configured
-                ? "ml-auto rounded bg-emerald-500/10 px-1.5 py-0.5 text-[0.65rem] font-medium text-emerald-500"
+                ? "bg-success/10 text-success ml-auto rounded px-1.5 py-0.5 text-[0.65rem] font-medium"
                 : autoProvisioned
                   ? "text-muted-foreground bg-muted ml-auto rounded px-1.5 py-0.5 text-[0.65rem] font-medium"
                   : "bg-warning/10 text-warning ml-auto rounded px-1.5 py-0.5 text-[0.65rem] font-medium"
@@ -1173,7 +1173,7 @@ export function IntegrationDetailPage() {
           <span
             className={
               active
-                ? "rounded bg-emerald-500/10 px-1.5 py-0.5 text-[0.65rem] font-medium text-emerald-500"
+                ? "bg-success/10 text-success rounded px-1.5 py-0.5 text-[0.65rem] font-medium"
                 : "bg-warning/10 text-warning rounded px-1.5 py-0.5 text-[0.65rem] font-medium"
             }
           >
@@ -1304,7 +1304,7 @@ export function IntegrationDetailPage() {
             <p className="text-muted-foreground text-xs">{t("integration.tools.intro")}</p>
             {detail.allow_undeclared_tools && (
               <div
-                className="rounded-md border-l-2 border-amber-500/30 bg-amber-500/5 p-3 text-xs"
+                className="border-warning/30 bg-warning/5 rounded-md border-l-2 p-3 text-xs"
                 data-testid="integration-tools-wildcard-notice"
               >
                 <p className="font-medium">{t("integration.tools.wildcardNotice.title")}</p>

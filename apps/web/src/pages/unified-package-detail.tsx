@@ -438,15 +438,12 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       {type === "agent" && <ModelRequiredAlert />}
 
       {!isOwned && (
-        <div className="mb-4 flex items-center gap-3 rounded-lg border border-blue-500/30 bg-blue-500/5 px-4 py-3 text-sm">
-          <span className="text-blue-400">{t("ownership.readOnly")}</span>
+        <div className="border-info/30 bg-info/5 mb-4 flex items-center gap-3 rounded-lg border px-4 py-3 text-sm">
+          <span className="text-info">{t("ownership.readOnly")}</span>
           {forkedFrom && (
             <span className="text-muted-foreground">
               — {t("ownership.forkedFrom")}
-              <Link
-                to={packageDetailPath(type, forkedFrom)}
-                className="text-blue-400 hover:underline"
-              >
+              <Link to={packageDetailPath(type, forkedFrom)} className="text-info hover:underline">
                 {forkedFrom}
               </Link>
             </span>
@@ -457,10 +454,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         <div className="border-border/50 bg-muted/30 mb-4 flex items-center gap-3 rounded-lg border px-4 py-3 text-sm">
           <span className="text-muted-foreground">
             {t("ownership.forkedFrom")}
-            <Link
-              to={packageDetailPath(type, forkedFrom)}
-              className="text-blue-400 hover:underline"
-            >
+            <Link to={packageDetailPath(type, forkedFrom)} className="text-info hover:underline">
               {forkedFrom}
             </Link>
           </span>

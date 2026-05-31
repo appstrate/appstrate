@@ -240,7 +240,7 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
           className="bg-muted/30 mt-2 space-y-3 rounded-md border p-3"
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="bg-background rounded-md border-l-2 border-amber-500/30 p-2">
+          <div className="bg-background border-warning/30 rounded-md border-l-2 p-2">
             <label
               className="flex cursor-pointer items-start gap-2"
               data-testid={`integ-wildcard-${packageId}`}
@@ -303,7 +303,7 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
         </div>
       )}
       {wildcardEnabled && (
-        <div className="bg-background rounded-md border-l-2 border-amber-500/30 p-2">
+        <div className="bg-background border-warning/30 rounded-md border-l-2 p-2">
           <label
             className="flex cursor-pointer items-start gap-2"
             data-testid={`integ-wildcard-${packageId}`}

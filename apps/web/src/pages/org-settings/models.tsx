@@ -52,7 +52,7 @@ function TestResultSpan({
 }) {
   const { t } = useTranslation(["settings"]);
   return (
-    <span className={`text-sm ${result.ok ? "text-green-500" : "text-destructive"}`}>
+    <span className={`text-sm ${result.ok ? "text-success" : "text-destructive"}`}>
       {result.ok
         ? t(successKey, { latency: result.latency })
         : t(failedKey, { message: result.message })}

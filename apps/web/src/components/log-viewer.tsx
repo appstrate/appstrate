@@ -18,8 +18,8 @@ import { cn } from "@/lib/utils";
 import { formatTimestamp, typeColors, levelColors, type LogEntry } from "./log-utils";
 
 const levelConfig: Record<string, { icon: typeof Info; className: string; label: string }> = {
-  info: { icon: Info, className: "text-blue-400 bg-blue-400/10", label: "INFO" },
-  warn: { icon: AlertTriangle, className: "text-amber-400 bg-amber-400/10", label: "WARN" },
+  info: { icon: Info, className: "text-info bg-info/10", label: "INFO" },
+  warn: { icon: AlertTriangle, className: "text-warning bg-warning/10", label: "WARN" },
   error: { icon: XCircle, className: "text-destructive bg-destructive/10", label: "ERROR" },
 };
 

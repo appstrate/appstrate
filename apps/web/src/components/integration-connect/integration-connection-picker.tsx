@@ -321,7 +321,7 @@ export function IntegrationConnectionPicker({
           <Button
             variant="outline"
             size="sm"
-            className={`h-7 justify-start gap-1.5 text-xs ${triggerWarn ? "text-amber-600 dark:text-amber-400" : ""}`}
+            className={`h-7 justify-start gap-1.5 text-xs ${triggerWarn ? "text-warning" : ""}`}
             data-testid={`member-pick-${integrationId}`}
           >
             <TriggerIcon className="size-3" />
@@ -388,7 +388,7 @@ export function IntegrationConnectionPicker({
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="ml-1 h-6 gap-1 px-2 text-[0.65rem] text-amber-600 hover:text-amber-700 dark:text-amber-400"
+                    className="text-warning hover:text-warning ml-1 h-6 gap-1 px-2 text-[0.65rem]"
                     disabled={oauthPending}
                     onClick={(e) => {
                       // Block the DropdownMenuItem's onSelect so the renew
@@ -456,7 +456,7 @@ export function IntegrationConnectionPicker({
           incremental consent; a foreign owner can only be flagged. */}
       {underScoped && displayConn && (
         <div
-          className="mt-1.5 flex flex-col gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-[0.7rem] text-amber-700 dark:text-amber-300"
+          className="border-warning/40 bg-warning/10 text-warning mt-1.5 flex flex-col gap-1.5 rounded-md border p-2 text-[0.7rem]"
           data-testid={`member-pick-scope-warning-${integrationId}`}
         >
           <div className="flex items-center gap-1.5">

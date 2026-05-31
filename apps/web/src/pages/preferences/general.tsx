@@ -22,7 +22,7 @@ function EmailVerificationBadge() {
 
   if (user.emailVerified) {
     return (
-      <div className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400">
+      <div className="text-success flex items-center gap-1.5 text-xs">
         <CheckCircle2 size={14} />
         <span>{t("preferences.emailVerified")}</span>
       </div>
@@ -42,7 +42,7 @@ function EmailVerificationBadge() {
 
   return (
     <div className="flex items-center gap-2">
-      <div className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
+      <div className="text-warning flex items-center gap-1.5 text-xs">
         <AlertCircle size={14} />
         <span>{t("preferences.emailNotVerified")}</span>
       </div>

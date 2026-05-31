@@ -40,7 +40,7 @@ function matchesQuery(integration: IntegrationSummary, query: string): boolean {
 function ActiveBadge({ active }: { active: boolean }) {
   const { t } = useTranslation("settings");
   return active ? (
-    <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[0.65rem] font-medium text-emerald-500">
+    <span className="bg-success/10 text-success rounded px-1.5 py-0.5 text-[0.65rem] font-medium">
       {t("integrations.badge.active")}
     </span>
   ) : (
