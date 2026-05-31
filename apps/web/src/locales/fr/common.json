@@ -12,6 +12,8 @@
   "switcher.appAriaLabel": "Changer d'application",
   "nav.ariaLabel": "Navigation",
   "nav.orgSection": "Organisation",
+  "nav.sectionResources": "Ressources",
+  "nav.sectionAdmin": "Administration",
   "nav.dashboard": "Dashboard",
   "nav.agents": "Agents",
   "nav.runs": "Runs",

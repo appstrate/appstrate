@@ -51,7 +51,7 @@ export interface BillingInfo {
 
 export function getUsageBarColor(usagePercent: number): string {
   if (usagePercent >= 90) return "bg-destructive";
-  if (usagePercent >= 70) return "bg-yellow-500";
+  if (usagePercent >= 70) return "bg-warning";
   return "bg-primary";
 }
 
