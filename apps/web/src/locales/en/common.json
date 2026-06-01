@@ -82,6 +82,7 @@
   "library.title": "Package Library",
   "library.tab.agents": "Agents",
   "library.tab.skills": "Skills",
+  "library.tab.integrations": "Integrations",
   "library.column.package": "Package",
   "library.system": "System",
   "library.systemAlwaysActive": "System package, always active",
