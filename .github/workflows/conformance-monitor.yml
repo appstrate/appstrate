@@ -8,6 +8,10 @@ on:
     # local checks.
     - cron: "0 6 * * 1"
   workflow_dispatch: {}
+  # TEMP (remove before merge): run on push to the harness branch so we can
+  # exercise the monitor in CI before it lands on the default branch.
+  push:
+    branches: [feat/integration-conformance-harness]
 
 permissions:
   contents: read
