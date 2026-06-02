@@ -21,17 +21,19 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 
-const TABS = ["agents", "skills"] as const;
+const TABS = ["agents", "skills", "integrations"] as const;
 type Tab = (typeof TABS)[number];
 
 const TYPE_MAP: Record<Tab, string> = {
   agents: "agent",
   skills: "skill",
+  integrations: "integration",
 };
 
 const DETAIL_PATH_MAP: Record<string, string> = {
   agent: "/agents",
   skill: "/skills",
+  integration: "/integrations",
 };
 
 export function LibraryPage() {
@@ -82,13 +84,17 @@ function LibraryMatrix({
 }) {
   const { t } = useTranslation();
   const toggle = useTogglePackageInstall();
+  // Agents/skills treat a "system" package as globally available (locked on,
+  // can't toggle). Integrations are different: they must be activated per
+  // application even when system-sourced, so their system rows stay toggleable.
+  const lockSystem = type !== "integration";
 
   if (pkgs.length === 0) {
     return <EmptyState message={t("library.empty")} icon={Package} />;
   }
 
   const handleToggle = (pkg: LibraryPackageItem, applicationId: string, installed: boolean) => {
-    if (pkg.source === "system") return;
+    if (lockSystem && pkg.source === "system") return;
     toggle.mutate(
       { applicationId, packageId: pkg.id, installed },
       {
@@ -140,13 +146,13 @@ function LibraryMatrix({
             </TableCell>
             {applications.map((app) => {
               const installed = pkg.installed_in.includes(app.id);
-              const isSystem = pkg.source === "system";
+              const locked = lockSystem && pkg.source === "system";
               return (
                 <TableCell key={app.id} className="text-center">
                   <Checkbox
-                    checked={isSystem || installed}
-                    disabled={isSystem}
-                    title={isSystem ? t("library.systemAlwaysActive") : undefined}
+                    checked={locked || installed}
+                    disabled={locked}
+                    title={locked ? t("library.systemAlwaysActive") : undefined}
                     onCheckedChange={() => handleToggle(pkg, app.id, installed)}
                   />
                 </TableCell>
