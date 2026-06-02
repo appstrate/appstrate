@@ -539,17 +539,7 @@
         "oauth": ["write:discussion"]
       }
     },
-    "assign_copilot_to_issue": {
-      "required_scopes": {
-        "oauth": ["repo"]
-      }
-    },
     "request_copilot_review": {
-      "required_scopes": {
-        "oauth": ["repo"]
-      }
-    },
-    "create_pull_request_with_copilot": {
       "required_scopes": {
         "oauth": ["repo"]
       }
@@ -622,6 +612,36 @@
     "github_support_docs_search": {
       "required_scopes": {
         "oauth": []
+      }
+    },
+    "search_commits": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    },
+    "semantic_issues_search": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    },
+    "semantic_issue_similarity_search": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    },
+    "triage_issue": {
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
+    },
+    "check_dependency_vulnerabilities": {
+      "required_scopes": {
+        "oauth": ["security_events"]
+      }
+    },
+    "run_secret_scanning": {
+      "required_scopes": {
+        "oauth": ["security_events"]
       }
     }
   },
