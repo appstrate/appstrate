@@ -30,8 +30,7 @@
       },
       "_meta": {
         "dev.appstrate/oauth": {
-          "scope_separator": " ",
-          "dynamic_registration": true
+          "scope_separator": " "
         },
         "dev.appstrate/auth": {
           "required": true

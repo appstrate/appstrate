@@ -24,7 +24,10 @@ import { initiateIntegrationOAuth, resolveOAuthEndpoints } from "@appstrate/conn
 import { forbidden, invalidRequest } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import { oauthStateStore } from "./oauth-state-store.ts";
-import { toSupportedTokenEndpointAuthMethod } from "../integration-manifest-helpers.ts";
+import {
+  getRemoteSource,
+  toSupportedTokenEndpointAuthMethod,
+} from "../integration-manifest-helpers.ts";
 import {
   assertRequiredIdentityClaims,
   ensureIntegrationOAuthClient,
@@ -53,21 +56,23 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     // AFPS §7.3 / §7.4: `authorization_endpoint`, `token_endpoint`,
     // `resource`, `token_endpoint_auth_method`, `default_scopes`,
     // `code_challenge_methods_supported` (PKCE), `issuer` (discovery).
-    // `scope_separator` + the auto-DCR opt-in (`dynamic_registration`) live
-    // under `_meta["dev.appstrate/oauth"]`.
+    // `scope_separator` lives under `_meta["dev.appstrate/oauth"]`.
     const oauthMeta = (auth._meta?.["dev.appstrate/oauth"] ?? undefined) as
-      | { scope_separator?: string; dynamic_registration?: boolean }
+      | { scope_separator?: string }
       | undefined;
-    const dynamicRegistration = oauthMeta?.dynamic_registration === true;
-    // AFPS §7.3: an oauth2 auth declares EITHER an `issuer` (discovery fills
-    // the endpoints in) OR explicit `authorization_endpoint` + `token_endpoint`.
-    // Dynamic-registration integrations are exempt — the endpoints come from
-    // RFC 9728 → RFC 8414 discovery in `ensureIntegrationOAuthClient`.
-    if (
-      !dynamicRegistration &&
-      !auth.issuer &&
-      (!auth.authorization_endpoint || !auth.token_endpoint)
-    ) {
+    // Remote MCP integrations resolve their endpoints at connect time via the
+    // MCP-spec discovery chain (RFC 9728 → RFC 8414) in
+    // `ensureIntegrationOAuthClient`, so they need neither an `issuer` nor
+    // explicit endpoints in the manifest. Forward-compat: AFPS §7.3 still
+    // requires issuer-or-endpoints for oauth2 at the schema layer, so today's
+    // remote connectors (ClickUp, Notion) declare an `issuer` and this branch is
+    // never reached for them — it makes the connect path ready for a future
+    // schema relaxation to truly zero-config (only `source.remote.url`).
+    const isRemoteMcp = getRemoteSource(manifest) !== null;
+    // AFPS §7.3: a non-remote oauth2 auth declares EITHER an `issuer` (discovery
+    // fills the endpoints in) OR explicit `authorization_endpoint` +
+    // `token_endpoint`.
+    if (!isRemoteMcp && !auth.issuer && (!auth.authorization_endpoint || !auth.token_endpoint)) {
       throw invalidRequest(
         "oauth2 auth must declare an issuer (for discovery) or explicit authorization_endpoint + token_endpoint for marketplace connect.",
       );
@@ -75,8 +80,9 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     // Same callback for every integration flow. Computed before client
     // resolution so auto-DCR registers exactly this redirect URI.
     const redirectUri = `${getEnv().APP_URL}/api/integrations/callback`;
-    // Resolve the client (auto-registering via DCR when opted-in + unregistered)
-    // and the connect endpoints/resource (discovered for MCP, else manifest).
+    // Resolve the client (auto-registering via DCR for remote MCP integrations
+    // when unregistered) and the connect endpoints/resource (discovered for
+    // MCP, else manifest).
     const resolved = await ensureIntegrationOAuthClient(
       ctx.scope,
       ctx.integrationId,

@@ -182,7 +182,7 @@ const authStatusSchema = {
     supports_dynamic_registration: {
       type: "boolean",
       description:
-        'True when the auth opts into MCP-spec dynamic client registration (`_meta["dev.appstrate/oauth"].dynamic_registration`). The connect flow self-registers an OAuth client on first use.',
+        'True for an oauth2 auth on a remote MCP integration (`source.kind: "remote"`). Per the MCP Authorization spec the connect flow discovers the authorization server (RFC 9728 → RFC 8414) and self-registers an OAuth client (RFC 7591 DCR) on first use, so no pre-registered client is required.',
     },
   },
 } as const;

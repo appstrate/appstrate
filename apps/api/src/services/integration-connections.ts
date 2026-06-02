@@ -492,20 +492,26 @@ export interface ResolvedOAuthConnect {
   resource?: string;
 }
 
-/** Read the `dynamic_registration` opt-in off an auth's `_meta["dev.appstrate/oauth"]`. */
-function readDynamicRegistrationFlag(auth: AfpsManifestAuth): boolean {
-  const meta = auth._meta?.["dev.appstrate/oauth"];
-  return !!(
-    meta &&
-    typeof meta === "object" &&
-    (meta as { dynamic_registration?: unknown }).dynamic_registration === true
-  );
+/**
+ * Whether an auth takes the MCP-spec auto-DCR onboarding path. Per the MCP
+ * Authorization spec a remote MCP server is an OAuth protected resource whose
+ * client is obtained *at connect time* (RFC 9728 → RFC 8414 discovery → RFC
+ * 7591 dynamic client registration), so no hand-registered client is required.
+ *
+ * Derived purely from the manifest — an `oauth2` auth on a `source.kind:
+ * "remote"` integration — rather than a manifest opt-in flag: the capability is
+ * a property of the integration's shape, and the AS advertising (or not) a
+ * `registration_endpoint` is the real runtime gate. This keeps Appstrate
+ * aligned with the spec's capability-discovery model instead of re-declaring it
+ * per manifest.
+ */
+function supportsAutoDcr(manifest: IntegrationManifest, auth: AfpsManifestAuth): boolean {
+  return auth.type === "oauth2" && getRemoteSource(manifest) !== null;
 }
 
 /**
  * Resolve the OAuth connect config for an auth, auto-registering a client via
- * RFC 7591 Dynamic Client Registration when the auth opts in
- * (`_meta["dev.appstrate/oauth"].dynamic_registration: true`) and none is
+ * RFC 7591 Dynamic Client Registration for remote MCP integrations when none is
  * pre-registered. This is the MCP-spec onboarding path: an operator installs
  * the connector, the first actor clicks Connect, and Appstrate self-registers
  * — no hand-created OAuth app, no client secret.
@@ -517,8 +523,8 @@ function readDynamicRegistrationFlag(auth: AfpsManifestAuth): boolean {
  *
  * Best-effort: any discovery/registration failure returns the existing client
  * (or `null`), letting the caller fall back to the classic "register a client"
- * error. Never throws for the dynamic path — classic integrations are
- * unaffected (flag off ⇒ early return with the existing lookup).
+ * error. Never throws for the dynamic path — classic (non-remote) integrations
+ * are unaffected: they early-return with the existing lookup.
  */
 export async function ensureIntegrationOAuthClient(
   scope: AppScope,
@@ -530,9 +536,9 @@ export async function ensureIntegrationOAuthClient(
 ): Promise<ResolvedOAuthConnect> {
   const existing = await getIntegrationOAuthClient(scope, packageId, authKey);
 
-  // Classic path: dynamic registration not requested — behave exactly as
-  // before (endpoints come from the manifest in the caller).
-  if (!readDynamicRegistrationFlag(auth)) {
+  // Classic path: not a remote MCP oauth2 auth — behave exactly as before
+  // (endpoints come from the manifest in the caller).
+  if (!supportsAutoDcr(manifest, auth)) {
     return { client: existing };
   }
 
@@ -1277,9 +1283,10 @@ export async function getIntegrationAuthStatuses(
       resource,
       connections: allConnections.filter((c) => c.auth_key === key),
       has_oauth_client: oauthClientKeys.has(key),
-      // Auto-DCR opt-in — the connect flow self-registers a client, so the UI
-      // enables Connect even when no client is pre-registered.
-      supports_dynamic_registration: readDynamicRegistrationFlag(auth),
+      // MCP-spec auto-DCR: an oauth2 auth on a remote MCP integration self-
+      // registers a client at connect time, so the UI enables Connect even
+      // when no client is pre-registered. Derived from the manifest shape.
+      supports_dynamic_registration: supportsAutoDcr(manifest, auth),
     };
   });
 
