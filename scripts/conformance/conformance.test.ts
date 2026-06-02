@@ -6,6 +6,7 @@ import { declaredTools, serverEntryPoint, diffTools } from "./mcp-local-parity.t
 import { diffToolSets } from "./tool-diff.ts";
 import { resolveToken, credentialedCount, _resetCredsCache } from "./creds.ts";
 import { remoteUrl, toolsPolicyKeys, allowsUndeclared } from "./remote-parity.ts";
+import { applyAuth, checkAuthLiveness } from "./auth-live.ts";
 import { summarize, exitCode, formatReport } from "./report.ts";
 import type { Finding } from "./types.ts";
 import type { SystemPackageEntry } from "@appstrate/core/system-packages";
@@ -213,5 +214,96 @@ describe("remote manifest accessors", () => {
     expect(allowsUndeclared({ allow_undeclared_tools: true })).toBe(true);
     expect(allowsUndeclared({ allow_undeclared_tools: false })).toBe(false);
     expect(allowsUndeclared({})).toBe(false);
+  });
+});
+
+describe("applyAuth", () => {
+  const headerManifest = {
+    auths: {
+      primary: { delivery: { http: { in: "header", name: "Authorization", prefix: "Bearer" } } },
+    },
+  };
+
+  it("sets a Bearer header with a single space, regardless of prefix spacing", () => {
+    const { headers } = applyAuth("https://api/x", headerManifest, "tok", "primary");
+    expect(headers.Authorization).toBe("Bearer tok");
+
+    const spaced = {
+      auths: { primary: { delivery: { http: { name: "Authorization", prefix: "Bearer " } } } },
+    };
+    expect(applyAuth("https://api/x", spaced, "tok", "primary").headers.Authorization).toBe(
+      "Bearer tok",
+    );
+  });
+
+  it("falls back to Bearer Authorization when no delivery declared", () => {
+    const { headers } = applyAuth("https://api/x", {}, "tok", "primary");
+    expect(headers.Authorization).toBe("Bearer tok");
+  });
+
+  it("delivers via query param when declared", () => {
+    const manifest = {
+      auths: { primary: { delivery: { http: { in: "query", name: "access_token" } } } },
+    };
+    const { url, headers } = applyAuth("https://api/x", manifest, "tok", "primary");
+    expect(url).toBe("https://api/x?access_token=tok");
+    expect(headers.Authorization).toBeUndefined();
+  });
+});
+
+describe("checkAuthLiveness", () => {
+  const okFetch = (status: number): typeof fetch =>
+    (async () => new Response(null, { status })) as typeof fetch;
+  // @appstrate/github is a seeded probe.
+  const ghEntry = entry({
+    packageId: "@appstrate/github",
+    manifest: {
+      auths: { primary: { delivery: { http: { name: "Authorization", prefix: "Bearer" } } } },
+    },
+  });
+
+  afterEach(() => {
+    delete process.env.CONFORMANCE_TOKENS;
+    _resetCredsCache();
+  });
+
+  it("returns [] for an uncovered package (no probe)", async () => {
+    const f = await checkAuthLiveness(entry({ packageId: "@appstrate/notion" }), {
+      fetchImpl: okFetch(200),
+    });
+    expect(f).toEqual([]);
+  });
+
+  it("WARNs when a probe exists but no credential is configured", async () => {
+    _resetCredsCache();
+    const f = await checkAuthLiveness(ghEntry, { fetchImpl: okFetch(200) });
+    expect(f).toHaveLength(1);
+    expect(f[0]!.severity).toBe("warn");
+    expect(f[0]!.message).toContain("no credential");
+  });
+
+  it("INFO on expected status with a credential", async () => {
+    process.env.CONFORMANCE_TOKENS = JSON.stringify({ "@appstrate/github": "tok" });
+    _resetCredsCache();
+    const f = await checkAuthLiveness(ghEntry, { fetchImpl: okFetch(200) });
+    expect(f[0]!.severity).toBe("info");
+  });
+
+  it("FAILs on an unexpected status (token rejected)", async () => {
+    process.env.CONFORMANCE_TOKENS = JSON.stringify({ "@appstrate/github": "bad" });
+    _resetCredsCache();
+    const f = await checkAuthLiveness(ghEntry, { fetchImpl: okFetch(401) });
+    expect(f[0]!.severity).toBe("fail");
+    expect(f[0]!.message).toContain("401");
+  });
+
+  it("WARNs on a network error", async () => {
+    process.env.CONFORMANCE_TOKENS = JSON.stringify({ "@appstrate/github": "tok" });
+    _resetCredsCache();
+    const boom = (async () => {
+      throw new Error("ENOTFOUND");
+    }) as typeof fetch;
+    const f = await checkAuthLiveness(ghEntry, { fetchImpl: boom });
+    expect(f[0]!.severity).toBe("warn");
   });
 });
