@@ -3,7 +3,11 @@
     "label": "Claude 3 7 Sonnet 20250219",
     "contextWindow": 200000,
     "maxTokens": 64000,
-    "capabilities": ["text", "image", "reasoning"],
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
     "cost": {
       "input": 3,
       "output": 15,
@@ -15,7 +19,10 @@
     "label": "Claude 3 Haiku 20240307",
     "contextWindow": 200000,
     "maxTokens": 4096,
-    "capabilities": ["text", "image"],
+    "capabilities": [
+      "text",
+      "image"
+    ],
     "cost": {
       "input": 0.25,
       "output": 1.25,
@@ -27,7 +34,10 @@
     "label": "Claude 3 Opus 20240229",
     "contextWindow": 200000,
     "maxTokens": 4096,
-    "capabilities": ["text", "image"],
+    "capabilities": [
+      "text",
+      "image"
+    ],
     "cost": {
       "input": 15,
       "output": 75,
@@ -39,7 +49,11 @@
     "label": "Claude 4 Opus 20250514",
     "contextWindow": 200000,
     "maxTokens": 32000,
-    "capabilities": ["text", "image", "reasoning"],
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
     "cost": {
       "input": 15,
       "output": 75,
@@ -51,7 +65,11 @@
     "label": "Claude 4 Sonnet 20250514",
     "contextWindow": 1000000,
     "maxTokens": 64000,
-    "capabilities": ["text", "image", "reasoning"],
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
     "cost": {
       "input": 3,
       "output": 15,
@@ -63,7 +81,11 @@
     "label": "Claude Haiku 4 5",
     "contextWindow": 200000,
     "maxTokens": 64000,
-    "capabilities": ["text", "image", "reasoning"],
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
     "cost": {
       "input": 1,
       "output": 5,
@@ -75,7 +97,11 @@
     "label": "Claude Haiku 4 5 20251001",
     "contextWindow": 200000,
     "maxTokens": 64000,
-    "capabilities": ["text", "image", "reasoning"],
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
     "cost": {
       "input": 1,
       "output": 5,
@@ -87,7 +113,11 @@
     "label": "Claude Opus 4 1",
     "contextWindow": 200000,
     "maxTokens": 32000,
-    "capabilities": ["text", "image", "reasoning"],
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
     "cost": {
       "input": 15,
       "output": 75,
@@ -99,7 +129,11 @@
     "label": "Claude Opus 4 1 20250805",
     "contextWindow": 200000,
     "maxTokens": 32000,
-    "capabilities": ["text", "image", "reasoning"],
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
     "cost": {
       "input": 15,
       "output": 75,
@@ -111,7 +145,11 @@
     "label": "Claude Opus 4 20250514",
     "contextWindow": 200000,
     "maxTokens": 32000,
-    "capabilities": ["text", "image", "reasoning"],
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
     "cost": {
       "input": 15,
       "output": 75,
@@ -123,7 +161,11 @@
     "label": "Claude Opus 4 5",
     "contextWindow": 200000,
     "maxTokens": 64000,
-    "capabilities": ["text", "image", "reasoning"],
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
     "cost": {
       "input": 5,
       "output": 25,
@@ -135,7 +177,11 @@
     "label": "Claude Opus 4 5 20251101",
     "contextWindow": 200000,
     "maxTokens": 64000,
-    "capabilities": ["text", "image", "reasoning"],
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
     "cost": {
       "input": 5,
       "output": 25,
@@ -147,7 +193,11 @@
     "label": "Claude Opus 4 6",
     "contextWindow": 1000000,
     "maxTokens": 128000,
-    "capabilities": ["text", "image", "reasoning"],
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
     "cost": {
       "input": 5,
       "output": 25,
@@ -159,7 +209,11 @@
     "label": "Claude Opus 4 6 20260205",
     "contextWindow": 1000000,
     "maxTokens": 128000,
-    "capabilities": ["text", "image", "reasoning"],
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
     "cost": {
       "input": 5,
       "output": 25,
@@ -171,7 +225,11 @@
     "label": "Claude Opus 4 7",
     "contextWindow": 1000000,
     "maxTokens": 128000,
-    "capabilities": ["text", "image", "reasoning"],
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
     "cost": {
       "input": 5,
       "output": 25,
@@ -183,7 +241,27 @@
     "label": "Claude Opus 4 7 20260416",
     "contextWindow": 1000000,
     "maxTokens": 128000,
-    "capabilities": ["text", "image", "reasoning"],
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 5,
+      "output": 25,
+      "cacheRead": 0.5,
+      "cacheWrite": 6.25
+    }
+  },
+  "claude-opus-4-8": {
+    "label": "Claude Opus 4 8",
+    "contextWindow": 1000000,
+    "maxTokens": 128000,
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
     "cost": {
       "input": 5,
       "output": 25,
@@ -195,7 +273,11 @@
     "label": "Claude Sonnet 4 20250514",
     "contextWindow": 1000000,
     "maxTokens": 64000,
-    "capabilities": ["text", "image", "reasoning"],
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
     "cost": {
       "input": 3,
       "output": 15,
@@ -207,7 +289,11 @@
     "label": "Claude Sonnet 4 5",
     "contextWindow": 200000,
     "maxTokens": 64000,
-    "capabilities": ["text", "image", "reasoning"],
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
     "cost": {
       "input": 3,
       "output": 15,
@@ -219,7 +305,11 @@
     "label": "Claude Sonnet 4 5 20250929",
     "contextWindow": 200000,
     "maxTokens": 64000,
-    "capabilities": ["text", "image", "reasoning"],
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
     "cost": {
       "input": 3,
       "output": 15,
@@ -231,7 +321,11 @@
     "label": "Claude Sonnet 4 6",
     "contextWindow": 1000000,
     "maxTokens": 64000,
-    "capabilities": ["text", "image", "reasoning"],
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
     "cost": {
       "input": 3,
       "output": 15,
