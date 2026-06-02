@@ -32,6 +32,10 @@ const ENV_KEY = "CONFORMANCE_TOKENS";
 export interface RefreshCredential {
   refresh_token: string;
   client_id: string;
+  /** Confidential clients (client_secret_*) carry the secret for refresh. */
+  client_secret?: string;
+  /** Token-endpoint auth method; defaults to public client ("none"). */
+  token_endpoint_auth_method?: string;
   /** Optional: skip discovery and use this token endpoint directly. */
   token_endpoint?: string;
 }
@@ -133,8 +137,16 @@ export async function resolveAccessToken(
   }
 
   const exchange = deps.exchange ?? performRefreshTokenExchange;
+  const tokenEndpointAuthMethod = (cred.token_endpoint_auth_method ?? "none") as Parameters<
+    typeof performRefreshTokenExchange
+  >[0]["tokenEndpointAuthMethod"];
   const result = await exchange(
-    { tokenEndpoint, clientId: cred.client_id, clientSecret: "", tokenEndpointAuthMethod: "none" },
+    {
+      tokenEndpoint,
+      clientId: cred.client_id,
+      clientSecret: cred.client_secret ?? "",
+      tokenEndpointAuthMethod,
+    },
     cred.refresh_token,
     { label: `conformance:${entry.packageId}` },
   );

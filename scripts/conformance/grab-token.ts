@@ -34,6 +34,8 @@ function flag(name: string): string | undefined {
 
 interface OAuthAuth {
   issuer?: string;
+  authorization_endpoint?: string;
+  token_endpoint?: string;
   default_scopes?: string[];
   token_endpoint_auth_method?: string;
   _meta?: { "dev.appstrate/oauth"?: { scope_separator?: string } };
@@ -43,7 +45,7 @@ async function main(): Promise<void> {
   const packageId = process.argv[2];
   if (!packageId || packageId.startsWith("--")) {
     throw new Error(
-      "usage: bun scripts/conformance/grab-token.ts <packageId> [--port N] [--client-id ID]",
+      "usage: bun scripts/conformance/grab-token.ts <packageId> [--port N] [--client-id ID] [--client-secret SECRET] [--offline]",
     );
   }
   const port = Number(flag("--port") ?? 8989);
@@ -58,34 +60,55 @@ async function main(): Promise<void> {
 
   const manifest = entry.manifest;
   const auths = (manifest.auths ?? {}) as Record<string, OAuthAuth>;
-  const authEntry = Object.values(auths).find((a) => a.issuer);
-  if (!authEntry?.issuer) {
-    throw new Error(`${packageId}: no oauth2 auth with an issuer in the manifest`);
+  // An oauth2 auth declares EITHER an issuer (discovery) OR explicit endpoints.
+  const authEntry = Object.values(auths).find(
+    (a) => a.issuer || (a.authorization_endpoint && a.token_endpoint),
+  );
+  if (!authEntry) {
+    throw new Error(`${packageId}: no oauth2 auth (issuer or explicit endpoints) in the manifest`);
   }
-  const issuer = authEntry.issuer;
   const scopes = authEntry.default_scopes ?? [];
   const scopeSep = authEntry._meta?.["dev.appstrate/oauth"]?.scope_separator ?? " ";
   const resource = (manifest.source as { remote?: { url?: string } })?.remote?.url;
+  const authMethod = authEntry.token_endpoint_auth_method ?? "none";
 
   console.log(`[grab-token] ${packageId}`);
-  console.log(`[grab-token] issuer: ${issuer}`);
 
-  // 1. Discover endpoints.
-  const endpoints = await resolveOAuthEndpoints({ issuer });
-  if (!endpoints.authorizationEndpoint || !endpoints.tokenEndpoint) {
-    throw new Error(`could not discover authorize/token endpoints from ${issuer}`);
+  // 1. Resolve endpoints — discovery from issuer, else explicit from manifest.
+  let authorizationEndpoint = authEntry.authorization_endpoint;
+  let tokenEndpoint = authEntry.token_endpoint;
+  let registrationEndpoint: string | undefined;
+  if (authEntry.issuer) {
+    console.log(`[grab-token] issuer: ${authEntry.issuer}`);
+    const ep = await resolveOAuthEndpoints({ issuer: authEntry.issuer });
+    authorizationEndpoint = ep.authorizationEndpoint ?? authorizationEndpoint;
+    tokenEndpoint = ep.tokenEndpoint ?? tokenEndpoint;
+    registrationEndpoint = ep.registrationEndpoint;
+  }
+  if (!authorizationEndpoint || !tokenEndpoint) {
+    throw new Error(`${packageId}: could not resolve authorize/token endpoints`);
   }
 
-  // 2. Obtain a client id — explicit flag, else dynamic registration.
+  // 2. Obtain a client id. Confidential clients (client_secret_*) require a
+  // pre-registered app + --client-secret (GitHub: no DCR). Public clients can
+  // self-register via DCR when the AS advertises a registration endpoint.
   let clientId = flag("--client-id");
+  const clientSecret = flag("--client-secret") ?? "";
+  const isConfidential = authMethod.startsWith("client_secret");
   if (!clientId) {
-    if (!endpoints.registrationEndpoint) {
+    if (isConfidential) {
       throw new Error(
-        `no registration_endpoint advertised by ${issuer} — pass --client-id <id> for a pre-registered client`,
+        `${packageId}: auth method is "${authMethod}" (confidential) — create an OAuth app ` +
+          `with redirect ${redirectUri} and pass --client-id <id> --client-secret <secret>`,
+      );
+    }
+    if (!registrationEndpoint) {
+      throw new Error(
+        `${packageId}: no registration_endpoint — pass --client-id <id> for a pre-registered client`,
       );
     }
     const reg = await registerDynamicClient({
-      registrationEndpoint: endpoints.registrationEndpoint,
+      registrationEndpoint,
       redirectUri,
       clientName: "Appstrate conformance harness",
       scopes,
@@ -105,7 +128,7 @@ async function main(): Promise<void> {
   // asked; some reject the unknown scope, hence opt-in.
   const reqScopes = offline ? [...scopes, "offline_access"] : scopes;
 
-  const authUrl = new URL(endpoints.authorizationEndpoint);
+  const authUrl = new URL(authorizationEndpoint);
   authUrl.searchParams.set("response_type", "code");
   authUrl.searchParams.set("client_id", clientId);
   authUrl.searchParams.set("redirect_uri", redirectUri);
@@ -163,16 +186,18 @@ async function main(): Promise<void> {
     });
   });
 
-  // 5. Exchange code → access token (public client + PKCE; resource per RFC 8707).
+  // 5. Exchange code → access token. PKCE + RFC 8707 resource; confidential
+  // clients (client_secret_post) also carry the secret in the body.
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     code,
     redirect_uri: redirectUri,
     client_id: clientId,
     code_verifier: verifier,
+    ...(isConfidential && clientSecret ? { client_secret: clientSecret } : {}),
     ...(resource ? { resource } : {}),
   });
-  const res = await fetch(endpoints.tokenEndpoint, {
+  const res = await fetch(tokenEndpoint, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
     body,
@@ -194,13 +219,18 @@ async function main(): Promise<void> {
       [packageId]: {
         refresh_token: json.refresh_token,
         client_id: clientId,
-        token_endpoint: endpoints.tokenEndpoint,
+        ...(isConfidential
+          ? { client_secret: clientSecret, token_endpoint_auth_method: authMethod }
+          : {}),
+        token_endpoint: tokenEndpoint,
       },
     };
     console.log(`# Self-renewing form — set this as the CONFORMANCE_TOKENS CI secret:`);
     console.log(`${JSON.stringify(refreshForm)}\n`);
   } else {
-    console.log(`# Note: provider returned no refresh_token — the access token above expires.\n`);
+    console.log(
+      `# Note: provider returned no refresh_token — the access token above is long-lived or expiring.\n`,
+    );
   }
 }
 
