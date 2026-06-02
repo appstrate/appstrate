@@ -4,7 +4,7 @@ import { describe, it, expect, afterEach } from "bun:test";
 import { classify } from "./load.ts";
 import { declaredTools, serverEntryPoint, diffTools } from "./mcp-local-parity.ts";
 import { diffToolSets } from "./tool-diff.ts";
-import { resolveToken, credentialedCount, _resetCredsCache } from "./creds.ts";
+import { resolveToken, resolveAccessToken, credentialedCount, _resetCredsCache } from "./creds.ts";
 import { remoteUrl, toolsPolicyKeys, allowsUndeclared } from "./remote-parity.ts";
 import { applyAuth, checkAuthLiveness } from "./auth-live.ts";
 import { listAllTools } from "./mcp-list.ts";
@@ -192,6 +192,63 @@ describe("creds", () => {
     _resetCredsCache();
     expect(credentialedCount()).toBe(1);
     expect(resolveToken("c")).toBe("ok");
+  });
+
+  it("counts refresh-credential entries too", () => {
+    process.env.CONFORMANCE_TOKENS = JSON.stringify({
+      a: "tok",
+      b: { refresh_token: "r", client_id: "c" },
+      bad: { refresh_token: "r" }, // missing client_id → dropped
+    });
+    _resetCredsCache();
+    expect(credentialedCount()).toBe(2);
+    // resolveToken only returns plain-string creds.
+    expect(resolveToken("a")).toBe("tok");
+    expect(resolveToken("b")).toBeUndefined();
+  });
+});
+
+describe("resolveAccessToken", () => {
+  afterEach(() => {
+    delete process.env.CONFORMANCE_TOKENS;
+    _resetCredsCache();
+  });
+
+  it("returns a plain-string credential as-is", async () => {
+    process.env.CONFORMANCE_TOKENS = JSON.stringify({ "@x/p": "ya29" });
+    _resetCredsCache();
+    expect(await resolveAccessToken(entry({ packageId: "@x/p" }))).toBe("ya29");
+  });
+
+  it("returns undefined when no credential is configured", async () => {
+    _resetCredsCache();
+    expect(await resolveAccessToken(entry({ packageId: "@x/p" }))).toBeUndefined();
+  });
+
+  it("mints + caches a fresh token from a refresh credential", async () => {
+    process.env.CONFORMANCE_TOKENS = JSON.stringify({
+      "@x/p": { refresh_token: "r", client_id: "cid", token_endpoint: "https://t/token" },
+    });
+    _resetCredsCache();
+    let calls = 0;
+    const exchange = (async () => {
+      calls++;
+      return { raw: { access_token: "fresh" }, parsed: {} };
+    }) as never;
+    const e = entry({ packageId: "@x/p" });
+    expect(await resolveAccessToken(e, { exchange })).toBe("fresh");
+    expect(await resolveAccessToken(e, { exchange })).toBe("fresh"); // cached
+    expect(calls).toBe(1);
+  });
+
+  it("throws when a refresh credential has no token_endpoint and no manifest issuer", async () => {
+    process.env.CONFORMANCE_TOKENS = JSON.stringify({
+      "@x/p": { refresh_token: "r", client_id: "cid" },
+    });
+    _resetCredsCache();
+    await expect(resolveAccessToken(entry({ packageId: "@x/p", manifest: {} }))).rejects.toThrow(
+      /token_endpoint or a manifest issuer/,
+    );
   });
 });
 

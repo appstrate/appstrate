@@ -172,12 +172,29 @@ async function main(): Promise<void> {
   });
   const text = await res.text();
   if (!res.ok) throw new Error(`token exchange failed (${res.status}): ${text}`);
-  const json = JSON.parse(text) as { access_token?: string };
+  const json = JSON.parse(text) as { access_token?: string; refresh_token?: string };
   if (!json.access_token) throw new Error(`token response had no access_token: ${text}`);
 
-  console.log(`\n[grab-token] success. Run the live check with:\n`);
+  console.log(`\n[grab-token] success.\n`);
+  console.log(`# Quick one-off check (access token — expires):`);
   console.log(`CONFORMANCE_TOKENS='${JSON.stringify({ [packageId]: json.access_token })}' \\`);
   console.log(`  bun run test:system-packages --tier mcp --pkg ${entry.name}\n`);
+
+  if (json.refresh_token) {
+    // Self-renewing form — use THIS as the CI secret so the weekly monitor
+    // mints a fresh access token each run instead of silently losing coverage.
+    const refreshForm = {
+      [packageId]: {
+        refresh_token: json.refresh_token,
+        client_id: clientId,
+        token_endpoint: endpoints.tokenEndpoint,
+      },
+    };
+    console.log(`# Self-renewing form — set this as the CONFORMANCE_TOKENS CI secret:`);
+    console.log(`${JSON.stringify(refreshForm)}\n`);
+  } else {
+    console.log(`# Note: provider returned no refresh_token — the access token above expires.\n`);
+  }
 }
 
 main().catch((err) => {

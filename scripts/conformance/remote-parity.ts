@@ -22,7 +22,7 @@ import { createMcpHttpClient } from "@appstrate/mcp-transport";
 import type { SystemPackageEntry } from "@appstrate/core/system-packages";
 import type { Finding } from "./types.ts";
 import { diffToolSets } from "./tool-diff.ts";
-import { resolveToken } from "./creds.ts";
+import { resolveAccessToken } from "./creds.ts";
 import { ssrfGuardedFetch } from "./ssrf-fetch.ts";
 import { listAllTools, type LiveTool } from "./mcp-list.ts";
 import { loadBaseline, writeBaseline, diffSchemas } from "./schema-baseline.ts";
@@ -81,9 +81,24 @@ export async function checkMcpRemoteParity(
     ];
   }
 
-  const token = resolveToken(entry.packageId);
   const declared = toolsPolicyKeys(manifest);
   const allowUndeclared = allowsUndeclared(manifest);
+
+  // Resolve a token — minted fresh from a refresh credential when configured.
+  // A dead refresh token is a "couldn't test", not a parity failure (WARN).
+  let token: string | undefined;
+  try {
+    token = await resolveAccessToken(entry);
+  } catch (err) {
+    return [
+      {
+        packageId: entry.packageId,
+        check: CHECK,
+        severity: "warn",
+        message: `credential refresh failed: ${err instanceof Error ? err.message : String(err)}`,
+      },
+    ];
+  }
 
   const cantTest = (detail: string): Finding => ({
     packageId: entry.packageId,
