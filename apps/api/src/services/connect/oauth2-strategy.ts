@@ -27,10 +27,11 @@ import { oauthStateStore } from "./oauth-state-store.ts";
 import { toSupportedTokenEndpointAuthMethod } from "../integration-manifest-helpers.ts";
 import {
   assertRequiredIdentityClaims,
+  ensureIntegrationOAuthClient,
   extractIdentity,
-  getIntegrationOAuthClient,
   readIntegrationAuth,
   saveIntegrationConnection,
+  usesAutoProvisionedClient,
   type IntegrationConnectionSummary,
 } from "../integration-connections.ts";
 import type {
@@ -43,55 +44,86 @@ import type {
 
 export class OAuth2Strategy implements IntegrationConnectStrategy {
   async begin(ctx: ConnectContext, opts: BeginOptions): Promise<BeginResult> {
-    const { auth: rawAuth } = await readIntegrationAuth(ctx.scope, ctx.integrationId, ctx.authKey);
+    const { manifest, auth: rawAuth } = await readIntegrationAuth(
+      ctx.scope,
+      ctx.integrationId,
+      ctx.authKey,
+    );
     const auth =
       rawAuth as unknown as import("../integration-manifest-helpers.ts").AfpsManifestAuth;
-    // AFPS §7.3: an oauth2 auth declares EITHER an `issuer` (discovery
-    // fills the endpoints in) OR explicit `authorization_endpoint` +
-    // `token_endpoint`. Defensive guard — the manifest schema already enforces
-    // this, but it also narrows the optional types for the initiate call.
+    // AFPS §7.3 / §7.4: `authorization_endpoint`, `token_endpoint`,
+    // `resource`, `token_endpoint_auth_method`, `default_scopes`,
+    // `code_challenge_methods_supported` (PKCE), `issuer` (discovery).
+    // `scope_separator` lives under `_meta["dev.appstrate/oauth"]`.
+    const oauthMeta = (auth._meta?.["dev.appstrate/oauth"] ?? undefined) as
+      | { scope_separator?: string }
+      | undefined;
+    // AFPS §7.3: an oauth2 auth declares EITHER an `issuer` (discovery fills the
+    // endpoints in) OR explicit `authorization_endpoint` + `token_endpoint`.
+    // Today this holds for remote MCP connectors too — they declare an `issuer`
+    // (the AFPS schema still requires issuer-or-endpoints). A future schema
+    // relaxation for `source.kind: "remote"` (afps-spec) would let them omit it
+    // and rely on connect-time discovery; that change ships together with the
+    // exemption here, so no speculative dead branch is carried now.
     if (!auth.issuer && (!auth.authorization_endpoint || !auth.token_endpoint)) {
       throw invalidRequest(
         "oauth2 auth must declare an issuer (for discovery) or explicit authorization_endpoint + token_endpoint for marketplace connect.",
       );
     }
-    const client = await getIntegrationOAuthClient(ctx.scope, ctx.integrationId, ctx.authKey);
+    // Same callback for every integration flow. Computed before client
+    // resolution so auto-DCR registers exactly this redirect URI.
+    const redirectUri = `${getEnv().APP_URL}/api/integrations/callback`;
+    // Resolve the client (auto-registering via DCR for remote MCP integrations
+    // when unregistered) and the connect endpoints/resource (discovered for
+    // MCP, else manifest).
+    const resolved = await ensureIntegrationOAuthClient(
+      ctx.scope,
+      ctx.integrationId,
+      ctx.authKey,
+      manifest,
+      auth,
+      redirectUri,
+    );
+    const client = resolved.client;
     if (!client) {
+      // Distinguish the two "no client" causes: an auto-provisioning auth
+      // (public client on a remote MCP integration) tries to self-register via
+      // CIMD/DCR, so a missing client means discovery/registration failed — not
+      // that an admin forgot to register. Confidential/classic auths still
+      // require a manually-registered client.
       throw forbidden(
-        `Administrator must register OAuth client credentials for '${ctx.integrationId}' auth '${ctx.authKey}' before connection`,
+        usesAutoProvisionedClient(manifest, auth)
+          ? `Could not automatically provision an OAuth client for '${ctx.integrationId}' auth '${ctx.authKey}': the authorization server did not advertise dynamic client registration, or discovery/registration failed. Register a client manually, or retry once the server is reachable.`
+          : `Administrator must register OAuth client credentials for '${ctx.integrationId}' auth '${ctx.authKey}' before connection`,
       );
     }
-    const redirectUri = client.redirect_uri ?? `${getEnv().APP_URL}/api/integrations/callback`;
-    // AFPS §7.3 / §7.4: `authorization_endpoint`,
-    // `token_endpoint`, `resource`, `token_endpoint_auth_method`,
-    // `default_scopes`, `code_challenge_methods_supported`
-    // (PKCE), `issuer` (discovery). `scope_separator`
-    // lives under `_meta["dev.appstrate/oauth"]`.
-    const oauthMeta = (auth._meta?.["dev.appstrate/oauth"] ?? undefined) as
-      | { scope_separator?: string }
-      | undefined;
+    const effectiveRedirectUri = client.redirect_uri ?? redirectUri;
+    // Threaded endpoints/resource: discovery result wins, manifest is the
+    // fallback (classic integrations have no resolved.* fields).
+    const issuer = resolved.issuer ?? auth.issuer;
+    const authorizationEndpoint = resolved.authorizationEndpoint ?? auth.authorization_endpoint;
+    const tokenEndpoint = resolved.tokenEndpoint ?? auth.token_endpoint;
+    const resource = resolved.resource ?? auth.resource;
     const tokenAuthMethod = toSupportedTokenEndpointAuthMethod(auth.token_endpoint_auth_method);
     const result = await initiateIntegrationOAuth(oauthStateStore, {
       packageId: ctx.integrationId,
       authKey: ctx.authKey,
-      ...(auth.issuer ? { issuer: auth.issuer } : {}),
-      ...(auth.authorization_endpoint
-        ? { authorizationEndpoint: auth.authorization_endpoint }
-        : {}),
-      ...(auth.token_endpoint ? { tokenEndpoint: auth.token_endpoint } : {}),
+      ...(issuer ? { issuer } : {}),
+      ...(authorizationEndpoint ? { authorizationEndpoint } : {}),
+      ...(tokenEndpoint ? { tokenEndpoint } : {}),
       clientId: client.client_id,
       clientSecret: client.clientSecret,
       ...(tokenAuthMethod ? { tokenEndpointAuthMethod: tokenAuthMethod } : {}),
       scopes: opts.scopes,
       ...(oauthMeta?.scope_separator ? { scopeSeparator: oauthMeta.scope_separator } : {}),
-      ...(auth.resource ? { resource: auth.resource } : {}),
+      ...(resource ? { resource } : {}),
       ...(auth.code_challenge_methods_supported
         ? { codeChallengeMethodsSupported: auth.code_challenge_methods_supported }
         : {}),
       ...(auth.authorization_params
         ? { authorizationParams: auth.authorization_params as Record<string, string> }
         : {}),
-      redirectUri,
+      redirectUri: effectiveRedirectUri,
       orgId: ctx.scope.orgId,
       applicationId: ctx.scope.applicationId,
       actor: ctx.actor,

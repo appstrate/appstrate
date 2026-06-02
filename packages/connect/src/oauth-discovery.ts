@@ -50,6 +50,14 @@ export interface OAuthEndpointResolution {
    * omits the field or it isn't a well-formed string URL.
    */
   userinfoEndpoint?: string;
+  /**
+   * RFC 7591 §3 `registration_endpoint` as projected from the RFC 8414
+   * authorization-server metadata document. Present when the IdP supports
+   * OAuth 2.0 Dynamic Client Registration — the MCP-spec onboarding path
+   * (`/oauth/register`). `undefined` when the document omits it. Consumed by
+   * the auto-DCR orchestrator; never applied to the connect flow itself.
+   */
+  registrationEndpoint?: string;
 }
 
 export interface ResolveOAuthEndpointsInput {
@@ -118,6 +126,7 @@ function buildDiscoveryProbes(issuer: string): string[] {
 interface CachedDiscovery {
   codeChallengeMethodsSupported?: string[];
   userinfoEndpoint?: string;
+  registrationEndpoint?: string;
   /** Discovered endpoints (NOT applied unless manifest leaves them undeclared). */
   discoveredAuthorizationEndpoint?: string;
   discoveredTokenEndpoint?: string;
@@ -147,6 +156,7 @@ export async function resolveOAuthEndpoints(
   let tokenEndpoint = input.tokenEndpoint;
   let codeChallengeMethodsSupported: string[] | undefined;
   let userinfoEndpoint: string | undefined;
+  let registrationEndpoint: string | undefined;
 
   // No issuer — nothing to discover.
   if (!input.issuer) {
@@ -167,12 +177,14 @@ export async function resolveOAuthEndpoints(
       }
       codeChallengeMethodsSupported = cached.codeChallengeMethodsSupported;
       userinfoEndpoint = cached.userinfoEndpoint;
+      registrationEndpoint = cached.registrationEndpoint;
     }
     return {
       authorizationEndpoint,
       tokenEndpoint,
       ...(codeChallengeMethodsSupported !== undefined ? { codeChallengeMethodsSupported } : {}),
       ...(userinfoEndpoint !== undefined ? { userinfoEndpoint } : {}),
+      ...(registrationEndpoint !== undefined ? { registrationEndpoint } : {}),
     };
   }
 
@@ -219,6 +231,16 @@ export async function resolveOAuthEndpoints(
         // Malformed — ignore.
       }
     }
+    // RFC 7591 §3 — project `registration_endpoint` (Dynamic Client
+    // Registration) when present and well-formed. Powers MCP-spec auto-DCR.
+    if (registrationEndpoint === undefined && typeof doc.registration_endpoint === "string") {
+      try {
+        new URL(doc.registration_endpoint);
+        registrationEndpoint = doc.registration_endpoint;
+      } catch {
+        // Malformed — ignore.
+      }
+    }
     if (
       discoveredAuthorizationEndpoint &&
       discoveredTokenEndpoint &&
@@ -236,7 +258,8 @@ export async function resolveOAuthEndpoints(
     discoveredAuthorizationEndpoint !== undefined ||
     discoveredTokenEndpoint !== undefined ||
     codeChallengeMethodsSupported !== undefined ||
-    userinfoEndpoint !== undefined;
+    userinfoEndpoint !== undefined ||
+    registrationEndpoint !== undefined;
   discoveryCache.set(
     configuredIssuer,
     anyDiscovered
@@ -245,6 +268,7 @@ export async function resolveOAuthEndpoints(
           discoveredTokenEndpoint,
           codeChallengeMethodsSupported,
           userinfoEndpoint,
+          registrationEndpoint,
         }
       : null,
   );
@@ -262,6 +286,7 @@ export async function resolveOAuthEndpoints(
     tokenEndpoint,
     ...(codeChallengeMethodsSupported !== undefined ? { codeChallengeMethodsSupported } : {}),
     ...(userinfoEndpoint !== undefined ? { userinfoEndpoint } : {}),
+    ...(registrationEndpoint !== undefined ? { registrationEndpoint } : {}),
   };
 }
 
@@ -271,6 +296,7 @@ interface DiscoveryDocument {
   token_endpoint?: unknown;
   userinfo_endpoint?: unknown;
   code_challenge_methods_supported?: unknown;
+  registration_endpoint?: unknown;
 }
 
 /** Best-effort fetch + parse of a discovery document. Returns `null` on any failure. */

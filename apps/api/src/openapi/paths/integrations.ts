@@ -160,6 +160,7 @@ const authStatusSchema = {
     "resource",
     "connections",
     "has_oauth_client",
+    "client_auto_provisioned",
   ],
   properties: {
     auth_key: { type: "string" },
@@ -178,6 +179,11 @@ const authStatusSchema = {
     },
     connections: { type: "array", items: integrationConnectionSchema },
     has_oauth_client: { type: "boolean" },
+    client_auto_provisioned: {
+      type: "boolean",
+      description:
+        'True for an oauth2 auth on a remote MCP integration (`source.kind: "remote"`). Per the MCP Authorization spec the OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414) plus client acquisition without manual pre-registration (CIMD when advertised, else RFC 7591 dynamic registration) — so no pre-registered client is required.',
+    },
   },
 } as const;
 

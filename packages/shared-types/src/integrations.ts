@@ -75,6 +75,17 @@ export interface IntegrationAuthStatus {
   connections: IntegrationConnection[];
   /** True when this auth has an admin-registered OAuth2 client (oauth2 only). */
   has_oauth_client: boolean;
+  /**
+   * True for an oauth2 auth on a remote MCP integration (`source.kind:
+   * "remote"`). Per the MCP Authorization spec the OAuth client is provisioned
+   * automatically at connect time — the flow discovers the authorization server
+   * (RFC 9728 → RFC 8414) and obtains a client without manual pre-registration
+   * (CIMD when advertised, else RFC 7591 dynamic registration). The UI therefore
+   * treats the auth as connectable even without a pre-registered client. Named
+   * for the capability (auto-provisioned client), not the specific mechanism, so
+   * it stays accurate once CIMD lands alongside DCR.
+   */
+  client_auto_provisioned: boolean;
 }
 
 /**

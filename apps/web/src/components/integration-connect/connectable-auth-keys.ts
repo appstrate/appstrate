@@ -4,10 +4,12 @@ import type { IntegrationAuthStatus, IntegrationManifestView } from "../../hooks
 
 /**
  * Auth keys the actor can actually start a connect flow on. oauth2 auths
- * require an admin-registered OAuth client (`hasOAuthClient`); without one
- * the server refuses connect with 403. Non-oauth2 auths (api_key / basic /
- * custom) carry no client and are always connectable via the fields modal.
- * Mirrors the gate the integration detail page applies.
+ * require an OAuth client — either admin-registered (`has_oauth_client`) or
+ * auto-provisioned at connect time for remote MCP integrations
+ * (`client_auto_provisioned`, MCP-spec CIMD/DCR); without either the server
+ * refuses connect with 403. Non-oauth2 auths (api_key / basic / custom) carry
+ * no client and are always connectable via the fields modal. Mirrors the gate
+ * the integration detail page applies.
  */
 export function connectableAuthKeys(
   manifest: IntegrationManifestView,
@@ -20,7 +22,8 @@ export function connectableAuthKeys(
       out.add(key);
       continue;
     }
-    if (authStatuses.find((s) => s.auth_key === key)?.has_oauth_client) out.add(key);
+    const status = authStatuses.find((s) => s.auth_key === key);
+    if (status?.has_oauth_client || status?.client_auto_provisioned) out.add(key);
   }
   return out;
 }

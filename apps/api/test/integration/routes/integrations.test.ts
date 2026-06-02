@@ -74,6 +74,63 @@ function gmailManifest(name = "@official/gmail"): IntegrationManifest {
   } as unknown as IntegrationManifest;
 }
 
+/**
+ * Remote MCP integration (AFPS `source.kind: "remote"`) mirroring the real
+ * `@appstrate/clickup-mcp` / `@appstrate/notion-mcp` connectors: an oauth2 auth
+ * that declares an `issuer` (AFPS §7.3 still requires issuer-or-endpoints) but
+ * NO pre-registered client. The connect flow discovers the AS (RFC 9728 → RFC
+ * 8414) and self-registers via RFC 7591 DCR. The `.invalid` TLD (RFC 6761)
+ * guarantees discovery fails fast (NXDOMAIN) so the connect path is exercised
+ * without a live authorization server.
+ */
+function remoteMcpManifest(name = "@myorg/remote-mcp"): IntegrationManifest {
+  return {
+    type: "integration",
+    schema_version: "0.1",
+    name,
+    version: "1.0.0",
+    display_name: "Remote MCP",
+    description: "Remote MCP integration with MCP-spec auto-DCR",
+    source: {
+      kind: "remote",
+      remote: { url: "https://mcp.invalid/mcp", transport: "streamable-http" },
+    },
+    auths: {
+      oauth: {
+        type: "oauth2",
+        issuer: "https://mcp.invalid",
+        // Public client (PKCE, no secret) — the MCP-spec norm that marks this
+        // auth as client-auto-provisioned (CIMD/DCR).
+        token_endpoint_auth_method: "none",
+        default_scopes: ["read", "write"],
+        authorized_uris: ["https://mcp.invalid/**"],
+        delivery: {
+          http: {
+            in: "header",
+            name: "Authorization",
+            prefix: "Bearer ",
+            value: "{$credential.access_token}",
+          },
+        },
+        _meta: { "dev.appstrate/oauth": { scope_separator: " " } },
+      },
+      api: {
+        type: "api_key",
+        authorized_uris: ["https://mcp.invalid/**"],
+        credentials: { schema: { type: "object", properties: { api_key: { type: "string" } } } },
+        delivery: {
+          http: {
+            in: "header",
+            name: "Authorization",
+            prefix: "Bearer ",
+            value: "{$credential.api_key}",
+          },
+        },
+      },
+    },
+  } as unknown as IntegrationManifest;
+}
+
 async function seedIntegration(orgId: string, manifest: IntegrationManifest) {
   return seedPackage({
     id: manifest.name,
@@ -137,6 +194,7 @@ describe("GET /api/integrations/:packageId", () => {
         type: string;
         connections: unknown[];
         has_oauth_client: boolean;
+        client_auto_provisioned: boolean;
       }>;
       tool_catalog: Array<{ name: string; description?: string; policy?: unknown }>;
     };
@@ -149,6 +207,9 @@ describe("GET /api/integrations/:packageId", () => {
     expect(api?.has_oauth_client).toBe(false);
     expect(google?.type).toBe("oauth2");
     expect(google?.has_oauth_client).toBe(false);
+    // Local-source oauth2 → no auto-provisioning (endpoints are manifest-
+    // declared and a client must be pre-registered).
+    expect(google?.client_auto_provisioned).toBe(false);
     // The gmail fixture has no referenced mcp-server seeded → resolver
     // falls back to the integration's `tools` keys. Shape assertion keeps
     // the contract present without coupling to fixture catalog edits.
@@ -160,6 +221,78 @@ describe("GET /api/integrations/:packageId", () => {
       headers: authHeaders(ctx),
     });
     expect(res.status).toBe(404);
+  });
+
+  it("flags a remote MCP oauth2 auth as client_auto_provisioned", async () => {
+    await seedIntegration(ctx.orgId, remoteMcpManifest("@myorg/remote-mcp"));
+    const res = await app.request("/api/integrations/@myorg/remote-mcp", {
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      auths: Array<{
+        auth_key: string;
+        type: string;
+        has_oauth_client: boolean;
+        client_auto_provisioned: boolean;
+      }>;
+    };
+    const oauth = body.auths.find((a) => a.auth_key === "oauth");
+    const api = body.auths.find((a) => a.auth_key === "api");
+    // oauth2 on a remote MCP integration → client auto-provisioned, connectable
+    // without a pre-registered client.
+    expect(oauth?.type).toBe("oauth2");
+    expect(oauth?.has_oauth_client).toBe(false);
+    expect(oauth?.client_auto_provisioned).toBe(true);
+    // api_key is not oauth2 → no auto-provisioning (it carries no client at all).
+    expect(api?.type).toBe("api_key");
+    expect(api?.client_auto_provisioned).toBe(false);
+  });
+
+  it("a confidential remote MCP oauth2 is NOT client_auto_provisioned (needs a registered client)", async () => {
+    // Mirrors the github-mcp / gmail-mcp connectors: remote source, but a
+    // confidential client (`client_secret_post`) with explicit endpoints. Such
+    // an auth expects an admin-registered client and must NOT be flagged
+    // auto-provisioned just because the source is remote.
+    const confidentialRemote = {
+      type: "integration",
+      schema_version: "0.1",
+      name: "@myorg/remote-confidential",
+      version: "1.0.0",
+      display_name: "Remote confidential",
+      source: {
+        kind: "remote",
+        remote: { url: "https://mcp.invalid/mcp", transport: "streamable-http" },
+      },
+      auths: {
+        oauth: {
+          type: "oauth2",
+          authorization_endpoint: "https://mcp.invalid/oauth/authorize",
+          token_endpoint: "https://mcp.invalid/oauth/token",
+          token_endpoint_auth_method: "client_secret_post",
+          default_scopes: ["read"],
+          authorized_uris: ["https://mcp.invalid/**"],
+          delivery: {
+            http: {
+              in: "header",
+              name: "Authorization",
+              prefix: "Bearer ",
+              value: "{$credential.access_token}",
+            },
+          },
+        },
+      },
+    } as unknown as IntegrationManifest;
+    await seedIntegration(ctx.orgId, confidentialRemote);
+    const res = await app.request("/api/integrations/@myorg/remote-confidential", {
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      auths: Array<{ auth_key: string; client_auto_provisioned: boolean }>;
+    };
+    const oauth = body.auths.find((a) => a.auth_key === "oauth");
+    expect(oauth?.client_auto_provisioned).toBe(false);
   });
 });
 
@@ -586,6 +719,25 @@ describe("OAuth2 connect initiate", () => {
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: "{}",
     });
+    expect(res.status).toBe(403);
+  });
+
+  it("remote MCP oauth2 with no pre-registered client takes the auto-DCR path (403 when discovery fails)", async () => {
+    // A remote MCP integration self-registers its client at connect time, so
+    // connect is attempted even with no pre-registered client (unlike a classic
+    // oauth2 auth, which the UI gates earlier). Discovery against the
+    // unreachable `.invalid` AS yields no registration_endpoint, so DCR is a
+    // best-effort no-op and the flow falls back to the "no client" 403 — never
+    // throwing. Exercises the remote auto-DCR branch end-to-end.
+    await seedIntegration(ctx.orgId, remoteMcpManifest("@myorg/remote-mcp"));
+    const res = await app.request(
+      "/api/integrations/@myorg/remote-mcp/auths/oauth/connect/oauth2",
+      {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: "{}",
+      },
+    );
     expect(res.status).toBe(403);
   });
 
