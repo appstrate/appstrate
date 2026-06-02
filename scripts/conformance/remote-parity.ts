@@ -24,9 +24,16 @@ import type { Finding } from "./types.ts";
 import { diffToolSets } from "./tool-diff.ts";
 import { resolveToken } from "./creds.ts";
 import { ssrfGuardedFetch } from "./ssrf-fetch.ts";
+import { listAllTools, type LiveTool } from "./mcp-list.ts";
+import { loadBaseline, writeBaseline, diffSchemas } from "./schema-baseline.ts";
 
 const CHECK = "mcp-remote-parity";
 const CONNECT_TIMEOUT_MS = 20_000;
+
+export interface RemoteParityOptions {
+  /** Record live schemas to the baseline instead of diffing (`--update-baselines`). */
+  updateBaseline?: boolean;
+}
 
 /** `source.remote.url` from a remote integration manifest. */
 export function remoteUrl(manifest: Record<string, unknown>): string | undefined {
@@ -57,7 +64,10 @@ function isSsrfError(err: unknown): boolean {
 }
 
 /** Connect to the remote server, list tools, and diff against the manifest. */
-export async function checkMcpRemoteParity(entry: SystemPackageEntry): Promise<Finding[]> {
+export async function checkMcpRemoteParity(
+  entry: SystemPackageEntry,
+  opts: RemoteParityOptions = {},
+): Promise<Finding[]> {
   const manifest = entry.manifest;
   const url = remoteUrl(manifest);
   if (!url) {
@@ -106,14 +116,31 @@ export async function checkMcpRemoteParity(entry: SystemPackageEntry): Promise<F
   }
 
   try {
-    const { tools } = await client.listTools();
-    const provided = tools
-      .map((t) => (t as { name?: unknown }).name)
-      .filter((n): n is string => typeof n === "string");
+    const live: LiveTool[] = await listAllTools(client);
+    const provided = live.map((t) => t.name);
+
+    // Record mode: snapshot live schemas to the baseline, skip diffing.
+    if (opts.updateBaseline) {
+      await writeBaseline(entry.packageId, live);
+      return [
+        {
+          packageId: entry.packageId,
+          check: CHECK,
+          severity: "info",
+          message: `baseline recorded — ${live.length} tools`,
+        },
+      ];
+    }
+
     const findings = diffToolSets(entry.packageId, declared, provided, {
       check: CHECK,
       allowUndeclared,
     });
+
+    // Schema drift: same tool name, changed inputSchema vs committed baseline.
+    const baseline = await loadBaseline(entry.packageId);
+    if (baseline) findings.push(...diffSchemas(entry.packageId, live, baseline));
+
     if (findings.length === 0) {
       findings.push({
         packageId: entry.packageId,
@@ -121,7 +148,7 @@ export async function checkMcpRemoteParity(entry: SystemPackageEntry): Promise<F
         severity: "info",
         message: `parity ok — ${provided.length} tools (${declared.length} declared${
           allowUndeclared ? ", undeclared allowed" : ""
-        })`,
+        })${baseline ? ", schemas match baseline" : ""}`,
       });
     }
     return findings;

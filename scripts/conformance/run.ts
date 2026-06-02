@@ -32,6 +32,7 @@ interface Args {
   tier: Tier;
   pkg?: string;
   dir: string;
+  updateBaselines: boolean;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -39,11 +40,14 @@ function parseArgs(argv: string[]): Args {
     const i = argv.indexOf(name);
     return i !== -1 && i + 1 < argv.length ? argv[i + 1] : undefined;
   };
-  const tierRaw = flag("--tier") ?? "gate";
+  const updateBaselines = argv.includes("--update-baselines");
+  // Recording schemas requires hitting the remote servers → force the mcp tier
+  // unless the caller asked for a broader one.
+  const tierRaw = flag("--tier") ?? (updateBaselines ? "mcp" : "gate");
   const tier: Tier = tierRaw === "mcp" || tierRaw === "all" ? tierRaw : "gate";
   // Default to the built archives under the repo root (scripts/conformance → ../../system-packages).
   const dir = flag("--dir") ?? join(import.meta.dir, "../../system-packages");
-  return { tier, pkg: flag("--pkg"), dir };
+  return { tier, pkg: flag("--pkg"), dir, updateBaselines };
 }
 
 async function main(): Promise<void> {
@@ -70,7 +74,9 @@ async function main(): Promise<void> {
     if (klass === "mcp-server-local") {
       findings.push(...(await checkMcpLocalParity(entry)));
     } else if (klass === "mcp-remote" && runRemote) {
-      findings.push(...(await checkMcpRemoteParity(entry)));
+      findings.push(
+        ...(await checkMcpRemoteParity(entry, { updateBaseline: args.updateBaselines })),
+      );
     } else if (klass === "integration-cred") {
       credIntegrations++;
       if (runAuthLive) findings.push(...(await checkAuthLiveness(entry)));

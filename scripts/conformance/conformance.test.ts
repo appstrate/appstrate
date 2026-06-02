@@ -7,6 +7,9 @@ import { diffToolSets } from "./tool-diff.ts";
 import { resolveToken, credentialedCount, _resetCredsCache } from "./creds.ts";
 import { remoteUrl, toolsPolicyKeys, allowsUndeclared } from "./remote-parity.ts";
 import { applyAuth, checkAuthLiveness } from "./auth-live.ts";
+import { listAllTools } from "./mcp-list.ts";
+import { canonicalize, diffSchemas } from "./schema-baseline.ts";
+import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
 import { summarize, exitCode, formatReport } from "./report.ts";
 import type { Finding } from "./types.ts";
 import type { SystemPackageEntry } from "@appstrate/core/system-packages";
@@ -305,5 +308,64 @@ describe("checkAuthLiveness", () => {
     }) as typeof fetch;
     const f = await checkAuthLiveness(ghEntry, { fetchImpl: boom });
     expect(f[0]!.severity).toBe("warn");
+  });
+});
+
+describe("listAllTools — pagination", () => {
+  function fakeClient(pages: Array<{ tools: { name: string }[]; nextCursor?: string }>) {
+    let call = 0;
+    return {
+      client: {
+        listTools: async () => pages[call++ % pages.length],
+      },
+    } as unknown as AppstrateMcpClient;
+  }
+
+  it("concatenates across cursor pages", async () => {
+    const client = fakeClient([
+      { tools: [{ name: "a" }, { name: "b" }], nextCursor: "p2" },
+      { tools: [{ name: "c" }] },
+    ]);
+    const tools = await listAllTools(client);
+    expect(tools.map((t) => t.name)).toEqual(["a", "b", "c"]);
+  });
+
+  it("returns a single page when no cursor", async () => {
+    const client = fakeClient([{ tools: [{ name: "only" }] }]);
+    expect((await listAllTools(client)).map((t) => t.name)).toEqual(["only"]);
+  });
+
+  it("aborts a runaway cursor via maxPages", async () => {
+    const client = fakeClient([{ tools: [{ name: "x" }], nextCursor: "loops-forever" }]);
+    await expect(listAllTools(client, { maxPages: 3 })).rejects.toThrow(/exceeded 3 pages/);
+  });
+});
+
+describe("schema baseline", () => {
+  it("canonicalize is key-order independent", () => {
+    expect(canonicalize({ b: 1, a: 2 })).toBe(canonicalize({ a: 2, b: 1 }));
+    expect(canonicalize({ a: { y: 1, x: 2 } })).toBe(canonicalize({ a: { x: 2, y: 1 } }));
+    expect(canonicalize({ a: 1 })).not.toBe(canonicalize({ a: 2 }));
+  });
+
+  it("diffSchemas WARNs on a changed schema, ignores unchanged + unknown tools", () => {
+    const baseline = {
+      tools: { foo: { type: "object", properties: { a: {} } }, bar: { type: "string" } },
+    };
+    const live = [
+      { name: "foo", inputSchema: { properties: { a: {} }, type: "object" } }, // same (reordered)
+      { name: "bar", inputSchema: { type: "number" } }, // changed
+      { name: "baz", inputSchema: { type: "object" } }, // not in baseline → ignored
+    ];
+    const f = diffSchemas("@x/p", live, baseline);
+    expect(f).toHaveLength(1);
+    expect(f[0]!.severity).toBe("warn");
+    expect(f[0]!.message).toContain("bar");
+  });
+
+  it("returns no findings when every tracked schema matches", () => {
+    const baseline = { tools: { foo: { type: "object" } } };
+    const f = diffSchemas("@x/p", [{ name: "foo", inputSchema: { type: "object" } }], baseline);
+    expect(f).toEqual([]);
   });
 });
