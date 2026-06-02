@@ -49,10 +49,13 @@ jobs:
             echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
             echo
             echo '```'
-            bun run test:system-packages --tier all 2>&1
-            code=${PIPESTATUS[0]}
-            echo '```'
-          } | tee conformance-report.md
+          } > conformance-report.md
+          # Pipeline must stay in THIS shell so PIPESTATUS reflects the run's
+          # exit code (a `{ … } | tee` brace-group would capture it in a
+          # subshell and lose it — opening the issue on every run).
+          bun run test:system-packages --tier all 2>&1 | tee -a conformance-report.md
+          code=${PIPESTATUS[0]}
+          echo '```' >> conformance-report.md
           echo "code=${code}" >> "$GITHUB_OUTPUT"
 
       - name: Open or update tracking issue
