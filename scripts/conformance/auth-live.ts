@@ -17,7 +17,7 @@ import { isBlockedUrl } from "@appstrate/core/ssrf";
 import type { SystemPackageEntry } from "@appstrate/core/system-packages";
 import type { Finding } from "./types.ts";
 import { AUTH_PROBES } from "./probes.ts";
-import { resolveAccessToken } from "./creds.ts";
+import { resolveToken } from "./creds.ts";
 import { ssrfGuardedFetch } from "./ssrf-fetch.ts";
 
 const CHECK = "auth-live";
@@ -90,19 +90,7 @@ export async function checkAuthLiveness(
   const probe = AUTH_PROBES[entry.packageId];
   if (!probe) return []; // uncovered — silent, counted by the runner
 
-  let token: string | undefined;
-  try {
-    token = await resolveAccessToken(entry);
-  } catch (err) {
-    return [
-      {
-        packageId: entry.packageId,
-        check: CHECK,
-        severity: "warn",
-        message: `credential refresh failed: ${err instanceof Error ? err.message : String(err)}`,
-      },
-    ];
-  }
+  const token = resolveToken(entry.packageId);
   if (!token) {
     return [
       {
