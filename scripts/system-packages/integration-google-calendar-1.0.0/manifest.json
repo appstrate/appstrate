@@ -14,8 +14,7 @@
   "auths": {
     "primary": {
       "type": "oauth2",
-      "authorization_endpoint": "https://accounts.google.com/o/oauth2/v2/auth",
-      "token_endpoint": "https://oauth2.googleapis.com/token",
+      "issuer": "https://accounts.google.com",
       "default_scopes": ["https://www.googleapis.com/auth/calendar.readonly"],
       "authorization_params": {
         "access_type": "offline",
