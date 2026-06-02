@@ -500,15 +500,25 @@ export interface ResolvedOAuthConnect {
  * client acquisition without manual pre-registration (CIMD when advertised,
  * else RFC 7591 dynamic registration) — so no hand-registered client is needed.
  *
- * Derived purely from the manifest — an `oauth2` auth on a `source.kind:
- * "remote"` integration — rather than a manifest opt-in flag: the capability is
- * a property of the integration's shape, and the AS advertising (or not) a
- * `registration_endpoint` / CIMD support is the real runtime gate. This keeps
- * Appstrate aligned with the spec's capability-discovery model instead of
- * re-declaring it per manifest.
+ * Derived from the manifest shape rather than an opt-in flag, but it is NOT
+ * enough to be `oauth2` + `source.kind: "remote"`: the auto-provisioned client
+ * is a **public client** (`token_endpoint_auth_method: "none"` + PKCE — the
+ * MCP-spec norm for both CIMD and DCR). A remote integration that declares a
+ * confidential method (`client_secret_*`) is a classic *pre-registered*
+ * client that happens to be remote (e.g. the GitHub/Gmail MCP connectors,
+ * which ship explicit endpoints + expect an admin-registered secret) — it must
+ * keep requiring a manually-registered client. The AS advertising (or not) a
+ * `registration_endpoint` / CIMD support is the additional runtime gate.
  */
-function usesAutoProvisionedClient(manifest: IntegrationManifest, auth: AfpsManifestAuth): boolean {
-  return auth.type === "oauth2" && getRemoteSource(manifest) !== null;
+export function usesAutoProvisionedClient(
+  manifest: IntegrationManifest,
+  auth: AfpsManifestAuth,
+): boolean {
+  return (
+    auth.type === "oauth2" &&
+    auth.token_endpoint_auth_method === "none" &&
+    getRemoteSource(manifest) !== null
+  );
 }
 
 /**

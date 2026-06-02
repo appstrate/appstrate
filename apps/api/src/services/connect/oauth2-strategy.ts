@@ -24,16 +24,14 @@ import { initiateIntegrationOAuth, resolveOAuthEndpoints } from "@appstrate/conn
 import { forbidden, invalidRequest } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import { oauthStateStore } from "./oauth-state-store.ts";
-import {
-  getRemoteSource,
-  toSupportedTokenEndpointAuthMethod,
-} from "../integration-manifest-helpers.ts";
+import { toSupportedTokenEndpointAuthMethod } from "../integration-manifest-helpers.ts";
 import {
   assertRequiredIdentityClaims,
   ensureIntegrationOAuthClient,
   extractIdentity,
   readIntegrationAuth,
   saveIntegrationConnection,
+  usesAutoProvisionedClient,
   type IntegrationConnectionSummary,
 } from "../integration-connections.ts";
 import type {
@@ -88,12 +86,13 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     );
     const client = resolved.client;
     if (!client) {
-      // Distinguish the two "no client" causes: a remote MCP integration tries
-      // to self-provision a client (CIMD/DCR), so a missing client means
-      // discovery/registration failed — not that an admin forgot to register.
-      const isRemoteMcp = getRemoteSource(manifest) !== null;
+      // Distinguish the two "no client" causes: an auto-provisioning auth
+      // (public client on a remote MCP integration) tries to self-register via
+      // CIMD/DCR, so a missing client means discovery/registration failed — not
+      // that an admin forgot to register. Confidential/classic auths still
+      // require a manually-registered client.
       throw forbidden(
-        isRemoteMcp
+        usesAutoProvisionedClient(manifest, auth)
           ? `Could not automatically provision an OAuth client for '${ctx.integrationId}' auth '${ctx.authKey}': the authorization server did not advertise dynamic client registration, or discovery/registration failed. Register a client manually, or retry once the server is reachable.`
           : `Administrator must register OAuth client credentials for '${ctx.integrationId}' auth '${ctx.authKey}' before connection`,
       );

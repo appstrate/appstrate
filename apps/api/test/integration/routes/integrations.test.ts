@@ -99,6 +99,9 @@ function remoteMcpManifest(name = "@myorg/remote-mcp"): IntegrationManifest {
       oauth: {
         type: "oauth2",
         issuer: "https://mcp.invalid",
+        // Public client (PKCE, no secret) — the MCP-spec norm that marks this
+        // auth as client-auto-provisioned (CIMD/DCR).
+        token_endpoint_auth_method: "none",
         default_scopes: ["read", "write"],
         authorized_uris: ["https://mcp.invalid/**"],
         delivery: {
@@ -244,6 +247,52 @@ describe("GET /api/integrations/:packageId", () => {
     // api_key is not oauth2 → no auto-provisioning (it carries no client at all).
     expect(api?.type).toBe("api_key");
     expect(api?.client_auto_provisioned).toBe(false);
+  });
+
+  it("a confidential remote MCP oauth2 is NOT client_auto_provisioned (needs a registered client)", async () => {
+    // Mirrors the github-mcp / gmail-mcp connectors: remote source, but a
+    // confidential client (`client_secret_post`) with explicit endpoints. Such
+    // an auth expects an admin-registered client and must NOT be flagged
+    // auto-provisioned just because the source is remote.
+    const confidentialRemote = {
+      type: "integration",
+      schema_version: "0.1",
+      name: "@myorg/remote-confidential",
+      version: "1.0.0",
+      display_name: "Remote confidential",
+      source: {
+        kind: "remote",
+        remote: { url: "https://mcp.invalid/mcp", transport: "streamable-http" },
+      },
+      auths: {
+        oauth: {
+          type: "oauth2",
+          authorization_endpoint: "https://mcp.invalid/oauth/authorize",
+          token_endpoint: "https://mcp.invalid/oauth/token",
+          token_endpoint_auth_method: "client_secret_post",
+          default_scopes: ["read"],
+          authorized_uris: ["https://mcp.invalid/**"],
+          delivery: {
+            http: {
+              in: "header",
+              name: "Authorization",
+              prefix: "Bearer ",
+              value: "{$credential.access_token}",
+            },
+          },
+        },
+      },
+    } as unknown as IntegrationManifest;
+    await seedIntegration(ctx.orgId, confidentialRemote);
+    const res = await app.request("/api/integrations/@myorg/remote-confidential", {
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      auths: Array<{ auth_key: string; client_auto_provisioned: boolean }>;
+    };
+    const oauth = body.auths.find((a) => a.auth_key === "oauth");
+    expect(oauth?.client_auto_provisioned).toBe(false);
   });
 });
 
