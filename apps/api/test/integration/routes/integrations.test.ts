@@ -191,7 +191,7 @@ describe("GET /api/integrations/:packageId", () => {
         type: string;
         connections: unknown[];
         has_oauth_client: boolean;
-        supports_dynamic_registration: boolean;
+        client_auto_provisioned: boolean;
       }>;
       tool_catalog: Array<{ name: string; description?: string; policy?: unknown }>;
     };
@@ -204,9 +204,9 @@ describe("GET /api/integrations/:packageId", () => {
     expect(api?.has_oauth_client).toBe(false);
     expect(google?.type).toBe("oauth2");
     expect(google?.has_oauth_client).toBe(false);
-    // Local-source oauth2 → no auto-DCR (endpoints are manifest-declared and a
-    // client must be pre-registered).
-    expect(google?.supports_dynamic_registration).toBe(false);
+    // Local-source oauth2 → no auto-provisioning (endpoints are manifest-
+    // declared and a client must be pre-registered).
+    expect(google?.client_auto_provisioned).toBe(false);
     // The gmail fixture has no referenced mcp-server seeded → resolver
     // falls back to the integration's `tools` keys. Shape assertion keeps
     // the contract present without coupling to fixture catalog edits.
@@ -220,7 +220,7 @@ describe("GET /api/integrations/:packageId", () => {
     expect(res.status).toBe(404);
   });
 
-  it("flags a remote MCP oauth2 auth as supports_dynamic_registration (auto-DCR)", async () => {
+  it("flags a remote MCP oauth2 auth as client_auto_provisioned", async () => {
     await seedIntegration(ctx.orgId, remoteMcpManifest("@myorg/remote-mcp"));
     const res = await app.request("/api/integrations/@myorg/remote-mcp", {
       headers: authHeaders(ctx),
@@ -231,19 +231,19 @@ describe("GET /api/integrations/:packageId", () => {
         auth_key: string;
         type: string;
         has_oauth_client: boolean;
-        supports_dynamic_registration: boolean;
+        client_auto_provisioned: boolean;
       }>;
     };
     const oauth = body.auths.find((a) => a.auth_key === "oauth");
     const api = body.auths.find((a) => a.auth_key === "api");
-    // oauth2 on a remote MCP integration → auto-DCR, connectable without a
-    // pre-registered client.
+    // oauth2 on a remote MCP integration → client auto-provisioned, connectable
+    // without a pre-registered client.
     expect(oauth?.type).toBe("oauth2");
     expect(oauth?.has_oauth_client).toBe(false);
-    expect(oauth?.supports_dynamic_registration).toBe(true);
-    // api_key is not oauth2 → no auto-DCR (it carries no client at all).
+    expect(oauth?.client_auto_provisioned).toBe(true);
+    // api_key is not oauth2 → no auto-provisioning (it carries no client at all).
     expect(api?.type).toBe("api_key");
-    expect(api?.supports_dynamic_registration).toBe(false);
+    expect(api?.client_auto_provisioned).toBe(false);
   });
 });
 

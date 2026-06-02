@@ -130,4 +130,21 @@ describe("discoverProtectedResourceMetadata", () => {
     });
     expect(md).toBeNull();
   });
+
+  it("degrades to null when the (SSRF-guarded) fetch throws on every probe", async () => {
+    // The orchestrator injects an SSRF-guarded fetch that throws on blocked
+    // targets. Discovery must swallow that and return null (no client minted)
+    // rather than propagating — a blocked URL becomes "discovery failed".
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls++;
+      throw new Error("SSRF guard: refusing to fetch blocked URL");
+    }) as unknown as typeof fetch;
+    const md = await discoverProtectedResourceMetadata({
+      resourceServerUrl: "https://blocked.internal/mcp",
+      fetchImpl,
+    });
+    expect(md).toBeNull();
+    expect(calls).toBeGreaterThan(0);
+  });
 });

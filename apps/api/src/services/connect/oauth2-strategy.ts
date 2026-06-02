@@ -60,19 +60,14 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     const oauthMeta = (auth._meta?.["dev.appstrate/oauth"] ?? undefined) as
       | { scope_separator?: string }
       | undefined;
-    // Remote MCP integrations resolve their endpoints at connect time via the
-    // MCP-spec discovery chain (RFC 9728 → RFC 8414) in
-    // `ensureIntegrationOAuthClient`, so they need neither an `issuer` nor
-    // explicit endpoints in the manifest. Forward-compat: AFPS §7.3 still
-    // requires issuer-or-endpoints for oauth2 at the schema layer, so today's
-    // remote connectors (ClickUp, Notion) declare an `issuer` and this branch is
-    // never reached for them — it makes the connect path ready for a future
-    // schema relaxation to truly zero-config (only `source.remote.url`).
-    const isRemoteMcp = getRemoteSource(manifest) !== null;
-    // AFPS §7.3: a non-remote oauth2 auth declares EITHER an `issuer` (discovery
-    // fills the endpoints in) OR explicit `authorization_endpoint` +
-    // `token_endpoint`.
-    if (!isRemoteMcp && !auth.issuer && (!auth.authorization_endpoint || !auth.token_endpoint)) {
+    // AFPS §7.3: an oauth2 auth declares EITHER an `issuer` (discovery fills the
+    // endpoints in) OR explicit `authorization_endpoint` + `token_endpoint`.
+    // Today this holds for remote MCP connectors too — they declare an `issuer`
+    // (the AFPS schema still requires issuer-or-endpoints). A future schema
+    // relaxation for `source.kind: "remote"` (afps-spec) would let them omit it
+    // and rely on connect-time discovery; that change ships together with the
+    // exemption here, so no speculative dead branch is carried now.
+    if (!auth.issuer && (!auth.authorization_endpoint || !auth.token_endpoint)) {
       throw invalidRequest(
         "oauth2 auth must declare an issuer (for discovery) or explicit authorization_endpoint + token_endpoint for marketplace connect.",
       );
@@ -93,8 +88,14 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     );
     const client = resolved.client;
     if (!client) {
+      // Distinguish the two "no client" causes: a remote MCP integration tries
+      // to self-provision a client (CIMD/DCR), so a missing client means
+      // discovery/registration failed — not that an admin forgot to register.
+      const isRemoteMcp = getRemoteSource(manifest) !== null;
       throw forbidden(
-        `Administrator must register OAuth client credentials for '${ctx.integrationId}' auth '${ctx.authKey}' before connection`,
+        isRemoteMcp
+          ? `Could not automatically provision an OAuth client for '${ctx.integrationId}' auth '${ctx.authKey}': the authorization server did not advertise dynamic client registration, or discovery/registration failed. Register a client manually, or retry once the server is reachable.`
+          : `Administrator must register OAuth client credentials for '${ctx.integrationId}' auth '${ctx.authKey}' before connection`,
       );
     }
     const effectiveRedirectUri = client.redirect_uri ?? redirectUri;
