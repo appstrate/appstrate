@@ -6,6 +6,7 @@
       "name": "appstrate",
       "dependencies": {
         "@afps-spec/schema": "^0.4.0",
+        "@appstrate/connect": "workspace:*",
         "@appstrate/core": "workspace:*",
         "@appstrate/mcp-transport": "workspace:*",
         "@electric-sql/pglite": "^0.4.5",
