@@ -15,6 +15,7 @@
 import { probeBunCompat } from "@appstrate/core/mcp-server-bundle";
 import type { SystemPackageEntry } from "@appstrate/core/system-packages";
 import type { Finding } from "./types.ts";
+import { diffToolSets } from "./tool-diff.ts";
 
 const CHECK = "mcp-local-parity";
 
@@ -38,36 +39,12 @@ export function serverEntryPoint(manifest: Record<string, unknown>): string | un
 }
 
 /**
- * Pure set-diff between declared and live tool names. Strict: every declared
- * tool must be exposed (else the manifest lies / upstream removed it), and
- * every exposed tool must be declared (else an undeclared tool ships).
+ * Pure set-diff between declared and live tool names. Strict both directions —
+ * local MCP servers have no `allow_undeclared_tools` escape hatch, so the
+ * manifest IS the contract. Delegates to the shared {@link diffToolSets}.
  */
 export function diffTools(packageId: string, declared: string[], provided: string[]): Finding[] {
-  const findings: Finding[] = [];
-  const providedSet = new Set(provided);
-  const declaredSet = new Set(declared);
-
-  for (const name of declared) {
-    if (!providedSet.has(name)) {
-      findings.push({
-        packageId,
-        check: CHECK,
-        severity: "fail",
-        message: `declared tool "${name}" is not exposed by the server`,
-      });
-    }
-  }
-  for (const name of provided) {
-    if (!declaredSet.has(name)) {
-      findings.push({
-        packageId,
-        check: CHECK,
-        severity: "fail",
-        message: `server exposes undeclared tool "${name}" (add it to manifest tools[])`,
-      });
-    }
-  }
-  return findings;
+  return diffToolSets(packageId, declared, provided, { check: CHECK });
 }
 
 /** Spawn the local server, list its tools, and diff against the manifest. */

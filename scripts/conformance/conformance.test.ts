@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, afterEach } from "bun:test";
 import { classify } from "./load.ts";
 import { declaredTools, serverEntryPoint, diffTools } from "./mcp-local-parity.ts";
+import { diffToolSets } from "./tool-diff.ts";
+import { resolveToken, credentialedCount, _resetCredsCache } from "./creds.ts";
+import { remoteUrl, toolsPolicyKeys, allowsUndeclared } from "./remote-parity.ts";
 import { summarize, exitCode, formatReport } from "./report.ts";
 import type { Finding } from "./types.ts";
 import type { SystemPackageEntry } from "@appstrate/core/system-packages";
@@ -125,5 +128,90 @@ describe("report", () => {
 
   it("handles the empty case", () => {
     expect(formatReport([])).toContain("nothing to check");
+  });
+});
+
+describe("diffToolSets — allowUndeclared", () => {
+  const id = "@appstrate/github-mcp";
+
+  it("FAILs on undeclared server tools when strict", () => {
+    const f = diffToolSets(id, ["a"], ["a", "extra"], { check: "c", allowUndeclared: false });
+    expect(f).toHaveLength(1);
+    expect(f[0]!.severity).toBe("fail");
+  });
+
+  it("WARNs (not FAILs) on undeclared server tools when allowed", () => {
+    const f = diffToolSets(id, ["a"], ["a", "extra"], { check: "c", allowUndeclared: true });
+    expect(f).toHaveLength(1);
+    expect(f[0]!.severity).toBe("warn");
+    expect(f[0]!.message).toContain("extra");
+  });
+
+  it("still FAILs on a declared tool the server lacks, even when allowUndeclared", () => {
+    const f = diffToolSets(id, ["a", "gone"], ["a", "extra"], {
+      check: "c",
+      allowUndeclared: true,
+    });
+    const missing = f.find((x) => x.message.includes("gone"));
+    const extra = f.find((x) => x.message.includes("extra"));
+    expect(missing!.severity).toBe("fail");
+    expect(extra!.severity).toBe("warn");
+  });
+});
+
+describe("creds", () => {
+  afterEach(() => {
+    delete process.env.CONFORMANCE_TOKENS;
+    _resetCredsCache();
+  });
+
+  it("resolves a token from the JSON map", () => {
+    process.env.CONFORMANCE_TOKENS = JSON.stringify({ "@appstrate/clickup-mcp": "tok123" });
+    _resetCredsCache();
+    expect(resolveToken("@appstrate/clickup-mcp")).toBe("tok123");
+    expect(resolveToken("@appstrate/notion-mcp")).toBeUndefined();
+    expect(credentialedCount()).toBe(1);
+  });
+
+  it("returns undefined for everything when env is absent or invalid", () => {
+    _resetCredsCache();
+    expect(resolveToken("@appstrate/clickup-mcp")).toBeUndefined();
+    expect(credentialedCount()).toBe(0);
+
+    process.env.CONFORMANCE_TOKENS = "not json{";
+    _resetCredsCache();
+    expect(resolveToken("@appstrate/clickup-mcp")).toBeUndefined();
+  });
+
+  it("skips non-string / empty values", () => {
+    process.env.CONFORMANCE_TOKENS = JSON.stringify({ a: "", b: 5, c: "ok" });
+    _resetCredsCache();
+    expect(credentialedCount()).toBe(1);
+    expect(resolveToken("c")).toBe("ok");
+  });
+});
+
+describe("remote manifest accessors", () => {
+  it("reads source.remote.url", () => {
+    expect(remoteUrl({ source: { kind: "remote", remote: { url: "https://x/mcp" } } })).toBe(
+      "https://x/mcp",
+    );
+    expect(remoteUrl({ source: { kind: "none" } })).toBeUndefined();
+    expect(remoteUrl({})).toBeUndefined();
+  });
+
+  it("reads tools_policy keys", () => {
+    expect(toolsPolicyKeys({ tools_policy: { create_task: {}, get_task: {} } }).sort()).toEqual([
+      "create_task",
+      "get_task",
+    ]);
+    expect(toolsPolicyKeys({})).toEqual([]);
+    expect(toolsPolicyKeys({ tools_policy: [] })).toEqual([]);
+  });
+
+  it("reads allow_undeclared_tools", () => {
+    expect(allowsUndeclared({ allow_undeclared_tools: true })).toBe(true);
+    expect(allowsUndeclared({ allow_undeclared_tools: false })).toBe(false);
+    expect(allowsUndeclared({})).toBe(false);
   });
 });

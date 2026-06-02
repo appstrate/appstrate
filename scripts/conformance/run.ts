@@ -19,6 +19,8 @@
 import { join } from "node:path";
 import { loadClassified } from "./load.ts";
 import { checkMcpLocalParity } from "./mcp-local-parity.ts";
+import { checkMcpRemoteParity } from "./remote-parity.ts";
+import { credentialedCount } from "./creds.ts";
 import { formatReport, exitCode, type Summary, summarize } from "./report.ts";
 import type { Finding } from "./types.ts";
 
@@ -55,17 +57,25 @@ async function main(): Promise<void> {
 
   const selected = packages.filter((p) => !args.pkg || p.entry.packageId.includes(args.pkg));
 
+  // Tier gating. `gate` is deterministic + credential-free (local MCP parity);
+  // `mcp`/`all` add the network-bound remote handler.
+  const runRemote = args.tier === "mcp" || args.tier === "all";
+
   for (const { entry, klass } of selected) {
     if (klass === "mcp-server-local") {
       findings.push(...(await checkMcpLocalParity(entry)));
+    } else if (klass === "mcp-remote" && runRemote) {
+      findings.push(...(await checkMcpRemoteParity(entry)));
     }
-    // mcp-remote + integration-cred handlers land in Wave 2/3. In the `gate`
-    // tier they are intentionally not exercised (network/credentials).
+    // integration-cred auth-liveness lands in wave 3 (the `all` tier).
   }
 
   console.log(formatReport(findings));
 
   const summary: Summary = summarize(findings);
+  if (runRemote) {
+    console.log(`[conformance] remote credentials configured: ${credentialedCount()}`);
+  }
   console.log(
     `\n[conformance] tier=${args.tier} packages=${selected.length} → ${summary.ok ? "PASS" : "FAIL"}`,
   );
