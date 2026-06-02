@@ -47,6 +47,7 @@ async function main(): Promise<void> {
     );
   }
   const port = Number(flag("--port") ?? 8989);
+  const offline = process.argv.includes("--offline");
   const redirectUri = `http://127.0.0.1:${port}/callback`;
 
   // Load the manifest from the built archive.
@@ -99,11 +100,17 @@ async function main(): Promise<void> {
   const challenge = base64url(createHash("sha256").update(verifier).digest());
   const state = base64url(randomBytes(16));
 
+  // `--offline` requests a refresh token (OIDC `offline_access` scope +
+  // `prompt=consent`). Many ASes only issue a refresh token when explicitly
+  // asked; some reject the unknown scope, hence opt-in.
+  const reqScopes = offline ? [...scopes, "offline_access"] : scopes;
+
   const authUrl = new URL(endpoints.authorizationEndpoint);
   authUrl.searchParams.set("response_type", "code");
   authUrl.searchParams.set("client_id", clientId);
   authUrl.searchParams.set("redirect_uri", redirectUri);
-  if (scopes.length) authUrl.searchParams.set("scope", scopes.join(scopeSep));
+  if (reqScopes.length) authUrl.searchParams.set("scope", reqScopes.join(scopeSep));
+  if (offline) authUrl.searchParams.set("prompt", "consent");
   authUrl.searchParams.set("state", state);
   authUrl.searchParams.set("code_challenge", challenge);
   authUrl.searchParams.set("code_challenge_method", "S256");
