@@ -51,10 +51,11 @@ async function main(): Promise<void> {
   const packageId = process.argv[2];
   if (!packageId || packageId.startsWith("--")) {
     throw new Error(
-      "usage: bun scripts/conformance/grab-token.ts <packageId> [--port N] [--client-id ID] [--client-secret S] [--issuer URL]",
+      "usage: bun scripts/conformance/grab-token.ts <packageId> [--port N] [--client-id ID] [--client-secret S] [--issuer URL] [--offline]",
     );
   }
   const port = Number(flag("--port") ?? 8989);
+  const offline = process.argv.includes("--offline");
   const redirectUri = `http://127.0.0.1:${port}/callback`;
 
   const dir = join(import.meta.dir, "../../system-packages");
@@ -134,6 +135,13 @@ async function main(): Promise<void> {
   authUrl.searchParams.set("code_challenge", challenge);
   authUrl.searchParams.set("code_challenge_method", "S256");
   if (resource) authUrl.searchParams.set("resource", resource);
+  // `--offline` requests a refresh token. Google gates this behind its own
+  // query params (`access_type=offline` + a forced `prompt=consent`), NOT the
+  // OIDC `offline_access` scope. Harmless on servers that ignore them.
+  if (offline) {
+    authUrl.searchParams.set("access_type", "offline");
+    authUrl.searchParams.set("prompt", "consent");
+  }
 
   const code = await new Promise<string>((resolve, reject) => {
     const server = Bun.serve({
@@ -189,12 +197,37 @@ async function main(): Promise<void> {
   });
   const text = await res.text();
   if (!res.ok) throw new Error(`token exchange failed (${res.status}): ${text}`);
-  const json = JSON.parse(text) as { access_token?: string };
+  const json = JSON.parse(text) as { access_token?: string; refresh_token?: string };
   if (!json.access_token) throw new Error(`token response had no access_token: ${text}`);
 
-  console.log(`\n[grab-token] success. Run the live check with:\n`);
+  console.log(`\n[grab-token] success.\n`);
+  console.log(`# Quick one-off check (access token — may expire):`);
   console.log(`CONFORMANCE_TOKENS='${JSON.stringify({ [packageId]: json.access_token })}' \\`);
   console.log(`  bun run test:system-packages --tier all --pkg ${entry.name}\n`);
+
+  if (json.refresh_token) {
+    // Self-renewing form — use as the CI secret so the cron mints a fresh
+    // access token each run (e.g. Google's 1h tokens).
+    const refreshForm = {
+      [packageId]: {
+        refresh_token: json.refresh_token,
+        client_id: clientId,
+        ...(isConfidential
+          ? { client_secret: clientSecret, token_endpoint_auth_method: authMethod }
+          : {}),
+        token_endpoint: tokenEndpoint,
+      },
+    };
+    console.log(`# Self-renewing form — set this as the CONFORMANCE_TOKENS CI secret:`);
+    console.log(`${JSON.stringify(refreshForm)}\n`);
+    console.log(
+      `# (Google: publish the OAuth consent screen, else the refresh token expires in 7 days.)\n`,
+    );
+  } else if (offline) {
+    console.log(
+      `# Note: no refresh_token returned despite --offline (provider doesn't issue one).\n`,
+    );
+  }
 }
 
 main().catch((err) => {
