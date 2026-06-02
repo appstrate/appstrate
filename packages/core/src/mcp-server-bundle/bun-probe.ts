@@ -162,9 +162,13 @@ async function runProbe(
           proc.stdin?.write(JSON.stringify(listReq) + "\n");
         }
         if (msg.id === 2 && msg.result) {
-          toolCount = Array.isArray(msg.result.tools) ? msg.result.tools.length : 0;
+          const tools = Array.isArray(msg.result.tools) ? msg.result.tools : [];
+          toolCount = tools.length;
+          const toolNames = tools
+            .map((t) => (t as { name?: unknown }).name)
+            .filter((n): n is string => typeof n === "string");
           clearTimeout(timer);
-          settle({ ok: true, toolCount });
+          settle({ ok: true, toolCount, toolNames });
         }
       }
     });

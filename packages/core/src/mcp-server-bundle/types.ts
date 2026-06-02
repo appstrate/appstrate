@@ -88,6 +88,12 @@ export interface BunCompatProbeResult {
   ok: boolean;
   reason?: string;
   toolCount?: number;
+  /**
+   * Tool names returned by the probe's `tools/list` call, in server order.
+   * Present only when the probe completed the handshake (`ok: true`).
+   * Conformance tooling diffs these against the manifest's declared tools.
+   */
+  toolNames?: string[];
   durationMs?: number;
 }
 

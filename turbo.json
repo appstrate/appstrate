@@ -66,6 +66,9 @@
     },
     "//#lint:afps-1x": {
       "cache": false
+    },
+    "//#conformance:check": {
+      "cache": false
     }
   }
 }
