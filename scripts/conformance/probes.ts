@@ -36,4 +36,9 @@ export const AUTH_PROBES: Record<string, AuthProbe> = {
   "@appstrate/github": { url: "https://api.github.com/user", expectStatus: [200] },
   "@appstrate/slack": { url: "https://slack.com/api/auth.test", expectStatus: [200] },
   "@appstrate/stripe": { url: "https://api.stripe.com/v1/account", expectStatus: [200] },
+  // calendar.readonly scope — read-only list of the user's calendars.
+  "@appstrate/google-calendar": {
+    url: "https://www.googleapis.com/calendar/v3/users/me/calendarList",
+    expectStatus: [200],
+  },
 };

@@ -1,21 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * One-shot OAuth token grabber for remote MCP integrations — a DEV UTILITY for
- * obtaining a `CONFORMANCE_TOKENS` bearer to exercise the live `--tier mcp`
- * checks against auth-gated servers (ClickUp, Notion).
+ * One-shot OAuth token grabber for remote/credential-only integrations — a DEV
+ * UTILITY for obtaining a `CONFORMANCE_TOKENS` bearer to exercise the live
+ * checks against auth-gated providers.
  *
- *   bun scripts/conformance/grab-token.ts @appstrate/clickup-mcp [--port 8989] [--client-id <id>]
+ *   bun scripts/conformance/grab-token.ts <packageId> [options]
+ *     --port N            loopback port (default 8989)
+ *     --client-id ID      pre-registered client (required for confidential)
+ *     --client-secret S   client secret (confidential clients, e.g. Google)
+ *     --issuer URL        force OIDC discovery from this issuer (overrides the
+ *                         manifest's explicit endpoints — e.g. point a Google
+ *                         integration at https://accounts.google.com)
  *
  * Reuses `@appstrate/connect` for endpoint discovery + RFC 7591 dynamic client
- * registration, then runs the loopback PKCE authorization-code dance: registers
- * a public client (or `--client-id`), opens the browser for consent, captures
- * the code on 127.0.0.1, exchanges it, and prints a ready-to-paste
- * CONFORMANCE_TOKENS line. The token is only printed, never written to disk.
+ * registration, then runs the loopback PKCE authorization-code dance and prints
+ * a ready-to-paste CONFORMANCE_TOKENS line. The token is only printed.
  *
- * Targets public-client OAuth servers (`token_endpoint_auth_method: "none"` +
- * issuer discovery) — clickup-mcp / notion-mcp. github-mcp uses a confidential
- * client; cover it with a PAT in `CONFORMANCE_TOKENS` instead.
+ * Public clients (`token_endpoint_auth_method: "none"`, e.g. clickup/notion)
+ * self-register via DCR. Confidential clients (`client_secret_*`, e.g. Google,
+ * Slack, HubSpot, github-mcp) need a manually-created OAuth app + --client-id
+ * --client-secret.
  */
 
 import { createHash, randomBytes } from "node:crypto";
@@ -35,6 +40,9 @@ function flag(name: string): string | undefined {
 
 interface OAuthAuth {
   issuer?: string;
+  authorization_endpoint?: string;
+  token_endpoint?: string;
+  token_endpoint_auth_method?: string;
   default_scopes?: string[];
   _meta?: { "dev.appstrate/oauth"?: { scope_separator?: string } };
 }
@@ -43,7 +51,7 @@ async function main(): Promise<void> {
   const packageId = process.argv[2];
   if (!packageId || packageId.startsWith("--")) {
     throw new Error(
-      "usage: bun scripts/conformance/grab-token.ts <packageId> [--port N] [--client-id ID]",
+      "usage: bun scripts/conformance/grab-token.ts <packageId> [--port N] [--client-id ID] [--client-secret S] [--issuer URL]",
     );
   }
   const port = Number(flag("--port") ?? 8989);
@@ -55,33 +63,55 @@ async function main(): Promise<void> {
   if (!entry) throw new Error(`package not found in ${dir}: ${packageId}`);
 
   const auths = (entry.manifest.auths ?? {}) as Record<string, OAuthAuth>;
-  const authEntry = Object.values(auths).find((a) => a.issuer);
-  if (!authEntry?.issuer) {
-    throw new Error(
-      `${packageId}: no oauth2 auth with an issuer (use a PAT for confidential ones)`,
-    );
+  const authEntry = Object.values(auths).find(
+    (a) => a.issuer || (a.authorization_endpoint && a.token_endpoint),
+  );
+  if (!authEntry) {
+    throw new Error(`${packageId}: no oauth2 auth (issuer or explicit endpoints) in the manifest`);
   }
-  const issuer = authEntry.issuer;
   const scopes = authEntry.default_scopes ?? [];
   const scopeSep = authEntry._meta?.["dev.appstrate/oauth"]?.scope_separator ?? " ";
   const resource = (entry.manifest.source as { remote?: { url?: string } })?.remote?.url;
+  const authMethod = authEntry.token_endpoint_auth_method ?? "none";
+  const isConfidential = authMethod.startsWith("client_secret");
 
-  console.log(`[grab-token] ${packageId}  issuer: ${issuer}`);
+  console.log(`[grab-token] ${packageId}`);
 
-  const endpoints = await resolveOAuthEndpoints({ issuer });
-  if (!endpoints.authorizationEndpoint || !endpoints.tokenEndpoint) {
-    throw new Error(`could not discover authorize/token endpoints from ${issuer}`);
+  // Resolve endpoints — discovery from the (optionally overridden) issuer, else
+  // explicit from the manifest. `--issuer` exercises the OIDC autodiscover path
+  // even when the manifest hardcodes endpoints.
+  const issuer = flag("--issuer") ?? authEntry.issuer;
+  let authorizationEndpoint = authEntry.authorization_endpoint;
+  let tokenEndpoint = authEntry.token_endpoint;
+  let registrationEndpoint: string | undefined;
+  if (issuer) {
+    console.log(`[grab-token] discovering from issuer: ${issuer}`);
+    const ep = await resolveOAuthEndpoints({ issuer });
+    authorizationEndpoint = ep.authorizationEndpoint ?? authorizationEndpoint;
+    tokenEndpoint = ep.tokenEndpoint ?? tokenEndpoint;
+    registrationEndpoint = ep.registrationEndpoint;
+    console.log(`[grab-token] → authorize=${authorizationEndpoint}  token=${tokenEndpoint}`);
+  }
+  if (!authorizationEndpoint || !tokenEndpoint) {
+    throw new Error(`${packageId}: could not resolve authorize/token endpoints`);
   }
 
   let clientId = flag("--client-id");
+  const clientSecret = flag("--client-secret") ?? "";
   if (!clientId) {
-    if (!endpoints.registrationEndpoint) {
+    if (isConfidential) {
       throw new Error(
-        `no registration_endpoint advertised by ${issuer} — pass --client-id <id> for a pre-registered client`,
+        `${packageId}: confidential client ("${authMethod}") — create an OAuth app with redirect ` +
+          `${redirectUri} and pass --client-id <id> --client-secret <secret>`,
+      );
+    }
+    if (!registrationEndpoint) {
+      throw new Error(
+        `${packageId}: no registration_endpoint — pass --client-id <id> for a pre-registered client`,
       );
     }
     const reg = await registerDynamicClient({
-      registrationEndpoint: endpoints.registrationEndpoint,
+      registrationEndpoint,
       redirectUri,
       clientName: "Appstrate conformance harness",
       scopes,
@@ -95,7 +125,7 @@ async function main(): Promise<void> {
   const challenge = base64url(createHash("sha256").update(verifier).digest());
   const state = base64url(randomBytes(16));
 
-  const authUrl = new URL(endpoints.authorizationEndpoint);
+  const authUrl = new URL(authorizationEndpoint);
   authUrl.searchParams.set("response_type", "code");
   authUrl.searchParams.set("client_id", clientId);
   authUrl.searchParams.set("redirect_uri", redirectUri);
@@ -149,9 +179,10 @@ async function main(): Promise<void> {
     redirect_uri: redirectUri,
     client_id: clientId,
     code_verifier: verifier,
+    ...(isConfidential && clientSecret ? { client_secret: clientSecret } : {}),
     ...(resource ? { resource } : {}),
   });
-  const res = await fetch(endpoints.tokenEndpoint, {
+  const res = await fetch(tokenEndpoint, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
     body,
@@ -163,7 +194,7 @@ async function main(): Promise<void> {
 
   console.log(`\n[grab-token] success. Run the live check with:\n`);
   console.log(`CONFORMANCE_TOKENS='${JSON.stringify({ [packageId]: json.access_token })}' \\`);
-  console.log(`  bun run test:system-packages --tier mcp --pkg ${entry.name}\n`);
+  console.log(`  bun run test:system-packages --tier all --pkg ${entry.name}\n`);
 }
 
 main().catch((err) => {
