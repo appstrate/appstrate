@@ -217,7 +217,7 @@ describe("ALL /llm/* — basic routing", () => {
 
   it("forwards path and query string to baseUrl", async () => {
     const fetchFn = mock(
-      async () =>
+      async (_url: string, _init?: RequestInit) =>
         new Response('{"id":"msg_1"}', {
           status: 200,
           headers: { "Content-Type": "application/json" },
@@ -232,7 +232,7 @@ describe("ALL /llm/* — basic routing", () => {
       body: '{"model":"claude-sonnet-4-5"}',
     });
     expect(res.status).toBe(200);
-    const url = (fetchFn.mock.calls[0] as [string])[0];
+    const url = fetchFn.mock.calls[0]![0];
     expect(url).toBe("https://api.anthropic.com/v1/messages?stream=true");
   });
 
@@ -267,7 +267,9 @@ describe("ALL /llm/* — basic routing", () => {
 
 describe("ALL /llm/* — placeholder replacement", () => {
   it("replaces placeholder in x-api-key header", async () => {
-    const fetchFn = mock(async () => new Response("ok", { status: 200 }));
+    const fetchFn = mock(
+      async (_url: string, _init?: RequestInit) => new Response("ok", { status: 200 }),
+    );
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
     deps.config.llm = LLM_CONFIG;
     const app = createApp(deps);
@@ -275,13 +277,15 @@ describe("ALL /llm/* — placeholder replacement", () => {
       method: "POST",
       headers: { "x-api-key": "sk-placeholder" },
     });
-    const opts = (fetchFn.mock.calls[0] as [string, RequestInit])[1];
+    const opts = fetchFn.mock.calls[0]![1]!;
     const headers = opts.headers as Record<string, string>;
     expect(headers["x-api-key"]).toBe("real-sk-ant-key");
   });
 
   it("replaces placeholder embedded in Authorization Bearer header", async () => {
-    const fetchFn = mock(async () => new Response("ok", { status: 200 }));
+    const fetchFn = mock(
+      async (_url: string, _init?: RequestInit) => new Response("ok", { status: 200 }),
+    );
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
     deps.config.llm = {
       authMode: "api_key",
@@ -294,13 +298,15 @@ describe("ALL /llm/* — placeholder replacement", () => {
       method: "POST",
       headers: { Authorization: "Bearer sk-ant-oat01-placeholder" },
     });
-    const opts = (fetchFn.mock.calls[0] as [string, RequestInit])[1];
+    const opts = fetchFn.mock.calls[0]![1]!;
     const headers = opts.headers as Record<string, string>;
     expect(headers["authorization"]).toBe("Bearer sk-ant-oat01-real-token");
   });
 
   it("preserves headers that do not contain the placeholder", async () => {
-    const fetchFn = mock(async () => new Response("ok", { status: 200 }));
+    const fetchFn = mock(
+      async (_url: string, _init?: RequestInit) => new Response("ok", { status: 200 }),
+    );
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
     deps.config.llm = LLM_CONFIG;
     const app = createApp(deps);
@@ -312,7 +318,7 @@ describe("ALL /llm/* — placeholder replacement", () => {
         "X-Custom": "untouched",
       },
     });
-    const opts = (fetchFn.mock.calls[0] as [string, RequestInit])[1];
+    const opts = fetchFn.mock.calls[0]![1]!;
     const headers = opts.headers as Record<string, string>;
     expect(headers["x-api-key"]).toBe("real-sk-ant-key");
     expect(headers["content-type"]).toBe("application/json");

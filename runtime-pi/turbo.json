@@ -1,0 +1,9 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "typecheck": {
+      "inputs": ["**/*.ts", "!sidecar/**", "tsconfig.json", "package.json"]
+    }
+  }
+}

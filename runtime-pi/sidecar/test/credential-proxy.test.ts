@@ -96,7 +96,7 @@ describe("executeApiCall — structured failures", () => {
 describe("executeApiCall — happy path", () => {
   it("forwards credentials, captures cookies, and returns the upstream response", async () => {
     const fetchFn = mock(
-      async () =>
+      async (_url: string | URL, _init?: RequestInit) =>
         new Response('{"data":42}', {
           status: 200,
           headers: {
@@ -473,7 +473,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
 
   it("streaming bodies still use native fetch and only capture final-hop cookies", async () => {
     const fetchFn = mock(
-      async () =>
+      async (_url: string | URL, _init?: RequestInit) =>
         new Response("ok", {
           status: 200,
           headers: { "set-cookie": "final=F" },

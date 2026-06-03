@@ -175,7 +175,14 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<un
       return ok({ algorithm, hex: hasher.digest("hex") });
     }
     case "password_hash": {
-      const algorithm = typeof args.algorithm === "string" ? args.algorithm : "argon2id";
+      const requested = typeof args.algorithm === "string" ? args.algorithm : "argon2id";
+      const algorithm: "argon2id" | "argon2i" | "argon2d" | "bcrypt" =
+        requested === "bcrypt" ||
+        requested === "argon2i" ||
+        requested === "argon2d" ||
+        requested === "argon2id"
+          ? requested
+          : "argon2id";
       const hash = await Bun.password.hash(
         String(args.password),
         algorithm === "bcrypt" ? { algorithm: "bcrypt", cost: 10 } : { algorithm },

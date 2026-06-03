@@ -81,7 +81,12 @@ describe("buildMcpDirectFactories — runtime-injected tools", () => {
   it("registers run_history + recall_memory and no api_call", async () => {
     const { mcp, pair } = await makeMockServer();
     try {
-      const factories = await buildMcpDirectFactories({ mcp, runId: "run-1", emit: () => {} });
+      const factories = await buildMcpDirectFactories({
+        mcp,
+        runId: "run-1",
+        emit: () => {},
+        workspace: "/tmp",
+      });
       const captured: CapturedTool[] = [];
       const api = makeMockExtensionApi(captured);
       for (const f of factories) f(api);
@@ -97,7 +102,12 @@ describe("buildMcpDirectFactories — run_history dispatch", () => {
   it("forwards limit + fields to the MCP run_history tool", async () => {
     const { mcp, pair, calls } = await makeMockServer();
     try {
-      const factories = await buildMcpDirectFactories({ mcp, runId: "run-1", emit: () => {} });
+      const factories = await buildMcpDirectFactories({
+        mcp,
+        runId: "run-1",
+        emit: () => {},
+        workspace: "/tmp",
+      });
       const captured: CapturedTool[] = [];
       const api = makeMockExtensionApi(captured);
       for (const f of factories) f(api);
@@ -116,7 +126,12 @@ describe("buildMcpDirectFactories — recall_memory dispatch", () => {
   it("forwards q + limit to the MCP recall_memory tool", async () => {
     const { mcp, pair, calls } = await makeMockServer();
     try {
-      const factories = await buildMcpDirectFactories({ mcp, runId: "run-1", emit: () => {} });
+      const factories = await buildMcpDirectFactories({
+        mcp,
+        runId: "run-1",
+        emit: () => {},
+        workspace: "/tmp",
+      });
       const captured: CapturedTool[] = [];
       const api = makeMockExtensionApi(captured);
       for (const f of factories) f(api);
@@ -135,7 +150,12 @@ describe("buildMcpDirectFactories — integration tools", () => {
       { name: "github__api_call", description: "GitHub api_call" },
     ]);
     try {
-      const factories = await buildMcpDirectFactories({ mcp, runId: "run-1", emit: () => {} });
+      const factories = await buildMcpDirectFactories({
+        mcp,
+        runId: "run-1",
+        emit: () => {},
+        workspace: "/tmp",
+      });
       const captured: CapturedTool[] = [];
       const api = makeMockExtensionApi(captured);
       for (const f of factories) f(api);
@@ -188,6 +208,7 @@ describe("buildMcpDirectFactories — runtime-event trust boundary", () => {
       mcp,
       runId: "run-1",
       emit: (e) => emitted.push(e as { type: string }),
+      workspace: "/tmp",
     });
     const captured: CapturedTool[] = [];
     const api = makeMockExtensionApi(captured);
@@ -240,7 +261,7 @@ describe("buildMcpDirectFactories — failure modes", () => {
     const mcp = wrapClient(pair.client, { close: () => Promise.resolve() });
     try {
       await expect(
-        buildMcpDirectFactories({ mcp, runId: "run-1", emit: () => {} }),
+        buildMcpDirectFactories({ mcp, runId: "run-1", emit: () => {}, workspace: "/tmp" }),
       ).rejects.toThrow(/run_history/);
     } finally {
       await pair.close();

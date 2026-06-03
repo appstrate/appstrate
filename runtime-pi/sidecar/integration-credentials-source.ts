@@ -203,6 +203,14 @@ export interface IntegrationCredentialsSource extends MitmCredentialSource {
    * connect.tool re-login retry path.
    */
   shouldReauth(authKey: string, status: number): boolean;
+  /**
+   * Override the base's optional
+   * {@link MitmCredentialSource.refreshOnUnauthorized} as REQUIRED — this
+   * factory always wires it (routes to the registered re-login handler, else
+   * the platform refresh POST). Callers holding the concrete source type can
+   * invoke it without a presence check.
+   */
+  refreshOnUnauthorized(authKey: string): Promise<boolean>;
 }
 
 /**

@@ -87,7 +87,7 @@ describe("wrapExtensionFactory", () => {
     // Emits an error event
     const errorEmits = emitCalls.filter((c) => c.type === "error");
     expect(errorEmits).toHaveLength(1);
-    expect(errorEmits[0].message).toContain("something broke");
+    expect(errorEmits[0]!.message).toContain("something broke");
   });
 
   it("catches non-Error thrown values", async () => {

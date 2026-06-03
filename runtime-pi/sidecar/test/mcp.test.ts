@@ -33,13 +33,15 @@ function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
       }),
     ),
     cookieJar: new Map(),
+    // Bun's `Mock` lacks the `preconnect` member that `typeof fetch`
+    // declares; the cast bridges that cross-lib friction.
     fetchFn: mock(
       async () =>
         new Response('{"ok":true}', {
           status: 200,
           headers: { "Content-Type": "application/json" },
         }),
-    ),
+    ) as unknown as typeof fetch,
     isReady: () => true,
     ...overrides,
   };
@@ -213,7 +215,7 @@ describe("POST /mcp — tools/call run_history", () => {
           headers: { "Content-Type": "application/json" },
         }),
     );
-    const app = createApp(makeDeps({ fetchFn }));
+    const app = createApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
 
     const res = await rpc(app, {
       method: "tools/call",
@@ -227,7 +229,7 @@ describe("POST /mcp — tools/call run_history", () => {
     // Verifies the `limit` and `fields` arguments propagated as query
     // parameters into the underlying platform call.
     expect(fetchFn).toHaveBeenCalledTimes(1);
-    const calledUrl = fetchFn.mock.calls[0]![0] as string;
+    const calledUrl = (fetchFn.mock.calls[0] as unknown as [string])[0];
     expect(calledUrl).toContain("/internal/run-history");
     expect(calledUrl).toContain("limit=5");
     expect(calledUrl).toContain("fields=checkpoint");
@@ -243,7 +245,7 @@ describe("POST /mcp — tools/call recall_memory", () => {
           headers: { "Content-Type": "application/json" },
         }),
     );
-    const app = createApp(makeDeps({ fetchFn }));
+    const app = createApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
 
     const res = await rpc(app, {
       method: "tools/call",
@@ -255,7 +257,7 @@ describe("POST /mcp — tools/call recall_memory", () => {
     expect(result.content[0]!.text).toBe('{"memories":[{"id":1,"content":"x"}]}');
 
     expect(fetchFn).toHaveBeenCalledTimes(1);
-    const calledUrl = fetchFn.mock.calls[0]![0] as string;
+    const calledUrl = (fetchFn.mock.calls[0] as unknown as [string])[0];
     expect(calledUrl).toContain("/internal/memories");
     expect(calledUrl).toContain("q=python");
     expect(calledUrl).toContain("limit=3");
@@ -263,13 +265,13 @@ describe("POST /mcp — tools/call recall_memory", () => {
 
   it("omits empty q from the upstream URL", async () => {
     const fetchFn = mock(async () => new Response('{"memories":[]}', { status: 200 }));
-    const app = createApp(makeDeps({ fetchFn }));
+    const app = createApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
 
     await rpc(app, {
       method: "tools/call",
       params: { name: "recall_memory", arguments: { limit: 1 } },
     });
-    const calledUrl = fetchFn.mock.calls[0]![0] as string;
+    const calledUrl = (fetchFn.mock.calls[0] as unknown as [string])[0];
     expect(calledUrl).not.toContain("q=");
     expect(calledUrl).toContain("limit=1");
   });
@@ -330,7 +332,7 @@ describe("POST /mcp — per-request transport (stateless mode)", () => {
           headers: { "Content-Type": "application/json" },
         }),
     );
-    const app = createApp(makeDeps({ fetchFn }));
+    const app = createApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
 
     const args = { limit: 1 };
 
@@ -468,7 +470,7 @@ describe("POST /mcp — bounded response read", () => {
           headers: { "Content-Type": "application/json" },
         }),
     );
-    const app = createApp(makeDeps({ fetchFn }));
+    const app = createApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
     const res = await rpc(app, {
       method: "tools/call",
       params: { name: "run_history", arguments: { limit: 1 } },
@@ -549,7 +551,7 @@ describe("POST /mcp — api_call", () => {
           headers: { "Content-Type": "application/json" },
         }),
     );
-    const app = await makeApiCallApp({ fetchFn });
+    const app = await makeApiCallApp({ fetchFn: fetchFn as unknown as typeof fetch });
     const res = await rpc(app, {
       method: "tools/call",
       params: {
@@ -561,7 +563,7 @@ describe("POST /mcp — api_call", () => {
     const result = res.json.result as { content: Array<{ text: string }>; isError?: boolean };
     expect(result.isError).toBeUndefined();
     expect(result.content[0]!.text).toBe('{"messages":[]}');
-    const init = fetchFn.mock.calls[0]![1] as RequestInit;
+    const init = (fetchFn.mock.calls[0] as unknown as [string, RequestInit])[1];
     const headers = init.headers as Record<string, string>;
     expect(headers["Authorization"]).toBe("Bearer integ-tok-1");
   });

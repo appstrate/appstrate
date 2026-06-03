@@ -98,7 +98,9 @@ function startFakeUpstream(): Promise<{
   });
 }
 
-function makeProxy(overrides?: Parameters<typeof createForwardProxy>[0]): ForwardProxyResult {
+function makeProxy(
+  overrides?: Partial<Parameters<typeof createForwardProxy>[0]>,
+): ForwardProxyResult {
   const result = createForwardProxy({
     config: { platformApiUrl: "http://mock:3000", runToken: "tok", proxyUrl: "" },
     listenPort: 0,

@@ -161,7 +161,7 @@ describe("@appstrate/bun-toolkit fixtures", () => {
         string,
         { type: string; delivery: { http: { in: string; name: string; value: string } } }
       >;
-      tools_policy: Record<string, { required_scopes?: string[] }>;
+      tools_policy: Record<string, { required_scopes?: Record<string, string[]> }>;
     };
     expect(m.source.kind).toBe("local");
     expect(m.source.server?.name).toBe(SERVER_ID);

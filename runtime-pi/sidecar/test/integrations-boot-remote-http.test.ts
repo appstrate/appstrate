@@ -106,7 +106,9 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
         await getFetch()(SERVER_URL, { method: "POST" });
       },
     );
-    expect(seen).toBe("Bearer TOKEN");
+    // Cast: TS narrows a `let` assigned only inside a closure back to its
+    // initializer type (`null`); the global fetch stub mutates it at runtime.
+    expect(seen as string | null).toBe("Bearer TOKEN");
   });
 
   it("force-refreshes once and retries on a 401", async () => {
