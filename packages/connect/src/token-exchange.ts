@@ -26,8 +26,10 @@ import type { OAuthTokenContentType } from "./token-utils.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 
 /**
- * Superset of `OAuthTokenAuthMethod` from `@appstrate/core/validation`:
- * adds `"none"` for public-client integration auths (no client_secret).
+ * The token-endpoint auth methods this exchange helper implements — a narrowed
+ * subset of `OAuthTokenAuthMethod` (`@appstrate/core/validation`). `"none"` is
+ * the public-client case (no client_secret); the canonical enum's JWT / mTLS
+ * methods are intentionally unsupported here.
  */
 export type TokenExchangeAuthMethod = "client_secret_basic" | "client_secret_post" | "none";
 
