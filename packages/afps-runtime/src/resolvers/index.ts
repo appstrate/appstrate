@@ -85,21 +85,13 @@ export {
 // sidecar's `executeApiCall` (platform path) AND the local CLI resolver.
 export {
   MAX_REDIRECTS,
-  OUTBOUND_TIMEOUT_MS,
   matchesAuthorizedUri,
   stripUserInfoAndFragment,
-  preflightUrl,
   redactHost,
   mergeSetCookieIntoJar,
   fetchFollowingRedirectsCapturingCookies,
   guardedFetch,
   RedirectBlockedError,
-  PreflightError,
-  type PreflightResult,
-  type PreflightOptions,
-  type RedirectFollowOptions,
-  type RedirectLogger,
-  type GuardedFetchOptions,
 } from "./api-call-engine.ts";
 
 // Integration `api_call` surface — the portable equivalent of the platform's
@@ -113,8 +105,4 @@ export {
   apiCallToolName,
   type IntegrationApiCallResolver,
   type IntegrationRef,
-  type ApiCallIntegrationMeta,
-  type LocalIntegrationCredentialsFile,
-  type LocalIntegrationResolverOptions,
-  type RemoteAppstrateIntegrationResolverOptions,
 } from "./integration-api-call.ts";

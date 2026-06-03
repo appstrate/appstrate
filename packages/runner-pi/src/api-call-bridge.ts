@@ -34,8 +34,6 @@ const SCHEMA_PROPERTIES =
 const BODY_SCHEMA = SCHEMA_PROPERTIES.body ?? {};
 const RESPONSE_MODE_SCHEMA = SCHEMA_PROPERTIES.responseMode ?? {};
 
-export { readIntegrationRefs };
-
 export interface BuildApiCallExtensionFactoryOptions {
   bundle: Bundle;
   integrationResolver: IntegrationApiCallResolver;

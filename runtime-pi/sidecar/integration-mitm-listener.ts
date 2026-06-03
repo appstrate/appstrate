@@ -103,12 +103,8 @@ export interface CreateMitmListenerOptions {
   caBundle: CaBundle;
   minter: CertMinter;
   credentials: MitmCredentialSource;
-  /** Port to listen on. Defaults to 0 (ephemeral); read from `address()` after `ready`. */
-  port?: number;
   /** Host to bind. Defaults to `"127.0.0.1"`. */
   host?: string;
-  /** Max inner-request body size in bytes. Defaults to 10 MiB. */
-  maxRequestBytes?: number;
   /** Upstream fetch implementation. Defaults to `globalThis.fetch`. */
   fetch?: typeof fetch;
   /** Telemetry sink — non-fatal events surface here. */
@@ -159,8 +155,9 @@ export function createIntegrationMitmListener(
   options: CreateMitmListenerOptions,
 ): MitmListenerHandle {
   const host = options.host ?? "127.0.0.1";
-  const port = options.port ?? 0;
-  const maxRequestBytes = options.maxRequestBytes ?? 10 * 1024 * 1024;
+  // Ephemeral port (0 → kernel-assigned, read back from `address()` after `ready`).
+  const port = 0;
+  const maxRequestBytes = 10 * 1024 * 1024; // 10 MiB inner-request body cap.
   const fetchFn = options.fetch ?? globalThis.fetch;
   const emit = options.onEvent ?? (() => {});
 
@@ -466,7 +463,7 @@ async function collectUntilSniParses(rawSocket: Socket, seed: Buffer): Promise<B
  *     uint16 list_length
  *     ServerName{ uint8 name_type (0x00=host_name), uint16 host_len, opaque host_name }
  */
-export function extractSni(buf: Buffer): string | null {
+function extractSni(buf: Buffer): string | null {
   let p = 0;
   // TLS record header
   if (buf.length < 5) return null;

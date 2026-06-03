@@ -63,7 +63,7 @@ import { logger } from "./logger.ts";
  * seam a future run_logs relay would key on). Streaming these to run_logs is
  * deliberately deferred — this only categorises the existing log lines.
  */
-export const CREDENTIAL_FAILURE_RECONNECT_REQUIRED = "reconnect_required" as const;
+const CREDENTIAL_FAILURE_RECONNECT_REQUIRED = "reconnect_required" as const;
 
 // Wire-level payload returned by both `/internal/integration-credentials`
 // endpoints — canonical definition lives in `@appstrate/connect` (single

@@ -53,9 +53,6 @@ import { matchesAuthorizedUriSpec } from "./http-call-core.ts";
 /** Maximum redirect hops the follower will chase before giving up. */
 export const MAX_REDIRECTS = 10;
 
-/** Default outbound timeout (ms) for a single upstream attempt. */
-export const OUTBOUND_TIMEOUT_MS = 30_000;
-
 /**
  * Check a target URL against a list of `authorized_uris` patterns using
  * the AFPS spec semantics (`*` matches a single path segment, `**` matches

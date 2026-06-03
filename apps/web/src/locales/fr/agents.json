@@ -393,6 +393,5 @@
   "api.responseHint": "Le run est asynchrone. L'API retourne un ID de run immédiatement.",
   "api.manageKeys": "Gérer les clés API",
   "api.keyCreated": "Clé injectée dans l'exemple ci-dessous. Copiez le curl maintenant — la clé ne sera plus visible après navigation.",
-  "run.confirmTitle": "Confirmer le run",
-  "run.confirm": "Lancer"
+  "run.confirmTitle": "Confirmer le run"
 }

@@ -14,7 +14,6 @@ export { prepareBundleForPi, type PrepareBundleOptions } from "./bundle-extensio
 
 export {
   buildApiCallExtensionFactory,
-  readIntegrationRefs,
   type BuildApiCallExtensionFactoryOptions,
 } from "./api-call-bridge.ts";
 

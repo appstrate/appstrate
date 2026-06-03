@@ -291,12 +291,6 @@ export const skillManifestSchema = afpsSkillManifestSchema.extend({
 /** Inferred type from the skill manifest schema. */
 export type SkillManifest = z.infer<typeof skillManifestSchema>;
 
-/** Available scope entry for OAuth configuration. */
-export interface AvailableScope {
-  value: string;
-  label: string;
-}
-
 /**
  * OAuth2 token-endpoint client-authentication method (AFPS §7.3,
  * `token_endpoint_auth_method`). Derived from the canonical Zod enum so

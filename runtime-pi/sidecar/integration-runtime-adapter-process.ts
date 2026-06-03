@@ -283,12 +283,6 @@ export function createProcessIntegrationRuntimeAdapter(): IntegrationRuntimeAdap
       for (const path of createdPaths) {
         await rm(path, { force: true }).catch(() => {});
       }
-      // Try to remove the per-run scratch dir if any was created.
-      const scratchRoot = join(tmpdir(), `appstrate-mounts-`);
-      // We can't enumerate the runId here without storing it; the per-path
-      // unlinks above cover the actual files. The scratch dir itself is
-      // empty after that and harmless if left behind.
-      void scratchRoot;
       createdPaths.length = 0;
     },
   };
