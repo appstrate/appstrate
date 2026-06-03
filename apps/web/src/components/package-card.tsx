@@ -19,7 +19,6 @@ interface PackageCardProps {
   keywords?: string[];
   usedByAgents?: number;
   unreadCount?: number;
-  statusBadge?: React.ReactNode;
   actions?: React.ReactNode;
   autoInstalled?: boolean;
 }
@@ -34,7 +33,6 @@ export function PackageCard({
   keywords,
   usedByAgents,
   unreadCount,
-  statusBadge,
   actions,
   autoInstalled,
 }: PackageCardProps) {
@@ -71,7 +69,6 @@ export function PackageCard({
               {t("list.badgeAutoInstalled")}
             </span>
           )}
-          {statusBadge}
           {!!unreadCount && unreadCount > 0 && (
             <span className="bg-destructive text-destructive-foreground flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.6rem] leading-none font-medium">
               {unreadCount > 99 ? "99+" : unreadCount}

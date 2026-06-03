@@ -34,7 +34,6 @@ const TYPE_PRESENTATION: Record<
 export function ItemTab({
   type = "skill",
   readOnly = false,
-  badgeMap,
   actionsMap,
   iconMap,
   filterIds,
@@ -47,7 +46,6 @@ export function ItemTab({
   type?: BrowseType;
   /** When true, hides the "create" editor link (browse-only surface). */
   readOnly?: boolean;
-  badgeMap?: Map<string, ReactNode>;
   actionsMap?: Map<string, ReactNode>;
   iconMap?: Map<string, string>;
   filterIds?: Set<string>;
@@ -71,7 +69,6 @@ export function ItemTab({
     type,
     source: item.source,
     usedByAgents: item.used_by_agents,
-    statusBadge: badgeMap?.get(item.id),
     actions: actionsMap?.get(item.id),
     iconUrl: iconMap?.get(item.id),
     autoInstalled: item.auto_installed,

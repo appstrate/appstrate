@@ -24,7 +24,6 @@ export interface CardItem {
   keywords?: string[];
   usedByAgents?: number;
   unreadCount?: number;
-  statusBadge?: ReactNode;
   actions?: ReactNode;
   autoInstalled?: boolean;
 }
