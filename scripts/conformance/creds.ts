@@ -21,8 +21,16 @@
  *     skips discovery; otherwise it is discovered from the manifest issuer.
  *
  * Most providers issue long-lived/non-expiring tokens (string form is enough);
- * Google is the one that needs the refresh form. ClickUp issues no refresh
- * token at all → manual `workflow_dispatch` only.
+ * Google is the one that needs the refresh form (and survives the cron).
+ *
+ * Two providers can NOT be covered by a static cron secret → manual
+ * `workflow_dispatch` only (grab a fresh credential per run via grab-token):
+ *   - ClickUp: issues no refresh token at all.
+ *   - Notion MCP: issues a ROTATING refresh token (OAuth 2.1 — each refresh
+ *     invalidates the prior one with replay detection). A stored secret works
+ *     exactly once, then the server rotates it and the next run replays the
+ *     dead token → `invalid_grant: Refresh token reuse detected`. Self-renewal
+ *     would require persisting the rotated token back into the secret each run.
  */
 
 import { resolveOAuthEndpoints, performRefreshTokenExchange } from "@appstrate/connect";

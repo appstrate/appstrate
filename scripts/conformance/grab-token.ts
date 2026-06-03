@@ -12,6 +12,9 @@
  *     --issuer URL        force OIDC discovery from this issuer (overrides the
  *                         manifest's explicit endpoints — e.g. point a Google
  *                         integration at https://accounts.google.com)
+ *     --offline           request a refresh token: adds the `offline_access`
+ *                         scope (OAuth-2.1 servers, e.g. Notion MCP) AND
+ *                         Google's access_type=offline + prompt=consent
  *
  * Reuses `@appstrate/connect` for endpoint discovery + RFC 7591 dynamic client
  * registration, then runs the loopback PKCE authorization-code dance and prints
@@ -130,14 +133,18 @@ async function main(): Promise<void> {
   authUrl.searchParams.set("response_type", "code");
   authUrl.searchParams.set("client_id", clientId);
   authUrl.searchParams.set("redirect_uri", redirectUri);
-  if (scopes.length) authUrl.searchParams.set("scope", scopes.join(scopeSep));
+  // `--offline` requests a refresh token. Two mechanisms, applied together so a
+  // single flag covers the fleet: the OIDC `offline_access` scope (OAuth-2.1
+  // servers like Notion MCP — `refresh_token` in grant_types_supported) AND
+  // Google's proprietary `access_type=offline` + forced `prompt=consent` query
+  // params (Google ignores the scope). Each side ignores the other's mechanism.
+  const requestedScopes =
+    offline && !scopes.includes("offline_access") ? [...scopes, "offline_access"] : scopes;
+  if (requestedScopes.length) authUrl.searchParams.set("scope", requestedScopes.join(scopeSep));
   authUrl.searchParams.set("state", state);
   authUrl.searchParams.set("code_challenge", challenge);
   authUrl.searchParams.set("code_challenge_method", "S256");
   if (resource) authUrl.searchParams.set("resource", resource);
-  // `--offline` requests a refresh token. Google gates this behind its own
-  // query params (`access_type=offline` + a forced `prompt=consent`), NOT the
-  // OIDC `offline_access` scope. Harmless on servers that ignore them.
   if (offline) {
     authUrl.searchParams.set("access_type", "offline");
     authUrl.searchParams.set("prompt", "consent");
