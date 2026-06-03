@@ -17,7 +17,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { resolve } from "node:path";
-import { mkdtempSync, writeFileSync, chmodSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, chmodSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 
 const SCRIPT = resolve(import.meta.dir, "../../../../scripts/bootstrap.sh");
@@ -63,13 +63,16 @@ function writeExecutable(path: string, body: string): void {
 
 describe("scripts/bootstrap.sh", () => {
   let tmpBin: string;
+  let tmpHome: string;
 
   beforeEach(() => {
     tmpBin = mkdtempSync(`${tmpdir()}/bootstrap-test-`);
+    tmpHome = mkdtempSync(`${tmpdir()}/bootstrap-home-`);
   });
 
   afterEach(() => {
     rmSync(tmpBin, { recursive: true, force: true });
+    rmSync(tmpHome, { recursive: true, force: true });
   });
 
   describe("try_install_minisign (issue #479 — Homebrew unlinked-keg recovery)", () => {
@@ -234,6 +237,115 @@ exit 1
       );
 
       expect(res.stdout).toContain("FAIL");
+    });
+  });
+
+  describe("_setup_path (issue #527 — bash login-shell rc precedence)", () => {
+    // Drive the extracted rc-file writer in isolation. We point HOME at a
+    // throwaway dir, force a bash SHELL, and clear the CI / opt-out env so
+    // the writer actually runs (in real CI runs `CI=true` short-circuits it,
+    // which is precisely why this path had no coverage when #527 shipped).
+    function runSetupPath(extraSetup = ""): Promise<ShellResult> {
+      const body = `
+export HOME="${tmpHome}"
+export SHELL=/bin/bash
+unset CI
+unset APPSTRATE_NO_MODIFY_PATH
+BIN_DIR="${tmpHome}/.local/bin"
+${extraSetup}
+_setup_path
+`;
+      return runShell(body, tmpBin);
+    }
+
+    const marker = "# added by appstrate installer";
+
+    it("does NOT create ~/.bash_profile when only ~/.bashrc exists", async () => {
+      // The exact #527 repro: a server with ~/.bashrc and no ~/.bash_profile.
+      writeFileSync(`${tmpHome}/.bashrc`, "# user config\n");
+
+      const res = await runSetupPath();
+
+      expect(res.exitCode).toBe(0);
+      // The regression: a freshly created ~/.bash_profile would be read at
+      // login INSTEAD of ~/.profile/~/.bashrc, shadowing the user's config.
+      expect(existsSync(`${tmpHome}/.bash_profile`)).toBe(false);
+      // PATH still lands in the files a login + interactive bash will read.
+      expect(readFileSync(`${tmpHome}/.bashrc`, "utf8")).toContain(marker);
+      expect(existsSync(`${tmpHome}/.profile`)).toBe(true);
+      expect(readFileSync(`${tmpHome}/.profile`, "utf8")).toContain(marker);
+    });
+
+    it("appends to ~/.bash_profile when it already exists", async () => {
+      // If the user already manages a ~/.bash_profile, it's the canonical
+      // login file — appending there is correct and expected.
+      writeFileSync(`${tmpHome}/.bashrc`, "# user config\n");
+      writeFileSync(`${tmpHome}/.bash_profile`, "# pre-existing login config\n");
+
+      const res = await runSetupPath();
+
+      expect(res.exitCode).toBe(0);
+      const profile = readFileSync(`${tmpHome}/.bash_profile`, "utf8");
+      expect(profile).toContain("# pre-existing login config");
+      expect(profile).toContain(marker);
+    });
+
+    it("writes ~/.profile and ~/.bashrc on a pristine HOME but never ~/.bash_profile", async () => {
+      const res = await runSetupPath();
+
+      expect(res.exitCode).toBe(0);
+      expect(existsSync(`${tmpHome}/.bash_profile`)).toBe(false);
+      expect(readFileSync(`${tmpHome}/.profile`, "utf8")).toContain(marker);
+      expect(readFileSync(`${tmpHome}/.bashrc`, "utf8")).toContain(marker);
+    });
+
+    it("is idempotent — re-running does not duplicate the PATH line", async () => {
+      writeFileSync(`${tmpHome}/.bashrc`, "# user config\n");
+
+      await runSetupPath();
+      await runSetupPath();
+
+      const occurrences = readFileSync(`${tmpHome}/.bashrc`, "utf8").split(marker).length - 1;
+      expect(occurrences).toBe(1);
+    });
+
+    it("a login shell gains BIN_DIR AND still loads the user's ~/.bashrc (end-to-end)", async () => {
+      // Mimic a stock Debian/Ubuntu home: ~/.profile chains to ~/.bashrc,
+      // and ~/.bashrc carries the user's real config. This is the exact
+      // arrangement #527 broke — the installer's stray ~/.bash_profile would
+      // win at login and never reach this chain.
+      writeFileSync(
+        `${tmpHome}/.profile`,
+        'if [ -r "$HOME/.bashrc" ]; then . "$HOME/.bashrc"; fi\n',
+      );
+      writeFileSync(`${tmpHome}/.bashrc`, "export USER_CONFIG=present\n");
+
+      const setup = await runSetupPath();
+      expect(setup.exitCode).toBe(0);
+      expect(existsSync(`${tmpHome}/.bash_profile`)).toBe(false);
+
+      // Launch a real bash LOGIN shell with a clean environment so only the
+      // rc files under tmpHome decide PATH + exported vars.
+      const proc = Bun.spawn(
+        [
+          "/usr/bin/env",
+          "-i",
+          `HOME=${tmpHome}`,
+          "PATH=/usr/bin:/bin",
+          "/bin/bash",
+          "-l",
+          "-c",
+          'printf "PATH=%s\\nCFG=%s\\n" "$PATH" "${USER_CONFIG:-}"',
+        ],
+        { stdout: "pipe", stderr: "pipe" },
+      );
+      await proc.exited;
+      const out = await new Response(proc.stdout).text();
+
+      // PATH picked up the installed bin dir …
+      expect(out).toContain(`${tmpHome}/.local/bin`);
+      // … AND the user's pre-existing config survived (the #527 guarantee).
+      expect(out).toContain("CFG=present");
     });
   });
 });
