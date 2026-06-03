@@ -582,6 +582,30 @@ function buildAuth(
     // Better Auth the active secret (not the legacy single-value var).
     secret: env.BETTER_AUTH_SECRETS[env.BETTER_AUTH_ACTIVE_KID] ?? env.BETTER_AUTH_SECRET,
 
+    // Route Better Auth's internal logs through our structured pino logger
+    // instead of its default console writer (repo rule: no console.*). Only
+    // warn/error reach this sink (BA's default level), so the volume matches
+    // the prior console output — it's just redirected and JSON-structured.
+    //
+    // Suppress one construction-time false positive: the google/github social
+    // providers below are registered with empty placeholder creds ON PURPOSE
+    // so the per-app OIDC social override (`enterSocialOverride`) has a live
+    // provider factory to flow tenant creds through at request time. BA's
+    // `!clientId` guard runs once at construction and can't see that
+    // request-time override, so "Social provider … is missing clientId or
+    // clientSecret" is noise here, not an actionable warning.
+    logger: {
+      log: (level, message, ...args) => {
+        if (
+          level === "warn" &&
+          /^Social provider \w+ is missing clientId or clientSecret$/.test(message)
+        ) {
+          return;
+        }
+        logger[level](message, args.length > 0 ? { args } : undefined);
+      },
+    },
+
     plugins: [...basePlugins, ...extraPlugins],
 
     emailAndPassword: {

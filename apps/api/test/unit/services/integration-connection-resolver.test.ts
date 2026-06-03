@@ -139,6 +139,8 @@ describe("resolveConnections — admin pin (cascade layer 1)", () => {
     expect(result.resolved[INTEG]).toEqual({
       connectionId: c.id,
       source: "admin_pin",
+      label: null,
+      accountId: "acc_x",
     });
   });
 
@@ -205,6 +207,8 @@ describe("resolveConnections — run override (cascade layer 2)", () => {
     expect(result.resolved[INTEG]).toEqual({
       connectionId: c.id,
       source: "run_override",
+      label: null,
+      accountId: "acc_x",
     });
   });
 
@@ -257,6 +261,8 @@ describe("resolveConnections — member pin (cascade layer 4)", () => {
     expect(result.resolved[INTEG]).toEqual({
       connectionId: c.id,
       source: "member_pin",
+      label: null,
+      accountId: "acc_x",
     });
   });
 
@@ -345,6 +351,8 @@ describe("resolveConnections — fallback (cascade layer 5)", () => {
     expect(result.resolved[INTEG]).toEqual({
       connectionId: c.id,
       source: "fallback_auto",
+      label: null,
+      accountId: "acc_x",
     });
   });
 
@@ -588,6 +596,8 @@ describe("resolveConnections — org default", () => {
     expect(result.resolved[INTEG]).toEqual({
       connectionId: def.id,
       source: "org_default_enforced",
+      label: null,
+      accountId: "acc_x",
     });
   });
 
@@ -627,7 +637,12 @@ describe("resolveConnections — org default", () => {
       actorUserId: USER_ID,
     });
     expect(result.errors).toEqual([]);
-    expect(result.resolved[INTEG]).toEqual({ connectionId: def.id, source: "org_default" });
+    expect(result.resolved[INTEG]).toEqual({
+      connectionId: def.id,
+      source: "org_default",
+      label: null,
+      accountId: "acc_x",
+    });
   });
 
   it("member pin beats the SOFT default (explicit preference wins)", () => {
@@ -654,7 +669,12 @@ describe("resolveConnections — org default", () => {
       actorUserId: USER_ID,
     });
     expect(result.errors).toEqual([]);
-    expect(result.resolved[INTEG]).toEqual({ connectionId: onlyOne.id, source: "fallback_auto" });
+    expect(result.resolved[INTEG]).toEqual({
+      connectionId: onlyOne.id,
+      source: "fallback_auto",
+      label: null,
+      accountId: "acc_x",
+    });
   });
 
   it("a scope-deficient org default surfaces insufficient_scopes (checkHealth still runs)", () => {
