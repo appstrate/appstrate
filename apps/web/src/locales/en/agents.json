@@ -15,6 +15,7 @@
   "list.running": "{{count}} running",
   "detail.breadcrumb": "Agents",
   "detail.run": "Run",
+  "detail.connectionWarning": "Integration connections required before running",
   "detail.deleteConfirm": "Delete agent \"{{name}}\"? This will permanently remove it from the organization.",
   "detail.deleteConfirmWithApps": "Delete agent \"{{name}}\"? It is currently installed in: {{apps}}. This will permanently remove it from all applications.",
   "detail.titleConfig": "Configure required fields",

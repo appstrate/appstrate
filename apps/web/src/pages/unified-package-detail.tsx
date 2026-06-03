@@ -48,6 +48,7 @@ import { AgentConfigurationTab } from "../components/package-detail/agent-config
 import { RunAgentButton } from "../components/run-agent-button";
 import { PackageCard } from "../components/package-card";
 import { useAgentReadiness } from "../hooks/use-agent-readiness";
+import { useAgentIntegrationsReadiness } from "../hooks/use-agent-integrations-readiness";
 import { useModels, useAgentModel } from "../hooks/use-models";
 import { useProxies } from "../hooks/use-proxies";
 
@@ -81,11 +82,18 @@ function AgentRunButtonInline({
   const { data: models } = useModels();
   const { data: agentModel } = useAgentModel(packageId);
   const readiness = useAgentReadiness(detail, agentModel?.modelId, models, configSchemaOverride);
+  // Launch-time integration readiness — drives the non-blocking orange badge.
+  // Same server resolver as the run-kickoff 412 (see useAgentIntegrationsReadiness).
+  const integrationsReady = useAgentIntegrationsReadiness(
+    packageId,
+    detail?.dependencies.integrations,
+  );
 
   if (!detail) return null;
 
   const { hasRequiredConfig, hasModel, hasPrompt, hasRequiredSkills } = readiness;
-  // Integration connection gaps surface at run-kickoff (412 → MissingConnectionsModal)
+  // Integration connection gaps don't disable Run — they surface as a warning
+  // badge here and the recovery modal at run-kickoff (412 → MissingConnectionsModal).
   const runDisabled = !hasPrompt || !hasRequiredSkills || !hasRequiredConfig || !hasModel;
   const runDisabledTitle = !hasPrompt
     ? t("detail.titleEmptyPrompt")
@@ -104,6 +112,7 @@ function AgentRunButtonInline({
       version={resolvedVersion}
       disabled={runDisabled}
       disabledTitle={runDisabledTitle}
+      connectionWarning={!runDisabled && !integrationsReady.ready}
       showLabel
     />
   );

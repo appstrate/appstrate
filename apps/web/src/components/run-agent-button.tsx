@@ -28,6 +28,14 @@ interface RunAgentButtonProps {
   size?: "default" | "sm" | "icon";
   className?: string;
   showLabel?: boolean;
+  /**
+   * Render a non-blocking orange badge on the button when the agent's
+   * integration connections are not ready for a run. Iso with the run-kickoff
+   * 412 / MissingConnectionsModal (same server resolver) — see
+   * `useAgentIntegrationsReadiness`. Does NOT disable the button: the user can
+   * still click Run and recover through the modal.
+   */
+  connectionWarning?: boolean;
 }
 
 export function RunAgentButton({
@@ -40,6 +48,7 @@ export function RunAgentButton({
   size = "default",
   className,
   showLabel = false,
+  connectionWarning = false,
 }: RunAgentButtonProps) {
   const { t } = useTranslation(["agents"]);
   const { isMember } = usePermissions();
@@ -108,6 +117,18 @@ export function RunAgentButton({
 
   if (!isMember) return null;
 
+  // Non-blocking warning dot — surfaced when integration connections aren't
+  // ready, but the button stays clickable (recovery via MissingConnectionsModal).
+  const warningDot = connectionWarning ? (
+    <span
+      className="absolute -top-1 -right-1 flex size-3"
+      data-testid="run-connection-warning"
+      title={t("detail.connectionWarning")}
+    >
+      <span className="bg-warning ring-background size-3 rounded-full ring-2" />
+    </span>
+  ) : null;
+
   return (
     <>
       {showLabel ? (
@@ -119,6 +140,7 @@ export function RunAgentButton({
           className="relative"
         >
           {isPending ? <Spinner /> : t("detail.run")}
+          {warningDot}
         </Button>
       ) : (
         <Button
@@ -130,6 +152,7 @@ export function RunAgentButton({
           title={disabled ? disabledTitle : t("detail.run")}
         >
           {isPending ? <Spinner /> : <Play size={14} />}
+          {warningDot}
         </Button>
       )}
 

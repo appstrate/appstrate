@@ -15,6 +15,7 @@
   "list.running": "{{count}} en cours",
   "detail.breadcrumb": "Agents",
   "detail.run": "Lancer",
+  "detail.connectionWarning": "Connexions d'intégration requises pour le lancement",
   "detail.deleteConfirm": "Supprimer définitivement l'agent \"{{name}}\" de l'organisation ?",
   "detail.deleteConfirmWithApps": "Supprimer définitivement l'agent \"{{name}}\" ? Il est actuellement installé dans : {{apps}}. Il sera retiré de toutes les applications.",
   "detail.titleConfig": "Configurez les champs obligatoires",

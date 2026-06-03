@@ -17,6 +17,7 @@ import { connectionDisplayLabel } from "../integration-connect/connection-label"
 import { pickDefaultAuth } from "../integration-connect/pick-default-auth";
 import { connectableAuthKeys } from "../integration-connect/connectable-auth-keys";
 import { IntegrationConnectionPicker } from "../integration-connect/integration-connection-picker";
+import { isIntegrationEntryActive } from "../integration-connect/integration-run-readiness";
 import { requiredScopesForAgent } from "@appstrate/core/integration";
 
 interface AgentIntegrationsBlockProps {
@@ -139,8 +140,7 @@ function IntegrationConnectionCard({
   // are no discrete tools — the usage is the selected oauth scopes. Gating
   // on tools alone made apiCall integrations structurally unconnectable
   // from the agent page.
-  const isActive =
-    agentTools === "*" || (agentTools?.length ?? 0) > 0 || (agentScopes?.length ?? 0) > 0;
+  const isActive = isIntegrationEntryActive({ tools: agentTools, scopes: agentScopes });
   const showMemberPicker = !!agentPackageId && isActive;
 
   // The dropdown is the unified per-integration control — it lists every
@@ -399,9 +399,8 @@ function deriveIntegrationStatus(input: {
   // tools). Nothing selected → integration is declared but inert; surface as
   // "ok" with empty authKey so the card doesn't render a "connect" CTA for an
   // unused integration. The picker is the place to opt in.
-  const isActive =
-    agentTools === "*" || (agentTools?.length ?? 0) > 0 || (agentScopes?.length ?? 0) > 0;
-  if (!isActive) return { kind: "ok", authKey: "" };
+  if (!isIntegrationEntryActive({ tools: agentTools, scopes: agentScopes }))
+    return { kind: "ok", authKey: "" };
 
   if (connections.length === 0) return { kind: "not_connected" };
 
