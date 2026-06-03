@@ -1,20 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Tests for the agent self-provisioning fetch:
- * `GET /api/runs/:runId/workspace`.
+ * Tests for the agent self-provisioning fetches:
+ *   - `GET /api/runs/:runId/workspace`         — the AFPS bundle (ZIP)
+ *   - `GET /api/runs/:runId/documents`         — the input-document manifest
+ *   - `GET /api/runs/:runId/documents/:name`   — one document, streamed
  *
- * The agent container fetches its workspace archive (AFPS bundle + input
- * documents) from the platform at startup and extracts it locally, instead
- * of relying on a seed-into-the-run-volume step whose correctness depended
- * on the volume driver — a tmpfs-backed `local` volume is not shared between
- * the seed helper and the agent container, so the bundle silently vanished
- * and skills never materialised (issue #549).
+ * The agent extracts the bundle to its workspace root and streams each input
+ * document to `documents/<name>` on disk, instead of relying on a
+ * seed-into-the-run-volume step whose correctness depended on the volume
+ * driver — a tmpfs-backed `local` volume is not shared between the seed helper
+ * and the agent container, so the bundle silently vanished and skills never
+ * materialised (issue #549). Documents are stored as individual objects (not
+ * bundled into the ZIP) so the agent never buffers the whole payload.
  *
  * Auth is the same Standard Webhooks HMAC as event ingestion, here over an
- * empty GET body. These tests pin: the round-trip (upload → signed fetch →
- * identical ZIP bytes), the empty-workspace 404, the closed-sink 410, and
- * the bad-signature 401.
+ * empty GET body. These tests pin: the storage round-trip (bundle + per-doc +
+ * manifest), the bundle fetch (200 / 404-empty / 401-bad-sig / 410-closed /
+ * 404-unknown), and the document fetches (manifest 200 / 404, doc 200 / 404).
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -30,6 +33,8 @@ import { seedPackage } from "../../helpers/seed.ts";
 import {
   uploadRunWorkspace,
   downloadRunWorkspace,
+  downloadRunDocumentsManifest,
+  downloadRunDocumentStream,
   deleteRunWorkspace,
 } from "../../../src/services/run-workspace-storage.ts";
 
@@ -71,29 +76,53 @@ async function seedRunWithSink(
 }
 
 describe("run-workspace storage round-trip", () => {
-  it("uploads, downloads, and deletes a workspace archive", async () => {
+  it("uploads, downloads, and deletes the bundle + documents + manifest", async () => {
     const runId = `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
-    const files = [
-      { name: "agent-package.afps", content: Buffer.from("PACKAGE-BYTES") },
-      { name: "documents/report.txt", content: Buffer.from("hello world") },
-    ];
+    await uploadRunWorkspace(runId, {
+      bundle: Buffer.from("PACKAGE-BYTES"),
+      documents: [
+        { name: "report.txt", content: Buffer.from("hello world") },
+        { name: "data.csv", content: Buffer.from("a,b,c") },
+      ],
+    });
 
-    await uploadRunWorkspace(runId, files);
-
+    // Bundle: a ZIP wrapping agent-package.afps.
     const archive = await downloadRunWorkspace(runId);
     expect(archive).not.toBeNull();
     const entries = unzipArtifact(new Uint8Array(archive!));
     expect(new TextDecoder().decode(entries["agent-package.afps"])).toBe("PACKAGE-BYTES");
-    expect(new TextDecoder().decode(entries["documents/report.txt"])).toBe("hello world");
+
+    // Manifest enumerates the documents with their sizes.
+    const manifest = await downloadRunDocumentsManifest(runId);
+    expect(manifest?.documents).toEqual([
+      { name: "report.txt", size: 11 },
+      { name: "data.csv", size: 5 },
+    ]);
+
+    // Each document is fetchable as its own streamed object.
+    const reportStream = await downloadRunDocumentStream(runId, "report.txt");
+    expect(reportStream).not.toBeNull();
+    expect(await new Response(reportStream!).text()).toBe("hello world");
 
     await deleteRunWorkspace(runId);
     expect(await downloadRunWorkspace(runId)).toBeNull();
+    expect(await downloadRunDocumentsManifest(runId)).toBeNull();
+    expect(await downloadRunDocumentStream(runId, "report.txt")).toBeNull();
   });
 
-  it("uploadRunWorkspace is a no-op when there are no files", async () => {
+  it("uploads only a bundle when there are no documents (no manifest)", async () => {
     const runId = `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
-    await uploadRunWorkspace(runId, []);
+    await uploadRunWorkspace(runId, { bundle: Buffer.from("BUNDLE"), documents: [] });
+    expect(await downloadRunWorkspace(runId)).not.toBeNull();
+    expect(await downloadRunDocumentsManifest(runId)).toBeNull();
+    await deleteRunWorkspace(runId);
+  });
+
+  it("uploadRunWorkspace is a no-op with no bundle and no documents", async () => {
+    const runId = `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+    await uploadRunWorkspace(runId, { documents: [] });
     expect(await downloadRunWorkspace(runId)).toBeNull();
+    expect(await downloadRunDocumentsManifest(runId)).toBeNull();
   });
 
   it("deleteRunWorkspace never throws on a missing object", async () => {
@@ -112,13 +141,9 @@ describe("GET /api/runs/:runId/workspace", () => {
     await seedPackage({ orgId: ctx.orgId, id: "@test/ws-agent", type: "agent" });
   });
 
-  it("returns the provisioned archive verbatim to a signed request", async () => {
+  it("returns the provisioned bundle to a signed request", async () => {
     const runId = await seedRunWithSink(ctx, "@test/ws-agent");
-    const files = [
-      { name: "agent-package.afps", content: Buffer.from("BUNDLE") },
-      { name: "documents/a.txt", content: Buffer.from("doc-a") },
-    ];
-    await uploadRunWorkspace(runId, files);
+    await uploadRunWorkspace(runId, { bundle: Buffer.from("BUNDLE"), documents: [] });
 
     const res = await app.request(`/api/runs/${runId}/workspace`, {
       method: "GET",
@@ -127,15 +152,13 @@ describe("GET /api/runs/:runId/workspace", () => {
 
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("application/zip");
-    const archive = new Uint8Array(await res.arrayBuffer());
-    const entries = unzipArtifact(archive);
+    const entries = unzipArtifact(new Uint8Array(await res.arrayBuffer()));
     expect(new TextDecoder().decode(entries["agent-package.afps"])).toBe("BUNDLE");
-    expect(new TextDecoder().decode(entries["documents/a.txt"])).toBe("doc-a");
 
     await deleteRunWorkspace(runId);
   });
 
-  it("returns 404 when no workspace was provisioned (empty workspace)", async () => {
+  it("returns 404 when no bundle was provisioned", async () => {
     const runId = await seedRunWithSink(ctx, "@test/ws-agent");
     const res = await app.request(`/api/runs/${runId}/workspace`, {
       method: "GET",
@@ -146,9 +169,7 @@ describe("GET /api/runs/:runId/workspace", () => {
 
   it("rejects an invalid signature with 401", async () => {
     const runId = await seedRunWithSink(ctx, "@test/ws-agent");
-    await uploadRunWorkspace(runId, [
-      { name: "agent-package.afps", content: Buffer.from("BUNDLE") },
-    ]);
+    await uploadRunWorkspace(runId, { bundle: Buffer.from("BUNDLE"), documents: [] });
 
     const res = await app.request(`/api/runs/${runId}/workspace`, {
       method: "GET",
@@ -161,9 +182,7 @@ describe("GET /api/runs/:runId/workspace", () => {
 
   it("rejects a closed sink with 410", async () => {
     const runId = await seedRunWithSink(ctx, "@test/ws-agent", { sinkClosedAt: new Date() });
-    await uploadRunWorkspace(runId, [
-      { name: "agent-package.afps", content: Buffer.from("BUNDLE") },
-    ]);
+    await uploadRunWorkspace(runId, { bundle: Buffer.from("BUNDLE"), documents: [] });
 
     const res = await app.request(`/api/runs/${runId}/workspace`, {
       method: "GET",
@@ -180,5 +199,85 @@ describe("GET /api/runs/:runId/workspace", () => {
       headers: signedGetHeaders(RUN_SECRET),
     });
     expect(res.status).toBe(404);
+  });
+});
+
+describe("GET /api/runs/:runId/documents[/:name]", () => {
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ email: "docs@test.dev", orgSlug: "docs-org" });
+    await seedPackage({ orgId: ctx.orgId, id: "@test/docs-agent", type: "agent" });
+  });
+
+  it("returns the manifest then streams each document", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/docs-agent");
+    await uploadRunWorkspace(runId, {
+      bundle: Buffer.from("BUNDLE"),
+      documents: [{ name: "a.txt", content: Buffer.from("doc-a") }],
+    });
+
+    const manifestRes = await app.request(`/api/runs/${runId}/documents`, {
+      method: "GET",
+      headers: signedGetHeaders(RUN_SECRET),
+    });
+    expect(manifestRes.status).toBe(200);
+    expect(await manifestRes.json()).toEqual({ documents: [{ name: "a.txt", size: 5 }] });
+
+    const docRes = await app.request(`/api/runs/${runId}/documents/a.txt`, {
+      method: "GET",
+      headers: signedGetHeaders(RUN_SECRET),
+    });
+    expect(docRes.status).toBe(200);
+    expect(docRes.headers.get("content-type")).toBe("application/octet-stream");
+    expect(await docRes.text()).toBe("doc-a");
+
+    await deleteRunWorkspace(runId);
+  });
+
+  it("returns 404 on the manifest when the run carries no documents", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/docs-agent");
+    await uploadRunWorkspace(runId, { bundle: Buffer.from("BUNDLE"), documents: [] });
+
+    const res = await app.request(`/api/runs/${runId}/documents`, {
+      method: "GET",
+      headers: signedGetHeaders(RUN_SECRET),
+    });
+    expect(res.status).toBe(404);
+
+    await deleteRunWorkspace(runId);
+  });
+
+  it("returns 404 for a document the run does not have", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/docs-agent");
+    await uploadRunWorkspace(runId, {
+      bundle: Buffer.from("BUNDLE"),
+      documents: [{ name: "a.txt", content: Buffer.from("doc-a") }],
+    });
+
+    const res = await app.request(`/api/runs/${runId}/documents/missing.txt`, {
+      method: "GET",
+      headers: signedGetHeaders(RUN_SECRET),
+    });
+    expect(res.status).toBe(404);
+
+    await deleteRunWorkspace(runId);
+  });
+
+  it("rejects an invalid signature with 401", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/docs-agent");
+    await uploadRunWorkspace(runId, {
+      bundle: Buffer.from("BUNDLE"),
+      documents: [{ name: "a.txt", content: Buffer.from("doc-a") }],
+    });
+
+    const res = await app.request(`/api/runs/${runId}/documents/a.txt`, {
+      method: "GET",
+      headers: signedGetHeaders("wrong-secret-".repeat(3)),
+    });
+    expect(res.status).toBe(401);
+
+    await deleteRunWorkspace(runId);
   });
 });

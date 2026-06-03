@@ -153,6 +153,16 @@ export function createFileSystemStorage(config: FileSystemStorageConfig): Storag
       return new Uint8Array(await file.arrayBuffer());
     },
 
+    async downloadStream(bucket, path) {
+      const fullPath = resolve(bucket, path);
+      await verifyContainment(fullPath);
+      const file = Bun.file(fullPath);
+      if (!(await file.exists())) return null;
+      // Bun.file().stream() is a lazy, backpressure-aware ReadableStream over
+      // the file handle — no full read into memory.
+      return file.stream();
+    },
+
     async fileExists(bucket, path) {
       const fullPath = resolve(bucket, path);
       await verifyContainment(fullPath);

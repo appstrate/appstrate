@@ -47,6 +47,13 @@ export function downloadFile(bucket: string, path: string): Promise<Uint8Array |
   return getStore().downloadFile(bucket, path);
 }
 
+export function downloadStream(
+  bucket: string,
+  path: string,
+): Promise<ReadableStream<Uint8Array> | null> {
+  return getStore().downloadStream(bucket, path);
+}
+
 export function deleteFile(bucket: string, path: string): Promise<void> {
   return getStore().deleteFile(bucket, path);
 }

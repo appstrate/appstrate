@@ -267,8 +267,53 @@ const exists = (p: string) =>
 
 const WORKSPACE = env.workspaceDir;
 
+// Generous retry budget: workspace provisioning is the first blocking network
+// call, and with a sidecar the forward proxy may still be binding. 6 attempts
+// with exponential backoff span ~8 s (0.5+1+2+2+2), well inside the boot gate.
+const PROVISION_MAX_ATTEMPTS = 6;
+
 /**
- * Self-provision the workspace by fetching its archive from the platform and
+ * Signed GET against a run-scoped platform route, with the provisioning retry
+ * budget. Re-signs each attempt (fresh timestamp). Returns the {@link Response}
+ * as soon as it is `ok` OR carries a deterministic non-retryable status (4xx
+ * other than 429 — the caller decides whether that status is fatal). Retries
+ * 5xx, 429, and network errors with exponential backoff; throws only when the
+ * budget is exhausted on transient failures.
+ *
+ * Auth mirrors the event sink: a Standard Webhooks HMAC over the (empty) GET
+ * body keyed on the run secret. Outbound traffic reaches the platform exactly
+ * as the sink does — through the sidecar forward proxy when attached, directly
+ * over the egress network when not — so no extra wiring is needed.
+ */
+async function signedGetWithRetry(url: string): Promise<Response> {
+  let lastError = "unknown error";
+  for (let attempt = 1; attempt <= PROVISION_MAX_ATTEMPTS; attempt++) {
+    try {
+      const headers = sign({
+        msgId: randomUUID(),
+        timestampSec: Math.floor(Date.now() / 1000),
+        body: "",
+        secret: env.sink.secret,
+      });
+      const res = await fetch(url, { method: "GET", headers });
+      // Success, or a deterministic 4xx (404 missing, 401 bad signature, 410
+      // closed/expired sink) that retrying cannot fix — hand back either way.
+      if (res.ok || (res.status < 500 && res.status !== 429)) return res;
+      lastError = `HTTP ${res.status}`;
+    } catch (err) {
+      lastError = getErrorMessage(err);
+    }
+    if (attempt < PROVISION_MAX_ATTEMPTS) {
+      await new Promise((r) => setTimeout(r, Math.min(500 * 2 ** (attempt - 1), 2000)));
+    }
+  }
+  throw new Error(
+    `request to ${url} failed after ${PROVISION_MAX_ATTEMPTS} attempts: ${lastError}`,
+  );
+}
+
+/**
+ * Self-provision the AFPS bundle by fetching it from the platform and
  * extracting it into {@link WORKSPACE}.
  *
  * Replaces the old seed-into-the-run-volume delivery, whose correctness
@@ -278,64 +323,92 @@ const WORKSPACE = env.workspaceDir;
  * (issue #549). Fetching makes the workspace volume pure agent-local scratch,
  * so its backing (disk or tmpfs) is once again a free performance choice.
  *
- * Auth mirrors the event sink: a Standard Webhooks HMAC over the (empty) GET
- * body keyed on the run secret. Outbound traffic reaches the platform exactly
- * as the sink does — through the sidecar forward proxy when one is attached,
- * directly over the egress network when not — so no extra wiring is needed.
- *
- * Any non-2xx that survives the retry budget is fatal — including `404`. The
- * platform always uploads at least the agent package (`buildAgentPackage`
- * never returns an empty bundle), so a missing object is never a legitimate
- * "empty workspace": it means the upload was lost, deleted early, or the
- * request was misrouted. Continuing in that state is exactly the
- * silent-degradation regression #549 fixed, so we fail loud instead.
+ * Any non-2xx is fatal — including `404`. The platform always uploads at least
+ * the agent package (`buildAgentPackage` never returns an empty bundle), so a
+ * missing object is never a legitimate "empty workspace": it means the upload
+ * was lost, deleted early, or the request was misrouted. Continuing in that
+ * state is exactly the silent-degradation regression #549 fixed, so we fail
+ * loud instead.
  */
 async function provisionWorkspace(): Promise<void> {
   const url = env.sink.url.replace(/\/events$/, "/workspace");
-  // Generous budget: this is the first blocking network call, and with a
-  // sidecar the forward proxy may still be binding. 6 attempts with
-  // exponential backoff span ~8 s (0.5+1+2+2+2), well inside the boot gate.
-  const MAX_ATTEMPTS = 6;
-  let lastError = "unknown error";
+  let res: Response;
+  try {
+    res = await signedGetWithRetry(url);
+  } catch (err) {
+    return await die(`Failed to provision workspace from platform: ${getErrorMessage(err)}`);
+  }
+  if (!res.ok) {
+    return await die(`Failed to provision workspace from platform: HTTP ${res.status}`);
+  }
+  const archive = new Uint8Array(await res.arrayBuffer());
+  // unzipArtifact sanitises entry paths (no traversal, absolute, or backslash
+  // paths), so extraction stays inside WORKSPACE.
+  const files = unzipArtifact(archive);
+  await Promise.all(
+    Object.entries(files).map(async ([name, content]) => {
+      const dest = path.join(WORKSPACE, name);
+      await fs.mkdir(path.dirname(dest), { recursive: true });
+      await fs.writeFile(dest, content);
+    }),
+  );
+}
 
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    try {
-      const msgId = randomUUID();
-      const timestampSec = Math.floor(Date.now() / 1000);
-      const headers: Record<string, string> = {
-        ...sign({ msgId, timestampSec, body: "", secret: env.sink.secret }),
-      };
-      const res = await fetch(url, { method: "GET", headers });
-
-      if (res.ok) {
-        const archive = new Uint8Array(await res.arrayBuffer());
-        // unzipArtifact sanitises entry paths (no traversal, absolute, or
-        // backslash paths), so extraction stays inside WORKSPACE.
-        const files = unzipArtifact(archive);
-        await Promise.all(
-          Object.entries(files).map(async ([name, content]) => {
-            const dest = path.join(WORKSPACE, name);
-            await fs.mkdir(path.dirname(dest), { recursive: true });
-            await fs.writeFile(dest, content);
-          }),
-        );
-        return;
-      }
-
-      lastError = `HTTP ${res.status}`;
-      // 4xx other than 429 are deterministic (404 missing object, 401 bad
-      // signature, 410 closed/expired sink) — retrying cannot help, so bail
-      // to the fatal path immediately.
-      if (res.status < 500 && res.status !== 429) break;
-    } catch (err) {
-      lastError = getErrorMessage(err);
-    }
-    if (attempt < MAX_ATTEMPTS) {
-      await new Promise((r) => setTimeout(r, Math.min(500 * 2 ** (attempt - 1), 2000)));
-    }
+/**
+ * Self-provision the run's input documents, streaming each to
+ * `WORKSPACE/documents/<name>`.
+ *
+ * Documents are delivered out-of-band from the bundle: large and variable,
+ * they are fetched individually and streamed straight to disk, so the agent
+ * never buffers the whole payload — peak memory stays bounded regardless of
+ * upload size. The manifest enumerates them; a 404 on the manifest means the
+ * run carries no documents (the common case) and is NOT a fault. A 404 on a
+ * document the manifest listed IS fatal, same reasoning as the bundle (#549).
+ */
+async function provisionDocuments(): Promise<void> {
+  const manifestUrl = env.sink.url.replace(/\/events$/, "/documents");
+  let manifestRes: Response;
+  try {
+    manifestRes = await signedGetWithRetry(manifestUrl);
+  } catch (err) {
+    return await die(`Failed to fetch documents manifest: ${getErrorMessage(err)}`);
+  }
+  if (manifestRes.status === 404) return; // run carries no input documents
+  if (!manifestRes.ok) {
+    return await die(`Failed to fetch documents manifest: HTTP ${manifestRes.status}`);
   }
 
-  await die(`Failed to provision workspace from platform: ${lastError}`);
+  const manifest = (await manifestRes.json()) as { documents?: { name?: unknown }[] };
+  const names = (manifest.documents ?? [])
+    .map((d) => d.name)
+    .filter((n): n is string => typeof n === "string" && n.length > 0);
+  if (names.length === 0) return;
+
+  const dir = path.join(WORKSPACE, "documents");
+  await fs.mkdir(dir, { recursive: true });
+
+  // Sequential: input-document sets are small (typically 1–few files), so
+  // streaming each in turn bounds open connections and peak memory without a
+  // concurrency primitive.
+  for (const name of names) {
+    // Defence-in-depth: the platform sanitises names to a single path segment,
+    // but never write outside `dir` on a malformed manifest.
+    if (path.basename(name) !== name || name === "." || name === "..") {
+      return await die(`Refusing unsafe document name: ${name}`);
+    }
+    let docRes: Response;
+    try {
+      docRes = await signedGetWithRetry(`${manifestUrl}/${encodeURIComponent(name)}`);
+    } catch (err) {
+      return await die(`Failed to fetch document ${name}: ${getErrorMessage(err)}`);
+    }
+    if (!docRes.ok || !docRes.body) {
+      return await die(`Failed to fetch document ${name}: HTTP ${docRes.status}`);
+    }
+    // Stream the response body straight to disk — never materialise the whole
+    // document in memory. Bun.write consumes a Response as a stream.
+    await Bun.write(path.join(dir, name), docRes);
+  }
 }
 
 /** Create a minimal valid git repo via filesystem (avoids 3 subprocess spawns). */
@@ -409,11 +482,12 @@ await progress(`runtime starting (${Math.round(performance.now())}ms cold start)
   coldStartMs: Math.round(performance.now()),
 });
 
-// Fetch + extract the workspace archive (AFPS bundle + input docs) from the
-// platform before anything reads it. Fatal on any hard failure, including a
-// 404 — the platform always uploads the agent package, so a missing archive
-// is a provisioning fault, not an empty workspace (see provisionWorkspace).
+// Self-provision the workspace before anything reads it: the AFPS bundle
+// (fatal on any miss — see provisionWorkspace) and the input documents
+// (streamed per-file to `documents/<name>`; absent is fine). Sequential — the
+// document set is small and neither blocks on the other.
 await provisionWorkspace();
+await provisionDocuments();
 
 const packagePath = path.join(WORKSPACE, "agent-package.afps");
 const hasPackage = await exists(packagePath);

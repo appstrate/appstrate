@@ -346,6 +346,17 @@ const envSchema = z
     // to the local volume driver (host disk, no built-in quota).
     WORKSPACE_TMPFS_SIZE_MB: z.coerce.number().int().min(0).max(8192).default(512),
 
+    // Ceiling on the total bytes of input documents a single run may carry
+    // into its workspace. Each document is delivered out-of-band (fetched
+    // and streamed to disk by the agent), so this is a policy limit, not a
+    // memory-safety floor — but it also bounds what the platform buffers
+    // while consuming uploads. Default 256 MiB.
+    WORKSPACE_MAX_DOCS_BYTES: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(256 * 1024 * 1024),
+
     // Redis (optional — falls back to in-memory adapters when absent)
     REDIS_URL: z.string().optional(),
 

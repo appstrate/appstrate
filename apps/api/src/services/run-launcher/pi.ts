@@ -237,18 +237,16 @@ export async function runPlatformContainer(
       traceparent: context.traceparent,
     });
 
-    const filesToInject: Array<{ name: string; content: Buffer }> = [];
-    if (plan.agentPackage) {
-      filesToInject.push({ name: "agent-package.afps", content: plan.agentPackage });
-    }
-    if (plan.inputFiles) {
-      for (const f of plan.inputFiles) {
-        filesToInject.push({
-          name: `documents/${sanitizeStorageKey(f.name)}`,
-          content: f.buffer,
-        });
-      }
-    }
+    // The bundle (small, constant) and input documents (large, variable) are
+    // provisioned separately: the agent extracts the bundle but streams each
+    // document straight to `documents/<name>` on disk, so it never buffers the
+    // whole payload. Document object names carry no path prefix — the agent
+    // writes them under `documents/` itself (matches the `./documents/<name>`
+    // paths the prompt-builder hands the agent).
+    const documents = (plan.inputFiles ?? []).map((f) => ({
+      name: sanitizeStorageKey(f.name),
+      content: f.buffer,
+    }));
 
     await orch.ensureImages(
       skipSidecar ? [getEnv().PI_IMAGE] : [getEnv().PI_IMAGE, getEnv().SIDECAR_IMAGE],
@@ -284,7 +282,7 @@ export async function runPlatformContainer(
         },
         boundary,
       ),
-      uploadWorkspace(runId, filesToInject),
+      uploadWorkspace(runId, { bundle: plan.agentPackage ?? undefined, documents }),
     ]);
     sidecarHandle = sidecar;
     agentHandle = agent;

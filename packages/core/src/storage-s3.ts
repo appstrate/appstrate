@@ -127,6 +127,26 @@ export function createS3Storage(config: S3StorageConfig): Storage {
       }
     },
 
+    async downloadStream(bucket, path) {
+      try {
+        const res = await client.send(
+          new GetObjectCommand({
+            Bucket: config.bucket,
+            Key: makeKey(bucket, path),
+          }),
+        );
+        // SDK v3 exposes a Web ReadableStream view over the response body — pipe
+        // it through without materialising the whole object in memory.
+        return res.Body!.transformToWebStream();
+      } catch (e: unknown) {
+        const err = e as S3Error;
+        if (err.name === "NoSuchKey" || err.$metadata?.httpStatusCode === 404) {
+          return null;
+        }
+        throw e;
+      }
+    },
+
     async fileExists(bucket, path) {
       try {
         await client.send(
