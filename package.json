@@ -114,7 +114,7 @@
     "*.{ts,tsx,json,md,yml,yaml}": "prettier --write"
   },
   "dependencies": {
-    "@afps-spec/schema": "^0.4.0",
+    "@afps-spec/schema": "^0.6.0",
     "@appstrate/connect": "workspace:*",
     "@appstrate/core": "workspace:*",
     "@appstrate/mcp-transport": "workspace:*",
