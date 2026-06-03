@@ -50,6 +50,7 @@ import { isInlineShadowPackageId } from "./inline-run.ts";
 import type { RunStatusChangeParams } from "@appstrate/core/module";
 import { assertSinkOpen, verifyRunSignatureHeaders } from "../lib/run-signature.ts";
 import { clearRunMetricBroadcastState } from "./run-metric-broadcaster.ts";
+import { deleteRunWorkspace } from "./run-workspace-storage.ts";
 import type { TokenUsage } from "@appstrate/shared-types";
 
 // Re-export the pure helpers so callers that already import from this
@@ -423,6 +424,21 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
   // Drop the per-run throttle state — the run is terminal, no further
   // metric events will arrive. Bounds the broadcaster's in-memory map.
   clearRunMetricBroadcastState(run.id);
+
+  // Drop the run's workspace provisioning archive (the AFPS bundle + input
+  // docs the agent fetched at startup via GET /api/runs/:runId/workspace).
+  // This is the authoritative cleanup point: finalizeRun is the single
+  // CAS-guarded convergence for every termination path — natural finalize,
+  // watchdog stall sweep, and container-exit synthesis — so the object is
+  // dropped exactly once even when the launcher's own teardown never runs
+  // (e.g. the API replica that launched the run crashed; a later watchdog
+  // tick on any replica still routes through here). The launcher also
+  // deletes on its happy-path teardown; both are best-effort and idempotent
+  // (deleteRunWorkspace swallows + logs its own failures, and deleting a
+  // missing object is a no-op). Storage has no list/TTL primitive, so this
+  // deterministic by-runId delete is what prevents orphaned archives — not a
+  // time-based reaper.
+  await deleteRunWorkspace(run.id);
 
   // 7. Side effects — only the CAS winner reaches here, so memories and
   //    log rows are written exactly once.
