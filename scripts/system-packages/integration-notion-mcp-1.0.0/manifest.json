@@ -39,19 +39,20 @@
     }
   },
   "tools_policy": {
-    "search": {},
-    "fetch": {},
-    "create-pages": {},
-    "update-page": {},
-    "move-pages": {},
-    "duplicate-page": {},
-    "create-database": {},
-    "update-database": {},
-    "create-comment": {},
-    "get-comments": {},
-    "get-users": {},
-    "get-self": {},
-    "get-user": {}
+    "notion-create-comment": {},
+    "notion-create-database": {},
+    "notion-create-pages": {},
+    "notion-create-view": {},
+    "notion-duplicate-page": {},
+    "notion-fetch": {},
+    "notion-get-comments": {},
+    "notion-get-teams": {},
+    "notion-get-users": {},
+    "notion-move-pages": {},
+    "notion-search": {},
+    "notion-update-data-source": {},
+    "notion-update-page": {},
+    "notion-update-view": {}
   },
   "_meta": {
     "dev.appstrate/package": {

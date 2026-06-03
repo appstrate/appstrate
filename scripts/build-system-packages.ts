@@ -120,6 +120,24 @@ async function main() {
     const zipBytes: Uint8Array = zipArtifact(zipEntries);
 
     if (checkOnly) {
+      // Drift guard: the committed archive must be byte-identical to a fresh
+      // build of its source. `zipArtifact` is deterministic (fixed mtime), so
+      // any difference means someone edited the source dir without rebuilding
+      // — the platform would load the stale archive at boot.
+      const zipName = `${dirName}.afps`;
+      if (!existingAfps.includes(zipName)) {
+        console.error(
+          `MISSING ARCHIVE: ${zipName} — run \`bun run build:system-packages\` and commit it.`,
+        );
+        process.exit(1);
+      }
+      const onDisk = new Uint8Array(await readFile(join(OUTPUT_DIR, zipName)));
+      if (onDisk.byteLength !== zipBytes.byteLength || Buffer.compare(onDisk, zipBytes) !== 0) {
+        console.error(
+          `STALE ARCHIVE: ${zipName} differs from its source dir — run \`bun run build:system-packages\` and commit the rebuilt archive.`,
+        );
+        process.exit(1);
+      }
       console.log(`  ${dirName} [${type}] ✓`);
       count++;
       continue;

@@ -69,3 +69,6 @@ playwright-report/
 
 .worktrees/
 .claude/worktrees/
+
+# Conformance harness — live tool-surface snapshots (uploaded as CI artifacts)
+conformance-snapshot/

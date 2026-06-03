@@ -115,6 +115,16 @@
         "primary": ["https://www.googleapis.com/auth/gmail.labels"]
       }
     },
+    "update_label": {
+      "required_scopes": {
+        "primary": ["https://www.googleapis.com/auth/gmail.labels"]
+      }
+    },
+    "delete_label": {
+      "required_scopes": {
+        "primary": ["https://www.googleapis.com/auth/gmail.labels"]
+      }
+    },
     "label_message": {
       "required_scopes": {
         "primary": ["https://www.googleapis.com/auth/gmail.modify"]

@@ -64,7 +64,9 @@
     "detect:breaking": "bun scripts/detect-breaking-changes.ts",
     "build:system-packages:check": "bun scripts/build-system-packages.ts --check",
     "lint:afps-1x": "bun scripts/lint-afps-1x-keys.ts",
-    "check": "turbo typecheck lint format:check verify:openapi verify:compose-defaults detect:breaking build:system-packages:check lint:afps-1x",
+    "conformance:check": "bun scripts/conformance/run.ts --tier gate",
+    "test:system-packages": "bun scripts/conformance/run.ts",
+    "check": "turbo typecheck lint format:check verify:openapi verify:compose-defaults detect:breaking build:system-packages:check lint:afps-1x conformance:check",
     "build-runtime": "bun run docker:build:runtime",
     "build-sidecar": "bun run docker:build:sidecar",
     "docker:build:runtime": "docker build --platform linux/amd64 -t appstrate-pi -f ./runtime-pi/Dockerfile .",
@@ -112,7 +114,9 @@
   },
   "dependencies": {
     "@afps-spec/schema": "^0.4.0",
+    "@appstrate/connect": "workspace:*",
     "@appstrate/core": "workspace:*",
+    "@appstrate/mcp-transport": "workspace:*",
     "@electric-sql/pglite": "^0.4.5",
     "ajv": "^8.20.0"
   },
