@@ -43,8 +43,6 @@ export interface VendorSource {
   identifier: string;
   /** Semver range / exact version / dist-tag (e.g. `^1.0.0`, `1.4.2`, `latest`). */
   version: string;
-  /** Override the registry base URL (defaults to npmjs.org / pypi.org). */
-  registryBaseUrl?: string;
 }
 
 /**

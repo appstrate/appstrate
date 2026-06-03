@@ -67,9 +67,6 @@ export interface BundleMcpServerInput {
 
   /** When set, run the Bun compat probe with these options. */
   bunProbe?: BunProbeOptions | true;
-
-  /** Override the manifest indent (default `2`). */
-  jsonIndent?: 0 | 2 | 4;
 }
 
 /**
@@ -100,7 +97,6 @@ export function readVendorSource(manifest: McpServerManifest): VendorSource | nu
     source: raw.source,
     identifier: raw.identifier,
     version: raw.version,
-    ...(typeof raw.registryBaseUrl === "string" ? { registryBaseUrl: raw.registryBaseUrl } : {}),
   };
 }
 
@@ -163,7 +159,7 @@ export async function bundleMcpServer(input: BundleMcpServerInput): Promise<Bund
     : source;
 
   const manifestBytes = new TextEncoder().encode(
-    JSON.stringify(distributedManifest, null, input.jsonIndent ?? 2) + "\n",
+    JSON.stringify(distributedManifest, null, 2) + "\n",
   );
   tree["manifest.json"] = manifestBytes;
 
@@ -189,7 +185,6 @@ async function runVendor(
       {
         identifier: vendor.identifier,
         versionRange: vendor.version,
-        ...(vendor.registryBaseUrl ? { registryBaseUrl: vendor.registryBaseUrl } : {}),
       },
       input.npmDeps,
     );
@@ -198,7 +193,6 @@ async function runVendor(
     {
       identifier: vendor.identifier,
       versionRange: vendor.version,
-      ...(vendor.registryBaseUrl ? { registryBaseUrl: vendor.registryBaseUrl } : {}),
     },
     input.pypiDeps,
   );

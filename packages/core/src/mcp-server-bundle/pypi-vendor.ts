@@ -53,7 +53,6 @@ export interface PypiInstallSpec {
   identifier: string;
   version: string;
   targetDir: string;
-  registryBaseUrl?: string;
 }
 
 export type FetchPypiFn = (url: string) => Promise<unknown>;
@@ -70,7 +69,6 @@ export interface PypiVendorDeps {
 export interface PypiVendorInput {
   identifier: string;
   versionRange: string;
-  registryBaseUrl?: string;
 }
 
 const defaultFetchRegistry: FetchPypiFn = async (url) => {
@@ -118,7 +116,7 @@ export async function resolvePypiVersion(
   deps: PypiVendorDeps = {},
 ): Promise<{ version: string; integrity: string }> {
   const fetchRegistry = deps.fetchRegistry ?? defaultFetchRegistry;
-  const base = (input.registryBaseUrl ?? DEFAULT_PYPI_REGISTRY).replace(/\/$/, "");
+  const base = DEFAULT_PYPI_REGISTRY.replace(/\/$/, "");
   const url = `${base}/${encodeURIComponent(input.identifier)}/${encodeURIComponent(input.versionRange)}/json`;
 
   const raw = await fetchRegistry(url);
@@ -228,7 +226,6 @@ export async function vendorPypiPackage(
       identifier: input.identifier,
       version: resolved.version,
       targetDir: workDir,
-      registryBaseUrl: input.registryBaseUrl,
     });
     const scriptName = await pickPypiEntryPoint(workDir, input.identifier);
 

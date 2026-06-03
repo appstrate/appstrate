@@ -581,75 +581,9 @@ export function isApiCallToolName(name: string): boolean {
 }
 
 /**
- * Which auth keys an agent actually needs connected, given its declared
- * `tools[]` selection on the integration. Returns `[]` when the agent picked
- * zero tools and zero scopes — the integration is then declared-but-inert and
- * no connection is required at run-kickoff.
- */
-export function requiredAuthKeysForAgent(
-  manifest: IntegrationManifest,
-  agentTools: readonly string[] | "*" | undefined,
-  agentScopes?: readonly string[] | undefined,
-): string[] {
-  const wildcard = isToolsWildcard(agentTools);
-  const arrayTools = wildcard ? [] : (agentTools ?? []);
-  const hasTools = wildcard || arrayTools.length > 0;
-  const hasScopes = !!agentScopes && agentScopes.length > 0;
-  if (!hasTools && !hasScopes) return [];
-  const declaredAuths = manifest.auths ? Object.keys(manifest.auths) : [];
-  if (declaredAuths.length === 0) return [];
-  if (declaredAuths.length === 1) return declaredAuths;
-
-  // AFPS §4.4 wildcard — the agent opted into every upstream tool, so we
-  // can't pin a specific auth from `tools_policy`. Return every "wildcard-
-  // usable" auth: non-oauth2 (no scope mechanism — wholesale grant covers
-  // any tool) or oauth2 with non-empty `default_scopes` (the fallback scope
-  // set). If none qualify, fall back to every declared auth so the resolver
-  // still surfaces a connection candidate rather than reporting "no auth
-  // needed" — install-gating already rejected manifests where no auth is
-  // wildcard-usable.
-  if (wildcard) {
-    const wildcardUsable = declaredAuths.filter((k) => {
-      const auth = manifest.auths?.[k];
-      if (!auth) return false;
-      if (auth.type !== "oauth2") return true;
-      return (auth.default_scopes?.length ?? 0) > 0;
-    });
-    return wildcardUsable.length > 0 ? wildcardUsable : declaredAuths;
-  }
-
-  const toolsRecord = manifest.tools_policy ?? {};
-  const out = new Set<string>();
-  for (const toolName of arrayTools) {
-    const tool = toolsRecord[toolName];
-    if (!tool?.required_scopes) continue;
-    for (const authKey of Object.keys(tool.required_scopes)) {
-      if (declaredAuths.includes(authKey)) out.add(authKey);
-    }
-  }
-  // The `api_call` tool(s) aren't in `manifest.tools_policy`; pin each one's
-  // auth (from `_meta["dev.appstrate/api"]`) when the matching tool is selected.
-  const apiCallByTool = new Map(getApiCallConfigs(manifest).map((c) => [c.toolName, c.authKey]));
-  for (const toolName of arrayTools) {
-    const authKey = apiCallByTool.get(toolName);
-    if (authKey && declaredAuths.includes(authKey)) out.add(authKey);
-  }
-  // Scope-only selection maps each selected scope to the auth(s) whose
-  // scope_catalog declares it.
-  if (hasScopes) {
-    for (const authKey of declaredAuths) {
-      const catalog = manifest.auths?.[authKey]?.scope_catalog ?? [];
-      const values = new Set(catalog.map((s) => s.value));
-      if (agentScopes!.some((s) => values.has(s))) out.add(authKey);
-    }
-  }
-  return out.size === 0 ? declaredAuths : [...out];
-}
-
-/**
  * Which auth keys a connection COULD satisfy for the agent's tool selection —
- * the candidate set for a connection *picker* (run/schedule override UI), as
- * opposed to {@link requiredAuthKeysForAgent} which returns the auths that
+ * the candidate set for a connection *picker* (run/schedule override UI). It
+ * returns the auths a connection MAY satisfy, as opposed to the auths that
  * MUST be connected (install-gating, OAuth scope union, runtime resolver).
  *
  * `tools_policy.{tool}.required_scopes` only *binds a tool's scopes to an auth*

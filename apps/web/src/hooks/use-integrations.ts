@@ -37,8 +37,6 @@ export type {
   IntegrationDetail,
   IntegrationManifestAuth,
   IntegrationManifestView,
-  IntegrationOAuthClient,
-  IntegrationPin,
   IntegrationSummary,
 } from "@appstrate/shared-types";
 

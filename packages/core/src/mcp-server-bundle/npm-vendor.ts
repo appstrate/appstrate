@@ -67,8 +67,6 @@ export interface NpmInstallSpec {
   version: string;
   /** Target directory containing a `package.json` and `node_modules/`. */
   targetDir: string;
-  /** Registry base URL (defaults to npmjs.org). */
-  registryBaseUrl?: string;
 }
 
 export type FetchRegistryFn = (url: string) => Promise<unknown>;
@@ -88,7 +86,6 @@ export interface NpmVendorDeps {
 export interface NpmVendorInput {
   identifier: string;
   versionRange: string;
-  registryBaseUrl?: string;
 }
 
 const defaultFetchRegistry: FetchRegistryFn = async (url) => {
@@ -140,7 +137,7 @@ export async function resolveNpmVersion(
   deps: NpmVendorDeps = {},
 ): Promise<{ version: string; integrity: string; tarball?: string }> {
   const fetchRegistry = deps.fetchRegistry ?? defaultFetchRegistry;
-  const base = (input.registryBaseUrl ?? DEFAULT_NPM_REGISTRY).replace(/\/$/, "");
+  const base = DEFAULT_NPM_REGISTRY.replace(/\/$/, "");
   // Scoped npm names have exactly one `/` (e.g. `@scope/name`), so a
   // single replace is functionally correct — but `replaceAll` is clearer
   // and silences the CodeQL "incomplete string escaping" warning, which
@@ -253,7 +250,6 @@ export async function vendorNpmPackage(
       identifier: input.identifier,
       version: resolved.version,
       targetDir: workDir,
-      registryBaseUrl: input.registryBaseUrl,
     });
 
     const installedRoot = join(workDir, "node_modules", input.identifier);

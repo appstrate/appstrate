@@ -22,11 +22,9 @@
 import { z } from "zod";
 import {
   mcpServerManifestSchema as afpsMcpServerManifestSchema,
-  mcpServerTypeEnum,
   type McpServerManifest,
 } from "@afps-spec/schema";
 
-export { mcpServerTypeEnum };
 export type { McpServerManifest };
 
 /**
