@@ -3,7 +3,9 @@
     "label": "Codestral 2405",
     "contextWindow": 32000,
     "maxTokens": 8191,
-    "capabilities": ["text"],
+    "capabilities": [
+      "text"
+    ],
     "cost": {
       "input": 1,
       "output": 3
@@ -13,7 +15,9 @@
     "label": "Codestral 2508",
     "contextWindow": 256000,
     "maxTokens": 256000,
-    "capabilities": ["text"],
+    "capabilities": [
+      "text"
+    ],
     "cost": {
       "input": 0.3,
       "output": 0.9
@@ -23,7 +27,9 @@
     "label": "Codestral Latest",
     "contextWindow": 32000,
     "maxTokens": 8191,
-    "capabilities": ["text"],
+    "capabilities": [
+      "text"
+    ],
     "cost": {
       "input": 1,
       "output": 3
@@ -33,7 +39,9 @@
     "label": "Codestral Mamba Latest",
     "contextWindow": 256000,
     "maxTokens": 256000,
-    "capabilities": ["text"],
+    "capabilities": [
+      "text"
+    ],
     "cost": {
       "input": 0.25,
       "output": 0.25
@@ -43,7 +51,9 @@
     "label": "Devstral 2512",
     "contextWindow": 256000,
     "maxTokens": 256000,
-    "capabilities": ["text"],
+    "capabilities": [
+      "text"
+    ],
     "cost": {
       "input": 0.4,
       "output": 2
@@ -53,7 +63,9 @@
     "label": "Devstral Latest",
     "contextWindow": 256000,
     "maxTokens": 256000,
-    "capabilities": ["text"],
+    "capabilities": [
+      "text"
+    ],
     "cost": {
       "input": 0.4,
       "output": 2
@@ -63,7 +75,9 @@
     "label": "Devstral Medium 2507",
     "contextWindow": 128000,
     "maxTokens": 128000,
-    "capabilities": ["text"],
+    "capabilities": [
+      "text"
+    ],
     "cost": {
       "input": 0.4,
       "output": 2
@@ -73,7 +87,9 @@
     "label": "Devstral Medium Latest",
     "contextWindow": 256000,
     "maxTokens": 256000,
-    "capabilities": ["text"],
+    "capabilities": [
+      "text"
+    ],
     "cost": {
       "input": 0.4,
       "output": 2
@@ -83,7 +99,9 @@
     "label": "Devstral Small 2505",
     "contextWindow": 128000,
     "maxTokens": 128000,
-    "capabilities": ["text"],
+    "capabilities": [
+      "text"
+    ],
     "cost": {
       "input": 0.1,
       "output": 0.3
@@ -93,7 +111,9 @@
     "label": "Devstral Small 2507",
     "contextWindow": 128000,
     "maxTokens": 128000,
-    "capabilities": ["text"],
+    "capabilities": [
+      "text"
+    ],
     "cost": {
       "input": 0.1,
       "output": 0.3
@@ -103,7 +123,9 @@
     "label": "Devstral Small Latest",
     "contextWindow": 256000,
     "maxTokens": 256000,
-    "capabilities": ["text"],
+    "capabilities": [
+      "text"
+    ],
     "cost": {
       "input": 0.1,
       "output": 0.3
@@ -113,7 +135,9 @@
     "label": "Labs Devstral Small 2512",
     "contextWindow": 256000,
     "maxTokens": 256000,
-    "capabilities": ["text"],
+    "capabilities": [
+      "text"
+    ],
     "cost": {
       "input": 0.1,
       "output": 0.3
@@ -123,7 +147,10 @@
     "label": "Magistral Medium 1 2 2509",
     "contextWindow": 40000,
     "maxTokens": 40000,
-    "capabilities": ["text", "reasoning"],
+    "capabilities": [
+      "text",
+      "reasoning"
+    ],
     "cost": {
       "input": 2,
       "output": 5
@@ -133,7 +160,10 @@
     "label": "Magistral Medium 2506",
     "contextWindow": 40000,
     "maxTokens": 40000,
-    "capabilities": ["text", "reasoning"],
+    "capabilities": [
+      "text",
+      "reasoning"
+    ],
     "cost": {
       "input": 2,
       "output": 5
@@ -143,7 +173,10 @@
     "label": "Magistral Medium 2509",
     "contextWindow": 40000,
     "maxTokens": 40000,
-    "capabilities": ["text", "reasoning"],
+    "capabilities": [
+      "text",
+      "reasoning"
+    ],
     "cost": {
       "input": 2,
       "output": 5
@@ -153,7 +186,10 @@
     "label": "Magistral Medium Latest",
     "contextWindow": 40000,
     "maxTokens": 40000,
-    "capabilities": ["text", "reasoning"],
+    "capabilities": [
+      "text",
+      "reasoning"
+    ],
     "cost": {
       "input": 2,
       "output": 5
@@ -163,7 +199,10 @@
     "label": "Magistral Small 1 2 2509",
     "contextWindow": 40000,
     "maxTokens": 40000,
-    "capabilities": ["text", "reasoning"],
+    "capabilities": [
+      "text",
+      "reasoning"
+    ],
     "cost": {
       "input": 0.5,
       "output": 1.5
@@ -173,7 +212,10 @@
     "label": "Magistral Small 2506",
     "contextWindow": 40000,
     "maxTokens": 40000,
-    "capabilities": ["text", "reasoning"],
+    "capabilities": [
+      "text",
+      "reasoning"
+    ],
     "cost": {
       "input": 0.5,
       "output": 1.5
@@ -183,7 +225,10 @@
     "label": "Magistral Small Latest",
     "contextWindow": 40000,
     "maxTokens": 40000,
-    "capabilities": ["text", "reasoning"],
+    "capabilities": [
+      "text",
+      "reasoning"
+    ],
     "cost": {
       "input": 0.5,
       "output": 1.5
@@ -193,7 +238,10 @@
     "label": "Ministral 3 14b 2512",
     "contextWindow": 262144,
     "maxTokens": 262144,
-    "capabilities": ["text", "image"],
+    "capabilities": [
+      "text",
+      "image"
+    ],
     "cost": {
       "input": 0.2,
       "output": 0.2
@@ -203,7 +251,10 @@
     "label": "Ministral 3 3b 2512",
     "contextWindow": 131072,
     "maxTokens": 131072,
-    "capabilities": ["text", "image"],
+    "capabilities": [
+      "text",
+      "image"
+    ],
     "cost": {
       "input": 0.1,
       "output": 0.1
@@ -213,7 +264,23 @@
     "label": "Ministral 3 8b 2512",
     "contextWindow": 262144,
     "maxTokens": 262144,
-    "capabilities": ["text", "image"],
+    "capabilities": [
+      "text",
+      "image"
+    ],
+    "cost": {
+      "input": 0.15,
+      "output": 0.15
+    }
+  },
+  "ministral-8b-2512": {
+    "label": "Ministral 8b 2512",
+    "contextWindow": 262144,
+    "maxTokens": 262144,
+    "capabilities": [
+      "text",
+      "image"
+    ],
     "cost": {
       "input": 0.15,
       "output": 0.15
@@ -223,7 +290,9 @@
     "label": "Mistral Large 2402",
     "contextWindow": 32000,
     "maxTokens": 8191,
-    "capabilities": ["text"],
+    "capabilities": [
+      "text"
+    ],
     "cost": {
       "input": 4,
       "output": 12
@@ -233,7 +302,9 @@
     "label": "Mistral Large 2407",
     "contextWindow": 128000,
     "maxTokens": 128000,
-    "capabilities": ["text"],
+    "capabilities": [
+      "text"
+    ],
     "cost": {
       "input": 3,
       "output": 9
@@ -243,7 +314,9 @@
     "label": "Mistral Large 2411",
     "contextWindow": 128000,
     "maxTokens": 128000,
-    "capabilities": ["text"],
+    "capabilities": [
+      "text"
+    ],
     "cost": {
       "input": 2,
       "output": 6
@@ -253,7 +326,10 @@
     "label": "Mistral Large 2512",
     "contextWindow": 262144,
     "maxTokens": 262144,
-    "capabilities": ["text", "image"],
+    "capabilities": [
+      "text",
+      "image"
+    ],
     "cost": {
       "input": 0.5,
       "output": 1.5
@@ -263,7 +339,10 @@
     "label": "Mistral Large 3",
     "contextWindow": 262144,
     "maxTokens": 262144,
-    "capabilities": ["text", "image"],
+    "capabilities": [
+      "text",
+      "image"
+    ],
     "cost": {
       "input": 0.5,
       "output": 1.5
@@ -273,7 +352,10 @@
     "label": "Mistral Large Latest",
     "contextWindow": 262144,
     "maxTokens": 262144,
-    "capabilities": ["text", "image"],
+    "capabilities": [
+      "text",
+      "image"
+    ],
     "cost": {
       "input": 0.5,
       "output": 1.5
@@ -283,7 +365,9 @@
     "label": "Mistral Medium",
     "contextWindow": 32000,
     "maxTokens": 8191,
-    "capabilities": ["text"],
+    "capabilities": [
+      "text"
+    ],
     "cost": {
       "input": 2.7,
       "output": 8.1
@@ -293,7 +377,9 @@
     "label": "Mistral Medium 2312",
     "contextWindow": 32000,
     "maxTokens": 8191,
-    "capabilities": ["text"],
+    "capabilities": [
+      "text"
+    ],
     "cost": {
       "input": 2.7,
       "output": 8.1
@@ -303,7 +389,9 @@
     "label": "Mistral Medium 2505",
     "contextWindow": 131072,
     "maxTokens": 8191,
-    "capabilities": ["text"],
+    "capabilities": [
+      "text"
+    ],
     "cost": {
       "input": 0.4,
       "output": 2
@@ -313,7 +401,10 @@
     "label": "Mistral Medium 3 1 2508",
     "contextWindow": 131072,
     "maxTokens": 131072,
-    "capabilities": ["text", "image"],
+    "capabilities": [
+      "text",
+      "image"
+    ],
     "cost": {
       "input": 0.4,
       "output": 2
@@ -323,7 +414,10 @@
     "label": "Mistral Medium Latest",
     "contextWindow": 131072,
     "maxTokens": 131072,
-    "capabilities": ["text", "image"],
+    "capabilities": [
+      "text",
+      "image"
+    ],
     "cost": {
       "input": 0.4,
       "output": 2
@@ -333,7 +427,9 @@
     "label": "Mistral Small",
     "contextWindow": 32000,
     "maxTokens": 8191,
-    "capabilities": ["text"],
+    "capabilities": [
+      "text"
+    ],
     "cost": {
       "input": 0.1,
       "output": 0.3
@@ -343,7 +439,10 @@
     "label": "Mistral Small 3 2 2506",
     "contextWindow": 131072,
     "maxTokens": 131072,
-    "capabilities": ["text", "image"],
+    "capabilities": [
+      "text",
+      "image"
+    ],
     "cost": {
       "input": 0.06,
       "output": 0.18
@@ -353,7 +452,10 @@
     "label": "Mistral Small Latest",
     "contextWindow": 131072,
     "maxTokens": 131072,
-    "capabilities": ["text", "image"],
+    "capabilities": [
+      "text",
+      "image"
+    ],
     "cost": {
       "input": 0.06,
       "output": 0.18
@@ -363,7 +465,9 @@
     "label": "Mistral Tiny",
     "contextWindow": 32000,
     "maxTokens": 8191,
-    "capabilities": ["text"],
+    "capabilities": [
+      "text"
+    ],
     "cost": {
       "input": 0.25,
       "output": 0.25
@@ -373,7 +477,9 @@
     "label": "Open Codestral Mamba",
     "contextWindow": 256000,
     "maxTokens": 256000,
-    "capabilities": ["text"],
+    "capabilities": [
+      "text"
+    ],
     "cost": {
       "input": 0.25,
       "output": 0.25
@@ -383,7 +489,9 @@
     "label": "Open Mistral 7b",
     "contextWindow": 32000,
     "maxTokens": 8191,
-    "capabilities": ["text"],
+    "capabilities": [
+      "text"
+    ],
     "cost": {
       "input": 0.25,
       "output": 0.25
@@ -393,7 +501,9 @@
     "label": "Open Mistral Nemo",
     "contextWindow": 128000,
     "maxTokens": 128000,
-    "capabilities": ["text"],
+    "capabilities": [
+      "text"
+    ],
     "cost": {
       "input": 0.3,
       "output": 0.3
@@ -403,7 +513,9 @@
     "label": "Open Mistral Nemo 2407",
     "contextWindow": 128000,
     "maxTokens": 128000,
-    "capabilities": ["text"],
+    "capabilities": [
+      "text"
+    ],
     "cost": {
       "input": 0.3,
       "output": 0.3
@@ -413,7 +525,9 @@
     "label": "Open Mixtral 8x22b",
     "contextWindow": 65336,
     "maxTokens": 8191,
-    "capabilities": ["text"],
+    "capabilities": [
+      "text"
+    ],
     "cost": {
       "input": 2,
       "output": 6
@@ -423,7 +537,9 @@
     "label": "Open Mixtral 8x7b",
     "contextWindow": 32000,
     "maxTokens": 8191,
-    "capabilities": ["text"],
+    "capabilities": [
+      "text"
+    ],
     "cost": {
       "input": 0.7,
       "output": 0.7
@@ -433,7 +549,10 @@
     "label": "Pixtral 12b 2409",
     "contextWindow": 128000,
     "maxTokens": 128000,
-    "capabilities": ["text", "image"],
+    "capabilities": [
+      "text",
+      "image"
+    ],
     "cost": {
       "input": 0.15,
       "output": 0.15
@@ -443,7 +562,10 @@
     "label": "Pixtral Large 2411",
     "contextWindow": 128000,
     "maxTokens": 128000,
-    "capabilities": ["text", "image"],
+    "capabilities": [
+      "text",
+      "image"
+    ],
     "cost": {
       "input": 2,
       "output": 6
@@ -453,7 +575,10 @@
     "label": "Pixtral Large Latest",
     "contextWindow": 128000,
     "maxTokens": 128000,
-    "capabilities": ["text", "image"],
+    "capabilities": [
+      "text",
+      "image"
+    ],
     "cost": {
       "input": 2,
       "output": 6

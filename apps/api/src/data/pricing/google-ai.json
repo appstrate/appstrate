@@ -3,7 +3,10 @@
     "label": "Gemini 2.0 Flash",
     "contextWindow": 1048576,
     "maxTokens": 8192,
-    "capabilities": ["text", "image"],
+    "capabilities": [
+      "text",
+      "image"
+    ],
     "cost": {
       "input": 0.1,
       "output": 0.4,
@@ -14,7 +17,10 @@
     "label": "Gemini 2.0 Flash 001",
     "contextWindow": 1048576,
     "maxTokens": 8192,
-    "capabilities": ["text", "image"],
+    "capabilities": [
+      "text",
+      "image"
+    ],
     "cost": {
       "input": 0.1,
       "output": 0.4,
@@ -25,7 +31,10 @@
     "label": "Gemini 2.0 Flash Lite",
     "contextWindow": 1048576,
     "maxTokens": 8192,
-    "capabilities": ["text", "image"],
+    "capabilities": [
+      "text",
+      "image"
+    ],
     "cost": {
       "input": 0.075,
       "output": 0.3,
@@ -36,7 +45,10 @@
     "label": "Gemini 2.0 Flash Lite 001",
     "contextWindow": 1048576,
     "maxTokens": 8192,
-    "capabilities": ["text", "image"],
+    "capabilities": [
+      "text",
+      "image"
+    ],
     "cost": {
       "input": 0.075,
       "output": 0.3,
@@ -47,7 +59,10 @@
     "label": "Gemini 2.5 Computer Use Preview 10 2025",
     "contextWindow": 128000,
     "maxTokens": 64000,
-    "capabilities": ["text", "image"],
+    "capabilities": [
+      "text",
+      "image"
+    ],
     "cost": {
       "input": 1.25,
       "output": 10
@@ -57,7 +72,11 @@
     "label": "Gemini 2.5 Flash",
     "contextWindow": 1048576,
     "maxTokens": 65535,
-    "capabilities": ["text", "image", "reasoning"],
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
     "cost": {
       "input": 0.3,
       "output": 2.5,
@@ -68,7 +87,11 @@
     "label": "Gemini 2.5 Flash Lite",
     "contextWindow": 1048576,
     "maxTokens": 65535,
-    "capabilities": ["text", "image", "reasoning"],
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
     "cost": {
       "input": 0.1,
       "output": 0.4,
@@ -79,7 +102,11 @@
     "label": "Gemini 2.5 Flash Lite Preview 06 17",
     "contextWindow": 1048576,
     "maxTokens": 65535,
-    "capabilities": ["text", "image", "reasoning"],
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
     "cost": {
       "input": 0.1,
       "output": 0.4,
@@ -90,7 +117,11 @@
     "label": "Gemini 2.5 Flash Lite Preview 09 2025",
     "contextWindow": 1048576,
     "maxTokens": 65535,
-    "capabilities": ["text", "image", "reasoning"],
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
     "cost": {
       "input": 0.1,
       "output": 0.4,
@@ -101,7 +132,9 @@
     "label": "Gemini 2.5 Flash Native Audio Latest",
     "contextWindow": 1048576,
     "maxTokens": 8192,
-    "capabilities": ["text"],
+    "capabilities": [
+      "text"
+    ],
     "cost": {
       "input": 0.3,
       "output": 2.5
@@ -111,7 +144,9 @@
     "label": "Gemini 2.5 Flash Native Audio Preview 09 2025",
     "contextWindow": 1048576,
     "maxTokens": 8192,
-    "capabilities": ["text"],
+    "capabilities": [
+      "text"
+    ],
     "cost": {
       "input": 0.3,
       "output": 2.5
@@ -121,7 +156,9 @@
     "label": "Gemini 2.5 Flash Native Audio Preview 12 2025",
     "contextWindow": 1048576,
     "maxTokens": 8192,
-    "capabilities": ["text"],
+    "capabilities": [
+      "text"
+    ],
     "cost": {
       "input": 0.3,
       "output": 2.5
@@ -131,7 +168,11 @@
     "label": "Gemini 2.5 Flash Preview 09 2025",
     "contextWindow": 1048576,
     "maxTokens": 65535,
-    "capabilities": ["text", "image", "reasoning"],
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
     "cost": {
       "input": 0.3,
       "output": 2.5,
@@ -142,7 +183,11 @@
     "label": "Gemini 2.5 Pro",
     "contextWindow": 1048576,
     "maxTokens": 65535,
-    "capabilities": ["text", "image", "reasoning"],
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
     "cost": {
       "input": 1.25,
       "output": 10,
@@ -153,7 +198,10 @@
     "label": "Gemini 2.5 Pro Preview Tts",
     "contextWindow": 1048576,
     "maxTokens": 65535,
-    "capabilities": ["text", "image"],
+    "capabilities": [
+      "text",
+      "image"
+    ],
     "cost": {
       "input": 1.25,
       "output": 10,
@@ -164,7 +212,11 @@
     "label": "Gemini 3 Flash Preview",
     "contextWindow": 1048576,
     "maxTokens": 65535,
-    "capabilities": ["text", "image", "reasoning"],
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
     "cost": {
       "input": 0.5,
       "output": 3,
@@ -175,18 +227,41 @@
     "label": "Gemini 3 Pro Preview",
     "contextWindow": 1048576,
     "maxTokens": 65535,
-    "capabilities": ["text", "image", "reasoning"],
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
     "cost": {
       "input": 2,
       "output": 12,
       "cacheRead": 0.2
     }
   },
+  "gemini-3.1-flash-lite": {
+    "label": "Gemini 3.1 Flash Lite",
+    "contextWindow": 1048576,
+    "maxTokens": 65536,
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 0.45,
+      "output": 2.7,
+      "cacheRead": 0.045
+    }
+  },
   "gemini-3.1-flash-lite-preview": {
     "label": "Gemini 3.1 Flash Lite Preview",
     "contextWindow": 1048576,
     "maxTokens": 65536,
-    "capabilities": ["text", "image", "reasoning"],
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
     "cost": {
       "input": 0.25,
       "output": 1.5,
@@ -197,7 +272,10 @@
     "label": "Gemini 3.1 Flash Live Preview",
     "contextWindow": 131072,
     "maxTokens": 65536,
-    "capabilities": ["text", "image"],
+    "capabilities": [
+      "text",
+      "image"
+    ],
     "cost": {
       "input": 0.75,
       "output": 4.5
@@ -207,7 +285,11 @@
     "label": "Gemini 3.1 Pro Preview",
     "contextWindow": 1048576,
     "maxTokens": 65536,
-    "capabilities": ["text", "image", "reasoning"],
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
     "cost": {
       "input": 2,
       "output": 12,
@@ -218,18 +300,40 @@
     "label": "Gemini 3.1 Pro Preview Customtools",
     "contextWindow": 1048576,
     "maxTokens": 65536,
-    "capabilities": ["text", "image", "reasoning"],
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
     "cost": {
       "input": 2,
       "output": 12,
       "cacheRead": 0.2
     }
   },
+  "gemini-3.5-flash": {
+    "label": "Gemini 3.5 Flash",
+    "contextWindow": 1048576,
+    "maxTokens": 65535,
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 1.5,
+      "output": 9,
+      "cacheRead": 0.15
+    }
+  },
   "gemini-exp-1114": {
     "label": "Gemini Exp 1114",
     "contextWindow": 1048576,
     "maxTokens": 8192,
-    "capabilities": ["text", "image"],
+    "capabilities": [
+      "text",
+      "image"
+    ],
     "cost": {
       "input": 0,
       "output": 0
@@ -239,7 +343,11 @@
     "label": "Gemini Exp 1206",
     "contextWindow": 1048576,
     "maxTokens": 65535,
-    "capabilities": ["text", "image", "reasoning"],
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
     "cost": {
       "input": 0.3,
       "output": 2.5,
@@ -250,7 +358,11 @@
     "label": "Gemini Flash Latest",
     "contextWindow": 1048576,
     "maxTokens": 65535,
-    "capabilities": ["text", "image", "reasoning"],
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
     "cost": {
       "input": 0.3,
       "output": 2.5,
@@ -261,7 +373,11 @@
     "label": "Gemini Flash Lite Latest",
     "contextWindow": 1048576,
     "maxTokens": 65535,
-    "capabilities": ["text", "image", "reasoning"],
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
     "cost": {
       "input": 0.1,
       "output": 0.4,
@@ -272,7 +388,11 @@
     "label": "Gemini Pro Latest",
     "contextWindow": 1048576,
     "maxTokens": 65535,
-    "capabilities": ["text", "image", "reasoning"],
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
     "cost": {
       "input": 1.25,
       "output": 10,
@@ -283,7 +403,11 @@
     "label": "Gemini Robotics Er 1.5 Preview",
     "contextWindow": 1048576,
     "maxTokens": 65535,
-    "capabilities": ["text", "image", "reasoning"],
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
     "cost": {
       "input": 0.3,
       "output": 2.5,
@@ -294,7 +418,10 @@
     "label": "Gemma 3 27b It",
     "contextWindow": 131072,
     "maxTokens": 8192,
-    "capabilities": ["text", "image"],
+    "capabilities": [
+      "text",
+      "image"
+    ],
     "cost": {
       "input": 0,
       "output": 0
@@ -304,7 +431,10 @@
     "label": "Learnlm 1.5 Pro Experimental",
     "contextWindow": 32767,
     "maxTokens": 8192,
-    "capabilities": ["text", "image"],
+    "capabilities": [
+      "text",
+      "image"
+    ],
     "cost": {
       "input": 0,
       "output": 0
@@ -314,7 +444,9 @@
     "label": "Lyria 3 Clip Preview",
     "contextWindow": 131072,
     "maxTokens": 8192,
-    "capabilities": ["text"],
+    "capabilities": [
+      "text"
+    ],
     "cost": {
       "input": 0,
       "output": 0
@@ -324,7 +456,9 @@
     "label": "Lyria 3 Pro Preview",
     "contextWindow": 131072,
     "maxTokens": 8192,
-    "capabilities": ["text"],
+    "capabilities": [
+      "text"
+    ],
     "cost": {
       "input": 0,
       "output": 0
