@@ -41,7 +41,9 @@ interface CacheHarness {
   calls: () => Array<{ url: string; method: string }>;
 }
 
-function makeHarness(handler?: (url: string, init: RequestInit) => Response): CacheHarness {
+function makeHarness(
+  handler?: (url: string, init: RequestInit) => Response | Promise<Response>,
+): CacheHarness {
   const calls: Array<{ url: string; method: string }> = [];
   const fetchFn = mock(async (url: unknown, init?: RequestInit) => {
     const u = typeof url === "string" ? url : (url as URL).toString();

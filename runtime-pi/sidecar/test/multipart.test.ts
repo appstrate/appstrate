@@ -44,13 +44,15 @@ function makeMultipartDeps(overrides?: Partial<AppDeps>): AppDeps {
     config: { platformApiUrl: "http://mock:3000", runToken: "tok", proxyUrl: "" },
     fetchCredentials: mock(async (): Promise<CredentialsResponse> => integrationCreds()),
     cookieJar: new Map(),
+    // bun:test `mock()` lacks the `preconnect` member of `typeof fetch`; cast
+    // through the same shim the per-test fetchFn overrides use.
     fetchFn: mock(
       async () =>
         new Response('{"ok":true}', {
           status: 200,
           headers: { "Content-Type": "application/json" },
         }),
-    ),
+    ) as unknown as typeof fetch,
     isReady: () => true,
     ...overrides,
   };
@@ -114,8 +116,8 @@ describe("POST /mcp — api_call multipart/form-data", () => {
       // construction.
       const req = new Request("https://api.example.com/sink", {
         method: "POST",
-        headers: new Headers(init?.headers as HeadersInit | undefined),
-        body: init?.body as BodyInit,
+        headers: new Headers(init?.headers),
+        body: init?.body,
       });
       capturedContentType = req.headers.get("content-type");
       const fd = await req.formData();
@@ -185,11 +187,11 @@ describe("POST /mcp — api_call multipart/form-data", () => {
     const capturedFields: Record<string, string> = {};
     let capturedFileBytes: Uint8Array | null = null;
     const fetchFn = mock(async (_url: string, init?: RequestInit) => {
-      const reqHeaders = new Headers(init?.headers as HeadersInit | undefined);
+      const reqHeaders = new Headers(init?.headers);
       const req = new Request("https://api.example.com/sink", {
         method: "POST",
         headers: reqHeaders,
-        body: init?.body as BodyInit,
+        body: init?.body,
       });
       const fd = await req.formData();
       for (const [k, v] of fd.entries()) {
@@ -246,8 +248,8 @@ describe("POST /mcp — api_call multipart/form-data", () => {
     const fetchFn = mock(async (_url: string, init?: RequestInit) => {
       const req = new Request("https://api.example.com/sink", {
         method: "POST",
-        headers: new Headers(init?.headers as HeadersInit | undefined),
-        body: init?.body as BodyInit,
+        headers: new Headers(init?.headers),
+        body: init?.body,
       });
       const fd = await req.formData();
       for (const [k, v] of fd.entries()) {
@@ -282,8 +284,8 @@ describe("POST /mcp — api_call multipart/form-data", () => {
       // boundary to be set on the Request, not on init.headers).
       const req = new Request("https://api.example.com/sink", {
         method: "POST",
-        headers: new Headers(init?.headers as HeadersInit | undefined),
-        body: init?.body as BodyInit,
+        headers: new Headers(init?.headers),
+        body: init?.body,
       });
       capturedContentType = req.headers.get("content-type");
       return new Response("{}", { status: 200 });

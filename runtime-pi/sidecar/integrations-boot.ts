@@ -438,20 +438,27 @@ export async function connectRemoteHttpIntegration(
     return { name: plan.headerName, value: `${plan.headerPrefix}${plan.value}` };
   };
 
-  const customFetch: typeof fetch = async (input, init) => {
-    const send = async (): Promise<Response> => {
-      const headers = new Headers(init?.headers);
-      const h = readHeader();
-      if (h) headers.set(h.name, h.value);
-      return fetch(input, { ...init, headers });
-    };
-    let res = await send();
-    if (res.status === 401 && source.refreshOnUnauthorized) {
-      const refreshed = await source.refreshOnUnauthorized(authKey).catch(() => false);
-      if (refreshed) res = await send();
-    }
-    return res;
-  };
+  // `typeof fetch` (Bun) carries a static `preconnect` member alongside the
+  // call signature. The MCP transport's `fetch?: typeof fetch` option demands
+  // the full shape, so forward the real `preconnect` rather than casting it
+  // away — the override stays a faithful drop-in for `fetch`.
+  const customFetch: typeof fetch = Object.assign(
+    async (input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1]) => {
+      const send = async (): Promise<Response> => {
+        const headers = new Headers(init?.headers);
+        const h = readHeader();
+        if (h) headers.set(h.name, h.value);
+        return fetch(input, { ...init, headers });
+      };
+      let res = await send();
+      if (res.status === 401 && source.refreshOnUnauthorized) {
+        const refreshed = await source.refreshOnUnauthorized(authKey).catch(() => false);
+        if (refreshed) res = await send();
+      }
+      return res;
+    },
+    { preconnect: fetch.preconnect },
+  );
 
   const clientInfo = {
     name: "appstrate-sidecar-remote-integration",

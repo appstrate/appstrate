@@ -230,8 +230,11 @@ describe("runConnectLoginHook", () => {
       expect(source.shouldReauth("session", 403)).toBe(false);
 
       // Simulate the listener's reauth path: refreshOnUnauthorized routes to
-      // the registered re-login handler, which re-runs the login tool.
-      const ok = await source.refreshOnUnauthorized("session");
+      // the registered re-login handler, which re-runs the login tool. The
+      // factory always wires this hook (optional only on the base
+      // MitmCredentialSource contract), so narrow it before invoking.
+      expect(source.refreshOnUnauthorized).toBeDefined();
+      const ok = await source.refreshOnUnauthorized!("session");
       expect(ok).toBe(true);
       expect(rotating.loginCalls()).toBe(2);
       // The fresh session is now injectable — a retried request gets sess-2.
@@ -296,8 +299,11 @@ describe("runConnectLoginHook", () => {
       expect(source.deliveryPlans().session!.value).toBe("boot");
 
       // Re-login fails → false, and the previously-captured session is left
-      // untouched (the listener returns the original failed response).
-      const ok = await source.refreshOnUnauthorized("session");
+      // untouched (the listener returns the original failed response). The
+      // factory always wires this hook (optional only on the base
+      // MitmCredentialSource contract), so narrow it before invoking.
+      expect(source.refreshOnUnauthorized).toBeDefined();
+      const ok = await source.refreshOnUnauthorized!("session");
       expect(ok).toBe(false);
       expect(calls).toBe(2);
       expect(source.deliveryPlans().session!.value).toBe("boot");

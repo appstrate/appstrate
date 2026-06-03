@@ -317,7 +317,7 @@ describe("McpHost — namespace normalisation", () => {
         client: fs.client,
       });
       const names = host.buildTools().map((t) => t.descriptor.name);
-      const ns = names[0]!.split("__")[0];
+      const ns = names[0]!.split("__")[0]!;
       expect(ns.length).toBeLessThanOrEqual(20);
     } finally {
       await fs.pair.close();
@@ -385,8 +385,8 @@ describe("McpHost — trusted (first-party) bypass of the poisoning sanitiser", 
   }
 
   const noteDescOf = (tool: AppstrateToolDefinition): string =>
-    (tool.descriptor.inputSchema as { properties: { note: { description: string } } }).properties
-      .note.description;
+    (tool.descriptor.inputSchema as unknown as { properties: { note: { description: string } } })
+      .properties.note.description;
 
   it("truncates an untrusted tool's rich docs but keeps the trusted one verbatim", async () => {
     const untrusted = await makeUpstream(fatSchemaTool());
@@ -665,8 +665,8 @@ describe("McpHost — intoNamespace (attachable api_call)", () => {
       const apicall = tools.find((t) => t.descriptor.name === "kijiji__api_call")!;
       const r1 = await search.handler({}, {} as never);
       const r2 = await apicall.handler({}, {} as never);
-      expect((r1.content as [{ text: string }])[0].text).toBe("notion-results");
-      expect((r2.content as [{ text: string }])[0].text).toBe("api_call-result");
+      expect((r1.content as unknown as [{ text: string }])[0].text).toBe("notion-results");
+      expect((r2.content as unknown as [{ text: string }])[0].text).toBe("api_call-result");
     } finally {
       await host.dispose();
     }

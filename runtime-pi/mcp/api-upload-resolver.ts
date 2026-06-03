@@ -250,7 +250,11 @@ export class McpApiUploadResolver {
     let chunkIndex = 0;
     try {
       const stream = openFileStream(absPath);
-      const reader = stream.getReader();
+      // `getReader()` resolves to the `node:stream/web` reader declaration,
+      // while `chunkBytes` declares the global one — structurally identical
+      // (same `ReadableStreamDefaultReader<Uint8Array>`), so bridge the two
+      // lib variants with a cast, matching this file's `openFileStream` cast.
+      const reader = stream.getReader() as ReadableStreamDefaultReader<Uint8Array>;
       try {
         const iter = chunkBytes(reader, partSizeBytes, totalBytes);
         for await (const chunk of iter) {

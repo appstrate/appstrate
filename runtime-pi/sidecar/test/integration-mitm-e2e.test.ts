@@ -158,7 +158,9 @@ describe("MITM listener — subprocess end-to-end", () => {
         expect(parsed.body).toBe(`{"upstream":"ok"}`);
         // The smuggled `Bearer SHOULD-BE-STRIPPED` MUST NOT reach upstream;
         // the listener replaced it with the planner's fresh token.
-        expect(observedHeader).toBe("Bearer fresh-token");
+        // Cast: TS narrows a `let` assigned only inside a closure back to its
+        // initializer type (`null`); the stubFetch above mutates it at runtime.
+        expect(observedHeader as string | null).toBe("Bearer fresh-token");
         expect(observedBody).toBe(`{"hi":"world"}`);
       } finally {
         await listener.close();

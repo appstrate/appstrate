@@ -60,20 +60,21 @@ function writeSyntheticFile(name: string, size: number) {
   return { workspace: ws, bytes };
 }
 
+/** The CallToolResult-ish shape every simulator returns. */
+interface SimResult {
+  status: number;
+  headers: Record<string, string>;
+  body: string;
+  isError?: boolean;
+}
+
 /**
  * Build an in-process MCP pair whose `api_call` handler is
  * driven by a per-test simulator. The simulator receives the same
  * args shape the sidecar would and returns the CallToolResult shape
  * (including `_meta`) that the resolver's wrapper expects.
  */
-async function makePair(
-  simulate: (args: Record<string, unknown>) => Promise<{
-    status: number;
-    headers: Record<string, string>;
-    body: string;
-    isError?: boolean;
-  }>,
-) {
+async function makePair(simulate: (args: Record<string, unknown>) => Promise<SimResult>) {
   const tool: AppstrateToolDefinition = {
     descriptor: {
       name: API_CALL_TOOL,
@@ -508,7 +509,7 @@ describe("McpApiUploadResolver — s3-multipart", () => {
   it("treats a 200 with <Error> body from CompleteMultipartUpload as failure", async () => {
     // S3 quirk: a 200 with an `<Error>` body is a failure. The
     // adapter must surface this to the agent.
-    const { pair, mcp } = await makePair(async (args) => {
+    const { pair, mcp } = await makePair(async (args): Promise<SimResult> => {
       const method = args.method as string;
       const target = args.target as string;
       if (method === "POST" && /\?uploads$/.test(target)) {
@@ -658,7 +659,7 @@ describe("McpApiUploadResolver — tus", () => {
   it("fails fast when the server reports a desynced offset", async () => {
     // Server returns offset=1 instead of the expected (4MiB-1)+1 → resolver must
     // refuse to continue.
-    const { pair, mcp } = await makePair(async (args) => {
+    const { pair, mcp } = await makePair(async (args): Promise<SimResult> => {
       const method = args.method as string;
       if (method === "POST") {
         return {
@@ -709,7 +710,7 @@ describe("McpApiUploadResolver — tus", () => {
     // confirmed by upstream — counting them would mislead the agent
     // about how many bytes actually landed).
     let chunkCount = 0;
-    const { pair, mcp } = await makePair(async (args) => {
+    const { pair, mcp } = await makePair(async (args): Promise<SimResult> => {
       const method = args.method as string;
       if (method === "POST") {
         return {
@@ -1227,8 +1228,11 @@ describe("McpApiUploadResolver — cancellation parity", () => {
       expect(result.ok).toBe(false);
       await deletes.wait(1);
       // The user signal was aborted, but the DELETE still landed —
-      // proving the resolver used a SEPARATE signal for cleanup.
-      expect(deleteSawAbortedSignal).toBe(true);
+      // proving the resolver used a SEPARATE signal for cleanup. The
+      // assignment happens inside the simulator callback (which TS can't
+      // prove ran), so it stays narrowed to the `null` initializer here;
+      // widen the read back to its declared union for the matcher.
+      expect(deleteSawAbortedSignal as boolean | null).toBe(true);
       expect(deletes.count).toBe(1);
     } finally {
       await pair.close();
@@ -1249,7 +1253,7 @@ describe("McpApiUploadResolver — s3-multipart ETag round-trip", () => {
     // pass the raw ETag through. AWS itself accepts both forms;
     // emitting the stricter form keeps every clone happy.
     let completeBody = "";
-    const { pair, mcp } = await makePair(async (args) => {
+    const { pair, mcp } = await makePair(async (args): Promise<SimResult> => {
       const method = args.method as string;
       const target = args.target as string;
       if (method === "POST" && /\?uploads$/.test(target)) {
