@@ -204,10 +204,25 @@ async function main(): Promise<void> {
   });
   const text = await res.text();
   if (!res.ok) throw new Error(`token exchange failed (${res.status}): ${text}`);
-  const json = JSON.parse(text) as { access_token?: string; refresh_token?: string };
+  const json = JSON.parse(text) as {
+    access_token?: string;
+    refresh_token?: string;
+    expires_in?: number;
+  };
   if (!json.access_token) throw new Error(`token response had no access_token: ${text}`);
 
   console.log(`\n[grab-token] success.\n`);
+  // Lifetime decides cron-coverability for refresh-less providers (e.g.
+  // ClickUp): no `expires_in` (or a very long one) → a plain static string
+  // token survives the weekly cron; a short one with no refresh → manual only.
+  console.log(
+    `# access-token lifetime: ${
+      json.expires_in
+        ? `${json.expires_in}s (~${Math.round(json.expires_in / 3600)}h)`
+        : "no expires_in (non-expiring → cron-safe as a static string)"
+    }`,
+  );
+  console.log(`# refresh_token: ${json.refresh_token ? "issued" : "none"}\n`);
   console.log(`# Quick one-off check (access token — may expire):`);
   console.log(`CONFORMANCE_TOKENS='${JSON.stringify({ [packageId]: json.access_token })}' \\`);
   console.log(`  bun run test:system-packages --tier all --pkg ${entry.name}\n`);
