@@ -20,7 +20,7 @@ import {
  * reuse it without navigating to the integration page.
  */
 
-export function deriveFieldNames(auth: IntegrationManifestAuth): string[] {
+function deriveFieldNames(auth: IntegrationManifestAuth): string[] {
   const schema = auth.credentials?.schema as { properties?: Record<string, unknown> } | undefined;
   if (schema?.properties && typeof schema.properties === "object") {
     return Object.keys(schema.properties);

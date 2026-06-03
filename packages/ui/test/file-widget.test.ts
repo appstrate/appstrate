@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { fileMatchesAccept } from "../src/schema-form/file-widget.tsx";
+import { fileMatchesAccept } from "../src/schema-form/accept-match.ts";
 
 const file = (name: string, type: string) => ({ name, type });
 
