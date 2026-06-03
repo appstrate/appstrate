@@ -720,6 +720,8 @@
   "integration.section.oauthClient": "OAuth client (admin)",
   "integration.oauthClient.configured": "Configured",
   "integration.oauthClient.notConfigured": "Not configured",
+  "integration.oauthClient.autoProvisioned": "Optional — client auto-provisioned",
+  "integration.oauthClient.autoProvisionedHint": "This MCP integration registers its OAuth client automatically at connect time (DCR). The manual registration below is optional — use it only to supply your own client.",
   "integration.field.version": "Version",
   "integration.field.author": "Author",
   "integration.field.license": "License",

@@ -85,10 +85,15 @@ function OAuthClientForm({
   packageId,
   authKey,
   authDecl,
+  autoProvisioned = false,
 }: {
   packageId: string;
   authKey: string;
   authDecl?: IntegrationManifestAuth;
+  // Remote MCP auths register their client at connect time (CIMD/DCR), so a
+  // pre-registered client is optional. Surface that instead of a "to configure"
+  // warning, and keep the form collapsed by default.
+  autoProvisioned?: boolean;
 }) {
   const { t } = useTranslation("settings");
   const { data: client, isLoading } = useIntegrationOAuthClient(packageId, authKey);
@@ -124,7 +129,10 @@ function OAuthClientForm({
   };
 
   const configured = !!client;
-  const isOpen = open === null ? !configured : open;
+  // Default collapsed when configured OR when the client is auto-provisioned
+  // (manual registration is optional in that case); open otherwise so an admin
+  // who must register a client sees the form straight away.
+  const isOpen = open === null ? !configured && !autoProvisioned : open;
 
   return (
     <>
@@ -145,15 +153,27 @@ function OAuthClientForm({
             className={
               configured
                 ? "ml-auto rounded bg-emerald-500/10 px-1.5 py-0.5 text-[0.65rem] font-medium text-emerald-500"
-                : "bg-warning/10 text-warning ml-auto rounded px-1.5 py-0.5 text-[0.65rem] font-medium"
+                : autoProvisioned
+                  ? "text-muted-foreground bg-muted ml-auto rounded px-1.5 py-0.5 text-[0.65rem] font-medium"
+                  : "bg-warning/10 text-warning ml-auto rounded px-1.5 py-0.5 text-[0.65rem] font-medium"
             }
           >
             {configured
               ? t("integration.oauthClient.configured")
-              : t("integration.oauthClient.notConfigured")}
+              : autoProvisioned
+                ? t("integration.oauthClient.autoProvisioned")
+                : t("integration.oauthClient.notConfigured")}
           </span>
         </CollapsibleTrigger>
         <CollapsibleContent className="px-4 pb-4">
+          {autoProvisioned && !client && (
+            <p
+              className="text-muted-foreground mb-3 text-xs"
+              data-testid={`oauth-client-auto-hint-${authKey}`}
+            >
+              {t("integration.oauthClient.autoProvisionedHint")}
+            </p>
+          )}
           {client && (
             <p className="text-muted-foreground mb-3 text-xs">
               {t("integration.oauthClient.registered", { clientId: client.client_id })}
@@ -340,7 +360,12 @@ function AuthSection({
           a fix that's right here, not in another tab. */}
       {isOAuth && isAdmin && (
         <div className="mb-3">
-          <OAuthClientForm packageId={packageId} authKey={status.auth_key} authDecl={authDecl} />
+          <OAuthClientForm
+            packageId={packageId}
+            authKey={status.auth_key}
+            authDecl={authDecl}
+            autoProvisioned={status.client_auto_provisioned}
+          />
         </div>
       )}
 
