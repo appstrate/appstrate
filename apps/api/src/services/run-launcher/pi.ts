@@ -122,12 +122,16 @@ export async function runPlatformContainer(
       : deriveKeyPlaceholder(llmApiKey);
 
     // Skip the sidecar entirely when the run declares no integrations AND
-    // uses a static API key. The sidecar's sole purposes are integration
-    // MCP multiplexing (Phase 1.4) and LLM passthrough for OAuth; an
-    // API-key model with no integrations needs neither. Saves a
-    // subprocess spawn + MCP handshake + forward-proxy bind on every run.
+    // uses a static API key AND has no egress proxy. The sidecar's purposes
+    // are integration MCP multiplexing (Phase 1.4), LLM passthrough for
+    // OAuth, AND hosting the forward proxy that masks the agent's outbound
+    // IP. An API-key model with no integrations and no proxy needs none of
+    // these. When a proxy IS configured, the sidecar's forward-proxy bind
+    // is the ONLY path that routes agent egress through it — skipping the
+    // sidecar would silently drop the proxy and leak the host IP.
     const hasIntegrations = (plan.integrations?.length ?? 0) > 0;
-    const skipSidecar = !hasIntegrations && !!llmConfig.apiKey && !isOauthCredential;
+    const skipSidecar =
+      !hasIntegrations && !!llmConfig.apiKey && !isOauthCredential && !plan.proxyUrl;
 
     let sidecarLlm: LlmProxyConfig | undefined;
     if (isOauthCredential) {
