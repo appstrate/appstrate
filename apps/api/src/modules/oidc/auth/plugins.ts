@@ -209,6 +209,11 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
     oauthProvider({
       loginPage: "/api/oauth/login",
       consentPage: "/api/oauth/consent",
+      // basePath is `/api/auth` (not `/`), so BA advises ensuring the
+      // discovery doc at `/.well-known/oauth-authorization-server/api/auth`
+      // is served — which this plugin itself serves. The warning is purely
+      // advisory for the non-root basePath; clear it via the documented flag.
+      silenceWarnings: { oauthAuthServerConfig: true },
       // Snapshot the full vocabulary at plugin construction time —
       // `betterAuthPlugins()` runs after `loadModules()` populates the
       // module registry, so module-contributed scopes are included in
