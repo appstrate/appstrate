@@ -8,10 +8,6 @@ on:
     # local checks.
     - cron: "0 6 * * 1"
   workflow_dispatch: {}
-  # TEMP: dispatch isn't available off the default branch — push trigger lets us
-  # exercise the monitor on this feature branch. Revert before merge.
-  push:
-    branches: [feat/integration-conformance-harness]
 
 permissions:
   contents: read
