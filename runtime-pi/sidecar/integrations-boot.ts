@@ -857,6 +857,49 @@ export function pushUnavailableToolBreadcrumb(
 }
 
 /**
+ * Breadcrumb for the serverless (`sourceKind: "none"`) branch, where the
+ * in-process `api_call` server is the integration's entire surface.
+ *
+ * When `toolCount === 0` the integration is effectively non-functional: the
+ * config (`integrations_configuration[id].tools`) didn't list `"api_call"`, so
+ * the resolver filtered everything and nothing is callable. The agent silently
+ * falls back to read/bash and the run looks healthy until it fails its job.
+ * Emit a `warn` with an actionable message instead of a success-toned "ready"
+ * breadcrumb, so the misconfiguration is self-diagnosing. Keep the
+ * `ready (N tools)` wording only for `N > 0`.
+ */
+export function pushServerlessReadyBreadcrumb(
+  spec: IntegrationSpawnSpec,
+  toolCount: number,
+  durationMs: number,
+  breadcrumbs: IntegrationBootBreadcrumb[],
+): void {
+  if (toolCount === 0) {
+    breadcrumbs.push({
+      message: `${spec.integrationId}: api_call exposed 0 tools — nothing callable. Check integrations_configuration["${spec.integrationId}"].tools (a serverless integration must list "api_call").`,
+      level: "warn",
+      data: {
+        integrationId: spec.integrationId,
+        kind: "serverless",
+        durationMs,
+        toolCount: 0,
+      },
+    });
+    return;
+  }
+  breadcrumbs.push({
+    message: `${spec.integrationId}: api_call ready (${durationMs}ms, ${toolCount} tool${toolCount === 1 ? "" : "s"})`,
+    level: "info",
+    data: {
+      integrationId: spec.integrationId,
+      kind: "serverless",
+      durationMs,
+      toolCount,
+    },
+  });
+}
+
+/**
  * Spawn each integration sequentially, register the surviving ones on a
  * shared {@link McpHost}, and return the materialised tool list. Per-integration
  * failures are captured in `result.failed` so a single broken integration
@@ -1113,16 +1156,7 @@ export async function bootIntegrations(
           // serverless integration — no `source.server`, so `vendored` is N/A.
         });
         const ms = Math.round(performance.now() - specStart);
-        breadcrumbs.push({
-          message: `${spec.integrationId}: api_call ready (${ms}ms, ${apiCallToolCount} tool${apiCallToolCount === 1 ? "" : "s"})`,
-          level: "info",
-          data: {
-            integrationId: spec.integrationId,
-            kind: "serverless",
-            durationMs: ms,
-            toolCount: apiCallToolCount,
-          },
-        });
+        pushServerlessReadyBreadcrumb(spec, apiCallToolCount, ms, breadcrumbs);
         continue;
       }
       const server = spec.manifest.server;
