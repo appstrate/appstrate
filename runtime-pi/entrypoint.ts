@@ -289,12 +289,14 @@ async function signedGetWithRetry(url: string): Promise<Response> {
   let lastError = "unknown error";
   for (let attempt = 1; attempt <= PROVISION_MAX_ATTEMPTS; attempt++) {
     try {
-      const headers = sign({
-        msgId: randomUUID(),
-        timestampSec: Math.floor(Date.now() / 1000),
-        body: "",
-        secret: env.sink.secret,
-      });
+      const headers: Record<string, string> = {
+        ...sign({
+          msgId: randomUUID(),
+          timestampSec: Math.floor(Date.now() / 1000),
+          body: "",
+          secret: env.sink.secret,
+        }),
+      };
       const res = await fetch(url, { method: "GET", headers });
       // Success, or a deterministic 4xx (404 missing, 401 bad signature, 410
       // closed/expired sink) that retrying cannot fix — hand back either way.
@@ -484,10 +486,13 @@ await progress(`runtime starting (${Math.round(performance.now())}ms cold start)
 
 // Self-provision the workspace before anything reads it: the AFPS bundle
 // (fatal on any miss — see provisionWorkspace) and the input documents
-// (streamed per-file to `documents/<name>`; absent is fine). Sequential — the
-// document set is small and neither blocks on the other.
-await provisionWorkspace();
-await provisionDocuments();
+// (streamed per-file to `documents/<name>`; absent is fine). Run in parallel —
+// they write disjoint paths (bundle → workspace root, documents →
+// `documents/`), share no state, and neither is read until after both resolve,
+// so overlapping their fetches shaves cold-start latency. On failure either
+// one calls `die()` (process.exit), so the first fault wins and the other is
+// abandoned with the process.
+await Promise.all([provisionWorkspace(), provisionDocuments()]);
 
 const packagePath = path.join(WORKSPACE, "agent-package.afps");
 const hasPackage = await exists(packagePath);
