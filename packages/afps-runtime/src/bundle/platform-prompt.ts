@@ -375,7 +375,7 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
 
   // --- Memory ---
   // Data-only section: dumps the agent's pinned memory list (working
-  // set, ADR-012 tier 1). The archive tier (ADR-013) is reachable via
+  // set, tier 1). The archive tier is reachable via
   // tool calls — those instructions live in each tool's MCP descriptor
   // `description` (`note` for writes, runtime-injected `recall_memory`
   // for searches, surfaced via `tools/list`). Section omitted when no

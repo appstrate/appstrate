@@ -258,7 +258,7 @@ export const runLogs = pgTable(
 /**
  * Unified agent persistence — one row per piece of cross-run state the agent
  * chooses to keep, regardless of its shape. The shape collapses two
- * orthogonal dimensions instead of an enum (ADR-012):
+ * orthogonal dimensions instead of an enum:
  *
  * - `key` — nullable string. When set, the row is upsert-by-key (single
  *   slot per `(package, app, actor, key)`); when null, the row is append-
@@ -275,9 +275,6 @@ export const runLogs = pgTable(
  *
  * Actor columns mirror the `runs` convention: `actor_type ∈
  * {'user', 'end_user', 'shared'}`, `actor_id` NULL iff `actor_type='shared'`.
- *
- * See `docs/adr/ADR-011-checkpoint-unification.md` and
- * `docs/adr/ADR-012-memory-as-tool.md`.
  */
 export const packagePersistence = pgTable(
   "package_persistence",

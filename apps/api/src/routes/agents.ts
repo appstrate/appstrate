@@ -205,7 +205,7 @@ export function createAgentsRouter() {
   );
 
   // ─────────────────────────────────────────────────────────────────
-  // Unified persistence (checkpoints + memories) — ADR-011
+  // Unified persistence (checkpoints + memories)
   // ─────────────────────────────────────────────────────────────────
 
   // GET /api/agents/:scope/:name/persistence?kind=&actor_type=&actor_id=

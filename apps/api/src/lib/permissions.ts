@@ -108,7 +108,7 @@ const OWNER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "schedules:read",
   "schedules:write",
   "schedules:delete",
-  // Persistence (unified checkpoints + memories — see ADR-011)
+  // Persistence (unified checkpoints + memories)
   "persistence:read",
   "persistence:delete",
   // Infrastructure

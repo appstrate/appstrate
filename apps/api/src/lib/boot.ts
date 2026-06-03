@@ -133,7 +133,7 @@ export async function boot(): Promise<void> {
   // the internet lets any client spoof its source IP, which in turn
   // bypasses every per-IP rate limit in the platform (notably the
   // OIDC `/oauth2/token` limiter and the CLI device-flow limiters
-  // added in ADR-006). We can't detect a real proxy with certainty,
+  // added recently). We can't detect a real proxy with certainty,
   // but we can flag the most common misconfigurations.
   warnOnTrustProxyMisconfig(env.TRUST_PROXY, env.NODE_ENV);
 

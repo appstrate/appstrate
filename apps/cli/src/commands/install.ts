@@ -771,7 +771,7 @@ async function installTier0(
   }
 
   // Source. Use the CLI's own version as the tag — lockstep-versioned
-  // per ADR-006, so the cloned source matches exactly what this binary
+  // so the cloned source matches exactly what this binary
   // was built against. `CLI_VERSION` is inlined at bundle time via the
   // static package.json import in `lib/version.ts`; falling back to
   // `undefined` when the value is a dev placeholder lets `main` be

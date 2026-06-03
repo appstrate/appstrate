@@ -104,7 +104,7 @@ export async function buildRunContext(params: {
         ? getLatestVersionInfo(agent.id).catch(() => null)
         : null,
     // Only pinned memories enter the prompt; archive memories load via the
-    // `recall_memory` tool on demand. See ADR-012.
+    // `recall_memory` tool on demand.
     listPinnedMemories(agent.id, applicationId, persistenceScope),
     // Named pinned slots (any non-null key, EXCEPT "checkpoint" which is
     // already loaded above as `previousCheckpoint`). Renders in the prompt's

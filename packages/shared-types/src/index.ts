@@ -480,7 +480,7 @@ export interface AgentMemoryItem {
   /**
    * When true, this memory is rendered into the system prompt on every
    * run (working set). When false, it lives in the archive and is only
-   * reachable via the `recall_memory` tool. See ADR-012.
+   * reachable via the `recall_memory` tool.
    */
   pinned?: boolean;
   createdAt: string | null;
@@ -491,7 +491,7 @@ export interface AgentPinnedSlotItem {
   /**
    * Slot key (Letta-style label). The reserved key `"checkpoint"` is the
    * carry-over slot snapshotted onto runs.checkpoint; other keys (`"persona"`, `"goals"`, …) are
-   * first-class named pinned blocks. See ADR-013.
+   * first-class named pinned blocks.
    */
   key: string;
   /** Slot content — agent-defined JSON or string. */

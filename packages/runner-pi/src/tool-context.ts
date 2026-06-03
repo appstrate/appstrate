@@ -13,7 +13,7 @@
  *
  * Outbound credentialed calls are NOT part of this surface: tools issue them
  * through the namespaced `{ns}__api_call` MCP tool the LLM also sees, so the
- * credential stays injected server-side by the sidecar (ADR-003 invariant)
+ * credential stays injected server-side by the sidecar (a core invariant)
  * and there is a single call path rather than a parallel 4th-arg one.
  *
  * The runtime that materialises this context lives in

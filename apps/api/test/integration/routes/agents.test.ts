@@ -387,7 +387,7 @@ describe("Agents API", () => {
     });
   });
 
-  // ─── Persistence Routes (ADR-011 + ADR-013 — pinned slots + memories) ─
+  // ─── Persistence Routes (pinned slots + memories) ─
 
   describe("GET /api/agents/:scope/:name/persistence", () => {
     it("returns pinned slots as an array (admin sees every actor's row)", async () => {

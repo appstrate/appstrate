@@ -2,7 +2,7 @@
 // Copyright 2026 Appstrate
 
 /**
- * AFPS bundle signing — Ed25519 detached signatures per ADR-009
+ * AFPS bundle signing — Ed25519 detached signatures
  * Phase v1. Sigstore keyless (Phase v2) is stubbed via
  * {@link verifySigstoreSignature} so Phase 11 can swap the
  * implementation without a breaking API change.
@@ -303,7 +303,7 @@ export function readBundleSignature(bundle: Bundle): BundleSignature | null {
 }
 
 /**
- * Sigstore keyless verification stub (ADR-009 Phase v2).
+ * Sigstore keyless verification stub (Phase v2).
  *
  * The runtime reserves this API so Phase 11 can wire in `cosign`-
  * compatible verification (Fulcio cert chain + Rekor inclusion proof)

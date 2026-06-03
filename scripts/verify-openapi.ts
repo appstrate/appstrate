@@ -69,7 +69,7 @@ const expectedEndpoints = [
   // Agents (runtime — agents.ts + user-agents.ts junction endpoints)
   "GET /api/agents",
   "PUT /api/agents/{scope}/{name}/config",
-  // Unified persistence (ADR-011 + ADR-013) — pinned slots + memories
+  // Unified persistence — pinned slots + memories
   "GET /api/agents/{scope}/{name}/persistence",
   "DELETE /api/agents/{scope}/{name}/persistence",
   "DELETE /api/agents/{scope}/{name}/persistence/memories/{id}",

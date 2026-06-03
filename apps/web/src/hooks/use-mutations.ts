@@ -183,7 +183,7 @@ export function useDeleteAgent() {
   });
 }
 
-// --- Memory mutations (unified persistence — ADR-011) ---
+// --- Memory mutations (unified persistence) ---
 
 export function useDeleteMemory(packageId: string) {
   const qc = useQueryClient();

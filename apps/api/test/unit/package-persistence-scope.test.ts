@@ -2,7 +2,7 @@
 
 /**
  * Pure-logic tests for the actor → persistence-scope helper introduced
- * by ADR-011 (unified checkpoint + memory). These exercise the boundary
+ * by the unified checkpoint + memory model. These exercise the boundary
  * translation only — DB-touching reads/writes are integration-level and
  * live under `apps/api/test/integration`.
  */

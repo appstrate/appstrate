@@ -17,9 +17,6 @@
  * wire format and the in-process `Actor` type (`@appstrate/connect`).
  * The `PersistenceScope` here narrows `Actor` by adding a `'shared'`
  * variant for app-wide rows; non-shared scopes pass through unchanged.
- *
- * See `docs/adr/ADR-011-checkpoint-unification.md` and
- * `docs/adr/ADR-012-memory-as-tool.md`.
  */
 
 import { and, asc, count, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
@@ -395,8 +392,8 @@ export async function listPinnedMemories(
  *
  * Returns archive memories (`pinned=false`) visible to the scope, optionally
  * narrowed by an ILIKE substring match on text content. This is intentionally
- * a flat substring search, not vector retrieval — see ADR-012 for why we
- * draw the line here. JSON content (non-string) is excluded from `query`
+ * a flat substring search, not vector retrieval — by design for now,
+ * we draw the line here. JSON content (non-string) is excluded from `query`
  * filtering since the index isn't text-typed; pass no query to get all
  * archive rows.
  *

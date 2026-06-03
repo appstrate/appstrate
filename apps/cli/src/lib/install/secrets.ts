@@ -179,7 +179,7 @@ export function generateEnvForTier(
   }
 
   // Tiers 1/2/3: pin the image tag to the CLI's own version (lockstep
-  // per ADR-006) so `docker compose pull` can't silently drag in a
+  // versioned) so `docker compose pull` can't silently drag in a
   // newer or older appstrate/appstrate-pi/appstrate-sidecar image than
   // the CLI was built to orchestrate. Without this, compose falls back
   // to `${APPSTRATE_VERSION:-latest}` — and `latest` may not exist on

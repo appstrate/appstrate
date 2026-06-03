@@ -79,7 +79,7 @@ export const AFPS_SCHEMA_URLS: Record<PackageType, string> = {
 };
 
 // ── AFPS common-field shapes (§3.1) ──
-// TODO(audit 1.15): Upstream these shapes to `@afps-spec/schema`. The canonical
+// TODO: Upstream these shapes to `@afps-spec/schema`. The canonical
 // `commonFields` table (authorObject / repositoryObject / iconObject /
 // compatibilityObject) lives inside `createSchemas` as a closure-private const;
 // promoting them to named exports would let consumers like appstrate-core import
