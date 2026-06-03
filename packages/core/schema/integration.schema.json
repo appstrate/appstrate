@@ -821,12 +821,12 @@
         "type": "string"
       }
     },
+    "allow_undeclared_tools": {
+      "type": "boolean"
+    },
     "setup_guide": {
       "type": "object",
       "properties": {
-        "callback_url_hint": {
-          "type": "string"
-        },
         "steps": {
           "type": "array",
           "items": {

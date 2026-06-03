@@ -226,6 +226,10 @@ const agentManifestObjectSchema = afpsAgentManifestObjectSchema.extend({
   // maps + §4.4 per-integration config, including the rule that every
   // `integrations_configuration` key matches a declared integration dep).
   // We do not override those fields here to avoid drifting from the spec.
+  // The §4.4 `tools` wildcard (`string[] | "*"`, issue #547) is supported by
+  // the canonical schema as of @afps-spec/schema@0.5.0; no local widening is
+  // needed — the inherited shape already matches the Appstrate runtime
+  // contract (`dependencies.ts` `ToolsWildcard` / `isToolsWildcard`).
   // First-party runtime tools enabled for this agent — all opt-in, none
   // auto-injected (`output` included). `output` is required to be present
   // only when an output schema is declared (enforced by the superRefine

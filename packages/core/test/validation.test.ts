@@ -219,6 +219,53 @@ describe("validateManifest", () => {
     expect(result.valid).toBe(true);
   });
 
+  it("accepts the tools wildcard '*' in integrations_configuration (issue #547)", () => {
+    const result = validateManifest(
+      validAgentManifest({
+        dependencies: {
+          integrations: { "@test/gmail-mcp": "^1.0.0" },
+        },
+        integrations_configuration: {
+          "@test/gmail-mcp": { tools: "*", auth_key: "primary" },
+        },
+      }),
+    );
+    expect(result.valid).toBe(true);
+    const cfg = (
+      result.manifest as { integrations_configuration?: Record<string, { tools?: unknown }> }
+    ).integrations_configuration;
+    expect(cfg?.["@test/gmail-mcp"]?.tools).toBe("*");
+  });
+
+  it("accepts an explicit tools array in integrations_configuration", () => {
+    const result = validateManifest(
+      validAgentManifest({
+        dependencies: {
+          integrations: { "@test/gmail-mcp": "^1.0.0" },
+        },
+        integrations_configuration: {
+          "@test/gmail-mcp": { tools: ["send_email", "list_threads"] },
+        },
+      }),
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects a non-wildcard string for integrations_configuration tools", () => {
+    const result = validateManifest(
+      validAgentManifest({
+        dependencies: {
+          integrations: { "@test/gmail-mcp": "^1.0.0" },
+        },
+        integrations_configuration: {
+          "@test/gmail-mcp": { tools: "all" as unknown as string[] },
+        },
+      }),
+    );
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.includes("tools"))).toBe(true);
+  });
+
   it("accepts skill + mcp_server dependency values as bare semver strings (§4.1)", () => {
     const result = validateManifest(
       validAgentManifest({

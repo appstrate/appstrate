@@ -149,13 +149,29 @@ describe("integrationManifestSchema — oauth2 discovery + manual", () => {
     expect(integrationManifestSchema.safeParse(m).success).toBe(true);
   });
 
-  it("rejects oauth2 with neither issuer nor endpoints", () => {
-    const m = baseManifest();
+  it("rejects oauth2 with neither issuer nor endpoints on a non-remote source", () => {
+    // §7.3 issuer-or-endpoints rule applies to non-remote sources. Use a local
+    // source so the rule is in force (a remote source waives it — see below).
+    const m = baseManifest({
+      source: { kind: "local", server: { name: "@official/gmail-server", version: "^1.0.0" } },
+    });
     const auths = m.auths as Record<string, Record<string, unknown>>;
     delete auths.oauth!.issuer;
     delete auths.oauth!.authorization_endpoint;
     delete auths.oauth!.token_endpoint;
     expect(integrationManifestSchema.safeParse(m).success).toBe(false);
+  });
+
+  it("accepts oauth2 with neither issuer nor endpoints on a remote source (§7.3 waiver, 0.6.0)", () => {
+    // A remote MCP server discovers its authorization server at connect time
+    // from `source.remote.url` (RFC 9728 → RFC 8414), so its oauth2 auth MAY
+    // omit both issuer and explicit endpoints. baseManifest() is a remote source.
+    const m = baseManifest();
+    const auths = m.auths as Record<string, Record<string, unknown>>;
+    delete auths.oauth!.issuer;
+    delete auths.oauth!.authorization_endpoint;
+    delete auths.oauth!.token_endpoint;
+    expect(integrationManifestSchema.safeParse(m).success).toBe(true);
   });
 
   it("accepts RFC 8414 fields: resource, code_challenge_methods_supported, authorization_params", () => {
