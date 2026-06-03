@@ -427,18 +427,22 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
 
   // Drop the run's workspace provisioning archive (the AFPS bundle + input
   // docs the agent fetched at startup via GET /api/runs/:runId/workspace).
-  // This is the authoritative cleanup point: finalizeRun is the single
-  // CAS-guarded convergence for every termination path — natural finalize,
-  // watchdog stall sweep, and container-exit synthesis — so the object is
-  // dropped exactly once even when the launcher's own teardown never runs
-  // (e.g. the API replica that launched the run crashed; a later watchdog
-  // tick on any replica still routes through here). The launcher also
-  // deletes on its happy-path teardown; both are best-effort and idempotent
-  // (deleteRunWorkspace swallows + logs its own failures, and deleting a
-  // missing object is a no-op). Storage has no list/TTL primitive, so this
-  // deterministic by-runId delete is what prevents orphaned archives — not a
-  // time-based reaper.
-  await deleteRunWorkspace(run.id);
+  // This is the crash-safety net for the launcher's own happy-path teardown:
+  // finalizeRun is the single CAS-guarded convergence for every termination
+  // path — natural finalize, watchdog stall sweep, and container-exit
+  // synthesis — so the object is dropped even when the launcher teardown
+  // never runs (e.g. the API replica that launched the run crashed; a later
+  // watchdog tick on any replica still routes through here). Storage exposes
+  // no list/TTL primitive, so this deterministic by-runId delete is what
+  // prevents orphaned archives — not a time-based reaper.
+  //
+  // Fire-and-forget: cleanup must NOT sit on the critical path between the
+  // CAS close and the terminal status broadcast below — a slow/unreachable
+  // object store must never delay the run's terminal signal or the runner's
+  // finalize HTTP response. deleteRunWorkspace swallows + logs its own
+  // failures, and deleting a missing object (remote-origin runs never
+  // provision one) is a harmless idempotent no-op.
+  void deleteRunWorkspace(run.id);
 
   // 7. Side effects — only the CAS winner reaches here, so memories and
   //    log rows are written exactly once.
