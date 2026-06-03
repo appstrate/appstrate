@@ -116,7 +116,7 @@ describe("createIntegrationCredentialsSource", () => {
     });
 
     expect(source.current().auths[0]!.fields.apiKey).toBe("tok-1");
-    const ok = await source.refreshOnUnauthorized!("primary");
+    const ok = await source.refreshOnUnauthorized("primary");
     expect(ok).toBe(true);
     expect(calls.length).toBe(1);
     expect(calls[0]!.method).toBe("POST");
@@ -143,9 +143,9 @@ describe("createIntegrationCredentialsSource", () => {
       minRefreshIntervalMs: 60_000,
     });
 
-    expect(await source.refreshOnUnauthorized!("primary")).toBe(false);
+    expect(await source.refreshOnUnauthorized("primary")).toBe(false);
     // Cooldown should suppress the second attempt without firing fetch.
-    expect(await source.refreshOnUnauthorized!("primary")).toBe(false);
+    expect(await source.refreshOnUnauthorized("primary")).toBe(false);
     expect(calls).toBe(1);
   });
 
@@ -161,7 +161,7 @@ describe("createIntegrationCredentialsSource", () => {
       initialPayload: initial,
       fetchFn,
     });
-    expect(await source.refreshOnUnauthorized!("primary")).toBe(false);
+    expect(await source.refreshOnUnauthorized("primary")).toBe(false);
     // Payload unchanged.
     expect(source.current().auths[0]!.fields.apiKey).toBe("tok-1");
   });
@@ -177,7 +177,7 @@ describe("createIntegrationCredentialsSource", () => {
       initialPayload: initial,
       fetchFn,
     });
-    expect(await source.refreshOnUnauthorized!("primary")).toBe(false);
+    expect(await source.refreshOnUnauthorized("primary")).toBe(false);
   });
 
   it("coalesces concurrent refresh calls for the same authKey", async () => {
@@ -201,9 +201,9 @@ describe("createIntegrationCredentialsSource", () => {
     });
 
     // Three concurrent refresh calls — should fire ONE network call.
-    const p1 = source.refreshOnUnauthorized!("primary");
-    const p2 = source.refreshOnUnauthorized!("primary");
-    const p3 = source.refreshOnUnauthorized!("primary");
+    const p1 = source.refreshOnUnauthorized("primary");
+    const p2 = source.refreshOnUnauthorized("primary");
+    const p3 = source.refreshOnUnauthorized("primary");
     expect(calls).toBe(1);
     resolvePending!(new Response(JSON.stringify(makeWireJson("tok-2")), { status: 200 }));
     expect(await p1).toBe(true);
@@ -230,8 +230,8 @@ describe("createIntegrationCredentialsSource", () => {
       minRefreshIntervalMs: 0,
     });
 
-    expect(await source.refreshOnUnauthorized!("primary")).toBe(false);
-    expect(await source.refreshOnUnauthorized!("primary")).toBe(false);
+    expect(await source.refreshOnUnauthorized("primary")).toBe(false);
+    expect(await source.refreshOnUnauthorized("primary")).toBe(false);
     expect(calls).toBe(2);
   });
 });
@@ -369,7 +369,7 @@ describe("createIntegrationCredentialsSource — connect.tool re-login (P3)", ()
       [401],
     );
 
-    const ok = await source.refreshOnUnauthorized!("primary");
+    const ok = await source.refreshOnUnauthorized("primary");
     expect(ok).toBe(true);
     expect(handlerRan).toBe(1);
     // The platform refresh endpoint must NOT have been called.
@@ -392,7 +392,7 @@ describe("createIntegrationCredentialsSource — connect.tool re-login (P3)", ()
     // Handler registered for a DIFFERENT authKey — primary still uses POST.
     source.setReloginHandler("other", async () => true, [401]);
 
-    expect(await source.refreshOnUnauthorized!("primary")).toBe(true);
+    expect(await source.refreshOnUnauthorized("primary")).toBe(true);
     expect(postCalls).toBe(1);
     expect(source.current().auths[0]!.fields.apiKey).toBe("tok-2");
   });
@@ -422,8 +422,8 @@ describe("createIntegrationCredentialsSource — connect.tool re-login (P3)", ()
     );
 
     // In-flight dedup: two concurrent calls run the handler once.
-    const p1 = source.refreshOnUnauthorized!("primary");
-    const p2 = source.refreshOnUnauthorized!("primary");
+    const p1 = source.refreshOnUnauthorized("primary");
+    const p2 = source.refreshOnUnauthorized("primary");
     expect(handlerRan).toBe(1);
     resolvePending!(true);
     expect(await p1).toBe(true);
@@ -431,7 +431,7 @@ describe("createIntegrationCredentialsSource — connect.tool re-login (P3)", ()
 
     // Cooldown: a subsequent call within the interval is suppressed without
     // re-running the handler.
-    expect(await source.refreshOnUnauthorized!("primary")).toBe(false);
+    expect(await source.refreshOnUnauthorized("primary")).toBe(false);
     expect(handlerRan).toBe(1);
   });
 
@@ -453,9 +453,9 @@ describe("createIntegrationCredentialsSource — connect.tool re-login (P3)", ()
       },
       [401],
     );
-    expect(await source.refreshOnUnauthorized!("primary")).toBe(false);
+    expect(await source.refreshOnUnauthorized("primary")).toBe(false);
     // Cooldown armed → second attempt suppressed.
-    expect(await source.refreshOnUnauthorized!("primary")).toBe(false);
+    expect(await source.refreshOnUnauthorized("primary")).toBe(false);
     expect(handlerRan).toBe(1);
   });
 });
