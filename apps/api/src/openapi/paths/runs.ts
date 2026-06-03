@@ -955,6 +955,36 @@ export const runsPaths = {
       },
     },
   },
+  "/api/runs/{runId}/workspace": {
+    get: {
+      operationId: "fetchRunWorkspace",
+      tags: ["Runs"],
+      summary: "Fetch the run workspace archive (HMAC)",
+      description:
+        "Fetched by the agent runtime at startup to self-provision its `/workspace`. Returns a deterministic ZIP containing the AFPS bundle (`agent-package.afps`) plus any input documents (`documents/<name>`). The agent extracts it locally, so workspace delivery no longer depends on a shared run volume's driver (a tmpfs-backed `local` volume is not shared between the seed helper and the agent — see issue #549). Same Standard Webhooks HMAC auth as the event routes: the signature covers the empty GET body. Returns 404 when no workspace was provisioned (agent with no package and no input files), which the runtime treats as an empty workspace.",
+      parameters: [
+        { name: "runId", in: "path", required: true, schema: { type: "string" } },
+        { name: "webhook-id", in: "header", required: true, schema: { type: "string" } },
+        { name: "webhook-timestamp", in: "header", required: true, schema: { type: "string" } },
+        { name: "webhook-signature", in: "header", required: true, schema: { type: "string" } },
+      ],
+      security: [],
+      responses: {
+        "200": {
+          description: "Workspace archive (ZIP)",
+          content: {
+            "application/zip": {
+              schema: { type: "string", format: "binary" },
+            },
+          },
+        },
+        "401": { description: "Signature verification failed" },
+        "404": { description: "run_not_found | no workspace provisioned" },
+        "410": { description: "run_sink_closed | run_sink_expired" },
+        "429": { $ref: "#/components/responses/RateLimited" },
+      },
+    },
+  },
   "/api/runs/{runId}/sink/extend": {
     patch: {
       operationId: "extendRunSink",

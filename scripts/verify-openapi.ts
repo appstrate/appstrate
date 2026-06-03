@@ -255,6 +255,7 @@ const expectedEndpoints = [
   "POST /api/runs/{runId}/events",
   "POST /api/runs/{runId}/events/finalize",
   "POST /api/runs/{runId}/events/heartbeat",
+  "GET /api/runs/{runId}/workspace",
   "PATCH /api/runs/{runId}/sink/extend",
 
   // Packages

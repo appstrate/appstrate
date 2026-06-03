@@ -291,9 +291,11 @@ export function skipAuth(path: string, publicPaths: Set<string>, headers?: Heade
   if (path === "/api/integrations/callback") return true; // Integration OAuth redirect — no session
   if (path === "/api/uploads/_content") return true; // FS direct-upload sink — auth via HMAC token
   if (path === "/api/docs" || path === "/api/openapi.json") return true;
-  // Unified-runner event ingestion: `/api/runs/:runId/events` and
-  // `/api/runs/:runId/events/finalize` authenticate via Standard Webhooks
-  // HMAC signature at the route layer — not via JWT / API key / cookie.
+  // Unified-runner run-scoped routes: event ingestion
+  // (`/api/runs/:runId/events[/finalize|/heartbeat]`) and the agent
+  // workspace fetch (`/api/runs/:runId/workspace`). All authenticate via a
+  // Standard Webhooks HMAC signature at the route layer — not via JWT / API
+  // key / cookie.
   if (REMOTE_RUN_EVENT_PATH_PATTERN.test(path)) return true;
   if (publicPaths.has(path)) return true; // module-contributed public paths
   // OAuth model-provider pair-redeem is bearer-only: `Authorization: Bearer appp_…`
@@ -309,7 +311,8 @@ export function skipAuth(path: string, publicPaths: Set<string>, headers?: Heade
   return false;
 }
 
-const REMOTE_RUN_EVENT_PATH_PATTERN = /^\/api\/runs\/[^/]+\/events(\/finalize|\/heartbeat)?$/;
+const REMOTE_RUN_EVENT_PATH_PATTERN =
+  /^\/api\/runs\/[^/]+\/(events(\/finalize|\/heartbeat)?|workspace)$/;
 
 /**
  * Device-flow + CLI-token content-type shim.

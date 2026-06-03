@@ -34,6 +34,7 @@
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { randomUUID } from "node:crypto";
 import type { ExtensionFactory } from "@mariozechner/pi-coding-agent";
 import type { Api, Model } from "@mariozechner/pi-ai";
 import {
@@ -56,9 +57,12 @@ import {
   readBundleFromFile,
   recordIntegrity,
   serializeRecord,
+  parsePackageIdentity,
   type Bundle,
   type PackageIdentity,
 } from "@appstrate/afps-runtime/bundle";
+import { sign } from "@appstrate/afps-runtime/events";
+import { unzipArtifact } from "@appstrate/core/zip";
 import { HttpSink, attachStdoutBridge } from "@appstrate/afps-runtime/sinks";
 import type { ExecutionContext, RunEvent } from "@appstrate/afps-runtime/types";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
@@ -263,6 +267,77 @@ const exists = (p: string) =>
 
 const WORKSPACE = env.workspaceDir;
 
+/**
+ * Self-provision the workspace by fetching its archive from the platform and
+ * extracting it into {@link WORKSPACE}.
+ *
+ * Replaces the old seed-into-the-run-volume delivery, whose correctness
+ * depended on the run volume's driver: a tmpfs-backed `local` volume is not
+ * shared between the short-lived seed helper and the agent container, so the
+ * seeded AFPS bundle silently vanished and skills never materialised
+ * (issue #549). Fetching makes the workspace volume pure agent-local scratch,
+ * so its backing (disk or tmpfs) is once again a free performance choice.
+ *
+ * Auth mirrors the event sink: a Standard Webhooks HMAC over the (empty) GET
+ * body keyed on the run secret. Outbound traffic reaches the platform exactly
+ * as the sink does — through the sidecar forward proxy when one is attached,
+ * directly over the egress network when not — so no extra wiring is needed.
+ *
+ * A `404` means no workspace was provisioned (an agent with no package and no
+ * input documents): a legitimately empty workspace, not an error. Any other
+ * failure that survives the retry budget is fatal — the run cannot proceed
+ * without its package, and failing loud here is what prevents the original
+ * silent-degradation regression from ever recurring.
+ */
+async function provisionWorkspace(): Promise<void> {
+  const url = env.sink.url.replace(/\/events$/, "/workspace");
+  // Generous budget: this is the first blocking network call, and with a
+  // sidecar the forward proxy may still be binding. 6 attempts with
+  // exponential backoff span ~8 s (0.5+1+2+2+2), well inside the boot gate.
+  const MAX_ATTEMPTS = 6;
+  let lastError = "unknown error";
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const msgId = randomUUID();
+      const timestampSec = Math.floor(Date.now() / 1000);
+      const headers: Record<string, string> = {
+        ...sign({ msgId, timestampSec, body: "", secret: env.sink.secret }),
+      };
+      const res = await fetch(url, { method: "GET", headers });
+
+      if (res.status === 404) return; // empty workspace — nothing to extract
+
+      if (res.ok) {
+        const archive = new Uint8Array(await res.arrayBuffer());
+        // unzipArtifact sanitises entry paths (no traversal, absolute, or
+        // backslash paths), so extraction stays inside WORKSPACE.
+        const files = unzipArtifact(archive);
+        await Promise.all(
+          Object.entries(files).map(async ([name, content]) => {
+            const dest = path.join(WORKSPACE, name);
+            await fs.mkdir(path.dirname(dest), { recursive: true });
+            await fs.writeFile(dest, content);
+          }),
+        );
+        return;
+      }
+
+      lastError = `HTTP ${res.status}`;
+      // 4xx other than 429 are deterministic (bad signature, closed/expired
+      // sink) — retrying cannot help, so bail to the fatal path immediately.
+      if (res.status < 500 && res.status !== 429) break;
+    } catch (err) {
+      lastError = getErrorMessage(err);
+    }
+    if (attempt < MAX_ATTEMPTS) {
+      await new Promise((r) => setTimeout(r, Math.min(500 * 2 ** (attempt - 1), 2000)));
+    }
+  }
+
+  await die(`Failed to provision workspace from platform: ${lastError}`);
+}
+
 /** Create a minimal valid git repo via filesystem (avoids 3 subprocess spawns). */
 async function initGitWorkspace(): Promise<void> {
   const gitDir = `${WORKSPACE}/.git`;
@@ -334,6 +409,12 @@ await progress(`runtime starting (${Math.round(performance.now())}ms cold start)
   coldStartMs: Math.round(performance.now()),
 });
 
+// Fetch + extract the workspace archive (AFPS bundle + input docs) from the
+// platform before anything reads it. Fatal on hard failure (see
+// provisionWorkspace); a 404 leaves WORKSPACE empty and we fall through to the
+// no-package path below.
+await provisionWorkspace();
+
 const packagePath = path.join(WORKSPACE, "agent-package.afps");
 const hasPackage = await exists(packagePath);
 
@@ -349,6 +430,30 @@ await progress(hasPackage ? "workspace initialized · agent package read" : "wor
 if (bundle) {
   try {
     await prepareBundleForPi(bundle, { workspaceDir: WORKSPACE });
+
+    // Fail-loud safety net (issue #549): verify every skill the bundle
+    // carries actually landed under `.pi/skills/<id>`. Before agent
+    // self-provisioning, a dropped bundle degraded silently — the agent
+    // booted onto an empty workspace and only an easily-missed log line
+    // hinted at it. Now a skill that the bundle declares but that did not
+    // materialise surfaces as an `appstrate.error` breadcrumb, so the
+    // regression cannot hide again.
+    const missingSkills: string[] = [];
+    for (const [identity, pkg] of bundle.packages) {
+      if (identity === bundle.root) continue;
+      if ((pkg.manifest as { type?: unknown }).type !== "skill") continue;
+      const parsed = parsePackageIdentity(identity);
+      if (!parsed) continue;
+      if (!(await exists(path.join(WORKSPACE, ".pi", "skills", parsed.packageId)))) {
+        missingSkills.push(parsed.packageId);
+      }
+    }
+    if (missingSkills.length > 0) {
+      await emitError(
+        `Skill(s) declared by the agent did not materialise: ${missingSkills.join(", ")}`,
+        { missingSkills },
+      );
+    }
 
     // Fire-and-forget cleanup of the original AFPS; no longer needed once the
     // Pi SDK is up. (prepareBundleForPi is skills-only — no scratch dir.)

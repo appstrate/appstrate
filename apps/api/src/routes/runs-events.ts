@@ -21,10 +21,11 @@ import { z } from "zod";
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { runs } from "@appstrate/db/schema";
-import { invalidRequest } from "../lib/errors.ts";
+import { invalidRequest, notFound } from "../lib/errors.ts";
 import { rateLimitByRunId } from "../middleware/rate-limit.ts";
 import { verifyRunSignature } from "../middleware/verify-run-signature.ts";
 import { ingestRunEvent, finalizeRun } from "../services/run-event-ingestion.ts";
+import { downloadRunWorkspace } from "../services/run-workspace-storage.ts";
 import { tokenUsageSchema } from "@appstrate/core/token-usage";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
 import { getEnv } from "@appstrate/env";
@@ -230,6 +231,37 @@ export function createRunsEventsRouter() {
       .set({ lastHeartbeatAt: new Date() })
       .where(and(eq(runs.id, run.id), sql`sink_closed_at IS NULL`));
     return c.json({ ok: true });
+  });
+
+  // GET /api/runs/:runId/workspace — agent self-provisioning fetch.
+  //
+  // The agent container, at startup, fetches its workspace archive (the
+  // AFPS bundle + input documents, a deterministic ZIP) and extracts it
+  // into `/workspace`. This replaces the old seed-via-helper-volume
+  // delivery, whose correctness depended on the run volume's driver — a
+  // tmpfs-backed `local` volume is not shared between the seed helper and
+  // the agent container, so the bundle silently vanished and skills never
+  // materialised (issue #549). Same HMAC auth as the event routes: the
+  // runner proves it is the run via a signature over the (empty) GET body,
+  // so no user principal is involved.
+  router.get("/runs/:runId/workspace", eventLimiter, verifyRunSignature, async (c) => {
+    const run = c.get("run")!;
+    const archive = await downloadRunWorkspace(run.id);
+    if (!archive) {
+      // No workspace was provisioned for this run (e.g. an agent with no
+      // package and no input files). The agent treats 404 as an empty
+      // workspace and continues.
+      throw notFound(`no workspace provisioned for run ${run.id}`);
+    }
+    // Hono's body() takes an ArrayBuffer; hand it a tightly-bounded view of
+    // the Buffer's backing store (a Buffer may be a slice of a larger pool).
+    const bytes = archive.buffer.slice(
+      archive.byteOffset,
+      archive.byteOffset + archive.byteLength,
+    ) as ArrayBuffer;
+    c.header("Content-Type", "application/zip");
+    c.header("Content-Length", String(archive.length));
+    return c.body(bytes);
   });
 
   return router;
