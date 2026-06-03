@@ -102,7 +102,10 @@ export const runs = pgTable(
     // back through this column even after pins/connections are mutated.
     resolvedConnections:
       jsonb("resolved_connections").$type<
-        Record<string, { connectionId: string; source: string }>
+        Record<
+          string,
+          { connectionId: string; source: string; label?: string | null; accountId?: string | null }
+        >
       >(),
     apiKeyId: text("api_key_id").references(() => apiKeys.id, {
       onDelete: "set null",

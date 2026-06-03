@@ -762,6 +762,59 @@ describe("Runs API", () => {
       expect(body.schedule_name).toBeNull();
     });
 
+    it("GET /api/runs/:id projects resolvedConnections into connections_used (no raw connectionId)", async () => {
+      await seedAgent({ id: "@runorg/conn-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      const run = await seedRun({
+        packageId: "@runorg/conn-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "success",
+        resolvedConnections: {
+          "@acme/gmail": {
+            connectionId: "11111111-1111-1111-1111-111111111111",
+            source: "member_pin",
+            label: "Gmail Boulot",
+            accountId: "dt@tractr.net",
+          },
+        },
+      });
+
+      const res = await app.request(`/api/runs/${run.id}`, { headers: authHeaders(ctx) });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.connections_used).toEqual([
+        {
+          integration_id: "@acme/gmail",
+          label: "Gmail Boulot",
+          account_id: "dt@tractr.net",
+          source: "member_pin",
+        },
+      ]);
+      // The raw connection id is internal state and must not cross the wire.
+      expect(JSON.stringify(body.connections_used)).not.toContain(
+        "11111111-1111-1111-1111-111111111111",
+      );
+    });
+
+    it("GET /api/runs/:id returns connections_used null when no integrations resolved", async () => {
+      await seedAgent({ id: "@runorg/noconn-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      const run = await seedRun({
+        packageId: "@runorg/noconn-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "success",
+      });
+
+      const res = await app.request(`/api/runs/${run.id}`, { headers: authHeaders(ctx) });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.connections_used).toBeNull();
+    });
+
     it("GET /api/runs/:id returns endUserName for end-user runs", async () => {
       await seedAgent({ id: "@runorg/eu-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
       const eu = await seedEndUser({

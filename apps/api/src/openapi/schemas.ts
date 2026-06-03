@@ -537,6 +537,21 @@ export const schemas = {
           'Per-integration connection picks for this run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (#1).',
         additionalProperties: { type: "string" },
       },
+      connections_used: {
+        type: ["array", "null"],
+        description:
+          "Connections resolved for this run, projected from the internal snapshot for display. Null when the agent declares no integrations.",
+        items: {
+          type: "object",
+          required: ["integration_id", "label", "account_id", "source"],
+          properties: {
+            integration_id: { type: "string" },
+            label: { type: ["string", "null"] },
+            account_id: { type: ["string", "null"] },
+            source: { type: "string" },
+          },
+        },
+      },
     },
   },
   RunLog: {

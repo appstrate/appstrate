@@ -44,7 +44,7 @@ import {
 } from "../../lib/jsonb-schemas.ts";
 import { invalidRequest } from "../../lib/errors.ts";
 import type { AppScope, OrgScope } from "../../lib/scope.ts";
-import type { RunWireDto, EnrichedRun } from "@appstrate/shared-types";
+import type { RunWireDto, EnrichedRun, RunConnectionUsed } from "@appstrate/shared-types";
 
 export const RUN_HISTORY_FIELDS = ["checkpoint", "result"] as const;
 export type RunHistoryField = (typeof RUN_HISTORY_FIELDS)[number];
@@ -198,6 +198,26 @@ function runRowToWireDto(row: typeof runs.$inferSelect): RunWireDto {
   };
 }
 
+/**
+ * Project the internal `runs.resolved_connections` snapshot into the
+ * display-safe `connections_used` wire shape. Drops the raw `connectionId`
+ * (internal state) and keeps the denormalized label/account so the panel
+ * renders even after the connection is renamed or deleted. Empty/absent → null.
+ */
+function projectConnectionsUsed(
+  resolved: typeof runs.$inferSelect.resolvedConnections,
+): RunConnectionUsed[] | null {
+  if (!resolved || typeof resolved !== "object") return null;
+  const entries = Object.entries(resolved);
+  if (entries.length === 0) return null;
+  return entries.map(([integrationId, v]) => ({
+    integration_id: integrationId,
+    label: v.label ?? null,
+    account_id: v.accountId ?? null,
+    source: v.source,
+  }));
+}
+
 function mapEnrichedRun(r: EnrichedRunRow): EnrichedRun {
   return {
     ...runRowToWireDto(r.run),
@@ -205,6 +225,7 @@ function mapEnrichedRun(r: EnrichedRunRow): EnrichedRun {
     end_user_name: r.endUserName ?? null,
     api_key_name: r.apiKeyName ?? null,
     schedule_name: r.scheduleName ?? null,
+    connections_used: projectConnectionsUsed(r.run.resolvedConnections),
     package_ephemeral: r.packageEphemeral ?? false,
   };
 }
@@ -289,7 +310,10 @@ interface CreateRunParams {
    * pick. Persisted on `runs.resolved_connections` so the credentials
    * resolver (sidecar MITM refresh) can honour the pick long after kickoff.
    */
-  resolvedConnections?: Record<string, { connectionId: string; source: string }> | null;
+  resolvedConnections?: Record<
+    string,
+    { connectionId: string; source: string; label?: string | null; accountId?: string | null }
+  > | null;
   /**
    * `model_provider_credentials.id` snapshotted at run creation. Pinned
    * here so the OAuth model token resolver can reject any other

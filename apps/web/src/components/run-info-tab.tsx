@@ -45,6 +45,7 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
   const config = run.config as Record<string, unknown> | null;
   const usage = run.token_usage as TokenUsage | null;
   const metadata = run.metadata as Record<string, unknown> | null;
+  const connectionsUsed = run.connections_used ?? null;
   const hasUsage = run.cost != null || usage != null || run.model_label != null;
   const runnerOriginLabel =
     run.runOrigin === "remote" ? t("exec.infoRunnerRemote") : t("exec.infoRunnerPlatform");
@@ -157,6 +158,32 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
         </SectionCard>
       ) : (
         <EmptyState message={t("exec.emptyUsage")} icon={Coins} compact />
+      )}
+
+      {/* Connexions — connections resolved for this run, denormalized at
+          kickoff so the panel survives a connection rename/deletion. */}
+      {connectionsUsed && connectionsUsed.length > 0 && (
+        <SectionCard title={t("exec.infoConnections")}>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {connectionsUsed.map((c) => (
+              <InfoCard
+                key={c.integration_id}
+                label={c.integration_id}
+                value={
+                  <span className="flex flex-col">
+                    <span>{c.label ?? c.account_id ?? "—"}</span>
+                    {c.label && c.account_id && (
+                      <span className="text-muted-foreground text-xs">{c.account_id}</span>
+                    )}
+                    <span className="text-muted-foreground text-xs">
+                      {t(`exec.connSource.${c.source}`, { defaultValue: c.source })}
+                    </span>
+                  </span>
+                }
+              />
+            ))}
+          </div>
+        </SectionCard>
       )}
 
       {/* Metadata */}

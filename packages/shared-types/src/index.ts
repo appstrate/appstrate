@@ -97,12 +97,30 @@ export interface RunWireDto {
   connection_overrides: unknown;
 }
 
+/**
+ * One integration connection resolved for a run, projected from the internal
+ * `runs.resolved_connections` snapshot for display. The raw `connectionId` is
+ * deliberately omitted — only display-safe fields cross the wire.
+ */
+export interface RunConnectionUsed {
+  /** Integration package id (`@scope/integration`). */
+  integration_id: string;
+  /** Connection label, denormalized at kickoff. Null on pre-snapshot runs. */
+  label: string | null;
+  /** Account identifier (email, sub), denormalized at kickoff. */
+  account_id: string | null;
+  /** Resolution mechanism (`admin_pin` | `run_override` | `fallback_auto` | …). */
+  source: string;
+}
+
 /** Run with enriched display names from LEFT JOINs (dashboard user, end-user, API key, schedule). */
 export type EnrichedRun = RunWireDto & {
   user_name: string | null;
   end_user_name: string | null;
   api_key_name: string | null;
   schedule_name: string | null;
+  /** Connections resolved for this run, for the "connexions utilisées" panel. Null when the agent declares no integrations. */
+  connections_used: RunConnectionUsed[] | null;
   /** True if the run's source package is an inline/ephemeral shadow (POST /api/runs/inline). */
   package_ephemeral?: boolean;
   /** For inline runs only — snapshot of the manifest submitted at run time. Null after compaction. */

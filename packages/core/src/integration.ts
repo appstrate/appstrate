@@ -841,6 +841,14 @@ export type ConnectionResolutionSource =
 export interface ResolvedConnection {
   connectionId: string;
   source: ConnectionResolutionSource;
+  /**
+   * Connection label + account identifier, denormalized at run kickoff so the
+   * run's "connexions utilisées" panel survives the connection being renamed
+   * or deleted (same rationale as `runs.agent_scope`/`agent_name`). Absent on
+   * runs created before this snapshot existed.
+   */
+  label?: string | null;
+  accountId?: string | null;
 }
 
 /**

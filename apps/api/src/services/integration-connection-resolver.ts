@@ -414,7 +414,10 @@ function checkHealth(
     });
   }
 
-  return { kind: "resolved", value: { connectionId: conn.id, source } };
+  return {
+    kind: "resolved",
+    value: { connectionId: conn.id, source, label: conn.label, accountId: conn.accountId },
+  };
 }
 
 function errorOf(
