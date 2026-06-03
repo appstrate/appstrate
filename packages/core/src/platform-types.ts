@@ -176,11 +176,6 @@ export interface WorkloadResources {
   pidsLimit?: number;
 }
 
-export interface InjectableFile {
-  name: string;
-  content: Buffer;
-}
-
 export interface WorkloadSpec {
   runId: string;
   role: string;
@@ -269,27 +264,6 @@ export interface ContainerOrchestrator {
   removeIsolationBoundary(boundary: IsolationBoundary): Promise<void>;
 
   /**
-   * Materialize files into the run's workspace surface, BEFORE any workload
-   * starts. Each orchestrator maps it to its own surface:
-   *
-   *   - Process:    write files into the host workspace directory.
-   *   - Docker:     populate the per-run named volume via a short-lived
-   *                 helper container that mounts it (the canonical, portable
-   *                 way — archive-PUT into a mounted volume; never into a
-   *                 stopped container's shadowed rw-layer).
-   *   - Firecracker (future): loop-mount the rootfs/data image on the host,
-   *                 copy files in, unmount — all pre-boot.
-   *
-   * Decoupled from {@link createWorkload} on purpose: hot-plug-less backends
-   * (Firecracker has no virtio-fs and no block hot-plug) have no running
-   * container to inject into, so file delivery must target the workspace
-   * surface itself, not a workload. File paths are resolved relative to the
-   * workspace root (`/workspace` on container backends); sub-paths travel in
-   * the file names themselves (e.g. `documents/foo.pdf`).
-   */
-  seedWorkspace(boundary: IsolationBoundary, files: InjectableFile[]): Promise<void>;
-
-  /**
    * Create + start a sidecar container for the given run. The orchestrator
    * resolves the platform API URL from its own context (see
    * {@link resolvePlatformApiUrl}) — callers do not supply it.
@@ -301,9 +275,10 @@ export interface ContainerOrchestrator {
   ): Promise<WorkloadHandle>;
 
   /**
-   * Create a workload (agent). Does NOT start it. Workspace files are
-   * delivered separately via {@link seedWorkspace} before start — not
-   * through this spec.
+   * Create a workload (agent). Does NOT start it. The agent self-provisions
+   * its workspace at startup by fetching from the platform (the AFPS bundle
+   * and any input documents), so workspace contents are not delivered through
+   * this spec.
    */
   createWorkload(spec: WorkloadSpec, boundary: IsolationBoundary): Promise<WorkloadHandle>;
 

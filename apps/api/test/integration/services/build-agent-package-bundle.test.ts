@@ -118,6 +118,52 @@ describe("buildAgentPackage — multi-package bundle output", () => {
     expect(dec(skillPkg.files.get("SKILL.md"))).toContain("markdown");
   });
 
+  it("always emits a non-empty root package — the invariant behind the runtime's 404=fatal workspace fetch", async () => {
+    // The agent runtime treats a 404 on GET /api/runs/:runId/workspace as a
+    // FATAL provisioning fault, never a legitimately-empty workspace
+    // (runtime-pi/entrypoint.ts `provisionWorkspace`). That 404=fatal
+    // contract is sound ONLY because this chain never produces an empty
+    // upload:
+    //   buildAgentPackage → always a bundle with root manifest.json +
+    //   prompt.md → pi.ts pushes `agent-package.afps` into filesToInject →
+    //   uploadRunWorkspace gets >=1 file → the stored object always exists.
+    // If buildAgentPackage ever regressed to an empty bundle, the upload
+    // would no-op, the agent's fetch would 404, and the run would fail loud
+    // — re-opening the silent-degradation hole #549 closed. This test pins
+    // the load-bearing end of that contract: even the barest agent (no
+    // skills, no deps) yields a non-empty root package.
+    const manifest = {
+      name: "@bundlehost/bare-agent",
+      version: "0.0.1",
+      type: "agent",
+      description: "No skills, no deps",
+    };
+    await seedPackage({
+      id: "@bundlehost/bare-agent",
+      type: "agent",
+      orgId: ORG_ID,
+      draftManifest: manifest,
+    });
+
+    const result = await buildAgentPackage(
+      {
+        id: "@bundlehost/bare-agent",
+        manifest: manifest as unknown as AgentManifest,
+        prompt: "Bare.",
+        skills: [],
+        source: "local",
+      },
+      ORG_ID,
+    );
+
+    expect(result.zip.byteLength).toBeGreaterThan(0);
+    const bundle = readBundleFromBuffer(new Uint8Array(result.zip));
+    expect(bundle.packages.size).toBeGreaterThanOrEqual(1);
+    const rootPkg = bundle.packages.get(bundle.root)!;
+    expect(rootPkg.files.has("manifest.json")).toBe(true);
+    expect(rootPkg.files.has("prompt.md")).toBe(true);
+  });
+
   it("produces a deterministic bundle — two builds yield byte-identical ZIPs", async () => {
     const manifest = {
       name: "@bundlehost/solo-agent",

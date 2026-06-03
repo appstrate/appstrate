@@ -34,6 +34,7 @@
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { randomUUID } from "node:crypto";
 import type { ExtensionFactory } from "@mariozechner/pi-coding-agent";
 import type { Api, Model } from "@mariozechner/pi-ai";
 import {
@@ -56,9 +57,11 @@ import {
   readBundleFromFile,
   recordIntegrity,
   serializeRecord,
+  parsePackageIdentity,
   type Bundle,
   type PackageIdentity,
 } from "@appstrate/afps-runtime/bundle";
+import { sign } from "@appstrate/afps-runtime/events";
 import { HttpSink, attachStdoutBridge } from "@appstrate/afps-runtime/sinks";
 import type { ExecutionContext, RunEvent } from "@appstrate/afps-runtime/types";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
@@ -263,6 +266,145 @@ const exists = (p: string) =>
 
 const WORKSPACE = env.workspaceDir;
 
+// Generous retry budget: workspace provisioning is the first blocking network
+// call, and with a sidecar the forward proxy may still be binding. 6 attempts
+// with exponential backoff span ~8 s (0.5+1+2+2+2), well inside the boot gate.
+const PROVISION_MAX_ATTEMPTS = 6;
+
+/**
+ * Signed GET against a run-scoped platform route, with the provisioning retry
+ * budget. Re-signs each attempt (fresh timestamp). Returns the {@link Response}
+ * as soon as it is `ok` OR carries a deterministic non-retryable status (4xx
+ * other than 429 — the caller decides whether that status is fatal). Retries
+ * 5xx, 429, and network errors with exponential backoff; throws only when the
+ * budget is exhausted on transient failures.
+ *
+ * Auth mirrors the event sink: a Standard Webhooks HMAC over the (empty) GET
+ * body keyed on the run secret. Outbound traffic reaches the platform exactly
+ * as the sink does — through the sidecar forward proxy when attached, directly
+ * over the egress network when not — so no extra wiring is needed.
+ */
+async function signedGetWithRetry(url: string): Promise<Response> {
+  let lastError = "unknown error";
+  for (let attempt = 1; attempt <= PROVISION_MAX_ATTEMPTS; attempt++) {
+    try {
+      const headers: Record<string, string> = {
+        ...sign({
+          msgId: randomUUID(),
+          timestampSec: Math.floor(Date.now() / 1000),
+          body: "",
+          secret: env.sink.secret,
+        }),
+      };
+      const res = await fetch(url, { method: "GET", headers });
+      // Success, or a deterministic 4xx (404 missing, 401 bad signature, 410
+      // closed/expired sink) that retrying cannot fix — hand back either way.
+      if (res.ok || (res.status < 500 && res.status !== 429)) return res;
+      lastError = `HTTP ${res.status}`;
+    } catch (err) {
+      lastError = getErrorMessage(err);
+    }
+    if (attempt < PROVISION_MAX_ATTEMPTS) {
+      await new Promise((r) => setTimeout(r, Math.min(500 * 2 ** (attempt - 1), 2000)));
+    }
+  }
+  throw new Error(
+    `request to ${url} failed after ${PROVISION_MAX_ATTEMPTS} attempts: ${lastError}`,
+  );
+}
+
+/**
+ * Self-provision the AFPS bundle by fetching it from the platform and writing
+ * it into {@link WORKSPACE} as `agent-package.afps`.
+ *
+ * Replaces the old seed-into-the-run-volume delivery, whose correctness
+ * depended on the run volume's driver: a tmpfs-backed `local` volume is not
+ * shared between the short-lived seed helper and the agent container, so the
+ * seeded AFPS bundle silently vanished and skills never materialised
+ * (issue #549). Fetching makes the workspace volume pure agent-local scratch,
+ * so its backing (disk or tmpfs) is once again a free performance choice.
+ *
+ * Any non-2xx is fatal — including `404`. The platform always uploads at least
+ * the agent package (`buildAgentPackage` never returns an empty bundle), so a
+ * missing object is never a legitimate "empty workspace": it means the upload
+ * was lost, deleted early, or the request was misrouted. Continuing in that
+ * state is exactly the silent-degradation regression #549 fixed, so we fail
+ * loud instead.
+ */
+async function provisionWorkspace(): Promise<void> {
+  const url = env.sink.url.replace(/\/events$/, "/workspace");
+  let res: Response;
+  try {
+    res = await signedGetWithRetry(url);
+  } catch (err) {
+    return await die(`Failed to provision workspace from platform: ${getErrorMessage(err)}`);
+  }
+  if (!res.ok) {
+    return await die(`Failed to provision workspace from platform: HTTP ${res.status}`);
+  }
+  // The bundle is the `agent-package.afps` bytes (itself a ZIP the Pi runtime
+  // reads). Stream it straight to the workspace root — no intermediate unzip.
+  await fs.mkdir(WORKSPACE, { recursive: true });
+  await Bun.write(path.join(WORKSPACE, "agent-package.afps"), res);
+}
+
+/**
+ * Self-provision the run's input documents, streaming each to
+ * `WORKSPACE/documents/<name>`.
+ *
+ * Documents are delivered out-of-band from the bundle: large and variable,
+ * they are fetched individually and streamed straight to disk, so the agent
+ * never buffers the whole payload — peak memory stays bounded regardless of
+ * upload size. The manifest enumerates them; a 404 on the manifest means the
+ * run carries no documents (the common case) and is NOT a fault. A 404 on a
+ * document the manifest listed IS fatal, same reasoning as the bundle (#549).
+ */
+async function provisionDocuments(): Promise<void> {
+  const manifestUrl = env.sink.url.replace(/\/events$/, "/documents");
+  let manifestRes: Response;
+  try {
+    manifestRes = await signedGetWithRetry(manifestUrl);
+  } catch (err) {
+    return await die(`Failed to fetch documents manifest: ${getErrorMessage(err)}`);
+  }
+  if (manifestRes.status === 404) return; // run carries no input documents
+  if (!manifestRes.ok) {
+    return await die(`Failed to fetch documents manifest: HTTP ${manifestRes.status}`);
+  }
+
+  const manifest = (await manifestRes.json()) as { documents?: { name?: unknown }[] };
+  const names = (manifest.documents ?? [])
+    .map((d) => d.name)
+    .filter((n): n is string => typeof n === "string" && n.length > 0);
+  if (names.length === 0) return;
+
+  const dir = path.join(WORKSPACE, "documents");
+  await fs.mkdir(dir, { recursive: true });
+
+  // Sequential: input-document sets are small (typically 1–few files), so
+  // streaming each in turn bounds open connections and peak memory without a
+  // concurrency primitive.
+  for (const name of names) {
+    // Defence-in-depth: the platform sanitises names to a single path segment,
+    // but never write outside `dir` on a malformed manifest.
+    if (path.basename(name) !== name || name === "." || name === "..") {
+      return await die(`Refusing unsafe document name: ${name}`);
+    }
+    let docRes: Response;
+    try {
+      docRes = await signedGetWithRetry(`${manifestUrl}/${encodeURIComponent(name)}`);
+    } catch (err) {
+      return await die(`Failed to fetch document ${name}: ${getErrorMessage(err)}`);
+    }
+    if (!docRes.ok || !docRes.body) {
+      return await die(`Failed to fetch document ${name}: HTTP ${docRes.status}`);
+    }
+    // Stream the response body straight to disk — never materialise the whole
+    // document in memory. Bun.write consumes a Response as a stream.
+    await Bun.write(path.join(dir, name), docRes);
+  }
+}
+
 /** Create a minimal valid git repo via filesystem (avoids 3 subprocess spawns). */
 async function initGitWorkspace(): Promise<void> {
   const gitDir = `${WORKSPACE}/.git`;
@@ -334,6 +476,16 @@ await progress(`runtime starting (${Math.round(performance.now())}ms cold start)
   coldStartMs: Math.round(performance.now()),
 });
 
+// Self-provision the workspace before anything reads it: the AFPS bundle
+// (fatal on any miss — see provisionWorkspace) and the input documents
+// (streamed per-file to `documents/<name>`; absent is fine). Run in parallel —
+// they write disjoint paths (bundle → workspace root, documents →
+// `documents/`), share no state, and neither is read until after both resolve,
+// so overlapping their fetches shaves cold-start latency. On failure either
+// one calls `die()` (process.exit), so the first fault wins and the other is
+// abandoned with the process.
+await Promise.all([provisionWorkspace(), provisionDocuments()]);
+
 const packagePath = path.join(WORKSPACE, "agent-package.afps");
 const hasPackage = await exists(packagePath);
 
@@ -349,6 +501,30 @@ await progress(hasPackage ? "workspace initialized · agent package read" : "wor
 if (bundle) {
   try {
     await prepareBundleForPi(bundle, { workspaceDir: WORKSPACE });
+
+    // Fail-loud safety net (issue #549): verify every skill the bundle
+    // carries actually landed under `.pi/skills/<id>`. Before agent
+    // self-provisioning, a dropped bundle degraded silently — the agent
+    // booted onto an empty workspace and only an easily-missed log line
+    // hinted at it. Now a skill that the bundle declares but that did not
+    // materialise surfaces as an `appstrate.error` breadcrumb, so the
+    // regression cannot hide again.
+    const missingSkills: string[] = [];
+    for (const [identity, pkg] of bundle.packages) {
+      if (identity === bundle.root) continue;
+      if ((pkg.manifest as { type?: unknown }).type !== "skill") continue;
+      const parsed = parsePackageIdentity(identity);
+      if (!parsed) continue;
+      if (!(await exists(path.join(WORKSPACE, ".pi", "skills", parsed.packageId)))) {
+        missingSkills.push(parsed.packageId);
+      }
+    }
+    if (missingSkills.length > 0) {
+      await emitError(
+        `Skill(s) declared by the agent did not materialise: ${missingSkills.join(", ")}`,
+        { missingSkills },
+      );
+    }
 
     // Fire-and-forget cleanup of the original AFPS; no longer needed once the
     // Pi SDK is up. (prepareBundleForPi is skills-only — no scratch dir.)

@@ -95,6 +95,19 @@ describe("createFileSystemStorage", () => {
     });
   });
 
+  describe("downloadStream", () => {
+    it("streams the file's bytes", async () => {
+      await storage.uploadFile("pkg", "stream.txt", Buffer.from("streamed bytes"));
+      const stream = await storage.downloadStream("pkg", "stream.txt");
+      expect(stream).not.toBeNull();
+      expect(await new Response(stream!).text()).toBe("streamed bytes");
+    });
+
+    it("returns null for a non-existent file", async () => {
+      expect(await storage.downloadStream("bucket", "missing.txt")).toBeNull();
+    });
+  });
+
   describe("deleteFile", () => {
     it("removes an existing file", async () => {
       await storage.uploadFile("b", "to-delete.txt", Buffer.from("bye"));

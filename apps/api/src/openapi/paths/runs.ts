@@ -955,6 +955,113 @@ export const runsPaths = {
       },
     },
   },
+  "/api/runs/{runId}/workspace": {
+    get: {
+      operationId: "fetchRunWorkspace",
+      tags: ["Runs"],
+      summary: "Fetch the run bundle archive (HMAC)",
+      description:
+        "Fetched by the agent runtime at startup to self-provision its `/workspace`. Returns the AFPS bundle (`agent-package.afps` = manifest + prompt + skills; itself a ZIP) verbatim — small and constant; the agent writes it straight to its workspace root. Input documents are NOT bundled here; the agent fetches them separately and streams each to disk (`GET /api/runs/{runId}/documents`). This pull-based delivery means workspace correctness no longer depends on a shared run volume's driver (a tmpfs-backed `local` volume is not shared between the seed helper and the agent — see issue #549). Same Standard Webhooks HMAC auth as the event routes: the signature covers the empty GET body. A 404 means no bundle was provisioned, which the runtime treats as a fatal provisioning fault (the platform always uploads the agent package).",
+      parameters: [
+        { name: "runId", in: "path", required: true, schema: { type: "string" } },
+        { name: "webhook-id", in: "header", required: true, schema: { type: "string" } },
+        { name: "webhook-timestamp", in: "header", required: true, schema: { type: "string" } },
+        { name: "webhook-signature", in: "header", required: true, schema: { type: "string" } },
+      ],
+      security: [],
+      responses: {
+        "200": {
+          description: "Bundle archive (ZIP)",
+          content: {
+            "application/zip": {
+              schema: { type: "string", format: "binary" },
+            },
+          },
+        },
+        "401": { description: "Signature verification failed" },
+        "404": { description: "run_not_found | no workspace provisioned" },
+        "410": { description: "run_sink_closed | run_sink_expired" },
+        "429": { $ref: "#/components/responses/RateLimited" },
+      },
+    },
+  },
+  "/api/runs/{runId}/documents": {
+    get: {
+      operationId: "fetchRunDocumentsManifest",
+      tags: ["Runs"],
+      summary: "List the run's input documents (HMAC)",
+      description:
+        "Fetched by the agent runtime to enumerate the input documents it must provision. Returns the manifest of documents the run carries; the agent then fetches each via `GET /api/runs/{runId}/documents/{name}`. Same Standard Webhooks HMAC auth as the workspace route. A 404 means the run carries no input documents (the common case), which the runtime treats as an empty document set — not a fault.",
+      parameters: [
+        { name: "runId", in: "path", required: true, schema: { type: "string" } },
+        { name: "webhook-id", in: "header", required: true, schema: { type: "string" } },
+        { name: "webhook-timestamp", in: "header", required: true, schema: { type: "string" } },
+        { name: "webhook-signature", in: "header", required: true, schema: { type: "string" } },
+      ],
+      security: [],
+      responses: {
+        "200": {
+          description: "Documents manifest",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["documents"],
+                properties: {
+                  documents: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: ["name", "size"],
+                      properties: {
+                        name: { type: "string" },
+                        size: { type: "integer" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "401": { description: "Signature verification failed" },
+        "404": { description: "run_not_found | no input documents" },
+        "410": { description: "run_sink_closed | run_sink_expired" },
+        "429": { $ref: "#/components/responses/RateLimited" },
+      },
+    },
+  },
+  "/api/runs/{runId}/documents/{name}": {
+    get: {
+      operationId: "fetchRunDocument",
+      tags: ["Runs"],
+      summary: "Fetch a single run input document (HMAC)",
+      description:
+        "Fetched by the agent runtime for each entry in the documents manifest. The bytes are streamed straight from storage so neither the platform nor the agent buffers the whole document; the agent streams the response body to `documents/{name}` on disk. Same Standard Webhooks HMAC auth as the workspace route. A 404 on a document the manifest listed is a fatal provisioning fault.",
+      parameters: [
+        { name: "runId", in: "path", required: true, schema: { type: "string" } },
+        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { name: "webhook-id", in: "header", required: true, schema: { type: "string" } },
+        { name: "webhook-timestamp", in: "header", required: true, schema: { type: "string" } },
+        { name: "webhook-signature", in: "header", required: true, schema: { type: "string" } },
+      ],
+      security: [],
+      responses: {
+        "200": {
+          description: "Document bytes",
+          content: {
+            "application/octet-stream": {
+              schema: { type: "string", format: "binary" },
+            },
+          },
+        },
+        "401": { description: "Signature verification failed" },
+        "404": { description: "run_not_found | document not found" },
+        "410": { description: "run_sink_closed | run_sink_expired" },
+        "429": { $ref: "#/components/responses/RateLimited" },
+      },
+    },
+  },
   "/api/runs/{runId}/sink/extend": {
     patch: {
       operationId: "extendRunSink",

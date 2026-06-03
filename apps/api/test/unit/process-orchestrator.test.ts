@@ -82,44 +82,6 @@ describe("ProcessOrchestrator", () => {
     });
   });
 
-  describe("seedWorkspace", () => {
-    it("writes files into the boundary's shared workspace path, not boundary.id/workspace", async () => {
-      orchestrator = new ProcessOrchestrator();
-      await orchestrator.initialize();
-      const boundary = await orchestrator.createIsolationBoundary("test-run-shared");
-      if (boundary.workspace.kind !== "directory") throw new Error("expected directory workspace");
-
-      await orchestrator.seedWorkspace(boundary, [{ name: "x.txt", content: Buffer.from("y") }]);
-
-      // The file should land under the shared workspace, NOT under
-      // boundary.id/workspace — that's the contract the sidecar relies
-      // on to share the workspace surface with spawned runners.
-      expect(existsSync(`${boundary.workspace.path}/x.txt`)).toBe(true);
-      expect(existsSync(`${boundary.id}/workspace/x.txt`)).toBe(false);
-
-      await orchestrator.removeIsolationBoundary(boundary);
-    });
-
-    it("materialises the AFPS bundle + nested document paths into the workspace", async () => {
-      orchestrator = new ProcessOrchestrator();
-      await orchestrator.initialize();
-
-      const boundary = await orchestrator.createIsolationBoundary("test-run-3");
-      if (boundary.workspace.kind !== "directory") throw new Error("expected directory workspace");
-
-      await orchestrator.seedWorkspace(boundary, [
-        { name: "agent-package.afps", content: Buffer.from("fake-zip") },
-        { name: "documents/readme.md", content: Buffer.from("# Test") },
-      ]);
-
-      const workDir = boundary.workspace.path;
-      expect(existsSync(`${workDir}/agent-package.afps`)).toBe(true);
-      expect(existsSync(`${workDir}/documents/readme.md`)).toBe(true);
-
-      await orchestrator.removeIsolationBoundary(boundary);
-    });
-  });
-
   describe("ensureImages", () => {
     it("is a no-op", async () => {
       orchestrator = new ProcessOrchestrator();

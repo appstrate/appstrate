@@ -21,10 +21,15 @@ import { z } from "zod";
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { runs } from "@appstrate/db/schema";
-import { invalidRequest } from "../lib/errors.ts";
+import { invalidRequest, notFound } from "../lib/errors.ts";
 import { rateLimitByRunId } from "../middleware/rate-limit.ts";
 import { verifyRunSignature } from "../middleware/verify-run-signature.ts";
 import { ingestRunEvent, finalizeRun } from "../services/run-event-ingestion.ts";
+import {
+  downloadRunWorkspace,
+  downloadRunDocumentsManifest,
+  downloadRunDocumentStream,
+} from "../services/run-workspace-storage.ts";
 import { tokenUsageSchema } from "@appstrate/core/token-usage";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
 import { getEnv } from "@appstrate/env";
@@ -230,6 +235,60 @@ export function createRunsEventsRouter() {
       .set({ lastHeartbeatAt: new Date() })
       .where(and(eq(runs.id, run.id), sql`sink_closed_at IS NULL`));
     return c.json({ ok: true });
+  });
+
+  // The three routes below let the agent self-provision its workspace at
+  // startup. This replaces the old seed-via-helper-volume delivery, whose
+  // correctness depended on the run volume's driver — a tmpfs-backed `local`
+  // volume is not shared between the seed helper and the agent container, so
+  // the bundle silently vanished and skills never materialised (issue #549).
+  // All three carry the same HMAC auth as the event routes: the runner proves
+  // it is the run via a signature over the (empty) GET body, so no user
+  // principal is involved.
+
+  // GET /api/runs/:runId/workspace — the AFPS bundle (`agent-package.afps`,
+  // manifest + prompt + skills; itself a ZIP). Small and constant, served
+  // verbatim; the agent writes it straight to its workspace root. A 404 means
+  // no bundle was provisioned, which the runtime treats as a fatal
+  // provisioning fault (never a legitimately-empty workspace — the platform
+  // always uploads the agent package).
+  router.get("/runs/:runId/workspace", eventLimiter, verifyRunSignature, async (c) => {
+    const run = c.get("run")!;
+    const archive = await downloadRunWorkspace(run.id);
+    if (!archive) throw notFound(`no workspace provisioned for run ${run.id}`);
+    // Hono's body() takes an ArrayBuffer; hand it a tightly-bounded view of
+    // the Buffer's backing store (a Buffer may be a slice of a larger pool).
+    const bytes = archive.buffer.slice(
+      archive.byteOffset,
+      archive.byteOffset + archive.byteLength,
+    ) as ArrayBuffer;
+    c.header("Content-Type", "application/zip");
+    c.header("Content-Length", String(archive.length));
+    return c.body(bytes);
+  });
+
+  // GET /api/runs/:runId/documents — the input-document manifest. The agent
+  // enumerates this, then fetches each document by name. A 404 means the run
+  // carries no input documents (the common case), which the runtime treats as
+  // an empty document set — not a fault.
+  router.get("/runs/:runId/documents", eventLimiter, verifyRunSignature, async (c) => {
+    const run = c.get("run")!;
+    const manifest = await downloadRunDocumentsManifest(run.id);
+    if (!manifest) throw notFound(`no input documents for run ${run.id}`);
+    return c.json(manifest);
+  });
+
+  // GET /api/runs/:runId/documents/:name — a single input document, streamed
+  // straight from storage so neither the platform nor the agent buffers the
+  // whole payload. The agent streams the response body to `documents/<name>`.
+  // A 404 on a document the manifest listed is a fatal provisioning fault.
+  router.get("/runs/:runId/documents/:name", eventLimiter, verifyRunSignature, async (c) => {
+    const run = c.get("run")!;
+    const name = c.req.param("name");
+    const stream = await downloadRunDocumentStream(run.id, name);
+    if (!stream) throw notFound(`document ${name} not found for run ${run.id}`);
+    c.header("Content-Type", "application/octet-stream");
+    return c.body(stream);
   });
 
   return router;

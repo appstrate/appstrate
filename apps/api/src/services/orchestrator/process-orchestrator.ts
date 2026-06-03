@@ -29,7 +29,6 @@ import type {
   WorkloadHandle,
   WorkloadSpec,
   IsolationBoundary,
-  InjectableFile,
   SidecarLaunchSpec,
   CleanupReport,
   StopResult,
@@ -321,23 +320,6 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     logger.info("Sidecar spawned", { runId, port, pid: proc.pid });
 
     return { id, runId, role: "sidecar" };
-  }
-
-  async seedWorkspace(boundary: IsolationBoundary, files: InjectableFile[]): Promise<void> {
-    if (files.length === 0) return;
-    if (boundary.workspace.kind !== "directory") {
-      throw new Error(
-        `process orchestrator expected a directory workspace, got '${boundary.workspace.kind}'`,
-      );
-    }
-    // The agent's CWD is the boundary workspace directory; write the files
-    // straight into it (no volume mount, no shadowing — the host filesystem
-    // is the surface). Mirrors the Docker orchestrator's volume populate.
-    for (const file of files) {
-      const filePath = join(boundary.workspace.path, file.name);
-      await mkdir(join(filePath, ".."), { recursive: true });
-      await Bun.write(filePath, file.content);
-    }
   }
 
   async createWorkload(spec: WorkloadSpec, boundary: IsolationBoundary): Promise<WorkloadHandle> {

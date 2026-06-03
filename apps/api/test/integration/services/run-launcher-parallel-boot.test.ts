@@ -79,7 +79,6 @@ function createTimingFake(config: TimingFakeConfig): {
       };
     },
     async removeIsolationBoundary() {},
-    async seedWorkspace() {},
     async createSidecar(
       runId: string,
       _boundary: IsolationBoundary,

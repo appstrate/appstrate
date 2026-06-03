@@ -13,8 +13,9 @@ import type { Context } from "hono";
 import type { UploadedFile } from "./run-launcher/types.ts";
 import { isFileField, type JSONSchemaObject, type JSONSchema7 } from "@appstrate/core/form";
 import { validateInput } from "./schema.ts";
-import { invalidRequest, validationFailed } from "../lib/errors.ts";
+import { invalidRequest, payloadTooLarge, validationFailed } from "../lib/errors.ts";
 import { consumeUpload, isUploadUri, parseUploadUri } from "./uploads.ts";
+import { getEnv } from "@appstrate/env";
 
 export interface ParsedInput {
   input?: Record<string, unknown>;
@@ -100,6 +101,22 @@ export function collectUploadRefs(
 }
 
 /**
+ * Reject when the combined size of a run's input documents exceeds the
+ * per-run ceiling. Pure so it can be unit-tested without a DB or request
+ * context; callers pass `getEnv().WORKSPACE_MAX_DOCS_BYTES` as the limit.
+ * Throws `payloadTooLarge` (413) — a policy violation, surfaced before the
+ * run launches rather than as a mid-flight failure.
+ */
+export function assertDocsWithinCap(files: { size: number }[], maxBytes: number): void {
+  const total = files.reduce((sum, f) => sum + f.size, 0);
+  if (total > maxBytes) {
+    throw payloadTooLarge(
+      `Input documents total ${total} bytes; the per-run limit is ${maxBytes} bytes`,
+    );
+  }
+}
+
+/**
  * Parse and validate the run request body. Returns parsed input + resolved
  * uploaded files. Throws `ApiError` (invalidRequest / notFound) on any
  * validation or resolution failure.
@@ -139,6 +156,13 @@ export async function parseRequestInput(
         };
       }),
     );
+
+    // Bound the total input-document payload. Documents are delivered to the
+    // agent out-of-band (fetched + streamed to disk), so an oversized payload
+    // is a policy violation rather than a crash — but enforcing it here also
+    // caps what the platform buffers per run. Reject before launch so the
+    // caller gets a clean 413 instead of a run that fails mid-flight.
+    assertDocsWithinCap(uploadedFiles, getEnv().WORKSPACE_MAX_DOCS_BYTES);
 
     const inputValidation = validateInput(input, inputSchema);
     if (!inputValidation.valid) {
