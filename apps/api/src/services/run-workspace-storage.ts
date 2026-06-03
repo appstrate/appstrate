@@ -7,8 +7,8 @@
  * delivered separately by nature:
  *
  *   - **Bundle** (`agent-package.afps` = manifest + prompt + skills): small and
- *     constant. Fetched via `GET /api/runs/:runId/workspace`, extracted to the
- *     workspace root.
+ *     constant. Stored verbatim, fetched via `GET /api/runs/:runId/workspace`,
+ *     and written straight to the workspace root.
  *   - **Input documents** (user uploads): large and variable. Each is stored as
  *     its own object and fetched via `GET /api/runs/:runId/documents/:name`,
  *     enumerated through the manifest at `GET /api/runs/:runId/documents`. The
@@ -27,7 +27,6 @@
  */
 
 import * as storage from "@appstrate/db/storage";
-import { zipArtifact } from "@appstrate/core/zip";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
 
@@ -58,21 +57,24 @@ export interface RunDocumentsManifest {
   documents: RunDocumentMeta[];
 }
 
-const bundleKey = (runId: string): string => `${runId}.zip`;
+const bundleKey = (runId: string): string => `${runId}.afps`;
 const manifestKey = (runId: string): string => `${runId}/manifest.json`;
 const documentKey = (runId: string, name: string): string => `${runId}/documents/${name}`;
 
 /**
- * Provision a run's workspace storage: the bundle ZIP, one object per input
- * document, and the documents manifest. Overwrites any existing objects (a run
- * id is single-use). No-op for an absent bundle and no documents.
+ * Provision a run's workspace storage: the bundle (`agent-package.afps`), one
+ * object per input document, and the documents manifest. Overwrites any
+ * existing objects (a run id is single-use). No-op for an absent bundle and no
+ * documents.
  */
 export async function uploadRunWorkspace(runId: string, upload: RunWorkspaceUpload): Promise<void> {
   const ops: Promise<unknown>[] = [];
 
   if (upload.bundle) {
-    const zip = zipArtifact({ "agent-package.afps": upload.bundle });
-    ops.push(storage.uploadFile(BUCKET, bundleKey(runId), Buffer.from(zip)));
+    // The bundle is the `.afps` package — itself a ZIP the agent runtime reads.
+    // Stored verbatim (no extra archive wrapper); the agent writes it straight
+    // to its workspace root.
+    ops.push(storage.uploadFile(BUCKET, bundleKey(runId), upload.bundle));
   }
 
   if (upload.documents.length > 0) {
@@ -94,7 +96,7 @@ export async function uploadRunWorkspace(runId: string, upload: RunWorkspaceUplo
   await Promise.all(ops);
 }
 
-/** Fetch the run's bundle ZIP. Returns null when none was provisioned. */
+/** Fetch the run's bundle (`agent-package.afps` bytes). Returns null when none. */
 export async function downloadRunWorkspace(runId: string): Promise<Buffer | null> {
   const data = await storage.downloadFile(BUCKET, bundleKey(runId));
   return data ? Buffer.from(data) : null;

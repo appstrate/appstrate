@@ -25,7 +25,6 @@ import { db } from "@appstrate/db/client";
 import { runs } from "@appstrate/db/schema";
 import { encrypt } from "@appstrate/connect";
 import { sign } from "@appstrate/afps-runtime/events";
-import { unzipArtifact } from "@appstrate/core/zip";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
@@ -86,11 +85,10 @@ describe("run-workspace storage round-trip", () => {
       ],
     });
 
-    // Bundle: a ZIP wrapping agent-package.afps.
+    // Bundle: the agent-package.afps bytes, stored verbatim.
     const archive = await downloadRunWorkspace(runId);
     expect(archive).not.toBeNull();
-    const entries = unzipArtifact(new Uint8Array(archive!));
-    expect(new TextDecoder().decode(entries["agent-package.afps"])).toBe("PACKAGE-BYTES");
+    expect(new TextDecoder().decode(new Uint8Array(archive!))).toBe("PACKAGE-BYTES");
 
     // Manifest enumerates the documents with their sizes.
     const manifest = await downloadRunDocumentsManifest(runId);
@@ -152,8 +150,7 @@ describe("GET /api/runs/:runId/workspace", () => {
 
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("application/zip");
-    const entries = unzipArtifact(new Uint8Array(await res.arrayBuffer()));
-    expect(new TextDecoder().decode(entries["agent-package.afps"])).toBe("BUNDLE");
+    expect(await res.text()).toBe("BUNDLE");
 
     await deleteRunWorkspace(runId);
   });

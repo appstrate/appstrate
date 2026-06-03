@@ -62,7 +62,6 @@ import {
   type PackageIdentity,
 } from "@appstrate/afps-runtime/bundle";
 import { sign } from "@appstrate/afps-runtime/events";
-import { unzipArtifact } from "@appstrate/core/zip";
 import { HttpSink, attachStdoutBridge } from "@appstrate/afps-runtime/sinks";
 import type { ExecutionContext, RunEvent } from "@appstrate/afps-runtime/types";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
@@ -315,8 +314,8 @@ async function signedGetWithRetry(url: string): Promise<Response> {
 }
 
 /**
- * Self-provision the AFPS bundle by fetching it from the platform and
- * extracting it into {@link WORKSPACE}.
+ * Self-provision the AFPS bundle by fetching it from the platform and writing
+ * it into {@link WORKSPACE} as `agent-package.afps`.
  *
  * Replaces the old seed-into-the-run-volume delivery, whose correctness
  * depended on the run volume's driver: a tmpfs-backed `local` volume is not
@@ -343,17 +342,10 @@ async function provisionWorkspace(): Promise<void> {
   if (!res.ok) {
     return await die(`Failed to provision workspace from platform: HTTP ${res.status}`);
   }
-  const archive = new Uint8Array(await res.arrayBuffer());
-  // unzipArtifact sanitises entry paths (no traversal, absolute, or backslash
-  // paths), so extraction stays inside WORKSPACE.
-  const files = unzipArtifact(archive);
-  await Promise.all(
-    Object.entries(files).map(async ([name, content]) => {
-      const dest = path.join(WORKSPACE, name);
-      await fs.mkdir(path.dirname(dest), { recursive: true });
-      await fs.writeFile(dest, content);
-    }),
-  );
+  // The bundle is the `agent-package.afps` bytes (itself a ZIP the Pi runtime
+  // reads). Stream it straight to the workspace root — no intermediate unzip.
+  await fs.mkdir(WORKSPACE, { recursive: true });
+  await Bun.write(path.join(WORKSPACE, "agent-package.afps"), res);
 }
 
 /**

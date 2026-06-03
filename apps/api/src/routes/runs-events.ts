@@ -246,11 +246,12 @@ export function createRunsEventsRouter() {
   // it is the run via a signature over the (empty) GET body, so no user
   // principal is involved.
 
-  // GET /api/runs/:runId/workspace — the AFPS bundle (manifest + prompt +
-  // skills) as a ZIP. Small and constant; the agent extracts it to the
-  // workspace root. A 404 means no bundle was provisioned, which the runtime
-  // treats as a fatal provisioning fault (never a legitimately-empty
-  // workspace — the platform always uploads the agent package).
+  // GET /api/runs/:runId/workspace — the AFPS bundle (`agent-package.afps`,
+  // manifest + prompt + skills; itself a ZIP). Small and constant, served
+  // verbatim; the agent writes it straight to its workspace root. A 404 means
+  // no bundle was provisioned, which the runtime treats as a fatal
+  // provisioning fault (never a legitimately-empty workspace — the platform
+  // always uploads the agent package).
   router.get("/runs/:runId/workspace", eventLimiter, verifyRunSignature, async (c) => {
     const run = c.get("run")!;
     const archive = await downloadRunWorkspace(run.id);
