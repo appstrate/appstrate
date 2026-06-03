@@ -726,20 +726,45 @@ jobs:
           echo "::endgroup::"
           echo "✓ idempotent path OK"
 
-          # ── Scenario 10: bash shotgun ──────────────────────────────
+          # ── Scenario 10: bash shotgun (fresh home) ─────────────────
+          # On a fresh home, bootstrap writes .profile + .bashrc but must
+          # NOT create .bash_profile: a .bash_profile holding only our PATH
+          # line would shadow the user's .bashrc/.profile on every future
+          # login shell (issue #527).
           echo "::group::bash shotgun"
           OUT10=$(run_bootstrap_isolated 10 "/bin/bash") || {
             echo "$OUT10"; echo "::error::bootstrap failed on bash shotgun path"; exit 1
           }
           H10="$GITHUB_WORKSPACE/home-10"
-          for f in .profile .bashrc .bash_profile; do
+          for f in .profile .bashrc; do
             test -f "$H10/$f" \
               || { echo "::error::bash shotgun did not write $f"; exit 1; }
             grep -qF "$MARKER" "$H10/$f" \
               || { echo "::error::$f missing install marker"; exit 1; }
           done
+          test ! -f "$H10/.bash_profile" \
+            || { echo "::error::bash shotgun created .bash_profile on fresh home (issue #527)"; exit 1; }
           echo "::endgroup::"
           echo "✓ bash-shotgun OK"
+
+          # ── Scenario 10b: bash shotgun with pre-existing .bash_profile ─
+          # When the user already has a .bash_profile, bootstrap appends to
+          # it (login bash reads it and would otherwise miss our PATH line).
+          echo "::group::bash shotgun (existing .bash_profile)"
+          H10B="$GITHUB_WORKSPACE/home-10b"
+          rm -rf "$H10B"; mkdir -p "$H10B/.local/bin"
+          printf '# user bash_profile\n' >"$H10B/.bash_profile"
+          OUT10B=$(env -i \
+            HOME="$H10B" \
+            SHELL="/bin/bash" \
+            PATH="/usr/local/bin:/usr/bin:/bin" \
+            bash /tmp/bootstrap.sh 2>&1) || {
+            echo "$OUT10B"; echo "::error::bootstrap failed on existing-.bash_profile path"; exit 1
+          }
+          grep -qF "$MARKER" "$H10B/.bash_profile" \
+            || { echo "::error::existing .bash_profile missing install marker"; exit 1; }
+          echo "::endgroup::"
+          echo "✓ bash-shotgun (existing .bash_profile) OK"
 
           # ── Scenario 11: fish conf.d ───────────────────────────────
           echo "::group::fish conf.d"
