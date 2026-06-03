@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * T1 (Wave 3) — Writers MUST NOT emit non-canonical camelCase keys.
+ * Writers MUST NOT emit non-canonical camelCase keys.
  *
- * Umbrella regression test catching the WHOLE CLASS of writer-leak bugs that
- * shipped as C1 (`createOrgItem` writing `displayName`). Wave 1 fixes are
- * already in place; this test pins them so a future writer that accidentally
- * re-introduces camelCase fails CI before merge.
+ * Umbrella regression test catching the whole class of writer-leak bugs (e.g.
+ * `createOrgItem` writing `displayName` instead of `display_name`). Pins the
+ * canonical contract so a future writer that accidentally re-introduces
+ * camelCase fails CI before merge.
  *
  * Coverage:
  *  - `createOrgItem` manifest-mutation logic (`apps/api/src/services/package-items/crud.ts`)
@@ -74,8 +74,8 @@ function findBannedKeysDeep(value: unknown, basePath = "$"): Violation[] {
 /**
  * Mirrors the manifest-mutation block in
  * `apps/api/src/services/package-items/crud.ts:95-103` (`createOrgItem`).
- * Pure — no DB, no auth context. Wave1-A C1 fix landed: `display_name` (not
- * `displayName`). This helper pins that contract.
+ * Pure — no DB, no auth context. Pins the canonical contract: `display_name`
+ * (not `displayName`).
  */
 function simulateCreateOrgItem(
   type: "agent" | "skill" | "mcp-server" | "integration",
@@ -94,10 +94,10 @@ function simulateCreateOrgItem(
 }
 
 // ─────────────────────────────────────────────
-// T1 — createOrgItem simulation per package type
+// createOrgItem simulation per package type
 // ─────────────────────────────────────────────
 
-describe("T1 — createOrgItem writer never emits AFPS-1.x camelCase keys", () => {
+describe("createOrgItem writer never emits non-canonical camelCase keys", () => {
   const TYPES = ["agent", "skill", "mcp-server", "integration"] as const;
 
   for (const type of TYPES) {
@@ -107,14 +107,14 @@ describe("T1 — createOrgItem writer never emits AFPS-1.x camelCase keys", () =
         name: "Test Item",
         description: "A test item",
       });
-      // C1 — display_name MUST be present, displayName MUST NOT.
+      // display_name MUST be present, displayName MUST NOT.
       expect(m.display_name).toBe("Test Item");
       expect(m).not.toHaveProperty("displayName");
       const violations = findBannedKeysDeep(m);
       if (violations.length > 0) {
         // surface a readable failure message
         throw new Error(
-          `Banned AFPS-1.x camelCase keys leaked from createOrgItem(${type}): ` +
+          `Banned non-canonical camelCase keys leaked from createOrgItem(${type}): ` +
             violations.map((v) => `${v.path} (${v.key})`).join(", "),
         );
       }
@@ -136,21 +136,16 @@ describe("T1 — createOrgItem writer never emits AFPS-1.x camelCase keys", () =
       expect(violations).toEqual([]);
     });
 
-    it(`createOrgItem(${type}) does not COPY legacy camelCase from input`, () => {
-      // If a legacy manifest enters the writer, the writer MUST NOT replicate
-      // the legacy key (item.name overwrites display_name canonically).
-      // NOTE: writers don't actively strip legacy siblings — that's M8 in the
-      // editor path. This test pins what the writer DOES emit canonically and
-      // confirms the C1 fix (display_name, not displayName) is intact.
-      const legacyInput: Record<string, unknown> = {
+    it(`createOrgItem(${type}) emits canonical display_name from item.name`, () => {
+      // item.name MUST be written as the canonical display_name; the writer
+      // MUST NOT introduce a camelCase displayName. NOTE: writers don't
+      // actively strip non-canonical siblings already present on input — that
+      // happens in the editor path. This test pins what the writer DOES emit.
+      const input: Record<string, unknown> = {
         name: "@acme/test",
         version: "1.0.0",
       };
-      const m = simulateCreateOrgItem(
-        type,
-        { id: "@acme/test", name: "Canonical Label" },
-        legacyInput,
-      );
+      const m = simulateCreateOrgItem(type, { id: "@acme/test", name: "Canonical Label" }, input);
       // The writer emits canonical display_name; displayName never introduced.
       expect(m.display_name).toBe("Canonical Label");
       expect(m).not.toHaveProperty("displayName");
@@ -159,10 +154,10 @@ describe("T1 — createOrgItem writer never emits AFPS-1.x camelCase keys", () =
 });
 
 // ─────────────────────────────────────────────
-// T1 — writeManifestIntegrations round-trip
+// writeManifestIntegrations round-trip
 // ─────────────────────────────────────────────
 
-describe("T1 — writeManifestIntegrations emits canonical AFPS §4.1 keys only", () => {
+describe("writeManifestIntegrations emits canonical AFPS §4.1 keys only", () => {
   it("round-trips tools + scopes + auth_key through canonical keys only", () => {
     const m: Record<string, unknown> = {};
     writeManifestIntegrations(m, [
@@ -189,10 +184,10 @@ describe("T1 — writeManifestIntegrations emits canonical AFPS §4.1 keys only"
 });
 
 // ─────────────────────────────────────────────
-// T1 — Deep-walk sanity (helper itself works)
+// Deep-walk sanity (helper itself works)
 // ─────────────────────────────────────────────
 
-describe("T1 — banned-key walker (test infrastructure)", () => {
+describe("banned-key walker (test infrastructure)", () => {
   it("flags camelCase keys at any depth", () => {
     const v = findBannedKeysDeep({
       version: "1.0.0",

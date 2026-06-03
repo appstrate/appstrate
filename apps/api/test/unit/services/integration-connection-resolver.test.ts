@@ -697,7 +697,7 @@ describe("resolveConnections — org default", () => {
   });
 });
 
-// ─────────────────────── AFPS §4.1 `auth_key` (C2) ────────────────────────
+// ─────────────────────── AFPS §4.1 `auth_key` ─────────────────────────────
 
 describe("resolveConnections — agent dep `auth_key` (AFPS §4.1)", () => {
   function reqWithAuthKey(authKey: string): IntegrationRequirement {
@@ -725,7 +725,7 @@ describe("resolveConnections — agent dep `auth_key` (AFPS §4.1)", () => {
     expect(result.resolved[INTEG]!.source).toBe("fallback_auto");
   });
 
-  it("falls back to existing cascade when no `auth_key` is pinned (parity with pre-C2)", () => {
+  it("falls back to existing cascade when no `auth_key` is pinned (parity with prior behavior)", () => {
     const oauthConn = conn({ authKey: "oauth" });
     const patConn = conn({ authKey: "pat" });
     const result = resolveConnections({

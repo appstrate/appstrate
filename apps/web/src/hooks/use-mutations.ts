@@ -103,9 +103,9 @@ export function useImportPackage() {
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["agents"] });
       qc.invalidateQueries({ queryKey: ["packages"] });
-      // Non-blocking install-time warnings (AFPS §7.7 / audit P2 #12) —
+      // Non-blocking install-time warnings (AFPS §7.7) —
       // surface each one as a sonner warning toast so publishers see them
-      // immediately after a successful import (re-audit P3-1 follow-up).
+      // immediately after a successful import.
       if (data.warnings && data.warnings.length > 0) {
         for (const message of data.warnings) {
           toast.warning(message);

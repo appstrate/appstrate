@@ -346,7 +346,7 @@ function AuthSection({
 
       {/* Connect button / locked state. A missing oauth2 client blocks
           connecting: admins see the form above, members get a pointer.
-          M11 — the integration detail page is admin-leaning per CLAUDE.md
+          The integration detail page is admin-leaning per CLAUDE.md
           "Integrations — connection model". User-facing connect lives on
           agent surfaces (`AgentIntegrationsBlock` + `MissingConnectionsModal`)
           where the per-agent scope context is known; here we only show the

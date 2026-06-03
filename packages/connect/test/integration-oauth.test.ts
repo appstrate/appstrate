@@ -335,7 +335,7 @@ describe("initiateIntegrationOAuth", () => {
   });
 
   it("manual endpoints override discovery (AFPS §7.3 — manual wins, discovery enriches)", async () => {
-    // Per M4 / AFPS §7.3: when `issuer` is declared, discovery DOES run (to
+    // Per AFPS §7.3: when `issuer` is declared, discovery DOES run (to
     // project userinfo / PKCE caps), but manual endpoints are authoritative
     // and the discovered values must never override them. The resolver may
     // touch `fetch`; what matters is that the resulting endpoints are the

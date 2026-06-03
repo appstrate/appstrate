@@ -499,7 +499,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     expect(result.ok).toBe(true);
     // Streaming bodies can't be replayed across hops, so the path pins
     // `redirect: "manual"` — native "follow" would leak the injected
-    // credential header into a cross-origin redirect (see #481 audit H1).
+    // credential header into a cross-origin redirect.
     const init = fetchFn.mock.calls[0]![1] as RequestInit;
     expect(init.redirect).toBe("manual");
     expect(deps.cookieJar.get("demo")).toEqual(["final=F"]);

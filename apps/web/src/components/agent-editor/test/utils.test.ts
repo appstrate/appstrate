@@ -620,7 +620,7 @@ describe("writers emit canonical AFPS keys", () => {
     expect(m).not.toHaveProperty("runtime_tools");
   });
 
-  it("fieldsToSchema — wrapper output has NO camelCase keys (legacy fileConstraints/uiHints/propertyOrder/maxSize)", () => {
+  it("fieldsToSchema — wrapper output has NO camelCase keys (non-canonical fileConstraints/uiHints/propertyOrder/maxSize)", () => {
     const fields: SchemaField[] = [
       {
         _id: "1",
@@ -652,7 +652,7 @@ describe("writers emit canonical AFPS keys", () => {
     expect(wrapper).toHaveProperty("file_constraints");
     expect(wrapper).toHaveProperty("ui_hints");
     expect(wrapper).toHaveProperty("property_order");
-    // Legacy camelCase keys absent at the wrapper level
+    // Non-canonical camelCase keys absent at the wrapper level
     expect(wrapper).not.toHaveProperty("fileConstraints");
     expect(wrapper).not.toHaveProperty("uiHints");
     expect(wrapper).not.toHaveProperty("propertyOrder");
@@ -663,15 +663,15 @@ describe("writers emit canonical AFPS keys", () => {
     }
   });
 
-  it("fieldsToSchema — when caller replaces the wrapper wholesale, legacy keys vanish from the persisted manifest", () => {
-    // Simulates: previous manifest carries legacy wrapper keys; editor
-    // computes a fresh wrapper via `fieldsToSchema` and the caller does
-    // `updateManifest({ input: wrapper })` (replace, not merge).
-    const legacyManifest: Record<string, unknown> = {
+  it("fieldsToSchema — when caller replaces the wrapper wholesale, non-canonical camelCase keys vanish from the persisted manifest", () => {
+    // Simulates: previous manifest carries non-canonical camelCase wrapper
+    // keys; editor computes a fresh wrapper via `fieldsToSchema` and the
+    // caller does `updateManifest({ input: wrapper })` (replace, not merge).
+    const camelCaseManifest: Record<string, unknown> = {
       input: {
         schema: { type: "object", properties: { x: { type: "string" } } },
         fileConstraints: { x: { accept: ".pdf", maxSize: 1000 } },
-        uiHints: { x: { placeholder: "legacy" } },
+        uiHints: { x: { placeholder: "old" } },
         propertyOrder: ["x"],
       },
     };
@@ -689,9 +689,9 @@ describe("writers emit canonical AFPS keys", () => {
       ],
       "input",
     );
-    legacyManifest.input = wrapper;
+    camelCaseManifest.input = wrapper;
     // Round-trip via JSON to mimic persistence
-    const persisted = JSON.parse(JSON.stringify(legacyManifest)) as Record<string, unknown>;
+    const persisted = JSON.parse(JSON.stringify(camelCaseManifest)) as Record<string, unknown>;
     const input = persisted.input as Record<string, unknown>;
     expect(input).not.toHaveProperty("fileConstraints");
     expect(input).not.toHaveProperty("uiHints");

@@ -676,7 +676,7 @@ export async function replaceVersionContent(params: {
   // Validate dep shape + reject cycles BEFORE uploading or mutating DB so a
   // bad manifest can't leave a partial side-effect (uploaded ZIP, stale row).
   // `extractDependencies` itself rejects invalid scoped names and invalid
-  // semver ranges (see H5 — invalid ranges are rejected upstream here).
+  // semver ranges (invalid ranges are rejected upstream here).
   const deps = extractDependencies(manifest);
   await assertNoCycle(packageId, deps);
 
@@ -695,7 +695,7 @@ export async function replaceVersionContent(params: {
   }
 
   // Clear old deps and re-store from new manifest. Invalid ranges are
-  // rejected upstream by `extractDependencies` (see H5).
+  // rejected upstream by `extractDependencies`.
   await clearVersionDependencies(row.id);
   if (deps.length > 0) {
     await storeVersionDependencies(row.id, deps);
@@ -723,7 +723,7 @@ export async function createVersionAndUpload(params: {
 
   // Validate dep shape + reject cycles BEFORE uploading or persisting the
   // version row. `extractDependencies` rejects invalid scoped names and
-  // invalid semver ranges (see H5 — invalid ranges are rejected upstream
+  // invalid semver ranges (invalid ranges are rejected upstream
   // here, so the throw propagates and no ZIP / row is created).
   const deps = extractDependencies(manifest);
   await assertNoCycle(packageId, deps);

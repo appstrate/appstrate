@@ -189,7 +189,7 @@ describe("POST /mcp — tools/list", () => {
   // Regression — the agent-facing `run_history.fields` enum is the LLM's
   // single source of truth for the wire vocabulary. If the legacy `state`
   // value re-appears here, agents start sending it again and the platform
-  // 400s every call. Lock it to the canonical AFPS 1.4+ values.
+  // 400s every call. Lock it to the canonical AFPS values.
   it("advertises run_history.fields as exactly [checkpoint, result]", async () => {
     const app = createApp(makeDeps());
     const res = await rpc(app, { method: "tools/list" });

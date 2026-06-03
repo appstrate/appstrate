@@ -64,7 +64,7 @@
     "//#build:system-packages:check": {
       "cache": false
     },
-    "//#lint:afps-1x": {
+    "//#lint:manifest-casing": {
       "cache": false
     },
     "//#conformance:check": {

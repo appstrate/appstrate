@@ -1,7 +1,7 @@
 # Plan — `appstrate run` from package id + UI alignment
 
 > [!NOTE]
-> Historical planning doc — pre-AFPS-2.0 vocabulary. AFPS renamed "provider" → "integration"; "tool" → "mcp-server". The current implementation uses integration-aware terminology throughout (`integrationProfiles`, `--integration-profile`, `requiredIntegrations`, `user_agent_integration_profiles`, …). This file is preserved as the original planning record.
+> Historical planning doc — uses pre-rename vocabulary. AFPS renamed "provider" → "integration"; "tool" → "mcp-server". The current implementation uses integration-aware terminology throughout (`integrationProfiles`, `--integration-profile`, `requiredIntegrations`, `user_agent_integration_profiles`, …). This file is preserved as the original planning record.
 
 **Status:** Shipped. Commits: P1 83a8ad9, P2 c31dddf, P3 519fa8a, P4 bb4b8e8a, P5 (this commit).
 

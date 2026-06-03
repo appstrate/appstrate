@@ -342,7 +342,7 @@ describe("package-versions service", () => {
 
   // ── AFPS §4.3 — circular dependency detection at publish ─────
   describe("createVersionAndUpload — cycle detection", () => {
-    it("rejects a self-dependency at publish (H4 fast-path)", async () => {
+    it("rejects a self-dependency at publish (fast-path)", async () => {
       const pkg = await seedPackage({ orgId, id: `@${orgSlug}/self-dep` });
       const manifest: Record<string, unknown> = {
         name: pkg.id,

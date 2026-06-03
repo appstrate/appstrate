@@ -185,9 +185,7 @@ describe("runConnectLogin", () => {
     expect(capture.args.arguments).toEqual({});
   });
 
-  // F3 — the login-tool result wire format is snake_case (AFPS §7.x);
-  // the parser must accept BOTH snake_case and the legacy camelCase form
-  // for one release window.
+  // F3 — the login-tool result wire format is canonical snake_case (AFPS §7.x).
   it("accepts snake_case identity_claims / expires_at / scopes_granted in the login-tool result", async () => {
     const source = makeSource();
     const canned = {
@@ -219,38 +217,6 @@ describe("runConnectLogin", () => {
     expect(bundle.identityClaims).toEqual({ sub: "alice" });
     expect(bundle.expiresAt).toBe("2030-01-01T00:00:00.000Z");
     expect(bundle.scopesGranted).toEqual(["read", "write"]);
-  });
-
-  it("still accepts legacy camelCase identityClaims / expiresAt / scopesGranted for back-compat", async () => {
-    const source = makeSource();
-    const canned = {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify({
-            outputs: { access_token: "TOK" },
-            identityClaims: { sub: "bob" },
-            expiresAt: "2030-01-01T00:00:00.000Z",
-            scopesGranted: ["read"],
-          }),
-        },
-      ],
-    };
-    const { host } = makeFakeHost("ns", canned, () => source.activeInputs());
-    const bundle = await runConnectLogin({
-      host: host as any,
-      namespace: "ns",
-      toolName: "login",
-      inputs: {},
-      source,
-      authKey: "primary",
-      authType: "oauth2",
-      authorizedUris: [],
-      deliveryHttp: DELIVERY_HTTP,
-    });
-    expect(bundle.identityClaims).toEqual({ sub: "bob" });
-    expect(bundle.expiresAt).toBe("2030-01-01T00:00:00.000Z");
-    expect(bundle.scopesGranted).toEqual(["read"]);
   });
 
   it("clears the substitution window even when the tool call rejects", async () => {

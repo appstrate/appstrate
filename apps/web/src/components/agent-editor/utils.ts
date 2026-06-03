@@ -78,7 +78,7 @@ export const DEFAULT_SKILL_CONTENT = "---\nname: \ndescription: \n---\n\n";
 // ─── Default manifest for integration ───────────────────────
 
 /**
- * Minimal valid AFPS 2.0 integration skeleton for the "new" editor. Uses a
+ * Minimal valid AFPS integration skeleton for the "new" editor. Uses a
  * `remote` Streamable-HTTP source (no mcp-server bundle dependency, authorable
  * end-to-end via the editor) + a single api_key auth that injects the key as a
  * Bearer header. The author edits the URL, auth, and tools from here — the raw
@@ -182,7 +182,7 @@ export function manifestToMetadata(m: Record<string, unknown>): MetadataState {
     id,
     scope,
     version: (m.version as string) ?? "1.0.0",
-    displayName: (m.display_name as string) ?? "", // afps-1x-lint-ok: MetadataState TS-internal field (CASING_CONVENTIONS.md carve-out); manifest write is via metadataToManifestPatch's snake_case `display_name`.
+    displayName: (m.display_name as string) ?? "", // canonical-casing-exempt: MetadataState TS-internal field (CASING_CONVENTIONS.md carve-out); manifest write is via metadataToManifestPatch's snake_case `display_name`.
     description: (m.description as string) ?? "",
     author: authorText,
     keywords: Array.isArray(m.keywords) ? (m.keywords as string[]) : [],
@@ -371,7 +371,7 @@ export function schemaToFields(
         ? {
             isFile: true,
             accept: constraints?.accept || "",
-            maxSize: constraints?.max_size != null ? String(constraints.max_size) : "", // afps-1x-lint-ok: SchemaField TS-internal field (carve-out); manifest write is via fieldsToSchema's snake_case `max_size`.
+            maxSize: constraints?.max_size != null ? String(constraints.max_size) : "", // canonical-casing-exempt: SchemaField TS-internal field (carve-out); manifest write is via fieldsToSchema's snake_case `max_size`.
             multiple: isMultipleFileField(prop),
             maxFiles: prop.maxItems != null ? String(prop.maxItems) : "",
           }
@@ -413,9 +413,9 @@ export function schemaToFields(
 /**
  * Build a fresh AFPS canonical `SchemaWrapper` from editor field state.
  *
- * M8 — emits only canonical snake_case keys (`schema`, `file_constraints`,
+ * Emits only canonical snake_case keys (`schema`, `file_constraints`,
  * `ui_hints`, `property_order`). Every per-property entry is constructed
- * from scratch, so legacy 1.x camelCase siblings (`fileConstraints`,
+ * from scratch, so non-canonical camelCase siblings (`fileConstraints`,
  * `uiHints`, `propertyOrder`, per-property `maxSize`) cannot leak through.
  * The caller replaces the wrapper wholesale (`updateManifest({ input:
  * wrapper })`); the shallow-merge semantics drop any pre-existing camelCase

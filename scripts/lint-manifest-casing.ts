@@ -2,10 +2,10 @@
 /// <reference types="bun" />
 
 /**
- * lint-afps-1x-keys — repo-level grep lint for AFPS-1.x camelCase manifest keys
- * leaking into writer contexts. Wave-3 long-term safeguard against C1-class
- * bugs (see /tmp/afps-audit/FINAL-REPORT.md): a writer accidentally emitting
- * `displayName: …` in newly-created manifest payloads.
+ * lint-manifest-casing — repo-level grep lint for legacy camelCase manifest
+ * keys leaking into writer contexts. Long-term safeguard against a writer
+ * accidentally emitting `displayName: …` in newly-created manifest payloads:
+ * AFPS manifests are canonical snake_case (`display_name`, `max_size`, …).
  *
  * Strategy — narrow but precise: only flag camelCase manifest-key writes in
  * contexts that look like AFPS manifest construction. False positives are
@@ -21,16 +21,16 @@
  *  2. **Writer-shape requirement**: the key must appear as `<key>:` (object
  *     literal property) or `<obj>.<key> =` (manifest assignment) where
  *     `<obj>` is one of `manifest`, `finalManifest`, `m`, `payload`, `patch`,
- *     `wrapper`, or `output`. This catches the exact C1 leak shape
+ *     `wrapper`, or `output`. This catches the exact leak shape
  *     (`finalManifest.displayName = …`) without dragging in DB queries or
  *     React `Foo.displayName = "Foo"`.
  *
- *  3. **Per-line exemptions**: `// AFPS-1.x`, `// back-compat`, the M8
- *     cleanup pattern (`<key>: undefined` / `delete m.<key>`), and read
+ *  3. **Per-line exemptions**: `// canonical-casing-exempt`, `// back-compat`,
+ *     the cleanup pattern (`<key>: undefined` / `delete m.<key>`), and read
  *     fallback chains (`?? m.<key>`).
  *
- * Exits non-zero on any hit. Hook into `turbo check` via the `lint:afps-1x`
- * script in root package.json.
+ * Exits non-zero on any hit. Hook into `turbo check` via the
+ * `lint:manifest-casing` script in root package.json.
  */
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -70,7 +70,7 @@ const SCAN_FILES = [
 
 const FILE_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"]);
 
-// Banned AFPS-1.x camelCase manifest keys (AFPS-spec audit final report).
+// Banned legacy camelCase manifest keys — canonical AFPS form is snake_case.
 const BANNED_KEYS = [
   "displayName",
   "schemaVersion",
@@ -98,14 +98,13 @@ function isTestFile(filePath: string): boolean {
 
 // Per-line exemptions: legitimate read fallbacks and M8 cleanup writes.
 function lineIsExempt(line: string): boolean {
-  if (/\/\/.*AFPS-1\.x/.test(line)) return true;
   if (/\/\/.*back-compat/i.test(line)) return true;
   // Explicit per-line opt-out tag for documented TS-internal carve-outs
   // (e.g. agent-editor `MetadataState`/`SchemaField` field names — these
   // are TS-internal state types per CASING_CONVENTIONS.md, not manifest
   // wire keys; they translate to canonical snake_case via
   // `metadataToManifestPatch` / `fieldsToSchema`).
-  if (/\/\/.*afps-1x-lint-ok\b/i.test(line)) return true;
+  if (/\/\/.*canonical-casing-exempt\b/i.test(line)) return true;
   // Read fallback: `?? <obj>.<bannedKey>` (and `?? (<obj>.<bannedKey> as ...)`)
   if (
     /\?\?\s*\(?[\w.[\]'"`]*\.(displayName|schemaVersion|fileConstraints|uiHints|propertyOrder|maxSize|iconUrl|providersConfiguration|runtimeTools)\b/.test(
@@ -230,18 +229,18 @@ function main(): void {
   const hits = scan();
   if (hits.length === 0) {
     console.log(
-      "[lint-afps-1x-keys] OK — no AFPS-1.x camelCase manifest-key writer contexts found.",
+      "[lint-manifest-casing] OK — no legacy camelCase manifest-key writer contexts found.",
     );
     process.exit(0);
   }
   console.error(
-    `[lint-afps-1x-keys] FAIL — ${hits.length} suspect line(s) emit AFPS-1.x camelCase manifest keys.\n`,
+    `[lint-manifest-casing] FAIL — ${hits.length} suspect line(s) emit legacy camelCase manifest keys.\n`,
   );
   console.error(
     "AFPS requires canonical snake_case (display_name, schema_version, file_constraints, ui_hints,\n" +
       "property_order, max_size, icon_url, runtime_tools, …). If this hit is a legitimate read-fallback or\n" +
-      "documented back-compat, prefix the line with `// AFPS-1.x` or `// back-compat`. If it's a writer\n" +
-      "context, switch to the canonical snake_case key.\n",
+      "documented carve-out, prefix the line with `// canonical-casing-exempt` or `// back-compat`. If\n" +
+      "it's a writer context, switch to the canonical snake_case key.\n",
   );
   for (const h of hits) {
     console.error(`  ${h.file}:${h.line}  [${h.key}]  ${h.text}`);

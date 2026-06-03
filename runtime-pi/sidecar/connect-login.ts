@@ -200,18 +200,15 @@ function parseLoginToolResult(result: {
     throw new Error("connect-login: login tool result `outputs` is not a string map");
   }
   const out: LoginToolResult = { outputs };
-  // AFPS wire format is snake_case (`identity_claims`, `expires_at`,
-  // `scopes_granted`); accept the camelCase forms for one release window so
-  // an integration built against AFPS still parses cleanly. Snake_case
-  // wins on conflict (the canonical wire form). Drop the camelCase branches
-  // in the next major release.
-  const identityClaims = coerceStringMap(obj.identity_claims ?? obj.identityClaims);
+  // AFPS wire format is canonical snake_case (`identity_claims`, `expires_at`,
+  // `scopes_granted`).
+  const identityClaims = coerceStringMap(obj.identity_claims);
   if (identityClaims) out.identityClaims = identityClaims;
-  const expiresAtRaw = obj.expires_at ?? obj.expiresAt;
+  const expiresAtRaw = obj.expires_at;
   if (typeof expiresAtRaw === "string" || expiresAtRaw === null) {
     out.expiresAt = expiresAtRaw;
   }
-  const scopesGrantedRaw = obj.scopes_granted ?? obj.scopesGranted;
+  const scopesGrantedRaw = obj.scopes_granted;
   if (Array.isArray(scopesGrantedRaw) && scopesGrantedRaw.every((s) => typeof s === "string")) {
     out.scopesGranted = scopesGrantedRaw as string[];
   }

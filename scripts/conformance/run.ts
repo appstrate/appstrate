@@ -8,8 +8,8 @@
  * Tiers:
  *   - gate  (default) — deterministic, no network/credentials. Local MCP-server
  *                       tool parity. Wired into `bun run check`.
- *   - mcp             — gate + remote MCP parity (Wave 2, requires network/creds).
- *   - all             — every check including auth-liveness (Wave 3).
+ *   - mcp             — gate + remote MCP parity (requires network/creds).
+ *   - all             — every check including auth-liveness.
  *
  * Static manifest validation (scope_catalog ↔ required_scopes, schema, drift)
  * is already enforced by `build:system-packages:check`; the harness does not

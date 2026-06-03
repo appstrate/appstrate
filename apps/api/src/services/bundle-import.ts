@@ -215,7 +215,7 @@ export interface ImportBundleResult {
   root_package_id: string;
   root_version: string;
   /**
-   * Non-blocking install-time warnings (AFPS §7.7 / audit P2 #12) — surfaces
+   * Non-blocking install-time warnings (AFPS §7.7) — surfaces
    * `connect.login` selector/criteria patterns the Appstrate runtime engine
    * cannot evaluate (XPath, multi-value JSONPath, xpath criteria). Empty
    * array when no integration manifest in the bundle hits a limitation.
@@ -280,7 +280,7 @@ export async function importBundle(
     }
 
     // Surface engine-subset limitations for integration manifests as
-    // non-blocking warnings (AFPS §7.7 / audit P2 #12).
+    // non-blocking warnings (AFPS §7.7).
     if (parsedZip.type === "integration") {
       for (const w of collectConnectLoginWarnings(parsedZip.manifest)) {
         warnings.push(`${identity}: ${w}`);
@@ -290,7 +290,7 @@ export async function importBundle(
     // Surface `_meta` policy warnings for all package types — the validator
     // soft-fails malformed namespace keys to console.warn only (per AFPS §10.1
     // "consumers MUST NOT reject unknown `_meta` keys"). Lift them to the
-    // install-warning channel so publishers see them (re-audit 2A observation).
+    // install-warning channel so publishers see them.
     for (const w of collectMetaWarnings(parsedZip.manifest)) {
       warnings.push(`${identity}: ${w}`);
     }

@@ -180,7 +180,7 @@ describe("validateManifest", () => {
     expect(result.valid).toBe(true);
   });
 
-  it("agent with integrations declared as bare version string (legacy)", () => {
+  it("agent with integrations declared as bare version string (canonical §4.1 form)", () => {
     const result = validateManifest(
       validAgentManifest({
         dependencies: {

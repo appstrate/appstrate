@@ -31,11 +31,10 @@ export type { McpServerManifest };
 
 /**
  * MCPB `user_config` entry shape (Appendix C / MCPB spec). Upstream
- * `@afps-spec/schema@2.0.3` types `user_config` as
+ * `@afps-spec/schema` types `user_config` as
  * `z.record(z.string(), z.unknown())` — any value passes. This local refine
- * enforces the MCPB inner shape until the upstream tightening lands (tracked
- * as M2 in /tmp/afps-audit/FINAL-REPORT.md). `.passthrough()` preserves
- * forward-compatibility with future MCPB additions.
+ * enforces the MCPB inner shape until the upstream tightening lands.
+ * `.passthrough()` preserves forward-compatibility with future MCPB additions.
  */
 const userConfigEntrySchema = z
   .object({

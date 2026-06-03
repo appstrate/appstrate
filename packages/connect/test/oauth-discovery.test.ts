@@ -26,7 +26,7 @@ function jsonResponse(obj: unknown, status = 200): Response {
 
 describe("resolveOAuthEndpoints — discovery vs manual", () => {
   it("returns manual endpoints unchanged (manual wins over discovery — AFPS §7.3)", async () => {
-    // Per AFPS §7.3 + M4 enrichment: discovery DOES run when issuer is
+    // Per AFPS §7.3 enrichment: discovery DOES run when issuer is
     // declared (to project userinfo / PKCE caps), but manual endpoints are
     // authoritative — the discovered values must never override them.
     const result = await withFetch(
@@ -316,7 +316,7 @@ describe("resolveOAuthEndpoints — discovery vs manual", () => {
     expect(result.authorizationEndpoint).toBeUndefined();
   });
 
-  // ─── M4 — enrichment when both endpoints are manually declared ───
+  // ─── Enrichment when both endpoints are manually declared ───
   // AFPS §7.3 keeps discovery as enrichment. When the manifest declares both
   // endpoints AND the issuer, discovery MUST still run so callers learn the
   // IdP's `userinfo_endpoint` + `code_challenge_methods_supported`. Manual

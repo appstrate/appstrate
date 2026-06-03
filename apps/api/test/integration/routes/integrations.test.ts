@@ -404,7 +404,7 @@ describe("api_key connection flow", () => {
     expect(body.data.map((c) => c.id)).toContain(conn.id);
 
     // Destructive delete moved to /me/connections/:id (single owner-scoped
-    // entry point — see C7 of the integration refactor). The legacy
+    // entry point). The legacy
     // /integrations/:packageId/connections/:id route was removed in lockstep.
     const del = await app.request(`/api/me/connections/${conn.id}`, {
       method: "DELETE",

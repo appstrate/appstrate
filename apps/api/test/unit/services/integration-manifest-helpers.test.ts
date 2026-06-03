@@ -85,7 +85,7 @@ describe("getLocalServerRef", () => {
 
   // AFPS §7.1 — `source.server.vendored` is an optional boolean build-provenance
   // signal forwarded verbatim through the spawn spec → boot report so operators
-  // can audit which runs used a vendored foreign mcp-server. Phase 2B audit P2 #9.
+  // can audit which runs used a vendored foreign mcp-server.
   it("forwards `source.server.vendored` when declared", () => {
     expect(
       getLocalServerRef(

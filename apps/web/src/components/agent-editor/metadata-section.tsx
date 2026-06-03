@@ -14,7 +14,7 @@ export interface MetadataState {
   id: string;
   scope: string;
   version: string;
-  displayName: string; // afps-1x-lint-ok: TS-internal editor state (carve-out); writes go through metadataToManifestPatch → snake_case `display_name`.
+  displayName: string; // canonical-casing-exempt: TS-internal editor state (carve-out); writes go through metadataToManifestPatch → snake_case `display_name`.
   description: string;
   author: string;
   keywords: string[];
@@ -50,9 +50,9 @@ export function MetadataSection({ value, onChange, isEdit }: MetadataSectionProp
 
   const handleDisplayNameChange = (v: string) => {
     if (nameEdited) {
-      update({ displayName: v }); // afps-1x-lint-ok: MetadataState TS-internal (carve-out)
+      update({ displayName: v }); // canonical-casing-exempt: MetadataState TS-internal (carve-out)
     } else {
-      update({ displayName: v, id: toSlug(v) }); // afps-1x-lint-ok: MetadataState TS-internal (carve-out)
+      update({ displayName: v, id: toSlug(v) }); // canonical-casing-exempt: MetadataState TS-internal (carve-out)
     }
   };
 

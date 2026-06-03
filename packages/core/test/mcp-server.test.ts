@@ -48,10 +48,10 @@ function manifestWithUserConfig(userConfig: Record<string, unknown>): Record<str
 }
 
 // ─────────────────────────────────────────────
-// Wave 5 — M2 local refine: user_config MCPB inner shape
+// Local refine: user_config MCPB inner shape
 // ─────────────────────────────────────────────
 //
-// Upstream `@afps-spec/schema@2.0.3` types `user_config` as
+// Upstream `@afps-spec/schema` types `user_config` as
 // `z.record(z.string(), z.unknown())` — any value passes. The local refine in
 // `mcp-server.ts` validates each entry against the MCPB inner shape.
 describe("mcpServerManifestSchema — user_config MCPB inner shape (local refine)", () => {

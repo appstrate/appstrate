@@ -117,8 +117,8 @@ export function collectConnectLoginWarnings(manifest: unknown): string[] {
 /**
  * Walk a package manifest's top-level `_meta` block and collect install-time
  * warnings for namespace keys that don't match the AFPS Appendix B
- * `META_NAMESPACE_KEY` regex (per re-audit 2A observation — surface the
- * soft-fail warnings the core validator emits to `console.warn` only).
+ * `META_NAMESPACE_KEY` regex — surface the
+ * soft-fail warnings the core validator emits to `console.warn` only.
  *
  * Reserved-prefix keys (`mcp/`, `modelcontextprotocol/`) are hard-rejected
  * upstream by the validator (§10), so they cannot reach this code path.

@@ -1477,7 +1477,7 @@ describe("validateAgentIntegrationScopes", () => {
 });
 
 // ─────────────────────────────────────────────
-// T7 (Wave 3 + Wave 5) — `_meta` namespace key validation
+// `_meta` namespace key validation
 // ─────────────────────────────────────────────
 //
 // AFPS 0.1 Appendix B defines META_NAMESPACE_KEY as a strict regex (an OPTIONAL
@@ -1490,9 +1490,7 @@ describe("validateAgentIntegrationScopes", () => {
 // Per §10.1, consumers MUST NOT reject WELL-FORMED but unknown `_meta` keys —
 // but a MALFORMED key makes the package malformed, which §2 says consumers MUST
 // reject. appstrate delegates entirely to the upstream schema (no local refine).
-//
-// Final-report cross-reference: M1.
-describe("T7 — _meta namespace key validation (delegated to upstream 0.1 schema)", () => {
+describe("_meta namespace key validation (delegated to upstream 0.1 schema)", () => {
   it("rejects _meta keys that do not match META_NAMESPACE_KEY regex (§2 malformed key)", () => {
     const r = metaSchema.safeParse({ "BAD KEY": {} });
     expect(r.success).toBe(false);

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for streaming support in credential-proxy (Phase 3 + Wave 1).
+ * Unit tests for streaming support in credential-proxy.
  *
  * Coverage:
  *  - Streaming request: 50 MB upload forwarded byte-perfect with Content-Length
@@ -10,9 +10,9 @@
  *  - Streaming response 100 MB+1 byte → transform stream errors mid-pipe
  *  - 401 on streaming body in proxyCall → authRefreshed set, no retry
  *  - 401 on buffered body in proxyCall → authRefreshed NOT set
- *  - [Wave 1 C1] Streaming upload no Content-Length, body > 100 MB → mid-stream reject + log
- *  - [Wave 1 C2] Streaming response > 100 MB → log emitted with context
- *  - [Wave 1 H3] Slow-drip response past wall-clock timeout → aborted + log
+ *  - Streaming upload no Content-Length, body > 100 MB → mid-stream reject + log
+ *  - Streaming response > 100 MB → log emitted with context
+ *  - Slow-drip response past wall-clock timeout → aborted + log
  *
  * These tests exercise the streaming helpers and the proxyCall body-handling
  * logic in isolation, without a real DB (route + integration tests cover full
@@ -341,9 +341,9 @@ describe("credential-proxy streaming — duplex forwarding (Phase 3)", () => {
   });
 });
 
-// ─── Wave 1 — C1: Upload cap fires without Content-Length ───────────────────
+// ─── Upload cap fires without Content-Length ────────────────────────────────
 
-describe("credential-proxy streaming — C1: upload cap no Content-Length", () => {
+describe("credential-proxy streaming — upload cap no Content-Length", () => {
   // Streaming upload with no Content-Length header and body > 100 MB:
   // the capStreamingBody transform must reject mid-stream and emit a warn log.
   it("rejects mid-stream and emits warn log when upload exceeds cap (no CL)", async () => {
@@ -390,9 +390,9 @@ describe("credential-proxy streaming — C1: upload cap no Content-Length", () =
   });
 });
 
-// ─── Wave 1 — C2: Response cap logs context ─────────────────────────────────
+// ─── Response cap logs context ──────────────────────────────────────────────
 
-describe("credential-proxy streaming — C2: response cap emits warn log", () => {
+describe("credential-proxy streaming — response cap emits warn log", () => {
   it("emits warn log with context when response exceeds MAX_STREAMED_BODY_SIZE", async () => {
     const oversize = MAX_STREAMED_BODY_SIZE + 1;
     const payload = deterministicBytes(oversize, 0xdeadc0de);
@@ -435,9 +435,9 @@ describe("credential-proxy streaming — C2: response cap emits warn log", () =>
   });
 });
 
-// ─── Wave 1 — H3: Wall-clock timeout aborts slow-drip stream ────────────────
+// ─── Wall-clock timeout aborts slow-drip stream ─────────────────────────────
 
-describe("credential-proxy streaming — H3: wall-clock pipe timeout", () => {
+describe("credential-proxy streaming — wall-clock pipe timeout", () => {
   // Simulates a slow upstream: emits 1 byte at a time with a 20ms pause.
   // We use a short timeout (100ms) to keep the test fast. After ~5 chunks
   // the AbortSignal fires, the stream is aborted, and a warn log is emitted.

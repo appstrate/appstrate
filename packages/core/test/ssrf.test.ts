@@ -80,7 +80,7 @@ describe("isBlockedHost", () => {
 
   it("blocks trailing-dot FQDN bypass", () => {
     // A trailing dot resolves identically in DNS but used to slip past the
-    // exact-string and dotted-IP checks (#481 audit H3).
+    // exact-string and dotted-IP checks.
     expect(isBlockedHost("localhost.")).toBe(true);
     expect(isBlockedHost("metadata.google.internal.")).toBe(true);
     expect(isBlockedHost("host.docker.internal.")).toBe(true);

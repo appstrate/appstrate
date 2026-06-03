@@ -156,7 +156,7 @@ describe("extractDependencies", () => {
     expect(deps[0]!.versionRange).toBe("^1.0.0");
   });
 
-  // H5 — invalid semver range rejected upstream at extract time.
+  // Invalid semver range rejected upstream at extract time.
   it("throws on invalid semver range", () => {
     const manifest = {
       dependencies: { skills: { "@acme/skill": "not-a-range" } },
@@ -165,7 +165,7 @@ describe("extractDependencies", () => {
   });
 
   it("accepts standard semver range forms", () => {
-    // Sanity guard that the H5 validator doesn't over-reject (caret, tilde,
+    // Sanity guard that the validator doesn't over-reject (caret, tilde,
     // range, wildcard, exact, and the npm-style "*" are all valid).
     const manifest = {
       dependencies: {
@@ -351,7 +351,7 @@ describe("writeManifestIntegrations", () => {
   });
 
   // ───────────────────────────────────────────────────────────────────
-  // AFPS §4.4 `auth_key` (C2) — multi-auth selector threading.
+  // AFPS §4.4 `auth_key` — multi-auth selector threading.
   // ───────────────────────────────────────────────────────────────────
 
   it("parseManifestIntegrations extracts `auth_key` from integrations_configuration (§4.4)", () => {

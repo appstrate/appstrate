@@ -1447,11 +1447,11 @@ export function createPackagesRouter() {
     logger.info("Package imported", { packageId, type: packageType, orgId });
     const importedVersion = (manifest as Record<string, unknown>).version as string | undefined;
     // Surface engine-subset limitations for integration manifests as
-    // non-blocking warnings (AFPS §7.7 / audit P2 #12). Publishers learn
+    // non-blocking warnings (AFPS §7.7). Publishers learn
     // about unsupported `connect.login` selectors / criteria at install
     // time rather than chasing the runtime LoginError later. Also lift the
     // validator's `_meta` Appendix B regex soft-fail warnings to the same
-    // channel (re-audit 2A observation) so publishers see them on import.
+    // channel so publishers see them on import.
     const installWarnings = [
       ...collectConnectLoginWarnings(manifest),
       ...collectMetaWarnings(manifest),
