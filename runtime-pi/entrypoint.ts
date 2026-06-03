@@ -283,11 +283,12 @@ const WORKSPACE = env.workspaceDir;
  * as the sink does — through the sidecar forward proxy when one is attached,
  * directly over the egress network when not — so no extra wiring is needed.
  *
- * A `404` means no workspace was provisioned (an agent with no package and no
- * input documents): a legitimately empty workspace, not an error. Any other
- * failure that survives the retry budget is fatal — the run cannot proceed
- * without its package, and failing loud here is what prevents the original
- * silent-degradation regression from ever recurring.
+ * Any non-2xx that survives the retry budget is fatal — including `404`. The
+ * platform always uploads at least the agent package (`buildAgentPackage`
+ * never returns an empty bundle), so a missing object is never a legitimate
+ * "empty workspace": it means the upload was lost, deleted early, or the
+ * request was misrouted. Continuing in that state is exactly the
+ * silent-degradation regression #549 fixed, so we fail loud instead.
  */
 async function provisionWorkspace(): Promise<void> {
   const url = env.sink.url.replace(/\/events$/, "/workspace");
@@ -306,8 +307,6 @@ async function provisionWorkspace(): Promise<void> {
       };
       const res = await fetch(url, { method: "GET", headers });
 
-      if (res.status === 404) return; // empty workspace — nothing to extract
-
       if (res.ok) {
         const archive = new Uint8Array(await res.arrayBuffer());
         // unzipArtifact sanitises entry paths (no traversal, absolute, or
@@ -324,8 +323,9 @@ async function provisionWorkspace(): Promise<void> {
       }
 
       lastError = `HTTP ${res.status}`;
-      // 4xx other than 429 are deterministic (bad signature, closed/expired
-      // sink) — retrying cannot help, so bail to the fatal path immediately.
+      // 4xx other than 429 are deterministic (404 missing object, 401 bad
+      // signature, 410 closed/expired sink) — retrying cannot help, so bail
+      // to the fatal path immediately.
       if (res.status < 500 && res.status !== 429) break;
     } catch (err) {
       lastError = getErrorMessage(err);
@@ -410,9 +410,9 @@ await progress(`runtime starting (${Math.round(performance.now())}ms cold start)
 });
 
 // Fetch + extract the workspace archive (AFPS bundle + input docs) from the
-// platform before anything reads it. Fatal on hard failure (see
-// provisionWorkspace); a 404 leaves WORKSPACE empty and we fall through to the
-// no-package path below.
+// platform before anything reads it. Fatal on any hard failure, including a
+// 404 — the platform always uploads the agent package, so a missing archive
+// is a provisioning fault, not an empty workspace (see provisionWorkspace).
 await provisionWorkspace();
 
 const packagePath = path.join(WORKSPACE, "agent-package.afps");
