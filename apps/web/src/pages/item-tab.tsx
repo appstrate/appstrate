@@ -35,7 +35,6 @@ export function ItemTab({
   type = "skill",
   readOnly = false,
   actionsMap,
-  iconMap,
   filterIds,
   headerContent,
   extraActions: externalActions,
@@ -47,7 +46,6 @@ export function ItemTab({
   /** When true, hides the "create" editor link (browse-only surface). */
   readOnly?: boolean;
   actionsMap?: Map<string, ReactNode>;
-  iconMap?: Map<string, string>;
   filterIds?: Set<string>;
   headerContent?: ReactNode;
   extraActions?: ReactNode;
@@ -70,7 +68,6 @@ export function ItemTab({
     source: item.source,
     usedByAgents: item.used_by_agents,
     actions: actionsMap?.get(item.id),
-    iconUrl: iconMap?.get(item.id),
     autoInstalled: item.auto_installed,
   }));
 
