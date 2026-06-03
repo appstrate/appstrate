@@ -15,13 +15,28 @@
     "primary": {
       "type": "oauth2",
       "issuer": "https://accounts.google.com",
-      "default_scopes": ["https://www.googleapis.com/auth/contacts.readonly"],
+      "default_scopes": ["openid", "email", "https://www.googleapis.com/auth/contacts.readonly"],
       "authorization_params": {
         "access_type": "offline",
         "prompt": "consent"
       },
       "token_endpoint_auth_method": "client_secret_post",
+      "identity_claims": {
+        "accountId": "$.email",
+        "sub": "$.sub",
+        "email": "$.email",
+        "name": "$.name",
+        "picture": "$.picture"
+      },
       "scope_catalog": [
+        {
+          "value": "openid",
+          "label": "Identity (OpenID)"
+        },
+        {
+          "value": "email",
+          "label": "Email address"
+        },
         {
           "value": "https://www.googleapis.com/auth/contacts.readonly",
           "label": "Read contacts"
