@@ -62,6 +62,7 @@
     "format": "prettier --write \"apps/*/src/**\" \"packages/*/src/**\"",
     "format:check": "prettier --check \"apps/*/src/**\" \"packages/*/src/**\"",
     "detect:breaking": "bun scripts/detect-breaking-changes.ts",
+    "build:system-packages": "bun scripts/build-system-packages.ts",
     "build:system-packages:check": "bun scripts/build-system-packages.ts --check",
     "lint:afps-1x": "bun scripts/lint-afps-1x-keys.ts",
     "conformance:check": "bun scripts/conformance/run.ts --tier gate",

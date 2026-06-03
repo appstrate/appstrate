@@ -23,9 +23,18 @@ export type { Zippable };
  * so pinning a constant costs nothing and makes the output reproducible.
  * Reproducibility is what lets the system-package loader treat an integrity
  * drift as a genuine content change (forgotten version bump) rather than
- * rebuild noise. 2020-01-01 UTC — any constant ≥ 1980 works (DOS time epoch).
+ * rebuild noise.
+ *
+ * Built from LOCAL date components on purpose: the DOS time field in a ZIP
+ * has no timezone, and fflate encodes it via the Date's *local* getters
+ * (`getFullYear`/`getHours`/…). A UTC instant (`…T00:00:00Z`) would therefore
+ * encode different bytes depending on the builder's timezone — a dev in EDT
+ * and CI in UTC would produce non-identical archives, breaking the
+ * `build:system-packages --check` byte comparison. `new Date(2020, 0, 1)`
+ * reads back as 2020-01-01 00:00:00 under every timezone. Any constant ≥ 1980
+ * works (DOS time epoch).
  */
-const DETERMINISTIC_MTIME = new Date("2020-01-01T00:00:00Z");
+const DETERMINISTIC_MTIME = new Date(2020, 0, 1, 0, 0, 0, 0);
 
 /**
  * Create a ZIP archive from a set of file entries.
