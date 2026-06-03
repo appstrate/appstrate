@@ -59,7 +59,6 @@ function createCountingFake(): {
       };
     },
     async removeIsolationBoundary() {},
-    async seedWorkspace() {},
     async createSidecar(
       runId: string,
       _boundary: IsolationBoundary,
