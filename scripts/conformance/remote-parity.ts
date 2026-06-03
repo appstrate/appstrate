@@ -25,14 +25,14 @@ import { diffToolSets } from "./tool-diff.ts";
 import { resolveAccessToken } from "./creds.ts";
 import { ssrfGuardedFetch } from "./ssrf-fetch.ts";
 import { listAllTools, type LiveTool } from "./mcp-list.ts";
-import { loadBaseline, writeBaseline, diffSchemas } from "./schema-baseline.ts";
+import { writeSnapshot } from "./snapshot.ts";
 
 const CHECK = "mcp-remote-parity";
 const CONNECT_TIMEOUT_MS = 20_000;
 
 export interface RemoteParityOptions {
-  /** Record live schemas to the baseline instead of diffing (`--update-baselines`). */
-  updateBaseline?: boolean;
+  /** Write the full live tool surface to this dir (uploaded as a CI artifact). */
+  snapshotDir?: string;
 }
 
 /** `source.remote.url` from a remote integration manifest. */
@@ -134,27 +134,14 @@ export async function checkMcpRemoteParity(
     const live: LiveTool[] = await listAllTools(client);
     const provided = live.map((t) => t.name);
 
-    // Record mode: snapshot live schemas to the baseline, skip diffing.
-    if (opts.updateBaseline) {
-      await writeBaseline(entry.packageId, live);
-      return [
-        {
-          packageId: entry.packageId,
-          check: CHECK,
-          severity: "info",
-          message: `baseline recorded — ${live.length} tools`,
-        },
-      ];
-    }
+    // Snapshot the full live surface (name + description + schema) for the CI
+    // artifact — fetched fresh each run, never committed, diffed run-to-run.
+    if (opts.snapshotDir) await writeSnapshot(opts.snapshotDir, entry.packageId, live);
 
     const findings = diffToolSets(entry.packageId, declared, provided, {
       check: CHECK,
       allowUndeclared,
     });
-
-    // Schema drift: same tool name, changed inputSchema vs committed baseline.
-    const baseline = await loadBaseline(entry.packageId);
-    if (baseline) findings.push(...diffSchemas(entry.packageId, live, baseline));
 
     if (findings.length === 0) {
       findings.push({
@@ -163,7 +150,7 @@ export async function checkMcpRemoteParity(
         severity: "info",
         message: `parity ok — ${provided.length} tools (${declared.length} declared${
           allowUndeclared ? ", undeclared allowed" : ""
-        })${baseline ? ", schemas match baseline" : ""}`,
+        })`,
       });
     }
     return findings;

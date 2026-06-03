@@ -14,6 +14,7 @@ import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
 
 export interface LiveTool {
   name: string;
+  description?: string;
   inputSchema?: unknown;
 }
 
@@ -36,6 +37,7 @@ export async function listAllTools(
     for (const tool of page.tools) {
       out.push({
         name: tool.name,
+        ...(tool.description !== undefined ? { description: tool.description } : {}),
         ...(tool.inputSchema !== undefined ? { inputSchema: tool.inputSchema } : {}),
       });
     }

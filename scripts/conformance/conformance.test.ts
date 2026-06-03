@@ -8,7 +8,10 @@ import { resolveToken, resolveAccessToken, credentialedCount, _resetCredsCache }
 import { remoteUrl, toolsPolicyKeys, allowsUndeclared } from "./remote-parity.ts";
 import { applyAuth, checkAuthLiveness } from "./auth-live.ts";
 import { listAllTools } from "./mcp-list.ts";
-import { canonicalize, diffSchemas } from "./schema-baseline.ts";
+import { snapshotSlug, writeSnapshot, readSnapshot } from "./snapshot.ts";
+import { rm, mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
 import { summarize, exitCode, formatReport } from "./report.ts";
 import type { Finding } from "./types.ts";
@@ -403,31 +406,32 @@ describe("listAllTools — pagination", () => {
   });
 });
 
-describe("schema baseline", () => {
-  it("canonicalize is key-order independent", () => {
-    expect(canonicalize({ b: 1, a: 2 })).toBe(canonicalize({ a: 2, b: 1 }));
-    expect(canonicalize({ a: { y: 1, x: 2 } })).toBe(canonicalize({ a: { x: 2, y: 1 } }));
-    expect(canonicalize({ a: 1 })).not.toBe(canonicalize({ a: 2 }));
+describe("snapshot", () => {
+  it("slugifies a package id to a filesystem-safe name", () => {
+    expect(snapshotSlug("@appstrate/notion-mcp")).toBe("_appstrate_notion-mcp");
   });
 
-  it("diffSchemas WARNs on a changed schema, ignores unchanged + unknown tools", () => {
-    const baseline = {
-      tools: { foo: { type: "object", properties: { a: {} } }, bar: { type: "string" } },
-    };
-    const live = [
-      { name: "foo", inputSchema: { properties: { a: {} }, type: "object" } }, // same (reordered)
-      { name: "bar", inputSchema: { type: "number" } }, // changed
-      { name: "baz", inputSchema: { type: "object" } }, // not in baseline → ignored
-    ];
-    const f = diffSchemas("@x/p", live, baseline);
-    expect(f).toHaveLength(1);
-    expect(f[0]!.severity).toBe("warn");
-    expect(f[0]!.message).toContain("bar");
+  it("writes the full tool surface sorted by name and reads it back", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "conformance-snap-"));
+    try {
+      await writeSnapshot(dir, "@x/p", [
+        { name: "b", description: "second", inputSchema: { type: "object" } },
+        { name: "a", description: "first", inputSchema: { type: "number" } },
+      ]);
+      const back = await readSnapshot(dir, "@x/p");
+      expect(back?.packageId).toBe("@x/p");
+      expect(back?.tools.map((t) => t.name)).toEqual(["a", "b"]); // sorted
+      expect(back?.tools[0]).toEqual({
+        name: "a",
+        description: "first",
+        inputSchema: { type: "number" },
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
-  it("returns no findings when every tracked schema matches", () => {
-    const baseline = { tools: { foo: { type: "object" } } };
-    const f = diffSchemas("@x/p", [{ name: "foo", inputSchema: { type: "object" } }], baseline);
-    expect(f).toEqual([]);
+  it("readSnapshot returns null when absent", async () => {
+    expect(await readSnapshot(tmpdir(), "@x/does-not-exist-xyz")).toBeNull();
   });
 });

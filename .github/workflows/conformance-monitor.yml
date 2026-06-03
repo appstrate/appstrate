@@ -49,10 +49,21 @@ jobs:
           # Pipeline must stay in THIS shell so PIPESTATUS reflects the run's
           # exit code (a `{ … } | tee` brace-group would capture it in a
           # subshell and lose it — opening the issue on every run).
-          bun run test:system-packages --tier all 2>&1 | tee -a conformance-report.md
+          bun run test:system-packages --tier all --snapshot-out conformance-snapshot 2>&1 | tee -a conformance-report.md
           code=${PIPESTATUS[0]}
           echo '```' >> conformance-report.md
           echo "code=${code}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload live tool-surface snapshot
+        # Full name+description+inputSchema per remote MCP server, fetched fresh
+        # this run. Diff against an earlier run's artifact to inspect upstream
+        # drift — there is no committed baseline.
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: conformance-tool-snapshot
+          path: conformance-snapshot/
+          if-no-files-found: ignore
 
       - name: Open or update tracking issue
         # Only `fail` findings (real parity drift / SSRF) flip the exit code.
