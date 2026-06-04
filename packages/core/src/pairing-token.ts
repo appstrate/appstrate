@@ -28,6 +28,8 @@
 
 import { randomBytes } from "node:crypto";
 
+import { base64UrlDecode, base64UrlEncode, stripTrailing } from "./jwt.ts";
+
 const TOKEN_PREFIX = "appp_";
 const HEADER_VERSION = 1;
 
@@ -55,25 +57,6 @@ export interface PairingTokenHeader {
 export interface DecodedPairingToken extends PairingTokenHeader {
   /** Full token, including prefix — what the helper passes back as `Authorization: Bearer <token>`. */
   raw: string;
-}
-
-function stripTrailing(input: string, char: string): string {
-  let end = input.length;
-  while (end > 0 && input[end - 1] === char) end--;
-  return input.slice(0, end);
-}
-
-function base64UrlEncode(input: string): string {
-  const b64 = Buffer.from(input, "utf-8")
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_");
-  return stripTrailing(b64, "=");
-}
-
-function base64UrlDecode(input: string): string {
-  const padded = input + "=".repeat((4 - (input.length % 4)) % 4);
-  return Buffer.from(padded.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf-8");
 }
 
 function isHttpsOrLoopback(url: string): boolean {

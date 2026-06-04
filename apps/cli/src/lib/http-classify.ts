@@ -24,19 +24,31 @@ export const EXIT_TIMEOUT = 28;
 export const EXIT_TLS = 35;
 
 /**
- * Best-effort classifier. Walks the error chain (`cause`) because Bun's
- * fetch frequently wraps the low-level syscall error inside a generic
- * `TypeError: fetch failed`.
+ * Coarse kind of a fetch-time network failure. Single source of truth
+ * for both curl-exit-code mapping (`classifyNetworkError`) and retry
+ * eligibility (`isRetryableError` in `commands/api/retry.ts`).
+ *
+ * `"unknown"` means we could not confidently classify the error — the
+ * caller decides the fallback (generic exit 1 / non-retryable).
  */
-export function classifyNetworkError(err: unknown): number {
-  if (!err || typeof err !== "object") return 1;
+export type NetworkErrorKind = "dns" | "connect" | "timeout" | "tls" | "unknown";
+
+/**
+ * Best-effort classifier. Walks the error chain (`cause`) once because
+ * Bun's fetch frequently wraps the low-level syscall error inside a
+ * generic `TypeError: fetch failed`. Returns a coarse {@link NetworkErrorKind}
+ * using the union of every syscall/TLS code we recognise; callers map the
+ * kind to their own domain (exit code, retry boolean).
+ */
+export function classifyNetworkErrorKind(err: unknown): NetworkErrorKind {
+  if (!err || typeof err !== "object") return "unknown";
 
   // Timeout branch: we ourselves raise `AbortError` via
   // `ac.abort(new DOMException("timeout", "TimeoutError"))` when
   // `--max-time` fires. The DOMException subclass flows through as the
   // `.name` on the rejection.
-  const name = (err as { name?: unknown }).name;
-  if (name === "TimeoutError") return EXIT_TIMEOUT;
+  const topName = (err as { name?: unknown }).name;
+  if (topName === "TimeoutError") return "timeout";
 
   // Walk the cause chain (up to 3 levels — defensive against cycles).
   let current: unknown = err;
@@ -45,14 +57,14 @@ export function classifyNetworkError(err: unknown): number {
     if (typeof code === "string") {
       // Bun surfaces these as upper-case strings on the underlying
       // `SystemError`-like object.
-      if (code === "ENOTFOUND" || code === "EAI_AGAIN" || code === "EAI_FAIL") return EXIT_DNS;
+      if (code === "ENOTFOUND" || code === "EAI_AGAIN" || code === "EAI_FAIL") return "dns";
       if (
         code === "ECONNREFUSED" ||
         code === "EHOSTUNREACH" ||
         code === "ENETUNREACH" ||
         code === "ECONNRESET"
       ) {
-        return EXIT_CONNECT;
+        return "connect";
       }
       if (
         code.startsWith("ERR_TLS_") ||
@@ -62,9 +74,11 @@ export function classifyNetworkError(err: unknown): number {
         code === "SELF_SIGNED_CERT_IN_CHAIN" ||
         code === "ERR_SSL_PROTOCOL_ERROR"
       ) {
-        return EXIT_TLS;
+        return "tls";
       }
     }
+    // A `TimeoutError` may also surface deeper in the chain.
+    if ((current as { name?: unknown }).name === "TimeoutError") return "timeout";
     current = (current as { cause?: unknown }).cause;
   }
 
@@ -72,12 +86,33 @@ export function classifyNetworkError(err: unknown): number {
   const msg = (err as { message?: unknown }).message;
   if (typeof msg === "string") {
     const lower = msg.toLowerCase();
-    if (lower.includes("unable to verify") || lower.includes("self-signed")) return EXIT_TLS;
-    if (lower.includes("getaddrinfo") || lower.includes("dns")) return EXIT_DNS;
-    if (lower.includes("connection refused")) return EXIT_CONNECT;
+    if (lower.includes("unable to verify") || lower.includes("self-signed")) return "tls";
+    if (lower.includes("getaddrinfo") || lower.includes("dns")) return "dns";
+    if (lower.includes("connection refused")) return "connect";
   }
 
-  return 1;
+  return "unknown";
+}
+
+/**
+ * Map a fetch-time error to a curl-compatible process exit code.
+ * Thin adapter over {@link classifyNetworkErrorKind}; `"unknown"`
+ * falls back to 1 (generic failure) — we deliberately do NOT emit a
+ * curl-specific code we are not sure about, because users parse these.
+ */
+export function classifyNetworkError(err: unknown): number {
+  switch (classifyNetworkErrorKind(err)) {
+    case "dns":
+      return EXIT_DNS;
+    case "connect":
+      return EXIT_CONNECT;
+    case "timeout":
+      return EXIT_TIMEOUT;
+    case "tls":
+      return EXIT_TLS;
+    default:
+      return 1;
+  }
 }
 
 /**

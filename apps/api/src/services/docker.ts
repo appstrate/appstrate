@@ -137,23 +137,11 @@ export interface CreateContainerOptions {
    */
   binds?: string[];
   /**
-   * Docker `HostConfig.GroupAdd` — supplementary GIDs the container's
-   * primary user joins. Used to grant socket access (e.g. the `docker`
-   * group on Linux daemons) without dropping to root.
-   */
-  groupAdd?: string[];
-  /**
    * Override `User` set in the image. Used by the sidecar to run as
    * root only when it has Docker socket access — keeps the default
    * `USER nobody:nobody` image directive intact for every other path.
    */
   user?: string;
-  /**
-   * Override the image's default `CMD`. Used by the workspace-populate
-   * helper to hold a generic image (busybox) open with a `sleep` so the
-   * volume stays mounted while files are archived into it.
-   */
-  cmd?: string[];
 }
 
 export async function createContainer(
@@ -178,7 +166,6 @@ export async function createContainer(
     Image: options.image,
     Env: env,
     Tty: false,
-    ...(options.cmd ? { Cmd: options.cmd } : {}),
     HostConfig: {
       Memory: options.memory ?? 1024 * 1024 * 1024,
       NanoCpus: options.nanoCpus ?? 2_000_000_000,
@@ -189,7 +176,6 @@ export async function createContainer(
       NetworkMode: options.networkId ?? "bridge",
       ExtraHosts: options.extraHosts ?? [],
       ...(options.binds && options.binds.length > 0 ? { Binds: options.binds } : {}),
-      ...(options.groupAdd && options.groupAdd.length > 0 ? { GroupAdd: options.groupAdd } : {}),
     },
     ...(options.user ? { User: options.user } : {}),
     NetworkingConfig: {
@@ -716,28 +702,7 @@ async function removeNetworksMatching(predicate: (name: string) => boolean): Pro
 
 // --- Platform network auto-detection ---
 
-let platformNetworkCache:
-  | { networkId: string; hostname: string; gatewayIp: string }
-  | null
-  | undefined;
-
-/**
- * Get the address to reach Docker host-mapped ports.
- * Returns "localhost" in local dev, or the Docker gateway IP when the platform
- * itself runs inside a container (e.g. Coolify).
- * Result is cached after the first call.
- */
-export async function getDockerHostAddress(): Promise<string> {
-  const platform = await detectPlatformNetwork();
-  // Not containerized (local dev) → real localhost
-  if (!platform) return "localhost";
-  // Containerized with a real gateway IP (typical Linux + bridge driver)
-  if (platform.gatewayIp) return platform.gatewayIp;
-  // Containerized but no gateway exposed (macOS Docker Desktop / OrbStack):
-  // rely on Docker's host alias. Requires extra_hosts: "host.docker.internal:host-gateway"
-  // in the compose file (already set on the appstrate service).
-  return "host.docker.internal";
-}
+let platformNetworkCache: { networkId: string; hostname: string } | null | undefined;
 
 /**
  * Detect the Docker network the platform container is connected to.
@@ -749,7 +714,6 @@ export async function getDockerHostAddress(): Promise<string> {
 export async function detectPlatformNetwork(): Promise<{
   networkId: string;
   hostname: string;
-  gatewayIp: string;
 } | null> {
   if (platformNetworkCache !== undefined) return platformNetworkCache;
 
@@ -787,13 +751,11 @@ export async function detectPlatformNetwork(): Promise<{
       // Use the first alias or fall back to the container hostname
       const dnsName = info.Aliases?.[0] ?? data.Config?.Hostname ?? containerName;
 
-      const gatewayIp = info.Gateway ?? "";
-      platformNetworkCache = { networkId: info.NetworkID, hostname: dnsName, gatewayIp };
+      platformNetworkCache = { networkId: info.NetworkID, hostname: dnsName };
       logger.info("Detected platform Docker network", {
         network: name,
         networkId: info.NetworkID,
         hostname: dnsName,
-        gatewayIp,
       });
       return platformNetworkCache;
     }

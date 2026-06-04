@@ -7,7 +7,6 @@ import { signRunToken } from "../lib/run-token.ts";
 import {
   CHECKPOINT_KEY,
   getCheckpoint,
-  listPinnedMemories,
   listPinnedSlots,
   scopeFromActor,
 } from "./state/package-persistence.ts";
@@ -26,17 +25,6 @@ export class ModelNotConfiguredError extends Error {
     super("No LLM model configured for this organization");
     this.name = "ModelNotConfiguredError";
   }
-}
-
-/**
- * Normalise a DB `createdAt` (Date | ISO string | null) into epoch ms — the
- * representation `ExecutionContext.memories[].createdAt` requires.
- */
-function toEpochMs(value: Date | string | null | undefined): number {
-  if (!value) return 0;
-  const date = value instanceof Date ? value : new Date(value);
-  const ms = date.getTime();
-  return Number.isFinite(ms) ? ms : 0;
 }
 
 /**
@@ -87,32 +75,23 @@ export async function buildRunContext(params: {
 
   // Step 1: load all independent data in parallel
   const persistenceScope = scopeFromActor(actor);
-  const [
-    configFull,
-    previousCheckpoint,
-    agentPackageResult,
-    latestVersion,
-    memories,
-    pinnedSlotRows,
-  ] = await Promise.all([
-    skipConfigFetch ? null : getPackageConfig(applicationId, agent.id),
-    getCheckpoint(agent.id, applicationId, persistenceScope),
-    buildAgentPackage(agent, orgId),
-    params.overrideVersionLabel
-      ? null
-      : agent.source !== "system"
-        ? getLatestVersionInfo(agent.id).catch(() => null)
-        : null,
-    // Only pinned memories enter the prompt; archive memories load via the
-    // `recall_memory` tool on demand.
-    listPinnedMemories(agent.id, applicationId, persistenceScope),
-    // Named pinned slots (any non-null key, EXCEPT "checkpoint" which is
-    // already loaded above as `previousCheckpoint`). Renders in the prompt's
-    // `## Pinned Slots` section so cross-run state under custom keys is
-    // visible to the agent. Honors the documented contract: `pin({key, ...})`
-    // with any key produces a slot rendered in this prompt on every run.
-    listPinnedSlots(agent.id, applicationId, persistenceScope),
-  ]);
+  const [configFull, previousCheckpoint, agentPackageResult, latestVersion, pinnedSlotRows] =
+    await Promise.all([
+      skipConfigFetch ? null : getPackageConfig(applicationId, agent.id),
+      getCheckpoint(agent.id, applicationId, persistenceScope),
+      buildAgentPackage(agent, orgId),
+      params.overrideVersionLabel
+        ? null
+        : agent.source !== "system"
+          ? getLatestVersionInfo(agent.id).catch(() => null)
+          : null,
+      // Named pinned slots (any non-null key, EXCEPT "checkpoint" which is
+      // already loaded above as `previousCheckpoint`). Renders in the prompt's
+      // `## Pinned Slots` section so cross-run state under custom keys is
+      // visible to the agent. Honors the documented contract: `pin({key, ...})`
+      // with any key produces a slot rendered in this prompt on every run.
+      listPinnedSlots(agent.id, applicationId, persistenceScope),
+    ]);
 
   const config = params.config ?? configFull?.config ?? {};
   const agentPackage = agentPackageResult.zip;
@@ -162,13 +141,9 @@ export async function buildRunContext(params: {
   const context: ExecutionContext = {
     runId,
     input: input ?? {},
-    memories: memories.map((m) => ({
-      // Memory content is JSONB at the storage layer (post-unification).
-      // The AFPS runtime contract requires a string — stringify structured
-      // entries; pass strings through verbatim.
-      content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
-      createdAt: toEpochMs(m.createdAt),
-    })),
+    // No memories enter the prompt; archive memories load via the
+    // `recall_memory` tool on demand.
+    memories: [],
     ...(previousCheckpoint !== null ? { checkpoint: previousCheckpoint } : {}),
     ...(Object.keys(pinnedSlots).length > 0 ? { pinnedSlots } : {}),
     config,

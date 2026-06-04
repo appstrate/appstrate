@@ -27,6 +27,7 @@ import { toISORequired } from "../../lib/date-helpers.ts";
 import { getModelProvider } from "./registry.ts";
 import type { ModelApiShape, OAuthTokenResponse } from "@appstrate/core/sidecar-types";
 import type { ModelProviderIdentity } from "@appstrate/core/module";
+import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import { getSystemModelProviderKeys } from "../model-registry.ts";
 import { logger } from "../../lib/logger.ts";
 import type { ModelProviderCredentialInfo } from "@appstrate/shared-types";
@@ -335,10 +336,9 @@ export async function updateModelProviderCredential(
 /**
  * Derive a credential label when the caller doesn't supply one. Picks the
  * provider's `displayName` (registry) and dedupes against existing labels
- * in the same org by appending ` (2)`, ` (3)`, … on collision — mirrors
- * the frontend's `deduplicateLabel()` helper, but resolved server-side so
- * automation (CLI, connect-helper, OAuth import) doesn't have to invent a
- * name.
+ * in the same org by appending ` (2)`, ` (3)`, … on collision, resolved
+ * server-side so automation (CLI, connect-helper, OAuth import) doesn't have
+ * to invent a name.
  *
  * Unknown providerIds fall back to the literal id — defensive only;
  * upstream callers reject unknown ids before we get here.
@@ -350,11 +350,10 @@ export async function deriveCredentialLabel(orgId: string, providerId: string): 
     .select({ label: modelProviderCredentials.label })
     .from(modelProviderCredentials)
     .where(scopedWhere(modelProviderCredentials, { orgId }));
-  const existing = new Set(rows.map((r) => r.label));
-  if (!existing.has(base)) return base;
-  let counter = 2;
-  while (existing.has(`${base} (${counter})`)) counter++;
-  return `${base} (${counter})`;
+  return dedupeLabel(
+    base,
+    rows.map((r) => r.label),
+  );
 }
 
 /**

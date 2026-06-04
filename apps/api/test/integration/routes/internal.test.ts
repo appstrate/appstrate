@@ -323,35 +323,6 @@ describe("Internal API", () => {
       expect(body.memories[1]!.content).toBe("archived fact A");
     });
 
-    it("excludes pinned memories — they are already in the prompt", async () => {
-      const { addMemories } = await import("../../../src/services/state/package-persistence.ts");
-      await addMemories(
-        pkgId,
-        ctx.defaultAppId,
-        ctx.orgId,
-        { type: "user", id: ctx.user.id },
-        ["pinned-only"],
-        runningRunId,
-        { pinned: true },
-      );
-      await addMemories(
-        pkgId,
-        ctx.defaultAppId,
-        ctx.orgId,
-        { type: "user", id: ctx.user.id },
-        ["archive-only"],
-        runningRunId,
-      );
-
-      const res = await app.request("/internal/memories", {
-        headers: { Authorization: `Bearer ${runningToken}` },
-      });
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { memories: { content: string }[] };
-      expect(body.memories).toHaveLength(1);
-      expect(body.memories[0]!.content).toBe("archive-only");
-    });
-
     it("filters by `q` substring (case-insensitive)", async () => {
       const { addMemories } = await import("../../../src/services/state/package-persistence.ts");
       await addMemories(

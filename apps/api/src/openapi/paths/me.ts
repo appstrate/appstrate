@@ -270,25 +270,7 @@ export const mePaths = {
           description: "Member pin set",
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                required: [
-                  "packageId",
-                  "integration_package_id",
-                  "auth_key",
-                  "connection_id",
-                  "createdAt",
-                  "updatedAt",
-                ],
-                properties: {
-                  packageId: { type: "string" },
-                  integration_package_id: { type: "string" },
-                  auth_key: { type: "string" },
-                  connection_id: { type: "string", format: "uuid" },
-                  createdAt: { type: "string", format: "date-time" },
-                  updatedAt: { type: "string", format: "date-time" },
-                },
-              },
+              schema: { $ref: "#/components/schemas/IntegrationPin" },
             },
           },
         },

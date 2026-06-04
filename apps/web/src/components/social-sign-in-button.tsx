@@ -5,15 +5,28 @@ import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "../hooks/use-auth";
-import { GitHubIcon } from "./icons";
+import { GitHubIcon, GoogleIcon } from "./icons";
 
-export function GitHubSignInButton({
+type SocialProvider = "github" | "google";
+
+const PROVIDERS: Record<SocialProvider, { icon: React.ComponentType; labelKey: string }> = {
+  github: { icon: GitHubIcon, labelKey: "login.continueGithub" },
+  google: { icon: GoogleIcon, labelKey: "login.continueGoogle" },
+};
+
+export function SocialSignInButton({
+  provider,
   callbackURL: callbackURLProp,
-}: { callbackURL?: string } = {}) {
+}: {
+  provider: SocialProvider;
+  callbackURL?: string;
+}) {
   const { t } = useTranslation("settings");
-  const { signInWithGithub } = useAuth();
+  const { signInWithSocial } = useAuth();
   const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(false);
+
+  const { icon: Icon, labelKey } = PROVIDERS[provider];
 
   return (
     <Button
@@ -27,14 +40,14 @@ export function GitHubSignInButton({
           const redirect = searchParams.get("redirect");
           const callbackURL =
             callbackURLProp ?? (redirect ? `/login?redirect=${encodeURIComponent(redirect)}` : "/");
-          await signInWithGithub(callbackURL);
+          await signInWithSocial(provider, callbackURL);
         } finally {
           setLoading(false);
         }
       }}
     >
-      <GitHubIcon />
-      {t("login.continueGithub")}
+      <Icon />
+      {t(labelKey)}
     </Button>
   );
 }
