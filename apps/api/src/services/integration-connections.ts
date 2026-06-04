@@ -318,7 +318,8 @@ export async function selectAccessibleConnection(
 /**
  * `true` when the integration is active in the app — i.e. recorded in
  * `application_packages` (activation installs the row, deactivation removes
- * it). Use {@link assertIntegrationActive} when the caller needs a
+ * it) AND not switched off (`enabled = true`). A disabled install counts as
+ * inactive. Use {@link assertIntegrationActive} when the caller needs a
  * structured 404 instead of a boolean.
  */
 export async function isIntegrationActive(
@@ -332,6 +333,12 @@ export async function isIntegrationActive(
       and(
         eq(applicationPackages.applicationId, applicationId),
         eq(applicationPackages.packageId, packageId),
+        // "Active" = installed AND enabled. A disabled install (enabled=false)
+        // must be treated as inactive everywhere: the runtime spawn resolver
+        // skips it and run readiness rejects the run — otherwise a declared
+        // integration that an operator switched off would silently degrade
+        // the run (tools missing) instead of failing fast.
+        eq(applicationPackages.enabled, true),
       ),
     )
     .limit(1);

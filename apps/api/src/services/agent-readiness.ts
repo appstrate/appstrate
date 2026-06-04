@@ -10,9 +10,11 @@ import {
   resolveConnectionsForRun,
   translateResolutionError,
 } from "./integration-connection-resolver.ts";
+import { isIntegrationActive } from "./integration-connections.ts";
 import { validateConfig } from "./schema.ts";
 import { extractManifestSchemas } from "../lib/manifest-utils.ts";
 import { isPromptEmpty, findMissingDependencies } from "@appstrate/core/validation";
+import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { deepMergeConfig } from "@appstrate/core/schema-validation";
 import type { ConnectionOverrides } from "@appstrate/core/integration";
 import { ApiError, type ValidationFieldError } from "../lib/errors.ts";
@@ -52,7 +54,7 @@ export interface AgentReadinessParams {
  *
  * Single source of truth for readiness checks — the throwing wrapper
  * `validateAgentReadiness` delegates to this. Fail-fast sequence:
- * prompt → skills → integration connections → config.
+ * prompt → skills → integration install/enable → integration connections → config.
  */
 export async function collectAgentReadinessErrors(
   params: AgentReadinessParams,
@@ -81,6 +83,28 @@ export async function collectAgentReadinessErrors(
       title: "Missing Skill",
       message: `Required skill '${skillId}' is not installed`,
     });
+  }
+
+  // Integration install/enable gate — runs regardless of actor (it is an
+  // app-level fact, not an actor-level one). Every integration the agent
+  // declares MUST be installed AND enabled on the application. Without this
+  // the run silently degrades: the runtime spawn resolver skips an inactive
+  // integration (`isIntegrationActive` false) and the agent launches without
+  // its tools. The connection resolver below does NOT catch this — it gates
+  // on whether an accessible connection exists, and a disabled/uninstalled
+  // integration can still have lingering connections that resolve cleanly.
+  // Checked before connections so an inactive integration fails fast with a
+  // clear cause rather than a downstream `not_connected`.
+  const declaredIntegrations = parseManifestIntegrations(manifest as Record<string, unknown>);
+  for (const entry of declaredIntegrations) {
+    if (!(await isIntegrationActive(entry.id, applicationId))) {
+      errors.push({
+        field: `integrations.${entry.id}`,
+        code: "integration_not_active",
+        title: "Integration Not Enabled",
+        message: `Integration '${entry.id}' is not installed or is disabled in this application.`,
+      });
+    }
   }
 
   // Resolver enumerates own + shared connections, applies

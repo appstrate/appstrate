@@ -165,24 +165,43 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
   const errors: ConnectionResolutionError[] = [];
 
   const { adminPins, memberPins } = indexPins(input.pins, input.actorUserId ?? null);
-  const connectionIndex = new Map<string, ConnectionRow>();
-  for (const c of input.accessibleConnections) connectionIndex.set(c.id, c);
 
   for (const req of input.requirements) {
     // Inert only when the agent picked neither tools nor scopes. apiCall
     // integrations expose no tools, so scope selection keeps them active.
     if (!req.hasSelectedTools && req.agentScopes.length === 0) continue;
 
+    // Orphaned-auth guard: drop this integration's connections whose `authKey`
+    // no longer exists in its CURRENT manifest. A version bump can rename the
+    // auth (e.g. `primary` → `session`); a row left on the old key can never
+    // produce a delivery plan (the spawn resolver matches connection→auth by
+    // authKey), so it must not be a candidate at any cascade layer — otherwise
+    // the run auto-picks a connection that silently fails at runtime, and the
+    // member picker offers a connection the integration page (which iterates
+    // manifest auths) doesn't show. Other integrations' rows pass through
+    // untouched. Empty manifest auths → no constraint (defensive).
+    const manifestAuthKeys = new Set(
+      Object.keys((req.manifest as { auths?: Record<string, unknown> }).auths ?? {}),
+    );
+    const liveConnections =
+      manifestAuthKeys.size === 0
+        ? input.accessibleConnections
+        : input.accessibleConnections.filter(
+            (c) => c.integrationId !== req.integrationId || manifestAuthKeys.has(c.authKey),
+          );
+    const liveIndex = new Map<string, ConnectionRow>();
+    for (const c of liveConnections) liveIndex.set(c.id, c);
+
     // AFPS §4.1 `auth_key`: when the agent dep pins an auth method,
     // restrict the candidate connection set to rows on that auth BEFORE
     // running the cascade. The chosen connection's authKey carries through
     // to credential injection downstream; pre-filtering here means every
     // cascade layer (pins / overrides / fallback) honours the pin uniformly.
-    const integrationCandidates = input.accessibleConnections.filter(
+    const integrationCandidates = liveConnections.filter(
       (c) => c.integrationId === req.integrationId,
     );
-    let filteredConnections = input.accessibleConnections;
-    let filteredIndex = connectionIndex;
+    let filteredConnections = liveConnections;
+    let filteredIndex = liveIndex;
     if (req.requiredAuthKey !== undefined) {
       const matchingOnAuth = integrationCandidates.filter((c) => c.authKey === req.requiredAuthKey);
       if (matchingOnAuth.length === 0 && integrationCandidates.length > 0) {
