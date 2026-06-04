@@ -195,6 +195,11 @@ export async function provisionDocuments(deps: ProvisionDeps): Promise<void> {
         // in the sink buffer — keeps peak memory flat for large documents.
         await writer.flush();
       }
+    } catch (err) {
+      // A mid-stream read/write failure is fatal, same as a non-ok fetch: route
+      // it through `die()` so the run gets an `appstrate.error` breadcrumb
+      // rather than crashing out as an unhandled rejection.
+      return await deps.die(`Failed to stream document ${name}: ${getErrorMessage(err)}`);
     } finally {
       reader.releaseLock();
       await writer.end();

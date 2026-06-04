@@ -89,6 +89,11 @@ describe.skipIf(!RUN)("runtime-pi container provisions documents without spinnin
     const docBytes = new TextEncoder().encode("the answer is 42\n");
     server = Bun.serve({
       port: 0,
+      // Bind all interfaces: on Linux the container reaches the mock via the
+      // `host.docker.internal:host-gateway` IP, which a loopback-only bind
+      // would not answer (Docker Desktop's host-routing magic hides this on
+      // macOS, but CI runs on Linux).
+      hostname: "0.0.0.0",
       async fetch(req) {
         const u = new URL(req.url);
         const p = u.pathname;

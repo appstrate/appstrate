@@ -278,6 +278,31 @@ describe("provisionDocuments", () => {
     expect(messages[0]).toContain("x.txt");
   });
 
+  it("dies (does not crash) when a document body errors mid-stream", async () => {
+    const ws = await tempWorkspace();
+    const { die, messages } = makeDie();
+    // Inject the transport so the document body rejects on read deterministically
+    // (a server-side stream abort surfaces client-side as a clean EOF, not a
+    // read error — so it can't exercise the write-loop catch).
+    const fetchFn = (async (url: string | URL): Promise<Response> => {
+      if (String(url).endsWith("/documents")) {
+        return Response.json({ documents: [{ name: "partial.bin", size: 9 }] });
+      }
+      const body = new ReadableStream<Uint8Array>({
+        start(c) {
+          c.enqueue(new Uint8Array([1, 2, 3]));
+        },
+        pull(c) {
+          c.error(new Error("connection reset mid-stream"));
+        },
+      });
+      return new Response(body, { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await expect(provisionDocuments(deps(ws, die, { fetchFn }))).rejects.toBeInstanceOf(DieError);
+    expect(messages[0]).toContain("stream document partial.bin");
+  });
+
   it("refuses a path-traversal document name without fetching it", async () => {
     config.documents = () => Response.json({ documents: [{ name: "../evil" }] });
     let docFetched = false;
