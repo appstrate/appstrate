@@ -35,7 +35,8 @@ import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedPackage } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
-import { integrationConnections } from "@appstrate/db/schema";
+import { integrationConnections, applicationPackages } from "@appstrate/db/schema";
+import { and, eq } from "drizzle-orm";
 import { encryptCredentials } from "@appstrate/connect";
 import {
   localIntegrationManifest,
@@ -343,6 +344,77 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     // The smuggled connection_id is the wire contract the reconnect modal
     // consumes — without it the OAuth callback INSERTs a duplicate row.
     expect(err!.connection_id).toBe(deadConnectionId);
+  });
+
+  it("returns 412 integration_not_active when a declared integration is installed but DISABLED, even with a live connection", async () => {
+    // The exact prod regression: a declared integration is switched off on the
+    // app (enabled=false) while a resolvable connection lingers. The connection
+    // gate alone would PASS (the connection resolves), so the run used to launch
+    // and silently degrade — the runtime spawn resolver skips the inactive
+    // integration and the agent runs without its tools. Readiness must reject.
+    await seedAgent({
+      id: AGENT,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: buildAgentManifest([INTEGRATION]),
+    });
+    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await seedIntegration(INTEGRATION);
+    // A live, resolvable connection exists — the connection gate would pass.
+    await seedConnection(INTEGRATION, ctx.user.id);
+    // Operator disables the integration on the application.
+    await db
+      .update(applicationPackages)
+      .set({ enabled: false })
+      .where(
+        and(
+          eq(applicationPackages.applicationId, ctx.defaultAppId),
+          eq(applicationPackages.packageId, INTEGRATION),
+        ),
+      );
+
+    const res = await app.request(`/api/agents/${AGENT}/run`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+
+    expect(res.status).toBe(412);
+    const body = (await res.json()) as ProblemDetails;
+    expect(body.code).toBe("missing_integration_connection");
+    const err = body.errors!.find((e) => e.field === `integrations.${INTEGRATION}`);
+    expect(err).toBeDefined();
+    expect(err!.code).toBe("integration_not_active");
+  });
+
+  it("returns 412 integration_not_active when a declared integration is NOT installed on the app", async () => {
+    await seedAgent({
+      id: AGENT,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: buildAgentManifest([INTEGRATION]),
+    });
+    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    // Seed the integration PACKAGE but do NOT install it on the application.
+    await seedPackage({
+      id: INTEGRATION,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: buildIntegrationManifest(INTEGRATION),
+    });
+
+    const res = await app.request(`/api/agents/${AGENT}/run`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+
+    expect(res.status).toBe(412);
+    const body = (await res.json()) as ProblemDetails;
+    const err = body.errors!.find((e) => e.field === `integrations.${INTEGRATION}`);
+    expect(err).toBeDefined();
+    expect(err!.code).toBe("integration_not_active");
   });
 
   it("happy path: returns NON-412 status when the actor has exactly one accessible connection", async () => {
