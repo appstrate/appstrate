@@ -3,6 +3,17 @@
 /** Actor identity — dashboard user or end-user (headless). Re-exported from `@appstrate/core/platform-types` to keep one canonical definition. */
 export type { Actor } from "@appstrate/core/platform-types";
 
+/**
+ * OAuth2 token-endpoint client-auth methods supported across the connect
+ * surface (`token_endpoint_auth_method`). `"none"` is the public-client case
+ * (no client_secret). The canonical enum's JWT / mTLS methods are intentionally
+ * out of scope here. Single source of truth — re-exported by `token-exchange.ts`
+ * as `TokenExchangeAuthMethod`. Declared in this low-level module so it can be
+ * referenced without importing `token-exchange.ts` (which would create a cycle,
+ * since that module imports `OAuthStateStore` from here).
+ */
+export type TokenEndpointAuthMethod = "client_secret_post" | "client_secret_basic" | "none";
+
 export interface OAuthStateRecord {
   state: string;
   orgId: string;
@@ -40,7 +51,7 @@ export interface OAuthStateRecord {
     /** Optional RFC 8707 `resource` parameter (`auths.{key}.resource`) for the token exchange. */
     resource?: string;
     /** OAuth2 token endpoint client auth method (`token_endpoint_auth_method`) declared on the auth. */
-    tokenEndpointAuthMethod?: "client_secret_post" | "client_secret_basic" | "none";
+    tokenEndpointAuthMethod?: TokenEndpointAuthMethod;
     /** Optional explicit client_id (DCR or user-supplied). */
     clientId?: string;
     /** Optional explicit client_secret (omitted for `none`). */

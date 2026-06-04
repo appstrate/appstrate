@@ -36,7 +36,8 @@
     "README.md"
   ],
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./runtime-tools": "./src/runtime-tools/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

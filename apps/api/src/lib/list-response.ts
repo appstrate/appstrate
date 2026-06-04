@@ -11,12 +11,9 @@
  * be tacked on via spread at the call site without changing the helper.
  */
 
-export interface ListResponse<T> {
-  object: "list";
-  data: T[];
-  hasMore: boolean;
-  total?: number;
-}
+import type { ListEnvelope } from "@appstrate/shared-types";
+
+export type ListResponse<T> = ListEnvelope<T>;
 
 export function listResponse<T>(
   data: T[],

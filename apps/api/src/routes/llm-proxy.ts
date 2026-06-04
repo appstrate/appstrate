@@ -40,7 +40,8 @@ import type { Context } from "hono";
 import { logger } from "../lib/logger.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
-import { forbidden, invalidRequest } from "../lib/errors.ts";
+import { invalidRequest } from "../lib/errors.ts";
+import { assertBearerOnly } from "../lib/bearer-only.ts";
 import {
   proxyLlmCall,
   LlmProxyModelApiMismatchError,
@@ -52,13 +53,6 @@ import { mistralConversationsAdapter } from "../services/llm-proxy/mistral.ts";
 import type { LlmProxyAdapter, LlmProxyPrincipal } from "../services/llm-proxy/types.ts";
 import { getLlmProxyLimits, type LlmProxyLimits } from "../services/proxy-limits.ts";
 import type { AppEnv } from "../types/index.ts";
-
-/** Accepted auth methods — mirrors credential-proxy. */
-const ACCEPTED_AUTH_METHODS: ReadonlySet<string> = new Set([
-  "api_key",
-  "oauth2-instance",
-  "oauth2-dashboard",
-]);
 
 export function createLlmProxyRouter() {
   const router = new Hono<AppEnv>();
@@ -117,11 +111,7 @@ async function handleProxy(
   limits: LlmProxyLimits,
 ): Promise<Response> {
   const authMethod = c.get("authMethod");
-  if (!ACCEPTED_AUTH_METHODS.has(authMethod)) {
-    throw forbidden(
-      `LLM proxy does not accept auth method "${authMethod}" (cookie sessions and unknown strategies rejected)`,
-    );
-  }
+  assertBearerOnly(authMethod, "LLM proxy");
 
   const apiKeyId = c.get("apiKeyId");
   const orgId = c.get("orgId");

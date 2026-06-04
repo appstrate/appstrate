@@ -19,6 +19,7 @@
 // ─── JSON Schema Types (from @types/json-schema, draft-07 — compatible with 2020-12) ─
 
 import type { JSONSchema7, JSONSchema7Type, JSONSchema7TypeName } from "json-schema";
+import { isFileField as isFileFieldShared } from "@appstrate/afps-shared/file-field";
 export type { JSONSchema7, JSONSchema7Type, JSONSchema7TypeName };
 
 /** A JSON Schema object with typed properties — the root of input/config/output schemas. */
@@ -85,12 +86,13 @@ function getItems(prop: JSONSchema7): JSONSchema7 | undefined {
 
 // ─── File Field Detection ────────────────────────────────────────────────────
 
-/** Detect a file field: format "uri" + contentMediaType present (single or array). */
+/**
+ * Detect a file field: format "uri" + contentMediaType present (single or array).
+ * Delegates to the canonical `@appstrate/afps-shared` predicate (single source
+ * of truth) — the observable behaviour is unchanged for core consumers.
+ */
 export function isFileField(prop: JSONSchema7): boolean {
-  if (prop.format === "uri" && prop.contentMediaType) return true;
-  const items = getItems(prop);
-  if (getType(prop) === "array" && items?.format === "uri" && items?.contentMediaType) return true;
-  return false;
+  return isFileFieldShared(prop);
 }
 
 /** Detect a multiple-files field (array of file URIs). */

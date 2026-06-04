@@ -16,6 +16,7 @@
 
 import type { ExecutionContext } from "../types/execution-context.ts";
 import { renderTemplate } from "../template/mustache.ts";
+import { isFileField } from "@appstrate/afps-shared/file-field";
 import type { PromptView, PromptViewUpload } from "./prompt-renderer.ts";
 
 const TEMPLATE_RENDER_MIN_VERSION = [1, 1] as const;
@@ -28,23 +29,6 @@ function supportsTemplateRendering(schemaVersion: string | undefined): boolean {
   const minor = Number(match[2]);
   const [minMajor, minMinor] = TEMPLATE_RENDER_MIN_VERSION;
   return major > minMajor || (major === minMajor && minor >= minMinor);
-}
-
-/**
- * Heuristic matching the AFPS file-field convention: a JSON Schema
- * node is a "file" when it is a string with `format: uri` and a
- * `contentMediaType`, or an array of such items.
- */
-function isFileField(schema: unknown): boolean {
-  if (!schema || typeof schema !== "object") return false;
-  const s = schema as Record<string, unknown>;
-  if (s.type === "string" && s.format === "uri" && typeof s.contentMediaType === "string") {
-    return true;
-  }
-  if (s.type === "array" && typeof s.items === "object" && s.items !== null) {
-    return isFileField(s.items);
-  }
-  return false;
 }
 
 function formatFileSize(bytes: number): string {

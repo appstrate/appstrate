@@ -26,10 +26,9 @@
  */
 
 /**
- * Structural subset of the resolver config consumed by
- * `resolveHttpDelivery` (`@appstrate/afps-runtime/resolvers`). Declared here
- * structurally so this zero-dep package does not depend on afps-runtime; the
- * shapes are structurally compatible.
+ * Resolver config consumed by `resolveHttpDelivery`
+ * (`@appstrate/afps-runtime/resolvers`). This zero-dep package is the single
+ * source of truth for the shape; afps-runtime re-exports it.
  */
 export interface HttpDeliveryConfig {
   headerName?: string;

@@ -63,11 +63,20 @@ RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
 #   - @appstrate/core/{errors,ssrf}           getErrorMessage + isBlockedHost/Url,
 #                                             imported by credential-proxy.ts /
 #                                             mcp.ts / ssrf.ts
+#   - @appstrate/runner-pi/runtime-tools      canonical run_history / recall_memory
+#                                             descriptors (name + description +
+#                                             parameter JSON Schema), imported by
+#                                             mcp.ts to build the firstParty tool
+#                                             advertisements. The `./runtime-tools`
+#                                             subpath is pi-free (no pi-ai /
+#                                             pi-coding-agent imports) so the
+#                                             compiled binary stays minimal.
 COPY packages/connect/src        packages/connect/src
 COPY packages/afps-runtime/src   packages/afps-runtime/src
 COPY packages/afps-shared/src    packages/afps-shared/src
 COPY packages/mcp-transport/src  packages/mcp-transport/src
 COPY packages/core/src           packages/core/src
+COPY packages/runner-pi/src      packages/runner-pi/src
 
 # Sidecar sources. Glob is single-level (no recursion into `test/`),
 # so adding a new `.ts` file at `runtime-pi/sidecar/*.ts` is picked up

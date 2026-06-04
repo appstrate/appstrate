@@ -40,6 +40,7 @@
     "./integrity": "./src/integrity.ts",
     "./credential-template": "./src/credential-template.ts",
     "./delivery-http": "./src/delivery-http.ts",
+    "./file-field": "./src/file-field.ts",
     "./ssrf": "./src/ssrf.ts",
     "./token-usage": "./src/token-usage.ts"
   },

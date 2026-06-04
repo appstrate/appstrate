@@ -58,6 +58,10 @@ import {
 } from "@appstrate/mcp-transport";
 import { getErrorMessage } from "@appstrate/core/errors";
 import {
+  RUN_HISTORY_INJECTED_TOOL,
+  RECALL_MEMORY_INJECTED_TOOL,
+} from "@appstrate/runner-pi/runtime-tools";
+import {
   ABSOLUTE_MAX_RESPONSE_SIZE,
   MAX_MCP_ENVELOPE_SIZE,
   MAX_REQUEST_BODY_SIZE,
@@ -965,30 +969,15 @@ function buildSidecarTools(options: MountMcpOptions): {
   }
 
   const runHistory: AppstrateToolDefinition = {
+    // Name + description + inputSchema are derived from the canonical
+    // `run_history` descriptor in `@appstrate/runner-pi/runtime-tools`
+    // (the single source consumed by the runtime Pi-tool registration).
+    // The handler stays local to the sidecar.
     descriptor: {
-      name: "run_history",
-      description:
-        "Fetch metadata and optionally the carry-over checkpoint or final output of the agent's " +
-        'most recent past runs (current run excluded). Returns JSON `{ object: "list", data: [...], hasMore }`. ' +
-        "Use for trend analysis, auditing prior executions, or recovering from a failed run.",
-      inputSchema: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          limit: {
-            type: "integer",
-            minimum: 1,
-            maximum: 50,
-            description: "Number of past runs to return (1..50, default 10).",
-          },
-          fields: {
-            type: "array",
-            items: { type: "string", enum: ["checkpoint", "result"] },
-            uniqueItems: true,
-            description: "Optional subset of `{checkpoint, result}` to include per run.",
-          },
-        },
-      },
+      name: RUN_HISTORY_INJECTED_TOOL.name,
+      description: RUN_HISTORY_INJECTED_TOOL.description,
+      inputSchema:
+        RUN_HISTORY_INJECTED_TOOL.parameters as AppstrateToolDefinition["descriptor"]["inputSchema"],
     },
     handler: async (rawArgs) => {
       const args = rawArgs as { limit?: number; fields?: string[] };
@@ -1025,35 +1014,15 @@ function buildSidecarTools(options: MountMcpOptions): {
   // the archive (everything else) on demand so the working context stays
   // small. See ADR-012.
   const recallMemory: AppstrateToolDefinition = {
+    // Name + description + inputSchema are derived from the canonical
+    // `recall_memory` descriptor in `@appstrate/runner-pi/runtime-tools`
+    // (the single source consumed by the runtime Pi-tool registration).
+    // The handler stays local to the sidecar.
     descriptor: {
-      name: "recall_memory",
-      description:
-        "Search the agent's archive memories — durable facts and learnings from past runs that " +
-        "are NOT visible in the system prompt by default. Pass an optional `q` to filter by " +
-        "case-insensitive substring; omit it to retrieve the most recent archive memories. " +
-        "Use this when the prompt's `## Memory` section says you have archived memories worth " +
-        "checking, when looking for a fact you remember saving, or before answering a question " +
-        "that depends on prior-session context. Returns JSON `{ memories: [...] }`.",
-      inputSchema: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          q: {
-            type: "string",
-            minLength: 1,
-            maxLength: 2000,
-            description:
-              "Case-insensitive substring to match against memory content (text or JSON). " +
-              "Omit for an unfiltered most-recent-first slice.",
-          },
-          limit: {
-            type: "integer",
-            minimum: 1,
-            maximum: 50,
-            description: "Max memories to return (1..50, default 10).",
-          },
-        },
-      },
+      name: RECALL_MEMORY_INJECTED_TOOL.name,
+      description: RECALL_MEMORY_INJECTED_TOOL.description,
+      inputSchema:
+        RECALL_MEMORY_INJECTED_TOOL.parameters as AppstrateToolDefinition["descriptor"]["inputSchema"],
     },
     handler: async (rawArgs) => {
       const args = rawArgs as { q?: string; limit?: number };

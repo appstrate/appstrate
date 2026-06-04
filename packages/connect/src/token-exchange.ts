@@ -21,7 +21,7 @@ import {
   parseTokenResponse,
   type ParsedTokenResponse,
 } from "./token-utils.ts";
-import type { OAuthStateStore } from "./types.ts";
+import type { OAuthStateStore, TokenEndpointAuthMethod } from "./types.ts";
 import type { OAuthTokenContentType } from "./token-utils.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 
@@ -30,8 +30,11 @@ import { getErrorMessage } from "@appstrate/core/errors";
  * subset of `OAuthTokenAuthMethod` (`@appstrate/core/validation`). `"none"` is
  * the public-client case (no client_secret); the canonical enum's JWT / mTLS
  * methods are intentionally unsupported here.
+ *
+ * Alias of the canonical {@link TokenEndpointAuthMethod} (`./types.ts`) — the
+ * single source of truth for this union across the connect surface.
  */
-export type TokenExchangeAuthMethod = "client_secret_basic" | "client_secret_post" | "none";
+export type TokenExchangeAuthMethod = TokenEndpointAuthMethod;
 
 export interface ExchangeAuthorizationCodeInput {
   /** Token endpoint URL (`auths.{key}.token_endpoint`). */

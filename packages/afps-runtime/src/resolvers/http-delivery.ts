@@ -20,13 +20,11 @@
 
 import { substituteVars } from "./template-vars.ts";
 
-/** Subset of `auths.{key}.delivery.http` the resolver consumes (structural). */
-export interface HttpDeliveryConfig {
-  headerName?: string;
-  headerPrefix?: string;
-  valueFrom?: string | { template: string; encoding?: "base64" };
-  allowServerOverride?: boolean;
-}
+// The resolver config shape lives once in the zero-dep `@appstrate/afps-shared`
+// (the canonical `delivery.http` projection target). Re-export it here so
+// consumers importing from `@appstrate/afps-runtime/resolvers` keep their path.
+export type { HttpDeliveryConfig } from "@appstrate/afps-shared/delivery-http";
+import type { HttpDeliveryConfig } from "@appstrate/afps-shared/delivery-http";
 
 /**
  * Plan returned by {@link resolveHttpDelivery}. The proxy uses this to decide

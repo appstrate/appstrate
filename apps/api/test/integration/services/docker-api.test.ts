@@ -9,7 +9,6 @@ import {
   streamLogs,
   waitForExit,
   removeContainer,
-  injectFiles,
   stopContainer,
   createNetwork,
   connectContainerToNetwork,
@@ -19,7 +18,6 @@ import {
   cleanupOrphanedRunNetworks,
   cleanupOrphanedVolumes,
   createVolume,
-  getContainerHostPort,
   removeVolume,
   runEphemeralCommand,
   WORKSPACE_VOLUME_PREFIX,
@@ -115,8 +113,6 @@ async function createRawContainer(
   opts: {
     env?: string[];
     labels?: Record<string, string>;
-    exposedPorts?: Record<string, object>;
-    portBindings?: Record<string, Array<{ HostPort: string }>>;
   } = {},
 ): Promise<string> {
   const name = `appstrate-test-raw-${uid()}`;
@@ -128,10 +124,6 @@ async function createRawContainer(
       Cmd: cmd,
       Tty: false,
       Env: opts.env,
-      ExposedPorts: opts.exposedPorts,
-      HostConfig: {
-        PortBindings: opts.portBindings,
-      },
       Labels: {
         "appstrate.managed": "true",
         "appstrate.run": `test-${uid()}`,
@@ -405,68 +397,6 @@ describeRequiresDocker("removeContainer", () => {
   );
 });
 
-// ─── injectFiles ────────────────────────────────────────────
-
-describeRequiresDocker("injectFiles", () => {
-  it(
-    "injects a file into a container and verifies content via cat",
-    async () => {
-      const fileContent = "hello from injected file";
-      const id = await createRawContainer(["cat", "/tmp/test.txt"]);
-
-      await injectFiles(id, [{ name: "test.txt", content: Buffer.from(fileContent) }], "/tmp");
-
-      await startContainer(id);
-
-      const lines: string[] = [];
-      for await (const line of streamLogs(id)) {
-        lines.push(line);
-      }
-
-      expect(lines).toContain(fileContent);
-    },
-    TIMEOUT,
-  );
-
-  it(
-    "injects multiple files in a single tar archive",
-    async () => {
-      const id = await createRawContainer(["sh", "-c", "cat /tmp/a.txt && cat /tmp/b.txt"]);
-
-      await injectFiles(
-        id,
-        [
-          { name: "a.txt", content: Buffer.from("content-a") },
-          { name: "b.txt", content: Buffer.from("content-b") },
-        ],
-        "/tmp",
-      );
-
-      await startContainer(id);
-
-      const lines: string[] = [];
-      for await (const line of streamLogs(id)) {
-        lines.push(line);
-      }
-
-      const output = lines.join("\n");
-      expect(output).toContain("content-a");
-      expect(output).toContain("content-b");
-    },
-    TIMEOUT,
-  );
-
-  it(
-    "does nothing when files array is empty",
-    async () => {
-      const id = await createRawContainer(["true"]);
-      await injectFiles(id, [], "/tmp");
-      // No error thrown
-    },
-    TIMEOUT,
-  );
-});
-
 // ─── createNetwork ──────────────────────────────────────────
 
 describeRequiresDocker("createNetwork", () => {
@@ -550,36 +480,6 @@ describeRequiresDocker("removeNetwork", () => {
     "does not throw for non-existent network (404 tolerance)",
     async () => {
       await expect(removeNetwork("nonexistent-network-id-12345")).resolves.toBeUndefined();
-    },
-    TIMEOUT,
-  );
-});
-
-// ─── getContainerHostPort ───────────────────────────────────
-
-describeRequiresDocker("getContainerHostPort", () => {
-  it(
-    "returns the mapped host port for a container with port binding",
-    async () => {
-      // Create container with port binding via raw API
-      const id = await createRawContainer(["sh", "-c", "nc -l -p 8080 || sleep 10"], {
-        exposedPorts: { "8080/tcp": {} },
-        portBindings: { "8080/tcp": [{ HostPort: "0" }] },
-      });
-      await startContainer(id);
-
-      const port = await getContainerHostPort(id, "8080/tcp");
-      expect(port).toBeNumber();
-      expect(port!).toBeGreaterThan(0);
-    },
-    TIMEOUT,
-  );
-
-  it(
-    "returns null for non-existent container",
-    async () => {
-      const port = await getContainerHostPort("nonexistent-container-12345", "8080/tcp");
-      expect(port).toBeNull();
     },
     TIMEOUT,
   );
@@ -695,16 +595,10 @@ describeRequiresDocker("cleanupOrphanedRunNetworks", () => {
 // ─── Full lifecycle ─────────────────────────────────────────
 
 describeRequiresDocker("Full lifecycle", () => {
-  it("create -> inject -> start -> streamLogs -> waitForExit -> remove", async () => {
-    // Create container with a command that cats an injected file
-    const id = await createRawContainer(["sh", "/tmp/run.sh"], { env: ["GREETING=world"] });
-
-    // Inject a script before starting
-    await injectFiles(
-      id,
-      [{ name: "run.sh", content: Buffer.from('#!/bin/sh\necho "hello $GREETING"') }],
-      "/tmp",
-    );
+  it("create -> start -> streamLogs -> waitForExit -> remove", async () => {
+    const id = await createRawContainer(["sh", "-c", 'echo "hello $GREETING"'], {
+      env: ["GREETING=world"],
+    });
 
     await startContainer(id);
 

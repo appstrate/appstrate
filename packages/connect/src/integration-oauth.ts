@@ -26,7 +26,7 @@
  * `grant_type=refresh_token` to the same `token_endpoint` (RFC 6749 §6).
  */
 
-import type { Actor, OAuthStateRecord, OAuthStateStore } from "./types.ts";
+import type { Actor, OAuthStateRecord, OAuthStateStore, TokenEndpointAuthMethod } from "./types.ts";
 import { OAuthCallbackError } from "./oauth.ts";
 import { randomBase64Url, sha256Base64Url } from "./pkce.ts";
 import { exchangeAuthorizationCode } from "./token-exchange.ts";
@@ -89,7 +89,7 @@ export interface InitiateIntegrationOAuthInput {
    *
    * Manifest-explicit values continue to work unchanged.
    */
-  tokenEndpointAuthMethod?: "client_secret_post" | "client_secret_basic" | "none";
+  tokenEndpointAuthMethod?: TokenEndpointAuthMethod;
   /** Scopes requested in the authorize URL (joined per `scopeSeparator`). */
   scopes?: string[];
   /** Scope joiner (`_meta["dev.appstrate/oauth"].scope_separator`) — defaults to single space (OAuth2 standard). */

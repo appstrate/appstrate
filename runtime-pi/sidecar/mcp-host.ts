@@ -28,7 +28,7 @@
  *     SubprocessTransport.
  */
 
-import { isValidToolNameForExisting } from "@appstrate/core/naming";
+import { isValidToolName } from "@appstrate/core/naming";
 import { RUNTIME_TOOL_EVENTS_META_KEY } from "@appstrate/core/runtime-tool-defs";
 import {
   sanitiseToolDescriptor,
@@ -274,7 +274,7 @@ export class McpHost {
       }
       const sanitisedToolBody = sanitiseToolBody(sanitised.name);
       const namespacedName = sanitisedToolBody ? `${normalisedNs}__${sanitisedToolBody}` : "";
-      let finalName = isValidToolNameForExisting(namespacedName)
+      let finalName = isValidToolName(namespacedName)
         ? namespacedName
         : `${normalisedNs}__tool_${this.toolDescriptors.length}`;
       // Dedup: two DISTINCT upstream tools can converge onto the same
