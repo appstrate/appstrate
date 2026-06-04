@@ -16,6 +16,8 @@
  * endpoint before calling here (same posture as the userinfo fetch).
  */
 
+import type { TokenEndpointAuthMethod } from "./types.ts";
+
 export interface RegisterDynamicClientInput {
   /** RFC 7591 §3 registration endpoint (from AS metadata discovery). */
   registrationEndpoint: string;
@@ -30,7 +32,7 @@ export interface RegisterDynamicClientInput {
    * client + PKCE — the MCP-spec norm). Pass a confidential method only when the
    * AS requires a client secret.
    */
-  tokenEndpointAuthMethod?: "none" | "client_secret_basic" | "client_secret_post";
+  tokenEndpointAuthMethod?: TokenEndpointAuthMethod;
   /** Testing seam — defaults to global `fetch`. */
   fetchImpl?: typeof fetch;
 }

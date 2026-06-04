@@ -128,8 +128,6 @@ export interface CreateContainerOptions {
   networkId?: string;
   networkAlias?: string;
   extraHosts?: string[];
-  portBindings?: Record<string, Array<{ HostPort: string }>>;
-  exposedPorts?: Record<string, object>;
   labels?: Record<string, string>;
   /**
    * Docker `HostConfig.Binds` entries (`/host/path:/container/path[:ro]`).
@@ -139,23 +137,11 @@ export interface CreateContainerOptions {
    */
   binds?: string[];
   /**
-   * Docker `HostConfig.GroupAdd` — supplementary GIDs the container's
-   * primary user joins. Used to grant socket access (e.g. the `docker`
-   * group on Linux daemons) without dropping to root.
-   */
-  groupAdd?: string[];
-  /**
    * Override `User` set in the image. Used by the sidecar to run as
    * root only when it has Docker socket access — keeps the default
    * `USER nobody:nobody` image directive intact for every other path.
    */
   user?: string;
-  /**
-   * Override the image's default `CMD`. Used by the workspace-populate
-   * helper to hold a generic image (busybox) open with a `sleep` so the
-   * volume stays mounted while files are archived into it.
-   */
-  cmd?: string[];
 }
 
 export async function createContainer(
@@ -180,8 +166,6 @@ export async function createContainer(
     Image: options.image,
     Env: env,
     Tty: false,
-    ...(options.cmd ? { Cmd: options.cmd } : {}),
-    ExposedPorts: options.exposedPorts,
     HostConfig: {
       Memory: options.memory ?? 1024 * 1024 * 1024,
       NanoCpus: options.nanoCpus ?? 2_000_000_000,
@@ -191,9 +175,7 @@ export async function createContainer(
       AutoRemove: false,
       NetworkMode: options.networkId ?? "bridge",
       ExtraHosts: options.extraHosts ?? [],
-      PortBindings: options.portBindings,
       ...(options.binds && options.binds.length > 0 ? { Binds: options.binds } : {}),
-      ...(options.groupAdd && options.groupAdd.length > 0 ? { GroupAdd: options.groupAdd } : {}),
     },
     ...(options.user ? { User: options.user } : {}),
     NetworkingConfig: {
@@ -359,68 +341,6 @@ export async function removeContainer(containerId: string): Promise<void> {
   await assertDockerOk(res, "remove container", [404]);
 }
 
-/**
- * Inject files into a container using a single tar archive via Docker's archive API.
- * Must be called after createContainer() and before startContainer().
- */
-export async function injectFiles(
-  containerId: string,
-  files: Array<{ name: string; content: Buffer }>,
-  targetDir: string,
-): Promise<void> {
-  if (files.length === 0) return;
-
-  const tar = createTarArchive(files);
-
-  const res = await dockerFetch(
-    `/containers/${containerId}/archive?path=${encodeURIComponent(targetDir)}`,
-    {
-      method: "PUT",
-      headers: { "Content-Type": "application/x-tar" },
-      body: tar,
-    },
-  );
-
-  await assertDockerOk(res, "inject files into container");
-}
-
-/** Create a tar header for a single file entry. */
-function createTarHeader(fileName: string, contentLength: number): Buffer {
-  const header = Buffer.alloc(512, 0);
-  header.write(fileName, 0, Math.min(fileName.length, 100), "utf8");
-  header.write("0000644\0", 100, 8, "utf8");
-  header.write("0001000\0", 108, 8, "utf8");
-  header.write("0001000\0", 116, 8, "utf8");
-  header.write(contentLength.toString(8).padStart(11, "0") + "\0", 124, 12, "utf8");
-  const mtime = Math.floor(Date.now() / 1000);
-  header.write(mtime.toString(8).padStart(11, "0") + "\0", 136, 12, "utf8");
-  header.write("        ", 148, 8, "utf8");
-  header.write("0", 156, 1, "utf8");
-
-  let checksum = 0;
-  for (let i = 0; i < 512; i++) checksum += header[i]!;
-  header.write(checksum.toString(8).padStart(6, "0") + "\0 ", 148, 8, "utf8");
-
-  return header;
-}
-
-/** Create a tar archive containing one or more files. */
-function createTarArchive(files: Array<{ name: string; content: Buffer }>): Buffer {
-  const blocks: Buffer[] = [];
-
-  for (const file of files) {
-    blocks.push(createTarHeader(file.name, file.content.length));
-    const dataBlocks = Math.ceil(file.content.length / 512);
-    const data = Buffer.alloc(dataBlocks * 512, 0);
-    file.content.copy(data);
-    blocks.push(data);
-  }
-
-  // End-of-archive: two 512-byte zero blocks
-  blocks.push(Buffer.alloc(1024, 0));
-  return Buffer.concat(blocks);
-}
-
 export async function stopContainer(containerId: string, timeout = 5): Promise<void> {
   const res = await dockerFetch(`/containers/${containerId}/stop?t=${timeout}`, {
     method: "POST",
@@ -507,28 +427,6 @@ export async function connectContainerToNetwork(
   });
 
   await assertDockerOk(res, "connect container to network");
-}
-
-/**
- * Get the host-mapped port for a container's exposed port.
- * Returns the host port number, or null if no mapping exists.
- */
-export async function getContainerHostPort(
-  containerId: string,
-  containerPort: string,
-): Promise<number | null> {
-  const res = await dockerFetch(`/containers/${containerId}/json`);
-  if (!res.ok) return null;
-
-  const data = (await res.json()) as {
-    NetworkSettings?: {
-      Ports?: Record<string, Array<{ HostPort: string }> | null>;
-    };
-  };
-
-  const portInfo = data.NetworkSettings?.Ports?.[containerPort]?.[0];
-  if (!portInfo?.HostPort) return null;
-  return parseInt(portInfo.HostPort, 10);
 }
 
 export async function removeNetwork(networkId: string): Promise<void> {
@@ -804,28 +702,7 @@ async function removeNetworksMatching(predicate: (name: string) => boolean): Pro
 
 // --- Platform network auto-detection ---
 
-let platformNetworkCache:
-  | { networkId: string; hostname: string; gatewayIp: string }
-  | null
-  | undefined;
-
-/**
- * Get the address to reach Docker host-mapped ports.
- * Returns "localhost" in local dev, or the Docker gateway IP when the platform
- * itself runs inside a container (e.g. Coolify).
- * Result is cached after the first call.
- */
-export async function getDockerHostAddress(): Promise<string> {
-  const platform = await detectPlatformNetwork();
-  // Not containerized (local dev) → real localhost
-  if (!platform) return "localhost";
-  // Containerized with a real gateway IP (typical Linux + bridge driver)
-  if (platform.gatewayIp) return platform.gatewayIp;
-  // Containerized but no gateway exposed (macOS Docker Desktop / OrbStack):
-  // rely on Docker's host alias. Requires extra_hosts: "host.docker.internal:host-gateway"
-  // in the compose file (already set on the appstrate service).
-  return "host.docker.internal";
-}
+let platformNetworkCache: { networkId: string; hostname: string } | null | undefined;
 
 /**
  * Detect the Docker network the platform container is connected to.
@@ -837,7 +714,6 @@ export async function getDockerHostAddress(): Promise<string> {
 export async function detectPlatformNetwork(): Promise<{
   networkId: string;
   hostname: string;
-  gatewayIp: string;
 } | null> {
   if (platformNetworkCache !== undefined) return platformNetworkCache;
 
@@ -875,13 +751,11 @@ export async function detectPlatformNetwork(): Promise<{
       // Use the first alias or fall back to the container hostname
       const dnsName = info.Aliases?.[0] ?? data.Config?.Hostname ?? containerName;
 
-      const gatewayIp = info.Gateway ?? "";
-      platformNetworkCache = { networkId: info.NetworkID, hostname: dnsName, gatewayIp };
+      platformNetworkCache = { networkId: info.NetworkID, hostname: dnsName };
       logger.info("Detected platform Docker network", {
         network: name,
         networkId: info.NetworkID,
         hostname: dnsName,
-        gatewayIp,
       });
       return platformNetworkCache;
     }

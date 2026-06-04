@@ -39,26 +39,6 @@ const agentPackageIdParam = {
   schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$" },
 } as const;
 
-const integrationPinSchema = {
-  type: "object",
-  required: [
-    "packageId",
-    "integration_package_id",
-    "auth_key",
-    "connection_id",
-    "createdAt",
-    "updatedAt",
-  ],
-  properties: {
-    packageId: { type: "string" },
-    integration_package_id: { type: "string" },
-    auth_key: { type: "string" },
-    connection_id: { type: "string", format: "uuid" },
-    createdAt: { type: "string", format: "date-time" },
-    updatedAt: { type: "string", format: "date-time" },
-  },
-} as const;
-
 const integrationOrgDefaultSchema = {
   type: "object",
   required: [
@@ -822,7 +802,10 @@ export const integrationsPaths = {
                 required: ["object", "data", "hasMore"],
                 properties: {
                   object: { type: "string", enum: ["list"] },
-                  data: { type: "array", items: integrationPinSchema },
+                  data: {
+                    type: "array",
+                    items: { $ref: "#/components/schemas/IntegrationPin" },
+                  },
                   hasMore: { type: "boolean" },
                 },
               },
@@ -903,7 +886,9 @@ export const integrationsPaths = {
         "200": {
           description: "Pinned",
           headers: baseResponseHeaders,
-          content: { "application/json": { schema: integrationPinSchema } },
+          content: {
+            "application/json": { schema: { $ref: "#/components/schemas/IntegrationPin" } },
+          },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },

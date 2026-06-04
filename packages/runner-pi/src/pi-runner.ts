@@ -35,7 +35,8 @@ import {
   SettingsManager,
   type ExtensionFactory,
 } from "@mariozechner/pi-coding-agent";
-import type { Api, Model } from "@mariozechner/pi-ai";
+import type { Api, KnownApi, Model } from "@mariozechner/pi-ai";
+import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 import {
   emptyRunResult,
@@ -159,7 +160,7 @@ export function derivePiCompactionSettings(
  * {@link AuthStorage} uses to look up API keys.
  */
 export function deriveProviderFromApi(api: string): string {
-  const known: Record<string, string> = {
+  const known: Record<ModelApiShape, string> = {
     "anthropic-messages": "anthropic",
     "openai-completions": "openai",
     "openai-responses": "openai",
@@ -170,10 +171,15 @@ export function deriveProviderFromApi(api: string): string {
     "azure-openai-responses": "azure-openai-responses",
     "bedrock-converse-stream": "amazon-bedrock",
   };
-  const provider = known[api];
+  const provider = (known as Record<string, string>)[api];
   if (!provider) throw new Error(`PiRunner: unknown model api "${api}"`);
   return provider;
 }
+
+// Compile error if appstrate ever declares an apiShape Pi does not know.
+type _ApiShapeSubsetOfPi = ModelApiShape extends KnownApi ? true : never;
+const _assertApiShapeSubsetOfPi: _ApiShapeSubsetOfPi = true;
+void _assertApiShapeSubsetOfPi;
 
 export class PiRunner implements Runner {
   readonly name = "pi-runner";

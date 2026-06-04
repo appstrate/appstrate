@@ -4,11 +4,9 @@ import { describe, expect, it } from "bun:test";
 import {
   validateManifest,
   extractSkillMeta,
-  extractManifestMetadata,
   agentManifestSchema,
   SUPPORTED_SCHEMA_VERSION_MAJOR,
 } from "../src/validation.ts";
-import type { Manifest } from "../src/validation.ts";
 import { agentManifestSchema as afpsAgentManifestSchema } from "@afps-spec/schema";
 
 // ─────────────────────────────────────────────
@@ -534,151 +532,6 @@ describe("validateManifest — package-type dispatch", () => {
       server: { type: "uv", entry_point: "main.py", mcp_config: { command: "uv" } },
     });
     expect(r.valid).toBe(false);
-  });
-});
-
-// ─────────────────────────────────────────────
-// extractManifestMetadata
-// ─────────────────────────────────────────────
-
-describe("extractManifestMetadata", () => {
-  it("full manifest — all metadata extracted", () => {
-    const manifest = {
-      name: "@test/my-skill",
-      version: "1.0.0",
-      type: "skill" as const,
-      description: "A useful skill",
-      keywords: ["ai", "tool"],
-      license: "MIT",
-      repository: "https://github.com/test/repo",
-    } as Partial<Manifest>;
-    const metadata = extractManifestMetadata(manifest);
-    expect(metadata.description).toBe("A useful skill");
-    expect(metadata.keywords).toEqual(["ai", "tool"]);
-    expect(metadata.license).toBe("MIT");
-    expect(metadata.repositoryUrl).toBe("https://github.com/test/repo");
-  });
-
-  it("display_name — extracted (mapped to displayName column) when present", () => {
-    const manifest = {
-      name: "@test/my-agent",
-      version: "1.0.0",
-      type: "agent" as const,
-      display_name: "My Custom Agent",
-    } as Partial<Manifest>;
-    const metadata = extractManifestMetadata(manifest);
-    expect(metadata.displayName).toBe("My Custom Agent");
-  });
-
-  it("empty manifest — returns empty object", () => {
-    const metadata = extractManifestMetadata({});
-    expect(metadata.description).toBeUndefined();
-    expect(metadata.keywords).toBeUndefined();
-    expect(metadata.license).toBeUndefined();
-    expect(metadata.repositoryUrl).toBeUndefined();
-    expect(metadata.displayName).toBeUndefined();
-  });
-
-  it("partial manifest — only defined fields included", () => {
-    const manifest = {
-      name: "@test/pkg",
-      version: "1.0.0",
-      type: "skill" as const,
-      description: "Only description",
-    } as Partial<Manifest>;
-    const metadata = extractManifestMetadata(manifest);
-    expect(metadata.description).toBe("Only description");
-    expect(metadata.keywords).toBeUndefined();
-    expect(metadata.license).toBeUndefined();
-    expect(metadata.repositoryUrl).toBeUndefined();
-  });
-
-  // ── AFPS §3.1 common-field projection ──
-
-  it("v2 common fields — all projected to ManifestMetadata", () => {
-    const manifest = {
-      name: "@test/pkg",
-      version: "1.0.0",
-      type: "skill" as const,
-      long_description: "Detailed prose description",
-      homepage: "https://example.com",
-      documentation: "https://docs.example.com",
-      support: "https://example.com/issues",
-      icon: "icon.png",
-      icons: [{ src: "icon-128.png", size: "128x128" }],
-      screenshots: ["s1.png", "s2.png"],
-      privacy_policies: ["https://example.com/privacy"],
-      compatibility: { platforms: ["darwin", "linux"] as Array<"darwin" | "linux"> },
-    } as Partial<Manifest>;
-    const metadata = extractManifestMetadata(manifest);
-    expect(metadata.longDescription).toBe("Detailed prose description");
-    expect(metadata.homepage).toBe("https://example.com");
-    expect(metadata.documentation).toBe("https://docs.example.com");
-    expect(metadata.support).toBe("https://example.com/issues");
-    expect(metadata.icon).toBe("icon.png");
-    expect(metadata.icons).toEqual([{ src: "icon-128.png", size: "128x128" }]);
-    expect(metadata.screenshots).toEqual(["s1.png", "s2.png"]);
-    expect(metadata.privacyPolicies).toEqual(["https://example.com/privacy"]);
-    expect(metadata.compatibility?.platforms).toEqual(["darwin", "linux"]);
-  });
-
-  it("author — string form round-trips verbatim", () => {
-    const manifest = {
-      name: "@test/pkg",
-      version: "1.0.0",
-      type: "skill" as const,
-      author: "Jane Doe <jane@example.com>",
-    } as Partial<Manifest>;
-    const metadata = extractManifestMetadata(manifest);
-    expect(metadata.author).toBe("Jane Doe <jane@example.com>");
-  });
-
-  it("author — object form round-trips as structured shape", () => {
-    const manifest = {
-      name: "@test/pkg",
-      version: "1.0.0",
-      type: "skill" as const,
-      author: { name: "Jane Doe", email: "jane@example.com", url: "https://jane.example" },
-    } as Partial<Manifest>;
-    const metadata = extractManifestMetadata(manifest);
-    expect(typeof metadata.author).toBe("object");
-    expect(metadata.author).toEqual({
-      name: "Jane Doe",
-      email: "jane@example.com",
-      url: "https://jane.example",
-    });
-  });
-
-  it("repository — string form maps to repositoryUrl only", () => {
-    const manifest = {
-      name: "@test/pkg",
-      version: "1.0.0",
-      type: "skill" as const,
-      repository: "https://github.com/test/repo",
-    } as Partial<Manifest>;
-    const metadata = extractManifestMetadata(manifest);
-    expect(metadata.repositoryUrl).toBe("https://github.com/test/repo");
-    expect(metadata.repository).toBeUndefined();
-  });
-
-  it("repository — object form populates both repository and repositoryUrl", () => {
-    const manifest = {
-      name: "@test/pkg",
-      version: "1.0.0",
-      type: "skill" as const,
-      repository: {
-        type: "git",
-        url: "https://github.com/test/repo.git",
-        directory: "packages/pkg",
-      },
-    } as Partial<Manifest>;
-    const metadata = extractManifestMetadata(manifest);
-    expect(metadata.repositoryUrl).toBe("https://github.com/test/repo.git");
-    expect(metadata.repository).toEqual({
-      type: "git",
-      url: "https://github.com/test/repo.git",
-      directory: "packages/pkg",
-    });
   });
 });
 

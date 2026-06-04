@@ -46,7 +46,7 @@ export type { ProxyCredentialsPayload } from "./proxy-primitives.ts";
 
 // ─── AFPS integration manifest ─────────────────────────────────────────
 // Multi-auth credential resolver + delivery planners.
-export { resolveHttpDelivery, buildProxyCredentialsPayload } from "./integration-credentials.ts";
+export { buildProxyCredentialsPayload } from "./integration-credentials.ts";
 // Credential-envelope decryptors — split out so they (and `encryption.ts` →
 // `@appstrate/env`) stay off the sidecar's import graph. Platform-only.
 export {
@@ -79,7 +79,7 @@ export { planMitmAction } from "./integration-mitm-planner.ts";
 export type { MitmRequestContext } from "./integration-mitm-planner.ts";
 
 // AFPS `delivery.http` resolver (snake_case, `{$credential.<field>}`
-// value templates). Counterpart to the pre-resolved `resolveHttpDelivery`.
+// value templates).
 export { resolveAfpsHttpDelivery } from "./afps-delivery.ts";
 export type { AfpsHttpDelivery } from "./afps-delivery.ts";
 

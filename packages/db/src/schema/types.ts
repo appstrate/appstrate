@@ -2,37 +2,19 @@
 
 import type { InferSelectModel } from "drizzle-orm";
 import type { profiles } from "./profiles.ts";
-import type {
-  packages,
-  packageVersions,
-  packageDistTags,
-  packageVersionDependencies,
-  applicationPackages,
-} from "./packages.ts";
+import type { packages, packageVersions, applicationPackages } from "./packages.ts";
 import type { runs, runLogs, schedules, packagePersistence } from "./runs.ts";
 import type { applications, endUsers } from "./applications.ts";
 import type { integrationConnections } from "./integrations.ts";
 import type { integrationPins } from "./integration-pins.ts";
-import type { user, session, account, verification } from "./auth.ts";
-import type {
-  organizations,
-  organizationMembers,
-  apiKeys,
-  orgInvitations,
-  orgProxies,
-  modelProviderCredentials,
-  orgModels,
-} from "./organizations.ts";
+import type { user } from "./auth.ts";
+import type { organizations, modelProviderCredentials, orgModels } from "./organizations.ts";
 
 export type UserProfile = InferSelectModel<typeof profiles>;
 
 export type Package = InferSelectModel<typeof packages>;
 
 export type PackageVersion = InferSelectModel<typeof packageVersions>;
-
-export type PackageDistTag = InferSelectModel<typeof packageDistTags>;
-
-export type PackageVersionDependency = InferSelectModel<typeof packageVersionDependencies>;
 
 export type Schedule = InferSelectModel<typeof schedules>;
 
@@ -48,25 +30,11 @@ export type ApplicationPackage = InferSelectModel<typeof applicationPackages>;
 
 export type Organization = InferSelectModel<typeof organizations>;
 
-export type OrganizationMember = InferSelectModel<typeof organizationMembers>;
-
-export type ApiKey = InferSelectModel<typeof apiKeys>;
-
-export type OrgInvitation = InferSelectModel<typeof orgInvitations>;
-
-export type OrgProxy = InferSelectModel<typeof orgProxies>;
-
 export type ModelProviderCredential = InferSelectModel<typeof modelProviderCredentials>;
 
 export type OrgModel = InferSelectModel<typeof orgModels>;
 
 export type User = InferSelectModel<typeof user>;
-
-export type Session = InferSelectModel<typeof session>;
-
-export type Account = InferSelectModel<typeof account>;
-
-export type Verification = InferSelectModel<typeof verification>;
 
 export type PackagePersistenceRow = InferSelectModel<typeof packagePersistence>;
 

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import { api, apiList } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import type {
@@ -100,11 +101,10 @@ export function deduplicateLabel(
   label: string,
   existingKeys: ModelProviderCredentialInfo[],
 ): string {
-  const existingLabels = new Set(existingKeys.map((k) => k.label));
-  if (!existingLabels.has(label)) return label;
-  let counter = 2;
-  while (existingLabels.has(`${label} (${counter})`)) counter++;
-  return `${label} (${counter})`;
+  return dedupeLabel(
+    label,
+    existingKeys.map((k) => k.label),
+  );
 }
 
 export function useTestModelProviderCredentialInline() {

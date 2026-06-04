@@ -11,8 +11,7 @@ import { Label } from "@/components/ui/label";
 import { useTheme } from "../stores/theme-store";
 import { useAuth } from "../hooks/use-auth";
 import { useAppConfig } from "../hooks/use-app-config";
-import { GoogleSignInButton } from "./google-sign-in-button";
-import { GitHubSignInButton } from "./github-sign-in-button";
+import { SocialSignInButton } from "./social-sign-in-button";
 import { LegalFooter } from "./legal-footer";
 
 type RegisterFormData = {
@@ -217,8 +216,12 @@ export function RegisterForm({
               </span>
             </div>
             <div className="flex flex-col gap-2">
-              {features.googleAuth && <GoogleSignInButton callbackURL={socialCallbackURL} />}
-              {features.githubAuth && <GitHubSignInButton callbackURL={socialCallbackURL} />}
+              {features.googleAuth && (
+                <SocialSignInButton provider="google" callbackURL={socialCallbackURL} />
+              )}
+              {features.githubAuth && (
+                <SocialSignInButton provider="github" callbackURL={socialCallbackURL} />
+              )}
             </div>
           </>
         )}

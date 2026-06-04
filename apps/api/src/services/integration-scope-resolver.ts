@@ -36,7 +36,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { applicationPackages, integrationConnections, packages } from "@appstrate/db/schema";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
-import { scopesContributedByTools } from "@appstrate/core/integration";
+import { requiredScopesForAgent } from "@appstrate/core/integration";
 
 import type { Actor } from "../lib/actor.ts";
 import { actorFilter } from "../lib/actor.ts";
@@ -109,18 +109,13 @@ export async function computeRequiredScopes(
     //   entry.tools = [] (explicit empty array) → "no tools used" — agents
     //                             that configured zero tools also want zero
     //                             inferred scopes.
-    const viaTools =
-      entry.tools === "*"
-        ? (integration.manifest.auths?.[input.authKey]?.default_scopes ?? [])
-        : scopesContributedByTools({
-            manifest: integration.manifest,
-            authKey: input.authKey,
-            agentTools: entry.tools,
-          });
-    const viaExplicit = entry.scopes ? [...entry.scopes] : [];
-
-    for (const s of viaTools) required.add(s);
-    for (const s of viaExplicit) required.add(s);
+    for (const s of requiredScopesForAgent({
+      manifest: integration.manifest,
+      authKey: input.authKey,
+      agentTools: entry.tools,
+      agentScopes: entry.scopes,
+    }))
+      required.add(s);
   }
 
   return { required: [...required] };

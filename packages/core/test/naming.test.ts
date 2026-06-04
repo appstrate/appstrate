@@ -7,8 +7,7 @@ import {
   parseScopedName,
   buildPackageId,
   isOwnedByOrg,
-  isValidToolNameForExisting,
-  isValidToolNameForNew,
+  isValidToolName,
   normalizeToolName,
   TOOL_NAME_MAX_LEN,
 } from "../src/naming.ts";
@@ -115,48 +114,41 @@ describe("buildPackageId", () => {
   });
 });
 
-describe("isValidToolNameForNew (strict predicate)", () => {
+describe("isValidToolName", () => {
   it("accepts canonical {namespace}__{tool} snake_case", () => {
-    expect(isValidToolNameForNew("fs__read_file")).toBe(true);
-    expect(isValidToolNameForNew("notion__search_pages")).toBe(true);
-    expect(isValidToolNameForNew("a__b")).toBe(true);
+    expect(isValidToolName("fs__read_file")).toBe(true);
+    expect(isValidToolName("notion__search_pages")).toBe(true);
+    expect(isValidToolName("a__b")).toBe(true);
   });
 
   it("rejects names without the __ separator", () => {
-    expect(isValidToolNameForNew("read_file")).toBe(false);
-    expect(isValidToolNameForNew("fs_read_file")).toBe(false);
+    expect(isValidToolName("read_file")).toBe(false);
+    expect(isValidToolName("fs_read_file")).toBe(false);
   });
 
   it("rejects mixed-case", () => {
-    expect(isValidToolNameForNew("FS__readFile")).toBe(false);
-    expect(isValidToolNameForNew("Fs__read_file")).toBe(false);
+    expect(isValidToolName("FS__readFile")).toBe(false);
+    expect(isValidToolName("Fs__read_file")).toBe(false);
   });
 
   it("rejects hyphens (mixed separator hurts tokenisation per V3)", () => {
-    expect(isValidToolNameForNew("mcp-fs__read_file")).toBe(false);
+    expect(isValidToolName("mcp-fs__read_file")).toBe(false);
   });
 
   it("rejects digit-leading names on either side", () => {
-    expect(isValidToolNameForNew("1fs__read_file")).toBe(false);
-    expect(isValidToolNameForNew("fs__1file")).toBe(false);
+    expect(isValidToolName("1fs__read_file")).toBe(false);
+    expect(isValidToolName("fs__1file")).toBe(false);
   });
 
   it("rejects names exceeding TOOL_NAME_MAX_LEN", () => {
     const long = "a".repeat(60) + "__b";
     expect(long.length).toBeGreaterThan(TOOL_NAME_MAX_LEN);
-    expect(isValidToolNameForNew(long)).toBe(false);
+    expect(isValidToolName(long)).toBe(false);
   });
 
   it("rejects empty / non-string input", () => {
-    expect(isValidToolNameForNew("")).toBe(false);
-    expect(isValidToolNameForNew(undefined as unknown as string)).toBe(false);
-  });
-});
-
-describe("isValidToolNameForExisting (lenient predicate)", () => {
-  it("currently mirrors the strict predicate", () => {
-    expect(isValidToolNameForExisting("fs__read_file")).toBe(true);
-    expect(isValidToolNameForExisting("READ__FILE")).toBe(false);
+    expect(isValidToolName("")).toBe(false);
+    expect(isValidToolName(undefined as unknown as string)).toBe(false);
   });
 });
 

@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for the multi-auth integration credential resolver. All
- * test inputs are pure data; no DB or network involved.
+ * Unit tests for the canonical `delivery.http` resolver. All test inputs are
+ * pure data; no DB or network involved. (Previously lived in
+ * `@appstrate/connect`'s integration-credentials test, against the connect
+ * re-export — moved here to the single source of truth.)
  */
 
 import { describe, it, expect } from "bun:test";
-import { resolveHttpDelivery } from "../src/integration-credentials.ts";
+import { resolveHttpDelivery } from "../../src/resolvers/http-delivery.ts";
 
 describe("resolveHttpDelivery — defaults per auth type", () => {
   it("oauth2 → Authorization: Bearer <accessToken>", () => {

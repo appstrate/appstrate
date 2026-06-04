@@ -76,7 +76,8 @@
     "./sidecar-types": "./src/sidecar-types.ts",
     "./pairing-token": "./src/pairing-token.ts",
     "./jwt": "./src/jwt.ts",
-    "./credential-template": "./src/credential-template.ts"
+    "./credential-template": "./src/credential-template.ts",
+    "./dedupe-label": "./src/dedupe-label.ts"
   },
   "dependencies": {
     "@afps-spec/schema": "^0.6.0",

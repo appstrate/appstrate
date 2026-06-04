@@ -868,6 +868,25 @@ export const schemas = {
       },
     },
   },
+  IntegrationPin: {
+    type: "object",
+    required: [
+      "packageId",
+      "integration_package_id",
+      "auth_key",
+      "connection_id",
+      "createdAt",
+      "updatedAt",
+    ],
+    properties: {
+      packageId: { type: "string" },
+      integration_package_id: { type: "string" },
+      auth_key: { type: "string" },
+      connection_id: { type: "string", format: "uuid" },
+      createdAt: { type: "string", format: "date-time" },
+      updatedAt: { type: "string", format: "date-time" },
+    },
+  },
   OrgProxy: {
     type: "object",
     required: ["id", "label", "enabled", "isDefault", "source", "createdAt", "updatedAt"],

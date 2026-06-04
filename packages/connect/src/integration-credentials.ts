@@ -9,14 +9,10 @@
 
 import type { ProxyCredentialsPayload } from "./proxy-primitives.ts";
 
-// The `delivery.http` resolver lives once in @appstrate/afps-runtime (the
-// dependency-free bottom layer this package already depends on); re-export it
-// so existing `@appstrate/connect` consumers keep their import path.
-export {
-  resolveHttpDelivery,
-  type HttpDeliveryConfig,
-  type HttpDeliveryPlan,
-} from "@appstrate/afps-runtime/resolvers";
+// `HttpDeliveryPlan` lives once in @appstrate/afps-runtime (the dependency-free
+// bottom layer this package already depends on); re-export it so existing
+// `@appstrate/connect` consumers keep their import path.
+export { type HttpDeliveryPlan } from "@appstrate/afps-runtime/resolvers";
 import type { HttpDeliveryPlan } from "@appstrate/afps-runtime/resolvers";
 
 /** Per-auth resolved credentials (a single entry in the multi-auth payload). */

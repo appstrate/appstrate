@@ -64,21 +64,7 @@ import { isValidSessionId, bindOrCheckSession } from "../services/credential-pro
 import { insertCredentialProxyUsage } from "../services/credential-proxy-usage.ts";
 import type { AppEnv } from "../types/index.ts";
 
-/**
- * Auth methods the credential proxy accepts. The value is the
- * `c.get("authMethod")` string set by the auth pipeline — `"api_key"` for
- * headless `ask_` bearers, `"oauth2-instance"` for device-flow JWTs minted
- * by the interactive CLI (`/api/auth/cli/token`), `"oauth2-dashboard"`
- * for dashboard-session JWTs obtained via the OIDC authorization-code
- * flow. Cookie sessions (`"session"`) and any unknown strategy id are
- * rejected.
- */
-const ACCEPTED_AUTH_METHODS: ReadonlySet<string> = new Set([
-  "api_key",
-  "oauth2-instance",
-  "oauth2-dashboard",
-]);
-
+import { assertBearerOnly } from "../lib/bearer-only.ts";
 import { getCookieJarStore } from "../infra/index.ts";
 import { getCredentialProxyLimits } from "../services/proxy-limits.ts";
 
@@ -102,11 +88,7 @@ export function createCredentialProxyRouter() {
       // Cookie sessions are refused — they would let a drive-by CSRF
       // trigger arbitrary upstream calls on behalf of a logged-in user.
       const authMethod = c.get("authMethod");
-      if (!ACCEPTED_AUTH_METHODS.has(authMethod)) {
-        throw forbidden(
-          `Credential proxy does not accept auth method "${authMethod}" (cookie sessions and unknown strategies rejected)`,
-        );
-      }
+      assertBearerOnly(authMethod, "Credential proxy");
 
       // Canonical header is `X-Integration-Id` (suffix parity with `X-Connection-Id`).
       const integrationId = c.req.header("X-Integration-Id");

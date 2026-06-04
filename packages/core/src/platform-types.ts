@@ -147,19 +147,6 @@ export interface PlatformApplication {
   readonly isDefault: boolean;
 }
 
-/**
- * Stripe-canonical list envelope for HTTP list responses.
- *
- * Wire format: `{ object: "list", data: T[], hasMore: boolean, total?: number }`.
- * Mirrored verbatim by `apps/api/src/lib/list-response.ts::ListResponse<T>`.
- */
-export interface PlatformListResponse<T> {
-  readonly object: "list";
-  readonly data: ReadonlyArray<T>;
-  readonly hasMore: boolean;
-  readonly total?: number;
-}
-
 // ---------------------------------------------------------------------------
 // Workload / orchestrator value types
 // ---------------------------------------------------------------------------

@@ -41,7 +41,7 @@ describe("deriveCredentialLabel", () => {
     await seedOrgModelProviderKey({
       orgId: ctx.orgId,
       label: "OpenAI",
-      apiShape: "openai-chat",
+      apiShape: "openai-completions",
       baseUrl: "https://api.openai.com/v1",
       apiKey: "sk-test-1",
     });
@@ -49,7 +49,7 @@ describe("deriveCredentialLabel", () => {
     await seedOrgModelProviderKey({
       orgId: ctx.orgId,
       label: "OpenAI (2)",
-      apiShape: "openai-chat",
+      apiShape: "openai-completions",
       baseUrl: "https://api.openai.com/v1",
       apiKey: "sk-test-2",
     });
@@ -85,7 +85,7 @@ describe("deriveModelLabel", () => {
     const cred = await seedOrgModelProviderKey({
       orgId: ctx.orgId,
       label: "OpenAI",
-      apiShape: "openai-chat",
+      apiShape: "openai-completions",
       baseUrl: "https://api.openai.com/v1",
       apiKey: "sk-test",
     });

@@ -15,7 +15,7 @@
  * via the OIDC module).
  */
 
-function stripTrailing(input: string, char: string): string {
+export function stripTrailing(input: string, char: string): string {
   let end = input.length;
   while (end > 0 && input[end - 1] === char) end--;
   return input.slice(0, end);

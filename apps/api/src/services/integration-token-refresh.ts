@@ -29,7 +29,7 @@ import type {
 } from "@appstrate/connect";
 import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
 import { logger } from "../lib/logger.ts";
-import { withRedisLock } from "../lib/distributed-lock.ts";
+import { dedupedRefresh } from "../lib/deduped-refresh.ts";
 import { OAUTH_REFRESH_LEAD_MS } from "@appstrate/core/sidecar-types";
 import {
   persistCredentialBundle,
@@ -65,9 +65,6 @@ export interface IntegrationRefreshResult {
   shrinkDetected: boolean;
 }
 
-/** Per-connection in-flight lock — coalesces concurrent refresh calls. */
-const inflightRefreshes = new Map<string, Promise<IntegrationRefreshResult>>();
-
 /**
  * Force-refresh the OAuth2 access token for an integration connection.
  * No-op (returns current creds) when the manifest auth isn't OAuth2 or no
@@ -100,22 +97,16 @@ export async function forceRefreshIntegrationConnection(
     };
   }
 
-  const cached = inflightRefreshes.get(connectionId);
-  if (cached) return cached;
-
-  // Two dedup layers, mirroring the model-provider refresh path:
-  //   1. in-process singleflight (`inflightRefreshes`) — collapses callers in
-  //      this API instance;
-  //   2. cross-process Redis lock + post-acquire re-read — serializes across
-  //      instances so a rotating refresh_token isn't double-spent (which would
-  //      falsely flag a valid connection `needsReconnection`). No-op on Tier 0/1.
-  const promise = withRedisLock(
-    `intg-refresh:${connectionId}`,
-    { ttlSeconds: 45, acquireTimeoutMs: 30_000, label: "intg-refresh" },
-    async () => {
-      // Re-read under the lock: a peer instance may have already refreshed
-      // while we waited. If the stored token is now comfortably unexpired,
-      // return it without burning the (possibly just-rotated) refresh_token.
+  // Two dedup layers (in-process singleflight + cross-process Redis lock +
+  // post-acquire re-read), owned by `dedupedRefresh`. The re-read short-circuit
+  // returns the stored creds when a peer instance already refreshed; otherwise
+  // we refresh against the freshest stored ciphertext (a peer may have rotated
+  // the refresh_token even if the access token is near expiry).
+  let freshCiphertext = credentialsEncrypted;
+  return dedupedRefresh<IntegrationRefreshResult>(connectionId, {
+    lockKey: `intg-refresh:${connectionId}`,
+    lockLabel: "intg-refresh",
+    reReadFreshness: async () => {
       const [row] = await db
         .select({
           credentialsEncrypted: integrationConnections.credentialsEncrypted,
@@ -124,6 +115,7 @@ export async function forceRefreshIntegrationConnection(
         .from(integrationConnections)
         .where(eq(integrationConnections.id, connectionId))
         .limit(1);
+      if (row?.credentialsEncrypted) freshCiphertext = row.credentialsEncrypted;
       if (row?.expiresAt && row.expiresAt.getTime() - Date.now() > OAUTH_REFRESH_LEAD_MS) {
         return {
           fields: decryptCredentialsToStringMap(row.credentialsEncrypted),
@@ -132,23 +124,11 @@ export async function forceRefreshIntegrationConnection(
           shrinkDetected: false,
         };
       }
-      // Refresh against the freshest stored ciphertext (a peer may have rotated
-      // the refresh_token even if the access token is near expiry).
-      return doRefresh(
-        connectionId,
-        packageIdForLog,
-        authKeyForLog,
-        row?.credentialsEncrypted ?? credentialsEncrypted,
-        refreshContext,
-      );
+      return null;
     },
-  );
-  inflightRefreshes.set(connectionId, promise);
-  try {
-    return await promise;
-  } finally {
-    inflightRefreshes.delete(connectionId);
-  }
+    doRefresh: () =>
+      doRefresh(connectionId, packageIdForLog, authKeyForLog, freshCiphertext, refreshContext),
+  });
 }
 
 async function doRefresh(

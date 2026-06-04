@@ -11,6 +11,7 @@ import { forbidden, internalError, notFound, parseBody } from "../lib/errors.ts"
 import { listResponse } from "../lib/list-response.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { setDisplayName } from "../services/profile.ts";
 
 export const profileUpdateSchema = z.object({
   language: z.enum(["fr", "en"]).optional(),
@@ -77,16 +78,15 @@ profileRouter.patch("/profile", async (c) => {
   const { language, displayName } = data;
 
   try {
-    const profileUpdates: Record<string, unknown> = {};
-    if (language) profileUpdates.language = language;
-    if (displayName) profileUpdates.displayName = displayName;
-
-    if (Object.keys(profileUpdates).length > 0) {
-      await db.update(profiles).set(profileUpdates).where(eq(profiles.id, user.id));
+    // `language` lives only on `profiles`; update it inline. `displayName`
+    // is mirrored across `profiles` + Better Auth `user.name`, so it goes
+    // through the shared dual-write service (also stamps `updatedAt`).
+    if (language) {
+      await db.update(profiles).set({ language }).where(eq(profiles.id, user.id));
     }
 
     if (displayName) {
-      await db.update(userTable).set({ name: displayName }).where(eq(userTable.id, user.id));
+      await setDisplayName(user.id, displayName);
     }
   } catch (err) {
     logger.error("Failed to update profile", {

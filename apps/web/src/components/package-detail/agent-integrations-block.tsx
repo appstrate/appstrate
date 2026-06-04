@@ -5,11 +5,12 @@ import { Loader2, Puzzle } from "lucide-react";
 import {
   useIntegrations,
   useIntegrationDetail,
-  useIntegrationConnections,
+  useIntegrationAgentResolution,
   useAgentsConsumingIntegration,
   type AgentIntegrationEntry,
   type IntegrationAuthStatus,
-  type IntegrationConnection,
+  type IntegrationAgentResolution,
+  type IntegrationCandidate,
   type IntegrationManifestView,
 } from "../../hooks/use-integrations";
 import { InlineConnectButton } from "../integration-connect/inline-connect-button";
@@ -17,7 +18,10 @@ import { connectionDisplayLabel } from "../integration-connect/connection-label"
 import { pickDefaultAuth } from "../integration-connect/pick-default-auth";
 import { connectableAuthKeys } from "../integration-connect/connectable-auth-keys";
 import { IntegrationConnectionPicker } from "../integration-connect/integration-connection-picker";
-import { isIntegrationEntryActive } from "../integration-connect/integration-run-readiness";
+import {
+  isIntegrationEntryActive,
+  resolutionBlocksRun,
+} from "../integration-connect/integration-run-readiness";
 import { requiredScopesForAgent } from "@appstrate/core/integration";
 
 interface AgentIntegrationsBlockProps {
@@ -33,23 +37,17 @@ interface AgentIntegrationsBlockProps {
 
 /**
  * Connection-status block for every integration declared in the agent
- * manifest. One card per dependency, three states (OK / action-required /
- * not-connected), CTA jumps to the integration detail page where the actor
- * can connect / re-consent.
+ * manifest. One card per dependency, with a connect / reconnect / upgrade
+ * affordance so the actor can connect or re-consent inline.
  *
- * Status derivation matches the backend gate (collectIntegrationDependencyErrors):
- *   ❌ not_connected         — no connection on any required auth
- *   ⚠️ needs_reconnection    — connection flagged for re-consent
- *   ✅ ok
+ * Status comes from the server-authoritative `IntegrationAgentResolution`
+ * (`GET /integrations/:id/agent-resolution/:agentId`) — the same verdict the
+ * connection picker and the launch-button readiness badge consume. The card
+ * never re-derives "is this connected?" client-side, so the badge, the picker,
+ * and the run-kickoff 412 can never disagree.
  *
- * Per-tool scope inference (required = ⋃ tools.{t}.required_scopes for selected
- * tools, from the per-auth required_scopes map) is recomputed client-side so the badge
- * never lags the agent's editor state. The exact same logic powers the 412
- * server-side; the modal (Phase C) is the recovery path when this block is
- * stale or the actor hits Run before refreshing.
- *
- * AFPS §4.4 wildcard — when the agent declares `tools: "*"`, per-tool inference
- * is bypassed and scope requirements fall back to the selected auth's
+ * AFPS §4.4 wildcard — when the agent declares `tools: "*"`, per-tool scope
+ * inference is bypassed and scope requirements fall back to the selected auth's
  * `default_scopes` (§7.4). The activity check + connection picker still treat
  * the wildcard as an active selection.
  */
@@ -172,17 +170,24 @@ function IntegrationConnectionCard({
       displayName={displayName}
       agentTools={agentTools}
       agentScopes={agentScopes}
+      {...(agentPackageId ? { agentPackageId } : {})}
     />
   );
 }
 
 /**
  * Connect CTA for surfaces WITHOUT the member picker — read-only previews
- * and agents that haven't selected any tool. Derives status from the
- * actor's own connections and surfaces a connect / reconnect / add-another
- * button plus the R5 reuse hint. Split from the picker path so its two
- * extra fetches (connections + consuming-agents) and the status/reuse
- * computation only run when actually rendered.
+ * and agents that haven't selected any tool. Reads the server-authoritative
+ * `IntegrationAgentResolution` (the same verdict the picker and the launch
+ * readiness badge consume) and surfaces a connect / reconnect / upgrade /
+ * add-another button plus the R5 reuse hint. Split from the picker path so
+ * its extra fetches (resolution + consuming-agents) only run when actually
+ * rendered.
+ *
+ * Without an `agentPackageId` (read-only preview) the resolution query is
+ * disabled and there's no per-agent verdict to surface, so the card renders
+ * the shell alone — no actionable CTA, matching the prior behaviour for that
+ * read-only surface.
  */
 function FallbackConnectCard({
   packageId,
@@ -191,6 +196,7 @@ function FallbackConnectCard({
   displayName,
   agentTools,
   agentScopes,
+  agentPackageId,
 }: {
   packageId: string;
   manifest: IntegrationManifestView;
@@ -198,12 +204,23 @@ function FallbackConnectCard({
   displayName: string;
   agentTools: string[] | "*" | undefined;
   agentScopes: string[] | undefined;
+  agentPackageId?: string;
 }) {
   const { t } = useTranslation(["agents", "settings"]);
-  const { data: connections, isPending: connsPending } = useIntegrationConnections(packageId);
+  const { data: resolution, isPending: resolutionPending } = useIntegrationAgentResolution(
+    packageId,
+    agentPackageId,
+  );
   const { data: consumingAgents } = useAgentsConsumingIntegration(packageId);
 
-  if (connsPending) {
+  // No agentPackageId → resolution is disabled (no per-agent verdict). Render
+  // the shell alone; this is the read-only preview surface, which never
+  // offered an actionable CTA.
+  if (!agentPackageId) {
+    return <CardShell title={displayName} subtitle={packageId} />;
+  }
+
+  if (resolutionPending || !resolution) {
     return (
       <CardShell
         icon={<Loader2 className="text-muted-foreground size-4 animate-spin" />}
@@ -213,37 +230,32 @@ function FallbackConnectCard({
     );
   }
 
-  const status = deriveIntegrationStatus({
-    manifest,
-    connections: connections ?? [],
-    agentTools,
-    agentScopes,
-  });
-  const action = resolveAction(status, manifest, agentTools, agentScopes);
+  const action = resolveAction(resolution, manifest, agentTools, agentScopes);
 
-  // The connected connection drives the reuse hint below. We used to also
+  // The resolved connection drives the reuse hint below. We used to also
   // render an unlink button here, but it called the global delete endpoint
   // (DELETE /api/integrations/.../connections/:id) which yanked the connection
   // from every other agent in the app — the bug that drove this refactor.
   // The two safe paths are now: (a) change which connection THIS agent uses
   // via the picker (writes a member pin), or (b) delete the connection
   // globally from /connections (destructive, with confirm + impact list).
-  const connectedAuthKey = status.kind === "ok" ? status.authKey : null;
-  const connectedConnection = connectedAuthKey
-    ? connections?.find((c) => c.auth_key === connectedAuthKey)
-    : null;
+  const resolvedConnection =
+    resolution.candidates.find((c) => c.id === resolution.resolved_connection_id) ?? null;
 
   // R5 — reuse hint: surface that this single connection is shared across
   // every agent in the app that consumes this integration, killing the
-  // "do I need one connection per agent?" confusion.
-  const reuseInfo = connectedConnection
-    ? buildReuseInfo(connectedConnection, consumingAgents?.length ?? 0, t)
-    : null;
+  // "do I need one connection per agent?" confusion. Only when the resolved
+  // connection isn't itself blocking (no missing scopes / reconnection) — a
+  // blocking action takes the foreground instead.
+  const reuseInfo =
+    resolvedConnection && !action
+      ? buildReuseInfo(resolvedConnection, consumingAgents?.length ?? 0, t)
+      : null;
 
-  // When already connected, still expose a path to add ANOTHER account on the
-  // same auth — a user can hold multiple connections per integration and use
-  // different ones across agents.
-  const addAnotherAuthKey = status.kind === "ok" && status.authKey ? status.authKey : null;
+  // When already connected (no blocking action), still expose a path to add
+  // ANOTHER account on the same auth — a user can hold multiple connections
+  // per integration and use different ones across agents.
+  const addAnotherAuthKey = !action && resolvedConnection ? resolvedConnection.auth_key : null;
 
   // An oauth2 connect/reconnect needs an admin-registered OAuth client; the
   // server returns 403 otherwise. Surface the pointer instead of a button
@@ -265,8 +277,8 @@ function FallbackConnectCard({
           intent={action.intent}
           // reconnect / upgrade target the existing row — without a
           // connectionId the callback would INSERT a duplicate.
-          {...(action.intent !== "connect" && connectedConnection
-            ? { connectionId: connectedConnection.id }
+          {...(action.intent !== "connect" && action.connectionId
+            ? { connectionId: action.connectionId }
             : {})}
         />
       ) : (
@@ -297,7 +309,7 @@ function FallbackConnectCard({
 }
 
 function buildReuseInfo(
-  connection: IntegrationConnection,
+  connection: IntegrationCandidate,
   agentCount: number,
   t: (k: string, opts?: Record<string, unknown>) => string,
 ): string {
@@ -311,29 +323,77 @@ function buildReuseInfo(
 }
 
 /**
- * Map status → connect action. `not_connected` picks the first required
- * auth (preferring oauth2) so the user gets a one-click flow; if the
- * integration declares multiple auths the agent only needs ONE of them
- * resolved (mirrors the spawn resolver). `needs_reconnection` already
- * knows which authKey is at fault.
+ * Map the server resolution → connect action for the fallback card. Mirrors
+ * `resolutionBlocksRun`'s blocking states, choosing the right intent + target:
+ *
+ *   - `resolved_missing_scopes` non-empty → `upgrade` the resolved connection
+ *     (incremental consent for the missing scopes only).
+ *   - `needs_reconnection` → `reconnect` the resolved connection.
+ *   - `none` / `must_choose` / `stale` → `connect` a fresh connection on the
+ *     default auth (preferring oauth2; mirrors the spawn resolver — the agent
+ *     only needs ONE of the declared auths resolved).
+ *   - `auto` / `pinned` / `admin_locked` with no missing scopes → null (OK).
+ *
+ * Connect/reconnect/upgrade all request the agent's inferred scopes — the
+ * backend only adds manifest defaults for a plain connect, so the agent
+ * surface forwards what THIS agent needs (the integration page connects at
+ * defaults). Empty union (no tools/scopes picked) → omit, stay at defaults.
  */
 function resolveAction(
-  status: IntegrationStatus,
+  resolution: IntegrationAgentResolution,
   manifest: IntegrationManifestView,
   agentTools: string[] | "*" | undefined,
   agentScopes: string[] | undefined,
-): { authKey: string; scopes?: string[]; intent: "connect" | "reconnect" | "upgrade" } | null {
-  if (status.kind === "ok") return null;
-  // Both connect and reconnect must request the agent's inferred scopes — the
-  // backend only adds manifest defaults for a plain connect, so the agent
-  // surface forwards what THIS agent needs (the integration page connects at
-  // defaults). Empty union (no tools/scopes picked) → omit, stay at defaults.
-  const authKey =
-    status.kind === "needs_reconnection" ? status.authKey : pickDefaultAuth(manifest.auths);
-  if (!authKey) return null;
-  const intent = status.kind === "needs_reconnection" ? "reconnect" : "connect";
-  const scopes = requiredScopesForAgent({ manifest, authKey, agentTools, agentScopes });
-  return { authKey, intent, ...(scopes.length ? { scopes } : {}) };
+): {
+  authKey: string;
+  scopes?: string[];
+  intent: "connect" | "reconnect" | "upgrade";
+  connectionId?: string;
+} | null {
+  const resolvedConnection =
+    resolution.candidates.find((c) => c.id === resolution.resolved_connection_id) ?? null;
+
+  // Under-scoped resolved connection → incremental-consent upgrade on it.
+  if (resolution.resolved_missing_scopes.length > 0 && resolvedConnection) {
+    return {
+      authKey: resolvedConnection.auth_key,
+      intent: "upgrade",
+      connectionId: resolvedConnection.id,
+      scopes: resolution.resolved_missing_scopes,
+    };
+  }
+
+  // Resolved connection flagged for re-consent → reconnect it in place.
+  if (resolution.status === "needs_reconnection" && resolvedConnection) {
+    const scopes = requiredScopesForAgent({
+      manifest,
+      authKey: resolvedConnection.auth_key,
+      agentTools,
+      agentScopes,
+    });
+    return {
+      authKey: resolvedConnection.auth_key,
+      intent: "reconnect",
+      connectionId: resolvedConnection.id,
+      ...(scopes.length ? { scopes } : {}),
+    };
+  }
+
+  // Any remaining blocking state — none / must_choose / stale, OR a
+  // needs_reconnection / missing-scopes resolution whose target connection is
+  // absent from `candidates` (so the upgrade/reconnect branches above didn't
+  // fire) — falls back to a fresh connect on the default auth. Keying this off
+  // the same predicate the run badge uses keeps the CTA in lockstep with
+  // resolutionBlocksRun: the card never goes silent while the badge blocks.
+  if (resolutionBlocksRun(resolution)) {
+    const authKey = pickDefaultAuth(manifest.auths);
+    if (!authKey) return null;
+    const scopes = requiredScopesForAgent({ manifest, authKey, agentTools, agentScopes });
+    return { authKey, intent: "connect", ...(scopes.length ? { scopes } : {}) };
+  }
+
+  // auto / pinned / admin_locked, fully scoped → connected, no action.
+  return null;
 }
 
 function CardShell({
@@ -371,47 +431,4 @@ function CardShell({
       {children}
     </div>
   );
-}
-
-// ───────────────────────────────────────────────────────────────────────────
-// Status derivation — mirrors apps/api/services/dependency-validation.ts
-// (`checkOne`). Kept in lockstep so the badge and the 412 agree on what
-// counts as "connected" at any moment.
-// ───────────────────────────────────────────────────────────────────────────
-
-type IntegrationStatus =
-  | { kind: "ok"; authKey: string }
-  | { kind: "not_connected" }
-  | { kind: "needs_reconnection"; authKey: string };
-
-function deriveIntegrationStatus(input: {
-  manifest: IntegrationManifestView;
-  connections: { auth_key: string; needs_reconnection: boolean }[];
-  agentTools: string[] | "*" | undefined;
-  agentScopes: string[] | undefined;
-}): IntegrationStatus {
-  const { manifest, connections, agentTools, agentScopes } = input;
-  const auths = manifest.auths ?? {};
-  if (Object.keys(auths).length === 0) return { kind: "ok", authKey: "" };
-
-  // "Active" = the agent declared a usage: selected tools (MCP integrations)
-  // or selected oauth scopes (apiCall integrations, which expose no discrete
-  // tools). Nothing selected → integration is declared but inert; surface as
-  // "ok" with empty authKey so the card doesn't render a "connect" CTA for an
-  // unused integration. The picker is the place to opt in.
-  if (!isIntegrationEntryActive({ tools: agentTools, scopes: agentScopes }))
-    return { kind: "ok", authKey: "" };
-
-  if (connections.length === 0) return { kind: "not_connected" };
-
-  // Flat model: any accessible connection counts. Surface needs_reconnection
-  // when ALL accessible connections need reconnect; otherwise pick the first
-  // healthy one. The OAuth-scope check moved to the integration detail page
-  // (passive — runtime selection is per-connection, the user may have picked
-  // a different connection that doesn't need those scopes).
-  const healthy = connections.find((c) => !c.needs_reconnection);
-  if (healthy) {
-    return { kind: "ok", authKey: healthy.auth_key };
-  }
-  return { kind: "needs_reconnection", authKey: connections[0]!.auth_key };
 }

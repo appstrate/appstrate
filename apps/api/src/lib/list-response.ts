@@ -11,18 +11,13 @@
  * be tacked on via spread at the call site without changing the helper.
  */
 
-export interface ListResponse<T> {
-  object: "list";
-  data: T[];
-  hasMore: boolean;
-  total?: number;
-}
+import type { ListEnvelope } from "@appstrate/shared-types";
 
 export function listResponse<T>(
   data: T[],
   opts: { hasMore?: boolean; total?: number } = {},
-): ListResponse<T> {
-  const out: ListResponse<T> = {
+): ListEnvelope<T> {
+  const out: ListEnvelope<T> = {
     object: "list",
     data,
     hasMore: opts.hasMore ?? false,
