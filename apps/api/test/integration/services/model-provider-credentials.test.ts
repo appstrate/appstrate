@@ -141,7 +141,7 @@ describe("model-provider-credentials service — api_key path", () => {
       iconUrl: "openai",
       description: "",
       docsUrl: "",
-      apiShape: "openai-chat",
+      apiShape: "openai-completions",
       defaultBaseUrl: "http://localhost:11434",
       baseUrlOverridable: true,
       authMode: "api_key",

@@ -16,6 +16,7 @@
  */
 
 import { getErrorMessage } from "@appstrate/core/errors";
+import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 
 export interface RuntimeEnv {
   /** Run identifier injected by the platform on container create. */
@@ -74,7 +75,7 @@ const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
 const DEFAULT_CONTEXT_WINDOW = 128_000;
 const DEFAULT_MAX_TOKENS = 16_384;
 const DEFAULT_MCP_CONNECT_DEADLINE_MS = 60_000;
-const KNOWN_MODEL_APIS = new Set([
+const MODEL_API_SLUGS = [
   "anthropic-messages",
   "openai-completions",
   "openai-responses",
@@ -84,7 +85,8 @@ const KNOWN_MODEL_APIS = new Set([
   "google-vertex",
   "azure-openai-responses",
   "bedrock-converse-stream",
-]);
+] as const satisfies readonly ModelApiShape[];
+const KNOWN_MODEL_APIS = new Set<string>(MODEL_API_SLUGS);
 
 export class RuntimeEnvError extends Error {
   override readonly name = "RuntimeEnvError";

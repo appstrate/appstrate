@@ -2933,6 +2933,235 @@
         }
       }
     },
+    "/api/runs/{runId}/workspace": {
+      "get": {
+        "operationId": "fetchRunWorkspace",
+        "tags": ["Runs"],
+        "summary": "Fetch the run bundle archive (HMAC)",
+        "description": "Fetched by the agent runtime at startup to self-provision its `/workspace`. Returns the AFPS bundle (`agent-package.afps` = manifest + prompt + skills; itself a ZIP) verbatim — small and constant; the agent writes it straight to its workspace root. Input documents are NOT bundled here; the agent fetches them separately and streams each to disk (`GET /api/runs/{runId}/documents`). This pull-based delivery means workspace correctness no longer depends on a shared run volume's driver (a tmpfs-backed `local` volume is not shared between the seed helper and the agent — see issue #549). Same Standard Webhooks HMAC auth as the event routes: the signature covers the empty GET body. A 404 means no bundle was provisioned, which the runtime treats as a fatal provisioning fault (the platform always uploads the agent package).",
+        "parameters": [
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "webhook-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "webhook-timestamp",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "webhook-signature",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Bundle archive (ZIP)",
+            "content": {
+              "application/zip": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Signature verification failed"
+          },
+          "404": {
+            "description": "run_not_found | no workspace provisioned"
+          },
+          "410": {
+            "description": "run_sink_closed | run_sink_expired"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/runs/{runId}/documents": {
+      "get": {
+        "operationId": "fetchRunDocumentsManifest",
+        "tags": ["Runs"],
+        "summary": "List the run's input documents (HMAC)",
+        "description": "Fetched by the agent runtime to enumerate the input documents it must provision. Returns the manifest of documents the run carries; the agent then fetches each via `GET /api/runs/{runId}/documents/{name}`. Same Standard Webhooks HMAC auth as the workspace route. A 404 means the run carries no input documents (the common case), which the runtime treats as an empty document set — not a fault.",
+        "parameters": [
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "webhook-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "webhook-timestamp",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "webhook-signature",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Documents manifest",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["documents"],
+                  "properties": {
+                    "documents": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["name", "size"],
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "size": {
+                            "type": "integer"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Signature verification failed"
+          },
+          "404": {
+            "description": "run_not_found | no input documents"
+          },
+          "410": {
+            "description": "run_sink_closed | run_sink_expired"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/runs/{runId}/documents/{name}": {
+      "get": {
+        "operationId": "fetchRunDocument",
+        "tags": ["Runs"],
+        "summary": "Fetch a single run input document (HMAC)",
+        "description": "Fetched by the agent runtime for each entry in the documents manifest. The bytes are streamed straight from storage so neither the platform nor the agent buffers the whole document; the agent streams the response body to `documents/{name}` on disk. Same Standard Webhooks HMAC auth as the workspace route. A 404 on a document the manifest listed is a fatal provisioning fault.",
+        "parameters": [
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "webhook-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "webhook-timestamp",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "webhook-signature",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Document bytes",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Signature verification failed"
+          },
+          "404": {
+            "description": "run_not_found | document not found"
+          },
+          "410": {
+            "description": "run_sink_closed | run_sink_expired"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
     "/api/runs/{runId}/sink/extend": {
       "patch": {
         "operationId": "extendRunSink",
@@ -3315,6 +3544,7 @@
                   "userId": "usr_r3t5w8y1z6",
                   "endUserId": null,
                   "orgId": "org_r3t5w8y1z6",
+                  "applicationId": "app_r3t5w8y1z6",
                   "name": "Weekday morning sort",
                   "enabled": true,
                   "cron_expression": "0 9 * * 1-5",
@@ -3393,6 +3623,7 @@
                   "userId": "usr_r3t5w8y1z6",
                   "endUserId": null,
                   "orgId": "org_r3t5w8y1z6",
+                  "applicationId": "app_r3t5w8y1z6",
                   "name": "Weekday morning sort",
                   "enabled": true,
                   "cron_expression": "0 9 * * 1-5",
@@ -3839,7 +4070,8 @@
                           "scopes",
                           "resource",
                           "connections",
-                          "has_oauth_client"
+                          "has_oauth_client",
+                          "client_auto_provisioned"
                         ],
                         "properties": {
                           "auth_key": {
@@ -3938,6 +4170,10 @@
                           },
                           "has_oauth_client": {
                             "type": "boolean"
+                          },
+                          "client_auto_provisioned": {
+                            "type": "boolean",
+                            "description": "True for an oauth2 auth on a remote MCP integration (`source.kind: \"remote\"`). Per the MCP Authorization spec the OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414) plus client acquisition without manual pre-registration (CIMD when advertised, else RFC 7591 dynamic registration) — so no pre-registered client is required."
                           }
                         }
                       }
@@ -4438,9 +4674,7 @@
                 "properties": {
                   "credentials": {
                     "type": "object",
-                    "additionalProperties": {
-                      "type": "string"
-                    }
+                    "additionalProperties": true
                   },
                   "connection_id": {
                     "type": "string",
@@ -6548,7 +6782,6 @@
                             "type": "string",
                             "enum": [
                               "anthropic-messages",
-                              "openai-chat",
                               "openai-completions",
                               "openai-responses",
                               "openai-codex-responses",
@@ -6700,7 +6933,7 @@
                     {
                       "id": "cm7stu901",
                       "label": "OpenAI Production",
-                      "apiShape": "openai-chat",
+                      "apiShape": "openai-completions",
                       "baseUrl": "https://api.openai.com",
                       "source": "custom",
                       "authMode": "api_key",
@@ -9431,6 +9664,9 @@
           "204": {
             "description": "Pin cleared (or never existed)"
           },
+          "400": {
+            "description": "Missing required query param (agentPackageId or integrationPackageId)."
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           }
@@ -9799,6 +10035,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       }
@@ -9887,6 +10126,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       }
@@ -10035,6 +10277,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
@@ -10093,6 +10338,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -10153,6 +10401,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "description": "Agent does not reference this mcp-server through an installed integration, or no published version exists.",
@@ -10590,7 +10841,7 @@
         "operationId": "importPackage",
         "tags": ["Packages"],
         "summary": "Import a package from ZIP",
-        "description": "Import a package (agent, skill, or integration) from a ZIP file. The ZIP must contain a valid manifest.json. The package scope does not need to match your organization — cross-org packages are imported read-only (fork to modify). Rate-limited to 10 requests/minute. Returns 409 if the target package has unpublished draft changes — re-submit with ?force=true to overwrite.",
+        "description": "Import a package (agent, skill, or integration) from a ZIP file. The ZIP must contain a valid manifest.json. The package scope does not need to match your organization; imported packages are owned by your org and remain editable regardless of their scope name. Rate-limited to 10 requests/minute. Returns 409 if the target package has unpublished draft changes — re-submit with ?force=true to overwrite.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -10744,7 +10995,7 @@
         "operationId": "importPackageFromGithub",
         "tags": ["Packages"],
         "summary": "Import a package from a GitHub URL",
-        "description": "Import a package (agent, skill, or integration) from a public GitHub repository URL. The URL must point to a directory containing a valid manifest.json. The package scope does not need to match your organization — cross-org packages are imported read-only (fork to modify). Rate-limited to 10 requests/minute.",
+        "description": "Import a package (agent, skill, or integration) from a public GitHub repository URL. The URL must point to a directory containing a valid manifest.json. The package scope does not need to match your organization; imported packages are owned by your org and remain editable regardless of their scope name. Rate-limited to 10 requests/minute.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -12504,7 +12755,7 @@
         "operationId": "forkPackage",
         "tags": ["Packages"],
         "summary": "Fork a package to your organization",
-        "description": "Create an editable copy of a non-owned package under the current organization's scope. The fork is based on the latest published version of the source package — the version manifest, content, and ZIP are copied. A local published version is automatically created. Returns 400 if the source has no published version.",
+        "description": "Create a copy of a package the org does not already own (e.g. a read-only system package) under the current organization's scope. Org-owned packages are editable in place regardless of their scope name, so forking is only needed for packages the org does not own. The fork is based on the latest published version of the source package — the version manifest, content, and ZIP are copied. A local published version is automatically created. Returns 400 if the source has no published version.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -16577,6 +16828,28 @@
             "description": "Per-integration connection picks for this run (flat-connections mechanism #2). Flat map: `{ \"@scope/integration\": \"<connection_id>\" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (#1).",
             "additionalProperties": {
               "type": "string"
+            }
+          },
+          "connections_used": {
+            "type": ["array", "null"],
+            "description": "Connections resolved for this run, projected from the internal snapshot for display. Null when the agent declares no integrations.",
+            "items": {
+              "type": "object",
+              "required": ["integration_id", "label", "account_id", "source"],
+              "properties": {
+                "integration_id": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": ["string", "null"]
+                },
+                "account_id": {
+                  "type": ["string", "null"]
+                },
+                "source": {
+                  "type": "string"
+                }
+              }
             }
           }
         }

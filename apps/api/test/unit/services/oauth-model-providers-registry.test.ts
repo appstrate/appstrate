@@ -64,7 +64,7 @@ describe("runtime registry composition", () => {
       expect(cfg.displayName.length).toBeGreaterThan(0);
       expect(cfg.iconUrl.length).toBeGreaterThan(0);
       expect(cfg.apiShape).toMatch(
-        /^(anthropic-messages|openai-chat|openai-completions|openai-responses|openai-codex-responses|mistral-conversations|google-generative-ai|google-vertex|azure-openai-responses|bedrock-converse-stream)$/,
+        /^(anthropic-messages|openai-completions|openai-responses|openai-codex-responses|mistral-conversations|google-generative-ai|google-vertex|azure-openai-responses|bedrock-converse-stream)$/,
       );
       expect(cfg.defaultBaseUrl.length).toBeGreaterThan(0);
       expect(typeof cfg.baseUrlOverridable).toBe("boolean");

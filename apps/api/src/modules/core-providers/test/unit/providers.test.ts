@@ -42,7 +42,7 @@ describe("core-providers module", () => {
     );
     expect(byId.get("openai")?.apiShape).toBe("openai-responses");
     expect(byId.get("anthropic")?.apiShape).toBe("anthropic-messages");
-    expect(byId.get("openai-compatible")?.apiShape).toBe("openai-chat");
+    expect(byId.get("openai-compatible")?.apiShape).toBe("openai-completions");
     expect(byId.get("mistral")?.apiShape).toBe("mistral-conversations");
     expect(byId.get("google-ai")?.apiShape).toBe("google-generative-ai");
     expect(byId.get("groq")?.apiShape).toBe("openai-completions");
