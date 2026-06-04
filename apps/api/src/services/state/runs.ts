@@ -33,7 +33,7 @@ import {
 } from "@appstrate/db/schema";
 import { getEnv } from "@appstrate/env";
 import { logger } from "../../lib/logger.ts";
-import { listResponse, type ListResponse } from "../../lib/list-response.ts";
+import { listResponse } from "../../lib/list-response.ts";
 import { scopedWhere } from "../../lib/db-helpers.ts";
 import { type Actor, actorFilter } from "../../lib/actor.ts";
 import {
@@ -44,7 +44,12 @@ import {
 } from "../../lib/jsonb-schemas.ts";
 import { invalidRequest } from "../../lib/errors.ts";
 import type { AppScope, OrgScope } from "../../lib/scope.ts";
-import type { RunWireDto, EnrichedRun, RunConnectionUsed } from "@appstrate/shared-types";
+import type {
+  RunWireDto,
+  EnrichedRun,
+  RunConnectionUsed,
+  ListEnvelope,
+} from "@appstrate/shared-types";
 
 export const RUN_HISTORY_FIELDS = ["checkpoint", "result"] as const;
 export type RunHistoryField = (typeof RUN_HISTORY_FIELDS)[number];
@@ -684,7 +689,7 @@ export async function deletePackageRuns(scope: AppScope, packageId: string): Pro
   return deleted.length;
 }
 
-export type RunListPage = ListResponse<EnrichedRun> & { total: number };
+export type RunListPage = ListEnvelope<EnrichedRun> & { total: number };
 
 export async function listRunsWithFilter(
   filter: SQL,

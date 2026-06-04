@@ -13,13 +13,11 @@
 
 import type { ListEnvelope } from "@appstrate/shared-types";
 
-export type ListResponse<T> = ListEnvelope<T>;
-
 export function listResponse<T>(
   data: T[],
   opts: { hasMore?: boolean; total?: number } = {},
-): ListResponse<T> {
-  const out: ListResponse<T> = {
+): ListEnvelope<T> {
+  const out: ListEnvelope<T> = {
     object: "list",
     data,
     hasMore: opts.hasMore ?? false,
