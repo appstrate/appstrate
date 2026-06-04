@@ -69,14 +69,14 @@
     "@afps-spec/schema": "^1.5.0",
     "@afps-spec/types": "^1.0.0",
     "file-type": "^22.0.1",
-    "fflate": "^0.8.2",
+    "fflate": "^0.8.3",
     "mustache": "^4.2.0",
     "semver": "^7.7.1",
-    "zod": "^4.3.6"
+    "zod": "^4.4.3"
   },
   "peerDependencies": {
-    "@mariozechner/pi-coding-agent": "^0.70.6",
-    "@mariozechner/pi-ai": "^0.70.6"
+    "@mariozechner/pi-coding-agent": "^0.73.1",
+    "@mariozechner/pi-ai": "^0.73.1"
   },
   "peerDependenciesMeta": {
     "@mariozechner/pi-coding-agent": {
@@ -89,7 +89,7 @@
   "devDependencies": {
     "@types/mustache": "^4.2.6",
     "@types/semver": "^7.7.1",
-    "@mariozechner/pi-coding-agent": "^0.70.6",
-    "@mariozechner/pi-ai": "^0.70.6"
+    "@mariozechner/pi-coding-agent": "^0.73.1",
+    "@mariozechner/pi-ai": "^0.73.1"
   }
 }
