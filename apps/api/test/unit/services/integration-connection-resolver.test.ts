@@ -61,6 +61,22 @@ function oauth2Manifest(): IntegrationManifest {
           },
         },
       },
+      // A second declared auth shape. The cascade tests inject `pat`
+      // connections to exercise multi-auth resolution; both keys must exist
+      // in the manifest (a connection only exists for a declared auth — the
+      // orphaned-auth guard drops rows whose authKey the manifest dropped).
+      pat: {
+        type: "api_key",
+        authorized_uris: ["https://api.example.com/**"],
+        delivery: {
+          http: {
+            in: "header",
+            name: "Authorization",
+            prefix: "Bearer ",
+            value: "{$credential.api_key}",
+          },
+        },
+      },
     },
     tools: {},
   } as unknown as IntegrationManifest;
@@ -807,5 +823,36 @@ describe("resolveConnections — agent dep `auth_key` (AFPS §4.1)", () => {
     // as `pinned_connection_unavailable`.
     expect(result.errors).toHaveLength(1);
     expect(result.errors[0]!.code).toBe("pinned_connection_unavailable");
+  });
+});
+
+// ─────────────────── Orphaned-auth guard (version-bump auth rename) ─────────────
+describe("resolveConnections — orphaned-auth guard", () => {
+  it("drops a connection whose authKey is absent from the current manifest", () => {
+    // Simulates a version bump that renamed the auth (e.g. `primary` → the
+    // declared `oauth`/`pat`): the lingering `legacy_primary` row can never be
+    // delivered, so it must NOT be auto-picked — the run reports not_connected.
+    const orphan = conn({ authKey: "legacy_primary" });
+    const result = resolveConnections({
+      requirements: [req(oauth2Manifest())],
+      accessibleConnections: [orphan],
+      pins: [],
+    });
+    expect(result.resolved[INTEG]).toBeUndefined();
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]!.code).toBe("not_connected");
+  });
+
+  it("keeps declared-auth connections, dropping only the orphaned one", () => {
+    const live = conn({ authKey: "oauth" });
+    const orphan = conn({ authKey: "legacy_primary" });
+    const result = resolveConnections({
+      requirements: [req(oauth2Manifest())],
+      accessibleConnections: [live, orphan],
+      pins: [],
+    });
+    // Single live candidate → auto; the orphan never competes (no must_choose).
+    expect(result.errors).toEqual([]);
+    expect(result.resolved[INTEG]?.connectionId).toBe(live.id);
   });
 });

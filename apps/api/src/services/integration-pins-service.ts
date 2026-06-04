@@ -660,19 +660,31 @@ export async function resolveAgentIntegrationPick(args: {
   const orgDefaultConnectionId = orgDefault?.connection_id ?? null;
   const orgDefaultEnforced = orgDefault?.enforce ?? false;
 
-  const candidates: IntegrationCandidate[] = candidatesRaw.map((c) => ({
-    ...c,
-    missing_scopes: manifest
-      ? missingScopesForConnection({
-          manifest,
-          authKey: c.auth_key,
-          granted: c.scopes_granted,
-          agentTools,
-          agentScopes,
-        })
-      : [],
-    is_own: actor.type === "user" ? c.owner_user_id === actor.id : c.owner_end_user_id === actor.id,
-  }));
+  // Drop orphaned-auth connections: a row whose `auth_key` no longer exists in
+  // the integration's current manifest (e.g. a version bump renamed the auth,
+  // `primary` → `session`) can never be delivered — the spawn resolver matches
+  // a connection to its auth by `authKey`, so an orphaned one yields no
+  // delivery plan. Offering it in the picker desynced the agent dropdown (which
+  // listed it) from the integration page (which iterates manifest auths and so
+  // hid it), and let a member pick a connection that silently fails at runtime.
+  // When the manifest can't be fetched, fall back to no filtering.
+  const manifestAuthKeys = manifest ? new Set(Object.keys(manifest.auths ?? {})) : null;
+  const candidates: IntegrationCandidate[] = candidatesRaw
+    .filter((c) => manifestAuthKeys === null || manifestAuthKeys.has(c.auth_key))
+    .map((c) => ({
+      ...c,
+      missing_scopes: manifest
+        ? missingScopesForConnection({
+            manifest,
+            authKey: c.auth_key,
+            granted: c.scopes_granted,
+            agentTools,
+            agentScopes,
+          })
+        : [],
+      is_own:
+        actor.type === "user" ? c.owner_user_id === actor.id : c.owner_end_user_id === actor.id,
+    }));
 
   const resolved = resolution.resolved[integrationId] ?? null;
   const err = resolution.errors.find((e) => e.integrationId === integrationId) ?? null;
