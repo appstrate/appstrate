@@ -18,7 +18,10 @@ import { connectionDisplayLabel } from "../integration-connect/connection-label"
 import { pickDefaultAuth } from "../integration-connect/pick-default-auth";
 import { connectableAuthKeys } from "../integration-connect/connectable-auth-keys";
 import { IntegrationConnectionPicker } from "../integration-connect/integration-connection-picker";
-import { isIntegrationEntryActive } from "../integration-connect/integration-run-readiness";
+import {
+  isIntegrationEntryActive,
+  resolutionBlocksRun,
+} from "../integration-connect/integration-run-readiness";
 import { requiredScopesForAgent } from "@appstrate/core/integration";
 
 interface AgentIntegrationsBlockProps {
@@ -376,13 +379,13 @@ function resolveAction(
     };
   }
 
-  // No usable connection (none / ambiguous / stale pin) → fresh connect on the
-  // default auth.
-  if (
-    resolution.status === "none" ||
-    resolution.status === "must_choose" ||
-    resolution.status === "stale"
-  ) {
+  // Any remaining blocking state — none / must_choose / stale, OR a
+  // needs_reconnection / missing-scopes resolution whose target connection is
+  // absent from `candidates` (so the upgrade/reconnect branches above didn't
+  // fire) — falls back to a fresh connect on the default auth. Keying this off
+  // the same predicate the run badge uses keeps the CTA in lockstep with
+  // resolutionBlocksRun: the card never goes silent while the badge blocks.
+  if (resolutionBlocksRun(resolution)) {
     const authKey = pickDefaultAuth(manifest.auths);
     if (!authKey) return null;
     const scopes = requiredScopesForAgent({ manifest, authKey, agentTools, agentScopes });
