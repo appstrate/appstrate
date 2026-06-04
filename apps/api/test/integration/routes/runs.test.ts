@@ -15,7 +15,6 @@ import {
   seedEndUser,
   seedApiKey,
   seedSchedule,
-  seedConnectionProfile,
 } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
 
@@ -754,13 +753,66 @@ describe("Runs API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.userName).toBeString();
-      expect(body.userName).toBeTruthy();
-      expect(body.endUserName).toBeNull();
-      expect(body.apiKeyName).toBeNull();
+      expect(body.user_name).toBeString();
+      expect(body.user_name).toBeTruthy();
+      expect(body.end_user_name).toBeNull();
+      expect(body.api_key_name).toBeNull();
       // scheduleName is populated from a LEFT JOIN on package_schedules — null
       // when the run has no scheduleId.
-      expect(body.scheduleName).toBeNull();
+      expect(body.schedule_name).toBeNull();
+    });
+
+    it("GET /api/runs/:id projects resolvedConnections into connections_used (no raw connectionId)", async () => {
+      await seedAgent({ id: "@runorg/conn-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      const run = await seedRun({
+        packageId: "@runorg/conn-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "success",
+        resolvedConnections: {
+          "@acme/gmail": {
+            connectionId: "11111111-1111-1111-1111-111111111111",
+            source: "member_pin",
+            label: "Gmail Boulot",
+            accountId: "dt@tractr.net",
+          },
+        },
+      });
+
+      const res = await app.request(`/api/runs/${run.id}`, { headers: authHeaders(ctx) });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.connections_used).toEqual([
+        {
+          integration_id: "@acme/gmail",
+          label: "Gmail Boulot",
+          account_id: "dt@tractr.net",
+          source: "member_pin",
+        },
+      ]);
+      // The raw connection id is internal state and must not cross the wire.
+      expect(JSON.stringify(body.connections_used)).not.toContain(
+        "11111111-1111-1111-1111-111111111111",
+      );
+    });
+
+    it("GET /api/runs/:id returns connections_used null when no integrations resolved", async () => {
+      await seedAgent({ id: "@runorg/noconn-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      const run = await seedRun({
+        packageId: "@runorg/noconn-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "success",
+      });
+
+      const res = await app.request(`/api/runs/${run.id}`, { headers: authHeaders(ctx) });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.connections_used).toBeNull();
     });
 
     it("GET /api/runs/:id returns endUserName for end-user runs", async () => {
@@ -784,8 +836,8 @@ describe("Runs API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.endUserName).toBe("Alice External");
-      expect(body.userName).toBeNull();
+      expect(body.end_user_name).toBe("Alice External");
+      expect(body.user_name).toBeNull();
     });
 
     it("GET /api/runs/:id returns endUserName from externalId fallback", async () => {
@@ -809,7 +861,7 @@ describe("Runs API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.endUserName).toBe("ext-user-123");
+      expect(body.end_user_name).toBe("ext-user-123");
     });
 
     it("GET /api/runs/:id returns apiKeyName for API key runs", async () => {
@@ -834,19 +886,16 @@ describe("Runs API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.apiKeyName).toBe("My Production Key");
+      expect(body.api_key_name).toBe("My Production Key");
     });
 
     it("GET /api/runs/:id returns scheduleName for scheduled runs", async () => {
       await seedAgent({ id: "@runorg/sched-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
-      const profile = await seedConnectionProfile({
-        userId: ctx.user.id,
-      });
       const schedule = await seedSchedule({
         packageId: "@runorg/sched-agent",
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        connectionProfileId: profile.id,
+        userId: ctx.user.id,
         name: "Daily Sync",
       });
       const run = await seedRun({
@@ -863,8 +912,8 @@ describe("Runs API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.scheduleName).toBe("Daily Sync");
-      expect(body.userName).toBeNull();
+      expect(body.schedule_name).toBe("Daily Sync");
+      expect(body.user_name).toBeNull();
     });
 
     it("GET /api/agents/:scope/:name/runs returns enriched fields in list", async () => {
@@ -888,11 +937,11 @@ describe("Runs API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.data).toHaveLength(1);
-      expect(body.data[0].userName).toBeString();
-      expect(body.data[0].userName).toBeTruthy();
-      expect(body.data[0].endUserName).toBeNull();
-      expect(body.data[0].apiKeyName).toBeNull();
-      expect(body.data[0].scheduleName).toBeNull();
+      expect(body.data[0].user_name).toBeString();
+      expect(body.data[0].user_name).toBeTruthy();
+      expect(body.data[0].end_user_name).toBeNull();
+      expect(body.data[0].api_key_name).toBeNull();
+      expect(body.data[0].schedule_name).toBeNull();
     });
   });
 });

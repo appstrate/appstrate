@@ -1,0 +1,58 @@
+{
+  "name": "@appstrate/shopify",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.1",
+  "display_name": "Shopify (API)",
+  "description": "E-commerce platform — manage products, orders, customers, and inventory",
+  "keywords": ["e-commerce", "retail"],
+  "license": "Apache-2.0",
+  "icon": "shopify",
+  "source": {
+    "kind": "none"
+  },
+  "auths": {
+    "primary": {
+      "type": "api_key",
+      "authorized_uris": ["https://*.myshopify.com/**"],
+      "credentials": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "shop_domain": {
+              "type": "string",
+              "description": "Your Shopify store domain (e.g. mystore.myshopify.com)"
+            },
+            "access_token": {
+              "type": "string",
+              "description": "Admin API access token from a Custom App"
+            }
+          },
+          "required": ["shop_domain", "access_token"]
+        }
+      },
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "X-Shopify-Access-Token",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/auth": {
+          "required": true
+        }
+      }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/api": {
+      "auths": {
+        "primary": {}
+      }
+    }
+  }
+}

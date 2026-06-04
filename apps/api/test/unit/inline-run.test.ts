@@ -61,21 +61,21 @@ describe("inline-run helpers", () => {
   describe("buildShadowLoadedPackage", () => {
     const manifest: AgentManifest = {
       name: "@inline/r-test",
-      displayName: "Shadow",
+      display_name: "Shadow",
       version: "0.0.0",
       type: "agent",
       description: "Inline agent",
-      schemaVersion: "1.0.0",
+      schema_version: "0.1",
+      author: "test",
     } as AgentManifest;
 
-    it("wraps manifest + prompt into a LoadedPackage with empty skills/tools", () => {
+    it("wraps manifest + prompt into a LoadedPackage with empty skills", () => {
       const loaded = buildShadowLoadedPackage("@inline/r-1", manifest, "hello");
       expect(loaded).toEqual({
         id: "@inline/r-1",
         manifest,
         prompt: "hello",
         skills: [],
-        tools: [],
         source: "local",
       });
     });
@@ -86,14 +86,12 @@ describe("inline-run helpers", () => {
       expect(loaded.prompt).toBe(prompt);
     });
 
-    it("applies resolved skills/tools when deps are passed", () => {
+    it("applies resolved skills when deps are passed", () => {
       const deps = {
         skills: [{ id: "@x/skill", version: "^1.0.0" }],
-        tools: [{ id: "@x/tool", version: "^1.0.0" }],
       };
       const loaded = buildShadowLoadedPackage("@inline/r-3", manifest, "p", deps);
       expect(loaded.skills).toEqual(deps.skills);
-      expect(loaded.tools).toEqual(deps.tools);
     });
   });
 });

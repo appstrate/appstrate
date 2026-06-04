@@ -36,6 +36,7 @@ import {
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import type { SinkCredentials } from "../../lib/mint-sink-credentials.ts";
+import { uploadRunWorkspace, deleteRunWorkspace } from "../run-workspace-storage.ts";
 
 import { getEnv } from "@appstrate/env";
 import { isOAuthModelProvider, getModelProvider } from "../model-providers/registry.ts";
@@ -65,6 +66,13 @@ export interface RunPlatformContainerInput {
   signal?: AbortSignal;
   /** Injectable orchestrator — production defaults to the global singleton. */
   orchestrator?: ContainerOrchestrator;
+  /**
+   * Injectable workspace provisioning — production defaults to the
+   * run-workspace storage helpers. The agent fetches this archive itself at
+   * startup; tests substitute a capturing stub.
+   */
+  uploadWorkspace?: typeof uploadRunWorkspace;
+  deleteWorkspace?: typeof deleteRunWorkspace;
 }
 
 /**
@@ -83,8 +91,10 @@ export async function runPlatformContainer(
 ): Promise<PlatformContainerResult> {
   const { runId, context, plan, sinkCredentials, signal } = input;
   const orch = input.orchestrator ?? getOrchestrator();
+  const uploadWorkspace = input.uploadWorkspace ?? uploadRunWorkspace;
+  const deleteWorkspace = input.deleteWorkspace ?? deleteRunWorkspace;
 
-  const prompt = buildPlatformSystemPrompt(context, plan);
+  const prompt = await buildPlatformSystemPrompt(context, plan);
   const { llmConfig } = plan;
   const modelId = llmConfig.modelId;
 
@@ -111,12 +121,17 @@ export async function runPlatformContainer(
       ? deriveOauthPlaceholder(llmApiKey, llmConfig.providerId)
       : deriveKeyPlaceholder(llmApiKey);
 
-    // Skip the sidecar entirely when the run declares no providers AND
-    // uses a static API key. The sidecar's sole purpose is credential
-    // injection (provider_call) + LLM passthrough for OAuth; an API-key
-    // model with no providers needs neither. Saves a subprocess spawn +
-    // MCP handshake + forward-proxy bind on every run.
-    const skipSidecar = plan.providers.length === 0 && !!llmConfig.apiKey && !isOauthCredential;
+    // Skip the sidecar entirely when the run declares no integrations AND
+    // uses a static API key AND has no egress proxy. The sidecar's purposes
+    // are integration MCP multiplexing (Phase 1.4), LLM passthrough for
+    // OAuth, AND hosting the forward proxy that masks the agent's outbound
+    // IP. An API-key model with no integrations and no proxy needs none of
+    // these. When a proxy IS configured, the sidecar's forward-proxy bind
+    // is the ONLY path that routes agent egress through it — skipping the
+    // sidecar would silently drop the proxy and leak the host IP.
+    const hasIntegrations = (plan.integrations?.length ?? 0) > 0;
+    const skipSidecar =
+      !hasIntegrations && !!llmConfig.apiKey && !isOauthCredential && !plan.proxyUrl;
 
     let sidecarLlm: LlmProxyConfig | undefined;
     if (isOauthCredential) {
@@ -148,17 +163,36 @@ export async function runPlatformContainer(
       proxyUrl: plan.proxyUrl ?? undefined,
       llm: sidecarLlm,
       // Propagate the resolved model's context window so the sidecar's
-      // TokenBudget can spill `provider_call` outputs that would push the
+      // TokenBudget can spill `api_call` outputs that would push the
       // cumulative tool-output token count past the upstream model's
       // hard limit (#464). Both values are nullable on `org_models`
       // rows; we forward whatever survives the catalog cascade — the
       // sidecar applies a conservative fallback when either is unset.
       ...(llmConfig.contextWindow != null ? { modelContextWindow: llmConfig.contextWindow } : {}),
       ...(llmConfig.maxTokens != null ? { modelMaxTokens: llmConfig.maxTokens } : {}),
+      // Phase 1.4 — integrations the sidecar will spawn + multiplex onto
+      // the agent-facing `/mcp` surface. Resolved upstream by
+      // `resolveIntegrationSpawns` (run-context-builder).
+      ...(plan.integrations && plan.integrations.length > 0
+        ? { integrations: plan.integrations }
+        : {}),
+      // Platform runtime tools (output/log/note/pin/report) the sidecar
+      // hosts as in-process MCP tools — unified with the integration tool
+      // surface. The no-sidecar path reads the same selection from the
+      // bundle manifest instead.
+      ...(plan.runtimeTools && plan.runtimeTools.length > 0
+        ? { runtimeTools: plan.runtimeTools }
+        : {}),
     };
 
     const hasOutputSchema =
       plan.outputSchema?.properties && Object.keys(plan.outputSchema.properties).length > 0;
+    // Forward the output schema to the sidecar so its `output` runtime tool
+    // can constrain + validate the `data` argument (mirrors the agent
+    // container's OUTPUT_SCHEMA env for the no-sidecar path).
+    if (hasOutputSchema && plan.outputSchema) {
+      sidecarSpec.outputSchema = plan.outputSchema as unknown as Record<string, unknown>;
+    }
     // The agent container only ever receives the placeholder
     // (apiKeyPlaceholder); the real access token never leaves the
     // platform/sidecar boundary. The sidecar overwrites Authorization with
@@ -192,7 +226,6 @@ export async function runPlatformContainer(
         : llmApiKey
           ? "http://sidecar:8080/llm"
           : undefined,
-      connectedProviders: plan.providers.filter((s) => plan.tokens[s.id]).map((s) => s.id),
       outputSchema: hasOutputSchema ? plan.outputSchema : undefined,
       forwardProxyUrl: skipSidecar ? undefined : "http://sidecar:8081",
       sink: {
@@ -208,26 +241,35 @@ export async function runPlatformContainer(
       traceparent: context.traceparent,
     });
 
-    const filesToInject: Array<{ name: string; content: Buffer }> = [];
-    if (plan.agentPackage) {
-      filesToInject.push({ name: "agent-package.afps", content: plan.agentPackage });
-    }
-    if (plan.inputFiles) {
-      for (const f of plan.inputFiles) {
-        filesToInject.push({
-          name: `documents/${sanitizeStorageKey(f.name)}`,
-          content: f.buffer,
-        });
-      }
-    }
+    // The bundle (small, constant) and input documents (large, variable) are
+    // provisioned separately: the agent extracts the bundle but streams each
+    // document straight to `documents/<name>` on disk, so it never buffers the
+    // whole payload. Document object names carry no path prefix — the agent
+    // writes them under `documents/` itself (matches the `./documents/<name>`
+    // paths the prompt-builder hands the agent).
+    const documents = (plan.inputFiles ?? []).map((f) => ({
+      name: sanitizeStorageKey(f.name),
+      content: f.buffer,
+    }));
 
     await orch.ensureImages(
       skipSidecar ? [getEnv().PI_IMAGE] : [getEnv().PI_IMAGE, getEnv().SIDECAR_IMAGE],
     );
 
-    // Sidecar + agent setup in parallel (identical to the legacy path —
-    // the only behavioural change is WHERE the agent's events end up).
-    // When `skipSidecar`, we only create the agent workload.
+    // Sidecar + agent + workspace upload in parallel. The workspace archive
+    // (AFPS bundle + input documents) is uploaded to run-scoped storage; the
+    // agent container fetches and extracts it itself at startup
+    // (`GET /api/runs/:runId/workspace`). This replaces the old
+    // seed-into-the-run-volume delivery, whose correctness depended on the
+    // volume driver — a tmpfs-backed `local` volume is NOT shared between the
+    // short-lived seed helper and the agent container, so the bundle silently
+    // vanished and skills never materialised (issue #549). With the agent
+    // self-provisioning, the run volume is pure agent-local scratch again, so
+    // its backing (disk or tmpfs) is a free performance choice. The upload
+    // must finish before `startWorkload` (inside waitForWorkload) so the
+    // object exists when the agent boots; racing it alongside the create
+    // calls here satisfies that ordering. When `skipSidecar`, only the agent
+    // is created (it reaches the platform directly over its egress network).
     const [sidecar, agent] = await Promise.all([
       skipSidecar ? Promise.resolve(undefined) : orch.createSidecar(runId, boundary, sidecarSpec),
       orch.createWorkload(
@@ -237,13 +279,14 @@ export async function runPlatformContainer(
           image: getEnv().PI_IMAGE,
           env: containerEnv,
           resources: { memoryBytes: 1536 * 1024 * 1024, nanoCpus: 2_000_000_000 },
-          files:
-            filesToInject.length > 0
-              ? { items: filesToInject, targetDir: "/workspace" }
-              : undefined,
+          // Without a sidecar there is no egress proxy — the agent must
+          // reach the upstream LLM and the platform sink directly, so it
+          // goes on the egress network instead of the internal boundary.
+          egress: skipSidecar,
         },
         boundary,
       ),
+      uploadWorkspace(runId, { bundle: plan.agentPackage ?? undefined, documents }),
     ]);
     sidecarHandle = sidecar;
     agentHandle = agent;
@@ -277,6 +320,9 @@ export async function runPlatformContainer(
         });
       });
     }
+    // Drop the provisioning archive — the agent has long since fetched it.
+    // Best-effort: deleteRunWorkspace never throws.
+    await deleteWorkspace(runId);
   }
 }
 

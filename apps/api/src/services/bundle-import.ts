@@ -20,13 +20,15 @@
  * This helper is transaction-aware insofar as each package is inserted
  * by `postInstallPackage` which uses `createVersionAndUpload` —
  * duplicates are caught before any storage write and surfaced to the
- * caller. Partial failures (e.g. half the packages succeed, then one
- * conflicts) are left in place: new inserts are harmless, and the
- * failed package is reported. For strict atomicity, a full-import
- * transaction will be added once storage becomes CAS (§Phase 4).
+ * caller. A genuine version-creation failure on any package ABORTS the
+ * whole import (the error propagates) rather than committing a `packages`
+ * row with no version (an un-runnable orphan) — earlier-inserted packages
+ * remain (new inserts are harmless). For strict all-or-nothing atomicity,
+ * a full-import transaction will be added once storage becomes CAS
+ * (§Phase 4).
  */
 
-import { zipSync, type AsyncZippableFile } from "fflate";
+import { zipSync, unzipSync, type AsyncZippableFile } from "fflate";
 import type { Bundle, BundlePackage } from "@appstrate/afps-runtime/bundle";
 import {
   extractRootFromAfps,
@@ -37,7 +39,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { parsePackageZip } from "@appstrate/core/zip";
 import { db } from "@appstrate/db/client";
 import { packages, packageVersions } from "@appstrate/db/schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, notExists, sql } from "drizzle-orm";
 import { conflict, invalidRequest } from "../lib/errors.ts";
 import { isSystemPackage } from "./system-packages.ts";
 import { postInstallPackage } from "./post-install-package.ts";
@@ -45,6 +47,10 @@ import { buildBundleFromUploadedAfps, type BundleAssemblyScope } from "./bundle-
 import { installPackage } from "./application-packages.ts";
 import { downloadVersionZip } from "./package-storage.ts";
 import { logger } from "../lib/logger.ts";
+import {
+  collectConnectLoginWarnings,
+  collectMetaWarnings,
+} from "./integration-install-warnings.ts";
 
 // Pinned mtime — must match the bundle writer exactly for cross-format
 // integrity parity. Anchored at 1980-01-02T12:00Z so fflate's local-TZ
@@ -76,31 +82,24 @@ export function reconstructPackageZip(pkg: BundlePackage): Uint8Array {
 
 /**
  * Heuristic: a `.afps-bundle` archive contains a `bundle.json` entry at
- * its root; a raw `.afps` archive contains `manifest.json`. The central
- * directory scan is cheap — we don't decompress until we know which
- * reader to call.
+ * its root; a raw `.afps` archive contains `manifest.json`. We enumerate
+ * entry names via the ZIP central directory (`unzipSync` with a `filter`
+ * that only matches `bundle.json`) — this reads the directory at the end
+ * of the file without decompressing any content. Returns true iff a
+ * root-level `bundle.json` entry is present.
+ *
+ * Total function: `unzipSync` THROWS `invalid zip data` on non-ZIP,
+ * truncated, or empty input. We swallow that and return false so such
+ * input falls through to the raw `.afps` reader, which raises a typed
+ * error instead of a raw throw. The function never throws.
  */
 function looksLikeAfpsBundle(bytes: Uint8Array): boolean {
-  // Super-cheap scan: find the literal string "bundle.json" in the
-  // first few KiB of the archive. ZIP central directories live at the
-  // END of the file, but filenames are also emitted in local file
-  // headers near the START — so this works on typical small archives.
-  // False-positives are impossible (a `.afps` has no such filename) and
-  // a false-negative falls through to the bundle reader which will
-  // raise `BUNDLE_JSON_MISSING` — an acceptable error shape.
-  const needle = new TextEncoder().encode("bundle.json");
-  const hay = bytes.subarray(0, Math.min(bytes.byteLength, 65536));
-  for (let i = 0; i + needle.length <= hay.byteLength; i++) {
-    let match = true;
-    for (let j = 0; j < needle.length; j++) {
-      if (hay[i + j] !== needle[j]) {
-        match = false;
-        break;
-      }
-    }
-    if (match) return true;
+  try {
+    const matched = unzipSync(bytes, { filter: (f) => f.name === "bundle.json" });
+    return Object.prototype.hasOwnProperty.call(matched, "bundle.json");
+  } catch {
+    return false;
   }
-  return false;
 }
 
 /**
@@ -207,14 +206,21 @@ export async function detectBundleConflicts(
 export interface ImportedPackageResult {
   identity: string;
   status: "inserted" | "reused";
-  versionId: number | null;
+  version_id: number | null;
 }
 
 export interface ImportBundleResult {
   imported: ImportedPackageResult[];
-  rootInstalled: boolean;
-  rootPackageId: string;
-  rootVersion: string;
+  root_installed: boolean;
+  root_package_id: string;
+  root_version: string;
+  /**
+   * Non-blocking install-time warnings (AFPS §7.7) — surfaces
+   * `connect.login` selector/criteria patterns the Appstrate runtime engine
+   * cannot evaluate (XPath, multi-value JSONPath, xpath criteria). Empty
+   * array when no integration manifest in the bundle hits a limitation.
+   */
+  warnings: string[];
 }
 
 /**
@@ -229,6 +235,7 @@ export async function importBundle(
   userId: string,
 ): Promise<ImportBundleResult> {
   const imported: ImportedPackageResult[] = [];
+  const warnings: string[] = [];
 
   for (const [identity, pkg] of bundle.packages) {
     const parsedIdentity = parsePackageIdentity(identity);
@@ -239,7 +246,7 @@ export async function importBundle(
     const version = parsedIdentity.version;
 
     if (isSystemPackage(packageId)) {
-      imported.push({ identity, status: "reused", versionId: null });
+      imported.push({ identity, status: "reused", version_id: null });
       continue;
     }
 
@@ -255,7 +262,7 @@ export async function importBundle(
       .where(and(eq(packageVersions.packageId, packageId), eq(packageVersions.version, version)))
       .limit(1);
     if (existingVer) {
-      imported.push({ identity, status: "reused", versionId: existingVer.id });
+      imported.push({ identity, status: "reused", version_id: existingVer.id });
       continue;
     }
 
@@ -272,12 +279,31 @@ export async function importBundle(
       throw invalidRequest(`Invalid package '${identity}' in bundle: ${getErrorMessage(err)}`);
     }
 
+    // Surface engine-subset limitations for integration manifests as
+    // non-blocking warnings (AFPS §7.7).
+    if (parsedZip.type === "integration") {
+      for (const w of collectConnectLoginWarnings(parsedZip.manifest)) {
+        warnings.push(`${identity}: ${w}`);
+      }
+    }
+
+    // Surface `_meta` policy warnings for all package types — the validator
+    // soft-fails malformed namespace keys to console.warn only (per AFPS §10.1
+    // "consumers MUST NOT reject unknown `_meta` keys"). Lift them to the
+    // install-warning channel so publishers see them.
+    for (const w of collectMetaWarnings(parsedZip.manifest)) {
+      warnings.push(`${identity}: ${w}`);
+    }
+
     // Ensure a packages row exists before the version snapshot. If a
     // row with the same id already exists owned by another org, leave
     // it alone — the imported version becomes a parallel snapshot
     // attached to that pre-existing package (safe because integrity
     // matched OR the row is new). Don't clobber another org's draft.
-    await db
+    // `.returning` tells us whether THIS call actually inserted the row
+    // (vs. hit the conflict) so a post-install failure only rolls back
+    // the orphan we created — never a pre-existing foreign-org row.
+    const insertedRows = await db
       .insert(packages)
       .values({
         id: packageId,
@@ -288,18 +314,44 @@ export async function importBundle(
         draftContent: parsedZip.content,
         createdBy: userId,
       })
-      .onConflictDoNothing({ target: packages.id });
+      .onConflictDoNothing({ target: packages.id })
+      .returning({ id: packages.id });
+    const insertedThisRow = insertedRows.length > 0;
 
-    await postInstallPackage({
-      packageType: parsedZip.type,
-      packageId,
-      orgId: scope.orgId,
-      userId,
-      content: parsedZip.content,
-      files: parsedZip.files,
-      zipBuffer: Buffer.from(reconstructed),
-      version,
-    });
+    try {
+      await postInstallPackage({
+        packageType: parsedZip.type,
+        packageId,
+        orgId: scope.orgId,
+        userId,
+        content: parsedZip.content,
+        files: parsedZip.files,
+        zipBuffer: Buffer.from(reconstructed),
+        version,
+      });
+    } catch (err) {
+      // Post-install (version snapshot + storage upload) failed. If this
+      // import just created the packages row, delete the orphan so we don't
+      // leave an un-runnable package with no version. A single self-guarding
+      // DELETE (`NOT EXISTS` any package_versions) is atomic — it can't race a
+      // concurrent import that commits a version in the window, which a
+      // separate SELECT-then-DELETE would cascade-delete. Then rethrow.
+      if (insertedThisRow) {
+        await db.delete(packages).where(
+          and(
+            eq(packages.id, packageId),
+            eq(packages.orgId, scope.orgId),
+            notExists(
+              db
+                .select({ one: sql`1` })
+                .from(packageVersions)
+                .where(eq(packageVersions.packageId, packageId)),
+            ),
+          ),
+        );
+      }
+      throw err;
+    }
 
     const [newVer] = await db
       .select({ id: packageVersions.id })
@@ -309,7 +361,7 @@ export async function importBundle(
     imported.push({
       identity,
       status: "inserted",
-      versionId: newVer?.id ?? null,
+      version_id: newVer?.id ?? null,
     });
   }
 
@@ -332,9 +384,10 @@ export async function importBundle(
 
   return {
     imported,
-    rootInstalled,
-    rootPackageId: rootParsed.packageId,
-    rootVersion: rootParsed.version,
+    root_installed: rootInstalled,
+    root_package_id: rootParsed.packageId,
+    root_version: rootParsed.version,
+    warnings,
   };
 }
 

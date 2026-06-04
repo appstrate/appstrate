@@ -16,6 +16,7 @@
  */
 
 import { getErrorMessage } from "@appstrate/core/errors";
+import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 
 export interface RuntimeEnv {
   /** Run identifier injected by the platform on container create. */
@@ -62,13 +63,6 @@ export interface RuntimeEnv {
    */
   traceparent?: string;
   /**
-   * Per-run Bearer token for the MCP HTTP transport. When unset, the
-   * MCP client connects unauthenticated — relies on Docker network
-   * isolation only. Reuses the platform's existing `RUN_TOKEN` env to
-   * avoid minting a separate secret.
-   */
-  runToken?: string;
-  /**
    * Wall-clock budget for the initial MCP handshake against the sidecar
    * (in milliseconds). Wraps both the connect retry loop and the final
    * attempt. Operators on slow registries can widen this when cold
@@ -81,7 +75,7 @@ const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
 const DEFAULT_CONTEXT_WINDOW = 128_000;
 const DEFAULT_MAX_TOKENS = 16_384;
 const DEFAULT_MCP_CONNECT_DEADLINE_MS = 60_000;
-const KNOWN_MODEL_APIS = new Set([
+const MODEL_API_SLUGS = [
   "anthropic-messages",
   "openai-completions",
   "openai-responses",
@@ -91,7 +85,8 @@ const KNOWN_MODEL_APIS = new Set([
   "google-vertex",
   "azure-openai-responses",
   "bedrock-converse-stream",
-]);
+] as const satisfies readonly ModelApiShape[];
+const KNOWN_MODEL_APIS = new Set<string>(MODEL_API_SLUGS);
 
 export class RuntimeEnvError extends Error {
   override readonly name = "RuntimeEnvError";
@@ -304,6 +299,5 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     mcpConnectDeadlineMs,
     outputSchemaRaw: source.OUTPUT_SCHEMA || undefined,
     traceparent: source.TRACEPARENT || undefined,
-    runToken: source.RUN_TOKEN || undefined,
   };
 }

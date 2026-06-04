@@ -14,7 +14,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 
 /** Upload a package item's full normalized files to Storage. Returns SHA256 SRI integrity hash. */
 export async function uploadPackageFiles(
-  type: "agents" | "skills" | "tools" | "providers",
+  type: "agents" | "skills" | "integrations" | "mcp-servers",
   orgId: string,
   itemId: string,
   normalizedFiles: Record<string, Uint8Array>,
@@ -39,7 +39,7 @@ export const SYSTEM_STORAGE_NAMESPACE = "_system";
  *  Tries org-scoped path first, falls back to global _system/ namespace for system packages.
  *  When expectedIntegrity is provided, verifies SHA256 SRI hash before unzipping. */
 export async function downloadPackageFiles(
-  type: "agents" | "skills" | "tools" | "providers",
+  type: "agents" | "skills" | "integrations" | "mcp-servers",
   orgId: string,
   itemId: string,
   expectedIntegrity?: string | null,
@@ -68,7 +68,7 @@ export async function downloadPackageFiles(
 
 /** Delete a package item's files from Storage. */
 export async function deletePackageFiles(
-  type: "agents" | "skills" | "tools" | "providers",
+  type: "agents" | "skills" | "integrations" | "mcp-servers",
   orgId: string,
   itemId: string,
 ): Promise<void> {

@@ -59,20 +59,9 @@ const DOS_EPOCH_MS = Date.UTC(1980, 0, 2, 12, 0, 0);
 function buildAfps(opts: {
   manifest: Record<string, unknown>;
   content: string;
-  type: "agent" | "skill" | "tool" | "provider";
+  type: "agent" | "skill";
 }): Uint8Array {
-  const filename = (() => {
-    switch (opts.type) {
-      case "agent":
-        return "prompt.md";
-      case "skill":
-        return "SKILL.md";
-      case "tool":
-        return "tool.ts";
-      case "provider":
-        return "PROVIDER.md";
-    }
-  })();
+  const filename = opts.type === "agent" ? "prompt.md" : "SKILL.md";
   const entries: Record<string, [Uint8Array, { mtime?: number; level?: number }]> = {
     "manifest.json": [
       enc(JSON.stringify(opts.manifest, null, 2)),
@@ -92,22 +81,15 @@ function buildAfps(opts: {
 /** Default content per type — minimal payload that satisfies
  *  parsePackageZip's per-type validation (skill needs YAML frontmatter,
  *  etc). */
-function defaultContentFor(type: "agent" | "skill" | "tool" | "provider"): string {
-  switch (type) {
-    case "agent":
-      return "Test prompt.";
-    case "skill":
-      return "---\nname: test-skill\ndescription: A test skill.\n---\nSkill body.";
-    case "tool":
-      return "export default function tool() {}";
-    case "provider":
-      return "Provider doc.";
-  }
+function defaultContentFor(type: "agent" | "skill"): string {
+  return type === "agent"
+    ? "Test prompt."
+    : "---\nname: test-skill\ndescription: A test skill.\n---\nSkill body.";
 }
 
 async function seedVersionedPackage(opts: {
   id: `@${string}/${string}`;
-  type: "agent" | "skill" | "tool" | "provider";
+  type: "agent" | "skill";
   version: string;
   orgId: string;
   manifest: Record<string, unknown>;
@@ -161,8 +143,8 @@ async function seedAndExportBundle(opts: {
       name: rootId,
       version: "1.0.0",
       type: "agent",
-      schemaVersion: "1.1",
-      displayName: "Root",
+      schema_version: "0.1",
+      display_name: "Root",
       author: "tester",
       dependencies: { skills: { [skillA]: "^1.0.0" } },
     },
@@ -178,8 +160,8 @@ async function seedAndExportBundle(opts: {
       name: skillA,
       version: "1.2.0",
       type: "skill",
-      schemaVersion: "1.1",
-      displayName: "A",
+      schema_version: "0.1",
+      display_name: "A",
       author: "tester",
       dependencies: { skills: { [skillB]: "^1" } },
     },
@@ -194,8 +176,8 @@ async function seedAndExportBundle(opts: {
       name: skillB,
       version: "1.0.0",
       type: "skill",
-      schemaVersion: "1.1",
-      displayName: "B",
+      schema_version: "0.1",
+      display_name: "B",
       author: "tester",
     },
     setLatest: true,
@@ -259,16 +241,16 @@ describe("POST /api/packages/import-bundle — import", () => {
       throw new Error(`unexpected ${res.status}: ${await res.text()}`);
     }
     const body = (await res.json()) as {
-      imported: Array<{ identity: string; status: string; versionId: number | null }>;
-      rootInstalled: boolean;
-      rootPackageId: string;
-      rootVersion: string;
+      imported: Array<{ identity: string; status: string; version_id: number | null }>;
+      root_installed: boolean;
+      root_package_id: string;
+      root_version: string;
     };
     expect(body.imported).toHaveLength(3);
     expect(body.imported.every((i) => i.status === "inserted" || i.status === "reused")).toBe(true);
-    expect(body.rootPackageId).toBe("@srcorg/agent-root");
-    expect(body.rootVersion).toBe("1.0.0");
-    expect(body.rootInstalled).toBe(true);
+    expect(body.root_package_id).toBe("@srcorg/agent-root");
+    expect(body.root_version).toBe("1.0.0");
+    expect(body.root_installed).toBe(true);
 
     // Verify DB state — 3 packages registered + root installed in
     // the importing app.
@@ -313,8 +295,8 @@ describe("POST /api/packages/import-bundle — import", () => {
         name: agentId,
         version: "1.0.0",
         type: "agent",
-        schemaVersion: "1.1",
-        displayName: "Standalone",
+        schema_version: "0.1",
+        display_name: "Standalone",
         author: "tester",
       },
       content: "Standalone prompt.",
@@ -327,8 +309,8 @@ describe("POST /api/packages/import-bundle — import", () => {
         name: agentId,
         version: "1.0.0",
         type: "agent",
-        schemaVersion: "1.1",
-        displayName: "Standalone",
+        schema_version: "0.1",
+        display_name: "Standalone",
         author: "tester",
       },
       content: "Standalone prompt.",
@@ -345,9 +327,9 @@ describe("POST /api/packages/import-bundle — import", () => {
     expect(res.status).toBe(201);
     const body = (await res.json()) as {
       imported: Array<{ identity: string; status: string }>;
-      rootPackageId: string;
+      root_package_id: string;
     };
-    expect(body.rootPackageId).toBe(agentId);
+    expect(body.root_package_id).toBe(agentId);
     expect(body.imported).toHaveLength(1);
   });
 
@@ -438,6 +420,69 @@ describe("POST /api/packages/import-bundle — import", () => {
     const body = (await res.json()) as { code: string; detail: string };
     expect(body.code).toBe("bundle_conflict");
     expect(body.detail).toContain("@srctamper/c@1.0.0");
+  });
+
+  it("maps a post-install failure to 400 post_install_failed and leaves no orphan packages row", async () => {
+    // Export a valid bundle, then tamper the ROOT manifest to declare a
+    // self-dependency (`@scope/root` depends on itself). That passes schema
+    // validation + bundle read but trips `assertNoCycle` inside
+    // `createVersionAndUpload` during post-install — AFTER the importer has
+    // inserted the root's `packages` row. The importer must (a) surface a
+    // clean 400 `post_install_failed` (not a raw 500) and (b) delete the
+    // just-inserted orphan row so no un-runnable package (row with no
+    // version) survives.
+    const sourceCtx = await createTestContext({ orgSlug: "srcorphan" });
+    const { bundle } = await seedAndExportBundle({
+      ctx: sourceCtx,
+      rootId: "@srcorphan/root",
+      skillA: "@srcorphan/skill-a",
+      skillB: "@srcorphan/skill-b",
+    });
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "destorphan" });
+
+    // Rebuild the root package with a self-referencing skill dependency.
+    const rootIdentity = "@srcorphan/root@1.0.0" as never;
+    const rootPkg = bundle.packages.get(rootIdentity);
+    expect(rootPkg).toBeDefined();
+    const manifestBytes = rootPkg!.files.get("manifest.json")!;
+    const manifest = JSON.parse(new TextDecoder().decode(manifestBytes)) as Record<string, unknown>;
+    (manifest as { dependencies: Record<string, unknown> }).dependencies = {
+      skills: { "@srcorphan/root": "^1.0.0" },
+    };
+    const files = new Map(rootPkg!.files);
+    files.set("manifest.json", enc(JSON.stringify(manifest, null, 2)));
+    const tampered: Bundle = { ...bundle, packages: new Map(bundle.packages) };
+    tampered.packages.set(rootIdentity, { ...rootPkg!, files });
+    const tamperedBytes = writeBundleToBuffer(tampered);
+
+    const form = new FormData();
+    form.append("file", new Blob([tamperedBytes]), "bundle.afps-bundle");
+    const res = await app.request("/api/packages/import-bundle", {
+      method: "POST",
+      body: form,
+      headers: authHeaders(ctx),
+    });
+
+    // Clean 4xx (same shape as single-import), NOT a raw 500.
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe("post_install_failed");
+
+    // No orphan packages row for the failed root.
+    const [orphan] = await db
+      .select({ id: packages.id })
+      .from(packages)
+      .where(eq(packages.id, "@srcorphan/root"))
+      .limit(1);
+    expect(orphan).toBeUndefined();
+    // And certainly no version row for it.
+    const [ver] = await db
+      .select({ id: packageVersions.id })
+      .from(packageVersions)
+      .where(eq(packageVersions.packageId, "@srcorphan/root"))
+      .limit(1);
+    expect(ver).toBeUndefined();
   });
 
   it("rejects non-multipart requests with 400", async () => {

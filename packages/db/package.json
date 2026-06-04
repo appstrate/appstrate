@@ -20,6 +20,8 @@
     "db:push": "drizzle-kit push"
   },
   "dependencies": {
+    "@appstrate/afps-shared": "workspace:*",
+    "@appstrate/core": "workspace:*",
     "@appstrate/emails": "workspace:*",
     "@appstrate/env": "workspace:*",
     "@aws-sdk/client-s3": "^3.1038.0",
@@ -30,7 +32,7 @@
     "drizzle-orm": "^0.45.2",
     "nodemailer": "^8.0.7",
     "postgres": "^3.4.9",
-    "zod": "^4.3.6"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/nodemailer": "^8.0.0",

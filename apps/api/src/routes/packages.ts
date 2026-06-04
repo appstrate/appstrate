@@ -5,11 +5,9 @@ import { z } from "zod";
 import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { parsePackageZip, PackageZipError, zipArtifact } from "@appstrate/core/zip";
-import { buildPublishedToolArchive } from "@appstrate/core/tool-bundler";
 import { buildDownloadHeaders } from "@appstrate/core/integrity";
 import { eq, and, inArray } from "drizzle-orm";
-import { packages, profiles, applicationProviderCredentials } from "@appstrate/db/schema";
-import { encryptCredentials } from "@appstrate/connect";
+import { packages, profiles } from "@appstrate/db/schema";
 import { db } from "@appstrate/db/client";
 import { listResponse } from "../lib/list-response.ts";
 import { postInstallPackage } from "../services/post-install-package.ts";
@@ -34,7 +32,7 @@ import {
 import { getErrorMessage } from "@appstrate/core/errors";
 import { uploadPackageFiles, downloadPackageFiles } from "../services/package-items/storage.ts";
 import { CONFIG_BY_TYPE, type PackageTypeConfig } from "../services/package-items/config.ts";
-import { validateToolSource, validateManifest, type PackageType } from "@appstrate/core/validation";
+import { validateManifest, type PackageType } from "@appstrate/core/validation";
 import { SLUG_REGEX } from "@appstrate/core/naming";
 import { unzipAndNormalize } from "../services/package-storage.ts";
 import { isValidVersion } from "@appstrate/core/semver";
@@ -52,7 +50,7 @@ import {
 } from "../services/package-versions.ts";
 import { agentDetailHandler } from "./agent-detail-handler.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
-import { requireOwnedPackage, requireOrgPackage, checkScopeMatch } from "../middleware/guards.ts";
+import { requirePackageInOrg } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getRunningRunsForPackage } from "../services/state/runs.ts";
 import { logger } from "../lib/logger.ts";
@@ -60,6 +58,11 @@ import { asRecord } from "@appstrate/core/safe-json";
 import { forkPackage } from "../services/package-fork.ts";
 import { tryParseSkillOnlyZip } from "../services/skill-zip.ts";
 import { fetchGithubDirectory, GithubImportError } from "../services/github-import.ts";
+import { validateAgentIntegrationSelections } from "../services/integration-scope-validation.ts";
+import {
+  collectConnectLoginWarnings,
+  collectMetaWarnings,
+} from "../services/integration-install-warnings.ts";
 import {
   ApiError,
   invalidRequest,
@@ -81,6 +84,24 @@ function manifestErrorsToFieldErrors(errors: string[]): ValidationFieldError[] {
   });
 }
 
+/**
+ * Phase 1 gate — after `validateManifest` accepts an agent manifest,
+ * cross-check that any `integrations_configuration[id]` selection (§4.4)
+ * is a subset of the referenced integration's catalog. Skips silently for
+ * non-agent types, integrations with no configuration entry, and
+ * integrations not visible to the org (the latter handled by run-time dep
+ * validation).
+ */
+async function assertAgentIntegrationScopesValid(
+  manifest: Record<string, unknown>,
+  orgId: string,
+): Promise<void> {
+  const scopeErrors = await validateAgentIntegrationSelections({ manifest, orgId });
+  if (scopeErrors.length > 0) {
+    throw validationFailed(scopeErrors);
+  }
+}
+
 // ═══════════════════════════════════════════════
 // Shared helpers for package CRUD routes
 // ═══════════════════════════════════════════════
@@ -98,7 +119,7 @@ export const forkSchema = z
 /** Enrich items with creator display names (batch lookup). */
 async function enrichWithCreatorNames<T extends { createdBy?: string | null }>(
   items: T[],
-): Promise<(T & { createdByName?: string })[]> {
+): Promise<(T & { created_by_name?: string })[]> {
   const userIds = [...new Set(items.map((i) => i.createdBy).filter(Boolean))] as string[];
   if (userIds.length === 0) return items;
 
@@ -111,7 +132,7 @@ async function enrichWithCreatorNames<T extends { createdBy?: string | null }>(
 
   return items.map((item) => ({
     ...item,
-    createdByName: item.createdBy ? (nameMap.get(item.createdBy) ?? undefined) : undefined,
+    created_by_name: item.createdBy ? (nameMap.get(item.createdBy) ?? undefined) : undefined,
   }));
 }
 
@@ -194,7 +215,7 @@ async function parsePackageUpload(
       manifest = parseManifestBytesSafe(manifestBytes);
       if (manifest) {
         // Extract display fields as fallbacks (not for manifest storage)
-        if (!name && typeof manifest.displayName === "string") name = manifest.displayName;
+        if (!name && typeof manifest.display_name === "string") name = manifest.display_name;
         if (!description && typeof manifest.description === "string")
           description = manifest.description;
       }
@@ -247,9 +268,7 @@ async function parsePackageUpload(
 }
 
 /** Create a version snapshot from files + manifest (non-fatal on error).
- *  For tools, the source is bundled into a self-contained `tool.js` via
- *  {@link buildPublishedToolArchive} so the published archive complies
- *  with AFPS §3.4. Other types are zipped as-is. */
+ *  All package types are zipped as-is. */
 async function createVersionSafe(params: {
   packageId: string;
   orgId: string;
@@ -265,22 +284,10 @@ async function createVersionSafe(params: {
     return;
   }
   try {
-    let zipBuffer: Buffer;
-    let manifestToStore = params.manifest;
-
-    if (params.manifest.type === "tool") {
-      const built = await buildPublishedToolArchive({
-        files: params.normalizedFiles,
-        manifest: params.manifest,
-        toolId: params.packageId,
-      });
-      zipBuffer = Buffer.from(built.archive);
-      manifestToStore = built.manifest;
-    } else {
-      const entries: Record<string, Uint8Array> = { ...params.normalizedFiles };
-      entries["manifest.json"] = new TextEncoder().encode(JSON.stringify(params.manifest, null, 2));
-      zipBuffer = Buffer.from(zipArtifact(entries, 6));
-    }
+    const manifestToStore = params.manifest;
+    const entries: Record<string, Uint8Array> = { ...params.normalizedFiles };
+    entries["manifest.json"] = new TextEncoder().encode(JSON.stringify(params.manifest, null, 2));
+    const zipBuffer = Buffer.from(zipArtifact(entries, 6));
 
     await createVersionAndUpload({
       packageId: params.packageId,
@@ -298,7 +305,7 @@ async function createVersionSafe(params: {
 
 interface PackageRouteConfig {
   cfg: PackageTypeConfig;
-  /** URL path segment used for routing (e.g. "skills", "providers"). */
+  /** URL path segment used for routing (e.g. "skills", "integrations"). */
   path: string;
   parseOpts: {
     requiredFile: string | null;
@@ -333,7 +340,11 @@ interface PackageRouteConfig {
   getHandler?: (c: Context<AppEnv>) => Promise<Response>;
 }
 
-const ROUTE_CONFIGS: Record<PackageType, PackageRouteConfig> = {
+// Every AFPS package type exposes user-facing routes. `Partial` is kept so
+// the `ROUTE_CONFIGS[type]?.` lookups stay null-tolerant, but all four types are
+// wired. `agent`/`skill` have JSON-body editors; `integration`/`mcp-server` are
+// import-only (no editor — both are authored externally and land via ZIP).
+const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
   skill: {
     cfg: CONFIG_BY_TYPE.skill,
     path: "skills",
@@ -341,15 +352,6 @@ const ROUTE_CONFIGS: Record<PackageType, PackageRouteConfig> = {
     storageFileName: () => "SKILL.md",
     jsonBodyCreate: true,
     requireContent: true,
-  },
-  tool: {
-    cfg: CONFIG_BY_TYPE.tool,
-    path: "tools",
-    parseOpts: { requiredFile: null, contentFileExt: ".ts" },
-    validateSource: validateToolSource,
-    storageFileName: () => "TOOL.md",
-    sourceFileName: () => "tool.ts",
-    jsonBodyCreate: true,
   },
   agent: {
     cfg: CONFIG_BY_TYPE.agent,
@@ -361,25 +363,31 @@ const ROUTE_CONFIGS: Record<PackageType, PackageRouteConfig> = {
     requireMutableForVersionOps: true,
     getHandler: agentDetailHandler,
   },
-  provider: {
-    cfg: CONFIG_BY_TYPE.provider,
-    path: "providers",
+  // Integrations are authored via a JSON-body manifest editor (parity with
+  // agents/skills). The stored `manifest.json` content mirrors the DB
+  // `draft_manifest` — the runtime reads the manifest from the DB
+  // (`fetchIntegrationManifest`), the storage file exists for export/bundle
+  // portability. Bundle-backed (`source.kind: "local"`) integrations still
+  // arrive via the import pipeline; the editor authors `remote`/`none`
+  // sources that need no server bundle.
+  integration: {
+    cfg: CONFIG_BY_TYPE.integration,
+    path: "integrations",
     parseOpts: { requiredFile: null, contentFileExt: null },
-    storageFileName: () => "PROVIDER.md",
+    storageFileName: () => "manifest.json",
     jsonBodyCreate: true,
-    afterCreate: async ({ packageId, applicationId }) => {
-      if (applicationId) {
-        await db
-          .insert(applicationProviderCredentials)
-          .values({
-            applicationId,
-            providerId: packageId,
-            credentialsEncrypted: encryptCredentials({}),
-            enabled: true,
-          })
-          .onConflictDoNothing();
-      }
-    },
+  },
+  // AFPS §3.4 — standalone mcp-server packages. Import-only like
+  // integrations (no editor): authored externally.
+  // AFPS-native manifest carrying MCPB vocabulary fields (server / tools / user_config) verbatim — NOT a strict-MCPB manifest. See AFPS spec §3.4.
+  // Listable, viewable, and importable as `.afps` like the other types.
+  // Referenced by an integration's `source.kind: "local"`.
+  "mcp-server": {
+    cfg: CONFIG_BY_TYPE["mcp-server"],
+    path: "mcp-servers",
+    parseOpts: { requiredFile: null, contentFileExt: null },
+    storageFileName: () => "manifest.json",
+    jsonBodyCreate: false,
   },
 };
 
@@ -389,7 +397,11 @@ function makeListHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
     const applicationId = c.get("applicationId");
-    const items = await listOrgItems(orgId, rcfg.cfg, applicationId);
+    // `?active=true` narrows to packages active (installed + enabled) in this
+    // app — the agent editor's integration picker uses it so it doesn't pull
+    // the whole catalogue.
+    const activeOnly = c.req.query("active") === "true";
+    const items = await listOrgItems(orgId, rcfg.cfg, applicationId, { activeOnly });
     const enriched = await enrichWithCreatorNames(items);
     return c.json(listResponse(enriched));
   };
@@ -406,12 +418,12 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       const body = await c.req.json<{
         manifest: Record<string, unknown>;
         content?: string;
-        sourceCode?: string;
+        source_code?: string;
       }>();
 
       const manifest = body.manifest;
       const content = body.content ?? "";
-      const sourceCode = body.sourceCode ?? "";
+      const sourceCode = body.source_code ?? "";
 
       // Validate manifest
       const manifestResult = validateManifest(manifest);
@@ -419,6 +431,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
         throw validationFailed(manifestErrorsToFieldErrors(manifestResult.errors));
       }
       const validatedManifest = manifestResult.manifest;
+      await assertAgentIntegrationScopesValid(validatedManifest as Record<string, unknown>, orgId);
 
       if (rcfg.requireContent && !content.trim()) {
         throw invalidRequest("Content cannot be empty", "content");
@@ -439,7 +452,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       }
 
       if (rcfg.sourceFileName && !sourceCode.trim()) {
-        throw invalidRequest("Source is required", "sourceCode");
+        throw invalidRequest("Source is required", "source_code");
       }
 
       if (rcfg.validateSource && sourceCode) {
@@ -447,7 +460,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
         if (!validation.valid) {
           throw validationFailed(
             validation.errors.map((message) => ({
-              field: "sourceCode",
+              field: "source_code",
               code: "invalid_source",
               title: "Invalid Source",
               message,
@@ -458,8 +471,12 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
 
       const packageId = validatedManifest.name;
 
-      const scopeErr = checkScopeMatch(c, packageId);
-      if (scopeErr) throw scopeErr;
+      // Scope no longer gates creation, but a system package id must never be shadowed by an
+      // org-owned row — the boot sync upserts system rows by id and would later overwrite it
+      // (orgId→null). Mirror the system-package guard the update/delete/version handlers apply.
+      if (isSystemPackage(packageId)) {
+        throw forbidden(`'${packageId}' is a system package and cannot be created`);
+      }
 
       // Check for name collision
       const existingIds = await getAllPackageIds(orgId);
@@ -479,7 +496,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
         validatedManifest as Record<string, unknown>,
       );
 
-      // After-create hook (e.g. auto-enable provider)
+      // After-create hook (optional per-type post-create side-effect)
       if (rcfg.afterCreate) {
         await rcfg.afterCreate({
           packageId,
@@ -518,7 +535,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       return c.json(
         {
           packageId,
-          lockVersion: item.lockVersion,
+          lock_version: item.lockVersion,
           message: `${rcfg.cfg.label.slice(0, -1)} created`,
         },
         201,
@@ -540,6 +557,10 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       if (!manifestResult.valid) {
         throw validationFailed(manifestErrorsToFieldErrors(manifestResult.errors));
       }
+      await assertAgentIntegrationScopesValid(
+        manifestResult.manifest as Record<string, unknown>,
+        orgId,
+      );
     }
 
     let warnings: string[] = [];
@@ -622,7 +643,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
     return c.json(
       {
         packageId: item.id,
-        lockVersion: item.lockVersion,
+        lock_version: item.lockVersion,
         message: `${rcfg.cfg.label.slice(0, -1)} created`,
         ...(warnings.length > 0 ? { warnings } : {}),
       },
@@ -671,9 +692,9 @@ function makeGetHandler(rcfg: PackageRouteConfig) {
 
     return c.json({
       ...item,
-      ...(sourceText != null ? { sourceCode: sourceText } : {}),
-      versionCount,
-      hasUnarchivedChanges: computeHasUnpublishedChanges(
+      ...(sourceText != null ? { source_code: sourceText } : {}),
+      version_count: versionCount,
+      has_unarchived_changes: computeHasUnpublishedChanges(
         item.source,
         versionCount,
         item.updatedAt ? new Date(item.updatedAt) : null,
@@ -701,24 +722,28 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     const body = await c.req.json<{
       manifest?: Record<string, unknown>;
       content?: string;
-      sourceCode?: string;
-      lockVersion?: number;
+      source_code?: string;
+      lock_version?: number;
     }>();
 
-    if (body.lockVersion == null || typeof body.lockVersion !== "number") {
-      throw invalidRequest("lockVersion (integer) is required for updates", "lockVersion");
+    if (body.lock_version == null || typeof body.lock_version !== "number") {
+      throw invalidRequest("lock_version (integer) is required for updates", "lock_version");
     }
 
     const manifest =
       body.manifest ?? (existing as { manifest?: Record<string, unknown> }).manifest ?? {};
     const content = body.content ?? existing.content ?? "";
-    const sourceCode = body.sourceCode;
+    const sourceCode = body.source_code;
 
     // Validate manifest
     const manifestResult = validateManifest(manifest);
     if (!manifestResult.valid) {
       throw validationFailed(manifestErrorsToFieldErrors(manifestResult.errors));
     }
+    await assertAgentIntegrationScopesValid(
+      manifestResult.manifest as Record<string, unknown>,
+      orgId,
+    );
 
     // Ensure ID immutability (all types)
     const newScopedName = (manifest as { name?: string }).name;
@@ -751,14 +776,14 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     // Source validation (tools)
     if (rcfg.sourceFileName && sourceCode !== undefined) {
       if (!sourceCode.trim()) {
-        throw invalidRequest("Source cannot be empty", "sourceCode");
+        throw invalidRequest("Source cannot be empty", "source_code");
       }
       if (rcfg.validateSource) {
         const validation = rcfg.validateSource(sourceCode);
         if (!validation.valid) {
           throw validationFailed(
             validation.errors.map((message) => ({
-              field: "sourceCode",
+              field: "source_code",
               code: "invalid_source",
               title: "Invalid Source",
               message,
@@ -772,7 +797,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       orgId,
       itemId,
       { manifest: manifest as Record<string, unknown>, content },
-      body.lockVersion,
+      body.lock_version,
     );
 
     if (!updated) {
@@ -801,7 +826,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
 
     return c.json({
       packageId: updated.id,
-      lockVersion: updated.lockVersion,
+      lock_version: updated.lockVersion,
       ...(warnings.length > 0 ? { warnings } : {}),
     });
   };
@@ -894,13 +919,13 @@ function makeVersionDetailHandler(rcfg: PackageRouteConfig) {
       version: detail.version,
       manifest: detail.manifest,
       content,
-      ...(sourceText != null ? { sourceCode: sourceText } : {}),
+      ...(sourceText != null ? { source_code: sourceText } : {}),
       yanked: detail.yanked,
-      yankedReason: detail.yankedReason,
+      yanked_reason: detail.yankedReason,
       integrity: detail.integrity,
-      artifactSize: detail.artifactSize,
+      artifact_size: detail.artifactSize,
       createdAt: detail.createdAt,
-      distTags: matchingTags,
+      dist_tags: matchingTags,
     });
   };
 }
@@ -1007,12 +1032,12 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
     }
 
     const existing = await getOrgItem(orgId, itemId, rcfg.cfg);
-    if (!existing || !existing.lockVersion) {
+    if (!existing || !existing.lock_version) {
       throw notFound(`${label} '${itemId}' not found`);
     }
 
     // Extract content from version ZIP
-    let content = detail.textContent ?? "";
+    let content = detail.prompt ?? "";
     if (detail.content) {
       const fileName = rcfg.storageFileName(itemId);
       const fileData = detail.content[fileName];
@@ -1025,7 +1050,7 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
       orgId,
       itemId,
       { manifest: detail.manifest, content },
-      existing.lockVersion,
+      existing.lock_version,
     );
 
     if (!updated) {
@@ -1062,8 +1087,8 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
 
     return c.json({
       message: `Version ${detail.version} restored`,
-      restoredVersion: detail.version,
-      lockVersion: updated.lockVersion,
+      restored_version: detail.version,
+      lock_version: updated.lockVersion,
     });
   };
 }
@@ -1112,10 +1137,11 @@ function makeDeleteVersionHandler(rcfg: PackageRouteConfig) {
 export function createPackagesRouter() {
   const router = new Hono<AppEnv>();
 
-  // --- Package CRUD routes (skills, tools, agents, providers) ---
+  // --- Package CRUD routes (skills, agents, integrations) ---
   for (const rcfg of Object.values(ROUTE_CONFIGS)) {
+    if (!rcfg) continue;
     const { path } = rcfg;
-    // Permission resource matches the route path (e.g. "skills", "tools", "agents", "providers")
+    // Permission resource matches the route path (e.g. "skills", "agents", "integrations")
     const resource = path as import("../lib/permissions.ts").Resource;
     const writeGuard = requirePermission(resource, "write");
     const deleteGuard = requirePermission(resource, "delete");
@@ -1128,19 +1154,19 @@ export function createPackagesRouter() {
     router.get(`/${path}/:scope{@[^/]+}/:name/versions/info`, makeVersionInfoHandler(rcfg));
     router.post(
       `/${path}/:scope{@[^/]+}/:name/versions`,
-      requireOwnedPackage(),
+      requirePackageInOrg(),
       writeGuard,
       makeCreateVersionHandler(rcfg),
     );
     router.post(
       `/${path}/:scope{@[^/]+}/:name/versions/:version/restore`,
-      requireOwnedPackage(),
+      requirePackageInOrg(),
       writeGuard,
       makeRestoreVersionHandler(rcfg),
     );
     router.delete(
       `/${path}/:scope{@[^/]+}/:name/versions/:version`,
-      requireOwnedPackage(),
+      requirePackageInOrg(),
       deleteGuard,
       makeDeleteVersionHandler(rcfg),
     );
@@ -1149,20 +1175,20 @@ export function createPackagesRouter() {
     router.get(`/${path}/:scope{@[^/]+}/:name`, rcfg.getHandler ?? makeGetHandler(rcfg));
     router.put(
       `/${path}/:scope{@[^/]+}/:name`,
-      requireOwnedPackage(),
+      requirePackageInOrg(),
       writeGuard,
       makeUpdateHandler(rcfg),
     );
     router.delete(
       `/${path}/:scope{@[^/]+}/:name`,
-      requireOrgPackage(),
+      requirePackageInOrg(),
       deleteGuard,
       makeDeleteHandler(rcfg),
     );
     // Unscoped IDs
     router.get(`/${path}/:id`, rcfg.getHandler ?? makeGetHandler(rcfg));
-    router.put(`/${path}/:id`, requireOwnedPackage(), writeGuard, makeUpdateHandler(rcfg));
-    router.delete(`/${path}/:id`, requireOrgPackage(), deleteGuard, makeDeleteHandler(rcfg));
+    router.put(`/${path}/:id`, requirePackageInOrg(), writeGuard, makeUpdateHandler(rcfg));
+    router.delete(`/${path}/:id`, requirePackageInOrg(), deleteGuard, makeDeleteHandler(rcfg));
   }
 
   // --- Fork route ---
@@ -1213,13 +1239,6 @@ export function createPackagesRouter() {
     return c.json(result, 201);
   });
 
-  // --- Provider versions (standalone — providers use their own CRUD in routes/providers.ts) ---
-  router.get("/providers/:scope{@[^/]+}/:name/versions", async (c) => {
-    const packageId = getItemId(c);
-    const versions = await listPackageVersions(packageId);
-    return c.json({ versions });
-  });
-
   // --- Package import/download/publish routes ---
 
   // --- Shared import logic (used by /import and /import-github) ---
@@ -1266,8 +1285,7 @@ export function createPackagesRouter() {
   ) {
     const user = c.get("user");
     const orgId = c.get("orgId");
-    const { manifest, content, files, type: packageType } = parsed;
-    const packageId = manifest.name as string;
+    const { manifest, content, files, type: packageType, packageId } = parsed;
 
     // System packages are immutable
     if (isSystemPackage(packageId)) {
@@ -1278,6 +1296,11 @@ export function createPackagesRouter() {
         detail: `'${packageId}' is a system package and cannot be overwritten`,
       });
     }
+
+    // Phase 1 — for agent imports, cross-check integrations_configuration
+    // selections against the referenced integration catalogs. `parsePackageZip`
+    // already ran `validateManifest`; this is the niveau 2 follow-up.
+    await assertAgentIntegrationScopesValid(manifest as Record<string, unknown>, orgId);
 
     // Check for existing user package
     const existing = await getPackageById(packageId);
@@ -1423,7 +1446,25 @@ export function createPackagesRouter() {
 
     logger.info("Package imported", { packageId, type: packageType, orgId });
     const importedVersion = (manifest as Record<string, unknown>).version as string | undefined;
-    return c.json({ packageId, type: packageType, version: importedVersion }, 201);
+    // Surface engine-subset limitations for integration manifests as
+    // non-blocking warnings (AFPS §7.7). Publishers learn
+    // about unsupported `connect.login` selectors / criteria at install
+    // time rather than chasing the runtime LoginError later. Also lift the
+    // validator's `_meta` Appendix B regex soft-fail warnings to the same
+    // channel so publishers see them on import.
+    const installWarnings = [
+      ...collectConnectLoginWarnings(manifest),
+      ...collectMetaWarnings(manifest),
+    ];
+    return c.json(
+      {
+        packageId,
+        type: packageType,
+        version: importedVersion,
+        ...(installWarnings.length > 0 ? { warnings: installWarnings } : {}),
+      },
+      201,
+    );
   }
 
   // POST /api/packages/import-bundle — import a multi-package .afps-bundle
@@ -1449,7 +1490,23 @@ export function createPackagesRouter() {
     const applicationId = c.get("applicationId");
     const userId = c.get("user").id;
 
-    const result = await handleImportBundle(bytes, { orgId, applicationId }, userId);
+    let result: Awaited<ReturnType<typeof handleImportBundle>>;
+    try {
+      result = await handleImportBundle(bytes, { orgId, applicationId }, userId);
+    } catch (err) {
+      // Typed errors (ApiError — conflicts, invalid request) propagate as-is.
+      // A raw post-install/version-creation failure becomes the same clean 4xx
+      // as the single-import route rather than a 500.
+      if (err instanceof ApiError) throw err;
+      const message = getErrorMessage(err);
+      logger.error("Bundle import post-install failed", { orgId, error: message });
+      throw new ApiError({
+        status: 400,
+        code: "post_install_failed",
+        title: "Post-Install Failed",
+        detail: message,
+      });
+    }
     return c.json(result, 201);
   });
 

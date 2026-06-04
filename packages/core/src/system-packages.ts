@@ -16,7 +16,7 @@ export interface SystemPackageEntry {
   scope: string;
   /** Package name without scope. */
   name: string;
-  /** Package type (agent, skill, tool, provider). */
+  /** Package type (agent, skill, integration). */
   type: PackageType;
   /** Semver version from the manifest. */
   version: string;
@@ -71,16 +71,18 @@ export async function loadSystemPackages(dir: string): Promise<LoadSystemPackage
 
     try {
       const parsed = parsePackageZip(new Uint8Array(zipBuffer));
-      const manifestName = parsed.manifest.name as string | undefined;
+      // Canonical (scoped) id — for mcp-server this is the AFPS identity name,
+      // not the unscoped MCPB `manifest.name`.
+      const canonicalId = parsed.packageId as string | undefined;
 
-      if (!manifestName) {
+      if (!canonicalId) {
         warnings.push({ file: entry, error: "Manifest missing 'name' field" });
         continue;
       }
 
-      const nameParts = parseScopedName(manifestName);
+      const nameParts = parseScopedName(canonicalId);
       if (!nameParts) {
-        warnings.push({ file: entry, error: `Invalid scoped name: ${manifestName}` });
+        warnings.push({ file: entry, error: `Invalid scoped name: ${canonicalId}` });
         continue;
       }
 

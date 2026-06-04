@@ -50,8 +50,9 @@ function makeBundle(): Bundle {
     name: "@scope/agent",
     version: "1.0.0",
     type: "agent",
-    schemaVersion: "1.0",
-    dependencies: { skills: {}, tools: {}, providers: {} },
+    schema_version: "0.1",
+    display_name: "Test Agent",
+    dependencies: { skills: {}, integrations: {} },
   };
   const files = new Map<string, Uint8Array>([["prompt.md", new TextEncoder().encode("Hello.")]]);
   const root = "@scope/agent@1.0.0";
@@ -182,113 +183,5 @@ describe("startReportSession — source discrimination", () => {
     const src = stub.calls[0]!.body.source as { stage: string; spec?: string };
     expect(src.stage).toBe("draft");
     expect(src.spec).toBeUndefined();
-  });
-});
-
-describe("startReportSession — old-server fallback", () => {
-  let stub: ReturnType<typeof installStubFetch>;
-
-  afterEach(() => stub.restore());
-
-  it("falls back to inline when an old server rejects kind: registry with 400", async () => {
-    let calls = 0;
-    stub = installStubFetch((call) => {
-      calls++;
-      if (calls === 1) {
-        const body = (call.body as { source: { kind: string } }).source;
-        if (body.kind === "registry") {
-          return new Response(
-            JSON.stringify({
-              code: "invalid_request",
-              detail: "Invalid input on field 'source.kind'",
-            }),
-            { status: 400, headers: { "Content-Type": "application/json" } },
-          );
-        }
-      }
-      return ok();
-    });
-
-    const reportSource: ReportSource = {
-      kind: "registry",
-      bundle: makeBundle(),
-      packageId: "@scope/agent",
-      stage: "published",
-      spec: "1.0.0",
-    };
-    const session = await startReportSession(
-      reportSource,
-      REPORT_CTX,
-      { mode: "true", fallback: "abort" },
-      SNAPSHOT,
-    );
-
-    expect(session.runId).toBe(SUCCESS_BODY.runId);
-    expect(stub.calls).toHaveLength(2);
-    // First call was the registry attempt.
-    expect((stub.calls[0]!.body as { source: { kind: string } }).source.kind).toBe("registry");
-    // Second call retried as inline so the run still gets created.
-    const retry = stub.calls[1]!.body as {
-      source: { kind: string; manifest?: unknown; prompt?: string };
-    };
-    expect(retry.source.kind).toBe("inline");
-    expect(retry.source.manifest).toBeDefined();
-    expect(retry.source.prompt).toBe("Hello.");
-  });
-
-  it("does not retry on a 400 that doesn't look like a registry-rejection", async () => {
-    stub = installStubFetch(
-      () =>
-        new Response(
-          JSON.stringify({
-            code: "rate_limited",
-            detail: "Rate limit exceeded",
-          }),
-          { status: 400, headers: { "Content-Type": "application/json" } },
-        ),
-    );
-
-    const reportSource: ReportSource = {
-      kind: "registry",
-      bundle: makeBundle(),
-      packageId: "@scope/agent",
-      stage: "published",
-    };
-    await expect(
-      startReportSession(reportSource, REPORT_CTX, { mode: "true", fallback: "abort" }, SNAPSHOT),
-    ).rejects.toMatchObject({ name: "ReportStartError" });
-
-    // Single attempt — no retry because the 400 body didn't match the
-    // unknown-discriminator heuristic.
-    expect(stub.calls).toHaveLength(1);
-  });
-
-  it("does not retry on invalid_request that targets a different field", async () => {
-    // A 400 with `code: invalid_request` but pointing at `applicationId`
-    // (or any non-`source` field) must NOT trigger the inline fallback —
-    // retrying inline would mask a real client bug. This locks in the
-    // structural part of the tightened heuristic.
-    stub = installStubFetch(
-      () =>
-        new Response(
-          JSON.stringify({
-            code: "invalid_request",
-            detail: "applicationId: must be a non-empty string",
-          }),
-          { status: 400, headers: { "Content-Type": "application/json" } },
-        ),
-    );
-
-    const reportSource: ReportSource = {
-      kind: "registry",
-      bundle: makeBundle(),
-      packageId: "@scope/agent",
-      stage: "published",
-      spec: "1.0.0",
-    };
-    await expect(
-      startReportSession(reportSource, REPORT_CTX, { mode: "true", fallback: "abort" }, SNAPSHOT),
-    ).rejects.toMatchObject({ name: "ReportStartError" });
-    expect(stub.calls).toHaveLength(1);
   });
 });

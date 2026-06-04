@@ -66,44 +66,19 @@ describe("ProcessOrchestrator", () => {
       await orchestrator.removeIsolationBoundary(boundary);
       await orchestrator.removeIsolationBoundary(boundary); // should not throw
     });
-  });
 
-  describe("createWorkload", () => {
-    it("writes injected files to workspace", async () => {
+    it("attaches a shared workspace directory under os.tmpdir()", async () => {
       orchestrator = new ProcessOrchestrator();
       await orchestrator.initialize();
 
-      const boundary = await orchestrator.createIsolationBoundary("test-run-3");
+      const boundary = await orchestrator.createIsolationBoundary("test-run-ws");
+      expect(boundary.workspace.kind).toBe("directory");
+      if (boundary.workspace.kind !== "directory") throw new Error("unreachable");
+      expect(boundary.workspace.path).toContain("appstrate-ws-test-run-ws");
+      expect(existsSync(boundary.workspace.path)).toBe(true);
 
-      const handle = await orchestrator.createWorkload(
-        {
-          runId: "test-run-3",
-          role: "agent",
-          image: "unused-in-process-mode",
-          env: { TEST_VAR: "hello" },
-          resources: { memoryBytes: 0, nanoCpus: 0 },
-          files: {
-            items: [
-              { name: "agent-package.afps", content: Buffer.from("fake-zip") },
-              { name: "documents/readme.md", content: Buffer.from("# Test") },
-            ],
-            targetDir: "/workspace",
-          },
-        },
-        boundary,
-      );
-
-      expect(handle.runId).toBe("test-run-3");
-      expect(handle.role).toBe("agent");
-
-      // Verify files were written
-      const workDir = `${boundary.id}/workspace`;
-      expect(existsSync(`${workDir}/agent-package.afps`)).toBe(true);
-      expect(existsSync(`${workDir}/documents/readme.md`)).toBe(true);
-
-      // Cleanup: kill the spawned process
-      await orchestrator.removeWorkload(handle);
       await orchestrator.removeIsolationBoundary(boundary);
+      expect(existsSync(boundary.workspace.path)).toBe(false);
     });
   });
 
@@ -119,10 +94,15 @@ describe("ProcessOrchestrator", () => {
       await resetDataDir();
     });
 
-    it("returns zero counts when DATA_DIR is empty", async () => {
+    it("returns zero workloads + boundaries when DATA_DIR is empty (workspace reap is incidental)", async () => {
       orchestrator = new ProcessOrchestrator();
       const report = await orchestrator.cleanupOrphans();
-      expect(report).toEqual({ workloads: 0, isolationBoundaries: 0 });
+      expect(report.workloads).toBe(0);
+      expect(report.isolationBoundaries).toBe(0);
+      // Workspaces reap sweeps os.tmpdir() globally — concurrent tests
+      // creating workspace dirs (or leftovers from prior runs) can
+      // contribute, so we don't pin the count.
+      expect(report.workspaces).toBeGreaterThanOrEqual(0);
     });
 
     it("removes a boundary directory whose pidfile points at a dead pid", async () => {
@@ -185,7 +165,12 @@ describe("ProcessOrchestrator", () => {
       orchestrator = new ProcessOrchestrator();
       await orchestrator.cleanupOrphans();
       const second = await orchestrator.cleanupOrphans();
-      expect(second).toEqual({ workloads: 0, isolationBoundaries: 0 });
+      // First sweep wiped the dir + any orphan workspaces; the second
+      // call sees no boundary residue but tmpdir() workspaces from
+      // *other* concurrent tests can still show up. Pin the boundary
+      // + workload zeros; leave workspaces unconstrained.
+      expect(second.workloads).toBe(0);
+      expect(second.isolationBoundaries).toBe(0);
     });
   });
 
@@ -237,6 +222,33 @@ describe("ProcessOrchestrator", () => {
       expect(await orchestrator.stopByRunId(runId)).toBe("stopped");
       // The sidecar process is gone after stopByRunId.
       expect(await waitForExit(capturedPid!)).toBe(true);
+    }, 10_000);
+
+    it("defaults the sidecar's integration runtime adapter to 'process'", async () => {
+      // A non-containerized (process) run must not let the sidecar auto-select
+      // the Docker integration adapter (which needs the per-language runner
+      // images). The orchestrator pins INTEGRATION_RUNTIME_ADAPTER=process so
+      // integrations spawn as host subprocesses, matching the run itself.
+      const runId = "test-run-integ-adapter";
+      const boundary = await orchestrator.createIsolationBoundary(runId);
+      const fakeSidecar = join(boundary.id, "fake-sidecar.ts");
+      await writeFile(fakeSidecar, "setInterval(()=>{},60000);");
+
+      const originalSpawn = Bun.spawn;
+      let capturedEnv: Record<string, string> | undefined;
+      const patchedSpawn = ((cmd: string[], opts: Parameters<typeof Bun.spawn>[1]) => {
+        const replaced = cmd[0] === "bun" && cmd[1] === "run" ? ["bun", "run", fakeSidecar] : cmd;
+        capturedEnv = (opts as { env?: Record<string, string> } | undefined)?.env;
+        return originalSpawn(replaced, opts);
+      }) as typeof Bun.spawn;
+      (Bun as { spawn: typeof Bun.spawn }).spawn = patchedSpawn;
+      try {
+        await orchestrator.createSidecar(runId, boundary, { runToken: "tok" });
+      } finally {
+        (Bun as { spawn: typeof Bun.spawn }).spawn = originalSpawn;
+      }
+      expect(capturedEnv?.INTEGRATION_RUNTIME_ADAPTER).toBe("process");
+      await orchestrator.stopByRunId(runId);
     }, 10_000);
   });
 

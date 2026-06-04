@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Copy, Plus, Trash2 } from "lucide-react";
-import i18n from "../i18n";
 import { Modal } from "./modal";
 import { ConfirmModal } from "./confirm-modal";
 import { Button } from "@/components/ui/button";
@@ -12,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Spinner } from "./spinner";
 import { useDeleteEndUser, useUpdateEndUser, type EndUserInfo } from "../hooks/use-end-users";
+import { formatDateField } from "../lib/markdown";
 
 interface Props {
   open: boolean;
@@ -173,7 +173,7 @@ export function EndUserDetailModal({ open, onClose, endUser }: Props) {
             className="space-y-4"
           >
             <div className="space-y-2">
-              <Label htmlFor="eu-edit-name">{t("applications.endUserName")}</Label>
+              <Label htmlFor="eu-edit-name">{t("applications.end_user_name")}</Label>
               <Input
                 id="eu-edit-name"
                 value={editName}
@@ -273,18 +273,12 @@ export function EndUserDetailModal({ open, onClose, endUser }: Props) {
       >
         <div className="space-y-4">
           <CopyableField label="ID" value={endUser.id} />
-          <ReadOnlyField label={t("applications.endUserName")} value={endUser.name} />
+          <ReadOnlyField label={t("applications.end_user_name")} value={endUser.name} />
           <ReadOnlyField label={t("applications.endUserEmail")} value={endUser.email} />
           <ReadOnlyField label={t("applications.endUserExternalId")} value={endUser.externalId} />
           <ReadOnlyField
             label={t("applications.createdAtLabel")}
-            value={new Date(endUser.createdAt).toLocaleDateString(i18n.language, {
-              day: "numeric",
-              month: "long",
-              year: "numeric",
-              hour: "2-digit",
-              minute: "2-digit",
-            })}
+            value={formatDateField(endUser.createdAt)}
           />
 
           {metaEntries.length > 0 && (

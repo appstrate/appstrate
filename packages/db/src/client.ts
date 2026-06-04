@@ -84,6 +84,23 @@ async function initPostgres(): Promise<Db> {
 // Top-level await — Bun supports this natively in ESM
 export const db: Db = await (isEmbeddedDb ? initPGlite() : initPostgres());
 
+/**
+ * Normalize a `db.execute(sql\`…\`)` result into a plain rows array.
+ *
+ * The two Drizzle drivers disagree on the result shape: postgres-js returns the
+ * rows array directly, while PGlite returns a result object (`{ rows, … }`).
+ * Raw-SQL call sites that iterate the result MUST go through this helper to stay
+ * portable across both tiers (external PostgreSQL and embedded PGlite) — without
+ * it, `result.map(...)` / `for (… of result)` throws under PGlite.
+ */
+export function toRows<T = Record<string, unknown>>(result: unknown): T[] {
+  if (Array.isArray(result)) return result as T[];
+  if (result && typeof result === "object" && Array.isArray((result as { rows?: unknown }).rows)) {
+    return (result as { rows: T[] }).rows;
+  }
+  return [];
+}
+
 export function getListenClient(): ListenClient {
   return _listenClient!;
 }

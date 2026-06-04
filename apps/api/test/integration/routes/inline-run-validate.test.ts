@@ -23,18 +23,17 @@ const app = getTestApp();
 function validManifest() {
   return {
     name: "@inline/r-ignored",
-    displayName: "Ad-hoc Agent",
+    display_name: "Ad-hoc Agent",
     version: "0.0.0",
     type: "agent",
     description: "Inline run",
-    schemaVersion: "1.0",
-    dependencies: { skills: {}, tools: {}, providers: {} },
+    schema_version: "0.1",
+    dependencies: { skills: {} },
   };
 }
 
 function manifestWithDeps(
   deps: {
-    tools?: Record<string, string>;
     skills?: Record<string, string>;
   } = {},
 ) {
@@ -42,8 +41,6 @@ function manifestWithDeps(
     ...validManifest(),
     dependencies: {
       skills: deps.skills ?? {},
-      tools: deps.tools ?? {},
-      providers: {},
     },
   };
 }
@@ -186,19 +183,19 @@ describe("POST /api/runs/inline/validate", () => {
 
   it("aggregates structural manifest errors with dep-cap violations", async () => {
     // The manifest is missing `type`, which breaks AFPS dispatch and emits
-    // base-schema issues (name/version/type). At the same time the provider
-    // deps exceed `max_authorized_uris` — a cap that reads the raw manifest
-    // shape and must surface alongside structural errors, not after a short-
-    // circuit. This is the regression guard for the fall-through change in
+    // base-schema issues (name/version/type). At the same time the skill
+    // deps exceed `max_skills` — a cap that reads the raw manifest shape and
+    // must surface alongside structural errors, not after a short-circuit.
+    // This is the regression guard for the fall-through change in
     // `inline-manifest-validation.ts` and `packages/core/validation.ts`.
-    const providers: Record<string, string> = {};
-    for (let i = 0; i < 200; i++) providers[`@test/provider-${i}`] = "1.0.0";
+    const skills: Record<string, string> = {};
+    for (let i = 0; i < 200; i++) skills[`@test/skill-${i}`] = "1.0.0";
     const manifest = {
       // `type` intentionally omitted to trigger base-schema aggregation
       name: "@inline/broken",
       version: "0.0.0",
-      schemaVersion: "1.0",
-      dependencies: { skills: {}, tools: {}, providers },
+      schema_version: "0.1",
+      dependencies: { skills },
     };
 
     const res = await post({ manifest, prompt: "hi" });
@@ -212,7 +209,7 @@ describe("POST /api/runs/inline/validate", () => {
     const messages = (body.errors ?? []).map((e) => `${e.field}: ${e.message}`).join("\n");
     // Structural failure surfaces (missing type) AND the dep-cap still fires.
     expect(messages).toMatch(/manifest\.type/i);
-    expect(messages).toMatch(/providers.*too many|dependencies\.providers/i);
+    expect(messages).toMatch(/skills.*too many|dependencies\.skills/i);
   });
 
   it("does not duplicate config errors across preflight stages", async () => {
@@ -238,9 +235,7 @@ describe("POST /api/runs/inline/validate", () => {
     };
     const configEntries = (body.errors ?? []).filter((e) => e.field.startsWith("config"));
     expect(configEntries.length).toBe(1);
-    // And the remaining code must be the stage-3 one, not the legacy
-    // readiness code (`config_incomplete` has been retired in favour of
-    // `invalid_config`).
+    // And the remaining code must be the stage-3 one (`invalid_config`).
     expect(configEntries[0]!.code).toBe("invalid_config");
   });
 
@@ -267,46 +262,6 @@ describe("POST /api/runs/inline/validate", () => {
   });
 
   describe("dependency resolution", () => {
-    it("accepts a manifest referencing a seeded system tool", async () => {
-      await seedPackage({
-        id: "@appstrate/output",
-        type: "tool",
-        source: "system",
-        orgId: null,
-      });
-      const manifest = manifestWithDeps({ tools: { "@appstrate/output": "^1.0.0" } });
-      const res = await post({ manifest, prompt: "do something" });
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { ok: boolean };
-      expect(body.ok).toBe(true);
-    });
-
-    it("accepts a manifest referencing a seeded org-scoped tool", async () => {
-      await seedPackage({
-        id: "@inlineorg/mytool",
-        type: "tool",
-        source: "local",
-        orgId: ctx.orgId,
-      });
-      const manifest = manifestWithDeps({ tools: { "@inlineorg/mytool": "^1.0.0" } });
-      const res = await post({ manifest, prompt: "do something" });
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { ok: boolean };
-      expect(body.ok).toBe(true);
-    });
-
-    it("returns 400 missing_tool when tool dep is not seeded", async () => {
-      const manifest = manifestWithDeps({ tools: { "@fake/nope": "^1.0.0" } });
-      const res = await post({ manifest, prompt: "do something" });
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as {
-        code?: string;
-        errors?: { field: string; code: string }[];
-      };
-      expect(body.code).toBe("validation_failed");
-      expect(body.errors?.some((e) => e.code === "missing_tool")).toBe(true);
-    });
-
     it("accepts a manifest referencing a seeded org-scoped skill", async () => {
       await seedPackage({
         id: "@inlineorg/helper",
@@ -335,12 +290,12 @@ describe("POST /api/runs/inline/validate", () => {
 
     it("does NOT insert a shadow row after successful dep resolution", async () => {
       await seedPackage({
-        id: "@appstrate/output",
-        type: "tool",
-        source: "system",
-        orgId: null,
+        id: "@inlineorg/helper2",
+        type: "skill",
+        source: "local",
+        orgId: ctx.orgId,
       });
-      const manifest = manifestWithDeps({ tools: { "@appstrate/output": "^1.0.0" } });
+      const manifest = manifestWithDeps({ skills: { "@inlineorg/helper2": "^1.0.0" } });
       expect(await shadowCount()).toBe(0);
       const res = await post({ manifest, prompt: "do something" });
       expect(res.status).toBe(200);

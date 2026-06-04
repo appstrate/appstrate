@@ -93,8 +93,8 @@ export const googleResumableAdapter: UploadAdapter = {
     if (typeof upstreamMime === "string" && upstreamMime.length > 0) {
       headers["X-Upload-Content-Type"] = upstreamMime;
     }
-    const res = await ctx.providerCall({
-      providerId: ctx.providerId,
+    const res = await ctx.apiCall({
+      apiCallToolName: ctx.apiCallToolName,
       target: ctx.target,
       method: "POST",
       headers,
@@ -112,7 +112,7 @@ export const googleResumableAdapter: UploadAdapter = {
     if (!sessionUrl) {
       throw new UploadError(
         `google-resumable: init response missing 'Location' header (got status ${res.status}). ` +
-          `The provider's authorizedUris must allow the upload session URL — verify the manifest.`,
+          `The integration's authorizedUris must allow the upload session URL — verify the manifest.`,
         res.status,
         res.headers,
         res.body,
@@ -133,8 +133,8 @@ export const googleResumableAdapter: UploadAdapter = {
   ): Promise<SessionState> {
     const s = state as GoogleSessionState;
     ctx.hashUpdate(chunk.bytes);
-    const res = await ctx.providerCall({
-      providerId: ctx.providerId,
+    const res = await ctx.apiCall({
+      apiCallToolName: ctx.apiCallToolName,
       target: s.sessionUrl,
       method: "PUT",
       headers: {
@@ -185,8 +185,8 @@ export const googleResumableAdapter: UploadAdapter = {
     const s = state as GoogleSessionState;
     if (!s.sessionUrl) return;
     try {
-      await ctx.providerCall({
-        providerId: ctx.providerId,
+      await ctx.apiCall({
+        apiCallToolName: ctx.apiCallToolName,
         target: s.sessionUrl,
         method: "DELETE",
       });

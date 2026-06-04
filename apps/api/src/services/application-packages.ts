@@ -11,7 +11,6 @@ import { applicationPackages, packages, applications, packageVersions } from "@a
 import { notFound, conflict } from "../lib/errors.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import { asRecord } from "@appstrate/core/safe-json";
-import { parseDraftManifest, extractDepsFromManifest } from "../lib/manifest-utils.ts";
 import type { PackageType } from "@appstrate/core/validation";
 import type { ResolvedRunConfig } from "@appstrate/shared-types";
 import type { AppScope } from "../lib/scope.ts";
@@ -113,14 +112,13 @@ const installedPackageSelect = {
   config: applicationPackages.config,
   modelId: applicationPackages.modelId,
   proxyId: applicationPackages.proxyId,
-  appProfileId: applicationPackages.appProfileId,
-  versionId: applicationPackages.versionId,
+  version_id: applicationPackages.versionId,
   enabled: applicationPackages.enabled,
-  installedAt: applicationPackages.installedAt,
+  installed_at: applicationPackages.installedAt,
   updatedAt: applicationPackages.updatedAt,
-  packageType: packages.type,
-  packageSource: packages.source,
-  draftManifest: packages.draftManifest,
+  package_type: packages.type,
+  package_source: packages.source,
+  draft_manifest: packages.draftManifest,
 };
 
 export async function listInstalledPackages(scope: AppScope, type?: PackageType) {
@@ -172,7 +170,6 @@ export async function listAccessiblePackages(scope: AppScope, type: PackageType)
       appConfig: applicationPackages.config,
       appModelId: applicationPackages.modelId,
       appProxyId: applicationPackages.proxyId,
-      appProfileId: applicationPackages.appProfileId,
       appVersionId: applicationPackages.versionId,
       appEnabled: applicationPackages.enabled,
     })
@@ -234,14 +231,12 @@ export async function getPackageConfig(
   config: Record<string, unknown>;
   modelId: string | null;
   proxyId: string | null;
-  appProfileId: string | null;
 }> {
   const [row] = await db
     .select({
       config: applicationPackages.config,
       modelId: applicationPackages.modelId,
       proxyId: applicationPackages.proxyId,
-      appProfileId: applicationPackages.appProfileId,
     })
     .from(applicationPackages)
     .where(
@@ -255,7 +250,6 @@ export async function getPackageConfig(
     config: asRecord(row?.config),
     modelId: row?.modelId ?? null,
     proxyId: row?.proxyId ?? null,
-    appProfileId: row?.appProfileId ?? null,
   };
 }
 
@@ -280,10 +274,6 @@ export async function getPackageConfig(
  * for the pair — the caller (route or CLI) decides whether that is a
  * 404 or a "no inheritance, fall back to flags + defaults" signal.
  *
- * Provider ids are read from the package's draft manifest (the same
- * source `requireAgent()` + `resolveManifestProviders` uses for
- * runtime), keeping the CLI preflight aligned with the actual run
- * pipeline without duplicating the manifest-walk code.
  */
 export async function getResolvedRunConfig(
   applicationId: string,
@@ -319,15 +309,11 @@ export async function getResolvedRunConfig(
     versionPin = versionRow?.version ?? null;
   }
 
-  const manifest = parseDraftManifest(row.draftManifest);
-  const { providerIds } = extractDepsFromManifest(manifest);
-
   return {
     config: asRecord(row.config),
     modelId: row.modelId ?? null,
     proxyId: row.proxyId ?? null,
-    versionPin,
-    requiredProviders: providerIds,
+    version_pin: versionPin,
   };
 }
 
@@ -338,7 +324,6 @@ export async function updateInstalledPackage(
     config?: Record<string, unknown>;
     modelId?: string | null;
     proxyId?: string | null;
-    appProfileId?: string | null;
     versionId?: number | null;
     enabled?: boolean;
   },
@@ -347,7 +332,6 @@ export async function updateInstalledPackage(
   if (updates.config !== undefined) set.config = updates.config;
   if (updates.modelId !== undefined) set.modelId = updates.modelId;
   if (updates.proxyId !== undefined) set.proxyId = updates.proxyId;
-  if (updates.appProfileId !== undefined) set.appProfileId = updates.appProfileId;
   if (updates.versionId !== undefined) set.versionId = updates.versionId;
   if (updates.enabled !== undefined) set.enabled = updates.enabled;
 
@@ -359,7 +343,6 @@ export async function updateInstalledPackage(
       config: updates.config ?? {},
       ...(updates.modelId !== undefined ? { modelId: updates.modelId } : {}),
       ...(updates.proxyId !== undefined ? { proxyId: updates.proxyId } : {}),
-      ...(updates.appProfileId !== undefined ? { appProfileId: updates.appProfileId } : {}),
       ...(updates.versionId !== undefined ? { versionId: updates.versionId } : {}),
       ...(updates.enabled !== undefined ? { enabled: updates.enabled } : {}),
       updatedAt: new Date(),

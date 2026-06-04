@@ -5,7 +5,7 @@
  *
  * Single endpoint that powers the dashboard library view: returns every
  * package visible to the org (org-owned + system) grouped by type, with
- * a per-package `installedIn` array indicating which of the caller's
+ * a per-package `installed_in` array indicating which of the caller's
  * applications already have the package installed.
  */
 
@@ -17,8 +17,8 @@ export const libraryPaths = {
       summary: "List all packages visible to the org with per-app install state",
       description:
         "Returns every package available to the caller's organization (org-owned + system) " +
-        "grouped by type (`agent`, `skill`, `tool`, `provider`). Each package carries an " +
-        "`installedIn` array of application ids — the applications belonging to the caller's " +
+        "grouped by type (`agent`, `skill`, `integration`). Each package carries an " +
+        "`installed_in` array of application ids — the applications belonging to the caller's " +
         "org where the package is currently installed. Ephemeral packages are excluded.\n\n" +
         "The response also includes the org's applications (id, name, isDefault) so the UI " +
         "can render a single grid keyed by app without an additional `/api/applications` call.",
@@ -59,12 +59,12 @@ export const libraryPaths = {
                     type: "object",
                     description:
                       "Packages grouped by type. Every group is always present (possibly empty).",
-                    required: ["agent", "skill", "tool", "provider"],
+                    required: ["agent", "skill", "mcp-server", "integration"],
                     properties: {
                       agent: { $ref: "#/components/schemas/LibraryPackageList" },
                       skill: { $ref: "#/components/schemas/LibraryPackageList" },
-                      tool: { $ref: "#/components/schemas/LibraryPackageList" },
-                      provider: { $ref: "#/components/schemas/LibraryPackageList" },
+                      "mcp-server": { $ref: "#/components/schemas/LibraryPackageList" },
+                      integration: { $ref: "#/components/schemas/LibraryPackageList" },
                     },
                   },
                 },
@@ -83,19 +83,19 @@ export const libraryPaths = {
                       source: "org",
                       name: "Inbox Triage",
                       description: "Sorts incoming Gmail threads into priority buckets.",
-                      installedIn: ["app_default"],
+                      installed_in: ["app_default"],
                     },
                   ],
                   skill: [],
-                  tool: [],
-                  provider: [
+                  "mcp-server": [],
+                  integration: [
                     {
                       id: "pkg_gmail",
-                      type: "provider",
+                      type: "integration",
                       source: "system",
                       name: "Gmail",
-                      description: "Google Mail OAuth provider.",
-                      installedIn: ["app_default", "app_staging"],
+                      description: "Google Mail OAuth integration.",
+                      installed_in: ["app_default", "app_staging"],
                     },
                   ],
                 },

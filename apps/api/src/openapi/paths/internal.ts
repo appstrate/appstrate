@@ -53,6 +53,7 @@ export const internalPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
   },
@@ -92,16 +93,16 @@ export const internalPaths = {
                     type: "array",
                     items: {
                       type: "object",
-                      required: ["id", "content", "createdAt", "actorType"],
+                      required: ["id", "content", "createdAt", "actor_type"],
                       properties: {
                         id: { type: "integer" },
                         content: {},
                         createdAt: { type: "string", format: "date-time" },
-                        actorType: {
+                        actor_type: {
                           type: "string",
                           enum: ["user", "end_user", "shared"],
                         },
-                        actorId: { type: ["string", "null"] },
+                        actor_id: { type: ["string", "null"] },
                       },
                     },
                   },
@@ -113,8 +114,8 @@ export const internalPaths = {
                     id: 42,
                     content: "User prefers Python over JS for data tasks",
                     createdAt: "2026-04-20T10:00:00Z",
-                    actorType: "user",
-                    actorId: "usr_abc",
+                    actor_type: "user",
+                    actor_id: "usr_abc",
                   },
                 ],
               },
@@ -123,129 +124,7 @@ export const internalPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
-      },
-    },
-  },
-  "/internal/credentials/{scope}/{name}": {
-    get: {
-      operationId: "getProviderCredentials",
-      tags: ["Internal"],
-      summary: "Fetch provider credentials",
-      description: "Container-to-host only. Auth via Bearer run token.",
-      security: [{ bearerExecToken: [] }],
-      parameters: [
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-      ],
-      responses: {
-        "200": {
-          description: "Credentials, authorized URIs, and transport metadata",
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["credentials", "authorizedUris", "allowAllUris", "credentialFieldName"],
-                properties: {
-                  credentials: {
-                    type: "object",
-                    description:
-                      "Credential fields keyed by name. Consumed server-side by the sidecar / credential-proxy when injecting the upstream auth header.",
-                    additionalProperties: { type: "string" },
-                  },
-                  authorizedUris: {
-                    type: ["array", "null"],
-                    items: { type: "string" },
-                  },
-                  allowAllUris: { type: "boolean" },
-                  credentialHeaderName: {
-                    type: "string",
-                    description:
-                      "Header name the upstream expects the credential under. When present, the sidecar / credential-proxy writes this header server-side from `credentials[credentialFieldName]`.",
-                  },
-                  credentialHeaderPrefix: {
-                    type: "string",
-                    description:
-                      "Optional prefix prepended to the credential value (e.g. `Bearer`).",
-                  },
-                  credentialFieldName: {
-                    type: "string",
-                    description:
-                      "Name of the field in `credentials` that holds the secret. Defaults to `access_token` for OAuth flows and `api_key` for API-key flows unless the manifest overrides via `definition.credentials.fieldName`.",
-                  },
-                },
-              },
-              example: {
-                credentials: { access_token: "ya29.a0AfH6SM..." },
-                authorizedUris: ["https://gmail.googleapis.com/**"],
-                allowAllUris: false,
-                credentialHeaderName: "Authorization",
-                credentialHeaderPrefix: "Bearer",
-                credentialFieldName: "access_token",
-              },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": {
-          description: "Run not running",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-              example: {
-                type: "about:blank",
-                title: "Forbidden",
-                status: 403,
-                detail: "Run is not in running state",
-                code: "forbidden",
-                requestId: "req_jkl012",
-              },
-            },
-          },
-        },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-  },
-  "/internal/credentials/{scope}/{name}/refresh": {
-    post: {
-      operationId: "refreshProviderCredentials",
-      tags: ["Internal"],
-      summary: "Force-refresh provider credentials",
-      description:
-        "Called by sidecar on upstream 401 to force an OAuth2 token refresh before retrying. If the provider is not OAuth2 or has no refresh token, returns current credentials unchanged. If the refresh itself fails, flags the connection as needs_reconnection and returns 401. Container-to-host only. Auth via Bearer run token.",
-      security: [{ bearerExecToken: [] }],
-      parameters: [
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-      ],
-      responses: {
-        "200": {
-          description: "Refreshed credentials, authorized URIs, and transport metadata",
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["credentials", "authorizedUris", "allowAllUris", "credentialFieldName"],
-                properties: {
-                  credentials: {
-                    type: "object",
-                    additionalProperties: { type: "string" },
-                  },
-                  authorizedUris: {
-                    type: ["array", "null"],
-                    items: { type: "string" },
-                  },
-                  allowAllUris: { type: "boolean" },
-                  credentialHeaderName: { type: "string" },
-                  credentialHeaderPrefix: { type: "string" },
-                  credentialFieldName: { type: "string" },
-                },
-              },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "404": { $ref: "#/components/responses/NotFound" },
+        "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
   },
@@ -320,6 +199,130 @@ export const internalPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "410": {
           description: "Refresh token revoked — connection flagged needsReconnection.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+      },
+    },
+  },
+  "/internal/integration-credentials/{scope}/{name}": {
+    get: {
+      operationId: "getIntegrationCredentials",
+      tags: ["Internal"],
+      summary: "Fetch live credentials + HTTP delivery plans for an installed integration",
+      description:
+        "Sidecar-only. Auth via Bearer run token. Backs the MITM `MitmCredentialSource.current()` + `.deliveryPlans()` calls — returns per-auth resolved credentials + `HttpDeliveryPlan` derived from the integration's `manifest.auths.{key}.delivery.http` declaration. OAuth2 tokens are proactively refreshed when within `OAUTH_REFRESH_LEAD_MS` of expiry. Verifies that the run's agent declares this integration in `dependencies.integrations` AND that the integration is installed on the run's application.",
+      security: [{ bearerExecToken: [] }],
+      parameters: [
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+      ],
+      responses: {
+        "200": {
+          description: "Live credentials + delivery plans + per-auth expiries.",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/IntegrationCredentialsResponse" },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "410": {
+          description:
+            "Refresh token revoked upstream — the integration connection has been flagged `needsReconnection` and the sidecar should surface this to the integration's MCP client as a 401. Matches the model-provider token endpoint's revoked semantics.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+        "502": {
+          description:
+            "Transient OAuth refresh failure upstream (network error, IdP 5xx, malformed response). The cached credential may still be valid; the sidecar's listener cooldown will back off and retry on the next 401.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+      },
+    },
+  },
+  "/internal/integration-credentials/{scope}/{name}/refresh": {
+    post: {
+      operationId: "refreshIntegrationCredentials",
+      tags: ["Internal"],
+      summary: "Force-refresh OAuth2 credentials for an installed integration",
+      description:
+        "Sidecar-only. Same response shape as the GET endpoint; forces a refresh of every OAuth2 auth on this integration regardless of remaining token lifetime. Called by the MITM listener's `refreshOnUnauthorized` hook when upstream returns 401. Non-OAuth2 auths are returned unchanged.",
+      security: [{ bearerExecToken: [] }],
+      parameters: [
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+      ],
+      responses: {
+        "200": {
+          description: "Refreshed credentials + delivery plans + per-auth expiries.",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/IntegrationCredentialsResponse" },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "410": {
+          description: "Refresh token revoked upstream — same semantics as the GET endpoint.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+        "502": {
+          description:
+            "Transient OAuth refresh failure upstream — same semantics as the GET endpoint.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+      },
+    },
+  },
+  "/internal/mcp-server-bundle/{scope}/{name}": {
+    get: {
+      operationId: "getMcpServerBundle",
+      tags: ["Internal"],
+      summary: "Fetch the AFPS bundle bytes for a referenced mcp-server package",
+      description:
+        "Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise an integration's MCP server before spawning a runner container. In AFPS a local-source integration references a SEPARATE mcp-server package via `source.server.name`; this endpoint serves that package's bundle. It verifies that the run's agent declares an installed integration (in `dependencies.integrations`) that references this mcp-server — orthogonal access control to the credentials endpoint. Returns the raw ZIP archive (`application/zip`).",
+      security: [{ bearerExecToken: [] }],
+      parameters: [
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+      ],
+      responses: {
+        "200": {
+          description: "AFPS bundle bytes (ZIP).",
+          content: {
+            "application/zip": {
+              schema: { type: "string", format: "binary" },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": {
+          description:
+            "Agent does not reference this mcp-server through an installed integration, or no published version exists.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },

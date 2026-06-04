@@ -47,7 +47,19 @@ describe("parseTokenResponse", () => {
   });
 
   it("throws when access_token is missing", () => {
-    expect(() => parseTokenResponse({})).toThrow("No access_token");
+    expect(() => parseTokenResponse({})).toThrow("No (string) access_token");
+  });
+
+  it("throws when access_token is a non-string", () => {
+    expect(() => parseTokenResponse({ access_token: 12345 })).toThrow("No (string) access_token");
+  });
+
+  it("coerces a string expires_in (Azure AD v1 / Keycloak)", () => {
+    const before = Date.now();
+    const result = parseTokenResponse({ ...baseToken, expires_in: "3600" });
+    expect(result.expiresAt).not.toBeNull();
+    const ms = new Date(result.expiresAt!).getTime();
+    expect(ms).toBeGreaterThanOrEqual(before + 3600 * 1000 - 1000);
   });
 
   it("computes expiresAt from expires_in", () => {

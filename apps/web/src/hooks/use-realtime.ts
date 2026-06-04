@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useEffect, useRef } from "react";
+import type { TokenUsage } from "@appstrate/shared-types";
 import { getCurrentOrgId } from "./use-org";
 import { getCurrentApplicationId } from "./use-current-application";
 
@@ -10,12 +11,7 @@ export interface RunMetricEvent {
   orgId: string;
   applicationId: string;
   packageId: string;
-  tokenUsage: {
-    input_tokens?: number;
-    output_tokens?: number;
-    cache_creation_input_tokens?: number;
-    cache_read_input_tokens?: number;
-  } | null;
+  token_usage: TokenUsage | null;
   costSoFar: number;
 }
 

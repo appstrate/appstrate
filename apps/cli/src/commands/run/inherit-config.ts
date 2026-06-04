@@ -41,8 +41,6 @@ export interface InheritedRunConfig {
   proxyId: string | null;
   /** Pinned version label, when the user did not provide an explicit @spec. */
   versionPin: string | null;
-  /** Provider ids declared on the package's manifest. Empty when run-config was not consulted. */
-  requiredProviders: string[];
   /** True when the API call returned 200; false when it 404'd or was skipped. */
   inherited: boolean;
 }
@@ -131,9 +129,9 @@ export interface MergeRunConfigInputs {
  * `config`: deep-merged. `flagConfig` overrides `inherited.config` at
  * the leaf — siblings at every level are preserved.
  *
- *     inherited:  { providers: { gmail: { scopes: ["read"] } } }
- *     flagConfig: { providers: { slack: { token: "xyz" } } }
- *     result:     { providers: { gmail: { … }, slack: { … } } }
+ *     inherited:  { integrations: { gmail: { scopes: ["read"] } } }
+ *     flagConfig: { integrations: { slack: { token: "xyz" } } }
+ *     result:     { integrations: { gmail: { … }, slack: { … } } }
  *
  * A previous shallow merge silently dropped the `gmail` key in that
  * scenario, which had no UI-side equivalent — the dashboard's
@@ -151,13 +149,12 @@ export function mergeRunConfig(inputs: MergeRunConfigInputs): InheritedRunConfig
   const config = deepMergeConfig(inherited?.config ?? {}, inputs.flagConfig);
   const modelId = inputs.flagModel ?? inputs.envModel ?? inherited?.modelId ?? null;
   const proxyId = inputs.flagProxy ?? inputs.envProxy ?? inherited?.proxyId ?? null;
-  const versionPin = inputs.hasExplicitSpec ? null : (inherited?.versionPin ?? null);
+  const versionPin = inputs.hasExplicitSpec ? null : (inherited?.version_pin ?? null);
   return {
     config,
     modelId,
     proxyId,
     versionPin,
-    requiredProviders: inherited?.requiredProviders ?? [],
     inherited: inherited !== null,
   };
 }

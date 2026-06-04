@@ -5,10 +5,10 @@ import {
   and,
   ne,
   gt,
+  lt,
   or,
   desc,
   isNull,
-  isNotNull,
   inArray,
   count,
   gte,
@@ -26,13 +26,14 @@ import {
   endUsers,
   apiKeys,
   schedules,
+  llmUsage,
   runStatusValues,
   activeRunStatusValues,
   type RunStatus,
 } from "@appstrate/db/schema";
-import type { RunProviderSnapshot } from "@appstrate/shared-types";
+import { getEnv } from "@appstrate/env";
 import { logger } from "../../lib/logger.ts";
-import { listResponse, type ListResponse } from "../../lib/list-response.ts";
+import { listResponse } from "../../lib/list-response.ts";
 import { scopedWhere } from "../../lib/db-helpers.ts";
 import { type Actor, actorFilter } from "../../lib/actor.ts";
 import {
@@ -43,6 +44,12 @@ import {
 } from "../../lib/jsonb-schemas.ts";
 import { invalidRequest } from "../../lib/errors.ts";
 import type { AppScope, OrgScope } from "../../lib/scope.ts";
+import type {
+  RunWireDto,
+  EnrichedRun,
+  RunConnectionUsed,
+  ListEnvelope,
+} from "@appstrate/shared-types";
 
 export const RUN_HISTORY_FIELDS = ["checkpoint", "result"] as const;
 export type RunHistoryField = (typeof RUN_HISTORY_FIELDS)[number];
@@ -96,7 +103,6 @@ function safeRunLogData(value: Record<string, unknown> | null) {
   return result.data;
 }
 
-import { asRecordOrNull } from "@appstrate/core/safe-json";
 import { toISO } from "../../lib/date-helpers.ts";
 
 /**
@@ -131,14 +137,101 @@ type EnrichedRunRow = {
   packageEphemeral: boolean | null;
 };
 
-function mapEnrichedRun(r: EnrichedRunRow) {
+/**
+ * Translate a raw Drizzle `runs` row into its public snake_case wire DTO
+ * (`@appstrate/shared-types` `RunWireDto`). This is the single bridge
+ * between internal storage and external JSON, and it is responsible for
+ * two things `c.json()` used to do implicitly/incorrectly:
+ *
+ *  1. Date → ISO string conversion happens HERE (`d?.toISOString() ?? null`)
+ *     so the returned value's TS type matches the wire shape end-to-end
+ *     instead of being erased at Hono's untyped `c.json()` boundary.
+ *  2. DB-only columns are intentionally NOT projected. In particular
+ *     `sinkSecretEncrypted` (an AES-256-GCM credential ciphertext),
+ *     `sinkExpiresAt`, `sinkClosedAt`, `lastHeartbeatAt`, `lastEventSequence`
+ *     (an internal ordering counter for the signed-event ingestion path —
+ *     never part of the public run shape), and `resolvedConnections` are
+ *     internal server state that must never reach a client. The previous
+ *     spread-the-whole-row mapper leaked the credential ciphertext.
+ *
+ * The DB TS field names stay camelCase (Better Auth blocker); universal
+ * DB-convention fields (id, *Id, *At) stay camelCase on the wire per Phase 3.
+ */
+// The explicit `: RunWireDto` return annotation is the drift guard: tsc fails
+// if the mapper produces a field not on the wire DTO (the original bug leaked
+// `sinkSecretEncrypted` via a spread) or the wrong type for one. A new runs
+// column is only exposed if it is added here AND to `RunWireDto` deliberately.
+function runRowToWireDto(row: typeof runs.$inferSelect): RunWireDto {
   return {
-    ...r.run,
-    userName: r.userName ?? null,
-    endUserName: r.endUserName ?? null,
-    apiKeyName: r.apiKeyName ?? null,
-    scheduleName: r.scheduleName ?? null,
-    packageEphemeral: r.packageEphemeral ?? false,
+    id: row.id,
+    packageId: row.packageId,
+    userId: row.userId,
+    endUserId: row.endUserId,
+    apiKeyId: row.apiKeyId,
+    orgId: row.orgId,
+    applicationId: row.applicationId,
+    scheduleId: row.scheduleId,
+    status: row.status,
+    input: row.input,
+    result: row.result,
+    checkpoint: row.checkpoint,
+    error: row.error,
+    metadata: row.metadata,
+    config: row.config,
+    config_override: row.configOverride,
+    started_at: row.startedAt?.toISOString() ?? null,
+    completed_at: row.completedAt?.toISOString() ?? null,
+    duration: row.duration,
+    cost: row.cost,
+    notifiedAt: row.notifiedAt?.toISOString() ?? null,
+    readAt: row.readAt?.toISOString() ?? null,
+    runNumber: row.runNumber,
+    token_usage: row.tokenUsage,
+    version_label: row.versionLabel,
+    version_dirty: row.versionDirty,
+    proxy_label: row.proxyLabel,
+    model_label: row.modelLabel,
+    model_source: row.modelSource,
+    runner_name: row.runnerName,
+    runner_kind: row.runnerKind,
+    agent_scope: row.agentScope,
+    agent_name: row.agentName,
+    runOrigin: row.runOrigin,
+    contextSnapshot: row.contextSnapshot,
+    modelCredentialId: row.modelCredentialId,
+    connection_overrides: row.connectionOverrides,
+  };
+}
+
+/**
+ * Project the internal `runs.resolved_connections` snapshot into the
+ * display-safe `connections_used` wire shape. Drops the raw `connectionId`
+ * (internal state) and keeps the denormalized label/account so the panel
+ * renders even after the connection is renamed or deleted. Empty/absent → null.
+ */
+function projectConnectionsUsed(
+  resolved: typeof runs.$inferSelect.resolvedConnections,
+): RunConnectionUsed[] | null {
+  if (!resolved || typeof resolved !== "object") return null;
+  const entries = Object.entries(resolved);
+  if (entries.length === 0) return null;
+  return entries.map(([integrationId, v]) => ({
+    integration_id: integrationId,
+    label: v.label ?? null,
+    account_id: v.accountId ?? null,
+    source: v.source,
+  }));
+}
+
+function mapEnrichedRun(r: EnrichedRunRow): EnrichedRun {
+  return {
+    ...runRowToWireDto(r.run),
+    user_name: r.userName ?? null,
+    end_user_name: r.endUserName ?? null,
+    api_key_name: r.apiKeyName ?? null,
+    schedule_name: r.scheduleName ?? null,
+    connections_used: projectConnectionsUsed(r.run.resolvedConnections),
+    package_ephemeral: r.packageEphemeral ?? false,
   };
 }
 
@@ -164,18 +257,15 @@ interface CreateRunParams {
   actor: Actor | null;
   input: Record<string, unknown> | null;
   scheduleId?: string;
-  connectionProfileId?: string;
   versionLabel?: string;
   versionDirty?: boolean;
   proxyLabel?: string;
   modelLabel?: string;
   modelSource?: string;
-  providerProfileIds?: Record<string, string>;
-  providerStatuses?: RunProviderSnapshot[];
   apiKeyId?: string;
   /** Snapshot of the agent's @scope (e.g. "@acme") at run creation. */
   agentScope?: string | null;
-  /** Snapshot of the agent's display name (manifest.displayName ?? name). */
+  /** Snapshot of the agent's display name (manifest.display_name ?? name). */
   agentName?: string | null;
   /** Snapshot of the effective agent config (merged overrides) at run creation. */
   config?: Record<string, unknown> | null;
@@ -212,6 +302,24 @@ interface CreateRunParams {
    */
   runnerKind?: string | null;
   /**
+   * Caller's per-(integration, authKey) connection override map. Persisted
+   * verbatim on `runs.connection_overrides` for audit + "re-run with same
+   * picks" replay. Feeds the resolver's mechanism #2 at kickoff; surface
+   * pinned admin choices and fallback if absent. Null when the run used
+   * defaults verbatim.
+   */
+  connectionOverrides?: Record<string, string> | null;
+  /**
+   * Snapshot of the resolver output at kickoff: per integration, which
+   * connection id was actually picked and which mechanism produced the
+   * pick. Persisted on `runs.resolved_connections` so the credentials
+   * resolver (sidecar MITM refresh) can honour the pick long after kickoff.
+   */
+  resolvedConnections?: Record<
+    string,
+    { connectionId: string; source: string; label?: string | null; accountId?: string | null }
+  > | null;
+  /**
    * `model_provider_credentials.id` snapshotted at run creation. Pinned
    * here so the OAuth model token resolver can reject any other
    * credentialId requested via the run's signed token. Set only for
@@ -233,7 +341,6 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
     status: "pending",
     input,
     startedAt: new Date(),
-    connectionProfileId: params.connectionProfileId,
     scheduleId: params.scheduleId,
     versionLabel: params.versionLabel,
     versionDirty: params.versionDirty ?? false,
@@ -241,8 +348,6 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
     modelLabel: params.modelLabel,
     modelSource: params.modelSource,
     applicationId: scope.applicationId,
-    providerProfileIds: params.providerProfileIds,
-    providerStatuses: params.providerStatuses,
     apiKeyId: params.apiKeyId,
     runNumber,
     agentScope: params.agentScope ?? null,
@@ -258,6 +363,12 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
     runnerName: params.runnerName ?? null,
     runnerKind: params.runnerKind ?? null,
     modelCredentialId: params.modelCredentialId ?? null,
+    ...(params.connectionOverrides !== undefined
+      ? { connectionOverrides: params.connectionOverrides }
+      : {}),
+    ...(params.resolvedConnections !== undefined
+      ? { resolvedConnections: params.resolvedConnections }
+      : {}),
   });
 }
 
@@ -272,7 +383,6 @@ export async function createFailedRun(
   actor: Actor | null,
   error: string,
   scheduleId?: string,
-  connectionProfileId?: string,
   agentDenorm?: { scope?: string | null; name?: string | null },
 ): Promise<void> {
   const runNumber = await nextRunNumber(scope, packageId);
@@ -292,7 +402,6 @@ export async function createFailedRun(
     completedAt: now,
     duration: 0,
     notifiedAt: now,
-    connectionProfileId,
     scheduleId,
     runNumber,
     agentScope: agentDenorm?.scope ?? null,
@@ -343,28 +452,28 @@ export async function updateRun(
     );
 }
 
-export async function getLastCheckpoint(
-  scope: AppScope,
-  packageId: string,
-  actor: Actor | null,
-): Promise<Record<string, unknown> | null> {
-  const conditions = [
-    eq(runs.packageId, packageId),
-    eq(runs.orgId, scope.orgId),
-    eq(runs.applicationId, scope.applicationId),
-    isNotNull(runs.checkpoint),
-  ];
-  if (actor) {
-    conditions.push(actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));
-  }
+/**
+ * Compute the total attributable spend for a run from the unified
+ * `llm_usage` ledger (proxy + runner rows). Called by `finalizeRun` to
+ * cache the canonical `runs.cost` value at terminal time. This is the
+ * SINGLE read path for aggregate run cost — no caller should SUM the
+ * ledger directly. `credential_proxy_usage` is intentionally NOT summed:
+ * it holds no cost. When the first metered integration ships, route its
+ * rows through `llm_usage` with a new `source` enum value (e.g.
+ * `credential_proxy`) — that keeps the single ledger invariant and
+ * avoids adding a redundant SUM here.
+ *
+ * One scalar SUM over the `(run_id)` index — cheap even on long runs.
+ */
+export async function computeRunCost(runId: string): Promise<number> {
+  const [llm] = await db
+    .select({
+      total: sql<string>`COALESCE(SUM(${llmUsage.costUsd}), 0)`,
+    })
+    .from(llmUsage)
+    .where(eq(llmUsage.runId, runId));
 
-  const [row] = await db
-    .select({ checkpoint: runs.checkpoint })
-    .from(runs)
-    .where(and(...conditions))
-    .orderBy(desc(runs.startedAt))
-    .limit(1);
-  return asRecordOrNull(row?.checkpoint);
+  return Number(llm?.total ?? 0);
 }
 
 export type RecentRunsField = RunHistoryField;
@@ -580,7 +689,7 @@ export async function deletePackageRuns(scope: AppScope, packageId: string): Pro
   return deleted.length;
 }
 
-export type RunListPage = ListResponse<Record<string, unknown>> & { total: number };
+export type RunListPage = ListEnvelope<EnrichedRun> & { total: number };
 
 export async function listRunsWithFilter(
   filter: SQL,
@@ -602,7 +711,7 @@ export async function listRunsWithFilter(
     .limit(limit)
     .offset(offset);
 
-  const data = rows.map(mapEnrichedRun) as unknown as Record<string, unknown>[];
+  const data = rows.map(mapEnrichedRun);
   const total = countRow?.count ?? 0;
   return {
     ...listResponse(data, { hasMore: offset + data.length < total }),
@@ -699,7 +808,7 @@ export async function listGlobalRuns(
     .limit(limit)
     .offset(offset);
 
-  const data = rows.map(mapEnrichedRun) as unknown as Record<string, unknown>[];
+  const data = rows.map(mapEnrichedRun);
   const total = countRow?.count ?? 0;
   return {
     ...listResponse(data, { hasMore: offset + data.length < total }),
@@ -759,8 +868,8 @@ export async function getRunFull(scope: AppScope, id: string) {
 
   return {
     ...mapEnrichedRun(row),
-    inlineManifest,
-    inlinePrompt,
+    inline_manifest: inlineManifest,
+    inline_prompt: inlinePrompt,
   };
 }
 
@@ -841,14 +950,23 @@ export async function listRunLogs(args: {
  * any LLM tokens already burned by the crashed-runner before the crash
  * would silently never be billed (cloud's `afterRun` would never see them).
  *
- * ⚠️ Single-instance only — in multi-instance deployments, this lists ALL
- * instances' in-flight runs. Multi-instance support requires per-instance
- * run tracking.
+ * Excludes runs a sibling instance is actively heartbeating: a run whose
+ * `last_heartbeat_at` is within the watchdog stall threshold is being
+ * driven by some live instance (this one or another), so finalizing it
+ * here would terminate another instance's in-flight run. Only runs whose
+ * heartbeat has already slipped past the stall threshold (the same cutoff
+ * the watchdog uses to declare a runner stalled) are treated as orphans.
+ *
+ * ⚠️ Best-effort multi-instance guard only — heartbeat freshness cannot
+ * distinguish "another instance owns this" from "this instance owns it but
+ * crashed mid-run". Full multi-instance correctness requires a per-instance
+ * `instance_id` column to attribute ownership; that is deferred.
  */
 export async function listOrphanRunIds(): Promise<string[]> {
+  const cutoff = new Date(Date.now() - getEnv().RUN_STALL_THRESHOLD_SECONDS * 1000);
   const rows = await db
     .select({ id: runs.id })
     .from(runs)
-    .where(inArray(runs.status, [...activeRunStatusValues]));
+    .where(and(inArray(runs.status, [...activeRunStatusValues]), lt(runs.lastHeartbeatAt, cutoff)));
   return rows.map((r) => r.id);
 }

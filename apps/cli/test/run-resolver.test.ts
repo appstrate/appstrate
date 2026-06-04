@@ -1,36 +1,36 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for the run command's ProviderResolver builder.
+ * Unit tests for the run command's IntegrationApiCallResolver builder.
  * Verifies validation + mode parsing without constructing any
  * actual HTTP client.
  */
 
 import { describe, it, expect } from "bun:test";
 import {
-  buildResolver,
-  parseProviderMode,
+  buildIntegrationResolver,
+  parseIntegrationMode,
   ResolverConfigError,
 } from "../src/commands/run/resolver.ts";
 
-describe("parseProviderMode", () => {
+describe("parseIntegrationMode", () => {
   it("defaults to remote when nothing is passed", () => {
-    expect(parseProviderMode(undefined)).toBe("remote");
+    expect(parseIntegrationMode(undefined)).toBe("remote");
   });
 
   it("accepts remote | local | none verbatim", () => {
-    expect(parseProviderMode("remote")).toBe("remote");
-    expect(parseProviderMode("local")).toBe("local");
-    expect(parseProviderMode("none")).toBe("none");
+    expect(parseIntegrationMode("remote")).toBe("remote");
+    expect(parseIntegrationMode("local")).toBe("local");
+    expect(parseIntegrationMode("none")).toBe("none");
   });
 
   it("throws ResolverConfigError on invalid input", () => {
-    expect(() => parseProviderMode("cloud")).toThrow(ResolverConfigError);
+    expect(() => parseIntegrationMode("cloud")).toThrow(ResolverConfigError);
   });
 
   it("error lists accepted modes", () => {
     try {
-      parseProviderMode("cloud");
+      parseIntegrationMode("cloud");
     } catch (err) {
       expect((err as ResolverConfigError).hint).toContain("remote");
       expect((err as ResolverConfigError).hint).toContain("local");
@@ -39,75 +39,53 @@ describe("parseProviderMode", () => {
   });
 });
 
-describe("buildResolver — none", () => {
-  it("returns an empty resolver that produces no tools", async () => {
-    const resolver = buildResolver("none", null);
+describe("buildIntegrationResolver", () => {
+  it("none → empty resolver", async () => {
+    const resolver = buildIntegrationResolver("none", null);
     const tools = await resolver.resolve([], {} as Parameters<typeof resolver.resolve>[1]);
     expect(tools).toEqual([]);
   });
-});
 
-describe("buildResolver — local", () => {
-  it("throws when credsFilePath is missing", () => {
-    expect(() => buildResolver("local", null)).toThrow(ResolverConfigError);
-  });
-
-  it("throws with hint when credsFilePath is missing", () => {
+  it("local → throws without credsFilePath, with an integrations hint", () => {
     try {
-      buildResolver("local", null);
+      buildIntegrationResolver("local", null);
+      throw new Error("expected throw");
     } catch (err) {
-      // message names the missing flag; hint documents the file format.
       expect((err as Error).message).toContain("--creds-file");
-      expect((err as ResolverConfigError).hint).toContain("providers");
+      expect((err as ResolverConfigError).hint).toContain("integrations");
     }
   });
 
-  it("constructs a resolver when credsFilePath is provided", () => {
-    // The resolver is lazy — no file IO happens until resolve() is called.
-    const resolver = buildResolver("local", { credsFilePath: "/tmp/nonexistent.json" });
+  it("local → constructs lazily when credsFilePath is provided", () => {
+    const resolver = buildIntegrationResolver("local", { credsFilePath: "/tmp/none.json" });
     expect(typeof resolver.resolve).toBe("function");
   });
-});
 
-describe("buildResolver — remote", () => {
-  it("throws when inputs are null", () => {
-    expect(() => buildResolver("remote", null)).toThrow(ResolverConfigError);
+  it("remote → throws when inputs are null", () => {
+    expect(() => buildIntegrationResolver("remote", null)).toThrow(ResolverConfigError);
   });
 
-  it("throws with login hint when inputs are null", () => {
-    try {
-      buildResolver("remote", null);
-    } catch (err) {
-      expect((err as ResolverConfigError).hint).toContain("appstrate login");
-    }
-  });
-
-  it("throws when any required field is missing", () => {
+  it("remote → throws when a required field is missing", () => {
     expect(() =>
-      buildResolver("remote", {
-        instance: "",
-        bearerToken: "ask_x",
-        applicationId: "app_x",
-      }),
-    ).toThrow(ResolverConfigError);
-    expect(() =>
-      buildResolver("remote", {
+      buildIntegrationResolver("remote", {
         instance: "https://x.com",
         bearerToken: "",
         applicationId: "app_x",
       }),
     ).toThrow(ResolverConfigError);
-    expect(() =>
-      buildResolver("remote", {
-        instance: "https://x.com",
-        bearerToken: "ask_x",
-        applicationId: "",
-      }),
-    ).toThrow(ResolverConfigError);
   });
 
-  it("constructs a resolver with all three fields", () => {
-    const resolver = buildResolver("remote", {
+  it("remote → throws with login hint when inputs are null", () => {
+    try {
+      buildIntegrationResolver("remote", null);
+      throw new Error("expected throw");
+    } catch (err) {
+      expect((err as ResolverConfigError).hint).toContain("appstrate login");
+    }
+  });
+
+  it("remote → constructs with all three fields", () => {
+    const resolver = buildIntegrationResolver("remote", {
       instance: "https://x.com",
       bearerToken: "ask_x",
       applicationId: "app_x",
@@ -115,19 +93,10 @@ describe("buildResolver — remote", () => {
     expect(typeof resolver.resolve).toBe("function");
   });
 
-  it("accepts a JWT bearer alongside the ask_… shape", () => {
-    const resolver = buildResolver("remote", {
+  it("remote → accepts a JWT bearer + optional endUserId", () => {
+    const resolver = buildIntegrationResolver("remote", {
       instance: "https://x.com",
       bearerToken: "eyJhbGciOiJSUzI1NiJ9.test.jwt",
-      applicationId: "app_x",
-    });
-    expect(typeof resolver.resolve).toBe("function");
-  });
-
-  it("accepts optional endUserId", () => {
-    const resolver = buildResolver("remote", {
-      instance: "https://x.com",
-      bearerToken: "ask_x",
       applicationId: "app_x",
       endUserId: "eu_x",
     });

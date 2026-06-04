@@ -3,13 +3,17 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "typecheck": "tsc --noEmit",
     "test": "bun test"
   },
   "dependencies": {
+    "@appstrate/afps-runtime": "workspace:*",
     "@appstrate/connect": "workspace:*",
     "@appstrate/core": "workspace:*",
     "@appstrate/mcp-transport": "workspace:*",
+    "@appstrate/runner-pi": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "fflate": "^0.8.2",
     "hono": "^4.12.15",
     "p-limit": "^7.3.0"
   }

@@ -1,0 +1,88 @@
+{
+  "name": "@appstrate/pinterest",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.1",
+  "display_name": "Pinterest (API)",
+  "description": "Visual discovery and bookmarking platform",
+  "keywords": ["social-media", "marketing"],
+  "license": "Apache-2.0",
+  "icon": "pinterest",
+  "source": {
+    "kind": "none"
+  },
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "authorization_endpoint": "https://www.pinterest.com/oauth/",
+      "token_endpoint": "https://api.pinterest.com/v5/oauth/token",
+      "default_scopes": ["user_accounts:read"],
+      "token_endpoint_auth_method": "client_secret_basic",
+      "scope_catalog": [
+        {
+          "value": "boards:read",
+          "label": "Read boards"
+        },
+        {
+          "value": "boards:write",
+          "label": "Create & edit boards"
+        },
+        {
+          "value": "pins:read",
+          "label": "Read pins"
+        },
+        {
+          "value": "pins:write",
+          "label": "Create & edit pins"
+        },
+        {
+          "value": "user_accounts:read",
+          "label": "Read user profile"
+        },
+        {
+          "value": "ads:read",
+          "label": "Read ads data"
+        },
+        {
+          "value": "ads:write",
+          "label": "Manage ads campaigns"
+        },
+        {
+          "value": "catalogs:read",
+          "label": "Read product catalogs"
+        },
+        {
+          "value": "catalogs:write",
+          "label": "Manage product catalogs"
+        }
+      ],
+      "authorized_uris": ["https://api.pinterest.com/**"],
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": ","
+        },
+        "dev.appstrate/auth": {
+          "required": true
+        }
+      }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/api": {
+      "auths": {
+        "primary": {}
+      }
+    }
+  }
+}

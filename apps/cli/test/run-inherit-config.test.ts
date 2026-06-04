@@ -38,8 +38,7 @@ describe("fetchRunConfigPayload", () => {
         config: { dryRun: true },
         modelId: "claude-sonnet",
         proxyId: null,
-        versionPin: "1.0.0",
-        requiredProviders: ["@afps/gmail"],
+        version_pin: "1.0.0",
       },
     });
     const payload = await fetchRunConfigPayload({
@@ -52,8 +51,7 @@ describe("fetchRunConfigPayload", () => {
       fetchImpl,
     });
     expect(payload?.modelId).toBe("claude-sonnet");
-    expect(payload?.versionPin).toBe("1.0.0");
-    expect(payload?.requiredProviders).toEqual(["@afps/gmail"]);
+    expect(payload?.version_pin).toBe("1.0.0");
   });
 
   it("returns null on 404 (no inheritance)", async () => {
@@ -112,8 +110,7 @@ describe("mergeRunConfig — priority order", () => {
         config: { dryRun: true, retries: 3 },
         modelId: null,
         proxyId: null,
-        versionPin: null,
-        requiredProviders: [],
+        version_pin: null,
       },
       flagConfig: { retries: 5 },
       hasExplicitSpec: false,
@@ -126,8 +123,7 @@ describe("mergeRunConfig — priority order", () => {
       config: {},
       modelId: "inherited-model",
       proxyId: null,
-      versionPin: null,
-      requiredProviders: [],
+      version_pin: null,
     };
     expect(mergeRunConfig({ inherited, hasExplicitSpec: false }).modelId).toBe("inherited-model");
     expect(
@@ -148,8 +144,7 @@ describe("mergeRunConfig — priority order", () => {
       config: {},
       modelId: null,
       proxyId: null,
-      versionPin: "1.2.3",
-      requiredProviders: [],
+      version_pin: "1.2.3",
     };
     expect(mergeRunConfig({ inherited, hasExplicitSpec: false }).versionPin).toBe("1.2.3");
     expect(mergeRunConfig({ inherited, hasExplicitSpec: true }).versionPin).toBeNull();
@@ -162,21 +157,6 @@ describe("mergeRunConfig — priority order", () => {
     expect(merged.modelId).toBeNull();
     expect(merged.proxyId).toBeNull();
     expect(merged.versionPin).toBeNull();
-    expect(merged.requiredProviders).toEqual([]);
-  });
-
-  it("requiredProviders flows through unchanged", () => {
-    const merged = mergeRunConfig({
-      inherited: {
-        config: {},
-        modelId: null,
-        proxyId: null,
-        versionPin: null,
-        requiredProviders: ["@a/p", "@b/p"],
-      },
-      hasExplicitSpec: false,
-    });
-    expect(merged.requiredProviders).toEqual(["@a/p", "@b/p"]);
   });
 });
 
@@ -223,8 +203,7 @@ describe("deepMergeConfig", () => {
         config: { providers: { gmail: { scopes: ["read"] }, slack: { token: "old" } } },
         modelId: null,
         proxyId: null,
-        versionPin: null,
-        requiredProviders: [],
+        version_pin: null,
       },
       flagConfig: { providers: { slack: { token: "new" } } },
       hasExplicitSpec: false,
@@ -244,6 +223,5 @@ function stubPayload() {
     modelId: null,
     proxyId: null,
     versionPin: null,
-    requiredProviders: [],
   };
 }

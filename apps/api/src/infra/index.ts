@@ -10,10 +10,12 @@ import type { PubSub } from "./pubsub/interface.ts";
 import type { KeyValueCache } from "./cache/interface.ts";
 import type { RateLimiterFactory } from "./rate-limit/interface.ts";
 import type { EventBuffer } from "./event-buffer/interface.ts";
+import type { CookieJarStore } from "./cookie-jar/interface.ts";
 import { LocalPubSub } from "./pubsub/local-pubsub.ts";
 import { LocalCache } from "./cache/local-cache.ts";
 import { LocalRateLimiterFactory } from "./rate-limit/local-rate-limit.ts";
 import { LocalEventBuffer } from "./event-buffer/local-event-buffer.ts";
+import { LocalCookieJarStore } from "./cookie-jar/local-cookie-jar.ts";
 import { logger } from "../lib/logger.ts";
 
 export { hasRedis, hasExternalDb, hasS3, getExecutionMode } from "./mode.ts";
@@ -29,6 +31,7 @@ let pubsubPromise: Promise<PubSub> | null = null;
 let cachePromise: Promise<KeyValueCache> | null = null;
 let rateLimiterPromise: Promise<RateLimiterFactory> | null = null;
 let eventBufferPromise: Promise<EventBuffer> | null = null;
+let cookieJarPromise: Promise<CookieJarStore> | null = null;
 
 export function getPubSub(): Promise<PubSub> {
   if (!pubsubPromise) {
@@ -82,18 +85,37 @@ export function getEventBuffer(): Promise<EventBuffer> {
   return eventBufferPromise;
 }
 
+export function getCookieJarStore(): Promise<CookieJarStore> {
+  if (!cookieJarPromise) {
+    cookieJarPromise = (async () => {
+      if (hasRedis()) {
+        const { RedisCookieJarStore } = await import("./cookie-jar/redis-cookie-jar.ts");
+        return new RedisCookieJarStore();
+      }
+      return new LocalCookieJarStore();
+    })();
+  }
+  return cookieJarPromise;
+}
+
 /** Shutdown all infrastructure adapters. */
 export async function shutdownInfra(): Promise<void> {
   // Resolve all pending singletons before tearing down.
   // RateLimiterFactory has no shutdown — its Redis connection is shared and closed by closeRedis().
-  const [ps, ch, eb] = await Promise.all([pubsubPromise, cachePromise, eventBufferPromise]);
+  const [ps, ch, eb, cj] = await Promise.all([
+    pubsubPromise,
+    cachePromise,
+    eventBufferPromise,
+    cookieJarPromise,
+  ]);
   // Ensure rate limiter promise is settled (no dangling async) before nullifying
   await rateLimiterPromise;
-  await Promise.all([ps?.shutdown(), ch?.shutdown(), eb?.shutdown()]);
+  await Promise.all([ps?.shutdown(), ch?.shutdown(), eb?.shutdown(), cj?.shutdown()]);
   pubsubPromise = null;
   cachePromise = null;
   rateLimiterPromise = null;
   eventBufferPromise = null;
+  cookieJarPromise = null;
 }
 
 /** Log which infrastructure backends are active. */

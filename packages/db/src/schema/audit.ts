@@ -33,7 +33,7 @@ export const auditEvents = pgTable(
     ip: text("ip"),
     userAgent: text("user_agent"),
     requestId: text("request_id"),
-    createdAt: timestamp("created_at").notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     index("idx_audit_events_org_created").on(table.orgId, table.createdAt),

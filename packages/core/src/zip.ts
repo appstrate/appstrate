@@ -4,18 +4,45 @@
 import { unzipSync, zipSync, type Zippable } from "fflate";
 import {
   validateManifest,
-  extractSkillMeta,
   type Manifest,
   type AgentManifest,
-  type ToolManifest,
+  type SkillManifest,
   type PackageType,
-  type ProviderManifest,
+  type IntegrationManifest,
+  type McpServerManifest,
 } from "./validation.ts";
+import { checkCompanionFiles, companionFilesFromRecord } from "./companion-files.ts";
 
 export type { Zippable };
 
 /**
+ * Fixed modification time stamped on every ZIP entry. fflate defaults each
+ * entry's mtime to the current clock, which makes archive bytes — and thus
+ * their integrity hash — change on every build even when the contents are
+ * identical. ZIP mtimes are never read back (`unzipArtifact` discards them),
+ * so pinning a constant costs nothing and makes the output reproducible.
+ * Reproducibility is what lets the system-package loader treat an integrity
+ * drift as a genuine content change (forgotten version bump) rather than
+ * rebuild noise.
+ *
+ * Built from LOCAL date components on purpose: the DOS time field in a ZIP
+ * has no timezone, and fflate encodes it via the Date's *local* getters
+ * (`getFullYear`/`getHours`/…). A UTC instant (`…T00:00:00Z`) would therefore
+ * encode different bytes depending on the builder's timezone — a dev in EDT
+ * and CI in UTC would produce non-identical archives, breaking the
+ * `build:system-packages --check` byte comparison. `new Date(2020, 0, 1)`
+ * reads back as 2020-01-01 00:00:00 under every timezone. Any constant ≥ 1980
+ * works (DOS time epoch).
+ */
+const DETERMINISTIC_MTIME = new Date(2020, 0, 1, 0, 0, 0, 0);
+
+/**
  * Create a ZIP archive from a set of file entries.
+ *
+ * Output is deterministic: entries are emitted in sorted path order with a
+ * fixed mtime, so identical inputs always produce identical bytes regardless
+ * of filesystem `readdir` order or wall-clock time.
+ *
  * @param entries - Map of file paths to Uint8Array content
  * @param level - Compression level (0=none, 9=max). Defaults to 6.
  * @returns The compressed ZIP as a Uint8Array
@@ -36,7 +63,13 @@ export function zipArtifact(
       );
     }
   }
-  return zipSync(entries, { level });
+  // Re-key in sorted order so insertion order (e.g. readdir order) can't
+  // perturb the output; fflate preserves key iteration order.
+  const sorted: Zippable = {};
+  for (const key of Object.keys(entries).sort()) {
+    sorted[key] = (entries as Record<string, Zippable[string]>)[key]!;
+  }
+  return zipSync(sorted, { level, mtime: DETERMINISTIC_MTIME });
 }
 
 /**
@@ -143,13 +176,20 @@ export function stripWrapperPrefix(
 /** Result of parsing an AFPS package ZIP file. */
 export interface ParsedPackageZip {
   /** The validated manifest from manifest.json. */
-  manifest: Manifest | AgentManifest | ProviderManifest;
-  /** The primary content (prompt.md for agents, SKILL.md for skills, source for tools, etc.). */
+  manifest: Manifest | AgentManifest | SkillManifest | IntegrationManifest | McpServerManifest;
+  /** The primary content (prompt.md for agents, SKILL.md for skills, manifest.json for integrations/mcp-servers). */
   content: string;
   /** All files in the ZIP archive (path to content). */
   files: Record<string, Uint8Array>;
   /** The detected package type. */
   type: PackageType;
+  /**
+   * Canonical package id — for every package type (agent/skill/integration/
+   * mcp-server) this is the scoped manifest `name`. AFPS (§3.4) lifted
+   * the mcp-server scoped identity to the manifest root, removing the
+   * previous `_meta["dev.afps/mcp-server"].name` indirection.
+   */
+  packageId: string;
 }
 
 /** Error thrown during package ZIP parsing with a machine-readable error code. */
@@ -239,62 +279,64 @@ export function parsePackageZip(zipBuffer: Uint8Array, maxSize?: number): Parsed
 
   const manifest = validation.manifest!;
 
-  const type = manifest.type;
+  // AFPS (§3.4 / §11.2) lifted mcp-server identity to the manifest root,
+  // so every package type now declares its `type` at the top level.
+  const type: PackageType | undefined = (manifest as { type?: PackageType }).type;
 
-  // Extract primary content based on type
+  // Enforce §3.3 / §3.4 companion-file invariants via the shared helper so
+  // the platform import path and the runtime bundle loader reject the same
+  // inputs. The helper covers: agent prompt.md non-empty, skill SKILL.md +
+  // frontmatter name, mcp-server server.entry_point payload present.
+  const violation = checkCompanionFiles(
+    manifest as { type?: unknown; server?: unknown } & Record<string, unknown>,
+    companionFilesFromRecord(files),
+  );
+  if (violation) {
+    const code =
+      violation.reason === "SKILL_MISSING_FRONTMATTER_NAME" ? "INVALID_CONTENT" : "MISSING_CONTENT";
+    throw new PackageZipError(code, violation.message);
+  }
+
+  // Extract primary content based on type. Companion-file presence is
+  // already guaranteed above; the switch below only reads the bytes the
+  // caller wants surfaced as `content`.
   let content: string;
 
   switch (type) {
     case "agent": {
-      const promptRaw = files["prompt.md"];
-      const promptMd = promptRaw ? new TextDecoder().decode(promptRaw) : undefined;
-      if (!promptMd || promptMd.trim().length === 0) {
-        throw new PackageZipError("MISSING_CONTENT", "Agent package must contain prompt.md");
-      }
-      content = promptMd;
+      content = new TextDecoder().decode(files["prompt.md"]!);
       break;
     }
     case "skill": {
-      const skillRaw = files["SKILL.md"];
-      const skillMd = skillRaw ? new TextDecoder().decode(skillRaw) : undefined;
-      if (!skillMd) {
-        throw new PackageZipError("MISSING_CONTENT", "Skill package must contain SKILL.md");
-      }
-      const meta = extractSkillMeta(skillMd);
-      if (!meta.name) {
-        throw new PackageZipError(
-          "INVALID_CONTENT",
-          "SKILL.md must contain a 'name' in YAML frontmatter",
-        );
-      }
-      content = skillMd;
+      content = new TextDecoder().decode(files["SKILL.md"]!);
       break;
     }
-    case "tool": {
-      const toolManifest = manifest as ToolManifest;
-      const entrypoint = toolManifest.entrypoint;
-      if (!entrypoint || !files[entrypoint]) {
-        throw new PackageZipError(
-          "MISSING_CONTENT",
-          `Tool package must contain the file declared in entrypoint: "${entrypoint || "(missing)"}"`,
-        );
-      }
-      // Structural check only. `entrypoint` may point at either draft source
-      // or a published bundle (AFPS §3.4); source-level validation is an
-      // authoring-time concern handled by upload/import/publish pipelines
-      // via `validateToolSource` explicitly, not by the ZIP parser.
-      content = new TextDecoder().decode(files[entrypoint]!);
+    case "integration": {
+      // Integration packages (proposal §4.1.2). Phase 1.0 bundles carry
+      // manifest.json as authoritative; INTEGRATION.md is an optional
+      // agent-facing documentation companion. Vendored server code lives
+      // under `server/` and is left untouched by this parser — the
+      // runtime resolver (Phase 1.2a) consumes it directly.
+      const integrationRaw = files["INTEGRATION.md"];
+      content = integrationRaw ? new TextDecoder().decode(integrationRaw) : manifestText;
       break;
     }
-    case "provider": {
-      // Provider packages require manifest.json; PROVIDER.md is an optional companion file
-      const providerRaw = files["PROVIDER.md"];
-      content = providerRaw ? new TextDecoder().decode(providerRaw) : manifestText;
+    case "mcp-server": {
+      // mcp-server packages (AFPS §3.4) are MCPB bundles — manifest.json is
+      // authoritative; the server payload under `server.entry_point` is left
+      // untouched for the runtime to consume directly.
+      content = manifestText;
       break;
     }
     default:
       throw new PackageZipError("INVALID_MANIFEST", `Unsupported package type: "${type}"`);
   }
 
-  return { manifest, content, files, type: type as PackageType };
+  // Canonical AFPS identity, type-agnostic: AFPS (§3.4) lifted the
+  // mcp-server scoped identity to the manifest root, so every package type
+  // now stores `@scope/name` at the top-level `name`. The previous
+  // `_meta["dev.afps/mcp-server"].name` fallback is gone.
+  const packageId = (manifest as { name: string }).name;
+
+  return { manifest, content, files, type: type as PackageType, packageId };
 }

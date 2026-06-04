@@ -7,7 +7,14 @@ const sharedCreateProps = {
     type: "array",
     items: {
       type: "string",
-      enum: ["run.started", "run.success", "run.failed", "run.timeout", "run.cancelled"],
+      enum: [
+        "run.started",
+        "run.success",
+        "run.failed",
+        "run.timeout",
+        "run.cancelled",
+        "run.connection_missing",
+      ],
     },
   },
   packageId: { type: ["string", "null"] },
@@ -265,6 +272,7 @@ export const webhooksPaths = {
                       "run.failed",
                       "run.timeout",
                       "run.cancelled",
+                      "run.connection_missing",
                     ],
                   },
                 },

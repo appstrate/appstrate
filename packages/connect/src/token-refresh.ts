@@ -1,33 +1,33 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { eq } from "drizzle-orm";
-import { userProviderConnections } from "@appstrate/db/schema";
-import type { Db } from "@appstrate/db/client";
-import type { DecryptedCredentials } from "./types.ts";
-import { encryptCredentials, decryptCredentials } from "./encryption.ts";
-import type { OAuthTokenAuthMethod, OAuthTokenContentType } from "@appstrate/core/validation";
+import type { OAuthTokenAuthMethod } from "@appstrate/core/validation";
 import {
   parseTokenResponse,
   parseTokenErrorResponse,
   buildTokenHeaders,
   buildTokenBody,
+  type OAuthTokenContentType,
+  type ParsedTokenResponse,
 } from "./token-utils.ts";
-import { extractErrorMessage } from "./utils.ts";
-
-/** In-memory concurrency lock: one refresh at a time per connection. */
-const inflightRefreshes = new Map<string, Promise<DecryptedCredentials>>();
+import { getErrorMessage } from "@appstrate/core/errors";
 
 export interface RefreshContext {
-  tokenUrl: string;
+  /**
+   * Token endpoint (`auths.{key}.token_endpoint`). AFPS DROPS the 1.x
+   * `refresh_url`: a refresh now POSTs `grant_type=refresh_token` to the same
+   * `token_endpoint` used for the authorization-code exchange (RFC 6749 §6).
+   */
+  tokenEndpoint: string;
   clientId: string;
   clientSecret: string;
-  tokenAuthMethod?: OAuthTokenAuthMethod;
+  /** Token endpoint client-auth method (`token_endpoint_auth_method`). */
+  tokenEndpointAuthMethod?: OAuthTokenAuthMethod;
   scopeSeparator?: string;
   tokenContentType?: OAuthTokenContentType;
 }
 
 /**
- * Error thrown by forceRefresh when the OAuth token refresh call fails.
+ * Error thrown by performRefreshTokenExchange when the OAuth token refresh call fails.
  *
  * `kind` discriminates between two cases that callers MUST treat differently:
  *
@@ -56,72 +56,63 @@ export class RefreshError extends Error {
   }
 }
 
-/**
- * Force a token refresh regardless of expiry.
- * Returns refreshed credentials, or current credentials if no refresh token / not OAuth2.
- * Throws if the refresh request itself fails (invalid_grant, network error).
- * Clears `needsReconnection` on success — a successful refresh proves the connection is healthy.
- */
-export async function forceRefresh(
-  db: Db,
-  connectionId: string,
-  providerId: string,
-  credentialsEncrypted: string,
-  refreshContext?: RefreshContext,
-): Promise<DecryptedCredentials> {
-  if (!refreshContext) {
-    return decryptCredentials<DecryptedCredentials>(credentialsEncrypted);
-  }
-
-  // Deduplicate concurrent refreshes for the same connection
-  const inflight = inflightRefreshes.get(connectionId);
-  if (inflight) return inflight;
-
-  const refreshPromise = doRefresh(
-    db,
-    connectionId,
-    providerId,
-    credentialsEncrypted,
-    refreshContext,
-  );
-  inflightRefreshes.set(connectionId, refreshPromise);
-
-  try {
-    return await refreshPromise;
-  } finally {
-    inflightRefreshes.delete(connectionId);
-  }
+/** Success payload from {@link performRefreshTokenExchange}. */
+export interface RefreshExchangeResult {
+  /** Normalised token response (access/refresh token, expiry, scopes). */
+  parsed: ParsedTokenResponse;
+  /** Raw JSON body — callers that need provider-specific fields (e.g. the
+   *  authoritative `scope` echo for shrink detection) read it directly. */
+  raw: Record<string, unknown>;
 }
 
-async function doRefresh(
-  db: Db,
-  connectionId: string,
-  providerId: string,
-  credentialsEncrypted: string,
+/**
+ * Perform the OAuth2 `grant_type=refresh_token` HTTP exchange for the
+ * integration (`integration_connections`) refresh path: build the request,
+ * POST it, classify failures into {@link RefreshError} (`revoked` vs
+ * `transient`), and parse the success body. Table-specific concerns — which
+ * row to write back, scope-shrink detection, `needsReconnection` flips —
+ * stay in the caller so the wire mechanics stay isolated and reusable.
+ */
+export async function performRefreshTokenExchange(
   ctx: RefreshContext,
-): Promise<DecryptedCredentials> {
-  const creds = decryptCredentials<DecryptedCredentials>(credentialsEncrypted);
-
-  if (!creds.refresh_token) {
-    return creds;
-  }
-
-  const useBasicAuth = ctx.tokenAuthMethod === "client_secret_basic";
-
+  refreshToken: string,
+  opts: { label: string; accessTokenFallback?: string },
+): Promise<RefreshExchangeResult> {
+  // AFPS default for `token_endpoint_auth_method` is
+  // `client_secret_basic` (RFC 8414 §2 / RFC 7591 §2). When the manifest
+  // omits the field, fall through to Basic auth instead of body auth so the
+  // refresh wire matches the wider OAuth 2.1 ecosystem (Anthropic, Google,
+  // GitHub, Slack all accept Basic; some IdPs require it).
+  //
+  // Per-method body shape (RFC 6749 §6 + RFC 7591 §2):
+  //   - client_secret_basic: only grant_type + refresh_token in body; client
+  //     credentials travel in the Authorization: Basic header.
+  //   - client_secret_post:  client_id + client_secret in body, no Basic header.
+  //   - none (public client): client_id in body, NO client_secret, NO Basic
+  //     header. RFC 6749 §6 + §3.2.1: a public client MUST authenticate
+  //     itself by including its client_id in the request.
+  const tokenAuthMethod = ctx.tokenEndpointAuthMethod ?? "client_secret_basic";
   const bodyParams: Record<string, string> = {
     grant_type: "refresh_token",
-    refresh_token: creds.refresh_token,
-    ...(useBasicAuth ? {} : { client_id: ctx.clientId, client_secret: ctx.clientSecret }),
+    refresh_token: refreshToken,
   };
-
+  if (tokenAuthMethod === "client_secret_post") {
+    bodyParams.client_id = ctx.clientId;
+    bodyParams.client_secret = ctx.clientSecret;
+  } else if (tokenAuthMethod === "none") {
+    // Public client: client_id in body only, no secret, no Basic header.
+    bodyParams.client_id = ctx.clientId;
+  }
+  // tokenAuthMethod === "client_secret_basic" → headers carry credentials,
+  // body stays minimal (grant_type + refresh_token).
   const body = buildTokenBody(bodyParams, ctx.tokenContentType);
 
   let response: Response;
   try {
-    response = await fetch(ctx.tokenUrl, {
+    response = await fetch(ctx.tokenEndpoint, {
       method: "POST",
       headers: buildTokenHeaders(
-        ctx.tokenAuthMethod,
+        tokenAuthMethod,
         ctx.clientId,
         ctx.clientSecret,
         ctx.tokenContentType,
@@ -130,10 +121,7 @@ async function doRefresh(
       signal: AbortSignal.timeout(30_000),
     });
   } catch (err) {
-    throw new RefreshError(
-      `Token refresh network error for '${providerId}': ${extractErrorMessage(err)}`,
-      "transient",
-    );
+    throw new RefreshError(`${opts.label} network error: ${getErrorMessage(err)}`, "transient");
   }
 
   if (!response.ok) {
@@ -148,45 +136,24 @@ async function doRefresh(
         ? `${classification.error}${classification.errorDescription ? ` — ${classification.errorDescription}` : ""}`
         : `HTTP ${response.status}`;
     throw new RefreshError(
-      `Token refresh failed for '${providerId}': ${summary}`,
+      `${opts.label} failed: ${summary}`,
       classification.kind,
       response.status,
       text,
     );
   }
 
-  let tokenData: Record<string, unknown>;
+  let raw: Record<string, unknown>;
   try {
-    tokenData = (await response.json()) as Record<string, unknown>;
+    raw = (await response.json()) as Record<string, unknown>;
   } catch {
-    throw new RefreshError(
-      `Token refresh returned non-JSON response for '${providerId}'`,
-      "transient",
-    );
+    throw new RefreshError(`${opts.label} returned non-JSON response`, "transient");
   }
 
   const parsed = parseTokenResponse(
-    { ...tokenData, access_token: tokenData.access_token ?? creds.access_token },
+    { ...raw, access_token: raw.access_token ?? opts.accessTokenFallback },
     undefined,
-    creds.refresh_token,
+    refreshToken,
   );
-
-  const newCreds: DecryptedCredentials = {
-    access_token: parsed.accessToken,
-    refresh_token: parsed.refreshToken,
-  };
-  const newExpiresAt = parsed.expiresAt;
-
-  const newEncrypted = encryptCredentials(newCreds);
-  await db
-    .update(userProviderConnections)
-    .set({
-      credentialsEncrypted: newEncrypted,
-      expiresAt: newExpiresAt ? new Date(newExpiresAt) : null,
-      needsReconnection: false,
-      updatedAt: new Date(),
-    })
-    .where(eq(userProviderConnections.id, connectionId));
-
-  return newCreds;
+  return { parsed, raw };
 }

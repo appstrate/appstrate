@@ -69,9 +69,9 @@ import { isValidRedirectUri } from "./redirect-uri.ts";
 // becomes an authorization bypass. If you add a new endpoint that mutates an
 // OAuth client by id, the `getClientOwningOrg` check is REQUIRED.
 //
-// The only exception are the scoped list helpers (`listClientsForOrg`,
-// `listClientsForApp`, `listClientsForOrgAndApps`) which filter by the
-// caller's org/applications at query time and are safe to expose directly.
+// The only exception is the scoped list helper (`listClientsForOrgAndApps`)
+// which filters by the caller's org/applications at query time and is safe
+// to expose directly.
 
 export type OAuthClientLevel = "instance" | "org" | "application";
 
@@ -249,19 +249,6 @@ export function _resetClientCache(): void {
 //
 // Org-level clients are visible to any admin of the org. Application-level
 // clients are visible to any admin of the org that owns the application.
-
-export async function listClientsForOrg(orgId: string): Promise<OAuthClientRecord[]> {
-  const rows = await db.select().from(oauthClient).where(eq(oauthClient.referencedOrgId, orgId));
-  return rows.map(mapRow);
-}
-
-export async function listClientsForApp(applicationId: string): Promise<OAuthClientRecord[]> {
-  const rows = await db
-    .select()
-    .from(oauthClient)
-    .where(eq(oauthClient.referencedApplicationId, applicationId));
-  return rows.map(mapRow);
-}
 
 /** Combined list for the admin UI — returns every client the caller's org can see in a single query. */
 export async function listClientsForOrgAndApps(

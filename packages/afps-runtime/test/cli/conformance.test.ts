@@ -3,7 +3,10 @@
 
 import { describe, it, expect } from "bun:test";
 import { runCli } from "../../src/cli/index.ts";
+import { BUILT_IN_CASES } from "../../src/conformance/cases.ts";
 import { captureIo } from "./helpers.ts";
+
+const TOTAL_CASES = BUILT_IN_CASES.length;
 
 describe("afps conformance", () => {
   it("runs all built-in cases and exits 0 when they pass", async () => {
@@ -15,7 +18,7 @@ describe("afps conformance", () => {
     expect(text).toContain("[L1.1]");
     expect(text).toContain("[L3.5]");
     expect(text).toContain("[L4.1]");
-    expect(text).toContain("Summary: 19/19 passed");
+    expect(text).toContain(`Summary: ${TOTAL_CASES}/${TOTAL_CASES} passed`);
   });
 
   it("emits JSON under --json", async () => {
@@ -24,7 +27,7 @@ describe("afps conformance", () => {
     expect(code).toBe(0);
     const report = JSON.parse(io.stdoutText());
     expect(report.adapter).toBe("@appstrate/afps-runtime");
-    expect(report.summary.total).toBe(19);
+    expect(report.summary.total).toBe(TOTAL_CASES);
     expect(report.summary.failed).toBe(0);
   });
 

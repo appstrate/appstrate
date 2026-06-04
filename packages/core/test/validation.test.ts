@@ -4,14 +4,10 @@ import { describe, expect, it } from "bun:test";
 import {
   validateManifest,
   extractSkillMeta,
-  validateToolSource,
-  extractManifestMetadata,
-  getDefaultAdminCredentialSchema,
-  validateProviderCredentialKeys,
-  CREDENTIAL_KEY_RE,
-  buildProviderDefinitionFromManifest,
+  agentManifestSchema,
+  SUPPORTED_SCHEMA_VERSION_MAJOR,
 } from "../src/validation.ts";
-import type { Manifest } from "../src/validation.ts";
+import { agentManifestSchema as afpsAgentManifestSchema } from "@afps-spec/schema";
 
 // ─────────────────────────────────────────────
 // Helpers — minimal valid manifests
@@ -22,8 +18,8 @@ function validAgentManifest(overrides?: Record<string, unknown>) {
     name: "@test/my-agent",
     version: "1.0.0",
     type: "agent",
-    schemaVersion: "1.0",
-    displayName: "My Agent",
+    schema_version: "0.1",
+    display_name: "My Agent",
     author: "test",
     ...overrides,
   };
@@ -34,39 +30,6 @@ function validSkillManifest(overrides?: Record<string, unknown>) {
     name: "@test/my-skill",
     version: "1.0.0",
     type: "skill",
-    ...overrides,
-  };
-}
-
-function validToolManifest(overrides?: Record<string, unknown>) {
-  return {
-    name: "@test/my-tool",
-    version: "1.0.0",
-    type: "tool",
-    entrypoint: "tool.ts",
-    tool: {
-      name: "my_tool",
-      description: "A test tool",
-      inputSchema: { type: "object", properties: {} },
-    },
-    ...overrides,
-  };
-}
-
-function validProviderManifest(overrides?: Record<string, unknown>) {
-  return {
-    name: "@test/my-provider",
-    version: "1.0.0",
-    type: "provider",
-    displayName: "My Provider",
-    definition: {
-      authMode: "oauth2",
-      oauth2: {
-        authorizationUrl: "https://example.com/authorize",
-        tokenUrl: "https://example.com/token",
-        defaultScopes: ["read"],
-      },
-    },
     ...overrides,
   };
 }
@@ -89,12 +52,6 @@ describe("validateManifest", () => {
     expect(result.errors).toHaveLength(0);
   });
 
-  it("valid tool manifest", () => {
-    const result = validateManifest(validToolManifest());
-    expect(result.valid).toBe(true);
-    expect(result.errors).toHaveLength(0);
-  });
-
   it("invalid manifest — missing name", () => {
     const result = validateManifest(validSkillManifest({ name: undefined }));
     expect(result.valid).toBe(false);
@@ -107,26 +64,25 @@ describe("validateManifest", () => {
     expect(result.errors.length).toBeGreaterThan(0);
   });
 
-  it("missing type field surfaces all base-schema errors", () => {
-    // Without a `type`, validateManifest falls through to the base schema and
-    // lets Zod aggregate every missing/invalid field in one pass, instead of
-    // short-circuiting on `type` alone.
+  it("missing type field rejects with a typed Unknown package type error", () => {
+    // Without a `type`, validateManifest fails fast with a single typed Zod
+    // issue keyed on `type` rather than running the permissive base schema.
+    // This makes the dispatcher's contract explicit: `type` is the AFPS
+    // discriminator and MUST be one of agent|skill|mcp-server|integration.
     const { type: _, ...noType } = validAgentManifest();
     const result = validateManifest(noType);
     expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.startsWith("type:"))).toBe(true);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toMatch(/^type:.*Unknown package type/);
   });
 
-  it("empty manifest surfaces every missing base field at once", () => {
-    // The base `manifestSchema` requires name/version/type. Without `type`,
-    // dispatch falls through to the base schema and Zod emits all three
-    // missing-field errors together instead of stopping on `type`.
+  it("empty manifest emits the single dispatcher-level Unknown package type error", () => {
+    // The dispatcher fails fast before the base schema runs, so we get one
+    // typed error instead of an aggregate of name/version/type misses.
     const result = validateManifest({});
     expect(result.valid).toBe(false);
-    const fields = result.errors.map((e) => e.split(":")[0]);
-    expect(fields).toContain("type");
-    expect(fields).toContain("name");
-    expect(fields).toContain("version");
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toMatch(/^type:.*Unknown package type/);
   });
 
   it("invalid scoped name format", () => {
@@ -157,10 +113,10 @@ describe("validateManifest", () => {
       name: "@test/minimal",
       version: "1.0.0",
       type: "agent",
-      schemaVersion: "1.0",
-      displayName: "Minimal Agent",
+      schema_version: "0.1",
+      display_name: "Minimal Agent",
       author: "test",
-      // dependencies, timeout, providersConfiguration intentionally omitted
+      // dependencies, timeout, integrations_configuration intentionally omitted
     };
 
     const result = validateManifest(manifest);
@@ -170,26 +126,181 @@ describe("validateManifest", () => {
     const m = result.manifest as Record<string, unknown>;
     expect(m.dependencies).toBeUndefined();
     expect(m.timeout).toBeUndefined();
-    expect(m.providersConfiguration).toBeUndefined();
+    expect(m.integrations_configuration).toBeUndefined();
   });
 
-  it("agent with dependencies (skills/tools/providers)", () => {
+  it("agent with dependencies (skills/mcp_servers/integrations) + runtime_tools", () => {
     const result = validateManifest(
       validAgentManifest({
         dependencies: {
-          providers: { "@test/google": "^1.0.0" },
+          integrations: { "@test/gmail": "^1.0.0" },
+          mcp_servers: { "@test/fetch": "^1.0.0" },
           skills: { "@test/skill": "^1.0.0", "@test/other": "~2.3.0" },
-          tools: { "@test/ext": ">=0.1.0" },
+        },
+        runtime_tools: ["log", "note"],
+      }),
+    );
+    expect(result.valid).toBe(true);
+    const m = result.manifest as Record<string, unknown>;
+    const deps = m.dependencies as Record<string, unknown>;
+    expect(deps.skills).toEqual({ "@test/skill": "^1.0.0", "@test/other": "~2.3.0" });
+    expect(deps.integrations).toEqual({ "@test/gmail": "^1.0.0" });
+    expect(deps.mcp_servers).toEqual({ "@test/fetch": "^1.0.0" });
+    // Selectable runtime tools are the top-level snake_case `runtime_tools`.
+    expect(m.runtime_tools).toEqual(["log", "note"]);
+  });
+
+  it("agent with no output schema is valid without the `output` runtime tool", () => {
+    // Side-effect-only run: do a task and finish, no result to return.
+    const result = validateManifest(validAgentManifest({ runtime_tools: ["log"] }));
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects an output schema when the `output` runtime tool is not selected", () => {
+    const result = validateManifest(
+      validAgentManifest({
+        output: { schema: { type: "object", properties: { x: { type: "string" } } } },
+        runtime_tools: ["log"],
+      }),
+    );
+    expect(result.valid).toBe(false);
+    // Error is surfaced on the runtime_tools field so the editor can render it.
+    expect(result.errors.some((e) => e.startsWith("runtime_tools:"))).toBe(true);
+  });
+
+  it("accepts an output schema when the `output` runtime tool is selected", () => {
+    const result = validateManifest(
+      validAgentManifest({
+        output: { schema: { type: "object", properties: { x: { type: "string" } } } },
+        runtime_tools: ["output", "log"],
+      }),
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it("agent with integrations declared as bare version string (canonical §4.1 form)", () => {
+    const result = validateManifest(
+      validAgentManifest({
+        dependencies: {
+          integrations: { "@test/gmail-mcp": "^1.0.0" },
         },
       }),
     );
     expect(result.valid).toBe(true);
-    const deps = (result.manifest as Record<string, unknown>).dependencies as Record<
-      string,
-      unknown
-    >;
-    expect(deps.skills).toEqual({ "@test/skill": "^1.0.0", "@test/other": "~2.3.0" });
-    expect(deps.tools).toEqual({ "@test/ext": ">=0.1.0" });
+  });
+
+  it("accepts an integration dependency as a bare semver string (AFPS §4.1)", () => {
+    const result = validateManifest(
+      validAgentManifest({
+        dependencies: {
+          integrations: { "@test/gmail-mcp": "^1.0.0" },
+        },
+      }),
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it("accepts per-integration config in integrations_configuration with scopes + auth_key (§4.4)", () => {
+    const result = validateManifest(
+      validAgentManifest({
+        dependencies: {
+          integrations: { "@test/gmail-mcp": "^1.0.0" },
+        },
+        integrations_configuration: {
+          "@test/gmail-mcp": {
+            scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
+            auth_key: "oauth",
+          },
+        },
+      }),
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it("accepts the tools wildcard '*' in integrations_configuration (issue #547)", () => {
+    const result = validateManifest(
+      validAgentManifest({
+        dependencies: {
+          integrations: { "@test/gmail-mcp": "^1.0.0" },
+        },
+        integrations_configuration: {
+          "@test/gmail-mcp": { tools: "*", auth_key: "primary" },
+        },
+      }),
+    );
+    expect(result.valid).toBe(true);
+    const cfg = (
+      result.manifest as { integrations_configuration?: Record<string, { tools?: unknown }> }
+    ).integrations_configuration;
+    expect(cfg?.["@test/gmail-mcp"]?.tools).toBe("*");
+  });
+
+  it("accepts an explicit tools array in integrations_configuration", () => {
+    const result = validateManifest(
+      validAgentManifest({
+        dependencies: {
+          integrations: { "@test/gmail-mcp": "^1.0.0" },
+        },
+        integrations_configuration: {
+          "@test/gmail-mcp": { tools: ["send_email", "list_threads"] },
+        },
+      }),
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects a non-wildcard string for integrations_configuration tools", () => {
+    const result = validateManifest(
+      validAgentManifest({
+        dependencies: {
+          integrations: { "@test/gmail-mcp": "^1.0.0" },
+        },
+        integrations_configuration: {
+          "@test/gmail-mcp": { tools: "all" as unknown as string[] },
+        },
+      }),
+    );
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.includes("tools"))).toBe(true);
+  });
+
+  it("accepts skill + mcp_server dependency values as bare semver strings (§4.1)", () => {
+    const result = validateManifest(
+      validAgentManifest({
+        dependencies: {
+          skills: { "@test/skill": "^1.0.0" },
+          mcp_servers: { "@test/mcp": "^2.0.0" },
+        },
+      }),
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects an integration dependency in object form (§4.1)", () => {
+    const result = validateManifest(
+      validAgentManifest({
+        dependencies: {
+          integrations: {
+            "@test/gmail-mcp": { version: "^1.0.0" } as unknown as string,
+          },
+        },
+      }),
+    );
+    expect(result.valid).toBe(false);
+  });
+
+  it("rejects an integrations_configuration entry with no matching dependency (§4.4)", () => {
+    const result = validateManifest(
+      validAgentManifest({
+        dependencies: {
+          integrations: { "@test/gmail-mcp": "^1.0.0" },
+        },
+        integrations_configuration: {
+          "@test/orphan": { tools: ["x"] },
+        },
+      }),
+    );
+    expect(result.valid).toBe(false);
   });
 
   it("agent with built-in skill using wildcard version", () => {
@@ -214,307 +325,33 @@ describe("validateManifest", () => {
     expect(result.valid).toBe(false);
   });
 
-  it("agent with providersConfiguration", () => {
-    const result = validateManifest(
-      validAgentManifest({
-        dependencies: {
-          providers: { "@test/google": "^1.0.0" },
-        },
-        providersConfiguration: {
-          "@test/google": {
-            scopes: ["gmail.readonly", "gmail.send"],
-          },
-        },
-      }),
-    );
-    expect(result.valid).toBe(true);
-    const m = result.manifest as Record<string, unknown>;
-    const cfg = m.providersConfiguration as Record<string, Record<string, unknown>>;
-    expect(cfg["@test/google"]!.scopes).toEqual(["gmail.readonly", "gmail.send"]);
-  });
+  // ─── schema_version format validation (AFPS 0.x) ───
 
-  it("valid provider manifest (oauth2)", () => {
-    const result = validateManifest(validProviderManifest());
-    expect(result.valid).toBe(true);
-    expect(result.errors).toHaveLength(0);
-    expect(result.manifest).toBeDefined();
-  });
-
-  it("valid provider manifest (api_key)", () => {
-    const result = validateManifest(
-      validProviderManifest({
-        definition: {
-          authMode: "api_key",
-          credentials: { schema: { apiKey: { type: "string", label: "API Key" } } },
-        },
-      }),
-    );
-    expect(result.valid).toBe(true);
-  });
-
-  it("valid provider manifest (basic)", () => {
-    const result = validateManifest(
-      validProviderManifest({
-        definition: {
-          authMode: "basic",
-          credentials: {
-            schema: {
-              username: { type: "string" },
-              password: { type: "string" },
-            },
-          },
-        },
-      }),
-    );
-    expect(result.valid).toBe(true);
-  });
-
-  it("valid provider manifest (oauth1)", () => {
-    const result = validateManifest(
-      validProviderManifest({
-        definition: {
-          authMode: "oauth1",
-          oauth1: {
-            requestTokenUrl: "https://example.com/request-token",
-            accessTokenUrl: "https://example.com/access-token",
-          },
-        },
-      }),
-    );
-    expect(result.valid).toBe(true);
-  });
-
-  it("provider oauth2 — missing authorizationUrl", () => {
-    const result = validateManifest(
-      validProviderManifest({
-        definition: {
-          authMode: "oauth2",
-          oauth2: { tokenUrl: "https://example.com/token" },
-        },
-      }),
-    );
+  it("rejects schema_version with patch segment (0.1.0)", () => {
+    const result = validateManifest(validAgentManifest({ schema_version: "0.1.0" }));
     expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes("authorizationUrl"))).toBe(true);
+    expect(result.errors.some((e) => e.includes("schema_version"))).toBe(true);
   });
 
-  it("provider oauth2 — missing tokenUrl", () => {
-    const result = validateManifest(
-      validProviderManifest({
-        definition: {
-          authMode: "oauth2",
-          oauth2: { authorizationUrl: "https://example.com/authorize" },
-        },
-      }),
-    );
+  it("rejects schema_version without minor segment (0)", () => {
+    const result = validateManifest(validAgentManifest({ schema_version: "0" }));
     expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes("tokenUrl"))).toBe(true);
+    expect(result.errors.some((e) => e.includes("schema_version"))).toBe(true);
   });
 
-  it("provider oauth2 — missing oauth2 object", () => {
-    const result = validateManifest(
-      validProviderManifest({
-        definition: { authMode: "oauth2" },
-      }),
-    );
+  it("rejects schema_version with v prefix (v0.1)", () => {
+    const result = validateManifest(validAgentManifest({ schema_version: "v0.1" }));
     expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes("oauth2"))).toBe(true);
+    expect(result.errors.some((e) => e.includes("schema_version"))).toBe(true);
   });
 
-  it("provider oauth1 — missing requestTokenUrl", () => {
-    const result = validateManifest(
-      validProviderManifest({
-        definition: {
-          authMode: "oauth1",
-          oauth1: { accessTokenUrl: "https://example.com/access-token" },
-        },
-      }),
-    );
-    expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes("requestTokenUrl"))).toBe(true);
-  });
-
-  it("provider api_key — missing credentials", () => {
-    const result = validateManifest(
-      validProviderManifest({
-        definition: { authMode: "api_key" },
-      }),
-    );
-    expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes("credentials"))).toBe(true);
-  });
-
-  it("provider — missing definition", () => {
-    const { definition: _, ...noDefinition } = validProviderManifest();
-    const result = validateManifest(noDefinition);
+  it("rejects schema_version with wrong major (1.0)", () => {
+    const result = validateManifest(validAgentManifest({ schema_version: "1.0" }));
     expect(result.valid).toBe(false);
   });
 
-  it("provider — invalid authMode", () => {
-    const result = validateManifest(
-      validProviderManifest({
-        definition: { authMode: "invalid_mode" },
-      }),
-    );
-    expect(result.valid).toBe(false);
-  });
-
-  // ─── uploadProtocols (AFPS spec.md §7.7) ───
-
-  it("provider — uploadProtocols with single known protocol accepted", () => {
-    const result = validateManifest(
-      validProviderManifest({
-        definition: {
-          authMode: "oauth2",
-          oauth2: {
-            authorizationUrl: "https://example.com/authorize",
-            tokenUrl: "https://example.com/token",
-          },
-          uploadProtocols: ["google-resumable"],
-        },
-      }),
-    );
-    expect(result.valid).toBe(true);
-  });
-
-  it("provider — uploadProtocols with multiple known protocols accepted", () => {
-    const result = validateManifest(
-      validProviderManifest({
-        definition: {
-          authMode: "oauth2",
-          oauth2: {
-            authorizationUrl: "https://example.com/authorize",
-            tokenUrl: "https://example.com/token",
-          },
-          uploadProtocols: ["s3-multipart", "tus", "ms-resumable"],
-        },
-      }),
-    );
-    expect(result.valid).toBe(true);
-  });
-
-  it("provider — uploadProtocols omitted is valid (backwards compatible)", () => {
-    const result = validateManifest(validProviderManifest());
-    expect(result.valid).toBe(true);
-  });
-
-  it("provider — uploadProtocols rejects unknown protocol", () => {
-    const result = validateManifest(
-      validProviderManifest({
-        definition: {
-          authMode: "oauth2",
-          oauth2: {
-            authorizationUrl: "https://example.com/authorize",
-            tokenUrl: "https://example.com/token",
-          },
-          uploadProtocols: ["fake-protocol"],
-        },
-      }),
-    );
-    expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.toLowerCase().includes("uploadprotocols"))).toBe(true);
-  });
-
-  it("provider — uploadProtocols rejects mix of known and unknown", () => {
-    const result = validateManifest(
-      validProviderManifest({
-        definition: {
-          authMode: "oauth2",
-          oauth2: {
-            authorizationUrl: "https://example.com/authorize",
-            tokenUrl: "https://example.com/token",
-          },
-          uploadProtocols: ["tus", "fake-protocol"],
-        },
-      }),
-    );
-    expect(result.valid).toBe(false);
-  });
-
-  it("provider — uploadProtocols rejects duplicate values", () => {
-    const result = validateManifest(
-      validProviderManifest({
-        definition: {
-          authMode: "oauth2",
-          oauth2: {
-            authorizationUrl: "https://example.com/authorize",
-            tokenUrl: "https://example.com/token",
-          },
-          uploadProtocols: ["tus", "tus"],
-        },
-      }),
-    );
-    expect(result.valid).toBe(false);
-  });
-
-  it("provider — uploadProtocols rejects non-array values", () => {
-    const result = validateManifest(
-      validProviderManifest({
-        definition: {
-          authMode: "oauth2",
-          oauth2: {
-            authorizationUrl: "https://example.com/authorize",
-            tokenUrl: "https://example.com/token",
-          },
-          uploadProtocols: "google-resumable",
-        },
-      }),
-    );
-    expect(result.valid).toBe(false);
-  });
-
-  it("provider with setupGuide", () => {
-    const result = validateManifest(
-      validProviderManifest({
-        setupGuide: {
-          callbackUrlHint: "https://example.com/callback",
-          steps: [
-            { label: "Create app", url: "https://example.com/apps" },
-            { label: "Copy credentials" },
-          ],
-        },
-      }),
-    );
-    expect(result.valid).toBe(true);
-  });
-
-  it("agent with dependencies.providers", () => {
-    const result = validateManifest(
-      validAgentManifest({
-        dependencies: {
-          providers: { "@acme/slack": "^1.0.0" },
-        },
-      }),
-    );
-    expect(result.valid).toBe(true);
-  });
-
-  // ─── schemaVersion format validation ───
-
-  it("rejects schemaVersion with patch segment (1.0.0)", () => {
-    const result = validateManifest(validAgentManifest({ schemaVersion: "1.0.0" }));
-    expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes("schemaVersion"))).toBe(true);
-  });
-
-  it("rejects schemaVersion without minor segment (1)", () => {
-    const result = validateManifest(validAgentManifest({ schemaVersion: "1" }));
-    expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes("schemaVersion"))).toBe(true);
-  });
-
-  it("rejects schemaVersion with v prefix (v1.0)", () => {
-    const result = validateManifest(validAgentManifest({ schemaVersion: "v1.0" }));
-    expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes("schemaVersion"))).toBe(true);
-  });
-
-  it("rejects schemaVersion with wrong major (2.0)", () => {
-    const result = validateManifest(validAgentManifest({ schemaVersion: "2.0" }));
-    expect(result.valid).toBe(false);
-  });
-
-  it("accepts schemaVersion with higher minor (1.99)", () => {
-    const result = validateManifest(validAgentManifest({ schemaVersion: "1.99" }));
+  it("accepts schema_version with higher minor (0.99)", () => {
+    const result = validateManifest(validAgentManifest({ schema_version: "0.99" }));
     expect(result.valid).toBe(true);
   });
 
@@ -526,8 +363,8 @@ describe("validateManifest", () => {
       name: "@test-org/hello-world",
       version: "1.0.0",
       type: "agent",
-      schemaVersion: "1.0",
-      displayName: "Hello World",
+      schema_version: "0.1",
+      display_name: "Hello World",
       author: "Appstrate",
       description: "A demo agent",
       keywords: ["demo", "example", "getting-started"],
@@ -544,11 +381,11 @@ describe("validateManifest", () => {
       name: "@test-org/fallback-agent",
       version: "0.0.0",
       type: "agent",
-      schemaVersion: "1.0",
-      displayName: "Fallback",
+      schema_version: "0.1",
+      display_name: "Fallback",
       author: "",
       description: "",
-      dependencies: { providers: {} },
+      dependencies: { integrations: {} },
     };
     const result = validateManifest(manifest);
     expect(result.valid).toBe(true);
@@ -567,11 +404,11 @@ describe("validateManifest", () => {
       name: "@test-org/my-agent",
       version: "1.0.0",
       type: "agent",
-      schemaVersion: "1.0",
-      displayName: "My Agent",
+      schema_version: "0.1",
+      display_name: "My Agent",
       description: "An agent",
       author: "user@example.com",
-      dependencies: { providers: {} },
+      dependencies: { integrations: {} },
     };
     const result = validateManifest(manifest);
     expect(result.valid).toBe(true);
@@ -584,82 +421,7 @@ describe("validateManifest", () => {
       name: "@test-org/my-skill",
       version: "1.0.0",
       type: "skill",
-      schemaVersion: "1.0",
-    };
-    const result = validateManifest(manifest);
-    expect(result.valid).toBe(true);
-    expect(result.errors).toHaveLength(0);
-  });
-
-  it("default tool manifest (content-module-factory + createOrgItem enrichment) is valid", () => {
-    // Mirrors makeContentPackageModule("tool") + createOrgItem tool enrichment
-    const manifest = {
-      name: "@test-org/my-tool",
-      version: "1.0.0",
-      type: "tool",
-      schemaVersion: "1.0",
-      entrypoint: "tool.ts",
-      tool: {
-        name: "my-tool",
-        description: "Tool",
-        inputSchema: { type: "object", properties: {} },
-      },
-    };
-    const result = validateManifest(manifest);
-    expect(result.valid).toBe(true);
-    expect(result.errors).toHaveLength(0);
-  });
-
-  it("default provider manifest (POST /api/providers) is valid", () => {
-    // Mirrors the manifest built by strate/apps/api/src/routes/providers.ts
-    const manifest = {
-      name: "@test-org/my-provider",
-      version: "1.0.0",
-      type: "provider",
-      displayName: "My Provider",
-      description: "A custom provider",
-      author: "user@example.com",
-      definition: {
-        authMode: "oauth2",
-        oauth2: {
-          authorizationUrl: "https://example.com/authorize",
-          tokenUrl: "https://example.com/token",
-          defaultScopes: [],
-          scopeSeparator: " ",
-          pkceEnabled: true,
-          tokenAuthMethod: "client_secret_post",
-        },
-        credentialHeaderName: "",
-        credentialHeaderPrefix: "",
-        authorizedUris: [],
-        allowAllUris: false,
-      },
-    };
-    const result = validateManifest(manifest);
-    expect(result.valid).toBe(true);
-    expect(result.errors).toHaveLength(0);
-  });
-
-  it("default provider manifest (api_key mode) is valid", () => {
-    const manifest = {
-      name: "@test-org/api-provider",
-      version: "1.0.0",
-      type: "provider",
-      displayName: "API Provider",
-      definition: {
-        authMode: "api_key",
-        credentials: {
-          schema: {
-            type: "object",
-            properties: { api_key: { type: "string", description: "API Key" } },
-            required: ["api_key"],
-          },
-          fieldName: "api_key",
-        },
-        credentialHeaderName: "Authorization",
-        credentialHeaderPrefix: "Bearer ",
-        authorizedUris: ["https://api.example.com/*"],
-      },
+      schema_version: "0.1",
     };
     const result = validateManifest(manifest);
     expect(result.valid).toBe(true);
@@ -672,12 +434,12 @@ describe("validateManifest", () => {
       customTopLevel: "preserved",
       timeout: 300,
       dependencies: {
-        providers: { "@test/google": "^1.0.0" },
+        integrations: { "@test/google": "^1.0.0" },
         skills: {},
-        tools: {},
+        mcp_servers: {},
         customDepsField: "preserved",
       },
-      providersConfiguration: {
+      integrations_configuration: {
         "@test/google": {
           scopes: ["gmail.readonly"],
           customConfigField: true,
@@ -694,215 +456,330 @@ describe("validateManifest", () => {
     const deps = m.dependencies as Record<string, unknown>;
     expect(deps.customDepsField).toBe("preserved");
 
-    const cfg = m.providersConfiguration as Record<string, Record<string, unknown>>;
+    const cfg = m.integrations_configuration as Record<string, Record<string, unknown>>;
     expect(cfg["@test/google"]!.customConfigField).toBe(true);
   });
 });
 
 // ─────────────────────────────────────────────
-// validateProviderCredentialKeys
+// validateManifest — all four AFPS package types
 // ─────────────────────────────────────────────
 
-describe("validateProviderCredentialKeys", () => {
-  it("oauth2 / oauth1 are not constrained (no credentials block)", () => {
-    expect(validateProviderCredentialKeys({ definition: { authMode: "oauth2" } })).toEqual([]);
-    expect(validateProviderCredentialKeys({ definition: { authMode: "oauth1" } })).toEqual([]);
-  });
-
-  it("canonical api_key manifest passes", () => {
-    const errors = validateProviderCredentialKeys({
-      definition: {
-        authMode: "api_key",
-        credentials: {
-          schema: { type: "object", properties: { api_key: { type: "string" } } },
-          fieldName: "api_key",
-        },
-      },
-    });
-    expect(errors).toEqual([]);
-  });
-
-  it("hyphen in schema property key is rejected", () => {
-    const errors = validateProviderCredentialKeys({
-      definition: {
-        authMode: "api_key",
-        credentials: {
-          schema: { type: "object", properties: { "api-key": { type: "string" } } },
-          fieldName: "api-key",
-        },
-      },
-    });
-    expect(errors.length).toBeGreaterThan(0);
-    const schemaErr = errors.find((e) => e.field === "schemaKey");
-    expect(schemaErr?.key).toBe("api-key");
-    expect(schemaErr?.message).toContain("api-key");
-  });
-
-  it("fieldName not matching schema properties is rejected", () => {
-    const errors = validateProviderCredentialKeys({
-      definition: {
-        authMode: "api_key",
-        credentials: {
-          schema: { type: "object", properties: { api_key: { type: "string" } } },
-          fieldName: "token",
-        },
-      },
-    });
-    const fieldErr = errors.find((e) => e.field === "fieldName");
-    expect(fieldErr?.message).toContain("not declared");
-  });
-
-  it("fieldName with illegal characters is rejected", () => {
-    const errors = validateProviderCredentialKeys({
-      definition: {
-        authMode: "api_key",
-        credentials: {
-          schema: { type: "object", properties: {} },
-          fieldName: "Api-Key",
-        },
-      },
-    });
-    expect(errors.length).toBeGreaterThan(0);
-    expect(errors[0]?.field).toBe("fieldName");
-  });
-
-  it("custom authMode with no credentials block passes (no schema to validate)", () => {
-    expect(validateProviderCredentialKeys({ definition: { authMode: "custom" } })).toEqual([]);
-  });
-
-  it("custom authMode with empty schema.properties and no fieldName passes", () => {
-    const errors = validateProviderCredentialKeys({
-      definition: {
-        authMode: "custom",
-        credentials: { schema: { type: "object", properties: {} } },
-      },
-    });
-    expect(errors).toEqual([]);
-  });
-
-  it("custom authMode with empty schema.properties accepts any canonical fieldName", () => {
-    // When no properties are declared, membership check is skipped — the
-    // fieldName only needs to satisfy the pattern. Pins intentional leniency.
-    const errors = validateProviderCredentialKeys({
-      definition: {
-        authMode: "custom",
-        credentials: {
-          schema: { type: "object", properties: {} },
-          fieldName: "any_key",
-        },
-      },
-    });
-    expect(errors).toEqual([]);
-  });
-
-  it("custom authMode still rejects non-canonical fieldName even with empty schema", () => {
-    const errors = validateProviderCredentialKeys({
-      definition: {
-        authMode: "custom",
-        credentials: {
-          schema: { type: "object", properties: {} },
-          fieldName: "Api-Key",
-        },
-      },
-    });
-    expect(errors.length).toBeGreaterThan(0);
-    expect(errors[0]?.field).toBe("fieldName");
-  });
-
-  it("validateManifest propagates credential errors for provider manifests", () => {
-    const result = validateManifest(
-      validProviderManifest({
-        definition: {
-          authMode: "api_key",
-          credentials: {
-            schema: { type: "object", properties: { "api-key": { type: "string" } } },
+describe("validateManifest — package-type dispatch", () => {
+  it("dispatches an integration manifest", () => {
+    const r = validateManifest({
+      name: "@test/gmail",
+      version: "1.0.0",
+      type: "integration",
+      schema_version: "0.1",
+      display_name: "Gmail",
+      source: { kind: "remote", remote: { url: "https://x/mcp", transport: "streamable-http" } },
+      auths: {
+        oauth: {
+          type: "oauth2",
+          issuer: "https://idp",
+          authorized_uris: ["https://api/**"],
+          delivery: {
+            http: { in: "header", name: "Authorization", value: "{$credential.access_token}" },
           },
+        },
+      },
+    });
+    expect(r.valid).toBe(true);
+  });
+
+  it("dispatches an mcp-server manifest via root identity (AFPS §3.4)", () => {
+    const r = validateManifest({
+      manifest_version: "0.3",
+      name: "@test/fetch-json",
+      version: "1.0.0",
+      type: "mcp-server",
+      schema_version: "0.1",
+      display_name: "Fetch JSON",
+      server: {
+        type: "node",
+        entry_point: "server/index.js",
+        mcp_config: { command: "node", args: ["server/index.js"] },
+      },
+    });
+    expect(r.valid).toBe(true);
+  });
+
+  it("rejects an mcp-server manifest with no root identity", () => {
+    const r = validateManifest({
+      manifest_version: "0.3",
+      name: "@test/fetch-json",
+      version: "1.0.0",
+      // missing type: "mcp-server"
+      server: {
+        type: "node",
+        entry_point: "server/index.js",
+        mcp_config: { command: "node" },
+      },
+    });
+    // No root `type` → dispatcher fails fast with the typed Unknown-package-type
+    // error (AFPS requires `type` as the discriminator).
+    expect(r.valid).toBe(false);
+  });
+
+  it("rejects an mcp-server with uv server type on manifest_version 0.3", () => {
+    const r = validateManifest({
+      manifest_version: "0.3",
+      name: "@test/uv-srv",
+      version: "1.0.0",
+      type: "mcp-server",
+      schema_version: "0.1",
+      server: { type: "uv", entry_point: "main.py", mcp_config: { command: "uv" } },
+    });
+    expect(r.valid).toBe(false);
+  });
+});
+
+// ─────────────────────────────────────────────
+// validateManifest — v2 §3.1 common fields
+// ─────────────────────────────────────────────
+
+describe("validateManifest — v2 common fields (§3.1)", () => {
+  it("accepts a manifest declaring every v2 common field at once", () => {
+    const result = validateManifest(
+      validSkillManifest({
+        long_description: "Detailed prose",
+        homepage: "https://example.com",
+        documentation: "https://docs.example.com",
+        support: "https://example.com/issues",
+        icon: "icon.png",
+        icons: [{ src: "icon-128.png", size: "128x128", theme: "dark" }],
+        screenshots: ["s1.png"],
+        privacy_policies: ["https://example.com/privacy"],
+        compatibility: { platforms: ["darwin"], runtimes: { node: ">=18" } },
+        author: "Jane Doe",
+        repository: "https://github.com/test/repo",
+        _meta: { "com.example.x": { foo: "bar" } },
+      }),
+    );
+    expect(result.valid).toBe(true);
+    expect(result.errors).toHaveLength(0);
+  });
+
+  it("author — accepts structured object form", () => {
+    const result = validateManifest(
+      validSkillManifest({
+        author: { name: "Jane Doe", email: "jane@example.com", url: "https://jane.example" },
+      }),
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it("author — accepts bare string form", () => {
+    const result = validateManifest(validSkillManifest({ author: "Jane Doe" }));
+    expect(result.valid).toBe(true);
+  });
+
+  it("repository — accepts structured object form", () => {
+    const result = validateManifest(
+      validSkillManifest({
+        repository: {
+          type: "git",
+          url: "https://github.com/test/repo.git",
+          directory: "packages/pkg",
+        },
+      }),
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it("repository — accepts bare string form", () => {
+    const result = validateManifest(
+      validSkillManifest({ repository: "https://github.com/test/repo" }),
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it("icons — rejects malformed size", () => {
+    // The base manifestSchema (used when type doesn't dispatch elsewhere) and
+    // the skill schema both inherit the icon-object regex from AFPS. Bad size
+    // strings must surface as validation errors.
+    const result = validateManifest(
+      validSkillManifest({ icons: [{ src: "icon.png", size: "not-a-size" }] }),
+    );
+    expect(result.valid).toBe(false);
+  });
+
+  it("_meta — accepts reverse-DNS-namespaced keys (round-trips)", () => {
+    const result = validateManifest(
+      validSkillManifest({
+        _meta: {
+          "com.example.publisher": { reviewedBy: "ops" },
+          "dev.afps.audit": { trail: ["a", "b"] },
+        },
+      }),
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it("_meta — rejects scalar values under a namespace key (§10.1 strictness)", () => {
+    // AFPS §10.1: `_meta.<reverse-dns-key>` MUST be a JSON object. The canonical
+    // schema enforces this — the previous appstrate-local laxer copy accepted
+    // strings/numbers/booleans which was a spec gap. Audit finding 1.15.
+    const result = validateManifest(
+      validSkillManifest({
+        _meta: {
+          "dev.appstrate/foo": "string-not-object",
         },
       }),
     );
     expect(result.valid).toBe(false);
   });
 
-  it("CREDENTIAL_KEY_RE sanity", () => {
-    expect(CREDENTIAL_KEY_RE.test("api_key")).toBe(true);
-    expect(CREDENTIAL_KEY_RE.test("token")).toBe(true);
-    expect(CREDENTIAL_KEY_RE.test("api-key")).toBe(false);
-    expect(CREDENTIAL_KEY_RE.test("Api_Key")).toBe(false);
-    expect(CREDENTIAL_KEY_RE.test("_leading")).toBe(false);
-    expect(CREDENTIAL_KEY_RE.test("1leading")).toBe(false);
+  it("_meta — rejects arrays and other non-object values under a namespace key", () => {
+    const result = validateManifest(
+      validSkillManifest({
+        _meta: {
+          "com.example.x": [1, 2, 3],
+        },
+      }),
+    );
+    expect(result.valid).toBe(false);
   });
-});
 
-// ─────────────────────────────────────────────
-// buildProviderDefinitionFromManifest — compat read path
-// ─────────────────────────────────────────────
-
-describe("buildProviderDefinitionFromManifest", () => {
-  it("reads nested credentials.fieldName (canonical)", () => {
-    const resolved = buildProviderDefinitionFromManifest("@test/p", {
-      definition: {
-        authMode: "api_key",
-        credentials: { fieldName: "token" },
-      },
-    });
-    expect(resolved.credentialFieldName).toBe("token");
-  });
-});
-
-// ─────────────────────────────────────────────
-// extractManifestMetadata
-// ─────────────────────────────────────────────
-
-describe("extractManifestMetadata", () => {
-  it("full manifest — all metadata extracted", () => {
-    const manifest = {
-      name: "@test/my-skill",
-      version: "1.0.0",
-      type: "skill" as const,
-      description: "A useful skill",
-      keywords: ["ai", "tool"],
+  it("common-field shapes — accept the canonical agent-full example (drift snapshot)", () => {
+    // Audit 1.15 drift gate: the local common-field shapes (authorObject /
+    // repositoryObject / iconObject / compatibilityObject) must accept anything
+    // the canonical AFPS `agentManifestSchema` accepts. We pin a representative
+    // sample derived from `afps-spec/examples/agent-full/manifest.json` and
+    // assert BOTH schemas validate it. If `@afps-spec/schema` ever tightens one
+    // of these shapes (e.g. requires `repository.directory`), the local copy
+    // will silently keep accepting the looser shape and this test will catch
+    // the divergence on the next CI run.
+    const sample = {
+      name: "@example/customer-intake",
+      version: "1.2.0",
+      type: "agent",
+      schema_version: "0.1",
+      display_name: "Customer Intake Assistant",
+      description: "Collects inbound requests and prepares a structured summary.",
+      keywords: ["workflow", "intake", "support"],
       license: "MIT",
-      repository: "https://github.com/test/repo",
-    } as Partial<Manifest>;
-    const metadata = extractManifestMetadata(manifest);
-    expect(metadata.description).toBe("A useful skill");
-    expect(metadata.keywords).toEqual(["ai", "tool"]);
-    expect(metadata.license).toBe("MIT");
-    expect(metadata.repositoryUrl).toBe("https://github.com/test/repo");
+      repository: "https://example.com/afps/customer-intake",
+      author: "AFPS Examples",
+      icons: [{ src: "icon-128.png", size: "128x128", theme: "dark" as const }],
+      compatibility: {
+        platforms: ["darwin", "linux"] as Array<"darwin" | "linux">,
+        runtimes: { node: ">=18" },
+      },
+    };
+
+    // Canonical schema must accept it.
+    const canonical = afpsAgentManifestSchema.safeParse(sample);
+    expect(canonical.success).toBe(true);
+
+    // Local schema (via validateManifest dispatch) must accept it too.
+    const local = validateManifest(sample);
+    expect(local.valid).toBe(true);
   });
 
-  it("displayName — extracted when present", () => {
-    const manifest = {
-      name: "@test/my-agent",
+  it("common-field shapes — author/repository object forms parity (drift snapshot)", () => {
+    const sample = {
+      name: "@example/pkg",
       version: "1.0.0",
       type: "agent" as const,
-      displayName: "My Custom Agent",
-    } as Partial<Manifest>;
-    const metadata = extractManifestMetadata(manifest);
-    expect(metadata.displayName).toBe("My Custom Agent");
+      schema_version: "0.1",
+      display_name: "Pkg",
+      author: { name: "Jane", email: "jane@example.com", url: "https://jane.example" },
+      repository: {
+        type: "git",
+        url: "https://github.com/test/repo.git",
+        directory: "packages/pkg",
+      },
+    };
+    const canonical = afpsAgentManifestSchema.safeParse(sample);
+    expect(canonical.success).toBe(true);
+
+    const local = validateManifest(sample);
+    expect(local.valid).toBe(true);
   });
 
-  it("empty manifest — returns empty object", () => {
-    const metadata = extractManifestMetadata({});
-    expect(metadata.description).toBeUndefined();
-    expect(metadata.keywords).toBeUndefined();
-    expect(metadata.license).toBeUndefined();
-    expect(metadata.repositoryUrl).toBeUndefined();
-    expect(metadata.displayName).toBeUndefined();
-  });
+  // ── schema_version MAJOR-policy (§2.4) ──
 
-  it("partial manifest — only defined fields included", () => {
-    const manifest = {
-      name: "@test/pkg",
+  it("schema_version — agent schema rejects forward-major (3.0) at the Zod boundary", () => {
+    // Per AFPS §2.4, consumers MUST reject manifests whose MAJOR exceeds the
+    // highest supported. The lift into the common manifest schema means
+    // programmatic `safeParse` calls now fail at the schema boundary, not only
+    // at the bundle/DB layer.
+    const result = agentManifestSchema.safeParse({
+      name: "@test/my-agent",
       version: "1.0.0",
-      type: "skill" as const,
-      description: "Only description",
-    } as Partial<Manifest>;
-    const metadata = extractManifestMetadata(manifest);
-    expect(metadata.description).toBe("Only description");
-    expect(metadata.keywords).toBeUndefined();
-    expect(metadata.license).toBeUndefined();
-    expect(metadata.repositoryUrl).toBeUndefined();
+      type: "agent",
+      schema_version: "3.0",
+      display_name: "My Agent",
+      author: "test",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("schema_version — agent schema accepts higher MINOR (0.5) as best-effort (§2.4)", () => {
+    const result = agentManifestSchema.safeParse({
+      name: "@test/my-agent",
+      version: "1.0.0",
+      type: "agent",
+      schema_version: "0.5",
+      display_name: "My Agent",
+      author: "test",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("schema_version — SUPPORTED_SCHEMA_VERSION_MAJOR is 0", () => {
+    // Constant pinning so a future bump becomes a deliberate code edit.
+    expect(SUPPORTED_SCHEMA_VERSION_MAJOR).toBe(0);
+  });
+
+  // ── _meta strict-reject malformed namespace keys (AFPS 0.1, §2 + §10.1) ──
+
+  it("_meta — hard-rejects malformed namespace key (§2 — malformed key = malformed package)", () => {
+    // AFPS 0.1 makes the upstream `metaSchema` STRICT. A key like `nodots/foo`
+    // violates Appendix B's META_NAMESPACE_KEY regex (a `/`-prefixed key's
+    // namespace must contain at least one `.`), so it is a malformed key — and
+    // a malformed key makes the package malformed, which consumers MUST reject
+    // (§2). Only WELL-FORMED unknown namespaces are tolerated (§10.1); malformed
+    // keys are rejected at parse time, no warning emitted.
+    const result = validateManifest(
+      validSkillManifest({
+        _meta: {
+          "nodots/foo": { foo: "bar" },
+        },
+      }),
+    );
+    expect(result.valid).toBe(false);
+    // The rejection must reference the `_meta` path / offending key.
+    expect(result.errors.some((e) => e.includes("_meta") || e.includes("nodots/foo"))).toBe(true);
+  });
+
+  it("_meta — bare key with no namespace prefix is accepted (matches META_NAMESPACE_KEY)", () => {
+    // The Appendix B regex makes the namespace prefix optional; a bare key
+    // like `bare-key` is structurally valid (`[A-Za-z0-9._-]+`). No warning,
+    // no reject.
+    const result = validateManifest(
+      validSkillManifest({
+        _meta: {
+          "bare-key": { foo: "bar" },
+        },
+      }),
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it("_meta — still hard-rejects the reserved MCP prefixes (§10)", () => {
+    // Producers MUST NOT use `mcp/` / `modelcontextprotocol/`. The §10 reservation
+    // is strictly stronger than §10.1's "don't reject unknown keys" rule.
+    const result = validateManifest(
+      validSkillManifest({
+        _meta: {
+          "mcp/foo": { bar: "baz" },
+        },
+      }),
+    );
+    expect(result.valid).toBe(false);
   });
 });
 
@@ -948,121 +825,5 @@ description: A skill without name
     expect(result.name).toBe("");
     expect(result.description).toBe("");
     expect(result.warnings.some((w) => w.includes("frontmatter"))).toBe(true);
-  });
-});
-
-// ─────────────────────────────────────────────
-// validateToolSource
-// ─────────────────────────────────────────────
-
-describe("validateToolSource", () => {
-  const validTool = `
-import { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-
-export default function(pi: ExtensionAPI) {
-  pi.registerTool({
-    name: "my-tool",
-    description: "Does stuff",
-    parameters: {},
-    execute(_toolCallId, params, signal) {
-      return { content: [{ type: "text", text: "hello" }] };
-    }
-  });
-}`;
-
-  it("valid tool source", () => {
-    const result = validateToolSource(validTool);
-    expect(result.valid).toBe(true);
-    expect(result.errors).toHaveLength(0);
-    expect(result.warnings).toHaveLength(0);
-  });
-
-  it("missing export default", () => {
-    const source = `function setup(pi) { pi.registerTool({ execute(_id, p, s) { return { content: [] }; } }); }`;
-    const result = validateToolSource(source);
-    expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes("export default"))).toBe(true);
-  });
-
-  it("missing registerTool — warning only", () => {
-    const source = `export default function(pi) { return { content: [{ type: "text", text: "x" }] }; }`;
-    const result = validateToolSource(source);
-    expect(result.valid).toBe(true);
-    expect(result.warnings.some((w) => w.includes("registerTool"))).toBe(true);
-  });
-
-  it("execute with single param — error", () => {
-    const source = `
-export default function(pi) {
-  pi.registerTool({
-    name: "t",
-    execute(params) {
-      return { content: [{ type: "text", text: "x" }] };
-    }
-  });
-}`;
-    const result = validateToolSource(source);
-    expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes("only one parameter"))).toBe(true);
-  });
-
-  it("unbalanced braces — no false positive (brace counting removed)", () => {
-    const source = `export default function(pi) {
-  pi.registerTool({
-    name: "t",
-    execute(_id, params, signal) {
-      return { content: [{ type: "text", text: "x" }] };
-    }
-  });`;
-    const result = validateToolSource(source);
-    // Brace counting was removed because it produced false positives
-    // (e.g. braces inside template literals or comments). The source
-    // is otherwise structurally valid, so validation should pass.
-    expect(result.valid).toBe(true);
-  });
-
-  it("empty source", () => {
-    const result = validateToolSource("   ");
-    expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes("empty"))).toBe(true);
-  });
-});
-
-// ─────────────────────────────────────────────
-// getDefaultAdminCredentialSchema
-// ─────────────────────────────────────────────
-
-describe("getDefaultAdminCredentialSchema", () => {
-  it("oauth2 returns clientId/clientSecret schema", () => {
-    const schema = getDefaultAdminCredentialSchema("oauth2");
-    expect(schema).not.toBeNull();
-    expect(schema!.type).toBe("object");
-    expect(schema!.properties.clientId).toBeDefined();
-    expect(schema!.properties.clientSecret).toBeDefined();
-    expect(schema!.required).toEqual(["clientId", "clientSecret"]);
-  });
-
-  it("oauth1 returns consumerKey/consumerSecret schema", () => {
-    const schema = getDefaultAdminCredentialSchema("oauth1");
-    expect(schema).not.toBeNull();
-    expect(schema!.properties.consumerKey).toBeDefined();
-    expect(schema!.properties.consumerSecret).toBeDefined();
-    expect(schema!.required).toEqual(["consumerKey", "consumerSecret"]);
-  });
-
-  it("api_key returns null", () => {
-    expect(getDefaultAdminCredentialSchema("api_key")).toBeNull();
-  });
-
-  it("basic returns null", () => {
-    expect(getDefaultAdminCredentialSchema("basic")).toBeNull();
-  });
-
-  it("custom returns null", () => {
-    expect(getDefaultAdminCredentialSchema("custom")).toBeNull();
-  });
-
-  it("unknown mode returns null", () => {
-    expect(getDefaultAdminCredentialSchema("whatever")).toBeNull();
   });
 });

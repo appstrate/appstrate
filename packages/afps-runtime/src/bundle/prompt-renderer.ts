@@ -16,23 +16,6 @@ import { renderTemplate } from "../template/mustache.ts";
  * forward-compatible.
  */
 /**
- * Provider surfaced to 1.2+ templates. Mirrors the common fields any
- * platform's provider registry exposes, without prescribing the exact
- * shape of credential schemas — those remain platform-specific and
- * are typically read via skill/tool docs rather than Mustache.
- */
-export interface PromptViewProvider {
-  id: string;
-  displayName?: string;
-  authMode?: string;
-  authorizedUris?: readonly string[];
-  allowAllUris?: boolean;
-  docsUrl?: string;
-  /** Platform-specific opaque bag — e.g. proxy endpoint, sidecar URL. */
-  extra?: Record<string, unknown>;
-}
-
-/**
  * Upload surfaced to 1.2+ templates — a single file the agent can read
  * from the workspace filesystem. Shape matches what an agent template
  * typically renders when listing available documents.
@@ -64,13 +47,6 @@ export interface PromptView {
   checkpoint: unknown;
   /** Recent run summaries, most recent first. Empty array when none. */
   history: ReadonlyArray<{ runId: string; timestamp: number; output: unknown }>;
-  /**
-   * Provider catalogue — the set of third-party services the agent is
-   * connected to for this run. Populated by the consumer (platform),
-   * surfaced to 1.2+ templates via `{{#providers}}…{{/providers}}`.
-   * Absent when the agent has no provider dependencies.
-   */
-  providers?: ReadonlyArray<PromptViewProvider>;
   /**
    * Declared timeout (seconds). Surfaced so environment templates can
    * render it into the prompt.
@@ -110,8 +86,6 @@ export interface RenderPromptOptions {
    * {@link PromptView.platform}.
    */
   platform?: Record<string, unknown>;
-  /** Provider catalogue surfaced to the view. See {@link PromptView.providers}. */
-  providers?: readonly PromptViewProvider[];
   /** Uploads surfaced to the view. See {@link PromptView.uploads}. */
   uploads?: readonly PromptViewUpload[];
   /** Declared timeout (seconds). See {@link PromptView.timeout}. */
@@ -148,7 +122,6 @@ export async function buildPromptView(
     memories: sliceMemories(context.memories, memoryLimit),
     checkpoint: context.checkpoint ?? null,
     history: sliceHistory(context.history, historyLimit),
-    ...(opts.providers !== undefined ? { providers: opts.providers } : {}),
     ...(opts.uploads !== undefined ? { uploads: opts.uploads } : {}),
     ...(opts.timeout !== undefined ? { timeout: opts.timeout } : {}),
     ...(opts.platform !== undefined ? { platform: opts.platform } : {}),

@@ -8,22 +8,20 @@ import type { Dependencies } from "@appstrate/core/dependencies";
 import { type PackageTypeConfig } from "./config.ts";
 import { downloadPackageFiles } from "./storage.ts";
 import { asRecord } from "@appstrate/core/safe-json";
-import { extractDepsFromManifest, parseDraftManifest } from "../../lib/manifest-utils.ts";
+import { extractSkillIdsFromManifest, parseDraftManifest } from "../../lib/manifest-utils.ts";
 
 // ─────────────────────────────────────────────
 // Dependency resolution from manifest (single source of truth)
 // ─────────────────────────────────────────────
 
 /**
- * Collect all transitive dependency IDs via BFS, grouped by type.
- * Handles cycles via a visited set. Batches DB reads per iteration.
+ * Collect all transitive skill dependency IDs via BFS. Handles cycles via a
+ * visited set; batches DB reads per iteration. The dependency graph is
+ * skill-only (integrations resolve through a separate path), so this returns
+ * a flat list of skill package IDs.
  */
-export async function collectAllDepIds(
-  rootPackageId: string,
-): Promise<{ skillIds: string[]; toolIds: string[]; providerIds: string[] }> {
+export async function collectAllSkillDepIds(rootPackageId: string): Promise<string[]> {
   const skills = new Set<string>();
-  const tools = new Set<string>();
-  const providers = new Set<string>();
   const visited = new Set<string>();
 
   // Seed: read root manifest
@@ -32,15 +30,14 @@ export async function collectAllDepIds(
     .from(packages)
     .where(eq(packages.id, rootPackageId))
     .limit(1);
-  if (!rootPkg) return { skillIds: [], toolIds: [], providerIds: [] };
+  if (!rootPkg) return [];
 
-  const rootDeps = extractDepsFromManifest(parseDraftManifest(rootPkg.draftManifest));
-  for (const id of rootDeps.skillIds) skills.add(id);
-  for (const id of rootDeps.toolIds) tools.add(id);
-  for (const id of rootDeps.providerIds) providers.add(id);
+  for (const id of extractSkillIdsFromManifest(parseDraftManifest(rootPkg.draftManifest))) {
+    skills.add(id);
+  }
 
   // BFS: process unvisited deps in batches
-  let frontier = [...skills, ...tools, ...providers];
+  let frontier = [...skills];
   visited.add(rootPackageId);
 
   while (frontier.length > 0) {
@@ -56,22 +53,9 @@ export async function collectAllDepIds(
 
     const nextFrontier: string[] = [];
     for (const row of rows) {
-      const deps = extractDepsFromManifest(parseDraftManifest(row.draftManifest));
-      for (const id of deps.skillIds) {
+      for (const id of extractSkillIdsFromManifest(parseDraftManifest(row.draftManifest))) {
         if (!skills.has(id)) {
           skills.add(id);
-          nextFrontier.push(id);
-        }
-      }
-      for (const id of deps.toolIds) {
-        if (!tools.has(id)) {
-          tools.add(id);
-          nextFrontier.push(id);
-        }
-      }
-      for (const id of deps.providerIds) {
-        if (!providers.has(id)) {
-          providers.add(id);
           nextFrontier.push(id);
         }
       }
@@ -79,17 +63,12 @@ export async function collectAllDepIds(
     frontier = nextFrontier;
   }
 
-  return {
-    skillIds: [...skills],
-    toolIds: [...tools],
-    providerIds: [...providers],
-  };
+  return [...skills];
 }
 
 /** Build dependencies object from a package's manifest (transitive). */
 export async function buildDependencies(packageId: string): Promise<Dependencies | null> {
-  const allDeps = await collectAllDepIds(packageId);
-  const allDepIds = [...allDeps.skillIds, ...allDeps.toolIds, ...allDeps.providerIds];
+  const allDepIds = await collectAllSkillDepIds(packageId);
   if (allDepIds.length === 0) return null;
 
   const depRows = await db
@@ -109,44 +88,28 @@ export async function buildDependencies(packageId: string): Promise<Dependencies
   });
 
   const skills: Record<string, string> = {};
-  const tools: Record<string, string> = {};
-  const providers: Record<string, string> = {};
 
   for (const row of rows) {
     if (!row.registryScope || !row.registryName) continue;
     if (!row.version) continue;
     const scopedName = `@${row.registryScope}/${row.registryName}`;
-    const version = row.version;
-    if (row.type === "skill") skills[scopedName] = version;
-    else if (row.type === "tool") tools[scopedName] = version;
-    else if (row.type === "provider") providers[scopedName] = version;
+    if (row.type === "skill") skills[scopedName] = row.version;
   }
 
-  const hasSkills = Object.keys(skills).length > 0;
-  const hasTools = Object.keys(tools).length > 0;
-  const hasProviders = Object.keys(providers).length > 0;
-  if (!hasSkills && !hasTools && !hasProviders) return null;
+  if (Object.keys(skills).length === 0) return null;
 
-  const result: Dependencies = {};
-  if (hasSkills) result.skills = skills;
-  if (hasTools) result.tools = tools;
-  if (hasProviders) result.providers = providers;
+  const result: Dependencies = { skills };
   return result;
 }
 
-/** Get all files for a package's transitive deps of a type. Returns Map<itemId, files>. */
+/** Get all files for a package's transitive skill deps. Returns Map<itemId, files>. */
 export async function getPackageDepFiles(
   packageId: string,
   orgId: string,
   cfg: PackageTypeConfig,
 ): Promise<Map<string, Record<string, Uint8Array>>> {
-  const allDeps = await collectAllDepIds(packageId);
-  const typeToIds: Record<string, string[]> = {
-    skill: allDeps.skillIds,
-    tool: allDeps.toolIds,
-    provider: allDeps.providerIds,
-  };
-  const depIds = typeToIds[cfg.type] ?? [];
+  // The transitive graph is skill-only — only skill packages carry dep files.
+  const depIds = cfg.type === "skill" ? await collectAllSkillDepIds(packageId) : [];
 
   const entries = await Promise.all(
     depIds.map(async (depId) => {

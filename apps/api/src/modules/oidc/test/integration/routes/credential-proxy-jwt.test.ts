@@ -128,7 +128,7 @@ describe("POST /api/credential-proxy/proxy — auth gate", () => {
   it("accepts a device-flow JWT bearer (oauth2-instance) and reaches post-auth validation", async () => {
     const p = await createJwtPrincipal();
 
-    // Omit X-Provider on purpose — a JWT that authenticated successfully
+    // Omit X-Integration-Id on purpose — a JWT that authenticated successfully
     // lands in the handler body and trips the explicit validation there.
     // If the auth pipeline rejected the JWT we would get 401 / 403
     // instead, never reaching the 400 branch.
@@ -148,7 +148,7 @@ describe("POST /api/credential-proxy/proxy — auth gate", () => {
     expect(res.status).toBe(400);
     const body = (await res.json()) as { detail?: string; title?: string };
     const detail = body.detail ?? body.title ?? "";
-    expect(detail).toMatch(/X-Provider/i);
+    expect(detail).toMatch(/X-Integration-Id/i);
   });
 
   it("rejects cookie sessions with 403 (CSRF threat model)", async () => {
@@ -160,7 +160,7 @@ describe("POST /api/credential-proxy/proxy — auth gate", () => {
         Cookie: p.cookie,
         "X-Application-Id": p.applicationId,
         "X-Org-Id": p.orgId,
-        "X-Provider": "@test/example",
+        "X-Integration-Id": "@test/example",
         "X-Target": "https://example.test/echo",
         "X-Session-Id": crypto.randomUUID(),
         "Content-Type": "application/json",
@@ -182,7 +182,7 @@ describe("POST /api/credential-proxy/proxy — auth gate", () => {
       headers: {
         Authorization: "Bearer not-a-real-token",
         "X-Application-Id": "app_x",
-        "X-Provider": "@test/example",
+        "X-Integration-Id": "@test/example",
         "X-Target": "https://example.test/echo",
         "X-Session-Id": crypto.randomUUID(),
         "Content-Type": "application/json",
@@ -207,7 +207,7 @@ describe("POST /api/credential-proxy/proxy — auth gate", () => {
         Authorization: `Bearer ${p.accessToken}`,
         "X-Application-Id": p.applicationId,
         "X-Org-Id": p.orgId,
-        "X-Provider": "@missing/provider",
+        "X-Integration-Id": "@missing/provider",
         "X-Target": "https://example.test/echo",
         "X-Session-Id": sessionId,
         "Content-Type": "application/json",

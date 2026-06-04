@@ -21,17 +21,13 @@ import { JsonView } from "../components/json-view";
 import { RunList } from "../components/run-list";
 import { NextRunPreview } from "../components/next-run-preview";
 import { usePaginatedRuns } from "../hooks/use-paginated-runs";
-import { ProviderConnectionCard } from "../components/provider-connection-card";
-import { AppProfileProvidersBlock } from "../components/app-profile-providers-block";
 import { ScheduleStatusBadge } from "../components/schedule-status-badge";
-import { ProfileLabel } from "../components/profile-label";
+import { ActorLabel } from "../components/actor-label";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { useScheduleById, useUpdateSchedule, useDeleteSchedule } from "../hooks/use-schedules";
-import { usePackageDetail, useAgents } from "../hooks/use-packages";
-import { useScheduleProviderReadiness } from "../hooks/use-schedule-readiness";
-import { useConnectionProfiles } from "../hooks/use-connection-profiles";
+import { useAgents } from "../hooks/use-packages";
 import { formatDateField } from "../lib/markdown";
-import { MoreHorizontal, Pencil, Trash2, Play, Pause, Calendar, Clock } from "lucide-react";
+import { MoreHorizontal, Pencil, Trash2, Play, Pause, Clock } from "lucide-react";
 
 export function ScheduleDetailPage() {
   const { t } = useTranslation(["agents", "common"]);
@@ -43,16 +39,8 @@ export function ScheduleDetailPage() {
   const updateSchedule = useUpdateSchedule();
   const deleteSchedule = useDeleteSchedule();
 
-  const { data: agentDetail } = usePackageDetail("agent", schedule?.packageId);
-  const hasProviders = (agentDetail?.dependencies?.providers?.length ?? 0) > 0;
-
-  const tabs = hasProviders
-    ? (["runs", "providers", "details"] as const)
-    : (["runs", "details"] as const);
-
-  const needsSetup = hasProviders && schedule?.readiness?.status !== "ready";
-  const defaultTab = needsSetup ? "providers" : "runs";
-  const [activeTab, setActiveTab] = useTabWithHash(tabs, defaultTab);
+  const tabs = ["runs", "details"] as const;
+  const [activeTab, setActiveTab] = useTabWithHash(tabs, "runs");
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   if (isLoading) return <LoadingState />;
@@ -109,9 +97,6 @@ export function ScheduleDetailPage() {
         >
           <TabsList className="mt-3">
             <TabsTrigger value="runs">{t("schedule.tabRuns")}</TabsTrigger>
-            {hasProviders && (
-              <TabsTrigger value="providers">{t("schedule.tabProviders")}</TabsTrigger>
-            )}
             <TabsTrigger value="details">{t("schedule.tabDetails")}</TabsTrigger>
           </TabsList>
         </PageHeader>
@@ -119,12 +104,6 @@ export function ScheduleDetailPage() {
         <TabsContent value="runs">
           <ScheduleHistory schedule={schedule} />
         </TabsContent>
-
-        {hasProviders && (
-          <TabsContent value="providers">
-            <ScheduleProviders schedule={schedule} />
-          </TabsContent>
-        )}
 
         <TabsContent value="details">
           <ScheduleParams schedule={schedule} />
@@ -157,20 +136,7 @@ function LiveScheduleStatusBadge({
 }: {
   schedule: NonNullable<ReturnType<typeof useScheduleById>["data"]>;
 }) {
-  const { allReady, isLoading, totalProviders } = useScheduleProviderReadiness(schedule);
-
-  const effectiveReady = isLoading ? schedule.readiness.status === "ready" : allReady;
-  const effectiveHasProviders = isLoading
-    ? schedule.readiness.totalProviders > 0
-    : totalProviders > 0;
-
-  return (
-    <ScheduleStatusBadge
-      enabled={schedule.enabled ?? true}
-      hasProviders={effectiveHasProviders}
-      allReady={effectiveReady}
-    />
-  );
+  return <ScheduleStatusBadge enabled={schedule.enabled ?? true} />;
 }
 
 // ─── Params Tab ──────────────────────────────────────────
@@ -183,24 +149,23 @@ function ScheduleParams({
   const { t } = useTranslation(["agents"]);
   const { data: agents } = useAgents();
   const agentDisplayName =
-    agents?.find((f) => f.id === schedule.packageId)?.displayName ?? schedule.packageId;
+    agents?.find((f) => f.id === schedule.packageId)?.display_name ?? schedule.packageId;
   const input = schedule.input as Record<string, unknown> | null;
 
   return (
     <>
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="border-border bg-muted/30 rounded-lg border p-4">
-          <p className="text-muted-foreground mb-1 text-xs">{t("schedule.paramProfile")}</p>
+          <p className="text-muted-foreground mb-1 text-xs">{t("schedule.paramActor")}</p>
           <p className="inline-flex items-center gap-1.5 text-sm font-medium">
-            <ProfileLabel
-              profileType={schedule.profileType}
-              profileName={schedule.profileName}
-              profileOwnerName={schedule.profileOwnerName}
+            <ActorLabel
+              actor_type={schedule.actor_type}
+              actor_name={schedule.actor_name}
               iconSize="size-3.5"
             />
-            {schedule.profileType && (
+            {schedule.actor_type && (
               <UIBadge variant="outline" className="px-1 py-0 text-[10px]">
-                {schedule.profileType}
+                {schedule.actor_type}
               </UIBadge>
             )}
           </p>
@@ -218,7 +183,7 @@ function ScheduleParams({
 
         <div className="border-border bg-muted/30 rounded-lg border p-4">
           <p className="text-muted-foreground mb-1 text-xs">{t("schedule.paramCron")}</p>
-          <p className="font-mono text-sm">{schedule.cronExpression}</p>
+          <p className="font-mono text-sm">{schedule.cron_expression}</p>
         </div>
 
         <div className="border-border bg-muted/30 rounded-lg border p-4">
@@ -229,14 +194,14 @@ function ScheduleParams({
         <div className="border-border bg-muted/30 rounded-lg border p-4">
           <p className="text-muted-foreground mb-1 text-xs">{t("schedule.paramNextRun")}</p>
           <p className="text-sm font-medium">
-            {schedule.nextRunAt ? formatDateField(schedule.nextRunAt) : "-"}
+            {schedule.next_run_at ? formatDateField(schedule.next_run_at) : "-"}
           </p>
         </div>
 
         <div className="border-border bg-muted/30 rounded-lg border p-4">
           <p className="text-muted-foreground mb-1 text-xs">{t("schedule.paramLastRun")}</p>
           <p className="text-sm font-medium">
-            {schedule.lastRunAt ? formatDateField(schedule.lastRunAt) : "-"}
+            {schedule.last_run_at ? formatDateField(schedule.last_run_at) : "-"}
           </p>
         </div>
       </div>
@@ -254,66 +219,6 @@ function ScheduleParams({
   );
 }
 
-// ─── Providers Tab ───────────────────────────────────────
-
-function ScheduleProviders({
-  schedule,
-}: {
-  schedule: NonNullable<ReturnType<typeof useScheduleById>["data"]>;
-}) {
-  const { t } = useTranslation(["agents"]);
-  const { agentProviders } = useScheduleProviderReadiness(schedule);
-  const { data: userProfiles } = useConnectionProfiles();
-
-  const isAppProfile = schedule.profileType === "app";
-  const appProfileId = isAppProfile ? schedule.connectionProfileId : undefined;
-
-  // For user profile schedules, only the profile owner can connect/disconnect
-  const isProfileOwner = userProfiles?.some((p) => p.id === schedule.connectionProfileId) ?? false;
-
-  if (agentProviders.length === 0) {
-    return <EmptyState message={t("schedule.noProviders")} icon={Calendar} compact />;
-  }
-
-  if (isAppProfile && appProfileId) {
-    return (
-      <AppProfileProvidersBlock
-        appProfileId={appProfileId}
-        appProfileName={schedule.profileName ?? "-"}
-        providers={agentProviders}
-      />
-    );
-  }
-
-  // User profile schedule — show provider cards directly
-  return (
-    <div className="border-border bg-card rounded-lg border">
-      <div className="border-border flex items-center gap-2 border-b px-4 py-3">
-        <ProfileLabel
-          profileType={schedule.profileType}
-          profileName={schedule.profileName}
-          profileOwnerName={schedule.profileOwnerName}
-          iconSize="size-4"
-          className="text-muted-foreground text-sm font-medium"
-        />
-        <UIBadge variant="outline" className="px-1 py-0 text-[10px]">
-          {schedule.profileType}
-        </UIBadge>
-      </div>
-      <div className="space-y-2 p-2">
-        {agentProviders.map((providerId) => (
-          <ProviderConnectionCard
-            key={providerId}
-            providerId={providerId}
-            readOnly={!isProfileOwner}
-            viewProfileId={schedule.connectionProfileId}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
 // ─── History Tab ─────────────────────────────────────────
 
 function ScheduleHistory({
@@ -324,9 +229,9 @@ function ScheduleHistory({
   const { t } = useTranslation(["agents"]);
   const { data: agents } = useAgents();
   const agentName =
-    agents?.find((f) => f.id === schedule.packageId)?.displayName ?? schedule.packageId;
+    agents?.find((f) => f.id === schedule.packageId)?.display_name ?? schedule.packageId;
 
-  const isActive = schedule.enabled && schedule.readiness.status === "ready";
+  const isActive = schedule.enabled;
 
   // Use the same hook as RunList so React Query deduplicates the fetch.
   // We only need the first run for the "next run" preview row.
@@ -338,7 +243,7 @@ function ScheduleHistory({
   const firstExec = data?.data?.[0];
 
   // Show the fake "next run" row only if the last run started > 30s ago.
-  const lastStartedAt = firstExec?.startedAt;
+  const lastStartedAt = firstExec?.started_at;
   const [showNext, setShowNext] = useState(true);
 
   /* eslint-disable react-hooks/set-state-in-effect -- syncing with wall clock timer */
@@ -359,12 +264,12 @@ function ScheduleHistory({
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const previewRow =
-    isActive && showNext && schedule.nextRunAt ? (
+    isActive && showNext && schedule.next_run_at ? (
       <NextRunPreview
         runNumber={(firstExec?.runNumber ?? 0) + 1}
         agentName={agentName}
-        scheduleName={schedule.name || schedule.id}
-        nextRunAt={schedule.nextRunAt}
+        schedule_name={schedule.name || schedule.id}
+        next_run_at={schedule.next_run_at}
       />
     ) : null;
 

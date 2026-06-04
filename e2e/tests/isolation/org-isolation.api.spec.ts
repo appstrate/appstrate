@@ -14,7 +14,6 @@ import {
   createEndUser,
   createApiKey,
   createApplication,
-  createConnectionProfile,
   createSchedule,
   installPackageInApp,
 } from "../../helpers/seed.ts";
@@ -183,14 +182,12 @@ test.describe("Cross-org application isolation", () => {
 // ═══════════════════════════════════════════════
 
 test.describe("Cross-org schedule isolation", () => {
-  test("OrgB cannot list OrgA schedules", async ({ request, clientA, clientB, ctxA }) => {
+  test("OrgB cannot list OrgA schedules", async ({ clientA, clientB, ctxA }) => {
     const scope = `@${ctxA.org.orgSlug}`;
     const agentName = `sched-agent-${Date.now()}`;
     await createAgent(clientA, scope, agentName);
 
-    const profile = await createConnectionProfile(request, ctxA.auth.cookie, ctxA.org.orgId);
-
-    const schedule = await createSchedule(clientA, scope, agentName, profile.id);
+    const schedule = await createSchedule(clientA, scope, agentName);
 
     const res = await clientB.get("/schedules");
     expect(res.status()).toBe(200);
@@ -200,37 +197,34 @@ test.describe("Cross-org schedule isolation", () => {
     expect(ids).not.toContain(schedule.id);
   });
 
-  test("OrgB cannot access OrgA schedule by ID", async ({ request, clientA, clientB, ctxA }) => {
+  test("OrgB cannot access OrgA schedule by ID", async ({ clientA, clientB, ctxA }) => {
     const scope = `@${ctxA.org.orgSlug}`;
     const agentName = `sched-det-${Date.now()}`;
     await createAgent(clientA, scope, agentName);
 
-    const profile = await createConnectionProfile(request, ctxA.auth.cookie, ctxA.org.orgId);
-    const schedule = await createSchedule(clientA, scope, agentName, profile.id);
+    const schedule = await createSchedule(clientA, scope, agentName);
 
     const res = await clientB.get(`/schedules/${schedule.id}`);
     expect(res.status()).toBe(404);
   });
 
-  test("OrgB cannot update OrgA schedule", async ({ request, clientA, clientB, ctxA }) => {
+  test("OrgB cannot update OrgA schedule", async ({ clientA, clientB, ctxA }) => {
     const scope = `@${ctxA.org.orgSlug}`;
     const agentName = `sched-upd-${Date.now()}`;
     await createAgent(clientA, scope, agentName);
 
-    const profile = await createConnectionProfile(request, ctxA.auth.cookie, ctxA.org.orgId);
-    const schedule = await createSchedule(clientA, scope, agentName, profile.id);
+    const schedule = await createSchedule(clientA, scope, agentName);
 
     const res = await clientB.put(`/schedules/${schedule.id}`, { name: "Hijacked" });
     expect(res.status()).toBe(404);
   });
 
-  test("OrgB cannot delete OrgA schedule", async ({ request, clientA, clientB, ctxA }) => {
+  test("OrgB cannot delete OrgA schedule", async ({ clientA, clientB, ctxA }) => {
     const scope = `@${ctxA.org.orgSlug}`;
     const agentName = `sched-del-${Date.now()}`;
     await createAgent(clientA, scope, agentName);
 
-    const profile = await createConnectionProfile(request, ctxA.auth.cookie, ctxA.org.orgId);
-    const schedule = await createSchedule(clientA, scope, agentName, profile.id);
+    const schedule = await createSchedule(clientA, scope, agentName);
 
     const res = await clientB.delete(`/schedules/${schedule.id}`);
     expect(res.status()).toBe(404);
@@ -261,7 +255,11 @@ test.describe("Cross-org notification isolation", () => {
 // ═══════════════════════════════════════════════
 
 test.describe("X-Application-Id middleware enforcement", () => {
-  test("OrgB cannot use OrgA applicationId as X-Application-Id", async ({ request, ctxA, ctxB }) => {
+  test("OrgB cannot use OrgA applicationId as X-Application-Id", async ({
+    request,
+    ctxA,
+    ctxB,
+  }) => {
     // Try to access agents using OrgB's cookie + orgId but OrgA's applicationId
     const res = await request.get("/api/agents", {
       headers: {

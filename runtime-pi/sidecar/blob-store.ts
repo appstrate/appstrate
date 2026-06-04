@@ -4,7 +4,7 @@
 /**
  * Run-scoped blob cache backing the sidecar's MCP `resources/*` surface.
  *
- * One writer populates this store: the `provider_call` tool when an
+ * One writer populates this store: the `api_call` tool when an
  * upstream response is too large to inline.
  *
  * One reader: the MCP `resources/read` handler (validated against the
@@ -12,7 +12,7 @@
  * security incident, not a feature).
  *
  * Design (V2 + V8 from the migration plan):
- *   - URI scheme: `appstrate://provider-response/{runId}/{ulid}`. The
+ *   - URI scheme: `appstrate://api-response/{runId}/{ulid}`. The
  *     ULID is unguessable per spec security guidance — sequential IDs
  *     are forbidden.
  *   - In-memory only. The agent run lives in a single container with a
@@ -77,7 +77,7 @@ export function generateUlid(now: number = Date.now()): string {
   return out.slice(0, 26);
 }
 
-const BLOB_URI_PREFIX_TEMPLATE = "appstrate://provider-response/";
+const BLOB_URI_PREFIX_TEMPLATE = "appstrate://api-response/";
 
 /**
  * Build the full URI for a blob in the given run. Exposed so callers

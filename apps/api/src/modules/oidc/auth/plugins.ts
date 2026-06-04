@@ -170,6 +170,17 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
     // rotating refresh instead of a 7-day BA session.
     cliTokenPlugin(),
     deviceAuthorization({
+      // `schema: {}` is a workaround for better-auth 1.6.9's
+      // `deviceAuthorizationOptionsSchema` defining `schema: z.custom(() => true)`
+      // (device-authorization/index.mjs:28). Under zod 4.4.3 (pinned via the
+      // root `overrides.zod` since #512), `z.custom()` rejects missing keys
+      // with `expected: "nonoptional"`, so the plugin factory throws at
+      // construction unless the key is present. The plugin merges this with
+      // its own default schema via `mergeSchema(schema, options?.schema)`.
+      // CI clean installs hit this; local stale `node_modules` (mixed zod
+      // versions) masks it. Remove once better-auth fixes its options schema
+      // upstream.
+      schema: {},
       expiresIn: "10m",
       // 2s polling interval — RFC 8628 §3.2 suggests 5s as a *default*, not a
       // floor. `gh auth login`, `gcloud auth login`, and `aws sso login` all
@@ -198,6 +209,11 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
     oauthProvider({
       loginPage: "/api/oauth/login",
       consentPage: "/api/oauth/consent",
+      // basePath is `/api/auth` (not `/`), so BA advises ensuring the
+      // discovery doc at `/.well-known/oauth-authorization-server/api/auth`
+      // is served — which this plugin itself serves. The warning is purely
+      // advisory for the non-root basePath; clear it via the documented flag.
+      silenceWarnings: { oauthAuthServerConfig: true },
       // Snapshot the full vocabulary at plugin construction time —
       // `betterAuthPlugins()` runs after `loadModules()` populates the
       // module registry, so module-contributed scopes are included in

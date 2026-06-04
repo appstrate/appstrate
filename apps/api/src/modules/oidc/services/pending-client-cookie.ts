@@ -31,7 +31,7 @@
  * both.
  */
 
-import { setCookie, getCookie, deleteCookie } from "hono/cookie";
+import { setCookie, deleteCookie } from "hono/cookie";
 import type { Context } from "hono";
 import { getEnv } from "@appstrate/env";
 import { logger } from "../../../lib/logger.ts";
@@ -75,22 +75,11 @@ export function issuePendingClientCookie(c: Context<AppEnv>, clientId: string): 
 }
 
 /**
- * Read + verify the cookie from a Hono context. Returns the decoded
- * `clientId` on success, `null` on any failure (missing, expired, bad sig).
- *
- * Used by OIDC routes that have a Hono context in scope (e.g. guards that
- * clear the cookie after use).
- */
-export function readPendingClientCookie(c: Context<AppEnv>): string | null {
-  const raw = getCookie(c, COOKIE_NAME);
-  return raw ? parseAndVerify(raw) : null;
-}
-
-/**
- * Variant of `readPendingClientCookie` that reads directly from a `Headers`
- * object. Used by the `databaseHooks.user.create.before` guard, which is
- * invoked from Better Auth's internal context and only has access to the
- * request headers (not a Hono context).
+ * Read + verify the `oidc_pending_client` cookie directly from a `Headers`
+ * object. Returns the decoded `clientId` on success, `null` on any failure
+ * (missing, expired, bad sig). Used by the `databaseHooks.user.create.before`
+ * guard, which is invoked from Better Auth's internal context and only has
+ * access to the request headers (not a Hono context).
  */
 export function readPendingClientCookieFromHeaders(headers: Headers | null): string | null {
   if (!headers) return null;
@@ -111,7 +100,7 @@ function parseAndVerify(raw: string): string | null {
   // Format: `<clientId>.<exp>.<sig>`. `clientId` never contains a dot (it
   // starts with `oauth_` and is base64url) and `sig` is now `<kid>$<hmac>`
   // — neither contains a dot — so splitting on `.` still yields exactly 3
-  // parts. Legacy un-prefixed signatures are accepted by `verifyAuthHmac`.
+  // parts.
   const parts = raw.split(".");
   if (parts.length !== 3) return null;
   const [clientId, expStr, sig] = parts as [string, string, string];

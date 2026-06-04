@@ -37,6 +37,7 @@ Commands:
   verify <bundle>     Validate manifest + template, verify signature
   inspect <bundle>    Print manifest, files, signature summary
   render <bundle>     Render the prompt template against a context
+  bundle <manifest>   Vendor an mcp-server's deps into a runnable .afps
   conformance         Run the AFPS conformance suite (L1–L4)
 
 Live LLM execution is handled by 'appstrate run' — see apps/cli.
@@ -68,6 +69,7 @@ export async function runCli(argv: readonly string[], io: CliIO): Promise<number
     verify: async () => (await import("./commands/verify.ts")).run(rest, io),
     inspect: async () => (await import("./commands/inspect.ts")).run(rest, io),
     render: async () => (await import("./commands/render.ts")).run(rest, io),
+    bundle: async () => (await import("./commands/bundle.ts")).run(rest, io),
     conformance: async () => (await import("./commands/conformance.ts")).run(rest, io),
   };
 

@@ -1,0 +1,88 @@
+{
+  "name": "@appstrate/slack",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.1",
+  "display_name": "Slack (API)",
+  "description": "Team messaging and workflow automation",
+  "keywords": ["messaging", "productivity"],
+  "license": "Apache-2.0",
+  "icon": "slack",
+  "source": {
+    "kind": "none"
+  },
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "authorization_endpoint": "https://slack.com/oauth/v2/authorize",
+      "token_endpoint": "https://slack.com/api/oauth.v2.access",
+      "default_scopes": ["channels:read", "users:read"],
+      "token_endpoint_auth_method": "client_secret_post",
+      "scope_catalog": [
+        {
+          "value": "channels:read",
+          "label": "View channels"
+        },
+        {
+          "value": "channels:history",
+          "label": "View channel messages"
+        },
+        {
+          "value": "chat:write",
+          "label": "Send messages"
+        },
+        {
+          "value": "users:read",
+          "label": "View users"
+        },
+        {
+          "value": "users:read.email",
+          "label": "View user emails"
+        },
+        {
+          "value": "files:read",
+          "label": "View files"
+        },
+        {
+          "value": "files:write",
+          "label": "Upload files"
+        },
+        {
+          "value": "reactions:read",
+          "label": "View reactions"
+        },
+        {
+          "value": "reactions:write",
+          "label": "Add reactions"
+        }
+      ],
+      "authorized_uris": ["https://slack.com/api/**"],
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": ","
+        },
+        "dev.appstrate/auth": {
+          "required": true
+        }
+      }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/api": {
+      "auths": {
+        "primary": {}
+      }
+    }
+  }
+}

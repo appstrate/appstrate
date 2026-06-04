@@ -103,7 +103,7 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
           WHEN octet_length(NEW.data::text) <= 6000 THEN NEW.data
           ELSE '"[payload too large]"'::jsonb
         END,
-        'created_at', NEW.created_at
+        'created_at', to_char(NEW.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
       )::text);
       RETURN NEW;
     END;
@@ -132,6 +132,71 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
       CREATE TRIGGER run_logs_notify_trigger
         AFTER INSERT ON run_logs
         FOR EACH ROW EXECUTE FUNCTION notify_run_log_insert();
+    END $$;
+  `);
+
+  // ────────────────────────────────────────────────────────────────────
+  // integration_connections — drives live updates of the "Reconnection
+  // required" badge across every consumer (connectors page, agent picker,
+  // integration detail, status cards). Without this, the badge only
+  // refreshes on window-focus refetch and stays stale across tabs.
+  //
+  // Tenant scope: the payload carries `application_id` only — the table
+  // has no `org_id` column (org is enforced via the `applications` row).
+  // The realtime subscriber filter relies on the SSE auth gate
+  // (`validateSSEAuth`) having proven `applicationId ∈ orgId`, so this
+  // payload-side scope is sufficient.
+  //
+  // DELETE branch carries the OLD row's identifiers so the frontend can
+  // invalidate the right cache; `needs_reconnection` is NULL on delete
+  // and the listener only uses the integration id + actor.
+  // ────────────────────────────────────────────────────────────────────
+  await db.execute(drizzleSql`
+    CREATE OR REPLACE FUNCTION notify_integration_connection_change()
+    RETURNS TRIGGER AS $$
+    BEGIN
+      -- NEW is null on DELETE, OLD is null on INSERT — branch instead of
+      -- COALESCE'ing whole row records (Postgres can't compare composite
+      -- types to null via COALESCE in plpgsql reliably).
+      IF (TG_OP = 'DELETE') THEN
+        PERFORM pg_notify('connection_update', json_build_object(
+          'operation', TG_OP,
+          'id', OLD.id,
+          'integration_package_id', OLD.integration_package_id,
+          'auth_key', OLD.auth_key,
+          'user_id', OLD.user_id,
+          'end_user_id', OLD.end_user_id,
+          'application_id', OLD.application_id,
+          'needs_reconnection', NULL,
+          'deleted', TRUE
+        )::text);
+        RETURN OLD;
+      ELSE
+        PERFORM pg_notify('connection_update', json_build_object(
+          'operation', TG_OP,
+          'id', NEW.id,
+          'integration_package_id', NEW.integration_package_id,
+          'auth_key', NEW.auth_key,
+          'user_id', NEW.user_id,
+          'end_user_id', NEW.end_user_id,
+          'application_id', NEW.application_id,
+          'needs_reconnection', NEW.needs_reconnection,
+          'deleted', FALSE
+        )::text);
+        RETURN NEW;
+      END IF;
+    END;
+    $$ LANGUAGE plpgsql
+  `);
+
+  await db.execute(drizzleSql`
+    DO $$ BEGIN
+      IF EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'integration_connections_notify_trigger') THEN
+        DROP TRIGGER integration_connections_notify_trigger ON integration_connections;
+      END IF;
+      CREATE TRIGGER integration_connections_notify_trigger
+        AFTER INSERT OR UPDATE OR DELETE ON integration_connections
+        FOR EACH ROW EXECUTE FUNCTION notify_integration_connection_change();
     END $$;
   `);
 }

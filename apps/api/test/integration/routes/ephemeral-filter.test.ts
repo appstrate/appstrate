@@ -20,11 +20,11 @@ const app = getTestApp();
 
 const shadowManifest = {
   name: "@inline/r-test",
-  displayName: "Shadow Agent",
+  display_name: "Shadow Agent",
   version: "0.0.0",
   type: "agent",
   description: "Inline",
-  schemaVersion: "1.0.0",
+  schema_version: "0.1",
 } as unknown as AgentManifest;
 
 describe("ephemeral filter — catalog endpoints hide inline shadows", () => {

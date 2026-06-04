@@ -27,7 +27,8 @@ const MINIMAL_MANIFEST = JSON.stringify({
   version: "1.0.0",
   type: "agent",
   description: "Signature policy fixture",
-  schemaVersion: "1.1",
+  schema_version: "0.1",
+  display_name: "Sig Test",
 });
 
 async function buildBundleBytes(opts?: {

@@ -12,12 +12,12 @@ import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 // Catch stale fire-and-forget rejections from previous test cycles
 // (e.g., ensureDefaultProfile racing with truncateAll)
 process.on("unhandledRejection", () => {});
-import { truncateAll, db } from "../../helpers/db.ts";
+import { truncateAll } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
-import { seedPackage, seedConnectionProfile, seedConnectionForApp } from "../../helpers/seed.ts";
+import { seedPackage } from "../../helpers/seed.ts";
+import type { Actor } from "../../../src/lib/actor.ts";
 import { flushRedis, closeRedis } from "../../helpers/redis.ts";
-import { connectionProfiles, applicationProviderCredentials } from "@appstrate/db/schema";
-import { eq } from "drizzle-orm";
+import { describeRequiresRedis } from "../../helpers/tier.ts";
 import {
   createSchedule,
   listSchedules,
@@ -27,13 +27,14 @@ import {
   deleteSchedule,
 } from "../../../src/services/scheduler.ts";
 
-describe("scheduler service", () => {
+// Real BullMQ repeatable-job semantics — skipped in tier0 (in-memory queue).
+describeRequiresRedis("scheduler service", () => {
   let userId: string;
   let orgId: string;
   let orgSlug: string;
   let defaultAppId: string;
   let packageId: string;
-  let connectionProfileId: string;
+  let actor: Actor;
 
   beforeEach(async () => {
     await truncateAll();
@@ -45,8 +46,7 @@ describe("scheduler service", () => {
     orgSlug = org.slug;
     defaultAppId = applicationId;
 
-    const profile = await seedConnectionProfile({ userId, name: "Default" });
-    connectionProfileId = profile.id;
+    actor = { type: "user", id: userId };
 
     // Seed an agent package that schedules will reference
     const pkg = await seedPackage({
@@ -73,7 +73,7 @@ describe("scheduler service", () => {
       const schedule = await createSchedule(
         { orgId: orgId, applicationId: defaultAppId },
         packageId,
-        connectionProfileId,
+        actor,
         {
           name: "Every hour",
           cronExpression: "0 * * * *",
@@ -84,13 +84,13 @@ describe("scheduler service", () => {
       expect(schedule.id).toMatch(/^sched_/);
       expect(schedule.packageId).toBe(packageId);
       expect(schedule.orgId).toBe(orgId);
-      expect(schedule.connectionProfileId).toBe(connectionProfileId);
-      expect(schedule.cronExpression).toBe("0 * * * *");
+      expect(schedule.userId).toBe(userId);
+      expect(schedule.cron_expression).toBe("0 * * * *");
       expect(schedule.timezone).toBe("UTC");
       expect(schedule.enabled).toBe(true);
       expect(schedule.name).toBe("Every hour");
-      expect(schedule.nextRunAt).toBeInstanceOf(Date);
-      expect(schedule.createdAt).toBeInstanceOf(Date);
+      expect(typeof schedule.next_run_at).toBe("string");
+      expect(typeof schedule.createdAt).toBe("string");
     });
 
     it("stores JSON input when provided", async () => {
@@ -99,7 +99,7 @@ describe("scheduler service", () => {
       const schedule = await createSchedule(
         { orgId: orgId, applicationId: defaultAppId },
         packageId,
-        connectionProfileId,
+        actor,
         {
           cronExpression: "*/5 * * * *",
           input: inputData,
@@ -113,7 +113,7 @@ describe("scheduler service", () => {
       const schedule = await createSchedule(
         { orgId: orgId, applicationId: defaultAppId },
         packageId,
-        connectionProfileId,
+        actor,
         {
           cronExpression: "0 9 * * *",
         },
@@ -126,53 +126,53 @@ describe("scheduler service", () => {
       const schedule = await createSchedule(
         { orgId: orgId, applicationId: defaultAppId },
         packageId,
-        connectionProfileId,
+        actor,
         {
           cronExpression: "0 * * * *",
           timezone: "UTC",
         },
       );
 
-      expect(schedule.nextRunAt).not.toBeNull();
-      expect(schedule.nextRunAt!.getTime()).toBeGreaterThan(Date.now());
+      expect(schedule.next_run_at).not.toBeNull();
+      expect(new Date(schedule.next_run_at!).getTime()).toBeGreaterThan(Date.now());
     });
 
     it("persists per-schedule overrides verbatim", async () => {
       const schedule = await createSchedule(
         { orgId: orgId, applicationId: defaultAppId },
         packageId,
-        connectionProfileId,
+        actor,
         {
           cronExpression: "0 9 * * *",
-          configOverride: { providers: { gmail: { scopes: ["read"] } } },
+          configOverride: { integrations: { gmail: { scopes: ["read"] } } },
           modelIdOverride: "model_abc",
           proxyIdOverride: "prx_xyz",
           versionOverride: "1.2.3",
         },
       );
 
-      expect(schedule.configOverride).toEqual({
-        providers: { gmail: { scopes: ["read"] } },
+      expect(schedule.config_override).toEqual({
+        integrations: { gmail: { scopes: ["read"] } },
       });
-      expect(schedule.modelIdOverride).toBe("model_abc");
-      expect(schedule.proxyIdOverride).toBe("prx_xyz");
-      expect(schedule.versionOverride).toBe("1.2.3");
+      expect(schedule.model_id_override).toBe("model_abc");
+      expect(schedule.proxy_id_override).toBe("prx_xyz");
+      expect(schedule.version_override).toBe("1.2.3");
     });
 
     it("defaults all overrides to null when omitted", async () => {
       const schedule = await createSchedule(
         { orgId: orgId, applicationId: defaultAppId },
         packageId,
-        connectionProfileId,
+        actor,
         {
           cronExpression: "0 9 * * *",
         },
       );
 
-      expect(schedule.configOverride).toBeNull();
-      expect(schedule.modelIdOverride).toBeNull();
-      expect(schedule.proxyIdOverride).toBeNull();
-      expect(schedule.versionOverride).toBeNull();
+      expect(schedule.config_override).toBeNull();
+      expect(schedule.model_id_override).toBeNull();
+      expect(schedule.proxy_id_override).toBeNull();
+      expect(schedule.version_override).toBeNull();
     });
   });
 
@@ -180,11 +180,11 @@ describe("scheduler service", () => {
 
   describe("listSchedules", () => {
     it("returns schedules for the org", async () => {
-      await createSchedule({ orgId: orgId, applicationId: defaultAppId }, packageId, connectionProfileId, {
+      await createSchedule({ orgId: orgId, applicationId: defaultAppId }, packageId, actor, {
         name: "Schedule A",
         cronExpression: "0 * * * *",
       });
-      await createSchedule({ orgId: orgId, applicationId: defaultAppId }, packageId, connectionProfileId, {
+      await createSchedule({ orgId: orgId, applicationId: defaultAppId }, packageId, actor, {
         name: "Schedule B",
         cronExpression: "*/30 * * * *",
       });
@@ -198,7 +198,7 @@ describe("scheduler service", () => {
     });
 
     it("does not return schedules from other orgs", async () => {
-      await createSchedule({ orgId: orgId, applicationId: defaultAppId }, packageId, connectionProfileId, {
+      await createSchedule({ orgId: orgId, applicationId: defaultAppId }, packageId, actor, {
         name: "My Schedule",
         cronExpression: "0 * * * *",
       });
@@ -217,11 +217,10 @@ describe("scheduler service", () => {
           description: "Other",
         },
       });
-      const otherProfile = await seedConnectionProfile({ userId: otherUser.id, name: "Default" });
       await createSchedule(
         { orgId: otherOrg.id, applicationId: otherDefaultAppId },
         otherPkg.id,
-        otherProfile.id,
+        { type: "user", id: otherUser.id },
         {
           name: "Other Schedule",
           cronExpression: "0 * * * *",
@@ -262,11 +261,11 @@ describe("scheduler service", () => {
         },
       });
 
-      await createSchedule({ orgId: orgId, applicationId: defaultAppId }, packageId, connectionProfileId, {
+      await createSchedule({ orgId: orgId, applicationId: defaultAppId }, packageId, actor, {
         name: "Agent 1 Schedule",
         cronExpression: "0 * * * *",
       });
-      await createSchedule({ orgId: orgId, applicationId: defaultAppId }, pkg2.id, connectionProfileId, {
+      await createSchedule({ orgId: orgId, applicationId: defaultAppId }, pkg2.id, actor, {
         name: "Agent 2 Schedule",
         cronExpression: "*/15 * * * *",
       });
@@ -303,7 +302,7 @@ describe("scheduler service", () => {
       const created = await createSchedule(
         { orgId: orgId, applicationId: defaultAppId },
         packageId,
-        connectionProfileId,
+        actor,
         {
           name: "Hourly Run",
           cronExpression: "0 * * * *",
@@ -316,7 +315,7 @@ describe("scheduler service", () => {
       expect(found).not.toBeNull();
       expect(found!.id).toBe(created.id);
       expect(found!.name).toBe("Hourly Run");
-      expect(found!.cronExpression).toBe("0 * * * *");
+      expect(found!.cron_expression).toBe("0 * * * *");
       expect(found!.timezone).toBe("America/New_York");
       expect(found!.packageId).toBe(packageId);
     });
@@ -334,7 +333,7 @@ describe("scheduler service", () => {
       const created = await createSchedule(
         { orgId: orgId, applicationId: defaultAppId },
         packageId,
-        connectionProfileId,
+        actor,
         {
           cronExpression: "0 * * * *",
         },
@@ -349,16 +348,16 @@ describe("scheduler service", () => {
       );
 
       expect(updated).not.toBeNull();
-      expect(updated!.cronExpression).toBe("*/5 * * * *");
-      expect(updated!.nextRunAt).toBeInstanceOf(Date);
-      expect(updated!.nextRunAt!.getTime()).toBeGreaterThan(Date.now());
+      expect(updated!.cron_expression).toBe("*/5 * * * *");
+      expect(typeof updated!.next_run_at).toBe("string");
+      expect(new Date(updated!.next_run_at!).getTime()).toBeGreaterThan(Date.now());
     });
 
     it("updates name", async () => {
       const created = await createSchedule(
         { orgId: orgId, applicationId: defaultAppId },
         packageId,
-        connectionProfileId,
+        actor,
         {
           name: "Original Name",
           cronExpression: "0 * * * *",
@@ -381,7 +380,7 @@ describe("scheduler service", () => {
       const created = await createSchedule(
         { orgId: orgId, applicationId: defaultAppId },
         packageId,
-        connectionProfileId,
+        actor,
         {
           cronExpression: "0 9 * * *",
           configOverride: { foo: "bar" },
@@ -397,10 +396,10 @@ describe("scheduler service", () => {
         created.id,
         { cronExpression: "*/15 * * * *" },
       );
-      expect(partialUpdate!.configOverride).toEqual({ foo: "bar" });
-      expect(partialUpdate!.modelIdOverride).toBe("model_init");
-      expect(partialUpdate!.proxyIdOverride).toBe("prx_init");
-      expect(partialUpdate!.versionOverride).toBe("1.0.0");
+      expect(partialUpdate!.config_override).toEqual({ foo: "bar" });
+      expect(partialUpdate!.model_id_override).toBe("model_init");
+      expect(partialUpdate!.proxy_id_override).toBe("prx_init");
+      expect(partialUpdate!.version_override).toBe("1.0.0");
 
       // Explicit null clears the override (UI's "Inherit" sentinel).
       const cleared = await updateSchedule(
@@ -413,24 +412,24 @@ describe("scheduler service", () => {
           versionOverride: null,
         },
       );
-      expect(cleared!.configOverride).toBeNull();
-      expect(cleared!.modelIdOverride).toBeNull();
-      expect(cleared!.proxyIdOverride).toBeNull();
-      expect(cleared!.versionOverride).toBeNull();
+      expect(cleared!.config_override).toBeNull();
+      expect(cleared!.model_id_override).toBeNull();
+      expect(cleared!.proxy_id_override).toBeNull();
+      expect(cleared!.version_override).toBeNull();
     });
 
     it("sets nextRunAt to null when enabled is false", async () => {
       const created = await createSchedule(
         { orgId: orgId, applicationId: defaultAppId },
         packageId,
-        connectionProfileId,
+        actor,
         {
           cronExpression: "0 * * * *",
         },
       );
 
       expect(created.enabled).toBe(true);
-      expect(created.nextRunAt).not.toBeNull();
+      expect(created.next_run_at).not.toBeNull();
 
       const updated = await updateSchedule(
         { orgId: orgId, applicationId: defaultAppId },
@@ -442,14 +441,14 @@ describe("scheduler service", () => {
 
       expect(updated).not.toBeNull();
       expect(updated!.enabled).toBe(false);
-      expect(updated!.nextRunAt).toBeNull();
+      expect(updated!.next_run_at).toBeNull();
     });
 
     it("re-enables and recomputes nextRunAt", async () => {
       const created = await createSchedule(
         { orgId: orgId, applicationId: defaultAppId },
         packageId,
-        connectionProfileId,
+        actor,
         {
           cronExpression: "0 * * * *",
         },
@@ -467,15 +466,15 @@ describe("scheduler service", () => {
 
       expect(updated).not.toBeNull();
       expect(updated!.enabled).toBe(true);
-      expect(updated!.nextRunAt).toBeInstanceOf(Date);
-      expect(updated!.nextRunAt!.getTime()).toBeGreaterThan(Date.now());
+      expect(typeof updated!.next_run_at).toBe("string");
+      expect(new Date(updated!.next_run_at!).getTime()).toBeGreaterThan(Date.now());
     });
 
     it("updates input data", async () => {
       const created = await createSchedule(
         { orgId: orgId, applicationId: defaultAppId },
         packageId,
-        connectionProfileId,
+        actor,
         {
           cronExpression: "0 * * * *",
           input: { key: "original" },
@@ -513,7 +512,7 @@ describe("scheduler service", () => {
       const created = await createSchedule(
         { orgId: orgId, applicationId: defaultAppId },
         packageId,
-        connectionProfileId,
+        actor,
         {
           cronExpression: "0 * * * *",
         },
@@ -541,7 +540,7 @@ describe("scheduler service", () => {
       const schedule1 = await createSchedule(
         { orgId: orgId, applicationId: defaultAppId },
         packageId,
-        connectionProfileId,
+        actor,
         {
           name: "Keep This",
           cronExpression: "0 * * * *",
@@ -550,7 +549,7 @@ describe("scheduler service", () => {
       const schedule2 = await createSchedule(
         { orgId: orgId, applicationId: defaultAppId },
         packageId,
-        connectionProfileId,
+        actor,
         {
           name: "Delete This",
           cronExpression: "*/30 * * * *",
@@ -563,148 +562,6 @@ describe("scheduler service", () => {
       expect(remaining).toHaveLength(1);
       expect(remaining[0]!.id).toBe(schedule1.id);
       expect(remaining[0]!.name).toBe("Keep This");
-    });
-  });
-
-  // ── enrichment (readiness + profile info) ─────────────────
-
-  describe("listSchedules enrichment", () => {
-    async function seedProviderPackage(id: string) {
-      await seedPackage({
-        orgId: null,
-        id,
-        type: "provider",
-        source: "system",
-        draftManifest: {
-          name: id,
-          version: "1.0.0",
-          type: "provider",
-          description: `Provider ${id}`,
-          definition: { authMode: "api_key" },
-        },
-      });
-      await db.insert(applicationProviderCredentials).values({
-        applicationId: defaultAppId,
-        providerId: id,
-        credentialsEncrypted: "{}",
-        enabled: true,
-      });
-    }
-
-    it("returns profileName and readiness 'ready' when agent has no providers", async () => {
-      await createSchedule({ orgId: orgId, applicationId: defaultAppId }, packageId, connectionProfileId, {
-        name: "No Providers",
-        cronExpression: "0 * * * *",
-      });
-
-      const schedules = await listSchedules({ orgId: orgId, applicationId: defaultAppId });
-
-      expect(schedules).toHaveLength(1);
-      const s = schedules[0]!;
-      expect(s.profileName).toBe("Default");
-      expect(s.profileType).toBe("user");
-      expect(s.readiness).toEqual({
-        status: "ready",
-        totalProviders: 0,
-        connectedProviders: 0,
-        missingProviders: [],
-      });
-    });
-
-    it("returns readiness 'not_ready' when provider has no connection", async () => {
-      const providerId = "@system/sched-gmail";
-      await seedProviderPackage(providerId);
-
-      const agentWithProvider = await seedPackage({
-        orgId,
-        id: `@${orgSlug}/agent-with-provider`,
-        draftManifest: {
-          name: `@${orgSlug}/agent-with-provider`,
-          version: "0.1.0",
-          type: "agent",
-          description: "Agent needing a provider",
-          dependencies: { providers: { [providerId]: "*" } },
-        },
-      });
-
-      await createSchedule(
-        { orgId: orgId, applicationId: defaultAppId },
-        agentWithProvider.id,
-        connectionProfileId,
-        {
-          name: "Missing Connection",
-          cronExpression: "0 * * * *",
-        },
-      );
-
-      const schedules = await listSchedules({ orgId: orgId, applicationId: defaultAppId });
-      const s = schedules.find((s) => s.name === "Missing Connection")!;
-
-      expect(s.readiness.status).toBe("not_ready");
-      expect(s.readiness.totalProviders).toBe(1);
-      expect(s.readiness.connectedProviders).toBe(0);
-      expect(s.readiness.missingProviders).toEqual([providerId]);
-    });
-
-    it("returns readiness 'ready' when provider is connected", async () => {
-      const providerId = "@system/sched-connected";
-      await seedProviderPackage(providerId);
-      await seedConnectionForApp(connectionProfileId, providerId, orgId, defaultAppId, { api_key: "k" });
-
-      const agentConnected = await seedPackage({
-        orgId,
-        id: `@${orgSlug}/agent-connected`,
-        draftManifest: {
-          name: `@${orgSlug}/agent-connected`,
-          version: "0.1.0",
-          type: "agent",
-          description: "Connected agent",
-          dependencies: { providers: { [providerId]: "*" } },
-        },
-      });
-
-      await createSchedule(
-        { orgId: orgId, applicationId: defaultAppId },
-        agentConnected.id,
-        connectionProfileId,
-        {
-          name: "Connected Schedule",
-          cronExpression: "0 * * * *",
-        },
-      );
-
-      const schedules = await listSchedules({ orgId: orgId, applicationId: defaultAppId });
-      const s = schedules.find((s) => s.name === "Connected Schedule")!;
-
-      expect(s.readiness.status).toBe("ready");
-      expect(s.readiness.totalProviders).toBe(1);
-      expect(s.readiness.connectedProviders).toBe(1);
-      expect(s.readiness.missingProviders).toEqual([]);
-    });
-
-    // Org-profile readiness tests are in scheduler-org-readiness.test.ts
-    // (isolated to avoid BullMQ fire-and-forget race conditions)
-
-    it("cascade-deletes schedule when profile is deleted", async () => {
-      const tempProfile = await seedConnectionProfile({ userId, name: "Temp" });
-
-      const schedule = await createSchedule(
-        { orgId: orgId, applicationId: defaultAppId },
-        packageId,
-        tempProfile.id,
-        {
-          name: "Deleted Profile",
-          cronExpression: "0 * * * *",
-        },
-      );
-
-      await db.delete(connectionProfiles).where(eq(connectionProfiles.id, tempProfile.id));
-
-      const found = await getSchedule(schedule.id);
-      expect(found).toBeNull();
-
-      const schedules = await listSchedules({ orgId: orgId, applicationId: defaultAppId });
-      expect(schedules.find((s) => s.name === "Deleted Profile")).toBeUndefined();
     });
   });
 });

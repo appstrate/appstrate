@@ -112,6 +112,22 @@ function openRealtimeStream(
     orgId: string;
     applicationId: string;
     isAdmin: boolean;
+    /**
+     * Actor identity carried into the subscriber so the
+     * `connection_update` channel (and any future per-actor channel) can
+     * fan out only the rows the caller owns. Set from the SSE auth
+     * result — either `userId` (dashboard session or API key) or
+     * `endUserId` (impersonation), never both.
+     *
+     * NOTE: these SSE routes do not support `Appstrate-User` impersonation
+     * today — `validateSSEAuth` only ever resolves `userId` (the cookie
+     * user or the API-key owner). The `endUserId` branch in the
+     * `connection_update` filter (services/realtime.ts) is therefore
+     * forward-looking: the channel is effectively dashboard-member-only,
+     * and an end-user's connection rows (user_id NULL) reach no subscriber.
+     */
+    userId?: string;
+    endUserId?: string;
   },
   verbose: boolean,
 ) {
@@ -216,6 +232,7 @@ export function createRealtimeRouter() {
         orgId: validated.orgId,
         applicationId: validated.applicationId,
         isAdmin: true,
+        userId: validated.userId,
       },
       verbose,
     );
@@ -238,6 +255,7 @@ export function createRealtimeRouter() {
         orgId: validated.orgId,
         applicationId: validated.applicationId,
         isAdmin: true,
+        userId: validated.userId,
       },
       verbose,
     );
@@ -258,6 +276,7 @@ export function createRealtimeRouter() {
         orgId: validated.orgId,
         applicationId: validated.applicationId,
         isAdmin: true,
+        userId: validated.userId,
       },
       verbose,
     );

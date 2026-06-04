@@ -5,8 +5,13 @@
  * Validate a multi-package {@link Bundle} against the AFPS spec.
  *
  * Runs:
- *   - AFPS manifest schema check per package (via `@afps-spec/schema`)
- *   - `schemaVersion` major check per package
+ *   - AFPS manifest schema check per package (via `@afps-spec/schema`),
+ *     dispatched across the four package types `agent | skill | mcp-server |
+ *     integration` via the root-level `type` discriminator (AFPS §3.4
+ *     lifted mcp-server identity to the manifest root).
+ *   - `schema_version` MAJOR policy check on the types that carry one
+ *     (`agent` requires it; `skill`/`integration`/`mcp-server` declare it at
+ *     the root — AFPS lifted it there for mcp-server too).
  *   - `type = "agent"` for the root when `agentOnlyRoot` is on
  *   - Prompt template syntax check on the root's `prompt.md` if present
  *   - Cycle + divergent-version detection (non-fatal warnings)
@@ -15,10 +20,12 @@
 import {
   agentManifestSchema,
   skillManifestSchema,
-  toolManifestSchema,
-  providerManifestSchema,
+  mcpServerManifestSchema,
+  integrationManifestSchema,
 } from "@afps-spec/schema";
+import type { z } from "zod";
 import { validateTemplate } from "../template/mustache.ts";
+import { checkCompanionFiles } from "./companion-files.ts";
 import type { Bundle, BundlePackage, PackageIdentity } from "./types.ts";
 import { parsePackageIdentity } from "./types.ts";
 
@@ -34,7 +41,8 @@ export interface BundleValidationIssue {
     | "SCHEMA_VERSION_MISSING"
     | "SCHEMA_VERSION_UNSUPPORTED"
     | "CYCLE_DETECTED"
-    | "VERSION_DIVERGENCE";
+    | "VERSION_DIVERGENCE"
+    | "COMPANION_FILE_MISSING";
   /** Which package raised this issue — `null` for bundle-level. */
   identity: PackageIdentity | null;
   /** Dot-path inside the package's manifest when relevant. */
@@ -50,12 +58,12 @@ export interface BundleValidationResult {
 }
 
 export interface ValidateBundleOptions {
-  /** Accepted schemaVersion MAJORs. Default: `[1]`. */
+  /** Accepted `schema_version` MAJORs. Default: `[0]` (AFPS 0.1 draft). */
   supportedMajors?: readonly number[];
   /**
    * Require the root package's `type` to be `"agent"`. Default: `true`.
-   * The runtime executes agents; a bundle whose root is a skill/tool/
-   * provider won't run end-to-end.
+   * The runtime executes agents; a bundle whose root is a skill /
+   * mcp-server / integration won't run end-to-end.
    */
   agentOnlyRoot?: boolean;
 }
@@ -64,7 +72,7 @@ export function validateBundle(
   bundle: Bundle,
   opts: ValidateBundleOptions = {},
 ): BundleValidationResult {
-  const supportedMajors = opts.supportedMajors ?? [1];
+  const supportedMajors = opts.supportedMajors ?? [0];
   const agentOnlyRoot = opts.agentOnlyRoot ?? true;
   const issues: BundleValidationIssue[] = [];
 
@@ -116,26 +124,29 @@ function validatePackage(
   },
 ): void {
   const manifest = pkg.manifest as Record<string, unknown>;
-  const rawType = manifest["type"];
+  // AFPS (§3.4 / §11.2): mcp-server identity was lifted from
+  // `_meta["dev.afps/mcp-server"]` to the manifest root, so the root `type`
+  // discriminator is now authoritative for every package type.
+  const effectiveType: unknown = manifest["type"];
 
-  if (isRoot && ctx.agentOnlyRoot && rawType !== "agent") {
+  if (isRoot && ctx.agentOnlyRoot && effectiveType !== "agent") {
     ctx.issues.push({
       code: "UNSUPPORTED_TYPE",
       identity,
       path: "manifest.type",
-      message: `root package must be type: "agent" (got ${JSON.stringify(rawType)})`,
+      message: `root package must be type: "agent" (got ${JSON.stringify(effectiveType)})`,
       severity: "error",
     });
   }
 
-  const schema = schemaForType(rawType);
+  const schema = schemaForType(effectiveType);
   if (!schema) {
     if (!isRoot) {
       ctx.issues.push({
         code: "UNSUPPORTED_TYPE",
         identity,
         path: "manifest.type",
-        message: `unknown package type ${JSON.stringify(rawType)}`,
+        message: `unknown package type ${JSON.stringify(effectiveType)}`,
         severity: "error",
       });
     }
@@ -154,27 +165,7 @@ function validatePackage(
       });
     }
   } else {
-    const data = parseResult.data as { schemaVersion?: string };
-    if (!data.schemaVersion) {
-      ctx.issues.push({
-        code: "SCHEMA_VERSION_MISSING",
-        identity,
-        path: "manifest.schemaVersion",
-        message: 'manifest must declare a schemaVersion (e.g. "1.1")',
-        severity: "error",
-      });
-    } else {
-      const major = Number(data.schemaVersion.split(".")[0]);
-      if (!ctx.supportedMajors.includes(major)) {
-        ctx.issues.push({
-          code: "SCHEMA_VERSION_UNSUPPORTED",
-          identity,
-          path: "manifest.schemaVersion",
-          message: `schemaVersion ${data.schemaVersion} is not supported (majors: ${ctx.supportedMajors.join(", ")})`,
-          severity: "error",
-        });
-      }
-    }
+    checkSchemaVersion(effectiveType, parseResult.data, identity, ctx);
   }
 
   // Root agents must have a parseable prompt template if one exists.
@@ -194,22 +185,97 @@ function validatePackage(
       }
     }
   }
+
+  // §3.3 / §3.4 companion-file enforcement — single source of truth shared
+  // with the platform's ZIP-import path. Flags missing prompt.md (agent),
+  // missing SKILL.md / frontmatter name (skill), and missing
+  // server.entry_point payload (mcp-server) as bundle-level errors.
+  const violation = checkCompanionFiles(
+    manifest as { type?: unknown; server?: unknown } & Record<string, unknown>,
+    pkg.files,
+  );
+  if (violation) {
+    ctx.issues.push({
+      code: "COMPANION_FILE_MISSING",
+      identity,
+      path: violation.path ? `files.${violation.path}` : "files",
+      message: violation.message,
+      severity: "error",
+    });
+  }
 }
 
-function schemaForType(
-  type: unknown,
-): typeof agentManifestSchema | typeof skillManifestSchema | null {
+/**
+ * The four AFPS package-type schemas. The `tool`/`provider` package types
+ * (and their `@afps-spec` schemas) were removed — `mcp-server` (MCPB,
+ * §3.4) and `integration` (§3.5/§7) replace them.
+ */
+type TypeSchema =
+  | typeof agentManifestSchema
+  | typeof skillManifestSchema
+  | typeof mcpServerManifestSchema
+  | typeof integrationManifestSchema;
+
+function schemaForType(type: unknown): TypeSchema | null {
   switch (type) {
     case "agent":
       return agentManifestSchema;
     case "skill":
       return skillManifestSchema;
-    case "tool":
-      return toolManifestSchema as unknown as typeof agentManifestSchema;
-    case "provider":
-      return providerManifestSchema as unknown as typeof agentManifestSchema;
+    case "mcp-server":
+      return mcpServerManifestSchema;
+    case "integration":
+      return integrationManifestSchema;
     default:
       return null;
+  }
+}
+
+/**
+ * Enforce the `schema_version` MAJOR policy per package type (AFPS,
+ * snake_case `schema_version`).
+ *
+ *   - `agent`       — `schema_version` is REQUIRED by the AFPS schema, so a
+ *     missing/invalid one already surfaces as a MANIFEST_SCHEMA error above.
+ *     Here we additionally enforce the runtime's supported-MAJOR policy.
+ *   - `skill` / `integration` / `mcp-server` — `schema_version` is OPTIONAL at
+ *     the schema level. When present we enforce the MAJOR policy; when absent
+ *     we accept it. AFPS lifted `schema_version` to the root of
+ *     mcp-server (§3.4), so mcp-server is no longer exempt — it gets the same
+ *     check as skill/integration.
+ */
+function checkSchemaVersion(
+  type: unknown,
+  data: z.infer<TypeSchema>,
+  identity: PackageIdentity,
+  ctx: { supportedMajors: readonly number[]; issues: BundleValidationIssue[] },
+): void {
+  const schemaVersion = (data as { schema_version?: unknown }).schema_version;
+
+  if (typeof schemaVersion !== "string" || schemaVersion.length === 0) {
+    // agent REQUIRES schema_version (already flagged by MANIFEST_SCHEMA);
+    // skill/integration/mcp-server may omit it — accept silently.
+    if (type === "agent") {
+      ctx.issues.push({
+        code: "SCHEMA_VERSION_MISSING",
+        identity,
+        path: "manifest.schema_version",
+        message: 'agent manifest must declare a schema_version (e.g. "0.1")',
+        severity: "error",
+      });
+    }
+    return;
+  }
+
+  const major = Number(schemaVersion.split(".")[0]);
+  if (!ctx.supportedMajors.includes(major)) {
+    ctx.issues.push({
+      code: "SCHEMA_VERSION_UNSUPPORTED",
+      identity,
+      path: "manifest.schema_version",
+      message: `schema_version ${schemaVersion} is not supported (majors: ${ctx.supportedMajors.join(", ")})`,
+      severity: "error",
+    });
   }
 }
 
@@ -247,7 +313,7 @@ function depIdentities(pkg: BundlePackage, bundle: Bundle): PackageIdentity[] {
   const deps = (pkg.manifest as { dependencies?: unknown }).dependencies;
   if (!deps || typeof deps !== "object") return [];
   const names = new Set<string>();
-  for (const section of ["skills", "tools", "providers"] as const) {
+  for (const section of ["skills", "mcp_servers", "integrations"] as const) {
     const s = (deps as Record<string, unknown>)[section];
     if (s && typeof s === "object" && !Array.isArray(s)) {
       for (const n of Object.keys(s as Record<string, unknown>)) names.add(n);

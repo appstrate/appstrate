@@ -68,11 +68,15 @@ function createTimingFake(config: TimingFakeConfig): {
     async initialize() {},
     async shutdown() {},
     async cleanupOrphans(): Promise<CleanupReport> {
-      return { workloads: 0, isolationBoundaries: 0 };
+      return { workloads: 0, isolationBoundaries: 0, workspaces: 0 };
     },
     async ensureImages() {},
     async createIsolationBoundary(runId: string): Promise<IsolationBoundary> {
-      return { id: `net_${runId}`, name: `appstrate-exec-${runId}` };
+      return {
+        id: `net_${runId}`,
+        name: `appstrate-exec-${runId}`,
+        workspace: { kind: "directory", path: `/tmp/test-ws-${runId}` },
+      };
     },
     async removeIsolationBoundary() {},
     async createSidecar(
@@ -147,16 +151,17 @@ function buildRunPlan(): AppstrateRunPlan {
       label: "Test Model",
       isSystemModel: false,
     },
-    tokens: {},
-    // Declare at least one provider so the launcher's sidecar-skip
+    // Declare at least one integration so the launcher's sidecar-skip
     // shortcut does not bypass createSidecar in this parallel-boot test.
-    providers: [
+    integrations: [
       {
-        id: "gmail",
-        name: "gmail",
-        displayName: "Gmail",
-        authMode: "oauth2",
-      } as AppstrateRunPlan["providers"][number],
+        integrationId: "@test/gmail-mcp",
+        namespace: "gmail",
+        sourceKind: "local",
+        manifest: { name: "@test/gmail-mcp", version: "1.0.0" },
+        spawnEnv: {},
+        toolAllowlist: [],
+      },
     ],
     timeout: 60,
   };

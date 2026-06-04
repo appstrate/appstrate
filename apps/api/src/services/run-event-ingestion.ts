@@ -34,7 +34,7 @@ import { logger } from "../lib/logger.ts";
 import { getCache, getEventBuffer } from "../infra/index.ts";
 import { getEnv } from "@appstrate/env";
 import { persistRunEvent, writeRunnerLedgerRow } from "./run-launcher/appstrate-event-sink.ts";
-import { updateRun, appendRunLog } from "./state/runs.ts";
+import { updateRun, appendRunLog, computeRunCost } from "./state/runs.ts";
 import {
   addMemories as addUnifiedMemories,
   upsertPinned,
@@ -48,9 +48,9 @@ import { asJSONSchemaObject } from "@appstrate/core/form";
 import { callHook, emitEvent } from "../lib/modules/module-loader.ts";
 import { isInlineShadowPackageId } from "./inline-run.ts";
 import type { RunStatusChangeParams } from "@appstrate/core/module";
-import { computeRunCost } from "./credential-proxy-usage.ts";
 import { assertSinkOpen, verifyRunSignatureHeaders } from "../lib/run-signature.ts";
 import { clearRunMetricBroadcastState } from "./run-metric-broadcaster.ts";
+import { deleteRunWorkspace } from "./run-workspace-storage.ts";
 import type { TokenUsage } from "@appstrate/shared-types";
 
 // Re-export the pure helpers so callers that already import from this
@@ -128,6 +128,31 @@ export async function getRunSinkContext(runId: string): Promise<RunSinkContext |
 // Pulling them out of this module keeps the signature-verification unit
 // tests from requiring the db client's env invariants.
 
+/**
+ * Re-read `runs.last_event_sequence` from the DB and, if it advanced past
+ * the caller's in-memory snapshot, update `run.lastEventSequence` in place.
+ * Returns whether the value advanced.
+ *
+ * Concurrent POSTs each load their own snapshot in the verify-signature
+ * middleware before any of them persists, so a parallel burst sees the
+ * same stale value: only one wins the fast-path CAS, the others observe a
+ * false gap-at-head. Refreshing from DB lets the loser's drain recompute
+ * `next` against actual DB state instead of stranding buffered events
+ * until finalize's gap_fill.
+ */
+async function refreshSequence(run: RunSinkContext): Promise<boolean> {
+  const [fresh] = await db
+    .select({ s: runs.lastEventSequence })
+    .from(runs)
+    .where(eq(runs.id, run.id))
+    .limit(1);
+  if (fresh && fresh.s > run.lastEventSequence) {
+    run.lastEventSequence = fresh.s;
+    return true;
+  }
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // Ingestion — single signed event
 // ---------------------------------------------------------------------------
@@ -194,18 +219,10 @@ async function ingestInner(
     return { status: "persisted", sequence };
   }
 
-  // Refresh the in-memory snapshot from DB and try a drain. Concurrent
-  // POSTs each load their own snapshot in the verify-signature middleware
-  // before any of them persists, so a parallel burst sees the same stale
-  // value: only one wins the fast path, the others end up here. Without a
+  // Refresh the in-memory snapshot from DB and try a drain. Without this
   // refresh + drain attempt, buffered events sit until finalize's gap_fill
   // — collapsing real-time activity into a single visual burst.
-  const [fresh] = await db
-    .select({ s: runs.lastEventSequence })
-    .from(runs)
-    .where(eq(runs.id, run.id))
-    .limit(1);
-  if (fresh && fresh.s > run.lastEventSequence) run.lastEventSequence = fresh.s;
+  await refreshSequence(run);
   await drainBufferedEvents(run);
 
   return run.lastEventSequence >= sequence
@@ -408,6 +425,25 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
   // metric events will arrive. Bounds the broadcaster's in-memory map.
   clearRunMetricBroadcastState(run.id);
 
+  // Drop the run's workspace provisioning archive (the AFPS bundle + input
+  // docs the agent fetched at startup via GET /api/runs/:runId/workspace).
+  // This is the crash-safety net for the launcher's own happy-path teardown:
+  // finalizeRun is the single CAS-guarded convergence for every termination
+  // path — natural finalize, watchdog stall sweep, and container-exit
+  // synthesis — so the object is dropped even when the launcher teardown
+  // never runs (e.g. the API replica that launched the run crashed; a later
+  // watchdog tick on any replica still routes through here). Storage exposes
+  // no list/TTL primitive, so this deterministic by-runId delete is what
+  // prevents orphaned archives — not a time-based reaper.
+  //
+  // Fire-and-forget: cleanup must NOT sit on the critical path between the
+  // CAS close and the terminal status broadcast below — a slow/unreachable
+  // object store must never delay the run's terminal signal or the runner's
+  // finalize HTTP response. deleteRunWorkspace swallows + logs its own
+  // failures, and deleting a missing object (remote-origin runs never
+  // provision one) is a harmless idempotent no-op.
+  void deleteRunWorkspace(run.id);
+
   // 7. Side effects — only the CAS winner reaches here, so memories and
   //    log rows are written exactly once.
   if (outputValidationErrors) {
@@ -445,58 +481,70 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
     actorFromIds(actorRow?.userId ?? null, actorRow?.endUserId ?? null),
   );
 
-  if (result.memories?.length) {
-    // Split memories by declared scope and write each non-empty bucket
-    // to the unified store. The store IS the store — exceptions
-    // propagate so finalize fails loudly on persistence faults.
-    const sharedContent: string[] = [];
-    const actorContent: string[] = [];
-    for (const m of result.memories) {
-      if (m.scope === "shared") sharedContent.push(m.content);
-      else actorContent.push(m.content);
+  // Post-CAS best-effort: the run is already terminal in `runs`. Memory and
+  // pinned-slot persistence is agent-authored side-data — a transient store
+  // fault here must NOT strand the status-change broadcast below (the only
+  // signal that updates the UI / fires webhooks) nor 500 the runner for a run
+  // that is already committed terminal. Log + swallow, like the run-log writes
+  // further down. (Persistence faults are surfaced via the error log for ops.)
+  try {
+    if (result.memories?.length) {
+      // Split memories by declared scope and write each non-empty bucket.
+      const sharedContent: string[] = [];
+      const actorContent: string[] = [];
+      for (const m of result.memories) {
+        if (m.scope === "shared") sharedContent.push(m.content);
+        else actorContent.push(m.content);
+      }
+
+      if (actorContent.length > 0) {
+        await addUnifiedMemories(
+          run.packageId,
+          run.applicationId,
+          run.orgId,
+          persistenceScope,
+          actorContent,
+          run.id,
+        );
+      }
+      if (sharedContent.length > 0) {
+        await addUnifiedMemories(
+          run.packageId,
+          run.applicationId,
+          run.orgId,
+          { type: "shared" },
+          sharedContent,
+          run.id,
+        );
+      }
     }
 
-    if (actorContent.length > 0) {
-      await addUnifiedMemories(
-        run.packageId,
-        run.applicationId,
-        run.orgId,
-        persistenceScope,
-        actorContent,
-        run.id,
-      );
+    // Unified-persistence pinned-slot write — the single store for every
+    // named pinned slot the agent wrote via `pin({ key, content })`,
+    // including the carry-over `"checkpoint"` slot. Honors the AFPS
+    // scope when the runtime stamped one onto each slot; falls back to
+    // the run's actor scope.
+    if (result.pinned) {
+      for (const [key, slot] of Object.entries(result.pinned)) {
+        const slotScope = slot.scope === "shared" ? { type: "shared" as const } : persistenceScope;
+        await upsertPinned(
+          run.packageId,
+          run.applicationId,
+          run.orgId,
+          slotScope,
+          key,
+          slot.content,
+          run.id,
+        );
+      }
     }
-    if (sharedContent.length > 0) {
-      await addUnifiedMemories(
-        run.packageId,
-        run.applicationId,
-        run.orgId,
-        { type: "shared" },
-        sharedContent,
-        run.id,
-      );
-    }
+  } catch (err) {
+    logger.error("finalize: memory/pinned persistence failed (run already terminal)", {
+      runId: run.id,
+      err: getErrorMessage(err),
+    });
   }
 
-  // Unified-persistence pinned-slot write — the single store for every
-  // named pinned slot the agent wrote via `pin({ key, content })`,
-  // including the carry-over `"checkpoint"` slot. Honors the AFPS 1.4
-  // scope when the runtime stamped one onto each slot; falls back to
-  // the run's actor scope.
-  if (result.pinned) {
-    for (const [key, slot] of Object.entries(result.pinned)) {
-      const slotScope = slot.scope === "shared" ? { type: "shared" as const } : persistenceScope;
-      await upsertPinned(
-        run.packageId,
-        run.applicationId,
-        run.orgId,
-        slotScope,
-        key,
-        slot.content,
-        run.id,
-      );
-    }
-  }
   // Post-CAS best-effort: the run is already terminal in `runs`. A
   // transient log INSERT failure here is logged and swallowed — the UI
   // shows the run as complete from the row-level state regardless.
@@ -721,16 +769,30 @@ async function persistEventAndAdvance(
     // against the actual DB state — otherwise it bails out on a false
     // gap-at-head and strands every subsequent buffered event until
     // finalize's gap_fill.
-    const [fresh] = await db
-      .select({ s: runs.lastEventSequence })
-      .from(runs)
-      .where(eq(runs.id, run.id))
-      .limit(1);
-    if (fresh && fresh.s > run.lastEventSequence) run.lastEventSequence = fresh.s;
+    await refreshSequence(run);
     return;
   }
 
   run.lastEventSequence = sequence;
+
+  // Emit `run.started` for remote-origin runs at the moment the DB
+  // actually transitions pending → running (the first ingested event).
+  // Platform-origin runs already emit `started` from
+  // `executeAgentInBackground` when they flip the row, so they are
+  // excluded here to avoid a duplicate. Remote runs no longer emit at
+  // row-insert time (run-creation.ts) — that fired before the DB
+  // transition and never again when it actually happened.
+  if (firstEvent && run.runOrigin === "remote") {
+    void emitEvent("onRunStatusChange", {
+      orgId: run.orgId,
+      runId: run.id,
+      packageId: run.packageId,
+      applicationId: run.applicationId,
+      status: "started",
+      packageEphemeral: isInlineShadowPackageId(run.packageId),
+      ...(run.modelSource !== null ? { modelSource: run.modelSource } : {}),
+    });
+  }
 }
 
 async function bufferEvent(runId: string, sequence: number, event: RunEvent): Promise<void> {
@@ -774,15 +836,7 @@ async function drainBufferedEvents(
     // before giving up; otherwise concurrent buffer-path drainers (one
     // per bursty parallel-call event) all observe a false gap, exit
     // early, and the buffer sits until finalize.
-    const [fresh] = await db
-      .select({ s: runs.lastEventSequence })
-      .from(runs)
-      .where(eq(runs.id, run.id))
-      .limit(1);
-    if (fresh && fresh.s > run.lastEventSequence) {
-      run.lastEventSequence = fresh.s;
-      continue;
-    }
+    if (await refreshSequence(run)) continue;
     return;
   }
 }

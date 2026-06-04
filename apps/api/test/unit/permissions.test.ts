@@ -33,13 +33,11 @@ describe("resolvePermissions", () => {
     expect(perms.has("runs:read")).toBe(true);
     // Can run
     expect(perms.has("agents:run")).toBe(true);
-    // Can manage connections
-    expect(perms.has("connections:connect")).toBe(true);
-    expect(perms.has("connections:disconnect")).toBe(true);
+    // Can manage integration connections
+    expect(perms.has("integrations:connect")).toBe(true);
+    expect(perms.has("integrations:disconnect")).toBe(true);
     // Can cancel runs
     expect(perms.has("runs:cancel")).toBe(true);
-    // Can bind org profiles
-    expect(perms.has("app-profiles:bind")).toBe(true);
     // Can write end-users
     expect(perms.has("end-users:write")).toBe(true);
     // Module-owned permissions still part of the core taxonomy
@@ -71,7 +69,7 @@ describe("resolvePermissions", () => {
     // Cannot do anything else
     expect(perms.has("agents:write")).toBe(false);
     expect(perms.has("agents:run")).toBe(false);
-    expect(perms.has("connections:connect")).toBe(false);
+    expect(perms.has("integrations:connect")).toBe(false);
     expect(perms.has("runs:cancel")).toBe(false);
     expect(perms.has("org:update")).toBe(false);
     expect(perms.has("org:delete")).toBe(false);
@@ -166,13 +164,6 @@ describe("API_KEY_ALLOWED_SCOPES", () => {
       "api-keys:read",
       "api-keys:create",
       "api-keys:revoke",
-      "profiles:read",
-      "profiles:write",
-      "profiles:delete",
-      "app-profiles:read",
-      "app-profiles:write",
-      "app-profiles:delete",
-      "app-profiles:bind",
       "model-provider-credentials:read",
       "model-provider-credentials:write",
       "model-provider-credentials:delete",
@@ -194,9 +185,9 @@ describe("API_KEY_ALLOWED_SCOPES", () => {
       "end-users:delete",
       "applications:read",
       "applications:write",
-      "connections:read",
-      "connections:connect",
-      "connections:disconnect",
+      "integrations:read",
+      "integrations:connect",
+      "integrations:disconnect",
       "schedules:read",
       "schedules:write",
       "schedules:delete",

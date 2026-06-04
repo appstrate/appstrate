@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Appstrate
 
-import {
-  UPLOAD_PROTOCOLS as AFPS_UPLOAD_PROTOCOLS,
-  type UploadProtocol as AfpsUploadProtocol,
-} from "@appstrate/core/validation";
+import { RESERVED_INTEGRATION_UPLOAD_PROTOCOLS } from "@appstrate/core/integration";
 
 /**
  * `UploadAdapter` interface — the contract every chunked-upload
@@ -12,8 +9,8 @@ import {
  *
  * Adapters never touch the wire directly. They orchestrate state
  * (session URLs, ETag accumulation, offset tracking) and call
- * back into `ctx.providerCall(...)` which dispatches a single MCP
- * `provider_call` for each chunk. The credential isolation
+ * back into `ctx.apiCall(...)` which dispatches a single MCP
+ * `{ns}__api_call` for each chunk. The credential isolation
  * invariant is therefore preserved: every byte still flows through
  * the sidecar's authenticated proxy.
  *
@@ -24,37 +21,36 @@ import {
  * different headers, different finalize step), but the orchestration
  * shape is identical: init → loop(chunks) → finalize, with cancel
  * always best-effort. The interface lifts that shape so the resolver
- * (`provider-upload-resolver.ts`) is protocol-agnostic and the
+ * (`api-upload-resolver.ts`) is protocol-agnostic and the
  * delta to add a fifth protocol is one new file in this directory.
  */
 
 /**
- * Stable protocol identifier surfaced through the MCP tool's
- * `uploadProtocol` enum and through provider manifests'
- * `definition.uploadProtocols[]`.
+ * Stable protocol identifier surfaced through the upload tool's
+ * `uploadProtocol` enum and through integration manifests'
+ * `source.api.upload_protocols[]`.
  *
- * Sourced from `@afps-spec/schema` (re-exported via `@appstrate/core/validation`)
- * so the runtime's gating enum cannot drift from the AFPS canonical set.
- *
- * Add a new entry by extending `uploadProtocolEnum` in `@afps-spec/schema`,
- * publishing a minor bump, and registering a matching adapter in `./index.ts` —
- * the resolver's `ADAPTERS[protocol]` lookup yields `undefined` for any value
- * not present in the registry, which the resolver surfaces to the agent as a
- * structured failure.
+ * AFPS dropped the closed enum in favour of an open string array; the
+ * runtime treats the protocol as an opaque `string` and recognises the
+ * well-known reserved values via {@link RESERVED_INTEGRATION_UPLOAD_PROTOCOLS}
+ * from `@appstrate/core/integration`. Producers MAY emit other
+ * (reverse-DNS-qualified) values; consumers tolerate them and surface a
+ * structured "no adapter registered" failure when no matching entry exists in
+ * `./index.ts`'s `ADAPTERS` map.
  */
-export type UploadProtocol = AfpsUploadProtocol;
+export type UploadProtocol = string;
 
 /**
- * Outcome of a single `providerCall` issued by an adapter.
+ * Outcome of a single `apiCall` issued by an adapter.
  *
- * Mirrors the sidecar's `_meta.appstrate/upstream` payload after
+ * Mirrors the sidecar's `_meta["dev.appstrate/upstream"]` payload after
  * resolver-side parsing — adapters consume `status` and `headers`
  * for protocol semantics, and `body` for the few protocols that need
  * to read the response payload (S3's `CreateMultipartUpload` returns
  * `UploadId` in XML; Microsoft's `createUploadSession` returns the
  * resumable URL in JSON).
  */
-export interface AdapterProviderResponse {
+export interface AdapterApiCallResponse {
   status: number;
   headers: Record<string, string>;
   /** Response body as a string. UTF-8 decoded for non-binary upstreams. */
@@ -62,8 +58,8 @@ export interface AdapterProviderResponse {
 }
 
 /**
- * Abstract `provider_call` dispatcher exposed to adapters. Wraps
- * `mcp.callTool({ name: "provider_call", arguments: ... })` and
+ * Abstract `api_call` dispatcher exposed to adapters. Wraps
+ * `mcp.callTool({ name: "{ns}__api_call", arguments: ... })` and
  * surfaces the upstream meta in a single object.
  *
  * `bytes` carries the chunk to upload — the wrapper base64-encodes
@@ -71,13 +67,11 @@ export interface AdapterProviderResponse {
  * to (for adapters that follow `Location:` between calls, this may
  * differ from the original `target` the agent passed).
  */
-export type AdapterProviderCall = (
-  req: AdapterProviderCallRequest,
-) => Promise<AdapterProviderResponse>;
+export type AdapterApiCall = (req: AdapterApiCallRequest) => Promise<AdapterApiCallResponse>;
 
-export interface AdapterProviderCallRequest {
-  /** `provider_call.providerId` — pinned for the whole upload. */
-  providerId: string;
+export interface AdapterApiCallRequest {
+  /** The `{ns}__api_call` tool name — pinned for the whole upload. */
+  apiCallToolName: string;
   target: string;
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD";
   headers?: Record<string, string>;
@@ -92,7 +86,7 @@ export interface AdapterProviderCallRequest {
  * and adapter-supplied metadata.
  */
 export interface AdapterContext {
-  providerId: string;
+  apiCallToolName: string;
   /** Original target URL from the agent. The adapter MAY substitute
    *  per-protocol session URLs after init. */
   target: string;
@@ -103,10 +97,10 @@ export interface AdapterContext {
   /** Suggested chunk size; the adapter may clamp to its own protocol-
    *  level minimum/alignment requirements. */
   partSizeBytes: number;
-  /** Wraps `mcp.callTool({ name: "provider_call", … })`. */
-  providerCall: AdapterProviderCall;
+  /** Wraps `mcp.callTool({ name: "{ns}__api_call", … })`. */
+  apiCall: AdapterApiCall;
   /** Abort signal — adapters check between chunks AND propagate to
-   *  the underlying providerCall. */
+   *  the underlying apiCall. */
   signal: AbortSignal;
   /** Update the running SHA-256 with the chunk bytes about to be sent.
    *  Adapters call this exactly once per uploaded chunk so the digest
@@ -220,7 +214,7 @@ export interface UploadAdapter {
   /**
    * Initiate the upload session. Returns adapter-private state.
    *
-   * Implementations issue ONE `providerCall` typically — a metadata
+   * Implementations issue ONE `apiCall` typically — a metadata
    * POST. May issue zero (tus, where session creation is implicit on
    * first PATCH) or several (rare). Must respect `ctx.signal`.
    */
@@ -251,8 +245,11 @@ export interface UploadAdapter {
 }
 
 /**
- * Set of all valid `uploadProtocol` values. Useful for schema
- * validation in the Pi tool surface. Single source of truth lives in
- * `@afps-spec/schema` (`uploadProtocolEnum`).
+ * Set of *reserved* `uploadProtocol` values. Useful for schema validation
+ * in the Pi tool surface. Sourced from `@appstrate/core/integration`
+ * (`RESERVED_INTEGRATION_UPLOAD_PROTOCOLS`) — the same list AFPS reserves
+ * for the well-known protocols — so the runtime's recognition set cannot
+ * drift from the canonical reserved set. Per AFPS the field is open
+ * (producers MAY emit other values); consumers SHOULD ignore unknown ones.
  */
-export const UPLOAD_PROTOCOLS: readonly UploadProtocol[] = AFPS_UPLOAD_PROTOCOLS;
+export const UPLOAD_PROTOCOLS: readonly UploadProtocol[] = RESERVED_INTEGRATION_UPLOAD_PROTOCOLS;

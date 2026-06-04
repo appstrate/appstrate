@@ -28,8 +28,8 @@ export type {
   UploadResult,
   UploadSuccess,
   UploadFailure,
-  AdapterProviderCall,
-  AdapterProviderCallRequest,
-  AdapterProviderResponse,
+  AdapterApiCall,
+  AdapterApiCallRequest,
+  AdapterApiCallResponse,
 } from "./types.ts";
 export { UPLOAD_PROTOCOLS, UploadError } from "./types.ts";

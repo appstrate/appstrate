@@ -4,9 +4,8 @@ import { Link } from "react-router-dom";
 import { Badge } from "./status-badge";
 import { ScheduleStatusBadge } from "./schedule-status-badge";
 import { NextRunPreview } from "./next-run-preview";
-import { ProfileLabel } from "./profile-label";
+import { ActorLabel } from "./actor-label";
 import { useScheduleRuns } from "../hooks/use-schedules";
-import { useScheduleProviderReadiness } from "../hooks/use-schedule-readiness";
 import { ACTIVE_RUN_STATUSES, type EnrichedSchedule } from "@appstrate/shared-types";
 
 interface ScheduleCardProps {
@@ -16,27 +15,15 @@ interface ScheduleCardProps {
 
 export function ScheduleCard({ schedule, agentName }: ScheduleCardProps) {
   const { data: runs } = useScheduleRuns(schedule.id);
-  const { totalProviders, allReady, isLoading } = useScheduleProviderReadiness(schedule);
-  const hasProviders = totalProviders > 0;
 
   // Running + unread counts scoped to this schedule's runs
   const runningRuns = runs?.filter((e) => ACTIVE_RUN_STATUSES.has(e.status)).length ?? 0;
   const unreadCount = runs?.filter((e) => e.notifiedAt != null && e.readAt == null).length ?? 0;
 
-  // While client-side readiness is loading, use the server-side readiness from EnrichedSchedule
-  const effectiveReady = isLoading ? schedule.readiness.status === "ready" : allReady;
-  const effectiveHasProviders = isLoading ? schedule.readiness.totalProviders > 0 : hasProviders;
-
-  const isActive = (schedule.enabled ?? true) && effectiveReady;
+  const isActive = schedule.enabled ?? true;
   const lastRunNumber = runs?.[0]?.runNumber ?? 0;
 
-  const statusBadge = (
-    <ScheduleStatusBadge
-      enabled={schedule.enabled ?? true}
-      hasProviders={effectiveHasProviders}
-      allReady={effectiveReady}
-    />
-  );
+  const statusBadge = <ScheduleStatusBadge enabled={schedule.enabled ?? true} />;
 
   return (
     <Link
@@ -52,21 +39,20 @@ export function ScheduleCard({ schedule, agentName }: ScheduleCardProps) {
           </span>
         )}
         {runningRuns > 0 && <Badge status="running" />}
-        <ProfileLabel
-          profileType={schedule.profileType}
-          profileName={schedule.profileName}
-          profileOwnerName={schedule.profileOwnerName}
+        <ActorLabel
+          actor_type={schedule.actor_type}
+          actor_name={schedule.actor_name}
           className="text-muted-foreground ml-auto text-xs"
         />
       </div>
 
       {/* Next run preview -- flush to card edges */}
-      {isActive && schedule.nextRunAt && (
+      {isActive && schedule.next_run_at && (
         <NextRunPreview
           runNumber={lastRunNumber + 1}
           agentName={agentName}
-          scheduleName={schedule.name || schedule.id}
-          nextRunAt={schedule.nextRunAt}
+          schedule_name={schedule.name || schedule.id}
+          next_run_at={schedule.next_run_at}
           className="border-border border-t border-dashed"
         />
       )}

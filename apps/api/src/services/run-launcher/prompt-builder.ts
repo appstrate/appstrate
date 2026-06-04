@@ -3,22 +3,19 @@
 /**
  * Appstrate platform system prompt — thin shim over the runtime's
  * `buildPlatformPromptInputs` + `renderPlatformPrompt`. Derivation of
- * every section (System / Environment / Tools / Skills / Providers /
- * Input / Documents / Config / Checkpoint / Memory / Output Format) happens
- * in the runtime from the parsed Bundle; this function only adds the
+ * every section (System / Environment / Tools / Skills / Input /
+ * Documents / Config / Checkpoint / Memory / Output Format) happens in
+ * the runtime from the parsed Bundle; this function only adds the
  * overrides that are platform-specific:
  *
  *   - `platformName`: `"Appstrate"`
  *   - `uploads`: DB-stored files with platform-sanitised paths
- *   - `providers`: filtered to those with wired credentials
- *     (`plan.tokens[p.id]`) and enriched with authorized URIs via
- *     `@appstrate/connect`. Replaces the bundle-derived provider list
- *     via `providersReplace: true` so disconnected providers never
- *     reach the LLM prompt.
  *
  * Every other field flows straight from the bundle — the same code
  * path used by the `appstrate run` CLI. Divergence between platform
- * and CLI is now strictly the three overrides above.
+ * and CLI is now strictly the two overrides above. Outbound API access
+ * is surfaced via integration MCP tools (`{ns}__api_call`), not the
+ * prompt.
  *
  * Run history is NOT rendered in the prompt: the runtime wires a
  * typed `run_history` tool (see runtime-pi/entrypoint.ts Phase D) whose
@@ -28,30 +25,18 @@
 
 import type { AppstrateRunPlan } from "./types.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
-import { buildPlatformPromptInputs, renderPlatformPrompt } from "@appstrate/afps-runtime/bundle";
-import type { PlatformPromptProvider } from "@appstrate/afps-runtime/bundle";
-import { RUNTIME_INJECTED_TOOLS, loadRuntimeToolDoc } from "@appstrate/runner-pi";
+import {
+  buildPlatformPromptInputs,
+  renderPlatformPrompt,
+  type PlatformPromptIntegration,
+} from "@appstrate/afps-runtime/bundle";
 import { sanitizeStorageKey } from "../file-storage.ts";
+import { fetchIntegrationPromptDocs } from "../integration-service.ts";
 
-export function buildPlatformSystemPrompt(
+export async function buildPlatformSystemPrompt(
   context: ExecutionContext,
   plan: AppstrateRunPlan,
-): string {
-  // Project ProviderSummary → PlatformPromptProvider explicitly: drop the
-  // platform-internal credential bag (credentialSchema / credentialFieldName /
-  // credentialHeaderName / credentialHeaderPrefix / categories) so it never
-  // reaches the prompt-rendering pipeline.
-  const connectedProviders: PlatformPromptProvider[] = plan.providers
-    .filter((p) => plan.tokens[p.id])
-    .map((p) => ({
-      id: p.id,
-      displayName: p.displayName,
-      authMode: p.authMode,
-      ...(p.authorizedUris?.length ? { authorizedUris: p.authorizedUris } : {}),
-      allowAllUris: p.allowAllUris ?? false,
-      ...(p.docsUrl !== undefined ? { docsUrl: p.docsUrl } : {}),
-    }));
-
+): Promise<string> {
   const uploads = plan.files?.map((f) => ({
     name: f.name,
     path: `./documents/${sanitizeStorageKey(f.name)}`,
@@ -59,37 +44,40 @@ export function buildPlatformSystemPrompt(
     ...(f.type ? { type: f.type } : {}),
   }));
 
+  // Phase 1.4 — inline each resolved integration's manifest description +
+  // INTEGRATION.md (AFPS §3.5) so the LLM can read the integration's
+  // API contract alongside the `{ns}__*` tools advertised via MCP
+  // `tools/list`. Docs are pulled from `packages.draftContent` (captured
+  // at install time by `core/zip.ts`) — never re-fetched from storage.
+  let integrations: PlatformPromptIntegration[] | undefined;
+  if (plan.integrations && plan.integrations.length > 0) {
+    const docs = await fetchIntegrationPromptDocs(plan.integrations.map((i) => i.integrationId));
+    const docsById = new Map(docs.map((d) => [d.packageId, d]));
+    integrations = plan.integrations.map((spec) => {
+      const found = docsById.get(spec.integrationId);
+      return {
+        id: spec.integrationId,
+        ...(found?.description ? { description: found.description } : {}),
+        ...(found?.doc ? { doc: found.doc } : {}),
+      };
+    });
+  }
+
   const inputs = buildPlatformPromptInputs(plan.bundle, context, {
     platformName: "Appstrate",
     timeoutSeconds: plan.timeout,
-    providers: connectedProviders,
-    providersReplace: true,
     ...(uploads ? { uploads } : {}),
+    ...(integrations && integrations.length > 0 ? { integrations } : {}),
   });
 
-  // Inject runtime-wired tools (run_history, recall_memory) that are
-  // not bundle packages. Both `availableTools` and `toolDocs` are
-  // appended AFTER bundle-derived entries so user-shipped tools come
-  // first in the `### Tools` listing and have their TOOL.md rendered
-  // ahead of the runtime docs — same order they're discoverable via
-  // MCP `tools/list`.
-  //
-  // `TOOL.md` is resolved here via `loadRuntimeToolDoc`, mirroring how
-  // bundle tools expose their doc through `pkg.files.get("TOOL.md")`:
-  // the descriptor never carries the doc string — the platform is the
-  // single point that reads it.
-  inputs.availableTools = [
-    ...(inputs.availableTools ?? []),
-    ...RUNTIME_INJECTED_TOOLS.map((t) => ({
-      id: t.id,
-      name: t.name,
-      description: t.description,
-    })),
-  ];
-  inputs.toolDocs = [
-    ...(inputs.toolDocs ?? []),
-    ...RUNTIME_INJECTED_TOOLS.map((t) => ({ id: t.id, content: loadRuntimeToolDoc(t) })),
-  ];
-
+  // The agent's tools — runtime-wired (`run_history`, `recall_memory`),
+  // integration tools, and the platform runtime tools (output/log/note/
+  // pin/report) — are all advertised to the model via MCP `tools/list`
+  // (name + description + input schema), so the prompt no longer lists
+  // them. The Communication contract (rendered above) is the only
+  // tool-related instruction the model can't infer from `tools/list`, and
+  // it stays. This keeps a single source of truth for each tool's
+  // signature and avoids a stale/partial in-prompt list that would
+  // contradict the live tool set.
   return renderPlatformPrompt(inputs);
 }

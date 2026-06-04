@@ -77,16 +77,16 @@ Run with `bun replay.ts`.
 Live execution is handled by the `appstrate run` command (in
 `apps/cli`), which shares this runtime as a workspace dependency. Same
 PiRunner, same sinks, plus profile / credential / telemetry support
-when an Appstrate instance is pinned. `--providers=none` and
+when an Appstrate instance is pinned. `--integrations=none` and
 `--report=false` keep it fully offline — the briefing-agent bundle
-uses no authenticated providers, so this example works without any
+uses no authenticated integrations, so this example works without any
 platform in the loop.
 
 ```sh
 export ANTHROPIC_API_KEY=sk-...
 
 bun apps/cli/src/cli.ts run $E/agent.afps \
-  --providers=none --report=false \
+  --integrations=none --report=false \
   --model-source=env --model-api=anthropic-messages \
   --model=claude-haiku-4-5-20251001 \
   --snapshot $E/snapshot.json \

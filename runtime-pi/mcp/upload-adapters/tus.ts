@@ -68,8 +68,8 @@ export const tusAdapter: UploadAdapter = {
     const meta = encodeTusMetadata(ctx.metadata);
     if (meta) headers["Upload-Metadata"] = meta;
 
-    const res = await ctx.providerCall({
-      providerId: ctx.providerId,
+    const res = await ctx.apiCall({
+      apiCallToolName: ctx.apiCallToolName,
       target: ctx.target,
       method: "POST",
       headers,
@@ -113,8 +113,8 @@ export const tusAdapter: UploadAdapter = {
       );
     }
     ctx.hashUpdate(chunk.bytes);
-    const res = await ctx.providerCall({
-      providerId: ctx.providerId,
+    const res = await ctx.apiCall({
+      apiCallToolName: ctx.apiCallToolName,
       target: s.sessionUrl,
       method: "PATCH",
       headers: {
@@ -179,8 +179,8 @@ export const tusAdapter: UploadAdapter = {
     const s = state as TusSessionState;
     if (!s.sessionUrl) return;
     try {
-      await ctx.providerCall({
-        providerId: ctx.providerId,
+      await ctx.apiCall({
+        apiCallToolName: ctx.apiCallToolName,
         target: s.sessionUrl,
         method: "DELETE",
         headers: { "Tus-Resumable": TUS_VERSION },

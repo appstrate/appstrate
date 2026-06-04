@@ -46,7 +46,6 @@ import { createRunsEventsRouter } from "../../src/routes/runs-events.ts";
 import { createRunsRemoteRouter } from "../../src/routes/runs-remote.ts";
 import { createSchedulesRouter } from "../../src/routes/schedules.ts";
 import { createUserAgentsRouter } from "../../src/routes/user-agents.ts";
-import { createProvidersRouter } from "../../src/routes/providers.ts";
 import { createApiKeysRouter } from "../../src/routes/api-keys.ts";
 import { createProxiesRouter } from "../../src/routes/proxies.ts";
 import { createModelsRouter } from "../../src/routes/models.ts";
@@ -54,8 +53,6 @@ import { createModelProvidersOAuthRouter } from "../../src/routes/model-provider
 import { createModelProviderCredentialsRouter } from "../../src/routes/model-provider-credentials.ts";
 import { createInternalRouter } from "../../src/routes/internal.ts";
 import { createApplicationsRouter } from "../../src/routes/applications.ts";
-import { createConnectionProfilesRouter } from "../../src/routes/connection-profiles.ts";
-import { createAppProfilesRouter } from "../../src/routes/app-profiles.ts";
 import { createNotificationsRouter } from "../../src/routes/notifications.ts";
 import { createPackagesRouter } from "../../src/routes/packages.ts";
 import { createRealtimeRouter } from "../../src/routes/realtime.ts";
@@ -64,7 +61,7 @@ import { createCredentialProxyRouter } from "../../src/routes/credential-proxy.t
 import { createLlmProxyRouter } from "../../src/routes/llm-proxy.ts";
 import { getDiscoveredModules } from "./test-modules.ts";
 import healthRouter from "../../src/routes/health.ts";
-import { createConnectionsRouter } from "../../src/routes/connections.ts";
+import { createIntegrationsRouter } from "../../src/routes/integrations.ts";
 import orgsRouter from "../../src/routes/organizations.ts";
 import meRouter from "../../src/routes/me.ts";
 import profileRouter from "../../src/routes/profile.ts";
@@ -183,9 +180,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
     "/api/api-keys",
     "/api/notifications",
     "/api/packages",
-    "/api/providers",
-    "/api/connections",
-    "/api/app-profiles",
+    "/api/integrations",
     ...extraModules.flatMap((m) => m.appScopedPaths ?? []),
   ];
 
@@ -239,18 +234,15 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
     // `apps/api/src/index.ts` → `registerModuleRoutes`.
     if (moduleRouter) app.route("/", moduleRouter);
   }
-  app.route("/api/providers", createProvidersRouter());
   app.route("/api/api-keys", createApiKeysRouter());
   app.route("/api/proxies", createProxiesRouter());
   app.route("/api/models", createModelsRouter());
   app.route("/api/model-provider-credentials", createModelProviderCredentialsRouter());
   app.route("/api/model-providers-oauth", createModelProvidersOAuthRouter());
   app.route("/api/applications", createApplicationsRouter());
-  app.route("/api/connection-profiles", createConnectionProfilesRouter());
-  app.route("/api/app-profiles", createAppProfilesRouter());
   app.route("/api", profileRouter);
   app.route("/api/realtime", createRealtimeRouter());
-  app.route("/api/connections", createConnectionsRouter());
+  app.route("/api/integrations", createIntegrationsRouter());
   app.route("/api/credential-proxy", createCredentialProxyRouter());
   app.route("/api/llm-proxy", createLlmProxyRouter());
   app.route("/invite", invitationsRouter);

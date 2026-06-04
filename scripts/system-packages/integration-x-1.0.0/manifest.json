@@ -1,0 +1,117 @@
+{
+  "name": "@appstrate/x",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.1",
+  "display_name": "X (Twitter) (API)",
+  "description": "Social media platform for microblogging and real-time engagement",
+  "keywords": ["social-media", "marketing"],
+  "license": "Apache-2.0",
+  "icon": "x",
+  "source": {
+    "kind": "none"
+  },
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "authorization_endpoint": "https://x.com/i/oauth2/authorize",
+      "token_endpoint": "https://api.x.com/2/oauth2/token",
+      "default_scopes": ["tweet.read", "users.read", "offline.access"],
+      "token_endpoint_auth_method": "client_secret_basic",
+      "code_challenge_methods_supported": ["S256"],
+      "scope_catalog": [
+        {
+          "value": "tweet.read",
+          "label": "Read tweets"
+        },
+        {
+          "value": "tweet.write",
+          "label": "Post & delete tweets"
+        },
+        {
+          "value": "tweet.moderate.write",
+          "label": "Moderate tweet replies"
+        },
+        {
+          "value": "users.read",
+          "label": "Read user profiles"
+        },
+        {
+          "value": "follows.read",
+          "label": "Read followers & following"
+        },
+        {
+          "value": "follows.write",
+          "label": "Follow & unfollow users"
+        },
+        {
+          "value": "like.read",
+          "label": "Read likes"
+        },
+        {
+          "value": "like.write",
+          "label": "Like & unlike tweets"
+        },
+        {
+          "value": "list.read",
+          "label": "Read lists"
+        },
+        {
+          "value": "list.write",
+          "label": "Create & manage lists"
+        },
+        {
+          "value": "bookmark.read",
+          "label": "Read bookmarks"
+        },
+        {
+          "value": "bookmark.write",
+          "label": "Manage bookmarks"
+        },
+        {
+          "value": "space.read",
+          "label": "Read Spaces"
+        },
+        {
+          "value": "dm.read",
+          "label": "Read direct messages"
+        },
+        {
+          "value": "dm.write",
+          "label": "Send direct messages"
+        },
+        {
+          "value": "offline.access",
+          "label": "Refresh token (long-lived access)"
+        }
+      ],
+      "authorized_uris": ["https://api.x.com/**"],
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": " "
+        },
+        "dev.appstrate/auth": {
+          "required": true
+        }
+      }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/api": {
+      "auths": {
+        "primary": {}
+      }
+    }
+  }
+}

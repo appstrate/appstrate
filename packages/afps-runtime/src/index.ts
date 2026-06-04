@@ -13,9 +13,8 @@
  * runtime representation — every resolver, runner, and tool consumes
  * Bundle directly via `Bundle.packages.get(identity)`.
  *
- * AFPS 1.3 introduces three spec-aligned resolver interfaces
- * (ToolResolver, ProviderResolver, SkillResolver). They live under
- * `@appstrate/afps-runtime/resolvers`.
+ * Skill resolution (SkillResolver) and the integration `api_call`
+ * surface live under `@appstrate/afps-runtime/resolvers`.
  */
 
 export const VERSION = "0.0.0";
@@ -79,7 +78,6 @@ export {
   renderPrompt,
   buildPromptView,
   type PromptView,
-  type PromptViewProvider,
   type PromptViewUpload,
   type RenderPromptOptions,
 } from "./bundle/index.ts";
@@ -88,8 +86,8 @@ export {
 export {
   renderPlatformPrompt,
   type PlatformPromptOptions,
-  type PlatformPromptProvider,
   type PlatformPromptTool,
+  type PlatformPromptIntegration,
   type PlatformPromptSchema,
 } from "./bundle/index.ts";
 
@@ -137,7 +135,7 @@ export {
   RunCancelledError,
   RunTimeoutError,
   WorkloadExitError,
-  ProviderAuthorizationError,
+  AuthorizedUrisError,
   ResolverError,
   RunHistoryError,
   CredentialResolutionError,

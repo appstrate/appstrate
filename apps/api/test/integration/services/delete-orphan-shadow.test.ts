@@ -32,11 +32,11 @@ import type { AgentManifest } from "../../../src/types/index.ts";
 
 const manifest = {
   name: "@inline/r-test",
-  displayName: "Test Inline Agent",
+  display_name: "Test Inline Agent",
   version: "0.0.0",
   type: "agent",
   description: "Inline",
-  schemaVersion: "1.0.0",
+  schema_version: "0.1",
 } as unknown as AgentManifest;
 
 describe("deleteOrphanShadowPackage", () => {

@@ -120,7 +120,7 @@ if (sig) {
 }
 
 // Render the prompt — memories / state / history travel on the
-// ExecutionContext; no provider bridge is involved.
+// ExecutionContext; no integration bridge is involved.
 const prompt = await renderPrompt({
   template: bundle.prompt,
   context: {
@@ -146,18 +146,18 @@ await sink.finalize(result);
 
 ### Package subpath exports
 
-| Subpath                               | What                                                               |
-| ------------------------------------- | ------------------------------------------------------------------ |
-| `@appstrate/afps-runtime`             | Everything — re-exports all modules                                |
-| `@appstrate/afps-runtime/bundle`      | Loader, validator, hash, signing, prompt rendering                 |
-| `@appstrate/afps-runtime/runner`      | `Runner`, `RunOptions`, `reduceEvents`, `RunResult`                |
-| `@appstrate/afps-runtime/interfaces`  | `EventSink` contract                                               |
-| `@appstrate/afps-runtime/sinks`       | `ConsoleSink`, `FileSink`, `HttpSink`, `CompositeSink`             |
-| `@appstrate/afps-runtime/resolvers`   | `ProviderResolver`, `ToolResolver`, `SkillResolver`, `ToolContext` |
-| `@appstrate/afps-runtime/events`      | CloudEvents envelope + Standard Webhooks signing                   |
-| `@appstrate/afps-runtime/template`    | Logic-less Mustache with JSON sanitisation                         |
-| `@appstrate/afps-runtime/conformance` | Adapter interface + built-in cases + report runner                 |
-| `@appstrate/afps-runtime/types`       | `RunEvent`, `ExecutionContext`, `RunResult`, `LogLevel`, …         |
+| Subpath                               | What                                                                                                            |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `@appstrate/afps-runtime`             | Everything — re-exports all modules                                                                             |
+| `@appstrate/afps-runtime/bundle`      | Loader, validator, hash, signing, prompt rendering                                                              |
+| `@appstrate/afps-runtime/runner`      | `Runner`, `RunOptions`, `reduceEvents`, `RunResult`                                                             |
+| `@appstrate/afps-runtime/interfaces`  | `EventSink` contract                                                                                            |
+| `@appstrate/afps-runtime/sinks`       | `ConsoleSink`, `FileSink`, `HttpSink`, `CompositeSink`                                                          |
+| `@appstrate/afps-runtime/resolvers`   | `SkillResolver`, `LocalIntegrationResolver`, `RemoteAppstrateIntegrationResolver`, `IntegrationApiCallResolver` |
+| `@appstrate/afps-runtime/events`      | CloudEvents envelope + Standard Webhooks signing                                                                |
+| `@appstrate/afps-runtime/template`    | Logic-less Mustache with JSON sanitisation                                                                      |
+| `@appstrate/afps-runtime/conformance` | Adapter interface + built-in cases + report runner                                                              |
+| `@appstrate/afps-runtime/types`       | `RunEvent`, `ExecutionContext`, `RunResult`, `LogLevel`, …                                                      |
 
 ## Conformance
 
@@ -211,7 +211,7 @@ harness, but a simple golden-file diff is sufficient for L1-L3.
 
 ## Signing model
 
-Artifact signing follows [ADR-009](../../docs/adr/ADR-009-afps-bundle-signing-ed25519-to-sigstore.md):
+Artifact signing model:
 
 - **v1 — Ed25519 detached (shipped)**. `signature.sig` holds
   `{ alg, keyId, signature, chain? }`; verification pins trust by

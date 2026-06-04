@@ -76,7 +76,10 @@ export interface SubprocessTransportOptions {
   maxLinesPerSec?: number;
   /** Per-second cap on stderr bytes. */
   maxStderrBps?: number;
-  /** SIGTERM grace period before SIGKILL on close(). Defaults to 1s. */
+  /** SIGTERM grace period before SIGKILL on close(). Defaults to 10s
+   * (aligned with MCP integration spec §5.4.2 — third-party MCP servers
+   * may need a graceful flush of in-flight uploads, response buffers, or
+   * upstream connection teardown that 1s does not cover). */
   killTimeoutMs?: number;
 }
 
@@ -338,7 +341,7 @@ export class SubprocessTransport implements Transport {
     }
     this.closed = true;
     const child = this.child;
-    const grace = this.options.killTimeoutMs ?? 1000;
+    const grace = this.options.killTimeoutMs ?? 10_000;
     try {
       child.stdin.end();
     } catch {

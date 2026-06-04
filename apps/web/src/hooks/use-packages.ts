@@ -9,7 +9,6 @@ import { stripScope } from "@appstrate/core/naming";
 import { api, apiList, uploadFormData, apiBlob } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
-// Profile resolution is now per-provider (server-side), no global connectionProfileId needed
 import type {
   OrgPackageItem,
   OrgPackageItemDetail,
@@ -25,24 +24,26 @@ import type {
 const PACKAGE_CONFIG = {
   agent: { path: "agents" },
   skill: { path: "skills" },
-  tool: { path: "tools" },
-  provider: { path: "providers" },
+  "mcp-server": { path: "mcp-servers" },
+  integration: { path: "integrations" },
 } as const;
 
 type PackageDetailMap = {
   agent: AgentDetail;
   skill: OrgPackageItemDetail;
-  tool: OrgPackageItemDetail;
-  provider: OrgPackageItemDetail;
+  "mcp-server": OrgPackageItemDetail;
+  integration: OrgPackageItemDetail;
 };
 
-function usePackageList(type: PackageType) {
+function usePackageList(type: PackageType, opts?: { activeOnly?: boolean }) {
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
   const cfg = PACKAGE_CONFIG[type];
+  const activeOnly = opts?.activeOnly ?? false;
   return useQuery({
-    queryKey: ["packages", cfg.path, orgId, applicationId],
-    queryFn: () => apiList<OrgPackageItem>(`/packages/${cfg.path}`),
+    queryKey: ["packages", cfg.path, orgId, applicationId, activeOnly ? "active" : "all"],
+    queryFn: () =>
+      apiList<OrgPackageItem>(`/packages/${cfg.path}${activeOnly ? "?active=true" : ""}`),
     enabled: !!orgId && !!applicationId,
   });
 }
@@ -70,10 +71,6 @@ function useUploadPackage(type: PackageType) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["packages", cfg.path] });
-      if (type === "provider") {
-        qc.invalidateQueries({ queryKey: ["providers"] });
-        qc.invalidateQueries({ queryKey: ["available-providers"] });
-      }
     },
   });
 }
@@ -88,10 +85,6 @@ function useDeletePackage(type: PackageType) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["packages", cfg.path] });
-      if (type === "provider") {
-        qc.invalidateQueries({ queryKey: ["providers"] });
-        qc.invalidateQueries({ queryKey: ["available-providers"] });
-      }
       navigate("/");
     },
   });
@@ -258,7 +251,7 @@ export function useRestoreVersion(type: PackageType, packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (version: string) =>
-      api<{ message: string; restoredVersion: string; lockVersion: number }>(
+      api<{ message: string; restored_version: string; lock_version: number }>(
         `${packageBasePath(type, packageId)}/versions/${version}/restore`,
         { method: "POST" },
       ),
@@ -275,7 +268,7 @@ export function useVersionInfo(type: PackageType, packageId: string | undefined)
   return useQuery({
     queryKey: ["version-info", orgId, applicationId, type, packageId],
     queryFn: () =>
-      api<{ latestPublishedVersion: string | null; activeVersion: string | null }>(
+      api<{ latest_published_version: string | null; active_version: string | null }>(
         `${packageBasePath(type, packageId!)}/versions/info`,
       ),
     enabled: !!orgId && !!applicationId && !!packageId,

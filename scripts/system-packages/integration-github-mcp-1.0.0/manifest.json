@@ -1,0 +1,653 @@
+{
+  "name": "@appstrate/github-mcp",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.1",
+  "display_name": "GitHub",
+  "description": "GitHub integration backed by GitHub's official remote MCP server (api.githubcopilot.com/mcp/). Full ~80-tool catalog spanning every documented toolset (context, repos, issues, pull_requests, actions, code_security, secret_protection, dependabot, notifications, users, orgs, projects, gists, discussions, copilot, copilot_spaces, git, labels, stargazers, security_advisories, github_support_docs_search). Two interchangeable auth paths: (1) OAuth — full OAuth App flow with per-tool scope inference; (2) PAT — Personal Access Token Bearer. GitHub MCP does not support Dynamic Client Registration: OAuth requires an OAuth App registered in the user's GitHub account. The selected access token is Bearer-injected on every MCP request by the sidecar.",
+  "license": "Apache-2.0",
+  "source": {
+    "kind": "remote",
+    "remote": {
+      "url": "https://api.githubcopilot.com/mcp/x/all",
+      "transport": "streamable-http"
+    }
+  },
+  "allow_undeclared_tools": true,
+  "auths": {
+    "oauth": {
+      "type": "oauth2",
+      "authorization_endpoint": "https://github.com/login/oauth/authorize",
+      "token_endpoint": "https://github.com/login/oauth/access_token",
+      "userinfo_endpoint": "https://api.github.com/user",
+      "default_scopes": [
+        "read:user",
+        "repo",
+        "read:org",
+        "workflow",
+        "security_events",
+        "notifications",
+        "gist",
+        "read:discussion",
+        "write:discussion",
+        "read:project",
+        "project"
+      ],
+      "token_endpoint_auth_method": "client_secret_post",
+      "identity_claims": {
+        "accountId": "$.login",
+        "sub": "$.id",
+        "login": "$.login",
+        "name": "$.name",
+        "email": "$.email",
+        "avatarUrl": "$.avatar_url"
+      },
+      "scope_catalog": [
+        {
+          "value": "read:user",
+          "label": "Read profile",
+          "description": "Read access to the authenticated user's profile (get_me, copilot_spaces)."
+        },
+        {
+          "value": "user:email",
+          "label": "User email",
+          "description": "Access the authenticated user's email addresses."
+        },
+        {
+          "value": "public_repo",
+          "label": "Public repos",
+          "description": "Read + write public repositories (commits, issues, PRs, stars, forks)."
+        },
+        {
+          "value": "repo",
+          "label": "All repos",
+          "description": "Full access to private + public repositories (writes, branches, files, collaborators).",
+          "implies": ["public_repo", "repo:status", "repo_deployment", "security_events"]
+        },
+        {
+          "value": "repo:status",
+          "label": "Commit status",
+          "description": "Read/write commit statuses (CI/CD signals)."
+        },
+        {
+          "value": "repo_deployment",
+          "label": "Deployments",
+          "description": "Access deployment statuses."
+        },
+        {
+          "value": "read:org",
+          "label": "Read orgs",
+          "description": "Read org membership, teams, and projects."
+        },
+        {
+          "value": "write:org",
+          "label": "Write orgs",
+          "description": "Publicize/unpublicize membership and manage teams.",
+          "implies": ["read:org"]
+        },
+        {
+          "value": "admin:org",
+          "label": "Admin orgs",
+          "description": "Full admin access to organizations (rarely needed).",
+          "implies": ["write:org", "read:org"]
+        },
+        {
+          "value": "gist",
+          "label": "Gists",
+          "description": "Create and manage gists."
+        },
+        {
+          "value": "notifications",
+          "label": "Notifications",
+          "description": "List, mark, dismiss, and manage notification subscriptions."
+        },
+        {
+          "value": "workflow",
+          "label": "Workflows",
+          "description": "Trigger, cancel, rerun GitHub Actions workflow runs and inspect job logs."
+        },
+        {
+          "value": "security_events",
+          "label": "Security alerts",
+          "description": "Read code scanning, secret scanning, and Dependabot alerts."
+        },
+        {
+          "value": "read:project",
+          "label": "Read projects",
+          "description": "Read GitHub Projects (boards, items, fields)."
+        },
+        {
+          "value": "project",
+          "label": "Write projects",
+          "description": "Modify GitHub Projects items, fields, and statuses.",
+          "implies": ["read:project"]
+        },
+        {
+          "value": "read:discussion",
+          "label": "Read discussions",
+          "description": "Read GitHub Discussions (threads, comments, categories)."
+        },
+        {
+          "value": "write:discussion",
+          "label": "Write discussions",
+          "description": "Create and update discussion comments.",
+          "implies": ["read:discussion"]
+        },
+        {
+          "value": "delete_repo",
+          "label": "Delete repos",
+          "description": "Delete repositories (irreversible — grant with care)."
+        },
+        {
+          "value": "read:packages",
+          "label": "Read packages",
+          "description": "Read packages published to GitHub Packages."
+        },
+        {
+          "value": "write:packages",
+          "label": "Write packages",
+          "description": "Publish and update packages on GitHub Packages.",
+          "implies": ["read:packages"]
+        }
+      ],
+      "authorized_uris": ["https://api.githubcopilot.com/**", "https://api.github.com/**"],
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer ",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": " "
+        },
+        "dev.appstrate/auth": {
+          "required": false
+        }
+      }
+    },
+    "pat": {
+      "type": "api_key",
+      "authorized_uris": ["https://api.githubcopilot.com/**", "https://api.github.com/**"],
+      "credentials": {
+        "schema": {
+          "type": "object",
+          "required": ["personal_access_token"],
+          "properties": {
+            "personal_access_token": {
+              "type": "string",
+              "description": "GitHub Personal Access Token (classic at https://github.com/settings/tokens, or fine-grained at https://github.com/settings/personal-access-tokens). For full functionality grant the equivalent of `repo + workflow + notifications + gist + read:org + security_events + project + write:discussion + write:packages`. Injected as `Authorization: Bearer <PAT>`."
+            }
+          }
+        }
+      },
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer ",
+          "value": "{$credential.personal_access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/auth": {
+          "required": false
+        }
+      }
+    }
+  },
+  "tools_policy": {
+    "get_me": {
+      "required_scopes": {
+        "oauth": ["read:user"]
+      }
+    },
+    "get_teams": {
+      "required_scopes": {
+        "oauth": ["read:org"]
+      }
+    },
+    "get_team_members": {
+      "required_scopes": {
+        "oauth": ["read:org"]
+      }
+    },
+    "search_repositories": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    },
+    "search_code": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    },
+    "list_branches": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    },
+    "list_commits": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    },
+    "get_commit": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    },
+    "list_tags": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    },
+    "get_tag": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    },
+    "get_file_contents": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    },
+    "list_releases": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    },
+    "get_latest_release": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    },
+    "get_release_by_tag": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    },
+    "list_repository_collaborators": {
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
+    },
+    "create_branch": {
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
+    },
+    "create_or_update_file": {
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
+    },
+    "create_repository": {
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
+    },
+    "delete_file": {
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
+    },
+    "fork_repository": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    },
+    "push_files": {
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
+    },
+    "search_issues": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    },
+    "list_issues": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    },
+    "issue_read": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    },
+    "list_issue_types": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    },
+    "issue_write": {
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
+    },
+    "add_issue_comment": {
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
+    },
+    "sub_issue_write": {
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
+    },
+    "search_pull_requests": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    },
+    "list_pull_requests": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    },
+    "pull_request_read": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    },
+    "create_pull_request": {
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
+    },
+    "update_pull_request": {
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
+    },
+    "update_pull_request_branch": {
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
+    },
+    "merge_pull_request": {
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
+    },
+    "pull_request_review_write": {
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
+    },
+    "add_comment_to_pending_review": {
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
+    },
+    "add_reply_to_pull_request_comment": {
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
+    },
+    "actions_list": {
+      "required_scopes": {
+        "oauth": ["workflow"]
+      }
+    },
+    "actions_get": {
+      "required_scopes": {
+        "oauth": ["workflow"]
+      }
+    },
+    "get_job_logs": {
+      "required_scopes": {
+        "oauth": ["workflow"]
+      }
+    },
+    "actions_run_trigger": {
+      "required_scopes": {
+        "oauth": ["workflow"]
+      }
+    },
+    "list_code_scanning_alerts": {
+      "required_scopes": {
+        "oauth": ["security_events"]
+      }
+    },
+    "get_code_scanning_alert": {
+      "required_scopes": {
+        "oauth": ["security_events"]
+      }
+    },
+    "list_secret_scanning_alerts": {
+      "required_scopes": {
+        "oauth": ["security_events"]
+      }
+    },
+    "get_secret_scanning_alert": {
+      "required_scopes": {
+        "oauth": ["security_events"]
+      }
+    },
+    "list_dependabot_alerts": {
+      "required_scopes": {
+        "oauth": ["security_events"]
+      }
+    },
+    "get_dependabot_alert": {
+      "required_scopes": {
+        "oauth": ["security_events"]
+      }
+    },
+    "list_notifications": {
+      "required_scopes": {
+        "oauth": ["notifications"]
+      }
+    },
+    "get_notification_details": {
+      "required_scopes": {
+        "oauth": ["notifications"]
+      }
+    },
+    "mark_all_notifications_read": {
+      "required_scopes": {
+        "oauth": ["notifications"]
+      }
+    },
+    "dismiss_notification": {
+      "required_scopes": {
+        "oauth": ["notifications"]
+      }
+    },
+    "manage_notification_subscription": {
+      "required_scopes": {
+        "oauth": ["notifications"]
+      }
+    },
+    "manage_repository_notification_subscription": {
+      "required_scopes": {
+        "oauth": ["notifications"]
+      }
+    },
+    "search_users": {
+      "required_scopes": {
+        "oauth": []
+      }
+    },
+    "search_orgs": {
+      "required_scopes": {
+        "oauth": []
+      }
+    },
+    "projects_list": {
+      "required_scopes": {
+        "oauth": ["read:project"]
+      }
+    },
+    "projects_get": {
+      "required_scopes": {
+        "oauth": ["read:project"]
+      }
+    },
+    "projects_write": {
+      "required_scopes": {
+        "oauth": ["project"]
+      }
+    },
+    "list_gists": {
+      "required_scopes": {
+        "oauth": ["gist"]
+      }
+    },
+    "get_gist": {
+      "required_scopes": {
+        "oauth": ["gist"]
+      }
+    },
+    "create_gist": {
+      "required_scopes": {
+        "oauth": ["gist"]
+      }
+    },
+    "update_gist": {
+      "required_scopes": {
+        "oauth": ["gist"]
+      }
+    },
+    "list_discussions": {
+      "required_scopes": {
+        "oauth": ["read:discussion"]
+      }
+    },
+    "list_discussion_categories": {
+      "required_scopes": {
+        "oauth": ["read:discussion"]
+      }
+    },
+    "get_discussion": {
+      "required_scopes": {
+        "oauth": ["read:discussion"]
+      }
+    },
+    "get_discussion_comments": {
+      "required_scopes": {
+        "oauth": ["read:discussion"]
+      }
+    },
+    "discussion_comment_write": {
+      "required_scopes": {
+        "oauth": ["write:discussion"]
+      }
+    },
+    "request_copilot_review": {
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
+    },
+    "list_copilot_spaces": {
+      "required_scopes": {
+        "oauth": ["read:user"]
+      }
+    },
+    "get_copilot_space": {
+      "required_scopes": {
+        "oauth": ["read:user"]
+      }
+    },
+    "get_repository_tree": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    },
+    "list_label": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    },
+    "get_label": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    },
+    "label_write": {
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
+    },
+    "list_starred_repositories": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    },
+    "star_repository": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    },
+    "unstar_repository": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    },
+    "list_global_security_advisories": {
+      "required_scopes": {
+        "oauth": []
+      }
+    },
+    "get_global_security_advisory": {
+      "required_scopes": {
+        "oauth": []
+      }
+    },
+    "list_repository_security_advisories": {
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
+    },
+    "list_org_repository_security_advisories": {
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
+    },
+    "github_support_docs_search": {
+      "required_scopes": {
+        "oauth": []
+      }
+    },
+    "search_commits": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    },
+    "semantic_issues_search": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    },
+    "semantic_issue_similarity_search": {
+      "required_scopes": {
+        "oauth": ["public_repo"]
+      }
+    },
+    "triage_issue": {
+      "required_scopes": {
+        "oauth": ["repo"]
+      }
+    },
+    "check_dependency_vulnerabilities": {
+      "required_scopes": {
+        "oauth": ["security_events"]
+      }
+    },
+    "run_secret_scanning": {
+      "required_scopes": {
+        "oauth": ["security_events"]
+      }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    }
+  }
+}

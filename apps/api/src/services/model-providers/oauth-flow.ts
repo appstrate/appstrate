@@ -17,7 +17,7 @@
  * official CLIs. Any platform-hosted callback is rejected. The CLI
  * (`appstrate connect`) does the loopback dance locally via
  * @mariozechner/pi-ai and POSTs the resulting tokens to
- * `/api/model-providers-oauth/import`, which calls
+ * `/api/model-providers-oauth/pair/redeem`, which calls
  * `importOAuthModelProviderConnection()` below.
  *
  * Spec: docs/architecture/OAUTH_MODEL_PROVIDERS_SPEC.md §4.

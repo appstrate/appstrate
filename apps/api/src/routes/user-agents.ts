@@ -16,10 +16,6 @@ export const updateSkillsSchema = z.object({
   skillIds: z.array(z.string()).max(50),
 });
 
-export const updateToolsSchema = z.object({
-  toolIds: z.array(z.string()).max(50),
-});
-
 /**
  * Resolve each dep ID to its canonical caret range (`^X.Y.Z`) from the
  * org/system catalog. IDs whose row is missing or whose draft manifest
@@ -43,13 +39,8 @@ async function resolveCaretRanges(orgId: string, ids: string[]): Promise<Record<
   return result;
 }
 
-/** Update a dep section (skills or tools) in the manifest. */
-async function updateManifestDeps(
-  orgId: string,
-  packageId: string,
-  depKey: "skills" | "tools",
-  ids: string[],
-): Promise<void> {
+/** Update the skills dep section in the manifest. */
+async function updateManifestDeps(orgId: string, packageId: string, ids: string[]): Promise<void> {
   const [row] = await db
     .select({ draftManifest: packages.draftManifest })
     .from(packages)
@@ -59,7 +50,7 @@ async function updateManifestDeps(
 
   const manifest = asRecord(row.draftManifest);
   const deps = asRecord(manifest.dependencies);
-  deps[depKey] = await resolveCaretRanges(orgId, ids);
+  deps.skills = await resolveCaretRanges(orgId, ids);
   manifest.dependencies = deps;
 
   await db
@@ -92,33 +83,11 @@ export function createUserAgentsRouter() {
         );
       }
 
-      await updateManifestDeps(c.get("orgId"), packageId, "skills", skillIds);
+      await updateManifestDeps(c.get("orgId"), packageId, skillIds);
 
       return c.json({ packageId, skillIds, message: "Skill references updated" });
     },
   );
-
-  // PUT /api/agents/:scope/:name/tools — set tool references for an agent
-  router.put("/:scope{@[^/]+}/:name/tools", requireOrgAgent(), requireMutableAgent(), async (c) => {
-    const agent = c.get("package");
-    const packageId = agent.id;
-
-    const body = await c.req.json();
-    const data = parseBody(updateToolsSchema, body, "toolIds");
-    const { toolIds } = data;
-
-    const invalidIds = toolIds.filter((id) => !scopedNameRegex.test(id));
-    if (invalidIds.length > 0) {
-      throw invalidRequest(
-        `Invalid tool IDs (must be scoped @scope/name): ${invalidIds.join(", ")}`,
-        "toolIds",
-      );
-    }
-
-    await updateManifestDeps(c.get("orgId"), packageId, "tools", toolIds);
-
-    return c.json({ packageId, toolIds, message: "Tool references updated" });
-  });
 
   return router;
 }

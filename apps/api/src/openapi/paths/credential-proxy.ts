@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Credential proxy endpoint (AFPS 1.3 — BYOI for external runners).
+ * Credential proxy endpoint (BYOI for external runners).
  *
  * Wire-compatible with the runtime-pi sidecar `/proxy` contract. Accepts
  * bearer auth: API keys (headless / GitHub Action) or OIDC-issued JWTs
@@ -17,7 +17,7 @@
 
 const proxySharedDescription =
   "High-value endpoint. Accepts an upstream HTTP request and forwards it to the " +
-  "provider after injecting the stored credentials server-side. Credentials never " +
+  "upstream API after injecting the stored credentials server-side. Credentials never " +
   "leave Appstrate.\n\n" +
   "Authentication: bearer only — either an API key with the `credential-proxy:call` " +
   "scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token " +
@@ -27,7 +27,7 @@ const proxySharedDescription =
   "Optional `Appstrate-User` header scopes the call to an end-user's connection " +
   "profile (API-key auth only).\n\n" +
   "URL and headers can contain `{{credential_field}}` placeholders substituted " +
-  "against the provider's credential schema. Set `X-Substitute-Body: true` to run " +
+  "against the integration's credential schema. Set `X-Substitute-Body: true` to run " +
   "the same substitution on the request body (verbs that carry one).";
 
 const proxyParameters = [
@@ -39,10 +39,10 @@ const proxyParameters = [
     schema: { type: "string" },
   },
   {
-    name: "X-Provider",
+    name: "X-Integration-Id",
     in: "header",
     required: true,
-    description: "Scoped provider name (e.g. `@afps/gmail`).",
+    description: "Scoped integration package name (e.g. `@afps/gmail`).",
     schema: { type: "string" },
   },
   {
@@ -50,8 +50,8 @@ const proxyParameters = [
     in: "header",
     required: true,
     description:
-      "Absolute URL of the upstream endpoint. Must match the provider manifest's " +
-      "`authorizedUris` unless `allowAllUris: true`.",
+      "Absolute URL of the upstream endpoint. Must match the integration manifest auth's " +
+      "`authorized_uris` unless `allow_all_uris: true`.",
     schema: { type: "string", format: "uri" },
   },
   {
@@ -76,7 +76,7 @@ const proxyParameters = [
     name: "Appstrate-User",
     in: "header",
     required: false,
-    description: "Impersonation header — scopes the call to this end-user's connection profile.",
+    description: "Impersonation header — scopes the call to this end-user's connection.",
     schema: { type: "string", pattern: "^eu_" },
   },
   {
@@ -101,13 +101,13 @@ const proxyParameters = [
     schema: { type: "string" },
   },
   {
-    name: "X-Connection-Profile-Id",
+    name: "X-Connection-Id",
     in: "header",
     required: false,
     description:
-      "Optional explicit connection profile UUID. When set, the proxy narrows to that profile " +
-      "after validating it belongs to the caller (own user / end-user profile, or an app " +
-      "profile in the request's application). When absent the route falls back to the " +
+      "Optional explicit connection UUID. When set, the proxy narrows to that connection " +
+      "after validating it belongs to the caller (own user / end-user connection, or a " +
+      "shared connection in the request's application). When absent the route falls back to the " +
       "implicit default chain (end-user default → app default → user default). Mismatched " +
       "or unknown ids surface as `404 — no credentials`, identical to the implicit-default path.",
     schema: { type: "string", format: "uuid" },
@@ -144,10 +144,10 @@ const proxyResponses = {
   "403": {
     description:
       "Forbidden — principal lacks `credential-proxy:call`, target not in " +
-      "`authorizedUris`, session bound to a different principal, or cookie session used.",
+      "`authorized_uris`, session bound to a different principal, or cookie session used.",
   },
   "404": {
-    description: "No credentials or connection profile for the requested provider.",
+    description: "No credentials or connection for the requested integration.",
   },
   "429": { $ref: "#/components/responses/RateLimited" },
 } as const;
@@ -163,11 +163,11 @@ type ProxyVerb = "get" | "post" | "put" | "patch" | "delete";
 
 function makeProxyOperation(verb: ProxyVerb) {
   const summaries: Record<ProxyVerb, string> = {
-    get: "Proxy a GET request to a provider with server-side credential injection",
-    post: "Proxy a POST request to a provider with server-side credential injection",
-    put: "Proxy a PUT request to a provider with server-side credential injection",
-    patch: "Proxy a PATCH request to a provider with server-side credential injection",
-    delete: "Proxy a DELETE request to a provider with server-side credential injection",
+    get: "Proxy a GET request to an integration with server-side credential injection",
+    post: "Proxy a POST request to an integration with server-side credential injection",
+    put: "Proxy a PUT request to an integration with server-side credential injection",
+    patch: "Proxy a PATCH request to an integration with server-side credential injection",
+    delete: "Proxy a DELETE request to an integration with server-side credential injection",
   };
   const operationIds: Record<ProxyVerb, string> = {
     get: "credentialProxyGet",

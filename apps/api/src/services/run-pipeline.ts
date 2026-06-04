@@ -6,20 +6,20 @@
  */
 
 import { logger } from "../lib/logger.ts";
-import { buildRunContext, ModelNotConfiguredError } from "./env-builder.ts";
+import { buildRunContext, ModelNotConfiguredError } from "./run-context-builder.ts";
 import { createRun } from "./state/runs.ts";
 import { getPackageConfig } from "./application-packages.ts";
-import { executeAgentInBackground } from "../routes/runs.ts";
-import { resolveProviderProfiles } from "./connection-profiles.ts";
-import { resolveManifestProviders } from "../lib/manifest-utils.ts";
+import { executeAgentInBackground } from "./run-launcher/execute-background.ts";
 import { validateAgentReadiness } from "./agent-readiness.ts";
+import { resolveRunConnectionsOrError } from "./integration-connection-resolver.ts";
+import type { ConnectionOverrides, ResolvedConnectionMap } from "@appstrate/core/integration";
 import { parseScopedName } from "@appstrate/core/naming";
 import { mintSinkCredentials } from "../lib/mint-sink-credentials.ts";
 import { encrypt } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
 import { getOrchestrator } from "./orchestrator/index.ts";
 import { ApiError } from "../lib/errors.ts";
-import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
+import type { LoadedPackage } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
 import type { UploadedFile, FileReference } from "./run-launcher/types.ts";
 import { runPreflightGates } from "./run-preflight-gates.ts";
@@ -37,8 +37,8 @@ export function extractRunAgentDenorm(pkg: LoadedPackage): {
 } {
   const parsed = parseScopedName(pkg.id);
   const manifestName =
-    typeof pkg.manifest.displayName === "string"
-      ? pkg.manifest.displayName
+    typeof pkg.manifest.display_name === "string"
+      ? pkg.manifest.display_name
       : typeof pkg.manifest.name === "string"
         ? pkg.manifest.name
         : null;
@@ -55,7 +55,6 @@ export function extractRunAgentDenorm(pkg: LoadedPackage): {
 export interface RunPipelineParams {
   runId: string;
   agent: LoadedPackage;
-  providerProfiles: ProviderProfileMap;
   orgId: string;
   actor: Actor | null;
   input?: Record<string, unknown> | null;
@@ -74,14 +73,25 @@ export interface RunPipelineParams {
   overrideVersionLabel?: string;
   /** Schedule ID — set only for scheduled runs. */
   scheduleId?: string;
-  /** Connection profile ID used to create the run. */
-  connectionProfileId?: string;
   /** Application ID — required for all runs. */
   applicationId: string;
   /** Uploaded files to inject into the container. */
   uploadedFiles?: UploadedFile[];
   /** API key ID that triggered the run (if auth via API key). */
   apiKeyId?: string;
+  /**
+   * Per-(integration, authKey) connection id chosen by the caller for
+   * THIS run (#199). Persisted on `runs.connection_overrides` as the
+   * audit trail and fed into the resolver's mechanism #2 so the snapshot
+   * pins the right row. Loses to admin pins (mechanism #1).
+   */
+  connectionOverrides?: ConnectionOverrides | null;
+  /**
+   * Schedule-frozen overrides loaded from `package_schedules.connection_overrides`.
+   * Same shape as `connectionOverrides`; loses to both admin pins and
+   * per-run overrides. Scheduler path only.
+   */
+  scheduleConnectionOverrides?: ConnectionOverrides | null;
   /**
    * W3C `traceparent` header value of the spawning request. Forwarded
    * into the runtime so its outbound traffic becomes child spans of
@@ -104,50 +114,46 @@ export interface RunPipelineSuccess {
 // ---------------------------------------------------------------------------
 
 export interface PreflightResult {
-  providerProfiles: ProviderProfileMap;
   config: Record<string, unknown>;
   modelId: string | null;
   proxyId: string | null;
 }
 
 /**
- * Resolve provider profiles, package config, and validate agent readiness.
+ * Resolve package config and validate agent readiness.
  * Shared by the POST /run route and the scheduler's triggerScheduledRun.
+ *
+ * Connection overrides are forwarded to readiness so a caller that
+ * disambiguates a must_choose situation via `connection_overrides` on
+ * the run body / schedule row gets past the readiness gate on retry
+ * (otherwise readiness re-fires must_choose on the same N>1 candidate
+ * set and the picker UX loop never exits).
  */
 export async function resolveRunPreflight(params: {
   agent: LoadedPackage;
   applicationId: string;
   orgId: string;
-  defaultUserProfileId: string | null;
-  userProviderOverrides?: Record<string, string>;
-  appProfileId: string | null;
+  actor: Actor | null;
+  connectionOverrides?: ConnectionOverrides | null;
+  scheduleConnectionOverrides?: ConnectionOverrides | null;
 }): Promise<PreflightResult> {
-  const { agent, applicationId, orgId, defaultUserProfileId, userProviderOverrides, appProfileId } =
-    params;
+  const { agent, applicationId, orgId, actor } = params;
 
-  const manifestProviders = resolveManifestProviders(agent.manifest);
-
-  const [providerProfiles, packageConfig] = await Promise.all([
-    resolveProviderProfiles(
-      manifestProviders,
-      defaultUserProfileId,
-      userProviderOverrides,
-      appProfileId,
-      applicationId,
-    ),
-    getPackageConfig(applicationId, agent.id),
-  ]);
+  const packageConfig = await getPackageConfig(applicationId, agent.id);
 
   await validateAgentReadiness({
     agent,
-    providerProfiles,
     orgId,
     config: packageConfig.config,
     applicationId,
+    actor,
+    ...(params.connectionOverrides ? { runOverrides: params.connectionOverrides } : {}),
+    ...(params.scheduleConnectionOverrides
+      ? { scheduleOverrides: params.scheduleConnectionOverrides }
+      : {}),
   });
 
   return {
-    providerProfiles,
     config: packageConfig.config,
     modelId: packageConfig.modelId,
     proxyId: packageConfig.proxyId,
@@ -169,7 +175,6 @@ export async function resolveRunPreflight(params: {
 export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<RunPipelineSuccess> {
   const {
     runId,
-    providerProfiles,
     orgId,
     actor,
     input,
@@ -179,20 +184,16 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     proxyId,
     overrideVersionLabel,
     scheduleId,
-    connectionProfileId,
     applicationId,
     uploadedFiles,
     apiKeyId,
   } = params;
-  // --- Step 0: Shared preflight gates (rate, concurrency, timeout cap,
-  //     beforeRun hook, provider status snapshot). Shared with the remote
-  //     origin in run-creation.ts so drift across the two paths is
-  //     impossible — one change surface.
+  // --- Step 1: Shared preflight gates (rate, concurrency, timeout cap,
+  //     beforeRun hook). Shared with the remote origin in run-creation.ts so
+  //     drift across the two paths is impossible — one change surface.
   const gates = await runPreflightGates({
     orgId,
-    applicationId: params.applicationId,
     agent: params.agent,
-    providerProfiles,
   });
   if (!gates.ok) {
     throw new ApiError({
@@ -202,9 +203,45 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
       detail: gates.error.message,
     });
   }
-  const { agent, providerStatusSnapshots } = gates;
+  const { agent } = gates;
 
-  // --- Step 1: Build run context ---
+  // --- Step 2: Connection resolution snapshot (#199) ---
+  //
+  // Apply the 4-mechanism cascade once at kickoff so:
+  //  - the spawn loader (run-context-builder) pins the same row admin/run intended,
+  //  - the credentials resolver (sidecar MITM refresh) honours that pick
+  //    long after kickoff via runs.resolved_connections.
+  //
+  // Readiness already ran in resolveRunPreflight WITH the same overrides
+  // (so the must_choose retry exits its loop). This second pass produces
+  // the persisted resolution snapshot and re-checks under the current DB
+  // state — any error here is hard 412: either the override points at an
+  // invalid id (caller's mistake), or a race after readiness mutated DB
+  // state (connection deleted / pin shifted). Either way the caller
+  // needs structured feedback, not a silent fallback.
+  let resolvedConnections: ResolvedConnectionMap | null = null;
+  if (actor) {
+    const outcome = await resolveRunConnectionsOrError({
+      agentManifest: agent.manifest as Record<string, unknown>,
+      packageId: agent.id,
+      actor,
+      scope: { orgId, applicationId },
+      runOverrides: params.connectionOverrides ?? null,
+      scheduleOverrides: params.scheduleConnectionOverrides ?? null,
+    });
+    if (!outcome.ok) {
+      throw new ApiError({
+        status: outcome.error.status,
+        code: outcome.error.code,
+        title: outcome.error.title,
+        detail: outcome.error.detail,
+        errors: outcome.error.errors,
+      });
+    }
+    resolvedConnections = outcome.resolved;
+  }
+
+  // --- Step 3: Build run context ---
   let context;
   let plan;
   let agentPackage: Buffer | null;
@@ -226,7 +263,6 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     } = await buildRunContext({
       runId,
       agent,
-      providerProfiles,
       orgId,
       applicationId,
       actor,
@@ -237,6 +273,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
       proxyId,
       overrideVersionLabel,
       traceparent: params.traceparent,
+      resolvedConnections,
     }));
   } catch (err) {
     if (err instanceof ModelNotConfiguredError) {
@@ -250,12 +287,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     throw err;
   }
 
-  // --- Step 2: Extract profile ID map ---
-  const profileIdMap = Object.fromEntries(
-    Object.entries(providerProfiles).map(([k, v]) => [k, v.connectionProfileId]),
-  );
-
-  // --- Step 5: Mint sink credentials ---
+  // --- Step 4: Mint sink credentials ---
   // Every run — platform and remote — uses the same signed-event
   // protocol. The container reads `APPSTRATE_SINK_URL` +
   // `APPSTRATE_SINK_SECRET` from its env and POSTs CloudEvents back;
@@ -274,7 +306,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     ttlSeconds: env.REMOTE_RUN_SINK_DEFAULT_TTL_SECONDS,
   });
 
-  // --- Step 6: Create run record (with sink state) ---
+  // --- Step 5: Create run record (with sink state) ---
   const agentDenorm = extractRunAgentDenorm(agent);
   await createRun(
     { orgId, applicationId },
@@ -284,14 +316,11 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
       actor,
       input: input ?? null,
       scheduleId,
-      connectionProfileId,
       versionLabel: versionLabel ?? undefined,
       versionDirty,
       proxyLabel: proxyLabel ?? undefined,
       modelLabel: modelLabel ?? undefined,
       modelSource: modelSource ?? undefined,
-      providerProfileIds: profileIdMap,
-      providerStatuses: providerStatusSnapshots,
       apiKeyId,
       agentScope: agentDenorm.scope,
       agentName: agentDenorm.name,
@@ -300,13 +329,15 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
       runOrigin: "platform",
       sinkSecretEncrypted: encrypt(sinkCredentials.secret),
       sinkExpiresAt: new Date(sinkCredentials.expiresAt),
+      connectionOverrides: params.connectionOverrides ?? null,
+      resolvedConnections,
       runnerName: params.runnerName ?? null,
       runnerKind: params.runnerKind ?? null,
       modelCredentialId: plan.llmConfig.credentialId ?? null,
     },
   );
 
-  // --- Step 7: Fire-and-forget execution ---
+  // --- Step 6: Fire-and-forget execution ---
   executeAgentInBackground({
     runId,
     orgId,

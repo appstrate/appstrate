@@ -1,0 +1,89 @@
+{
+  "name": "@appstrate/microsoft-outlook",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.1",
+  "display_name": "Microsoft Outlook (API)",
+  "description": "Email and calendar service by Microsoft",
+  "keywords": ["email", "productivity"],
+  "license": "Apache-2.0",
+  "icon": "microsoftoutlook",
+  "source": {
+    "kind": "none"
+  },
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "authorization_endpoint": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+      "token_endpoint": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+      "default_scopes": ["Mail.Read", "User.Read", "offline_access"],
+      "token_endpoint_auth_method": "client_secret_post",
+      "code_challenge_methods_supported": ["S256"],
+      "scope_catalog": [
+        {
+          "value": "Mail.Read",
+          "label": "Read user mail"
+        },
+        {
+          "value": "Mail.ReadWrite",
+          "label": "Read and write user mail"
+        },
+        {
+          "value": "Mail.Send",
+          "label": "Send mail"
+        },
+        {
+          "value": "Contacts.Read",
+          "label": "Read contacts"
+        },
+        {
+          "value": "Contacts.ReadWrite",
+          "label": "Read and write contacts"
+        },
+        {
+          "value": "Calendars.Read",
+          "label": "Read calendars"
+        },
+        {
+          "value": "Calendars.ReadWrite",
+          "label": "Read and write calendars"
+        },
+        {
+          "value": "User.Read",
+          "label": "Read user profile"
+        },
+        {
+          "value": "offline_access",
+          "label": "Maintain access (refresh tokens)"
+        }
+      ],
+      "authorized_uris": ["https://graph.microsoft.com/**"],
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": " "
+        },
+        "dev.appstrate/auth": {
+          "required": true
+        }
+      }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/api": {
+      "auths": {
+        "primary": {}
+      }
+    }
+  }
+}

@@ -10,8 +10,6 @@
  * wrapper owns trust-root parsing, logging wiring, and translation of
  * the runtime's `BundleSignaturePolicyError` into a platform-typed
  * error that carries the offending `packageId`.
- *
- * See docs/adr/ADR-009-afps-bundle-signing-ed25519-to-sigstore.md.
  */
 
 import { z } from "zod";

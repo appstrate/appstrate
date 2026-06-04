@@ -2,7 +2,7 @@
 
 /**
  * Unit tests for the token-aware context-budget primitives that the
- * sidecar uses to gate `provider_call` / `run_history` / `recall_memory`
+ * sidecar uses to gate `api_call` / `run_history` / `recall_memory`
  * tool outputs against the agent's run-level context budget.
  *
  * Coverage focus:

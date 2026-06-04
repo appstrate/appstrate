@@ -1,0 +1,71 @@
+{
+  "name": "@appstrate/webhooks",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.1",
+  "display_name": "Webhooks (API)",
+  "description": "Generic webhook provider — send HTTP requests to any URL with optional authentication",
+  "keywords": ["integration", "automation"],
+  "license": "Apache-2.0",
+  "icon": "webhook",
+  "source": {
+    "kind": "none"
+  },
+  "auths": {
+    "primary": {
+      "type": "custom",
+      "authorized_uris": [],
+      "allow_all_uris": true,
+      "credentials": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "webhook_url": {
+              "type": "string",
+              "description": "Target webhook URL"
+            },
+            "secret_header_name": {
+              "type": "string",
+              "description": "Custom authentication header name (e.g. X-Webhook-Secret) — optional"
+            },
+            "secret_header_value": {
+              "type": "string",
+              "description": "Secret value for the authentication header — optional"
+            }
+          },
+          "required": ["webhook_url"]
+        }
+      },
+      "delivery": {
+        "env": {
+          "WEBHOOK_URL": {
+            "value": "{$credential.webhook_url}",
+            "sensitive": true
+          },
+          "WEBHOOK_SECRET_HEADER_NAME": {
+            "value": "{$credential.secret_header_name}"
+          },
+          "WEBHOOK_SECRET_HEADER_VALUE": {
+            "value": "{$credential.secret_header_value}",
+            "sensitive": true
+          }
+        }
+      },
+      "_meta": {
+        "dev.appstrate/auth": {
+          "required": true
+        }
+      }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/api": {
+      "auths": {
+        "primary": {}
+      }
+    }
+  }
+}

@@ -3,15 +3,15 @@
 
 /**
  * MCP exposure of the sidecar's capabilities — the only agent-facing
- * surface after the migration.
+ * surface.
  *
  * The sidecar's only first-party HTTP endpoint is `/health`; everything
- * the agent talks to (`provider_call`, `run_history`, `recall_memory`) is
+ * the agent talks to (`{ns}__api_call`, `run_history`, `recall_memory`) is
  * dispatched here as MCP tools.
  *
  * Key invariants:
  *
- * 1. `provider_call` calls {@link executeProviderCall} directly via
+ * 1. `{ns}__api_call` calls {@link executeApiCall} directly via
  *    `proxyDeps`. There is no longer a `/proxy` HTTP envelope — the
  *    same credential-isolation invariants (cred fetch, URL allowlist,
  *    server-side header injection, 401-retry, cookie jar, persistent-
@@ -58,11 +58,14 @@ import {
 } from "@appstrate/mcp-transport";
 import { getErrorMessage } from "@appstrate/core/errors";
 import {
+  RUN_HISTORY_INJECTED_TOOL,
+  RECALL_MEMORY_INJECTED_TOOL,
+} from "@appstrate/runner-pi/runtime-tools";
+import {
   ABSOLUTE_MAX_RESPONSE_SIZE,
   MAX_MCP_ENVELOPE_SIZE,
   MAX_REQUEST_BODY_SIZE,
   MAX_RESPONSE_SIZE,
-  PROVIDER_ID_RE,
   substituteVars,
 } from "./helpers.ts";
 import { TokenBudget } from "./token-budget.ts";
@@ -88,7 +91,7 @@ function decodeStrictBase64(s: string): Uint8Array | "invalid" {
   }
 }
 import type { BlobStore } from "./blob-store.ts";
-import { executeProviderCall, type ProviderCallDeps } from "./credential-proxy.ts";
+import { executeApiCall, type ApiCallDeps } from "./credential-proxy.ts";
 import {
   UPSTREAM_META_KEY,
   buildPreflightUpstreamMeta,
@@ -97,24 +100,15 @@ import {
 } from "./upstream-meta.ts";
 
 /**
- * `_meta` payload attached to every `provider_call` pre-flight error
+ * `_meta` payload attached to every `api_call` pre-flight error
  * (no upstream contact). Surfacing `status: 0` lets the runtime
  * distinguish "no upstream contact" from "upstream returned 5xx" via
  * the status code rather than the absence of `_meta` — the runtime
  * parser now requires `_meta` on every CallToolResult.
  */
-const PROVIDER_CALL_PREFLIGHT_META: Record<string, unknown> = {
+const API_CALL_PREFLIGHT_META: Record<string, unknown> = {
   [UPSTREAM_META_KEY]: buildPreflightUpstreamMeta(),
 };
-
-/**
- * JSON Schema `pattern` mirroring `PROVIDER_ID_RE` from `helpers.ts` —
- * the source of truth shared with `executeProviderCall`. We strip the
- * leading/trailing slashes and the regex flags so JSON Schema
- * validators (AJV / the MCP SDK / inspectors) see a portable
- * ECMA-compatible string. Anchors are preserved.
- */
-const PROVIDER_ID_PATTERN = PROVIDER_ID_RE.source;
 
 /**
  * Re-exported alias for the JSON-RPC envelope cap so call sites in this
@@ -166,7 +160,7 @@ function validateMcpHostHeader(req: Request): Response | undefined {
 }
 
 /**
- * Headers an LLM caller may NOT inject via `provider_call.args.headers`.
+ * Headers an LLM caller may NOT inject via `api_call.args.headers`.
  *
  * The MCP descriptor advertises that routing / sidecar-control headers
  * are filtered server-side. Without this filter, an LLM could supply
@@ -174,13 +168,14 @@ function validateMcpHostHeader(req: Request): Response | undefined {
  * the MCP layer deliberately does not expose),
  * `X-Substitute-Body: 1` to inject `{{credential}}` placeholders into
  * an attacker-controlled payload, or `X-Max-Response-Size` to bypass
- * the response truncation budget. The `X-Provider` and `X-Target`
+ * the response truncation budget. The `X-Integration` and `X-Target`
  * routing headers are also stripped so the LLM can't redirect the
  * request post-validation. Header names are matched case-insensitively
  * (HTTP header semantics).
  */
-const PROVIDER_CALL_FORBIDDEN_HEADERS = new Set<string>([
-  "x-provider",
+const API_CALL_FORBIDDEN_HEADERS = new Set<string>([
+  "x-integration",
+  "x-integration-id",
   "x-target",
   "x-substitute-body",
   "x-stream-response",
@@ -196,7 +191,7 @@ const PROVIDER_CALL_FORBIDDEN_HEADERS = new Set<string>([
  * (used to surface the violation to the agent — silent stripping would
  * mask buggy MCP clients).
  */
-function sanitiseProviderCallHeaders(raw: Record<string, string> | undefined): {
+function sanitiseApiCallHeaders(raw: Record<string, string> | undefined): {
   headers: Record<string, string>;
   dropped: string[];
 } {
@@ -204,7 +199,7 @@ function sanitiseProviderCallHeaders(raw: Record<string, string> | undefined): {
   const headers: Record<string, string> = {};
   const dropped: string[] = [];
   for (const [name, value] of Object.entries(raw)) {
-    if (PROVIDER_CALL_FORBIDDEN_HEADERS.has(name.toLowerCase())) {
+    if (API_CALL_FORBIDDEN_HEADERS.has(name.toLowerCase())) {
       dropped.push(name);
       continue;
     }
@@ -233,8 +228,12 @@ const INLINE_RESPONSE_THRESHOLD_BYTES = 32 * 1024;
  * Distinct from {@link UPSTREAM_META_KEY} (which carries upstream
  * `{ status, headers }`) so a CallToolResult can carry both without
  * collision.
+ *
+ * AFPS (Phase F1 follow-up): reverse-DNS namespace — `_meta` keys
+ * must be either a single bare token or a reverse-DNS prefix (RFC §10.1
+ * / Appendix B). The canonical form is `"dev.appstrate/token-budget"`.
  */
-export const TOKEN_BUDGET_META_KEY = "appstrate://token-budget";
+export const TOKEN_BUDGET_META_KEY = "dev.appstrate/token-budget";
 
 /**
  * Discriminated reason surfaced in the agent-facing `_meta` payload.
@@ -282,7 +281,7 @@ const MAX_MULTIPART_FILENAME_LENGTH = 1024;
 const MAX_MULTIPART_CONTENT_TYPE_LENGTH = 256;
 
 /**
- * Runtime shape of a single `provider_call.body.multipart[]` entry.
+ * Runtime shape of a single `api_call.body.multipart[]` entry.
  * Mirrors the JSON Schema on the tool descriptor — kept as an explicit
  * TS type so the handler can narrow without `as` casts. Two variants:
  *
@@ -331,13 +330,13 @@ function multipartError(
       content: [{ type: "text", text }],
       ...(structuredContent ? { structuredContent } : {}),
       isError: true,
-      _meta: PROVIDER_CALL_PREFLIGHT_META,
+      _meta: API_CALL_PREFLIGHT_META,
     },
   };
 }
 
 /**
- * Validate + decode every entry in `provider_call.body.multipart[]`.
+ * Validate + decode every entry in `api_call.body.multipart[]`.
  * Returns either the fully-decoded parts ready for `FormData` assembly,
  * or a structured `CallToolResult` describing the first failure (mirrors
  * the `{ fromBytes }` error shapes — invalid base64, oversize payload).
@@ -350,14 +349,14 @@ function multipartError(
  */
 function validateMultipartParts(parts: unknown): MultipartValidationOk | MultipartValidationErr {
   if (!Array.isArray(parts)) {
-    return multipartError("provider_call: body.multipart must be an array of parts.");
+    return multipartError("api_call: body.multipart must be an array of parts.");
   }
   if (parts.length === 0) {
-    return multipartError("provider_call: body.multipart must contain at least one part.");
+    return multipartError("api_call: body.multipart must contain at least one part.");
   }
   if (parts.length > MAX_MULTIPART_PARTS) {
     return multipartError(
-      `provider_call: body.multipart has ${parts.length} parts, which exceeds the per-request limit of ${MAX_MULTIPART_PARTS}.`,
+      `api_call: body.multipart has ${parts.length} parts, which exceeds the per-request limit of ${MAX_MULTIPART_PARTS}.`,
     );
   }
 
@@ -368,20 +367,20 @@ function validateMultipartParts(parts: unknown): MultipartValidationOk | Multipa
   for (let i = 0; i < parts.length; i++) {
     const part = parts[i] as MultipartPartArg | undefined;
     if (!part || typeof part !== "object") {
-      return multipartError(`provider_call: body.multipart[${i}] must be an object.`);
+      return multipartError(`api_call: body.multipart[${i}] must be an object.`);
     }
     if (typeof (part as { name?: unknown }).name !== "string" || part.name.length === 0) {
-      return multipartError(`provider_call: body.multipart[${i}].name must be a non-empty string.`);
+      return multipartError(`api_call: body.multipart[${i}].name must be a non-empty string.`);
     }
     if (part.name.length > MAX_MULTIPART_NAME_LENGTH) {
       return multipartError(
-        `provider_call: body.multipart[${i}].name length ${part.name.length} exceeds the per-part limit of ${MAX_MULTIPART_NAME_LENGTH}.`,
+        `api_call: body.multipart[${i}].name length ${part.name.length} exceeds the per-part limit of ${MAX_MULTIPART_NAME_LENGTH}.`,
       );
     }
     if ("value" in part) {
       if (typeof part.value !== "string") {
         return multipartError(
-          `provider_call: body.multipart[${i}].value must be a string. Use the file-part shape ({ name, filename, bytes, encoding }) for binary data.`,
+          `api_call: body.multipart[${i}].value must be a string. Use the file-part shape ({ name, filename, bytes, encoding }) for binary data.`,
         );
       }
       fields.push({ name: part.name, value: part.value });
@@ -390,17 +389,15 @@ function validateMultipartParts(parts: unknown): MultipartValidationOk | Multipa
     // File part: { name, filename, bytes, encoding, contentType? }
     if (part.encoding !== "base64") {
       return multipartError(
-        `provider_call: body.multipart[${i}].encoding must be "base64" (only standard base64 file parts are supported).`,
+        `api_call: body.multipart[${i}].encoding must be "base64" (only standard base64 file parts are supported).`,
       );
     }
     if (typeof part.filename !== "string" || part.filename.length === 0) {
-      return multipartError(
-        `provider_call: body.multipart[${i}].filename must be a non-empty string.`,
-      );
+      return multipartError(`api_call: body.multipart[${i}].filename must be a non-empty string.`);
     }
     if (part.filename.length > MAX_MULTIPART_FILENAME_LENGTH) {
       return multipartError(
-        `provider_call: body.multipart[${i}].filename length ${part.filename.length} exceeds the per-part limit of ${MAX_MULTIPART_FILENAME_LENGTH}.`,
+        `api_call: body.multipart[${i}].filename length ${part.filename.length} exceeds the per-part limit of ${MAX_MULTIPART_FILENAME_LENGTH}.`,
       );
     }
     if (
@@ -409,19 +406,19 @@ function validateMultipartParts(parts: unknown): MultipartValidationOk | Multipa
         part.contentType.length > MAX_MULTIPART_CONTENT_TYPE_LENGTH)
     ) {
       return multipartError(
-        `provider_call: body.multipart[${i}].contentType must be a string of at most ${MAX_MULTIPART_CONTENT_TYPE_LENGTH} characters.`,
+        `api_call: body.multipart[${i}].contentType must be a string of at most ${MAX_MULTIPART_CONTENT_TYPE_LENGTH} characters.`,
       );
     }
     const decoded = decodeStrictBase64(part.bytes);
     if (decoded === "invalid") {
       return multipartError(
-        `provider_call: body.multipart[${i}].bytes is not standard base64 (RFC 4648 §4, alphabet \`+/\`, no whitespace).`,
+        `api_call: body.multipart[${i}].bytes is not standard base64 (RFC 4648 §4, alphabet \`+/\`, no whitespace).`,
       );
     }
     decodedBytes += decoded.byteLength;
     if (decodedBytes > MAX_REQUEST_BODY_SIZE) {
       return multipartError(
-        `provider_call: body.multipart sum of decoded file bytes is ${decodedBytes} bytes ` +
+        `api_call: body.multipart sum of decoded file bytes is ${decodedBytes} bytes ` +
           `(at index ${i}), which exceeds the per-request limit of ${MAX_REQUEST_BODY_SIZE} ` +
           `bytes. Operators can raise the cap with SIDECAR_MAX_REQUEST_BODY_BYTES (and ` +
           `SIDECAR_MAX_MCP_ENVELOPE_BYTES, since base64 inflation must still fit the ` +
@@ -452,14 +449,14 @@ function validateMultipartParts(parts: unknown): MultipartValidationOk | Multipa
 }
 
 /**
- * Build the `provider_call`, `run_history`, and `recall_memory` MCP
+ * Build the `{ns}__api_call`, `run_history`, and `recall_memory` MCP
  * tool definitions. All three tools are implemented in-process —
- * `provider_call` calls {@link executeProviderCall} directly via
+ * `{ns}__api_call` calls {@link executeApiCall} directly via
  * {@link MountMcpOptions.proxyDeps}; `run_history` and `recall_memory`
  * call `proxyDeps.fetchFn` against the platform upstream. None of
  * these tools round-trip through a Hono HTTP envelope.
  *
- * When a `provider_call` upstream response is binary, exceeds the
+ * When an `api_call` upstream response is binary, exceeds the
  * per-call token cap, or would push the run-level cumulative budget
  * past its ceiling (see {@link TokenBudget}), the bytes are stored in
  * the supplied {@link BlobStore} and the tool returns a `resource_link`
@@ -467,164 +464,277 @@ function validateMultipartParts(parts: unknown): MultipartValidationOk | Multipa
  * {@link INLINE_RESPONSE_THRESHOLD_BYTES} is consulted only when no
  * {@link TokenBudget} is wired (tests / embedders).
  */
-function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] {
-  const { blobStore, proxyDeps, tokenBudget, providerCallLimit } = options;
+function buildSidecarTools(options: MountMcpOptions): {
+  firstParty: AppstrateToolDefinition[];
+  makeApiCallTool: (integ: ApiCallIntegrationConfig) => AppstrateToolDefinition;
+  makeApiUploadTool: (integ: ApiCallIntegrationConfig) => AppstrateToolDefinition | null;
+} {
+  const { blobStore, proxyDeps, tokenBudget, apiCallLimit } = options;
   const { config, fetchFn } = proxyDeps;
-  const providerCall: AppstrateToolDefinition = {
-    descriptor: {
-      name: "provider_call",
-      description:
-        "Make an authenticated request through the sidecar's credential-injecting proxy. " +
-        "The sidecar resolves the named provider's credentials and forwards the request to " +
-        "the supplied target URL. Use only with provider IDs declared in the agent bundle's " +
-        "`dependencies.providers[]`. Binary upstream responses spill to MCP `resources` and " +
-        "are returned as a `resource_link`.",
-      inputSchema: {
+  // Input schema for the generic `{ns}__api_call` per-integration tool —
+  // the integration is implied by the tool name, so the request carries no
+  // integration identifier (just target + method + headers + body).
+  const CREDENTIAL_PROXY_INPUT_SCHEMA = {
+    type: "object",
+    additionalProperties: false,
+    required: ["target"],
+    properties: {
+      target: {
+        type: "string",
+        format: "uri",
+        description:
+          "Absolute target URL. Must match an entry in the integration auth's `authorizedUris` " +
+          "(or be a non-private URL if the integration is `allowAllUris`).",
+      },
+      method: {
+        type: "string",
+        enum: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"],
+        description: "HTTP method. Defaults to GET.",
+      },
+      headers: {
         type: "object",
-        additionalProperties: false,
-        required: ["providerId", "target"],
-        properties: {
-          providerId: {
-            type: "string",
-            description:
-              "Provider identifier as declared in `dependencies.providers[].id` (e.g. `@appstrate/gmail` or `gmail`).",
-            // The pattern source is `PROVIDER_ID_RE` in `helpers.ts` —
-            // shared with `executeProviderCall` so the same shape gates
-            // the MCP descriptor and the credential-proxy core.
-            pattern: PROVIDER_ID_PATTERN,
-          },
-          target: {
-            type: "string",
-            format: "uri",
-            description:
-              "Absolute target URL. Must match an entry in the provider's `authorizedUris` " +
-              "(or be a non-private URL if the provider is `allowAllUris`).",
-          },
-          method: {
-            type: "string",
-            enum: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"],
-            description: "HTTP method. Defaults to GET.",
-          },
-          headers: {
+        description:
+          "Additional headers to forward. Hop-by-hop headers and sidecar-control " +
+          "headers (X-Integration, X-Target, X-Substitute-Body, …) are filtered " +
+          "server-side.",
+        additionalProperties: { type: "string" },
+      },
+      body: {
+        description:
+          "Request body. Three shapes:\n" +
+          "  - string: text/JSON endpoints.\n" +
+          "  - { fromBytes: <base64>, encoding: 'base64' }: binary uploads. " +
+          "Standard base64 (RFC 4648 §4) only — no URL-safe alphabet, no whitespace.\n" +
+          "  - { multipart: [...] }: multipart/form-data uploads. The sidecar " +
+          "builds a `FormData` from the supplied parts and lets `fetch()` set the " +
+          "`Content-Type: multipart/form-data; boundary=…` header itself — any " +
+          "caller-supplied multipart Content-Type is stripped (the boundary token " +
+          "must match the body bytes). Each part is either " +
+          "`{ name, value }` (a string field) or " +
+          "`{ name, filename, bytes: <base64>, encoding: 'base64', contentType? }` " +
+          "(a file part). Decoded byte sizes summed across all parts must fit " +
+          "SIDECAR_MAX_REQUEST_BODY_BYTES.",
+        oneOf: [
+          { type: "string" },
+          {
             type: "object",
-            description:
-              "Additional headers to forward. Hop-by-hop headers and sidecar-control " +
-              "headers (X-Provider, X-Target, X-Substitute-Body, …) are filtered " +
-              "server-side.",
-            additionalProperties: { type: "string" },
+            additionalProperties: false,
+            required: ["fromBytes", "encoding"],
+            properties: {
+              fromBytes: { type: "string" },
+              encoding: { const: "base64" },
+            },
           },
-          body: {
-            description:
-              "Request body. Three shapes:\n" +
-              "  - string: text/JSON endpoints.\n" +
-              "  - { fromBytes: <base64>, encoding: 'base64' }: binary uploads. " +
-              "Standard base64 (RFC 4648 §4) only — no URL-safe alphabet, no whitespace.\n" +
-              "  - { multipart: [...] }: multipart/form-data uploads. The sidecar " +
-              "builds a `FormData` from the supplied parts and lets `fetch()` set the " +
-              "`Content-Type: multipart/form-data; boundary=…` header itself — any " +
-              "caller-supplied multipart Content-Type is stripped (the boundary token " +
-              "must match the body bytes). Each part is either " +
-              "`{ name, value }` (a string field) or " +
-              "`{ name, filename, bytes: <base64>, encoding: 'base64', contentType? }` " +
-              "(a file part). Decoded byte sizes summed across all parts must fit " +
-              "SIDECAR_MAX_REQUEST_BODY_BYTES.",
-            oneOf: [
-              { type: "string" },
-              {
-                type: "object",
-                additionalProperties: false,
-                required: ["fromBytes", "encoding"],
-                properties: {
-                  fromBytes: { type: "string" },
-                  encoding: { const: "base64" },
-                },
-              },
-              {
-                type: "object",
-                additionalProperties: false,
-                required: ["multipart"],
-                properties: {
-                  multipart: {
-                    type: "array",
-                    minItems: 1,
-                    maxItems: MAX_MULTIPART_PARTS,
-                    items: {
-                      oneOf: [
-                        {
-                          type: "object",
-                          additionalProperties: false,
-                          required: ["name", "value"],
-                          properties: {
-                            name: {
-                              type: "string",
-                              minLength: 1,
-                              maxLength: MAX_MULTIPART_NAME_LENGTH,
-                            },
-                            value: { type: "string" },
-                          },
+          {
+            type: "object",
+            additionalProperties: false,
+            required: ["multipart"],
+            properties: {
+              multipart: {
+                type: "array",
+                minItems: 1,
+                maxItems: MAX_MULTIPART_PARTS,
+                items: {
+                  oneOf: [
+                    {
+                      type: "object",
+                      additionalProperties: false,
+                      required: ["name", "value"],
+                      properties: {
+                        name: {
+                          type: "string",
+                          minLength: 1,
+                          maxLength: MAX_MULTIPART_NAME_LENGTH,
                         },
-                        {
-                          type: "object",
-                          additionalProperties: false,
-                          required: ["name", "filename", "bytes", "encoding"],
-                          properties: {
-                            name: {
-                              type: "string",
-                              minLength: 1,
-                              maxLength: MAX_MULTIPART_NAME_LENGTH,
-                            },
-                            filename: {
-                              type: "string",
-                              minLength: 1,
-                              maxLength: MAX_MULTIPART_FILENAME_LENGTH,
-                            },
-                            bytes: { type: "string" },
-                            encoding: { const: "base64" },
-                            contentType: {
-                              type: "string",
-                              maxLength: MAX_MULTIPART_CONTENT_TYPE_LENGTH,
-                            },
-                          },
-                        },
-                      ],
+                        value: { type: "string" },
+                      },
                     },
-                  },
+                    {
+                      type: "object",
+                      additionalProperties: false,
+                      required: ["name", "filename", "bytes", "encoding"],
+                      properties: {
+                        name: {
+                          type: "string",
+                          minLength: 1,
+                          maxLength: MAX_MULTIPART_NAME_LENGTH,
+                        },
+                        filename: {
+                          type: "string",
+                          minLength: 1,
+                          maxLength: MAX_MULTIPART_FILENAME_LENGTH,
+                        },
+                        bytes: { type: "string" },
+                        encoding: { const: "base64" },
+                        contentType: {
+                          type: "string",
+                          maxLength: MAX_MULTIPART_CONTENT_TYPE_LENGTH,
+                        },
+                      },
+                    },
+                  ],
                 },
               },
-            ],
+            },
           },
-          substituteBody: {
-            type: "boolean",
-            description:
-              "When true, the sidecar substitutes `{{credential}}` placeholders in the " +
-              "request body. Off by default to avoid accidental token leaks into payloads.",
+        ],
+      },
+      substituteBody: {
+        type: "boolean",
+        description:
+          "When true, the sidecar substitutes `{{credential}}` placeholders in the " +
+          "request body. Off by default to avoid accidental token leaks into payloads.",
+      },
+    },
+  } as const;
+
+  // Build one generic `{ns}__api_call` tool for an integration that opted
+  // into `apiCall`. Runs the credential-proxy core (body parsing,
+  // redirect/cookie/SSRF hardening, 401 refresh, blob spillover) via
+  // {@link credentialProxyInner}, scoped to one integration's
+  // package id and integration-backed credentials. The integration is
+  // implied by the tool name, so the request schema carries no integration
+  // identifier.
+  //
+  // Built lazily (per `/mcp` request) by `mountMcp` because the set of
+  // integrations is only known after the background bootstrap finishes.
+  const makeApiCallTool = (integ: ApiCallIntegrationConfig): AppstrateToolDefinition => {
+    const toolName = integ.toolName ?? "api_call";
+    const ctx = {
+      proxyDeps: {
+        ...proxyDeps,
+        fetchCredentials: integ.fetchCredentials,
+        refreshCredentials: integ.refreshCredentials,
+      },
+      integrationId: integ.integrationId,
+      label: toolName,
+    };
+    return {
+      descriptor: {
+        name: `${integ.namespace}__${toolName}`,
+        description:
+          `Make an authenticated request through the "${integ.integrationId}" integration's ` +
+          "credential-injecting proxy. The sidecar injects the integration's resolved " +
+          "credential and forwards the request to the supplied target URL, which must match " +
+          "the integration auth's `authorizedUris`. Binary upstream responses spill to MCP " +
+          "`resources` and are returned as a `resource_link`.",
+        inputSchema:
+          CREDENTIAL_PROXY_INPUT_SCHEMA as unknown as AppstrateToolDefinition["descriptor"]["inputSchema"],
+      },
+      handler: async (rawArgs) =>
+        apiCallLimit
+          ? await apiCallLimit(() => credentialProxyInner(rawArgs, ctx))
+          : await credentialProxyInner(rawArgs, ctx),
+    };
+  };
+
+  // Resumable upload — advertise a
+  // `{ns}__api_upload` tool for an integration whose `apiCall` declared
+  // ≥1 `uploadProtocols`. The sidecar ONLY advertises this tool: the
+  // descriptor (gating enum + JSON schema) lives here so it cannot drift,
+  // but the chunked upload itself is orchestrated agent-side
+  // (`runtime-pi/mcp/api-upload-extension.ts`, wired by `direct.ts`),
+  // because the workspace file the agent uploads is not visible to the
+  // credential-isolated sidecar. The agent-side resolver dispatches each
+  // chunk back through this integration's `{ns}__api_call` tool, so
+  // credential injection + `authorizedUris` + SSRF hardening still apply
+  // per chunk. If a misconfigured client calls `{ns}__api_upload`
+  // directly against the sidecar (instead of via the agent extension),
+  // the handler returns a structured tool-level error rather than
+  // attempting an impossible no-workspace upload.
+  const makeApiUploadTool = (integ: ApiCallIntegrationConfig): AppstrateToolDefinition | null => {
+    const protocols = (integ.uploadProtocols ?? []).filter(
+      (p): p is string => typeof p === "string" && p.length > 0,
+    );
+    if (protocols.length === 0) return null;
+    const uploadToolName = (integ.toolName ?? "api_call").replace(/^api_call/, "api_upload");
+    return {
+      descriptor: {
+        name: `${integ.namespace}__${uploadToolName}`,
+        description:
+          `Upload a workspace file (>5 MB friendly) to the "${integ.integrationId}" integration's ` +
+          "API over a chunked resumable protocol. Bytes flow through the credential-injecting " +
+          "proxy per chunk; the agent never holds credentials. Returns the upstream's final " +
+          "response (file ID, ETag, …) plus a SHA-256 of the bytes uploaded for verification. " +
+          "Pick the `uploadProtocol` the API speaks: " +
+          "`google-resumable` (Drive, Cloud Storage, YouTube, Photos), " +
+          "`s3-multipart` (S3 / R2 / MinIO / Backblaze B2), " +
+          "`tus` (Cloudflare Stream, Vimeo, tusd), " +
+          "`ms-resumable` (OneDrive, SharePoint, Graph).",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["target", "fromFile", "uploadProtocol"],
+          properties: {
+            target: {
+              type: "string",
+              format: "uri",
+              description:
+                "Initial upload endpoint (Drive: `…?uploadType=resumable`; S3: object URL; " +
+                "tus: tus endpoint; MS: `…:/createUploadSession`). Must match the integration " +
+                "auth's `authorizedUris`.",
+            },
+            fromFile: {
+              type: "string",
+              description: "Workspace-relative path to the file to upload.",
+            },
+            uploadProtocol: {
+              type: "string",
+              enum: protocols,
+              description:
+                "Wire protocol the upstream API speaks. The integration manifest's " +
+                "`apiCall.uploadProtocols` gates which protocols are legal here.",
+            },
+            metadata: {
+              type: "object",
+              additionalProperties: true,
+              description:
+                "Per-protocol metadata. Drive: file metadata JSON (`{ name, parents, mimeType }`). " +
+                "S3: header overrides (`Content-Type`, `x-amz-meta-*`). " +
+                "tus: free-form key/value (encoded as `Upload-Metadata`). " +
+                "MS Graph: `{ item: { ... } }` envelope.",
+            },
+            partSizeBytes: {
+              type: "integer",
+              minimum: 1,
+              description:
+                "Chunk size in bytes. Defaults are protocol-tuned (Google: 8 MiB; S3: 5 MiB; " +
+                "tus: 4 MiB; MS: 5 MiB). Constraints: Google 256-KiB aligned; S3 ≥5 MiB except " +
+                "the last; MS ≤60 MiB and 320-KiB aligned.",
+            },
           },
         },
       },
-    },
-    handler: async (rawArgs) => {
-      // Run-scoped fan-out cap. Without this, an agent that issues N
-      // parallel `provider_call`s funnels their full payloads into the
-      // next LLM turn, blowing past upstream model TPM windows
-      // (issue #427). p-limit wraps the operation so the slot is held
-      // only for the duration of `providerCallInner` — no acquire/release
-      // pairing to manage.
-      return providerCallLimit
-        ? await providerCallLimit(() => providerCallInner(rawArgs))
-        : await providerCallInner(rawArgs);
-    },
+      // Advertise-only: the upload is executed agent-side (workspace
+      // access), so a direct sidecar invocation cannot succeed.
+      handler: async () => ({
+        content: [
+          {
+            type: "text",
+            text:
+              `${integ.namespace}__api_upload is orchestrated agent-side and cannot run against ` +
+              "the sidecar directly (the workspace file is not visible here). It is exposed to " +
+              "the LLM as a runtime tool that chunks the file and dispatches each part through " +
+              `${integ.namespace}__api_call.`,
+          },
+        ],
+        isError: true,
+      }),
+    };
   };
 
   /**
-   * Inner handler for `provider_call` — extracted so the
+   * Inner handler for `api_call` — extracted so the
    * concurrency-limiting wrapper above can stay shallow and the
    * pre-flight validation / upstream HTTP body can keep its existing
    * control flow without nested closures.
    */
-  async function providerCallInner(rawArgs: unknown): Promise<CallToolResult> {
+  async function credentialProxyInner(
+    rawArgs: unknown,
+    ctx: { proxyDeps: ApiCallDeps; integrationId: string; label: string },
+  ): Promise<CallToolResult> {
     {
       const args = rawArgs as {
-        providerId: string;
         target: string;
         method?: string;
         headers?: Record<string, string>;
@@ -634,6 +744,24 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
           | { multipart: MultipartPartArg[] };
         substituteBody?: boolean;
       };
+
+      // The MCP SDK does NOT validate `tools/call` arguments against the
+      // descriptor's `inputSchema`, so `target` may be absent or a
+      // non-string. Guard before it reaches executeApiCall →
+      // substituteVars(undefined) → opaque `undefined.replace` TypeError
+      // (surfaced as JSON-RPC -32603 instead of a structured tool error).
+      if (typeof args.target !== "string" || args.target.length === 0) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `${ctx.label}: 'target' is required and must be a non-empty string (the request URL or path).`,
+            },
+          ],
+          isError: true,
+          _meta: API_CALL_PREFLIGHT_META,
+        };
+      }
 
       const method = args.method ?? "GET";
 
@@ -649,27 +777,27 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
           content: [
             {
               type: "text",
-              text: `provider_call: 'body' is not allowed with method '${method}'. Use POST/PUT/PATCH/DELETE if you need to send a request body.`,
+              text: `${ctx.label}: 'body' is not allowed with method '${method}'. Use POST/PUT/PATCH/DELETE if you need to send a request body.`,
             },
           ],
           isError: true,
-          _meta: PROVIDER_CALL_PREFLIGHT_META,
+          _meta: API_CALL_PREFLIGHT_META,
         };
       }
 
-      const { headers: callerHeaders, dropped } = sanitiseProviderCallHeaders(args.headers);
+      const { headers: callerHeaders, dropped } = sanitiseApiCallHeaders(args.headers);
       if (dropped.length > 0) {
         return {
           content: [
             {
               type: "text",
               text:
-                `provider_call: caller-supplied headers may not include sidecar-control names: ` +
+                `${ctx.label}: caller-supplied headers may not include sidecar-control names: ` +
                 `${dropped.join(", ")}. Use the dedicated tool arguments (substituteBody, …) instead.`,
             },
           ],
           isError: true,
-          _meta: PROVIDER_CALL_PREFLIGHT_META,
+          _meta: API_CALL_PREFLIGHT_META,
         };
       }
 
@@ -731,12 +859,12 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
               {
                 type: "text",
                 text:
-                  "provider_call: substituteBody requires a text body — pass body as a string, " +
+                  `${ctx.label}: substituteBody requires a text body — pass body as a string, ` +
                   "not { fromBytes }.",
               },
             ],
             isError: true,
-            _meta: PROVIDER_CALL_PREFLIGHT_META,
+            _meta: API_CALL_PREFLIGHT_META,
           };
         }
         const decoded = decodeStrictBase64(args.body.fromBytes);
@@ -746,12 +874,12 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
               {
                 type: "text",
                 text:
-                  "provider_call: body.fromBytes is not standard base64 (RFC 4648 §4, " +
+                  `${ctx.label}: body.fromBytes is not standard base64 (RFC 4648 §4, ` +
                   "alphabet `+/`, no whitespace).",
               },
             ],
             isError: true,
-            _meta: PROVIDER_CALL_PREFLIGHT_META,
+            _meta: API_CALL_PREFLIGHT_META,
           };
         }
         if (decoded.byteLength > MAX_REQUEST_BODY_SIZE) {
@@ -760,12 +888,12 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
               {
                 type: "text",
                 text:
-                  `provider_call: body.fromBytes is ${decoded.byteLength} bytes, ` +
+                  `${ctx.label}: body.fromBytes is ${decoded.byteLength} bytes, ` +
                   `which exceeds the per-request limit of ${MAX_REQUEST_BODY_SIZE} bytes. ` +
                   `Operators can raise the cap with SIDECAR_MAX_REQUEST_BODY_BYTES (and ` +
                   `SIDECAR_MAX_MCP_ENVELOPE_BYTES, since base64 inflation must still fit ` +
                   `the JSON-RPC envelope). Files larger than the cap must be split across ` +
-                  `multiple provider_call invocations.`,
+                  `multiple api_call invocations.`,
               },
             ],
             structuredContent: {
@@ -778,7 +906,7 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
               },
             },
             isError: true,
-            _meta: PROVIDER_CALL_PREFLIGHT_META,
+            _meta: API_CALL_PREFLIGHT_META,
           };
         }
         buffered = decoded.buffer.slice(
@@ -787,9 +915,9 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
         ) as ArrayBuffer;
       }
 
-      const result = await executeProviderCall(
+      const result = await executeApiCall(
         {
-          providerId: args.providerId,
+          integrationId: ctx.integrationId,
           targetUrl: args.target,
           method,
           callerHeaders,
@@ -809,30 +937,30 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
           substituteBody: !!args.substituteBody,
           proxyUrl: config.proxyUrl,
         },
-        proxyDeps,
+        ctx.proxyDeps,
       );
       if (!result.ok) {
         return {
-          content: [{ type: "text", text: `provider_call: ${result.error}` }],
+          content: [{ type: "text", text: `${ctx.label}: ${result.error}` }],
           isError: true,
           // Pre-flight failure (cred fetch, URL allowlist, etc): no
           // upstream contact, but the runtime parser requires `_meta`
           // on every CallToolResult — surface `status: 0` so the agent
           // can distinguish "no upstream contact" from "upstream
           // returned 5xx" via the status code.
-          _meta: PROVIDER_CALL_PREFLIGHT_META,
+          _meta: API_CALL_PREFLIGHT_META,
         };
       }
       return responseToToolResult(result.response, {
         ...(blobStore ? { blobStore } : {}),
         ...(tokenBudget ? { tokenBudget } : {}),
-        source: `provider:${args.providerId}`,
+        source: `${ctx.label}:${ctx.integrationId}`,
         // Attach upstream `{ status, headers, finalUrl }` to the
         // CallToolResult `_meta` payload so the agent-side resolver
         // can surface real HTTP status / response headers (Location,
         // ETag, Upload-Offset, …) to chunked-upload protocols, plus
         // the post-redirect terminal URL for OAuth/CAS/magic-link
-        // callback extraction. Always on for `provider_call` — the
+        // callback extraction. Always on for `api_call` — the
         // runtime parser requires it.
         attachUpstreamMeta: true,
         upstreamFinalUrl: result.finalUrl,
@@ -841,30 +969,15 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
   }
 
   const runHistory: AppstrateToolDefinition = {
+    // Name + description + inputSchema are derived from the canonical
+    // `run_history` descriptor in `@appstrate/runner-pi/runtime-tools`
+    // (the single source consumed by the runtime Pi-tool registration).
+    // The handler stays local to the sidecar.
     descriptor: {
-      name: "run_history",
-      description:
-        "Fetch metadata and optionally the carry-over checkpoint or final output of the agent's " +
-        'most recent past runs (current run excluded). Returns JSON `{ object: "list", data: [...], hasMore }`. ' +
-        "Use for trend analysis, auditing prior executions, or recovering from a failed run.",
-      inputSchema: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          limit: {
-            type: "integer",
-            minimum: 1,
-            maximum: 50,
-            description: "Number of past runs to return (1..50, default 10).",
-          },
-          fields: {
-            type: "array",
-            items: { type: "string", enum: ["checkpoint", "result"] },
-            uniqueItems: true,
-            description: "Optional subset of `{checkpoint, result}` to include per run.",
-          },
-        },
-      },
+      name: RUN_HISTORY_INJECTED_TOOL.name,
+      description: RUN_HISTORY_INJECTED_TOOL.description,
+      inputSchema:
+        RUN_HISTORY_INJECTED_TOOL.parameters as AppstrateToolDefinition["descriptor"]["inputSchema"],
     },
     handler: async (rawArgs) => {
       const args = rawArgs as { limit?: number; fields?: string[] };
@@ -901,35 +1014,15 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
   // the archive (everything else) on demand so the working context stays
   // small. See ADR-012.
   const recallMemory: AppstrateToolDefinition = {
+    // Name + description + inputSchema are derived from the canonical
+    // `recall_memory` descriptor in `@appstrate/runner-pi/runtime-tools`
+    // (the single source consumed by the runtime Pi-tool registration).
+    // The handler stays local to the sidecar.
     descriptor: {
-      name: "recall_memory",
-      description:
-        "Search the agent's archive memories — durable facts and learnings from past runs that " +
-        "are NOT visible in the system prompt by default. Pass an optional `q` to filter by " +
-        "case-insensitive substring; omit it to retrieve the most recent archive memories. " +
-        "Use this when the prompt's `## Memory` section says you have archived memories worth " +
-        "checking, when looking for a fact you remember saving, or before answering a question " +
-        "that depends on prior-session context. Returns JSON `{ memories: [...] }`.",
-      inputSchema: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          q: {
-            type: "string",
-            minLength: 1,
-            maxLength: 2000,
-            description:
-              "Case-insensitive substring to match against memory content (text or JSON). " +
-              "Omit for an unfiltered most-recent-first slice.",
-          },
-          limit: {
-            type: "integer",
-            minimum: 1,
-            maximum: 50,
-            description: "Max memories to return (1..50, default 10).",
-          },
-        },
-      },
+      name: RECALL_MEMORY_INJECTED_TOOL.name,
+      description: RECALL_MEMORY_INJECTED_TOOL.description,
+      inputSchema:
+        RECALL_MEMORY_INJECTED_TOOL.parameters as AppstrateToolDefinition["descriptor"]["inputSchema"],
     },
     handler: async (rawArgs) => {
       const args = rawArgs as { q?: string; limit?: number };
@@ -961,7 +1054,7 @@ function buildSidecarTools(options: MountMcpOptions): AppstrateToolDefinition[] 
     },
   };
 
-  return [providerCall, runHistory, recallMemory];
+  return { firstParty: [runHistory, recallMemory], makeApiCallTool, makeApiUploadTool };
 }
 
 /**
@@ -1041,16 +1134,16 @@ interface ResponseToToolResultOptions {
    * `./upstream-meta.ts`; finalUrl is sanitised (userinfo + fragment
    * stripped) before serialisation.
    *
-   * Defaults to false on the legacy `provider_call` path so an
-   * existing agent connection sees no wire-format change. The new
-   * `provider_upload` Pi tool always passes `true`.
+   * Defaults to false for the first-party `run_history` / `recall_memory`
+   * tools. The `api_call` path always passes `true` (the runtime parser
+   * hard-requires `_meta`), as does the `api_upload` Pi tool.
    */
   attachUpstreamMeta?: boolean;
   /**
    * URL the response was eventually served from after any redirect
    * follow. Forwarded to {@link buildUpstreamMeta} which sanitises it
    * before serialisation. Omitted when no redirect happened (the
-   * sidecar passes `result.finalUrl` from {@link executeProviderCall}
+   * sidecar passes `result.finalUrl` from {@link executeApiCall}
    * regardless — equals the resolved target URL when no chain).
    */
   upstreamFinalUrl?: string;
@@ -1125,7 +1218,7 @@ function evaluateBudget(args: {
  *   legacy byte threshold. Production always supplies a BlobStore +
  *   TokenBudget via `mountMcp`.
  *
- * Every text-path result carries an `appstrate://token-budget` `_meta`
+ * Every text-path result carries a `dev.appstrate/token-budget` `_meta`
  * payload (when a TokenBudget is configured) so the agent runtime can
  * surface accounting and react to structured truncation events.
  */
@@ -1190,7 +1283,7 @@ async function responseToToolResult(
           {
             type: "text",
             text:
-              `provider_call: non-text response of type '${ct || "unknown"}' is not supported on ` +
+              `api_call: non-text response of type '${ct || "unknown"}' is not supported on ` +
               `this path without a configured blob store. Binary upstream responses are linked as ` +
               `MCP resources — verify the sidecar was started with a runId.`,
           },
@@ -1212,7 +1305,7 @@ async function responseToToolResult(
           {
             type: "text",
             text:
-              `provider_call: response exceeds ${binaryReadCap} bytes (${binaryReadCap >= 1024 * 1024 ? `${Math.round(binaryReadCap / 1024 / 1024)} MB` : `${Math.round(binaryReadCap / 1024)} KB`}) — refused without truncation ` +
+              `api_call: response exceeds ${binaryReadCap} bytes (${binaryReadCap >= 1024 * 1024 ? `${Math.round(binaryReadCap / 1024 / 1024)} MB` : `${Math.round(binaryReadCap / 1024)} KB`}) — refused without truncation ` +
               `(truncating an opaque binary blob is unsafe).`,
           },
         ],
@@ -1230,7 +1323,7 @@ async function responseToToolResult(
         content: [
           {
             type: "text",
-            text: `provider_call: blob store rejected upstream response — ${getErrorMessage(err)}`,
+            text: `api_call: blob store rejected upstream response — ${getErrorMessage(err)}`,
           },
         ],
         isError: true,
@@ -1433,23 +1526,102 @@ async function readBodyBounded(res: Response, maxBytes: number): Promise<string>
  * per-request cost is negligible compared to the upstream HTTP hop the
  * tool then performs.
  */
+/**
+ * One integration's `api_call` wiring.
+ * The credential adapters are built by the sidecar boot from the
+ * integration's live credentials source; `mountMcp` threads them into a
+ * per-integration `ApiCallDeps` so the generic tool reuses the
+ * shared credential-proxy core.
+ */
+export interface ApiCallIntegrationConfig {
+  /** McpHost-style namespace — the tool is named `{namespace}__{toolName}`. */
+  namespace: string;
+  /**
+   * Bare api_call tool name (before the `{namespace}__` prefix). `api_call`
+   * for an integration that opts in a single auth; `api_call__{authKey}` when
+   * it opts in several. Defaults to `api_call` when omitted. The companion
+   * upload tool swaps the `api_call` prefix for `api_upload`.
+   */
+  toolName?: string;
+  /** Integration package id (used as the proxy `integrationId` + audit source). */
+  integrationId: string;
+  /** Resolve the integration's credentials into the proxy payload. */
+  fetchCredentials: ApiCallDeps["fetchCredentials"];
+  /** Force-refresh on a mid-run 401 and re-resolve. */
+  refreshCredentials: NonNullable<ApiCallDeps["refreshCredentials"]>;
+  /**
+   * Resumable-upload protocols this integration's `apiCall` declared
+   * (`manifest.apiCall.uploadProtocols`). When non-empty the sidecar
+   * ALSO advertises a `{ns}__api_upload` tool alongside `{ns}__api_call`.
+   * The sidecar only ADVERTISES it (gating + schema live here); the
+   * actual chunked upload is orchestrated agent-side by `direct.ts`'s
+   * resolver (which has workspace access — the sidecar does not) and
+   * dispatched chunk-by-chunk back through this integration's
+   * `{ns}__api_call` tool. Empty / omitted → no upload tool.
+   */
+  uploadProtocols?: readonly string[];
+}
+
+/**
+ * Credential-proxy core deps needed to build one integration's `api_call`
+ * (+ optional `api_upload`) tool definitions outside of `mountMcp`. The
+ * sidecar boot (`integrations-boot.ts`) builds these once per run and
+ * passes them in so the api_call tools can be hosted as a trusted
+ * in-process MCP server registered on the McpHost — same pipeline as
+ * spawned/remote integration tools.
+ */
+export interface ApiCallToolDeps {
+  proxyDeps: ApiCallDeps;
+  blobStore?: BlobStore;
+  tokenBudget?: TokenBudget;
+  apiCallLimit?: LimitFunction;
+}
+
+/**
+ * Build the `api_call` (+ optional `api_upload`) {@link AppstrateToolDefinition}s
+ * for one integration, named UNPREFIXED (`api_call` / `api_upload`). The
+ * caller registers them on the McpHost, which applies the `{ns}__` prefix
+ * (yielding the `{ns}__api_call` name) + tool-name validation. The
+ * handlers reuse the exact credential-proxy core (`credentialProxyInner`)
+ * via {@link buildSidecarTools}, with the integration's credential adapters
+ * injected per-call.
+ */
+export function createApiCallToolDefs(
+  integ: ApiCallIntegrationConfig,
+  deps: ApiCallToolDeps,
+): AppstrateToolDefinition[] {
+  const { makeApiCallTool, makeApiUploadTool } = buildSidecarTools(deps);
+  const out: AppstrateToolDefinition[] = [];
+  const call = makeApiCallTool(integ);
+  out.push({ ...call, descriptor: { ...call.descriptor, name: API_CALL_TOOL_NAME } });
+  const upload = makeApiUploadTool(integ);
+  if (upload) {
+    out.push({ ...upload, descriptor: { ...upload.descriptor, name: API_UPLOAD_TOOL_NAME } });
+  }
+  return out;
+}
+
+/** Unprefixed tool names for the generic credential-injecting tools. */
+export const API_CALL_TOOL_NAME = "api_call";
+export const API_UPLOAD_TOOL_NAME = "api_upload";
+
 export interface MountMcpOptions {
-  /** Run-scoped blob store for `provider_call` resource spillover. */
+  /** Run-scoped blob store for `api_call` resource spillover. */
   blobStore?: BlobStore;
   /**
-   * Credential-proxy core deps. `provider_call` calls
-   * {@link executeProviderCall} directly with structured args; `run_history`
+   * Credential-proxy core deps. `api_call` calls
+   * {@link executeApiCall} directly with structured args; `run_history`
    * and `recall_memory` use `proxyDeps.fetchFn` + `proxyDeps.config` to
    * reach the platform upstream. Required: there is no longer a legacy
    * HTTP-route fallback.
    */
-  proxyDeps: ProviderCallDeps;
+  proxyDeps: ApiCallDeps;
   /**
    * Run-scoped token budget. When present, every tool output is run
    * through the budget tracker before being delivered to the agent —
    * dense JSON that fits under the byte cap but would exhaust the
    * context window now spills to the blob store, and a structured
-   * `appstrate://token-budget` `_meta` payload records the accounting.
+   * `dev.appstrate/token-budget` `_meta` payload records the accounting.
    *
    * Optional only so tests and embedders that don't care about the
    * token path can omit it; production wires a `TokenBudget`
@@ -1457,7 +1629,7 @@ export interface MountMcpOptions {
    */
   tokenBudget?: TokenBudget;
   /**
-   * Run-scoped fan-out limiter for `provider_call`. Caps the number of
+   * Run-scoped fan-out limiter for `api_call`. Caps the number of
    * concurrent upstream HTTP hops a single run can issue at once.
    * Without a cap, an agent that fetches N items in parallel (8 Gmail
    * messages, 20 ClickUp tasks, …) can feed the next LLM turn an
@@ -1467,12 +1639,76 @@ export interface MountMcpOptions {
    * Optional only so tests / embedders can omit it; production wires a
    * `pLimit` instance unconditionally via `createApp` (see `app.ts`).
    */
-  providerCallLimit?: LimitFunction;
+  apiCallLimit?: LimitFunction;
+  /**
+   * Lazy provider for additional MCP tool definitions to merge alongside
+   * the first-party sidecar tools (run_history, recall_memory).
+   * Called on EVERY `/mcp` request so the sidecar's HTTP surface comes up
+   * before integration MCP servers finish their initial handshake. The
+   * integration runtime (Phase 1.4) wires `McpHost.buildTools` here:
+   * tools registered after the sidecar started serving become visible on
+   * the next `tools/list` without restarting anything. First-party
+   * names take precedence.
+   */
+  additionalToolsProvider?: () => AppstrateToolDefinition[];
+  /**
+   * Promise that resolves once the integration runtime has finished its
+   * initial bootstrap pass. The first `/mcp` request awaits it (capped
+   * at INTEGRATION_BOOT_WAIT_MS) so the agent's initial `tools/list`
+   * sees all declared integration tools, even though the sidecar's HTTP
+   * listener came up first. Subsequent requests skip the wait (the
+   * promise is already resolved).
+   */
+  integrationBootPromise?: Promise<void>;
 }
 
+/**
+ * Cap on how long the first `/mcp` request waits for integrations to
+ * register their tools before responding. Tuned for the Phase 1.5 path
+ * on Docker Desktop / macOS: per-integration spawn pays for `docker
+ * create` + `docker cp bundle` + `docker cp ca.pem` (MITM) +
+ * `docker start` + Python/Node runner cold-start + MCP handshake, each
+ * `docker exec` round-trip costing 1–2 s on the LinuxKit VM. Linux hosts
+ * see <2 s end-to-end; the ceiling exists to bound pathological cases,
+ * not the happy path. Mirrors the agent-side MCP connect deadline so a
+ * truly hung integration boot surfaces as the agent's own handshake
+ * timeout rather than as an empty toolset (the failure mode that hides
+ * the bug — the LLM cheerfully tells the user the integration is not
+ * connected instead of erroring out).
+ */
+const INTEGRATION_BOOT_WAIT_MS = 30_000;
+
 export function mountMcp(app: Hono, options: MountMcpOptions): void {
-  const tools = buildSidecarTools(options);
+  const { firstParty } = buildSidecarTools(options);
+  const firstPartyNames = new Set(firstParty.map((t) => t.descriptor.name));
   const resources = options.blobStore ? buildBlobResourceProvider(options.blobStore) : undefined;
+  // Cache the await so only the first `/mcp` request pays the wait —
+  // every subsequent request sees an already-resolved promise. The
+  // timeout side of the race logs when it fires so a slow boot doesn't
+  // silently degrade the agent's toolset (see comment on
+  // INTEGRATION_BOOT_WAIT_MS).
+  let bootReady = options.integrationBootPromise;
+  if (bootReady) {
+    bootReady = Promise.race([
+      bootReady.then(() => {
+        bootReady = undefined; // resolved — skip the race on later requests
+      }),
+      new Promise<void>((resolve) => {
+        const t = setTimeout(() => {
+          // Best-effort log; tools/list still responds with whatever
+          // integrations DID register before the deadline. Operators
+          // diagnosing "agent doesn't see my integration" should look
+          // for this line.
+          logger.warn(
+            "integration boot wait exceeded; tools/list will respond without late integrations",
+            { waitMs: INTEGRATION_BOOT_WAIT_MS },
+          );
+          resolve();
+        }, INTEGRATION_BOOT_WAIT_MS);
+        t.unref?.();
+      }),
+    ]);
+  }
 
   app.all("/mcp", async (c) => {
     // Host header validation (DNS-rebinding defence). Done here, not by
@@ -1535,11 +1771,46 @@ export function mountMcp(app: Hono, options: MountMcpOptions): void {
       });
     }
 
-    const server = createMcpServer(
-      tools,
-      { name: "appstrate-sidecar", version: "1" },
-      resources ? { resources } : {},
+    // Wait for the integration runtime to finish its first bootstrap
+    // pass (max INTEGRATION_BOOT_WAIT_MS = 30s). The wait is amortised: only the first `/mcp`
+    // request pays it; once the promise resolves we drop the reference
+    // so subsequent requests skip the await entirely.
+    if (bootReady) await bootReady;
+    // Resolve tools per-request so integrations that finish booting AFTER
+    // the sidecar's HTTP listener is up still surface on the next call.
+    // The generic `api_call` (+ optional
+    // `api_upload`) tools are registered on the McpHost as trusted
+    // in-process MCP servers at boot (see integrations-boot.ts), so they
+    // arrive here through `additionalToolsProvider` (= host.buildTools)
+    // exactly like any spawned/remote integration tool. One pipeline.
+    const dynamicExtras = (options.additionalToolsProvider?.() ?? []).filter(
+      (t) => !firstPartyNames.has(t.descriptor.name),
     );
+    const tools = [...firstParty, ...dynamicExtras];
+    // `createMcpServer` validates every descriptor (tool-name pattern, schema
+    // shape). A single malformed dynamic tool would otherwise throw here —
+    // outside the try/finally below — and 500 the entire `/mcp` POST, taking
+    // down even the first-party tools. Degrade gracefully: log the offending
+    // descriptor, drop the dynamic extras, and serve first-party only so the
+    // agent can still connect.
+    let server: ReturnType<typeof createMcpServer>;
+    try {
+      server = createMcpServer(
+        tools,
+        { name: "appstrate-sidecar", version: "1" },
+        resources ? { resources } : {},
+      );
+    } catch (err) {
+      logger.error("MCP server build failed; serving first-party tools only", {
+        error: err instanceof Error ? err.message : String(err),
+        dynamicToolNames: dynamicExtras.map((t) => t.descriptor.name),
+      });
+      server = createMcpServer(
+        firstParty,
+        { name: "appstrate-sidecar", version: "1" },
+        resources ? { resources } : {},
+      );
+    }
     // Stateless mode: passing `sessionIdGenerator: undefined` explicitly
     // disables session tracking. Combined with per-request construction,
     // there is no state to leak between agent invocations, no map to

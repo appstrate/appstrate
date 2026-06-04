@@ -36,6 +36,8 @@
  * platform ships the **policy**.
  */
 
+import { z } from "zod";
+
 // ---------------------------------------------------------------------------
 // Core resource catalog (static — owned by the platform)
 //
@@ -63,16 +65,16 @@ export interface CoreResources {
   members: "read" | "invite" | "remove" | "change-role";
   agents: "read" | "write" | "configure" | "delete" | "run";
   skills: "read" | "write" | "delete";
-  tools: "read" | "write" | "delete";
-  providers: "read" | "write" | "delete";
+  // AFPS §3.4 — standalone MCP Bundle (MCPB) packages. Browse/import/delete
+  // like skills; no editor surface (an mcp-server manifest is an AFPS-native
+  // manifest (MCPB vocabulary lifted to the root), authored externally and
+  // imported as a `.afps`).
+  "mcp-servers": "read" | "write" | "delete";
   runs: "read" | "cancel" | "delete";
   schedules: "read" | "write" | "delete";
   // Unified `package_persistence` (checkpoints + memories) with first-class
   // actor scoping. Supersedes the dropped `memories` resource.
   persistence: "read" | "delete";
-  connections: "read" | "connect" | "disconnect";
-  profiles: "read" | "write" | "delete";
-  "app-profiles": "read" | "write" | "delete" | "bind";
   models: "read" | "write" | "delete";
   "model-provider-credentials": "read" | "write" | "delete";
   proxies: "read" | "write" | "delete";
@@ -81,6 +83,13 @@ export interface CoreResources {
   "end-users": "read" | "write" | "delete";
   "credential-proxy": "call";
   "llm-proxy": "call";
+  // AFPS integrations (INTEGRATIONS_PROPOSAL Phase 1.3 — marketplace UI).
+  // Read = browse catalog + view the actor's connection inventory.
+  // Write/delete = author/edit/remove the integration manifest (JSON-body
+  // editor, parity with agents/skills). Install/uninstall = manage per-app
+  // installation. Connect/disconnect = manage credentials (connections) per
+  // declared `auths.{key}`.
+  integrations: "read" | "write" | "delete" | "install" | "uninstall" | "connect" | "disconnect";
 }
 
 /** Core resource names. */
@@ -110,14 +119,10 @@ export const CORE_RESOURCE_NAMES: ReadonlySet<string> = new Set<string>([
   "members",
   "agents",
   "skills",
-  "tools",
-  "providers",
+  "mcp-servers",
   "runs",
   "schedules",
   "persistence",
-  "connections",
-  "profiles",
-  "app-profiles",
   "models",
   "model-provider-credentials",
   "proxies",
@@ -126,6 +131,7 @@ export const CORE_RESOURCE_NAMES: ReadonlySet<string> = new Set<string>([
   "end-users",
   "credential-proxy",
   "llm-proxy",
+  "integrations",
 ]);
 
 /**
@@ -178,6 +184,12 @@ export const ORG_ROLES = ["owner", "admin", "member", "viewer"] as const;
 
 /** Org role string union — `"owner" | "admin" | "member" | "viewer"`. */
 export type OrgRole = (typeof ORG_ROLES)[number];
+
+/** Zod validator for the per-org `settings` JSONB shape. */
+export const orgSettingsSchema = z.object({
+  apiVersion: z.string().optional(),
+  dashboardSsoEnabled: z.boolean().optional(),
+});
 
 // ---------------------------------------------------------------------------
 // Module permission aggregator — runtime registry shared by apps/api and

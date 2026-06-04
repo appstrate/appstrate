@@ -13,6 +13,7 @@ import {
   CalendarPlus,
   Trash2,
   PackageMinus,
+  PowerOff,
   FileJson,
   FileText,
 } from "lucide-react";
@@ -36,7 +37,6 @@ interface PackageActionsDropdownProps {
   manifest?: Record<string, unknown>;
   companionFile?: { name: string; content: string };
   isOwned: boolean;
-  isImported?: boolean;
   isBuiltIn: boolean;
   isHistoricalVersion: boolean;
   downloadVersion?: string;
@@ -59,15 +59,17 @@ interface PackageActionsDropdownProps {
   onDeleteRuns?: () => void;
   onAddSchedule?: () => void;
   onDeleteMemories?: () => void;
-  // Provider-specific
-  hasCredentials?: boolean;
-  onDeleteCredentials?: () => void;
   // Skill/Tool-specific
   canDeletePackage?: boolean;
   onDeletePackage?: () => void;
   // Uninstall from current app
   canUninstall?: boolean;
   onUninstall?: () => void;
+  // Integration-specific: deactivate in the current app (non-destructive —
+  // removes the application_packages row, keeps connections).
+  canDeactivate?: boolean;
+  onDeactivate?: () => void;
+  deactivatePending?: boolean;
 }
 
 export function PackageActionsDropdown({
@@ -76,7 +78,6 @@ export function PackageActionsDropdown({
   manifest,
   companionFile,
   isOwned,
-  isImported,
   isBuiltIn,
   isHistoricalVersion,
   downloadVersion,
@@ -93,12 +94,13 @@ export function PackageActionsDropdown({
   onDeleteRuns,
   onAddSchedule,
   onDeleteMemories,
-  hasCredentials,
-  onDeleteCredentials,
   canDeletePackage,
   onDeletePackage,
   canUninstall,
   onUninstall,
+  canDeactivate,
+  onDeactivate,
+  deactivatePending,
 }: PackageActionsDropdownProps) {
   const { t } = useTranslation(["agents", "common", "settings"]);
   const navigate = useNavigate();
@@ -178,7 +180,7 @@ export function PackageActionsDropdown({
             </DropdownMenuItem>
           )}
 
-          {/* ── Fork (non-owned packages, including system) ── */}
+          {/* ── Fork — only read-only system packages (org-owned ones are edited directly) ── */}
           {isMember && !isOwned && onFork && (
             <DropdownMenuItem onSelect={onFork}>
               <GitFork size={14} />
@@ -218,24 +220,16 @@ export function PackageActionsDropdown({
             </>
           )}
 
-          {/* ── Delete credentials (provider-only) ── */}
-          {isAdmin && type === "provider" && hasCredentials && onDeleteCredentials && (
+          {/* ── Deactivate / Uninstall / Delete ── */}
+          {isAdmin && (canDeactivate || canUninstall || (!isBuiltIn && isOwned)) && (
             <>
               <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onSelect={onDeleteCredentials}
-                className="text-destructive focus:text-destructive"
-              >
-                <Trash2 size={14} />
-                {t("providers.deleteCredentials", { ns: "settings" })}
-              </DropdownMenuItem>
-            </>
-          )}
-
-          {/* ── Uninstall / Delete ── */}
-          {isAdmin && (canUninstall || (!isBuiltIn && (isOwned || isImported))) && (
-            <>
-              <DropdownMenuSeparator />
+              {canDeactivate && onDeactivate && (
+                <DropdownMenuItem onSelect={onDeactivate} disabled={deactivatePending}>
+                  <PowerOff size={14} />
+                  {t("integrations.btn.deactivate", { ns: "settings" })}
+                </DropdownMenuItem>
+              )}
               {canUninstall && onUninstall && (
                 <DropdownMenuItem
                   onSelect={onUninstall}
@@ -245,7 +239,7 @@ export function PackageActionsDropdown({
                   {t("packages.uninstall", { ns: "settings" })}
                 </DropdownMenuItem>
               )}
-              {!isBuiltIn && (isOwned || isImported) && isAgent && onDeleteAgent && (
+              {!isBuiltIn && isOwned && isAgent && onDeleteAgent && (
                 <DropdownMenuItem
                   onSelect={onDeleteAgent}
                   disabled={runningRuns > 0}
@@ -255,19 +249,15 @@ export function PackageActionsDropdown({
                   {t("btn.delete")}
                 </DropdownMenuItem>
               )}
-              {!isBuiltIn &&
-                (isOwned || isImported) &&
-                !isAgent &&
-                canDeletePackage &&
-                onDeletePackage && (
-                  <DropdownMenuItem
-                    onSelect={onDeletePackage}
-                    className="text-destructive focus:text-destructive"
-                  >
-                    <Trash2 size={14} />
-                    {t("btn.delete")}
-                  </DropdownMenuItem>
-                )}
+              {!isBuiltIn && isOwned && !isAgent && canDeletePackage && onDeletePackage && (
+                <DropdownMenuItem
+                  onSelect={onDeletePackage}
+                  className="text-destructive focus:text-destructive"
+                >
+                  <Trash2 size={14} />
+                  {t("btn.delete")}
+                </DropdownMenuItem>
+              )}
             </>
           )}
         </DropdownMenuContent>

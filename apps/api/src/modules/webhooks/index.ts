@@ -13,10 +13,16 @@ import { z } from "zod";
 import type {
   AppstrateModule,
   ModuleInitContext,
+  RunConnectionMissingParams,
   RunStatusChangeParams,
 } from "@appstrate/core/module";
 import { createWebhooksRouter, createWebhookSchema, updateWebhookSchema } from "./routes.ts";
-import { initWebhookWorker, shutdownWebhookWorker, dispatchRunWebhook } from "./service.ts";
+import {
+  dispatchRunConnectionMissingWebhook,
+  dispatchRunWebhook,
+  initWebhookWorker,
+  shutdownWebhookWorker,
+} from "./service.ts";
 import { webhooksPaths } from "./openapi/paths.ts";
 import { webhooksSchemas } from "./openapi/schemas.ts";
 
@@ -111,6 +117,14 @@ const webhooksModule: AppstrateModule = {
           // receivers treat missing as `false`.
           ...(params.packageEphemeral ? { package: { ephemeral: true } } : {}),
         },
+      );
+    },
+    onRunConnectionMissing: (params: RunConnectionMissingParams) => {
+      dispatchRunConnectionMissingWebhook(
+        { orgId: params.orgId, applicationId: params.applicationId },
+        params.packageId,
+        params.actor,
+        params.errors,
       );
     },
   },

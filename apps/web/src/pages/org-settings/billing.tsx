@@ -8,6 +8,7 @@ import { useAppConfig } from "../../hooks/use-app-config";
 import { useBilling, useCheckout, usePortal, getUsageBarColor } from "../../hooks/use-billing";
 import { PlanGrid } from "../../components/plan-card";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
+import { formatDateField } from "../../lib/markdown";
 import { toast } from "sonner";
 
 const STATUS_I18N: Record<string, string> = {
@@ -22,7 +23,7 @@ const STATUS_I18N: Record<string, string> = {
 };
 
 export function OrgSettingsBillingPage() {
-  const { t, i18n } = useTranslation(["settings", "common"]);
+  const { t } = useTranslation(["settings", "common"]);
   const { features } = useAppConfig();
   const { data: billing, isLoading, error } = useBilling();
   const checkoutMutation = useCheckout();
@@ -35,19 +36,11 @@ export function OrgSettingsBillingPage() {
     return <EmptyState message={t("billing.noAccount")} icon={CreditCard} compact />;
   }
 
-  const dateLocale = i18n.language === "fr" ? "fr-FR" : "en-US";
-  const formatBillingDate = (iso: string) =>
-    new Date(iso).toLocaleDateString(dateLocale, {
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-    });
-
   const statusLabel =
-    billing.status === "canceling" && billing.periodEnd
-      ? t("billing.statusCanceling", { date: formatBillingDate(billing.periodEnd) })
-      : billing.status === "active" && billing.periodEnd
-        ? t("billing.cycleReset", { date: formatBillingDate(billing.periodEnd) })
+    billing.status === "canceling" && billing.period_end
+      ? t("billing.statusCanceling", { date: formatDateField(billing.period_end, "date") })
+      : billing.status === "active" && billing.period_end
+        ? t("billing.cycleReset", { date: formatDateField(billing.period_end, "date") })
         : t(STATUS_I18N[billing.status] ?? "billing.noSubscription");
 
   const hasSubscription = billing.status !== "none";
@@ -107,12 +100,12 @@ export function OrgSettingsBillingPage() {
           <div className="mb-1 flex items-center justify-between text-sm">
             <span className="text-muted-foreground">{t("billing.usage")}</span>
             <span className="font-medium">
-              {billing.usagePercent}%
+              {billing.usage_percent}%
               <span className="text-muted-foreground ml-2 text-xs font-normal">
                 (
                 {t("billing.creditsCount", {
-                  used: billing.creditsUsed,
-                  quota: billing.creditQuota,
+                  used: billing.credits_used,
+                  quota: billing.credit_quota,
                 })}
                 )
               </span>
@@ -120,8 +113,8 @@ export function OrgSettingsBillingPage() {
           </div>
           <div className="bg-muted h-2 overflow-hidden rounded-full">
             <div
-              className={`h-full rounded-full transition-all ${getUsageBarColor(billing.usagePercent)}`}
-              style={{ width: `${Math.min(billing.usagePercent, 100)}%` }}
+              className={`h-full rounded-full transition-all ${getUsageBarColor(billing.usage_percent)}`}
+              style={{ width: `${Math.min(billing.usage_percent, 100)}%` }}
             />
           </div>
         </div>
@@ -136,10 +129,10 @@ export function OrgSettingsBillingPage() {
         </div>
       )}
 
-      {billing.status === "canceling" && billing.periodEnd && (
+      {billing.status === "canceling" && billing.period_end && (
         <div className="mb-4 rounded-lg border border-yellow-500/50 bg-yellow-500/10 p-4 text-sm">
           <p className="font-medium text-yellow-600 dark:text-yellow-400">
-            {t("billing.cancelingWarning", { date: formatBillingDate(billing.periodEnd) })}
+            {t("billing.cancelingWarning", { date: formatDateField(billing.period_end, "date") })}
           </p>
         </div>
       )}

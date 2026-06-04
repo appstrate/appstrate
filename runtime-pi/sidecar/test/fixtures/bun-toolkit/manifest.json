@@ -1,0 +1,70 @@
+{
+  "$schema": "https://schemas.afps.dev/v0/integration.schema.json",
+  "schema_version": "0.1",
+  "type": "integration",
+  "name": "@appstrate/bun-toolkit",
+  "version": "1.0.0",
+  "display_name": "Bun Toolkit",
+  "description": "Reference integration referencing a separate Bun mcp-server package. It declares an api_key auth with delivery.http so the sidecar's MITM proxy injects X-Toolkit-Token on the upstream-calling tool — proving credential injection works without the server code ever reading the secret. A generic api_call tool is attached alongside the native tools.",
+  "license": "Apache-2.0",
+  "keywords": ["bun", "reference", "test", "toolkit"],
+  "source": {
+    "kind": "local",
+    "server": {
+      "name": "@appstrate/bun-toolkit-server",
+      "version": "^1.0.0"
+    }
+  },
+  "auths": {
+    "primary": {
+      "type": "api_key",
+      "authorized_uris": ["https://httpbin.org/**"],
+      "scope_catalog": [
+        {
+          "value": "read",
+          "label": "Read",
+          "description": "Read-only upstream calls (echo / fetch)."
+        },
+        {
+          "value": "write",
+          "label": "Write",
+          "description": "Mutating upstream calls.",
+          "implies": ["read"]
+        }
+      ],
+      "credentials": {
+        "schema": {
+          "type": "object",
+          "required": ["api_key"],
+          "properties": {
+            "api_key": {
+              "type": "string",
+              "description": "Any non-empty string. The integration never reads this value; the sidecar's MITM proxy injects it as the `X-Toolkit-Token` header on every upstream call."
+            }
+          }
+        }
+      },
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "X-Toolkit-Token",
+          "value": "{$credential.api_key}"
+        }
+      }
+    }
+  },
+  "tools_policy": {
+    "fetch_echo": {
+      "required_scopes": {
+        "primary": ["read"]
+      }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/api": {
+      "auths": {
+        "primary": {}
+      }
+    }
+  }
+}

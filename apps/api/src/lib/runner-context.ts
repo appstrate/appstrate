@@ -20,6 +20,7 @@
  */
 
 import type { Context } from "hono";
+import { SLUG_REGEX } from "@appstrate/core/naming";
 import { getRunnerResolver } from "./runner-resolver.ts";
 
 const RUNNER_NAME_HEADER = "x-appstrate-runner-name";
@@ -32,8 +33,9 @@ const RUNNER_KIND_MAX_LENGTH = 32;
  * and hyphens — the kebab-case slug shape of a tool identifier. Documented
  * as the wire contract for `X-Appstrate-Runner-Kind`. Values that don't
  * match are dropped to `null` so the column never carries arbitrary text.
+ * Same kebab-case slug shape as `@appstrate/core/naming`'s `SLUG_REGEX`.
  */
-const RUNNER_KIND_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
+const RUNNER_KIND_RE = SLUG_REGEX;
 
 interface ResolvedRunnerContext {
   name: string | null;

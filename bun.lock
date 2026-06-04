@@ -5,8 +5,10 @@
     "": {
       "name": "appstrate",
       "dependencies": {
-        "@afps-spec/schema": "^1.5.0",
+        "@afps-spec/schema": "^0.6.0",
+        "@appstrate/connect": "workspace:*",
         "@appstrate/core": "workspace:*",
+        "@appstrate/mcp-transport": "workspace:*",
         "@electric-sql/pglite": "^0.4.5",
         "ajv": "^8.20.0",
       },
@@ -66,7 +68,7 @@
         "nodemailer": "^8.0.7",
         "rate-limiter-flexible": "^11.0.1",
         "semver": "^7.7.1",
-        "zod": "^4.3.6",
+        "zod": "^4.4.3",
       },
       "devDependencies": {
         "@mariozechner/pi-coding-agent": "^0.70.6",
@@ -154,7 +156,7 @@
         "remark-gfm": "^4.0.1",
         "sonner": "^2.0.7",
         "tailwind-merge": "^3.5.0",
-        "zod": "^4.3.6",
+        "zod": "^4.4.3",
         "zustand": "^5.0.11",
       },
       "devDependencies": {
@@ -184,15 +186,17 @@
         "afps": "./bin/afps.ts",
       },
       "dependencies": {
-        "@afps-spec/schema": "^1.5.0",
-        "@afps-spec/types": "^1.0.0",
+        "@afps-spec/schema": "^0.6.0",
+        "@afps-spec/types": "^0.1.0",
+        "@appstrate/afps-shared": "workspace:*",
         "fflate": "^0.8.2",
         "file-type": "^22.0.1",
         "mustache": "^4.2.0",
         "semver": "^7.7.1",
-        "zod": "^4.3.6",
+        "zod": "^4.4.3",
       },
       "devDependencies": {
+        "@appstrate/core": "workspace:*",
         "@mariozechner/pi-ai": "^0.70.6",
         "@mariozechner/pi-coding-agent": "^0.70.6",
         "@types/mustache": "^4.2.6",
@@ -207,29 +211,41 @@
         "@mariozechner/pi-coding-agent",
       ],
     },
+    "packages/afps-shared": {
+      "name": "@appstrate/afps-shared",
+      "version": "0.1.0",
+      "dependencies": {
+        "semver": "^7.7.1",
+      },
+      "devDependencies": {
+        "@types/semver": "^7.7.1",
+      },
+      "peerDependencies": {
+        "typescript": "^5",
+      },
+    },
     "packages/connect": {
       "name": "@appstrate/connect",
       "version": "0.0.0",
       "dependencies": {
         "@appstrate/afps-runtime": "workspace:*",
+        "@appstrate/afps-shared": "workspace:*",
         "@appstrate/core": "workspace:*",
-        "@appstrate/db": "workspace:*",
         "@appstrate/env": "workspace:*",
-        "@appstrate/shared-types": "workspace:*",
-        "drizzle-orm": "^0.45.2",
       },
     },
     "packages/core": {
       "name": "@appstrate/core",
-      "version": "2.19.0",
+      "version": "2.22.0",
       "dependencies": {
-        "@afps-spec/schema": "^1.5.0",
+        "@afps-spec/schema": "^0.6.0",
+        "@appstrate/afps-shared": "^0.1.0",
         "ajv": "^8.20.0",
         "ajv-formats": "^3.0.1",
         "fflate": "^0.8.0",
         "pino": "^10.3.1",
         "semver": "^7.7.1",
-        "zod": "^4.3.6",
+        "zod": "^4.4.3",
       },
       "peerDependencies": {
         "@aws-sdk/client-s3": "^3",
@@ -247,6 +263,8 @@
       "name": "@appstrate/db",
       "version": "0.0.0",
       "dependencies": {
+        "@appstrate/afps-shared": "workspace:*",
+        "@appstrate/core": "workspace:*",
         "@appstrate/emails": "workspace:*",
         "@appstrate/env": "workspace:*",
         "@aws-sdk/client-s3": "^3.1038.0",
@@ -257,7 +275,7 @@
         "drizzle-orm": "^0.45.2",
         "nodemailer": "^8.0.7",
         "postgres": "^3.4.9",
-        "zod": "^4.3.6",
+        "zod": "^4.4.3",
       },
       "devDependencies": {
         "@types/nodemailer": "^8.0.0",
@@ -276,14 +294,14 @@
       "version": "0.0.0",
       "dependencies": {
         "@appstrate/core": "workspace:*",
-        "zod": "^4.3.6",
+        "zod": "^4.4.3",
       },
     },
     "packages/mcp-transport": {
       "name": "@appstrate/mcp-transport",
       "version": "0.0.0",
       "dependencies": {
-        "@afps-spec/types": "^1.0.0",
+        "@afps-spec/types": "^0.1.0",
         "@modelcontextprotocol/sdk": "^1.29.0",
       },
     },
@@ -306,7 +324,9 @@
       "version": "0.0.0",
       "dependencies": {
         "@appstrate/afps-runtime": "workspace:*",
+        "@appstrate/core": "workspace:*",
         "@appstrate/mcp-transport": "workspace:*",
+        "ajv": "^8.20.0",
       },
       "devDependencies": {
         "@mariozechner/pi-ai": "^0.70.6",
@@ -323,7 +343,7 @@
       "dependencies": {
         "@appstrate/core": "workspace:*",
         "@appstrate/db": "workspace:*",
-        "zod": "^4.3.6",
+        "zod": "^4.4.3",
       },
     },
     "packages/ui": {
@@ -377,19 +397,25 @@
     "runtime-pi/sidecar": {
       "name": "appstrate-sidecar",
       "dependencies": {
+        "@appstrate/afps-runtime": "workspace:*",
         "@appstrate/connect": "workspace:*",
         "@appstrate/core": "workspace:*",
         "@appstrate/mcp-transport": "workspace:*",
+        "@appstrate/runner-pi": "workspace:*",
         "@modelcontextprotocol/sdk": "^1.29.0",
+        "fflate": "^0.8.2",
         "hono": "^4.12.15",
         "p-limit": "^7.3.0",
       },
     },
   },
+  "overrides": {
+    "zod": "4.4.3",
+  },
   "packages": {
-    "@afps-spec/schema": ["@afps-spec/schema@1.5.0", "", { "dependencies": { "ajv": "^8.17.1", "semver": "^7.7.4", "zod": "^4.3.6" } }, "sha512-800ItINCO2cOpVTM9QjCsG3gFXfXP4ldPVKbBmn9dic7P1sONeaSAQ7WtGy6W+JncgX5GFz2jyYJ+z+4gEqNzA=="],
+    "@afps-spec/schema": ["@afps-spec/schema@0.6.0", "", { "dependencies": { "ajv": "^8.17.1", "semver": "^7.7.4", "zod": "^4.4.3" } }, "sha512-ycGMEm6h4E+Fe4/H709O9jnww2jnWawn2WT7ijQlqcm6U/nWkocEx/wnjWAo1Orrbka+TiTQDLUoqKjCqZNEvw=="],
 
-    "@afps-spec/types": ["@afps-spec/types@1.0.0", "", {}, "sha512-IeR4qT89cxr9FJ1IajByrRInkJ3HdK8yWxgI1/rJQtMBhc5A4mCATmiAJT6IG5fOLF2VZXHgI4UNCnnN/hoqPQ=="],
+    "@afps-spec/types": ["@afps-spec/types@0.1.0", "", {}, "sha512-0fK0vqhtzr+fRPnze2HPr+Krrx8pZwiOsUDjFswwz/Mr/VfnvWN+xinwzajX17NfFwA8W5a+vY90xO7HL7M9Xg=="],
 
     "@anthropic-ai/sdk": ["@anthropic-ai/sdk@0.90.0", "", { "dependencies": { "json-schema-to-ts": "^3.1.1" }, "peerDependencies": { "zod": "^3.25.0 || ^4.0.0" }, "optionalPeers": ["zod"], "bin": { "anthropic-ai-sdk": "bin/cli" } }, "sha512-MzZtPabJF1b0FTDl6Z6H5ljphPwACLGP13lu8MTiB8jXaW/YXlpOp+Po2cVou3MPM5+f5toyLnul9whKCy7fBg=="],
 
@@ -402,6 +428,8 @@
     "@apidevtools/swagger-parser": ["@apidevtools/swagger-parser@12.1.0", "", { "dependencies": { "@apidevtools/json-schema-ref-parser": "14.0.1", "@apidevtools/openapi-schemas": "^2.1.0", "@apidevtools/swagger-methods": "^3.0.2", "ajv": "^8.17.1", "ajv-draft-04": "^1.0.0", "call-me-maybe": "^1.0.2" }, "peerDependencies": { "openapi-types": ">=7" } }, "sha512-e5mJoswsnAX0jG+J09xHFYQXb/bUc5S3pLpMxUuRUA2H8T2kni3yEoyz2R3Dltw5f4A6j6rPNMpWTK+iVDFlng=="],
 
     "@appstrate/afps-runtime": ["@appstrate/afps-runtime@workspace:packages/afps-runtime"],
+
+    "@appstrate/afps-shared": ["@appstrate/afps-shared@workspace:packages/afps-shared"],
 
     "@appstrate/api": ["@appstrate/api@workspace:apps/api"],
 
@@ -2421,7 +2449,7 @@
 
     "yoctocolors": ["yoctocolors@2.1.2", "", {}, "sha512-CzhO+pFNo8ajLM2d2IW/R93ipy99LWjtwblvC1RsoSUMZgyLbYFr221TnSNT7GjGdYui6P459mw9JH/g/zW2ug=="],
 
-    "zod": ["zod@4.3.6", "", {}, "sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg=="],
+    "zod": ["zod@4.4.3", "", {}, "sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ=="],
 
     "zod-to-json-schema": ["zod-to-json-schema@3.25.2", "", { "peerDependencies": { "zod": "^3.25.28 || ^4" } }, "sha512-O/PgfnpT1xKSDeQYSCfRI5Gy3hPf91mKVDuYLUHZJMiDFptvP41MSnWofm8dnCm0256ZNfZIM7DSzuSMAFnjHA=="],
 

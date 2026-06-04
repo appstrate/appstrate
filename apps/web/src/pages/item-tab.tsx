@@ -3,35 +3,49 @@
 import { type ReactNode, useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { Wrench, Plug } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ImportModal } from "../components/import-modal";
-import type { PackageType } from "@appstrate/core/validation";
+import { usePackageList, type PackageType } from "../hooks/use-packages";
 import { type CardItem, PackageTab } from "./package-list";
-import type { ItemTabConfig } from "./item-tab-configs";
 import { packageNewPath } from "../lib/package-paths";
 
-const emojiMap: Record<PackageType, string> = {
-  agent: "⚡",
-  skill: "🧠",
-  tool: "🔧",
-  provider: "🔌",
+type BrowseType = Extract<PackageType, "skill" | "mcp-server">;
+
+/** Per-type presentation for the generic browse tab. */
+const TYPE_PRESENTATION: Record<
+  BrowseType,
+  { emoji: string; emptyIcon: typeof Wrench; typeKey: string; titleKey: string }
+> = {
+  skill: {
+    emoji: "🧠",
+    emptyIcon: Wrench,
+    typeKey: "packages.type.skill",
+    titleKey: "packages.type.skills",
+  },
+  "mcp-server": {
+    emoji: "🔌",
+    emptyIcon: Plug,
+    typeKey: "packages.type.mcp-server",
+    titleKey: "packages.type.mcp-servers",
+  },
 };
 
 export function ItemTab({
-  config,
-  badgeMap,
+  type = "skill",
+  readOnly = false,
   actionsMap,
-  iconMap,
   filterIds,
   headerContent,
   extraActions: externalActions,
   emptyExtraActions,
   title: externalTitle,
 }: {
-  config: ItemTabConfig;
-  badgeMap?: Map<string, ReactNode>;
+  /** Package type to list. Defaults to "skill" to preserve existing callers. */
+  type?: BrowseType;
+  /** When true, hides the "create" editor link (browse-only surface). */
+  readOnly?: boolean;
   actionsMap?: Map<string, ReactNode>;
-  iconMap?: Map<string, string>;
   filterIds?: Set<string>;
   headerContent?: ReactNode;
   extraActions?: ReactNode;
@@ -39,23 +53,22 @@ export function ItemTab({
   title?: string;
 }) {
   const { t } = useTranslation(["settings", "agents", "common"]);
-  const { data: rawItems, isLoading } = config.useData();
+  const { data: rawItems, isLoading } = usePackageList(type);
   const [importOpen, setImportOpen] = useState(false);
 
-  const typeLabel = t(`packages.type.${config.type}`);
-  const title = externalTitle ?? t(`packages.type.${config.type}s`);
+  const presentation = TYPE_PRESENTATION[type];
+  const typeLabel = t(presentation.typeKey);
+  const title = externalTitle ?? t(presentation.titleKey);
   const filtered = filterIds ? rawItems?.filter((item) => filterIds.has(item.id)) : rawItems;
   const items: CardItem[] | undefined = filtered?.map((item) => ({
     id: item.id,
     displayName: item.name || item.id,
     description: item.description,
-    type: config.type,
+    type,
     source: item.source,
-    usedByAgents: item.usedByAgents,
-    statusBadge: badgeMap?.get(item.id),
+    usedByAgents: item.used_by_agents,
     actions: actionsMap?.get(item.id),
-    iconUrl: iconMap?.get(item.id),
-    autoInstalled: item.autoInstalled,
+    autoInstalled: item.auto_installed,
   }));
 
   return (
@@ -63,19 +76,21 @@ export function ItemTab({
       <PackageTab
         items={items}
         isLoading={isLoading}
-        emoji={emojiMap[config.type]}
-        emptyMessage={t(config.emptyMessageKey, { type: typeLabel })}
-        emptyHint={t(config.emptyHintKey, { type: typeLabel })}
-        emptyIcon={config.emptyIcon}
+        emoji={presentation.emoji}
+        emptyMessage={t("packages.emptyItems", { type: typeLabel })}
+        emptyHint={t("packages.emptyItemsHint", { type: typeLabel })}
+        emptyIcon={presentation.emptyIcon}
         extraActions={
           <>
             {externalActions}
             <Button variant="outline" onClick={() => setImportOpen(true)}>
               {t("nav.import", { ns: "common" })}
             </Button>
-            <Link to={packageNewPath(config.type)}>
-              <Button>{t("list.createItem", { ns: "agents", type: typeLabel })}</Button>
-            </Link>
+            {!readOnly && (
+              <Link to={packageNewPath(type)}>
+                <Button>{t("list.createItem", { ns: "agents", type: typeLabel })}</Button>
+              </Link>
+            )}
           </>
         }
         emptyExtraActions={emptyExtraActions}

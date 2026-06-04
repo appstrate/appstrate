@@ -1,0 +1,89 @@
+{
+  "name": "@appstrate/airtable",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.1",
+  "display_name": "Airtable (API)",
+  "description": "Low-code platform for building collaborative databases and apps",
+  "keywords": ["project-management", "database", "collaboration"],
+  "license": "Apache-2.0",
+  "icon": "airtable",
+  "source": {
+    "kind": "none"
+  },
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "authorization_endpoint": "https://airtable.com/oauth2/v1/authorize",
+      "token_endpoint": "https://airtable.com/oauth2/v1/token",
+      "default_scopes": ["data.records:read", "schema.bases:read"],
+      "token_endpoint_auth_method": "client_secret_post",
+      "code_challenge_methods_supported": ["S256"],
+      "scope_catalog": [
+        {
+          "value": "data.records:read",
+          "label": "Read records"
+        },
+        {
+          "value": "data.records:write",
+          "label": "Create, update, and delete records"
+        },
+        {
+          "value": "data.recordComments:read",
+          "label": "Read record comments"
+        },
+        {
+          "value": "data.recordComments:write",
+          "label": "Create and manage comments"
+        },
+        {
+          "value": "schema.bases:read",
+          "label": "Read base schema (tables, fields)"
+        },
+        {
+          "value": "schema.bases:write",
+          "label": "Modify base schema"
+        },
+        {
+          "value": "webhook:manage",
+          "label": "Manage webhooks"
+        },
+        {
+          "value": "block:manage",
+          "label": "Manage extensions/blocks"
+        },
+        {
+          "value": "user.email:read",
+          "label": "Read user email"
+        }
+      ],
+      "authorized_uris": ["https://api.airtable.com/**"],
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": " "
+        },
+        "dev.appstrate/auth": {
+          "required": true
+        }
+      }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/api": {
+      "auths": {
+        "primary": {}
+      }
+    }
+  }
+}

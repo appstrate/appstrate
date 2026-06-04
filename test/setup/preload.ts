@@ -19,8 +19,9 @@
  * modules because anything in either root is part of the repo — there is no
  * "module disabled" state in tests, unlike production (MODULES env var).
  */
-import { resolve, join } from "path";
-import { readdirSync, existsSync, statSync } from "fs";
+import { resolve, join, basename } from "path";
+import { readdirSync, existsSync, statSync, mkdtempSync, rmSync } from "fs";
+import { tmpdir } from "os";
 import type { AppstrateModule } from "@appstrate/core/module";
 import { applyModuleMigration } from "./apply-module-migration.ts";
 import {
@@ -30,15 +31,25 @@ import {
   TEST_POSTGRES_CONTAINER,
 } from "./constants.ts";
 
+// ─── Tier selection ─────────────────────────────────────────
+// tier0 (TEST_TIER=0): fast in-memory dev mode — PGlite (throwaway temp dir),
+// in-memory infra adapters (no Redis), filesystem storage (no S3/MinIO), and
+// no Docker/DinD. tier3 (default, CI): real PostgreSQL + Redis + MinIO + DinD
+// via docker-compose, exactly as before.
+const TIER0 = process.env.TEST_TIER === "0";
+
 // ─── Docker Compose (idempotent — no-op if already running) ─────
-const composeFile = resolve(import.meta.dir, "docker-compose.test.yml");
-const compose = Bun.spawnSync(["docker", "compose", "-f", composeFile, "up", "-d", "--wait"], {
-  stdout: "pipe",
-  stderr: "pipe",
-});
-if (compose.exitCode !== 0) {
-  const stderr = compose.stderr.toString();
-  throw new Error(`Docker Compose failed (exit ${compose.exitCode}): ${stderr}`);
+// tier3 only — tier0 needs no external services.
+if (!TIER0) {
+  const composeFile = resolve(import.meta.dir, "docker-compose.test.yml");
+  const compose = Bun.spawnSync(["docker", "compose", "-f", composeFile, "up", "-d", "--wait"], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (compose.exitCode !== 0) {
+    const stderr = compose.stderr.toString();
+    throw new Error(`Docker Compose failed (exit ${compose.exitCode}): ${stderr}`);
+  }
 }
 
 // ─── Environment ────────────────────────────────────────────
@@ -49,24 +60,61 @@ const TEST_DATABASE_URL =
   process.env.TEST_DATABASE_URL ?? "postgres://test:test@localhost:5433/appstrate_test";
 const TEST_REDIS_URL = process.env.TEST_REDIS_URL ?? "redis://localhost:6380";
 
-// Override production env vars with test values
-process.env.DATABASE_URL = TEST_DATABASE_URL;
-process.env.REDIS_URL = TEST_REDIS_URL;
+// Secrets + app config — required in every tier.
 process.env.BETTER_AUTH_SECRET = "test-secret-at-least-32-chars-long-for-hmac";
 process.env.UPLOAD_SIGNING_SECRET = "test-upload-signing-secret-at-least-16-chars";
 process.env.CONNECTION_ENCRYPTION_KEY = Buffer.from("0123456789abcdef0123456789abcdef").toString(
   "base64",
 ); // 32 bytes
-process.env.S3_BUCKET = "test-bucket";
-process.env.S3_REGION = "us-east-1";
-// Port 9012 mirrors the MinIO host-port mapping in docker-compose.test.yml
-// (kept off 9000/9002 to avoid colliding with other dev servers on the host).
-process.env.S3_ENDPOINT = "http://localhost:9012";
-process.env.AWS_ACCESS_KEY_ID = "minioadmin";
-process.env.AWS_SECRET_ACCESS_KEY = "minioadmin";
 process.env.APP_URL = "http://localhost:3000";
 process.env.TRUSTED_ORIGINS = "http://localhost:3000";
 process.env.LOG_LEVEL = "error"; // Suppress logs during tests
+// Swap Better Auth's scrypt hasher (~35ms/hash) for a plain SHA-256 in tests —
+// most tests sign up a real user per beforeEach, so scrypt dominates the run.
+// Round-trip semantics are unchanged, so auth coverage is preserved. NEVER set
+// in production.
+process.env.AUTH_FAST_TEST_HASH = "1";
+// Shrink the out-of-order event buffer flush window (prod default 5s). Tests
+// that wait on a non-terminal event flush would otherwise pay up to 5s each;
+// 50ms keeps ordering semantics intact while removing the dead wait.
+process.env.REMOTE_RUN_BUFFER_FLUSH_MS = process.env.REMOTE_RUN_BUFFER_FLUSH_MS ?? "50";
+
+if (TIER0) {
+  // tier0: clear DATABASE_URL / REDIS_URL / S3_* (Bun auto-loads them from the
+  // dev .env) so the platform picks PGlite + in-memory infra + filesystem
+  // storage. PGlite runs against a throwaway temp directory wiped on exit.
+  delete process.env.DATABASE_URL;
+  delete process.env.REDIS_URL;
+  delete process.env.S3_BUCKET;
+  delete process.env.S3_REGION;
+  delete process.env.S3_ENDPOINT;
+  delete process.env.S3_PUBLIC_ENDPOINT;
+  delete process.env.AWS_ACCESS_KEY_ID;
+  delete process.env.AWS_SECRET_ACCESS_KEY;
+  const pgliteDir = mkdtempSync(join(tmpdir(), "appstrate-test-pglite-"));
+  process.env.PGLITE_DATA_DIR = pgliteDir;
+  process.env.FS_STORAGE_PATH = mkdtempSync(join(tmpdir(), "appstrate-test-storage-"));
+  const storageDir = process.env.FS_STORAGE_PATH;
+  process.on("exit", () => {
+    try {
+      rmSync(pgliteDir, { recursive: true, force: true });
+      if (storageDir) rmSync(storageDir, { recursive: true, force: true });
+    } catch {
+      // Best-effort cleanup — never let teardown failure mask the test outcome.
+    }
+  });
+} else {
+  // tier3: real external services from docker-compose.test.yml.
+  process.env.DATABASE_URL = TEST_DATABASE_URL;
+  process.env.REDIS_URL = TEST_REDIS_URL;
+  process.env.S3_BUCKET = "test-bucket";
+  process.env.S3_REGION = "us-east-1";
+  // Port 9012 mirrors the MinIO host-port mapping in docker-compose.test.yml
+  // (kept off 9000/9002 to avoid colliding with other dev servers on the host).
+  process.env.S3_ENDPOINT = "http://localhost:9012";
+  process.env.AWS_ACCESS_KEY_ID = "minioadmin";
+  process.env.AWS_SECRET_ACCESS_KEY = "minioadmin";
+}
 
 // Disable email verification in tests (SMTP vars from .env would enable it)
 delete process.env.SMTP_HOST;
@@ -83,7 +131,9 @@ delete process.env.GOOGLE_CLIENT_SECRET;
 // shouldn't leak into the test suite (they'd populate the registry
 // asymmetrically and break the zero-footprint invariant).
 delete process.env.SYSTEM_PROVIDER_KEYS;
-process.env.DOCKER_SOCKET = "http://localhost:2375";
+if (!TIER0) {
+  process.env.DOCKER_SOCKET = "http://localhost:2375";
+}
 
 // Belt-and-suspenders: when `bun test` runs from the monorepo root, the
 // CLI's own bunfig preload (which sets these) is ignored in favour of this
@@ -98,81 +148,112 @@ Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true
 Object.defineProperty(process.stdout, "isTTY", { value: false, configurable: true });
 Object.defineProperty(process.stderr, "isTTY", { value: false, configurable: true });
 
-// ─── MinIO bucket creation ───────────────────────────────────
-// Create the test bucket via mc inside the MinIO container (idempotent).
-const mcAlias = Bun.spawnSync(
-  [
-    "docker",
-    "exec",
-    TEST_MINIO_CONTAINER,
-    "mc",
-    "alias",
-    "set",
-    "local",
-    "http://localhost:9000",
-    "minioadmin",
-    "minioadmin",
-  ],
-  { stdout: "pipe", stderr: "pipe" },
-);
-if (mcAlias.exitCode === 0) {
-  Bun.spawnSync(
-    ["docker", "exec", TEST_MINIO_CONTAINER, "mc", "mb", "--ignore-existing", "local/test-bucket"],
-    { stdout: "pipe", stderr: "pipe" },
-  );
-}
-
-// ─── DinD: pre-pull alpine image ─────────────────────────────
-// Pull alpine:3.20 into the DinD daemon so docker API tests don't wait for pulls.
-Bun.spawnSync(["docker", "-H", "tcp://localhost:2375", "pull", "alpine:3.20"], {
-  stdout: "pipe",
-  stderr: "pipe",
-});
-
-// ─── Migrations ─────────────────────────────────────────────
-// Drop and recreate the test DB to ensure a clean slate (fresh migration).
-// Uses psql via the test postgres container to avoid needing a local client.
-function psqlAdmin(sqlCommand: string): void {
-  Bun.spawnSync(
+if (TIER0) {
+  // ─── tier0 core migrations ─────────────────────────────────
+  // Importing the db client initializes the throwaway PGlite database; then
+  // apply the core Drizzle migrations against it in-process. Shares the same
+  // migration walker as the embedded boot path (no drift).
+  // migrate.ts lives under apps/api where the @appstrate/db/client alias
+  // resolves; its own alias import initializes the (single, shared) PGlite
+  // instance that the test helpers + app code also use. Importing the client
+  // by relative path here would create a SECOND module instance (symlinked
+  // workspace) with its own uninitialized db — so we don't.
+  const { applyCorePGliteMigrations } = await import("../../apps/api/src/lib/modules/migrate.ts");
+  await applyCorePGliteMigrations(resolve(import.meta.dir, "../../packages/db/drizzle"));
+  // Close the embedded PGlite client after the whole suite. Its open handle
+  // keeps the event loop alive, so bun force-terminates with a non-zero exit
+  // code even on a fully-green run. A top-level `afterAll` in a preload runs
+  // ONCE after all tests, so closing here releases the handle for a clean exit
+  // without disturbing the shared `db` singleton mid-run.
+  const { closeDb } = await import("../../apps/api/test/helpers/db.ts");
+  const { afterAll: afterAllTier0 } = await import("bun:test");
+  afterAllTier0(async () => {
+    await closeDb();
+  });
+} else {
+  // ─── MinIO bucket creation ─────────────────────────────────
+  // Create the test bucket via mc inside the MinIO container (idempotent).
+  const mcAlias = Bun.spawnSync(
     [
       "docker",
       "exec",
-      TEST_POSTGRES_CONTAINER,
-      "psql",
-      "-U",
-      TEST_DB_USER,
-      "-d",
-      "postgres",
-      "-c",
-      sqlCommand,
+      TEST_MINIO_CONTAINER,
+      "mc",
+      "alias",
+      "set",
+      "local",
+      "http://localhost:9000",
+      "minioadmin",
+      "minioadmin",
     ],
     { stdout: "pipe", stderr: "pipe" },
   );
-}
+  if (mcAlias.exitCode === 0) {
+    Bun.spawnSync(
+      [
+        "docker",
+        "exec",
+        TEST_MINIO_CONTAINER,
+        "mc",
+        "mb",
+        "--ignore-existing",
+        "local/test-bucket",
+      ],
+      { stdout: "pipe", stderr: "pipe" },
+    );
+  }
 
-psqlAdmin(
-  `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${TEST_DB_NAME}' AND pid <> pg_backend_pid();`,
-);
-psqlAdmin(`DROP DATABASE IF EXISTS ${TEST_DB_NAME};`);
-psqlAdmin(`CREATE DATABASE ${TEST_DB_NAME};`);
+  // ─── DinD: pre-pull alpine image ───────────────────────────
+  // Pull alpine:3.20 into the DinD daemon so docker API tests don't wait for pulls.
+  Bun.spawnSync(["docker", "-H", "tcp://localhost:2375", "pull", "alpine:3.20"], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
 
-// Run drizzle-kit migrate as a subprocess from the packages/db directory,
-// since the postgres driver is a dependency of @appstrate/db, not @appstrate/api.
+  // ─── Migrations ────────────────────────────────────────────
+  // Drop and recreate the test DB to ensure a clean slate (fresh migration).
+  // Uses psql via the test postgres container to avoid needing a local client.
+  const psqlAdmin = (sqlCommand: string): void => {
+    Bun.spawnSync(
+      [
+        "docker",
+        "exec",
+        TEST_POSTGRES_CONTAINER,
+        "psql",
+        "-U",
+        TEST_DB_USER,
+        "-d",
+        "postgres",
+        "-c",
+        sqlCommand,
+      ],
+      { stdout: "pipe", stderr: "pipe" },
+    );
+  };
 
-const dbDir = resolve(import.meta.dir, "../../packages/db");
-const result = Bun.spawnSync(["bun", "drizzle-kit", "migrate"], {
-  cwd: dbDir,
-  env: { ...process.env, DATABASE_URL: TEST_DATABASE_URL },
-  stdout: "pipe",
-  stderr: "pipe",
-});
-
-if (result.exitCode !== 0) {
-  const stderr = result.stderr.toString();
-  const stdout = result.stdout.toString();
-  throw new Error(
-    `Migration failed (exit ${result.exitCode}):\nstderr: ${stderr}\nstdout: ${stdout}`,
+  psqlAdmin(
+    `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${TEST_DB_NAME}' AND pid <> pg_backend_pid();`,
   );
+  psqlAdmin(`DROP DATABASE IF EXISTS ${TEST_DB_NAME};`);
+  psqlAdmin(`CREATE DATABASE ${TEST_DB_NAME};`);
+
+  // Run drizzle-kit migrate as a subprocess from the packages/db directory,
+  // since the postgres driver is a dependency of @appstrate/db, not @appstrate/api.
+  const dbDir = resolve(import.meta.dir, "../../packages/db");
+  const result = Bun.spawnSync(["bun", "drizzle-kit", "migrate"], {
+    cwd: dbDir,
+    env: { ...process.env, DATABASE_URL: TEST_DATABASE_URL },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+
+  if (result.exitCode !== 0) {
+    const stderr = result.stderr.toString();
+    const stdout = result.stdout.toString();
+    throw new Error(
+      `Migration failed (exit ${result.exitCode}):\nstderr: ${stderr}\nstdout: ${stdout}`,
+    );
+  }
 }
 
 // ─── Module migrations + truncation registration ────────────
@@ -216,14 +297,25 @@ const moduleEntries: DiscoveredModule[] = [
   ...discoverModules(workspaceModulesRoot, "src/index.ts", (n) => n.startsWith("module-")),
 ];
 
+const applyModuleMigrationsPGlite = TIER0
+  ? (await import("../../apps/api/src/lib/modules/migrate.ts")).applyModuleMigrations
+  : null;
+
 for (const { dir: moduleDir } of moduleEntries) {
   const migrationsDir = join(moduleDir, "drizzle", "migrations");
   if (!existsSync(migrationsDir)) continue;
-  const sqlFiles = readdirSync(migrationsDir)
-    .filter((f) => f.endsWith(".sql"))
-    .sort();
-  for (const sqlFile of sqlFiles) {
-    applyModuleMigration(join(migrationsDir, sqlFile));
+  if (applyModuleMigrationsPGlite) {
+    // tier0: apply against PGlite via the shared module migrator (journal-driven,
+    // per-module tracking table). Module id = directory name.
+    await applyModuleMigrationsPGlite(basename(moduleDir), migrationsDir);
+  } else {
+    // tier3: pipe each .sql straight into the test postgres container.
+    const sqlFiles = readdirSync(migrationsDir)
+      .filter((f) => f.endsWith(".sql"))
+      .sort();
+    for (const sqlFile of sqlFiles) {
+      applyModuleMigration(join(migrationsDir, sqlFile));
+    }
   }
 }
 

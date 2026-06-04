@@ -4,20 +4,17 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedAgent, seedSchedule, seedConnectionProfile, seedRun } from "../../helpers/seed.ts";
+import { seedAgent, seedSchedule, seedRun } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
 
 const app = getTestApp();
 
 describe("Schedules API", () => {
   let ctx: TestContext;
-  let connectionProfileId: string;
 
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext();
-    const profile = await seedConnectionProfile({ userId: ctx.user.id, name: "Default" });
-    connectionProfileId = profile.id;
   });
 
   function agentId(name: string) {
@@ -43,7 +40,7 @@ describe("Schedules API", () => {
         packageId: agent.id,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        connectionProfileId: connectionProfileId,
+        userId: ctx.user.id,
         cronExpression: "0 * * * *",
         name: "Hourly",
       });
@@ -96,8 +93,7 @@ describe("Schedules API", () => {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
-          connectionProfileId: connectionProfileId,
-          cronExpression: "0 9 * * 1-5",
+          cron_expression: "0 9 * * 1-5",
           input: { note: "hello" },
         }),
       });
@@ -115,8 +111,7 @@ describe("Schedules API", () => {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
-          connectionProfileId: connectionProfileId,
-          cronExpression: "0 9 * * 1-5",
+          cron_expression: "0 9 * * 1-5",
         }),
       });
 
@@ -131,8 +126,7 @@ describe("Schedules API", () => {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
-          connectionProfileId: connectionProfileId,
-          cronExpression: "0 9 * * 1-5",
+          cron_expression: "0 9 * * 1-5",
           input: { email: "" },
         }),
       });
@@ -148,8 +142,7 @@ describe("Schedules API", () => {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
-          connectionProfileId: connectionProfileId,
-          cronExpression: "0 9 * * 1-5",
+          cron_expression: "0 9 * * 1-5",
           input: { email: "test@example.com" },
         }),
       });
@@ -168,8 +161,7 @@ describe("Schedules API", () => {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
-          connectionProfileId: connectionProfileId,
-          cronExpression: "0 9 * * 1-5",
+          cron_expression: "0 9 * * 1-5",
           name: "Weekday 9am",
           timezone: "Europe/Paris",
         }),
@@ -177,9 +169,11 @@ describe("Schedules API", () => {
 
       expect(res.status).toBe(201);
       const body = (await res.json()) as any;
-      expect(body.cronExpression).toBe("0 9 * * 1-5");
+      expect(body.cron_expression).toBe("0 9 * * 1-5");
       expect(body.name).toBe("Weekday 9am");
       expect(body.timezone).toBe("Europe/Paris");
+      // Schedule runs as the creating member.
+      expect(body.userId).toBe(ctx.user.id);
     });
 
     it("rejects invalid cron expression", async () => {
@@ -190,10 +184,85 @@ describe("Schedules API", () => {
       const res = await app.request(`/api/agents/${fid}/schedules`, {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ connectionProfileId: connectionProfileId, cronExpression: "not-valid-cron" }),
+        body: JSON.stringify({
+          cron_expression: "not-valid-cron",
+        }),
       });
 
       expect(res.status).toBe(400);
+    });
+  });
+
+  describe("connection_overrides shape (flat per-integration map)", () => {
+    // Regression guard for the schedule half of the connection-renewal flow.
+    // The wire shape is a FLAT `Record<integrationId, connectionId>` matching
+    // the run route — `routes/schedules.ts` validates it with
+    // `z.record(z.string(), z.string())`. The frontend previously sent the
+    // nested `Record<int, Record<authKey, conn>>` shape, which 400'd. These
+    // tests pin both directions so a revert to the nested schema fails CI.
+    // Connection ids need not resolve to real rows: the route validates the
+    // shape only and freezes the map; resolution happens at fire time.
+
+    it("accepts a flat connection_overrides map on create and round-trips it", async () => {
+      const fid = agentId("co-create");
+      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, fid);
+
+      const overrides = { "@runorg/svc": "conn_abc123" };
+      const res = await app.request(`/api/agents/${fid}/schedules`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cron_expression: "0 9 * * 1-5",
+          connection_overrides: overrides,
+        }),
+      });
+
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as any;
+      expect(body.connection_overrides).toEqual(overrides);
+    });
+
+    it("rejects the legacy nested connection_overrides shape with 400", async () => {
+      const fid = agentId("co-nested");
+      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, fid);
+
+      const res = await app.request(`/api/agents/${fid}/schedules`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cron_expression: "0 9 * * 1-5",
+          // Old nested shape: integrationId → { authKey → connectionId }.
+          connection_overrides: { "@runorg/svc": { primary: "conn_abc123" } },
+        }),
+      });
+
+      expect(res.status).toBe(400);
+    });
+
+    it("updates connection_overrides via PUT and round-trips the flat map", async () => {
+      const fid = agentId("co-update");
+      const agent = await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      const schedule = await seedSchedule({
+        packageId: agent.id,
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        cronExpression: "0 * * * *",
+        name: "co-sched",
+      });
+
+      const overrides = { "@runorg/svc": "conn_xyz789" };
+      const res = await app.request(`/api/schedules/${schedule.id}`, {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ connection_overrides: overrides }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.connection_overrides).toEqual(overrides);
     });
   });
 
@@ -205,7 +274,7 @@ describe("Schedules API", () => {
         packageId: agent.id,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        connectionProfileId: connectionProfileId,
+        userId: ctx.user.id,
         cronExpression: "0 * * * *",
         name: "Old Name",
       });
@@ -213,13 +282,13 @@ describe("Schedules API", () => {
       const res = await app.request(`/api/schedules/${schedule.id}`, {
         method: "PUT",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "New Name", cronExpression: "0 12 * * *" }),
+        body: JSON.stringify({ name: "New Name", cron_expression: "0 12 * * *" }),
       });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.name).toBe("New Name");
-      expect(body.cronExpression).toBe("0 12 * * *");
+      expect(body.cron_expression).toBe("0 12 * * *");
     });
   });
 
@@ -231,7 +300,7 @@ describe("Schedules API", () => {
         packageId: agent.id,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        connectionProfileId: connectionProfileId,
+        userId: ctx.user.id,
         cronExpression: "0 * * * *",
       });
 
@@ -252,7 +321,7 @@ describe("Schedules API", () => {
         packageId: agent.id,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        connectionProfileId: connectionProfileId,
+        userId: ctx.user.id,
         cronExpression: "0 * * * *",
         name: "Hourly Run",
       });
@@ -265,8 +334,7 @@ describe("Schedules API", () => {
       const body = (await res.json()) as any;
       expect(body.id).toBe(schedule.id);
       expect(body.name).toBe("Hourly Run");
-      expect(body.readiness).toBeDefined();
-      expect(body.profileName).toBeDefined();
+      expect(body.actor_type).toBe("user");
     });
 
     it("returns 404 for unknown schedule id", async () => {
@@ -278,17 +346,13 @@ describe("Schedules API", () => {
 
     it("returns 404 for schedule belonging to another org", async () => {
       const otherCtx = await createTestContext();
-      const otherProfile = await seedConnectionProfile({
-        userId: otherCtx.user.id,
-        name: "Other",
-      });
       const fid = `@${otherCtx.org.slug}/other-agent`;
       const agent = await seedAgent({ id: fid, orgId: otherCtx.orgId });
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: otherCtx.orgId,
         applicationId: otherCtx.defaultAppId,
-        connectionProfileId: otherProfile.id,
+        userId: otherCtx.user.id,
         cronExpression: "0 * * * *",
       });
 
@@ -307,7 +371,7 @@ describe("Schedules API", () => {
         packageId: agent.id,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        connectionProfileId: connectionProfileId,
+        userId: ctx.user.id,
         cronExpression: "0 * * * *",
       });
 
@@ -340,7 +404,7 @@ describe("Schedules API", () => {
         packageId: agent.id,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        connectionProfileId: connectionProfileId,
+        userId: ctx.user.id,
         cronExpression: "0 * * * *",
       });
 
@@ -353,78 +417,6 @@ describe("Schedules API", () => {
       expect(body.data).toBeArray();
       expect(body.data).toHaveLength(0);
       expect(body.total).toBe(0);
-    });
-  });
-
-  describe("Org profile support", () => {
-    it("creates a schedule with an app profile", async () => {
-      const appProfile = await seedConnectionProfile({
-        applicationId: ctx.defaultAppId,
-        name: "App Profile",
-      });
-      const fid = agentId("org-sched");
-      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
-      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, fid);
-
-      const res = await app.request(`/api/agents/${fid}/schedules`, {
-        method: "POST",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({
-          connectionProfileId: appProfile.id,
-          cronExpression: "0 9 * * 1-5",
-          name: "App Schedule",
-        }),
-      });
-
-      expect(res.status).toBe(201);
-      const body = (await res.json()) as any;
-      expect(body.connectionProfileId).toBe(appProfile.id);
-    });
-
-    it("updates a schedule to use an app profile", async () => {
-      const appProfile = await seedConnectionProfile({
-        applicationId: ctx.defaultAppId,
-        name: "App Profile",
-      });
-      const fid = agentId("org-upd");
-      const agent = await seedAgent({ id: fid, orgId: ctx.orgId });
-      const schedule = await seedSchedule({
-        packageId: agent.id,
-        orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
-        connectionProfileId: connectionProfileId,
-        cronExpression: "0 * * * *",
-      });
-
-      const res = await app.request(`/api/schedules/${schedule.id}`, {
-        method: "PUT",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ connectionProfileId: appProfile.id }),
-      });
-
-      expect(res.status).toBe(200);
-    });
-
-    it("rejects a profile from another org", async () => {
-      const otherCtx = await createTestContext();
-      const otherAppProfile = await seedConnectionProfile({
-        applicationId: otherCtx.defaultAppId,
-        name: "Other App Profile",
-      });
-      const fid = agentId("foreign-org");
-      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
-      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, fid);
-
-      const res = await app.request(`/api/agents/${fid}/schedules`, {
-        method: "POST",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({
-          connectionProfileId: otherAppProfile.id,
-          cronExpression: "0 9 * * 1-5",
-        }),
-      });
-
-      expect(res.status).toBe(403);
     });
   });
 

@@ -38,15 +38,6 @@ export interface InstallationInfo {
   probeError?: string;
 }
 
-export interface ConnectionProfileCheck {
-  /** Profile UUID pinned in the active CLI profile (`connectionProfileId` in config.toml). */
-  connectionProfileId: string;
-  /** Result status: ok = exists, missing = 404 (warn), unknown = the check could not run (no token / offline / 5xx). */
-  status: "ok" | "missing" | "unknown";
-  /** Free-form remediation hint surfaced in the rendered report. */
-  hint?: string;
-}
-
 export interface LocalInstallInfo {
   /** Absolute path to the install directory (defaults to `~/appstrate`). */
   dir: string;
@@ -63,8 +54,6 @@ export interface DoctorReport {
   dualInstall: boolean;
   /** True when more than one DIFFERENT install source was detected. */
   multiSource: boolean;
-  /** Connection-profile health for the active CLI profile, when one is pinned. */
-  connectionProfile?: ConnectionProfileCheck;
   /**
    * Local Docker-tier install detected at `~/appstrate` (or wherever
    * `--dir` was last installed). When present, the doctor surfaces the
@@ -114,10 +103,6 @@ export const defaultProbeBinary: ProbeBinary = async (binary, timeoutMs) => {
   return { ok: false, error: fallback.stderr.trim() || `exit ${fallback.exitCode}` };
 };
 
-export interface CheckConnectionProfile {
-  (): Promise<ConnectionProfileCheck | null>;
-}
-
 export interface RunDoctorOptions {
   pathEnv?: string;
   pathSeparator?: string;
@@ -128,14 +113,6 @@ export interface RunDoctorOptions {
   probeTimeoutMs?: number;
   /** `process.execPath` — used to highlight which entry is the running CLI. */
   execPath?: string;
-  /**
-   * Optional check for the pinned connection profile. Returns `null` when the
-   * active CLI profile has no `connectionProfileId` set (nothing to validate),
-   * or a `ConnectionProfileCheck` describing the result. Defaults to a real
-   * implementation that reads config + hits `/api/connection-profiles/{id}`.
-   * Tests inject a stub.
-   */
-  checkConnectionProfile?: CheckConnectionProfile;
   /**
    * Override the install-directory probe for tests. Returns the parsed
    * sidecar info when an install is detected at `dir`, or `null`.
@@ -205,18 +182,6 @@ export async function runDoctor(opts: RunDoctorOptions = {}): Promise<DoctorRepo
   }
   const sources = new Set(installations.map((i) => i.source));
 
-  // Connection-profile sanity check — fail soft so an offline doctor still
-  // renders the PATH-walk results. The check is opt-in (returns null when
-  // nothing is pinned) and isolated from the rest of the report.
-  let connectionProfile: ConnectionProfileCheck | undefined;
-  const probeProfile = opts.checkConnectionProfile ?? defaultCheckConnectionProfile;
-  try {
-    const result = await probeProfile();
-    if (result) connectionProfile = result;
-  } catch {
-    // intentional swallow — see ConnectionProfileCheck.status="unknown"
-  }
-
   // Local-install probe (#343) — surfaces the lifecycle command hints
   // when a Docker-tier install exists. Soft-fails on any error: a
   // missing or unreadable sidecar is the normal state for users who
@@ -237,7 +202,6 @@ export async function runDoctor(opts: RunDoctorOptions = {}): Promise<DoctorRepo
     runningIndex,
     dualInstall: installations.length > 1,
     multiSource: sources.size > 1,
-    ...(connectionProfile ? { connectionProfile } : {}),
     ...(localInstall ? { localInstall } : {}),
   };
 }
@@ -296,21 +260,6 @@ export function formatDoctorReport(report: DoctorReport, runningExecPath: string
   lines.push(`  ★ = running CLI`);
   lines.push(`  ← = first on $PATH (resolved when you type 'appstrate')`);
 
-  if (report.connectionProfile) {
-    lines.push(``);
-    const cp = report.connectionProfile;
-    if (cp.status === "missing") {
-      lines.push(`⚠ Connection profile ${cp.connectionProfileId} is pinned but no longer exists.`);
-      if (cp.hint) lines.push(`  ${cp.hint}`);
-    } else if (cp.status === "unknown") {
-      lines.push(
-        `Connection profile ${cp.connectionProfileId} could not be verified (offline or not logged in).`,
-      );
-    } else {
-      lines.push(`Connection profile ${cp.connectionProfileId} is healthy.`);
-    }
-  }
-
   if (report.localInstall) {
     lines.push(``);
     lines.push(
@@ -348,36 +297,6 @@ export function formatDoctorReport(report: DoctorReport, runningExecPath: string
 
   return lines.join("\n");
 }
-
-/**
- * Production check: read the active CLI profile from config.toml, return
- * `null` when no `connectionProfileId` is pinned, otherwise look it up via
- * `GET /api/connection-profiles` and surface a remediation hint if it has
- * been deleted server-side. Network/auth errors degrade to `unknown` so an
- * offline machine still gets a complete doctor report.
- */
-export const defaultCheckConnectionProfile: CheckConnectionProfile = async () => {
-  const { readConfig, resolveProfileName, getProfile } = await import("./config.ts");
-  const config = await readConfig();
-  const profileName = resolveProfileName(undefined, config);
-  const profile = await getProfile(profileName);
-  if (!profile?.connectionProfileId) return null;
-  const connectionProfileId = profile.connectionProfileId;
-
-  try {
-    const { listConnectionProfiles } = await import("./connection-profiles.ts");
-    const profiles = await listConnectionProfiles(profileName);
-    const found = profiles.some((p) => p.id === connectionProfileId);
-    if (found) return { connectionProfileId, status: "ok" };
-    return {
-      connectionProfileId,
-      status: "missing",
-      hint: "Run `appstrate connections profile switch <name>` to repin a valid profile.",
-    };
-  } catch {
-    return { connectionProfileId, status: "unknown" };
-  }
-};
 
 function upgradeHintRemoval(source: InstallSource): string {
   switch (source) {

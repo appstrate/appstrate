@@ -57,6 +57,14 @@ export interface Storage {
   ): Promise<string>;
   /** Download a file from storage. Returns null if the file does not exist. */
   downloadFile(bucket: string, path: string): Promise<Uint8Array | null>;
+  /**
+   * Stream a file's bytes. Returns null if the file does not exist. Prefer this
+   * over downloadFile() when serving a potentially large object straight to an
+   * HTTP response — it pipes from the backend without buffering the whole
+   * object in memory. Backends: S3 streams the GetObject body; filesystem
+   * streams the file handle.
+   */
+  downloadStream(bucket: string, path: string): Promise<ReadableStream<Uint8Array> | null>;
   /** Delete a file from storage. */
   deleteFile(bucket: string, path: string): Promise<void>;
   /**

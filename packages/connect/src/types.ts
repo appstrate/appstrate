@@ -1,37 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { AuthMode, ResolvedProviderDefinition } from "@appstrate/core/validation";
-
-export type { AuthMode };
-
 /** Actor identity — dashboard user or end-user (headless). Re-exported from `@appstrate/core/platform-types` to keep one canonical definition. */
 export type { Actor } from "@appstrate/core/platform-types";
 
-/** Provider definition used by the connect package. */
-export type ProviderDefinition = ResolvedProviderDefinition;
-
-export interface ConnectionRecord {
-  id: string;
-  connectionProfileId: string;
-  providerId: string;
-  orgId: string;
-  providerCredentialId: string;
-  credentialsEncrypted: string;
-  scopesGranted: string[];
-  needsReconnection: boolean;
-  expiresAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface DecryptedCredentials {
-  access_token?: string;
-  refresh_token?: string;
-  api_key?: string;
-  username?: string;
-  password?: string;
-  [key: string]: string | undefined;
-}
+/**
+ * OAuth2 token-endpoint client-auth methods supported across the connect
+ * surface (`token_endpoint_auth_method`). `"none"` is the public-client case
+ * (no client_secret). The canonical enum's JWT / mTLS methods are intentionally
+ * out of scope here. Single source of truth — re-exported by `token-exchange.ts`
+ * as `TokenExchangeAuthMethod`. Declared in this low-level module so it can be
+ * referenced without importing `token-exchange.ts` (which would create a cycle,
+ * since that module imports `OAuthStateStore` from here).
+ */
+export type TokenEndpointAuthMethod = "client_secret_post" | "client_secret_basic" | "none";
 
 export interface OAuthStateRecord {
   state: string;
@@ -39,19 +20,55 @@ export interface OAuthStateRecord {
   userId: string | null;
   endUserId?: string | null;
   applicationId: string;
-  connectionProfileId: string;
-  providerId: string;
+  /**
+   * Honest name for the OAuth-state subject across both branches:
+   * a real model-provider id OR an integration-auth sentinel
+   * (`integrationSubjectIdSentinel(packageId, authKey)`). For integration
+   * flows the authoritative exchange details live in `integration` below;
+   * this field is only used for self-describing audit logging.
+   */
+  subjectId: string;
   codeVerifier: string;
   scopesRequested: string[];
   redirectUri: string;
   createdAt: string;
   expiresAt: string;
-  authMode: string;
-  oauthTokenSecret?: string;
+  /**
+   * Integration-specific exchange parameters, carried from
+   * `POST /api/integrations/:pkgId/auths/:authKey/connect/oauth2` through
+   * to `handleIntegrationOAuthCallback`. `subjectId` carries a sentinel
+   * string for integration flows; the authoritative details live here.
+   */
+  integration?: {
+    packageId: string;
+    authKey: string;
+    /**
+     * Resolved token endpoint (`auths.{key}.token_endpoint`, possibly filled
+     * by issuer discovery at initiate time). Carried so the callback never
+     * re-resolves.
+     */
+    tokenEndpoint: string;
+    /** Optional RFC 8707 `resource` parameter (`auths.{key}.resource`) for the token exchange. */
+    resource?: string;
+    /** OAuth2 token endpoint client auth method (`token_endpoint_auth_method`) declared on the auth. */
+    tokenEndpointAuthMethod?: TokenEndpointAuthMethod;
+    /** Optional explicit client_id (DCR or user-supplied). */
+    clientId?: string;
+    /** Optional explicit client_secret (omitted for `none`). */
+    clientSecret?: string;
+    /**
+     * Reconnect / upgrade-scopes target. When set, the callback hands
+     * this id to `saveIntegrationConnection` so the existing row is
+     * UPDATED in place (token refreshed, scopes possibly broadened)
+     * instead of inserting a duplicate. Absent = fresh connect, always
+     * INSERT.
+     */
+    connectionId?: string;
+  };
 }
 
 /**
- * Ephemeral OAuth state store — keyed by `state` (OAuth2) or `oauth_token` (OAuth1a).
+ * Ephemeral OAuth state store — keyed by `state` (OAuth2).
  * Implementations are expected to enforce TTL; expired records must be treated as absent.
  * In-process Redis or local-memory impls are injected by the platform layer.
  */
@@ -59,11 +76,4 @@ export interface OAuthStateStore {
   set(key: string, record: OAuthStateRecord, ttlSeconds: number): Promise<void>;
   get(key: string): Promise<OAuthStateRecord | null>;
   delete(key: string): Promise<void>;
-}
-
-export interface ScopeValidationResult {
-  sufficient: boolean;
-  granted: string[];
-  required: string[];
-  missing: string[];
 }

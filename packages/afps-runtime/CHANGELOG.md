@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added — Letta-style `note` + `pin` tools (AFPS 1.5)
+### Added — Letta-style `note` + `pin` tools
 
 - New `noteTool` (`note`) and `pinTool` (`pin`) replace `memoryTool`
   (`add_memory`) and `checkpointTool` (`set_checkpoint`). `pin` accepts
@@ -24,7 +24,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Platform prompt's memory section references `note({ content })` and
   `pin({ key, content })`. The `## Checkpoint` section instructs agents
   to update via `pin({ key: "checkpoint", content })`.
-- See ADR-013 for the rationale.
 
 ### Removed — `add_memory` / `set_checkpoint` tools (BREAKING)
 
@@ -34,8 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   switch to `@appstrate/note` / `@appstrate/pin`.
 - `checkpoint.set` event type removed. Runners that emitted it must
   emit `pinned.set` with `key: "checkpoint"`.
-- Compat aliases were intentionally not added; the AFPS 1.4 break in
-  ADR-011 already required redeploys.
+- Compat aliases were intentionally not added; an earlier breaking change
+  already required redeploys.
 
 ### Added — `set_checkpoint` tool + scope-aware `add_memory`
 
@@ -67,7 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   runtime as a workspace dependency and drives the same `PiRunner`
   code path — plus profile / credential-proxy / HMAC sink wiring the
   runtime CLI never had.
-  Migration: `appstrate run <bundle> --providers=none --report=false
+  Migration: `appstrate run <bundle> --integrations=none --report=false
 --model-source=env --model-api=<api> --model=<id> --llm-api-key=<key>
 --snapshot <path> --input <json>` matches the previous `afps run`
   surface without requiring an Appstrate instance.

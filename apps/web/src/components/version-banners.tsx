@@ -10,7 +10,7 @@ export function VersionBanners({
   activeUrl,
 }: {
   isHistorical: boolean;
-  versionDetail: { version: string; yanked?: boolean; yankedReason?: string | null } | undefined;
+  versionDetail: { version: string; yanked?: boolean; yanked_reason?: string | null } | undefined;
   activeUrl: string;
 }) {
   const { t } = useTranslation("agents");
@@ -22,7 +22,7 @@ export function VersionBanners({
         <Alert variant="warning" className="mb-3">
           <AlertDescription>
             {t("version.yanked")}
-            {versionDetail.yankedReason ? ` — ${versionDetail.yankedReason}` : ""}
+            {versionDetail.yanked_reason ? ` — ${versionDetail.yanked_reason}` : ""}
           </AlertDescription>
         </Alert>
       )}

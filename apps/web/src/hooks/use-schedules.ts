@@ -9,14 +9,14 @@ import { usePackageDetail } from "./use-packages";
 import { useAgentModel } from "./use-models";
 import { useAgentProxy } from "./use-proxies";
 import { onMutationError } from "./use-mutations";
-import type { Schedule, EnrichedSchedule, Run } from "@appstrate/shared-types";
+import type { ScheduleWireDto, EnrichedSchedule, EnrichedRun } from "@appstrate/shared-types";
 
 export function useScheduleRuns(scheduleId: string | undefined) {
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
   return useQuery({
     queryKey: ["schedule-runs", orgId, applicationId, scheduleId],
-    queryFn: () => apiList<Run>(`/schedules/${scheduleId}/runs`),
+    queryFn: () => apiList<EnrichedRun>(`/schedules/${scheduleId}/runs`),
     enabled: !!scheduleId && !!applicationId,
   });
 }
@@ -66,17 +66,17 @@ export function useCreateSchedule(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (data: {
-      connectionProfileId: string;
       name?: string;
-      cronExpression: string;
+      cron_expression: string;
       timezone?: string;
       input?: Record<string, unknown>;
-      configOverride?: Record<string, unknown> | null;
-      modelIdOverride?: string | null;
-      proxyIdOverride?: string | null;
-      versionOverride?: string | null;
+      config_override?: Record<string, unknown> | null;
+      model_id_override?: string | null;
+      proxy_id_override?: string | null;
+      version_override?: string | null;
+      connection_overrides?: Record<string, string> | null;
     }) => {
-      return api<Schedule>(`/agents/${packageId}/schedules`, {
+      return api<ScheduleWireDto>(`/agents/${packageId}/schedules`, {
         method: "POST",
         body: JSON.stringify(data),
       });
@@ -94,18 +94,18 @@ export function useUpdateSchedule() {
       ...data
     }: {
       id: string;
-      connectionProfileId?: string;
       name?: string;
-      cronExpression?: string;
+      cron_expression?: string;
       timezone?: string;
       input?: Record<string, unknown>;
       enabled?: boolean;
-      configOverride?: Record<string, unknown> | null;
-      modelIdOverride?: string | null;
-      proxyIdOverride?: string | null;
-      versionOverride?: string | null;
+      config_override?: Record<string, unknown> | null;
+      model_id_override?: string | null;
+      proxy_id_override?: string | null;
+      version_override?: string | null;
+      connection_overrides?: Record<string, string> | null;
     }) => {
-      return api<Schedule>(`/schedules/${id}`, {
+      return api<ScheduleWireDto>(`/schedules/${id}`, {
         method: "PUT",
         body: JSON.stringify(data),
       });
@@ -134,6 +134,12 @@ export interface ScheduleFormDeps {
   persistedProxyId: string | null;
   persistedVersion: string | null;
   hasFileInputs: boolean;
+  /**
+   * Agent's declared integration deps (#199) — drives the schedule
+   * connection-overrides picker. Empty when the agent has no
+   * integrations.
+   */
+  agentIntegrations: Array<{ id: string; tools?: string[] | "*" }>;
 }
 
 /**
@@ -149,6 +155,10 @@ export function useScheduleFormDeps(packageId: string | undefined): ScheduleForm
   if (!packageId) return null;
 
   const inputSchema = agentDetail?.input?.schema ?? undefined;
+  const integrationDeps = (agentDetail?.dependencies?.integrations ?? []).map((d) => ({
+    id: d.id,
+    ...(d.tools ? { tools: d.tools } : {}),
+  }));
   return {
     inputSchema,
     configSchema: agentDetail?.config?.schema ?? undefined,
@@ -157,5 +167,6 @@ export function useScheduleFormDeps(packageId: string | undefined): ScheduleForm
     persistedProxyId: agentProxy?.proxyId ?? null,
     persistedVersion: agentDetail?.version ?? null,
     hasFileInputs: schemaHasFileFields(inputSchema),
+    agentIntegrations: integrationDeps,
   };
 }

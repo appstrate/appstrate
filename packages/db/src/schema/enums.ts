@@ -68,7 +68,16 @@ export const invitationStatusEnum = pgEnum("invitation_status", invitationStatus
 export const zInvitationStatusEnum = z.enum(invitationStatusValues);
 export type InvitationStatus = z.infer<typeof zInvitationStatusEnum>;
 
-export const packageTypeValues = ["agent", "skill", "tool", "provider"] as const;
+export const packageTypeValues = [
+  "agent",
+  "skill",
+  "integration",
+  // AFPS §3.4 — a standalone MCP Bundle (MCPB) package that an
+  // integration's `source.kind: "local"` references via `source.server`.
+  // The integration carries the auth/scope/delivery contract; the mcp-server
+  // package carries the runnable server (entry point + runtime).
+  "mcp-server",
+] as const;
 export const packageTypeEnum = pgEnum("package_type", packageTypeValues);
 export const zPackageTypeEnum = z.enum(packageTypeValues);
 export type PackageType = z.infer<typeof zPackageTypeEnum>;

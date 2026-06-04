@@ -2,7 +2,7 @@
 
 `appstrate` is the official command-line tool for installing, configuring, and authenticating against an Appstrate instance. It is a single self-contained binary (Bun runtime embedded) — no Node.js, npm, or pre-installed dependencies required on the host.
 
-Lives at [`apps/cli/`](./) in the monorepo; versioned in lockstep with the platform ([ADR-006](../../docs/adr/ADR-006-cli-device-flow-monorepo.md)).
+Lives at [`apps/cli/`](./) in the monorepo; versioned in lockstep with the platform.
 
 > **Driving this CLI from an AI coding agent?** Read [`AGENTS.md`](./AGENTS.md) first — it distills this reference into a zero-to-first-run recipe, rules of engagement, and a `curl` → `appstrate api` cheat sheet sized for an agent's context window.
 
@@ -32,25 +32,24 @@ See [`examples/self-hosting/README.md`](../../examples/self-hosting/README.md#ve
 
 ## Commands
 
-| Command                 | Purpose                                                                         |
-| ----------------------- | ------------------------------------------------------------------------------- |
-| `appstrate install`     | Install Appstrate locally (Tier 0) or bring up a Docker stack (Tiers 1/2/3).    |
-| `appstrate start`       | Start the installed Docker stack (`docker compose up -d`).                      |
-| `appstrate stop`        | Stop the stack — containers off, volumes preserved.                             |
-| `appstrate restart`     | Restart all containers.                                                         |
-| `appstrate logs`        | Stream Compose logs (with `-f` and an optional service-name positional).        |
-| `appstrate status`      | Show container status (`docker compose ps`).                                    |
-| `appstrate uninstall`   | Tear down. Default keeps volumes; `--purge` wipes data + the install dir.       |
-| `appstrate login`       | Sign into an instance via RFC 8628 device-flow. Tokens land in the OS keyring.  |
-| `appstrate logout`      | Revoke the active session server-side and wipe local credentials.               |
-| `appstrate whoami`      | Print the identity attached to the active profile.                              |
-| `appstrate token`       | Print metadata about the stored access + refresh tokens (debug).                |
-| `appstrate org`         | List, switch, or create organizations pinned on the active profile.             |
-| `appstrate app`         | List, switch, or create applications pinned on the active profile.              |
-| `appstrate api`         | Authenticated HTTP passthrough to the Appstrate API.                            |
-| `appstrate openapi`     | Explore the active profile's OpenAPI schema without flooding stdout.            |
-| `appstrate run`         | Execute an agent locally — by package id or from a `.afps`/`.afps-bundle` path. |
-| `appstrate connections` | Manage connection profiles (default + alternates) on the active profile.        |
+| Command               | Purpose                                                                         |
+| --------------------- | ------------------------------------------------------------------------------- |
+| `appstrate install`   | Install Appstrate locally (Tier 0) or bring up a Docker stack (Tiers 1/2/3).    |
+| `appstrate start`     | Start the installed Docker stack (`docker compose up -d`).                      |
+| `appstrate stop`      | Stop the stack — containers off, volumes preserved.                             |
+| `appstrate restart`   | Restart all containers.                                                         |
+| `appstrate logs`      | Stream Compose logs (with `-f` and an optional service-name positional).        |
+| `appstrate status`    | Show container status (`docker compose ps`).                                    |
+| `appstrate uninstall` | Tear down. Default keeps volumes; `--purge` wipes data + the install dir.       |
+| `appstrate login`     | Sign into an instance via RFC 8628 device-flow. Tokens land in the OS keyring.  |
+| `appstrate logout`    | Revoke the active session server-side and wipe local credentials.               |
+| `appstrate whoami`    | Print the identity attached to the active profile.                              |
+| `appstrate token`     | Print metadata about the stored access + refresh tokens (debug).                |
+| `appstrate org`       | List, switch, or create organizations pinned on the active profile.             |
+| `appstrate app`       | List, switch, or create applications pinned on the active profile.              |
+| `appstrate api`       | Authenticated HTTP passthrough to the Appstrate API.                            |
+| `appstrate openapi`   | Explore the active profile's OpenAPI schema without flooding stdout.            |
+| `appstrate run`       | Execute an agent locally — by package id or from a `.afps`/`.afps-bundle` path. |
 
 All commands accept `--profile <name>` to target a specific profile (see [Profiles](#profiles)).
 
@@ -143,16 +142,16 @@ appstrate login --profile prod --instance https://app.my.io
 
 **Flags**
 
-| Flag              | Values         | Description                                                                                                                                   |
-| ----------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--instance`      | URL            | Instance base URL. Skips the interactive prompt.                                                                                              |
-| `-p`, `--profile` | name           | Profile name to store credentials under (default: `default`).                                                                                 |
-| `--org`           | `<id-or-slug>` | After the token exchange, pin this organization on the profile non-interactively. Fails if the reference does not match any org.              |
-| `--create-org`    | `<name>`       | Create a new organization with this name and pin it. A default application + hello-world agent are provisioned server-side. Skips the prompt. |
-| `--no-org`        | —              | Skip the post-login org-pinning step entirely. Subsequent calls must carry `-H 'X-Org-Id: …'`, or pin later via `appstrate org switch`.       |
-| `--app`           | `<id>`         | After the org pin, pin this application on the profile non-interactively. Fails if the reference does not match any app.                      |
-| `--create-app`    | `<name>`       | Create a new application with this name after login and pin it. Skips the cascade's default-app pick.                                         |
-| `--no-app`        | —              | Skip the post-login app-pinning step entirely. Subsequent calls must carry `-H 'X-Application-Id: …'`, or pin later via `appstrate app switch`.       |
+| Flag              | Values         | Description                                                                                                                                     |
+| ----------------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--instance`      | URL            | Instance base URL. Skips the interactive prompt.                                                                                                |
+| `-p`, `--profile` | name           | Profile name to store credentials under (default: `default`).                                                                                   |
+| `--org`           | `<id-or-slug>` | After the token exchange, pin this organization on the profile non-interactively. Fails if the reference does not match any org.                |
+| `--create-org`    | `<name>`       | Create a new organization with this name and pin it. A default application + hello-world agent are provisioned server-side. Skips the prompt.   |
+| `--no-org`        | —              | Skip the post-login org-pinning step entirely. Subsequent calls must carry `-H 'X-Org-Id: …'`, or pin later via `appstrate org switch`.         |
+| `--app`           | `<id>`         | After the org pin, pin this application on the profile non-interactively. Fails if the reference does not match any app.                        |
+| `--create-app`    | `<name>`       | Create a new application with this name after login and pin it. Skips the cascade's default-app pick.                                           |
+| `--no-app`        | —              | Skip the post-login app-pinning step entirely. Subsequent calls must carry `-H 'X-Application-Id: …'`, or pin later via `appstrate app switch`. |
 
 **Org pinning after login** (issue #209): on success, the CLI calls `GET /api/orgs` and branches:
 
@@ -174,7 +173,7 @@ On success, the banner names both: `Logged in as … to "Acme" (org_xxx) / app "
 
 1. `POST /api/auth/device/code` → receive `device_code`, `user_code`, `verification_uri_complete`, `expires_in` (10 min), `interval` (5s).
 2. CLI prints the code, opens the verification URI in the browser via the [`open`](https://www.npmjs.com/package/open) package (silent fallback on headless hosts — the URL is still displayed in the terminal).
-3. User authenticates on the instance's `/activate` SSR page and clicks "Autoriser". A realm guard on `/device/approve` rejects cross-audience approval attempts (e.g. an application-level end-user trying to approve a CLI session) — see [ADR-006](../../docs/adr/ADR-006-cli-device-flow-monorepo.md) for rationale.
+3. User authenticates on the instance's `/activate` SSR page and clicks "Autoriser". A realm guard on `/device/approve` rejects cross-audience approval attempts (e.g. an application-level end-user trying to approve a CLI session).
 4. CLI polls `POST /api/auth/cli/token` every `interval` seconds (honoring `slow_down` backoff) until approval. On success: receives an `access_token` (15-minute signed JWT, ES256) + `refresh_token` (30-day opaque rotating token) pair — see issue #165.
 5. CLI decodes the JWT payload locally to extract `sub` (user id) and `email` from its claims. No second round-trip needed — the JWT is the authoritative identity source, and `/api/auth/get-session` does not understand Bearer JWTs (that endpoint is BA's cookie-based session reader).
 6. Tokens are stored in the OS keyring; profile is written to `config.toml`.
@@ -346,7 +345,7 @@ All four subcommands respect the global `--profile <name>` flag and talk to `GET
 
 ### `appstrate app`
 
-Manage the application pinned on the active profile. `login` auto-pins the default application in the pinned org (see above); `app switch` / `app create` let you change the pin without re-running the device flow. The pinned app id is sent as `X-Application-Id` on every `appstrate api` call — required for app-scoped routes (agents, runs, schedules, webhooks, api-keys, notifications, packages, providers, connections, end-users, app-profiles).
+Manage the application pinned on the active profile. `login` auto-pins the default application in the pinned org (see above); `app switch` / `app create` let you change the pin without re-running the device flow. The pinned app id is sent as `X-Application-Id` on every `appstrate api` call — required for app-scoped routes (agents, runs, schedules, webhooks, api-keys, notifications, packages, integrations, end-users).
 
 ```sh
 appstrate app list            # enumerate apps in the pinned org; pinned row is marked *, default row tagged [default]
@@ -537,25 +536,20 @@ appstrate run @scope/triage@1.2.0
 appstrate run @scope/triage@beta
 
 # Run a local bundle without hitting the instance
-appstrate run ./out/triage-1.2.0.afps-bundle --providers local --creds-file ./creds.json
+appstrate run ./out/triage-1.2.0.afps-bundle --integrations local --creds-file ./creds.json
 ```
 
 Run-config inheritance (model, proxy, agent config, version pin) is fetched from `/api/applications/{applicationId}/packages/{scope}/{name}/run-config` and merged with flag/env overrides. Use `--no-inherit` to opt out (deterministic CI).
 
 **Selected flags**
 
-| Flag                         | Purpose                                                                                                                                                |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `--connection-profile <ref>` | Connection profile to use for credential-proxy calls (UUID or name). Overrides the sticky default pinned via `appstrate connections profile switch`.   |
-| `--cp <ref>`                 | Alias for `--connection-profile`.                                                                                                                      |
-| `--provider-profile <kv>`    | Per-provider override `providerId=<id\|name>`. Repeatable.                                                                                             |
-| `--proxy <id>`               | Proxy id to associate with the run (overrides the per-app inherited value).                                                                            |
-| `--no-inherit`               | Skip per-application run-config inheritance — flags + env vars + defaults only.                                                                        |
-| `--no-preflight`             | Skip the connections-readiness preflight (CI mode; fails fast on missing connections via the structured-error path).                                   |
-| `--preflight-timeout <s>`    | Maximum seconds to poll for connections during the preflight. Default `300`.                                                                           |
-| `--json`                     | Emit canonical RunEvents as JSONL on stdout. Forces non-interactive preflight.                                                                         |
-| `-v, --verbose`              | Verbose tool-call output: pretty-print args + reveal full results (~2 KB). Honoured only in human mode (without `--json`). Env: `APPSTRATE_VERBOSE=1`. |
-| `-q, --quiet`                | Suppress per-tool output lines (name, args, result). Errors and final summary still print. Mutually exclusive with `--verbose`.                        |
+| Flag            | Purpose                                                                                                                                                |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--proxy <id>`  | Proxy id to associate with the run (overrides the per-app inherited value).                                                                            |
+| `--no-inherit`  | Skip per-application run-config inheritance — flags + env vars + defaults only.                                                                        |
+| `--json`        | Emit canonical RunEvents as JSONL on stdout.                                                                                                           |
+| `-v, --verbose` | Verbose tool-call output: pretty-print args + reveal full results (~2 KB). Honoured only in human mode (without `--json`). Env: `APPSTRATE_VERBOSE=1`. |
+| `-q, --quiet`   | Suppress per-tool output lines (name, args, result). Errors and final summary still print. Mutually exclusive with `--verbose`.                        |
 
 **Tool-call rendering**
 
@@ -571,23 +565,9 @@ Defaults match the dashboard log viewer: args truncated at 200 chars, result pre
 
 The full flag set is documented under `appstrate run --help`.
 
-**Preflight readiness**
+**Connection readiness**
 
-Before launching, the CLI calls `GET /api/agents/{scope}/{name}/readiness` to check that every required provider has a healthy connection under the resolved profile context. Missing or expired connections in an interactive terminal trigger a prompt to open `${instance}/preferences/connectors` in a browser, then poll until ready or `--preflight-timeout` is reached. In `--json` or non-TTY contexts, the run aborts with exit code 1 and a structured error containing `{ code: "connections_missing", missing, connectUrl }` on stdout.
-
-### `appstrate connections`
-
-Manage connection profiles for the active CLI profile. Profiles let you keep parallel sets of provider credentials (e.g. "personal Gmail" vs "work Gmail") and switch between them per run.
-
-```sh
-appstrate connections list                           # List connections for the current profile
-appstrate connections profile list                   # List all profiles owned by the user
-appstrate connections profile current                # Print the pinned default
-appstrate connections profile switch work            # Pin "work" as the default for credential-proxy calls
-appstrate connections profile create "freelance"     # Create a new non-default profile
-```
-
-`switch` writes the resolved profile UUID to `connectionProfileId` in `~/.config/appstrate/config.toml`. `appstrate run` and any other credential-proxy callers honour it via the `X-Connection-Profile-Id` header until overridden by `--connection-profile`.
+Connection readiness is enforced server-side at run-trigger time: a run that targets an integration without a healthy connection is rejected with HTTP 412 (`missing_integration_connection`) before the container launches. Connect or repair the connection from the dashboard's connectors panel (`${instance}/preferences/connectors`).
 
 ## Profiles
 
@@ -684,4 +664,4 @@ Source at [`apps/cli/`](../../apps/cli/). Tests at `apps/cli/test/` (unit tests,
 
 The release pipeline (`.github/workflows/release.yml`) handles this by running one job per target on a native runner (macOS arm64, macOS x64, Linux x64, Linux arm64) — each job's `bun install` fetches the matching native binding. If you need a binary for a platform other than your host locally, run `bun build --compile` on that target's OS or wait for a GitHub Release.
 
-Architectural decisions in [ADR-006](../../docs/adr/ADR-006-cli-device-flow-monorepo.md); implementation plan in `docs/specs/CLI_IMPLEMENTATION_PLAN.md` (local-only, gitignored); preflight results in `docs/specs/cli-preflight-results.md` (also gitignored).
+Implementation plan in `docs/specs/CLI_IMPLEMENTATION_PLAN.md` (local-only, gitignored); preflight results in `docs/specs/cli-preflight-results.md` (also gitignored).

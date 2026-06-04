@@ -4,14 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api, buildQs } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
-import type { Run } from "@appstrate/shared-types";
-
-interface PaginatedResult {
-  object: "list";
-  data: Run[];
-  total: number;
-  hasMore: boolean;
-}
+import type { EnrichedRun, ListEnvelope } from "@appstrate/shared-types";
 
 export type RunKindFilter = "all" | "package" | "inline";
 
@@ -54,7 +47,7 @@ export function usePaginatedRuns({
   return useQuery({
     queryKey: ["paginated-runs", orgId, applicationId, endpoint, user, kind, status, limit, offset],
     queryFn: async () => {
-      return api<PaginatedResult>(`${endpoint}${qs}`);
+      return api<ListEnvelope<EnrichedRun>>(`${endpoint}${qs}`);
     },
     placeholderData: (prev) => prev,
     enabled: !!applicationId && (scheduleId ? !!scheduleId : packageId ? !!packageId : true),

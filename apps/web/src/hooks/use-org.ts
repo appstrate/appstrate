@@ -3,7 +3,6 @@
 import { useCallback } from "react";
 import { useStore } from "zustand";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { isOwnedByOrg } from "@appstrate/core/naming";
 import { apiList } from "../api";
 import { orgStore, getCurrentOrgId } from "../stores/org-store";
 import { appStore } from "../stores/app-store";
@@ -52,11 +51,4 @@ export function useOrg() {
     loading: isLoading,
     isOrgOwner: currentOrg?.role === "owner",
   };
-}
-
-/** Check if a package is owned by the current org (scope matches org slug). */
-export function usePackageOwnership(packageId: string | undefined) {
-  const { currentOrg } = useOrg();
-  if (!packageId || !currentOrg) return { isOwned: false };
-  return { isOwned: isOwnedByOrg(packageId, currentOrg.slug) };
 }

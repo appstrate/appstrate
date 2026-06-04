@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unified persistence hooks (ADR-011 + ADR-013) — pinned slots + memories.
+ * Unified persistence hooks — pinned slots + memories.
  *
  * Reads go through `GET /agents/:id/persistence` with `kind` and optional
  * `runId` filters. The same `usePersistenceQuery` factor backs every read
@@ -56,12 +56,12 @@ function usePersistenceQuery<T>(
   });
 }
 
-function applyScopeFilter<T extends { actorType: PersistenceActorType }>(
+function applyScopeFilter<T extends { actor_type: PersistenceActorType }>(
   rows: T[],
   filter: PersistenceScopeFilter,
 ): T[] {
-  if (filter === "shared") return rows.filter((r) => r.actorType === "shared");
-  if (filter === "mine") return rows.filter((r) => r.actorType !== "shared");
+  if (filter === "shared") return rows.filter((r) => r.actor_type === "shared");
+  if (filter === "mine") return rows.filter((r) => r.actor_type !== "shared");
   return rows;
 }
 

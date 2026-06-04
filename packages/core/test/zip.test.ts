@@ -26,8 +26,8 @@ function validAgentManifest() {
     name: "@test/my-agent",
     version: "1.0.0",
     type: "agent",
-    schemaVersion: "1.0",
-    displayName: "My Agent",
+    schema_version: "0.1",
+    display_name: "My Agent",
     author: "test",
   });
 }
@@ -40,51 +40,30 @@ function validSkillManifest() {
   });
 }
 
-function validToolManifest() {
-  return JSON.stringify({
-    name: "@test/my-tool",
-    version: "1.0.0",
-    type: "tool",
-    entrypoint: "tool.ts",
-    tool: {
-      name: "my_tool",
-      description: "A test tool",
-      inputSchema: { type: "object", properties: {} },
-    },
-  });
-}
-
 const validSkillContent = `---
 name: my-skill
 description: A test skill
 ---
 # Skill content`;
 
-function validProviderManifest() {
+function validIntegrationManifest() {
   return JSON.stringify({
-    name: "@test/my-provider",
+    type: "integration",
+    name: "@test/my-integration",
     version: "1.0.0",
-    type: "provider",
-    definition: {
-      authMode: "oauth2",
-      oauth2: {
-        authorizationUrl: "https://example.com/authorize",
-        tokenUrl: "https://example.com/token",
-        defaultScopes: ["read"],
+    schema_version: "0.1",
+    display_name: "My Integration",
+    source: { kind: "local", server: { name: "@test/my-integration-server", version: "^1.0.0" } },
+    auths: {
+      key: {
+        type: "api_key",
+        credentials: { schema: { type: "object", properties: { token: { type: "string" } } } },
+        authorized_uris: ["https://api.example.com/**"],
+        delivery: { env: { TOKEN: { value: "{$credential.token}", sensitive: true } } },
       },
     },
   });
 }
-
-const validToolSource = `
-export default function(pi) {
-  pi.registerTool({
-    name: "tool",
-    execute(_id, params, signal) {
-      return { content: [{ type: "text", text: "ok" }] };
-    }
-  });
-}`;
 
 // ─────────────────────────────────────────────
 // parsePackageZip
@@ -112,36 +91,46 @@ describe("parsePackageZip", () => {
     expect(result.content).toContain("my-skill");
   });
 
-  it("valid tool ZIP", () => {
+  it("valid integration ZIP (manifest-only)", () => {
     const zip = makeZip({
-      "manifest.json": validToolManifest(),
-      "tool.ts": validToolSource,
+      "manifest.json": validIntegrationManifest(),
+      "server/index.js": "/* vendored MCP server */",
     });
     const result = parsePackageZip(zip);
-    expect(result.type).toBe("tool");
-    expect(result.content).toContain("registerTool");
+    expect(result.type).toBe("integration");
+    expect(result.manifest.name).toBe("@test/my-integration");
+    // No INTEGRATION.md present → content falls back to manifest text.
+    expect(result.content).toContain("@test/my-integration");
   });
 
-  it("valid provider ZIP (manifest-only)", () => {
+  it("valid integration ZIP with INTEGRATION.md companion", () => {
+    const doc = "# Integration agent-facing doc\n\nWhat this MCP server does.\n";
     const zip = makeZip({
-      "manifest.json": validProviderManifest(),
+      "manifest.json": validIntegrationManifest(),
+      "INTEGRATION.md": doc,
+      "server/index.js": "/* vendored */",
     });
     const result = parsePackageZip(zip);
-    expect(result.type).toBe("provider");
-    expect(result.content).toContain("oauth2");
-    expect(result.manifest.name).toBe("@test/my-provider");
+    expect(result.type).toBe("integration");
+    expect(result.content).toBe(doc);
   });
 
-  it("valid provider ZIP with PROVIDER.md", () => {
-    const providerDoc = "# My Provider API\n\nBase URL: https://api.example.com\n";
-    const zip = makeZip({
-      "manifest.json": validProviderManifest(),
-      "PROVIDER.md": providerDoc,
+  it("rejects an integration manifest missing required fields", () => {
+    const incomplete = JSON.stringify({
+      type: "integration",
+      name: "@test/broken",
+      version: "1.0.0",
+      schema_version: "0.1",
+      display_name: "Broken",
+      // missing source + auths
     });
-    const result = parsePackageZip(zip);
-    expect(result.type).toBe("provider");
-    expect(result.content).toBe(providerDoc);
-    expect(result.manifest.name).toBe("@test/my-provider");
+    const zip = makeZip({ "manifest.json": incomplete });
+    expect(() => parsePackageZip(zip)).toThrow(PackageZipError);
+    try {
+      parsePackageZip(zip);
+    } catch (e) {
+      expect((e as PackageZipError).code).toBe("INVALID_MANIFEST");
+    }
   });
 
   it("ZIP too large", () => {
@@ -207,24 +196,14 @@ describe("parsePackageZip", () => {
     }
   });
 
-  it("tool missing entrypoint file", () => {
-    const zip = makeZip({ "manifest.json": validToolManifest() });
-    expect(() => parsePackageZip(zip)).toThrow(PackageZipError);
-    try {
-      parsePackageZip(zip);
-    } catch (e) {
-      expect((e as PackageZipError).code).toBe("MISSING_CONTENT");
-    }
-  });
-
   it("parsePackageZip returns raw manifest without Zod defaults", () => {
     // Manifest with required fields only — NO optional defaults
     const manifest = {
       name: "@test/raw-roundtrip",
       version: "1.0.0",
       type: "agent" as const,
-      schemaVersion: "1.0",
-      displayName: "Raw Roundtrip Test",
+      schema_version: "0.1",
+      display_name: "Raw Roundtrip Test",
       author: "test",
       // dependencies and timeout intentionally omitted
       customField: "must-survive",
@@ -236,15 +215,17 @@ describe("parsePackageZip", () => {
     });
 
     const result = parsePackageZip(zip);
+    // Manifest is narrowed by `type === "agent"` here — cast for field access.
+    const agentManifest = result.manifest as Record<string, unknown>;
 
     // Raw manifest preserved — no Zod defaults injected
     expect(result.manifest).toEqual(manifest);
 
-    expect(result.manifest.dependencies).toBeUndefined();
-    expect(result.manifest.providersConfiguration).toBeUndefined();
+    expect(agentManifest.dependencies).toBeUndefined();
+    expect(agentManifest.integrations_configuration).toBeUndefined();
 
     // Custom field preserved
-    expect(result.manifest.customField).toBe("must-survive");
+    expect(agentManifest.customField).toBe("must-survive");
   });
 });
 
@@ -263,6 +244,32 @@ describe("zipArtifact / unzipArtifact roundtrip", () => {
 
     expect(new TextDecoder().decode(files["a.txt"])).toBe("hello");
     expect(new TextDecoder().decode(files["dir/b.txt"])).toBe("world");
+  });
+});
+
+describe("zipArtifact determinism", () => {
+  it("produces identical bytes across builds (fixed mtime)", () => {
+    const entries = {
+      "manifest.json": new TextEncoder().encode('{"a":1}'),
+      "prompt.md": new TextEncoder().encode("hello"),
+    };
+    const a = zipArtifact(entries);
+    const b = zipArtifact(entries);
+    expect(Buffer.from(a).equals(Buffer.from(b))).toBe(true);
+  });
+
+  it("is independent of entry insertion order (sorted output)", () => {
+    const forward = zipArtifact({
+      "a.txt": new TextEncoder().encode("1"),
+      "b.txt": new TextEncoder().encode("2"),
+      "c.txt": new TextEncoder().encode("3"),
+    });
+    const reversed = zipArtifact({
+      "c.txt": new TextEncoder().encode("3"),
+      "b.txt": new TextEncoder().encode("2"),
+      "a.txt": new TextEncoder().encode("1"),
+    });
+    expect(Buffer.from(forward).equals(Buffer.from(reversed))).toBe(true);
   });
 });
 
@@ -400,31 +407,6 @@ describe("zip bomb protection", () => {
 });
 
 // ─────────────────────────────────────────────
-// Tool entrypoint detection with prefix
-// ─────────────────────────────────────────────
-
-describe("tool entrypoint detection", () => {
-  it("folder-wrapped tool ZIP is parsed correctly", () => {
-    const zip = makeZip({
-      "wrapper/manifest.json": validToolManifest(),
-      "wrapper/tool.ts": validToolSource,
-    });
-    const result = parsePackageZip(zip);
-    expect(result.type).toBe("tool");
-    expect(result.content).toContain("registerTool");
-  });
-
-  it("ignores .d.ts files for tool detection", () => {
-    const zip = makeZip({
-      "manifest.json": validToolManifest(),
-      "types.d.ts": "declare module 'foo';",
-      "tool.ts": validToolSource,
-    });
-    const result = parsePackageZip(zip);
-    expect(result.type).toBe("tool");
-  });
-});
-
 // ─────────────────────────────────────────────
 // Wrapper folder stripping — parsePackageZip integration
 // ─────────────────────────────────────────────
@@ -448,25 +430,6 @@ describe("wrapper folder stripping (parsePackageZip)", () => {
     const result = parsePackageZip(zip);
     expect(result.type).toBe("skill");
     expect(result.content).toContain("my-skill");
-  });
-
-  it("wrapped provider ZIP with PROVIDER.md", () => {
-    const providerDoc = "# My Provider\n\nBase URL: https://api.example.com\n";
-    const zip = makeZip({
-      "my-provider/manifest.json": validProviderManifest(),
-      "my-provider/PROVIDER.md": providerDoc,
-    });
-    const result = parsePackageZip(zip);
-    expect(result.type).toBe("provider");
-    expect(result.content).toBe(providerDoc);
-  });
-
-  it("wrapped provider ZIP (manifest-only)", () => {
-    const zip = makeZip({
-      "my-provider/manifest.json": validProviderManifest(),
-    });
-    const result = parsePackageZip(zip);
-    expect(result.type).toBe("provider");
   });
 
   it("mixed top-level entries (root + folder) — no stripping", () => {
@@ -496,27 +459,17 @@ describe("wrapper folder stripping (parsePackageZip)", () => {
   });
 
   it("nested folders inside wrapper are preserved", () => {
-    const toolManifest = JSON.stringify({
-      name: "@test/my-tool",
-      version: "1.0.0",
-      type: "tool",
-      entrypoint: "lib/tool.ts",
-      tool: {
-        name: "my_tool",
-        description: "A test tool",
-        inputSchema: { type: "object", properties: {} },
-      },
-    });
     const zip = makeZip({
-      "wrapper/manifest.json": toolManifest,
-      "wrapper/lib/tool.ts": validToolSource,
+      "wrapper/manifest.json": validSkillManifest(),
+      "wrapper/SKILL.md": validSkillContent,
+      "wrapper/lib/helper.ts": "export const x = 1;",
       "wrapper/scripts/helper.py": "print('hi')",
     });
     const result = parsePackageZip(zip);
-    expect(result.type).toBe("tool");
-    expect(result.files["lib/tool.ts"]).toBeDefined();
+    expect(result.type).toBe("skill");
+    expect(result.files["lib/helper.ts"]).toBeDefined();
     expect(result.files["scripts/helper.py"]).toBeDefined();
-    expect(result.files["wrapper/lib/tool.ts"]).toBeUndefined();
+    expect(result.files["wrapper/lib/helper.ts"]).toBeUndefined();
   });
 
   it("returned files have stripped keys", () => {

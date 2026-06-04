@@ -79,32 +79,24 @@ export function toSlug(value: string, maxLen?: number): string {
  * headroom under the 64-char OpenAI/Anthropic limit for downstream
  * host re-prefixing (e.g. some CLI hosts add their own
  * `mcp__plugin_<plugin>_<server>__<tool>` super-prefix).
- *
- * Bifurcated predicates (npm pattern):
- * - `isValidToolNameForNew`: strict \u2014 used at registry publish time.
- * - `isValidToolNameForExisting`: lenient \u2014 used at runtime install so
- *   previously-published tools keep loading after rules tighten.
- *
- * The runtime predicate is currently identical to the strict one. Future
- * tightenings (e.g. forbidding new digit-prefixed names) go through
- * `isValidToolNameForNew` only, leaving older tools unaffected.
  */
 export const TOOL_NAME_MAX_LEN = 56;
-const TOOL_NAME_PATTERN_NEW = /^[a-z][a-z0-9_]*__[a-z][a-z0-9_]*$/;
+/**
+ * Inner-token snake_case pattern shared by both halves of the namespaced MCP
+ * tool name. Exposed so consumers that validate a *single* tool name (e.g.
+ * `agentManifestSchema`'s `integrations[id].tools[]` — the agent
+ * picks bare tool names, not pre-namespaced ones) match the same alphabet as
+ * `TOOL_NAME_PATTERN`. Forbids a leading underscore so validation.ts and
+ * naming.ts agree: validation.ts used to accept `_internal` while
+ * naming.ts rejected `_internal__foo`, leaving a manifest-vs-runtime drift.
+ */
+export const TOOL_NAME_INNER_PATTERN = /^[a-z][a-z0-9_]*$/;
+const TOOL_NAME_PATTERN = /^[a-z][a-z0-9_]*__[a-z][a-z0-9_]*$/;
 
-export function isValidToolNameForNew(name: string): boolean {
+export function isValidToolName(name: string): boolean {
   if (typeof name !== "string") return false;
   if (name.length === 0 || name.length > TOOL_NAME_MAX_LEN) return false;
-  return TOOL_NAME_PATTERN_NEW.test(name);
-}
-
-/**
- * Lenient runtime check. Mirrors `isValidToolNameForNew` for now; extend
- * the alphabet here (not in the strict predicate) when adding tolerance
- * for tightened rules.
- */
-export function isValidToolNameForExisting(name: string): boolean {
-  return isValidToolNameForNew(name);
+  return TOOL_NAME_PATTERN.test(name);
 }
 
 /**

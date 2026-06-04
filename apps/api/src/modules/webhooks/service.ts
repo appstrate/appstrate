@@ -44,6 +44,10 @@ export const webhookEventSchema = z.enum([
   "run.failed",
   "run.timeout",
   "run.cancelled",
+  // Fired by `onRunConnectionMissing` when run kickoff is rejected because
+  // the actor is missing or under-scoped on one or more integration
+  // connections. No run row exists when this fires.
+  "run.connection_missing",
 ]);
 
 type WebhookEventType = z.infer<typeof webhookEventSchema>;
@@ -491,7 +495,11 @@ export function buildEventEnvelope(params: {
   const eventId = prefixedId("evt");
   const now = Math.floor(Date.now() / 1000);
 
-  const execObj: Record<string, unknown> = { ...params.run, object: "run" };
+  // Default the inner `object` discriminator to "run" so run-lifecycle
+  // callers don't have to set it; callers for non-run events (e.g.
+  // `dispatchRunConnectionMissingWebhook`) put their own discriminator
+  // on the `run` payload before calling.
+  const execObj: Record<string, unknown> = { object: "run", ...params.run };
 
   // Summary mode: strip result and input
   if (params.payloadMode === "summary") {
@@ -756,6 +764,32 @@ export function dispatchRunWebhook(
   }).catch((err) => {
     logger.warn("Webhook dispatch failed", {
       runId,
+      error: getErrorMessage(err),
+    });
+  });
+}
+
+/**
+ * Fire-and-forget webhook dispatch for missing-integration kickoff rejections.
+ * Called when `validateAgentReadiness` returns integration field errors before
+ * a run row is created. The envelope's inner object is tagged `run_attempt`
+ * (not `run`) because nothing is persisted — consumers MUST treat the payload
+ * as informational, not as a run reference.
+ */
+export function dispatchRunConnectionMissingWebhook(
+  scope: AppScope,
+  packageId: string,
+  actor: { type: "user" | "end_user"; id: string },
+  errors: ReadonlyArray<{ field: string; code: string; message: string; title?: string }>,
+): void {
+  dispatchWebhookEvents(scope, "run.connection_missing", {
+    object: "run_attempt",
+    packageId,
+    actor,
+    errors,
+  }).catch((err) => {
+    logger.warn("run.connection_missing webhook dispatch failed", {
+      packageId,
       error: getErrorMessage(err),
     });
   });

@@ -138,9 +138,9 @@ export async function createAgent(
   name: string,
 ): Promise<{ id: string }> {
   const manifest = {
-    schemaVersion: "1.0",
+    schema_version: "0.1",
     name: `${scope}/${name}`,
-    displayName: `Test Agent ${name}`,
+    display_name: `Test Agent ${name}`,
     version: "0.1.0",
     type: "agent",
     description: `E2E test agent ${name}`,
@@ -169,9 +169,9 @@ export async function createAgentWithConfig(
   configProperties: Record<string, unknown>,
 ): Promise<{ id: string }> {
   const manifest = {
-    schemaVersion: "1.0",
+    schema_version: "0.1",
     name: `${scope}/${name}`,
-    displayName: `Test Agent ${name}`,
+    display_name: `Test Agent ${name}`,
     version: "0.1.0",
     type: "agent",
     description: `E2E test agent ${name}`,
@@ -258,11 +258,9 @@ export async function createSchedule(
   client: ApiClient,
   agentScope: string,
   agentName: string,
-  profileId: string,
 ): Promise<{ id: string }> {
   const res = await client.post(`/agents/${agentScope}/${agentName}/schedules`, {
-    connectionProfileId: profileId,
-    cronExpression: "0 * * * *",
+    cron_expression: "0 * * * *",
     name: `E2E Schedule ${Date.now()}`,
   });
 
@@ -270,29 +268,6 @@ export async function createSchedule(
     throw new Error(`Create schedule failed (${res.status()}): ${await res.text()}`);
   }
   return res.json();
-}
-
-// ─── Connection Profiles ────────────────────────
-
-export async function createConnectionProfile(
-  request: APIRequestContext,
-  cookie: string,
-  orgId: string,
-): Promise<{ id: string }> {
-  const res = await request.post("/api/connection-profiles", {
-    headers: {
-      Cookie: cookie,
-      "X-Org-Id": orgId,
-      "Content-Type": "application/json",
-    },
-    data: { name: `E2E Profile ${Date.now()}` },
-  });
-
-  if (res.status() !== 201) {
-    throw new Error(`Create profile failed (${res.status()}): ${await res.text()}`);
-  }
-  const body = await res.json();
-  return body.profile ?? body;
 }
 
 // ─── Application Packages (install/uninstall) ───

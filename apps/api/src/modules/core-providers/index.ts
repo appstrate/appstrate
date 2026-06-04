@@ -157,7 +157,7 @@ const openaiCompatible: ModelProviderDefinition = {
   iconUrl: "openai",
   description:
     "Self-hosted or third-party endpoint exposing the OpenAI chat-completions API (Ollama, vLLM, LiteLLM, …).",
-  apiShape: "openai-chat",
+  apiShape: "openai-completions",
   defaultBaseUrl: "http://localhost:11434",
   baseUrlOverridable: true,
   authMode: "api_key",

@@ -15,8 +15,6 @@ import type { Bundle, BundlePackage } from "../bundle/types.ts";
 
 export type {
   DependencyRef,
-  ToolRef,
-  ProviderRef,
   SkillRef,
   JSONSchema,
   Tool,
@@ -25,7 +23,7 @@ export type {
   RunEvent,
 } from "@afps-spec/types";
 
-import type { ToolRef, ProviderRef, SkillRef, Tool } from "@afps-spec/types";
+import type { SkillRef } from "@afps-spec/types";
 
 // ─────────────────────────────────────────────
 // Bundle surface passed to resolvers — the spec {@link Bundle} is the
@@ -49,14 +47,6 @@ export interface ResolvedSkill {
 // ─────────────────────────────────────────────
 // Resolvers (runtime-internal)
 // ─────────────────────────────────────────────
-
-export interface ToolResolver {
-  resolve(refs: ToolRef[], bundle: Bundle): Promise<Tool[]>;
-}
-
-export interface ProviderResolver {
-  resolve(refs: ProviderRef[], bundle: Bundle): Promise<Tool[]>;
-}
 
 export interface SkillResolver {
   resolve(refs: SkillRef[], bundle: Bundle): Promise<ResolvedSkill[]>;

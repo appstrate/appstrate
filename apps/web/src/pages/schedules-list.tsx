@@ -22,7 +22,7 @@ export function SchedulesListPage() {
   if (error) return <ErrorState message={error.message} />;
 
   const getAgentName = (packageId: string) =>
-    agents?.find((f) => f.id === packageId)?.displayName ?? packageId;
+    agents?.find((f) => f.id === packageId)?.display_name ?? packageId;
 
   return (
     <div className="p-6">

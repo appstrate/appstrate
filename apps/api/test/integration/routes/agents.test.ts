@@ -5,7 +5,7 @@ import { and, eq } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedAgent, seedRun, seedConnectionProfile, seedApplication } from "../../helpers/seed.ts";
+import { seedAgent, seedRun, seedApplication } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
 import { assertDbCount } from "../../helpers/assertions.ts";
 import { runs } from "@appstrate/db/schema";
@@ -14,7 +14,9 @@ import { addMemories, upsertPinned } from "../../../src/services/state/package-p
 const app = getTestApp();
 
 /** Seed an agent and install it in the default app. */
-async function seedInstalledAgent(overrides: Parameters<typeof seedAgent>[0] & { applicationId: string }) {
+async function seedInstalledAgent(
+  overrides: Parameters<typeof seedAgent>[0] & { applicationId: string },
+) {
   const { applicationId, ...rest } = overrides;
   const pkg = await seedAgent(rest);
   await installPackage({ orgId: rest.orgId!, applicationId: applicationId }, pkg.id);
@@ -381,329 +383,11 @@ describe("Agents API", () => {
       const body = (await res.json()) as any;
       const agent = body.data.find((f: { id: string }) => f.id === "@myorg/counted-agent");
       expect(agent).toBeDefined();
-      expect(agent.runningRuns).toBe(1);
+      expect(agent.running_runs).toBe(1);
     });
   });
 
-  // ─── Provider Profiles Routes ──────────────────────────────
-
-  describe("GET /api/agents/:scope/:name/provider-profiles", () => {
-    it("returns 200 with empty overrides initially", async () => {
-      await seedInstalledAgent({
-        id: "@myorg/pp-agent",
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-        applicationId: ctx.defaultAppId,
-      });
-
-      const res = await app.request("/api/agents/@myorg/pp-agent/provider-profiles", {
-        headers: authHeaders(ctx),
-      });
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as any;
-      expect(body.overrides).toEqual({});
-    });
-
-    it("returns 401 without auth", async () => {
-      await seedInstalledAgent({
-        id: "@myorg/pp-agent-noauth",
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-        applicationId: ctx.defaultAppId,
-      });
-
-      const res = await app.request("/api/agents/@myorg/pp-agent-noauth/provider-profiles");
-      expect(res.status).toBe(401);
-    });
-
-    it("returns overrides after setting one", async () => {
-      await seedInstalledAgent({
-        id: "@myorg/pp-agent-set",
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-        applicationId: ctx.defaultAppId,
-      });
-      const profile = await seedConnectionProfile({ userId: ctx.user.id, name: "Alt" });
-
-      await app.request("/api/agents/@myorg/pp-agent-set/provider-profiles", {
-        method: "PUT",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ providerId: "@system/gmail", connectionProfileId: profile.id }),
-      });
-
-      const res = await app.request("/api/agents/@myorg/pp-agent-set/provider-profiles", {
-        headers: authHeaders(ctx),
-      });
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as any;
-      expect(body.overrides["@system/gmail"]).toBe(profile.id);
-    });
-  });
-
-  describe("PUT /api/agents/:scope/:name/provider-profiles", () => {
-    it("returns 200 on valid body", async () => {
-      await seedInstalledAgent({
-        id: "@myorg/pp-put",
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-        applicationId: ctx.defaultAppId,
-      });
-      const profile = await seedConnectionProfile({ userId: ctx.user.id, name: "P" });
-
-      const res = await app.request("/api/agents/@myorg/pp-put/provider-profiles", {
-        method: "PUT",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ providerId: "@system/gmail", connectionProfileId: profile.id }),
-      });
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as any;
-      expect(body.success).toBe(true);
-    });
-
-    it("returns 400 with invalid connectionProfileId", async () => {
-      await seedInstalledAgent({
-        id: "@myorg/pp-put-bad",
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-        applicationId: ctx.defaultAppId,
-      });
-
-      const res = await app.request("/api/agents/@myorg/pp-put-bad/provider-profiles", {
-        method: "PUT",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ providerId: "@system/gmail", connectionProfileId: "not-a-uuid" }),
-      });
-      expect(res.status).toBe(400);
-    });
-
-    it("returns 400 with missing providerId", async () => {
-      await seedInstalledAgent({
-        id: "@myorg/pp-put-noprov",
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-        applicationId: ctx.defaultAppId,
-      });
-
-      const res = await app.request("/api/agents/@myorg/pp-put-noprov/provider-profiles", {
-        method: "PUT",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ connectionProfileId: "00000000-0000-0000-0000-000000000000" }),
-      });
-      expect(res.status).toBe(400);
-    });
-
-    it("accepts an app profile for provider override", async () => {
-      await seedInstalledAgent({
-        id: "@myorg/pp-put-app",
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-        applicationId: ctx.defaultAppId,
-      });
-      const appProfile = await seedConnectionProfile({
-        applicationId: ctx.defaultAppId,
-        name: "App",
-      });
-
-      const res = await app.request("/api/agents/@myorg/pp-put-app/provider-profiles", {
-        method: "PUT",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ providerId: "@system/gmail", connectionProfileId: appProfile.id }),
-      });
-      expect(res.status).toBe(200);
-    });
-  });
-
-  describe("DELETE /api/agents/:scope/:name/provider-profiles", () => {
-    it("removes an override and returns success", async () => {
-      await seedInstalledAgent({
-        id: "@myorg/pp-del",
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-        applicationId: ctx.defaultAppId,
-      });
-      const profile = await seedConnectionProfile({ userId: ctx.user.id, name: "D" });
-
-      // Set then remove
-      await app.request("/api/agents/@myorg/pp-del/provider-profiles", {
-        method: "PUT",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ providerId: "@system/gmail", connectionProfileId: profile.id }),
-      });
-
-      const res = await app.request("/api/agents/@myorg/pp-del/provider-profiles", {
-        method: "DELETE",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ providerId: "@system/gmail" }),
-      });
-      expect(res.status).toBe(200);
-
-      // Verify removed
-      const listRes = await app.request("/api/agents/@myorg/pp-del/provider-profiles", {
-        headers: authHeaders(ctx),
-      });
-      const listBody = (await listRes.json()) as any;
-      expect(listBody.overrides["@system/gmail"]).toBeUndefined();
-    });
-
-    it("returns 400 with missing providerId", async () => {
-      await seedInstalledAgent({
-        id: "@myorg/pp-del-bad",
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-        applicationId: ctx.defaultAppId,
-      });
-
-      const res = await app.request("/api/agents/@myorg/pp-del-bad/provider-profiles", {
-        method: "DELETE",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
-      expect(res.status).toBe(400);
-    });
-  });
-
-  // ─── App Profile on Agent ─────────────────────────────────
-
-  describe("PUT /api/agents/:scope/:name/app-profile", () => {
-    it("admin can set app profile on an agent", async () => {
-      await seedInstalledAgent({
-        id: "@myorg/appp-agent",
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-        applicationId: ctx.defaultAppId,
-      });
-      const appProfile = await seedConnectionProfile({
-        applicationId: ctx.defaultAppId,
-        name: "App Prof",
-      });
-
-      const res = await app.request("/api/agents/@myorg/appp-agent/app-profile", {
-        method: "PUT",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ appProfileId: appProfile.id }),
-      });
-
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as any;
-      expect(body.success).toBe(true);
-    });
-
-    it("admin can unset app profile with null", async () => {
-      await seedInstalledAgent({
-        id: "@myorg/appp-unset",
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-        applicationId: ctx.defaultAppId,
-      });
-
-      const res = await app.request("/api/agents/@myorg/appp-unset/app-profile", {
-        method: "PUT",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ appProfileId: null }),
-      });
-
-      expect(res.status).toBe(200);
-    });
-
-    it("returns 400 with invalid appProfileId", async () => {
-      await seedInstalledAgent({
-        id: "@myorg/appp-bad",
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-        applicationId: ctx.defaultAppId,
-      });
-
-      const res = await app.request("/api/agents/@myorg/appp-bad/app-profile", {
-        method: "PUT",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ appProfileId: "not-a-uuid" }),
-      });
-
-      expect(res.status).toBe(400);
-    });
-  });
-
-  // ─── Agent Detail — App Profile Fields ─────────────────────
-
-  describe("agent detail — app profile fields", () => {
-    it("returns agentAppProfileId and agentAppProfileName when set", async () => {
-      await seedInstalledAgent({
-        id: "@myorg/detail-appp",
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-        applicationId: ctx.defaultAppId,
-      });
-      const appProfile = await seedConnectionProfile({
-        applicationId: ctx.defaultAppId,
-        name: "Prod Creds",
-      });
-
-      await app.request("/api/agents/@myorg/detail-appp/app-profile", {
-        method: "PUT",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ appProfileId: appProfile.id }),
-      });
-
-      const res = await app.request("/api/packages/agents/@myorg/detail-appp", {
-        headers: authHeaders(ctx),
-      });
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as any;
-      expect(body.agentAppProfileId).toBe(appProfile.id);
-      expect(body.agentAppProfileName).toBe("Prod Creds");
-    });
-
-    it("returns null agentAppProfileId when no app profile configured", async () => {
-      await seedInstalledAgent({
-        id: "@myorg/detail-nop",
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-        applicationId: ctx.defaultAppId,
-      });
-
-      const res = await app.request("/api/packages/agents/@myorg/detail-nop", {
-        headers: authHeaders(ctx),
-      });
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as any;
-      expect(body.agentAppProfileId).toBeNull();
-      expect(body.agentAppProfileName).toBeNull();
-    });
-
-    it("returns null agentAppProfileId when configured profile was deleted", async () => {
-      await seedInstalledAgent({
-        id: "@myorg/detail-del",
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-        applicationId: ctx.defaultAppId,
-      });
-      const appProfile = await seedConnectionProfile({
-        applicationId: ctx.defaultAppId,
-        name: "Temp",
-      });
-
-      // Set then delete the profile
-      await app.request("/api/agents/@myorg/detail-del/app-profile", {
-        method: "PUT",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ appProfileId: appProfile.id }),
-      });
-      await app.request(`/api/app-profiles/${appProfile.id}`, {
-        method: "DELETE",
-        headers: authHeaders(ctx),
-      });
-
-      const res = await app.request("/api/packages/agents/@myorg/detail-del", {
-        headers: authHeaders(ctx),
-      });
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as any;
-      expect(body.agentAppProfileId).toBeNull();
-      expect(body.agentAppProfileName).toBeNull();
-    });
-  });
-
-  // ─── Persistence Routes (ADR-011 + ADR-013 — pinned slots + memories) ─
+  // ─── Persistence Routes (pinned slots + memories) ─
 
   describe("GET /api/agents/:scope/:name/persistence", () => {
     it("returns pinned slots as an array (admin sees every actor's row)", async () => {
@@ -739,11 +423,11 @@ describe("Agents API", () => {
       });
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
-        pinned: Array<{ key: string; actorType: string; content: { step: string } }>;
+        pinned: Array<{ key: string; actor_type: string; content: { step: string } }>;
       };
       expect(Array.isArray(body.pinned)).toBe(true);
       expect(body.pinned).toHaveLength(2);
-      const actorTypes = body.pinned.map((c) => c.actorType).sort();
+      const actorTypes = body.pinned.map((c) => c.actor_type).sort();
       expect(actorTypes).toEqual(["shared", "user"]);
       // Every row is the `checkpoint` slot here.
       expect(body.pinned.every((c) => c.key === "checkpoint")).toBe(true);

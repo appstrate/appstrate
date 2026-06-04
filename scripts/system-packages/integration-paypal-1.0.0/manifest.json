@@ -1,0 +1,84 @@
+{
+  "name": "@appstrate/paypal",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.1",
+  "display_name": "PayPal (API)",
+  "description": "Online payment processing platform",
+  "keywords": ["payments", "finance"],
+  "license": "Apache-2.0",
+  "icon": "paypal",
+  "source": {
+    "kind": "none"
+  },
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "authorization_endpoint": "https://www.paypal.com/connect",
+      "token_endpoint": "https://api-m.paypal.com/v1/oauth2/token",
+      "default_scopes": ["openid", "email", "profile"],
+      "token_endpoint_auth_method": "client_secret_basic",
+      "scope_catalog": [
+        {
+          "value": "openid",
+          "label": "OpenID Connect"
+        },
+        {
+          "value": "email",
+          "label": "Read email address"
+        },
+        {
+          "value": "profile",
+          "label": "Read basic profile"
+        },
+        {
+          "value": "https://uri.paypal.com/services/payments/payment",
+          "label": "Accept payments"
+        },
+        {
+          "value": "https://uri.paypal.com/services/payments/refund",
+          "label": "Issue refunds"
+        },
+        {
+          "value": "https://uri.paypal.com/services/reporting/search/read",
+          "label": "Search transactions"
+        },
+        {
+          "value": "https://uri.paypal.com/services/invoicing",
+          "label": "Manage invoices"
+        },
+        {
+          "value": "https://uri.paypal.com/services/subscriptions",
+          "label": "Manage subscriptions"
+        }
+      ],
+      "authorized_uris": ["https://api-m.paypal.com/**", "https://api-m.sandbox.paypal.com/**"],
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": " "
+        },
+        "dev.appstrate/auth": {
+          "required": true
+        }
+      }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/api": {
+      "auths": {
+        "primary": {}
+      }
+    }
+  }
+}

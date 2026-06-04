@@ -156,12 +156,12 @@ describe("DELETE /api/packages/agents/:scope/:name — observability preservatio
     expect(body.data.length).toBe(1);
     const row = body.data[0]!;
     expect(row.packageId).toBeNull();
-    expect(row.agentScope).toBe("@delorg");
-    expect(row.agentName).toBe("Ghost Agent");
+    expect(row.agent_scope).toBe("@delorg");
+    expect(row.agent_name).toBe("Ghost Agent");
     // packageEphemeral defaults to false on a deleted-package row — the
     // LEFT JOIN on `packages` produces no match, the mapper coalesces to
     // false. Inline detection still requires a non-null package_id.
-    expect(row.packageEphemeral).toBe(false);
+    expect(row.package_ephemeral).toBe(false);
   });
 
   it("deleting one agent does not affect another agent's runs", async () => {

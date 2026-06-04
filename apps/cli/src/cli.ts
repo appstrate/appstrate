@@ -49,13 +49,6 @@ import {
   appCurrentCommand,
   appCreateCommand,
 } from "./commands/app.ts";
-import {
-  connectionsListCommand,
-  connectionsProfileListCommand,
-  connectionsProfileCurrentCommand,
-  connectionsProfileSwitchCommand,
-  connectionsProfileCreateCommand,
-} from "./commands/connections.ts";
 import { modelsListCommand } from "./commands/models.ts";
 import { registerOpenapiCommand } from "./commands/openapi.ts";
 import { runCommand } from "./commands/run.ts";
@@ -473,66 +466,6 @@ appGroup
     });
   });
 
-// ─── `appstrate connections …` — manage connection profiles + view live connections ────
-
-const connectionsGroup = program
-  .command("connections")
-  .description("Manage connection profiles and inspect existing OAuth/API-key connections");
-
-connectionsGroup
-  .command("list")
-  .description("List active OAuth/API-key connections for the active profile")
-  .action(async () => {
-    const globalOpts = program.opts<{ profile?: string }>();
-    await connectionsListCommand({ profile: globalOpts.profile });
-  });
-
-const connectionsProfileGroup = connectionsGroup
-  .command("profile")
-  .description("Manage connection profiles (sticky default + pickers)");
-
-connectionsProfileGroup
-  .command("list")
-  .description("List connection profiles owned by the active user")
-  .action(async () => {
-    const globalOpts = program.opts<{ profile?: string }>();
-    await connectionsProfileListCommand({ profile: globalOpts.profile });
-  });
-
-connectionsProfileGroup
-  .command("current")
-  .description("Print the pinned connection profile id, or exit 1 if none is pinned")
-  .action(async () => {
-    const globalOpts = program.opts<{ profile?: string }>();
-    await connectionsProfileCurrentCommand({ profile: globalOpts.profile });
-  });
-
-connectionsProfileGroup
-  .command("switch [ref]")
-  .description(
-    "Re-pin the active connection profile (sticky default for `appstrate run`). With no argument, show an interactive picker.",
-  )
-  .action(async (ref: string | undefined) => {
-    const globalOpts = program.opts<{ profile?: string }>();
-    await connectionsProfileSwitchCommand({
-      profile: globalOpts.profile,
-      ref: typeof ref === "string" ? ref : undefined,
-    });
-  });
-
-connectionsProfileGroup
-  .command("create [name]")
-  .description(
-    "Create a new connection profile (and pin it on the CLI profile). With no argument, prompt interactively.",
-  )
-  .action(async (name: string | undefined) => {
-    const globalOpts = program.opts<{ profile?: string }>();
-    await connectionsProfileCreateCommand({
-      profile: globalOpts.profile,
-      name: typeof name === "string" ? name : undefined,
-    });
-  });
-
 // ─── `appstrate models …` — discover model presets on the instance ────
 
 const modelsGroup = program
@@ -826,11 +759,11 @@ program
     'Force remote execution on the pinned instance (same path as the dashboard "Run" button). Default for @scope/agent ids. Path-mode bundles are not yet supported in remote mode.',
   )
   .option(
-    "--providers <mode>",
-    "Provider resolution: remote (default, via Appstrate instance), local (creds file), or none. --local execution path only.",
+    "--integrations <mode>",
+    "Integration credential resolution: remote (default, via Appstrate instance), local (creds file), or none. --local execution path only.",
   )
-  .option("--creds-file <path>", "JSON credentials file for --providers=local")
-  .option("--api-key <key>", "Appstrate API key (ask_...) for --providers=remote")
+  .option("--creds-file <path>", "JSON credentials file for --integrations=local")
+  .option("--api-key <key>", "Appstrate API key (ask_...) for --integrations=remote")
   .option("--input <json>", "Input JSON object passed to the agent")
   .option("--input-file <path>", "Read input JSON from file")
   .option("--config <json>", "Config JSON object passed to the agent")
@@ -878,26 +811,6 @@ program
     "Skip the per-app run-config inheritance — run with flags + env vars + defaults only (deterministic CI)",
   )
   .option(
-    "--connection-profile <id|name>",
-    "Connection profile to use for credential-proxy calls (overrides the sticky default pinned via `appstrate connections profile switch`)",
-  )
-  .option("--cp <id|name>", "Alias for --connection-profile")
-  .option(
-    "--provider-profile <kv>",
-    "Per-provider profile override 'providerId=<id|name>' (repeatable)",
-    collect,
-    [],
-  )
-  .option(
-    "--no-preflight",
-    "Skip the connections-readiness preflight (CI mode; fails fast on missing connections).",
-  )
-  .option(
-    "--preflight-timeout <seconds>",
-    "Maximum seconds to wait for connections during the preflight polling loop (default 300).",
-    parsePreflightTimeout,
-  )
-  .option(
     "-v, --verbose",
     "Verbose tool-call output: pretty-print args + reveal full results (~2 KB). Honoured only in human mode (without --json).",
   )
@@ -912,7 +825,7 @@ program
       bundle,
       local: opts.local === true,
       remote: opts.remote === true,
-      providers: typeof opts.providers === "string" ? opts.providers : undefined,
+      integrations: typeof opts.integrations === "string" ? opts.integrations : undefined,
       credsFile: typeof opts.credsFile === "string" ? opts.credsFile : undefined,
       apiKey: typeof opts.apiKey === "string" ? opts.apiKey : undefined,
       input: typeof opts.input === "string" ? opts.input : undefined,
@@ -934,19 +847,6 @@ program
       // `opts.inherit === false`. Default (no flag) is `undefined` →
       // inheritance enabled.
       noInherit: opts.inherit === false,
-      // `--cp` is an alias — fall back to it when `--connection-profile`
-      // is not set.
-      connectionProfile:
-        typeof opts.connectionProfile === "string"
-          ? opts.connectionProfile
-          : typeof opts.cp === "string"
-            ? opts.cp
-            : undefined,
-      providerProfile: Array.isArray(opts.providerProfile) ? opts.providerProfile : undefined,
-      // commander maps `--no-preflight` to `opts.preflight === false`.
-      noPreflight: opts.preflight === false,
-      preflightTimeout:
-        typeof opts.preflightTimeout === "number" ? opts.preflightTimeout : undefined,
       verbose: opts.verbose === true,
       quiet: opts.quiet === true,
     });
@@ -962,16 +862,6 @@ function parseReportFallback(raw: unknown): "abort" | "console" | undefined {
   if (typeof raw !== "string") return undefined;
   if (raw === "abort" || raw === "console") return raw;
   throw new Error(`Invalid --report-fallback value "${raw}" (expected: abort | console)`);
-}
-
-function parsePreflightTimeout(raw: unknown): number {
-  const n = typeof raw === "string" ? Number(raw) : NaN;
-  if (!Number.isInteger(n) || n <= 0) {
-    throw new Error(
-      `Invalid --preflight-timeout "${raw}" (expected a positive integer number of seconds)`,
-    );
-  }
-  return n;
 }
 
 function parseSinkTtl(raw: unknown): number | undefined {

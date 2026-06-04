@@ -132,7 +132,7 @@ function classifyKeyringError(err: unknown): "missing-backend" | "entry-missing"
  * account takeover. Credential Manager is the only acceptable store on
  * Windows; if it's down, we fail loudly rather than silently fall back
  * to disk. DPAPI-based encryption would fix this but is out of scope
- * for v1 (tracked as a follow-up in ADR-006).
+ * for v1 (tracked as a follow-up).
  *
  * `entry-missing` is a read-path concept ("user hasn't logged in yet")
  * and never triggers a fallback, so we don't refuse on that case.

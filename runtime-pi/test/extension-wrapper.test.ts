@@ -13,9 +13,6 @@ const emitSpy = (obj: Record<string, unknown>) => {
 // Shared no-op ctx for tests that don't exercise the 4th arg. Throws on use
 // so that any unexpected access surfaces immediately.
 const stubCtx = {
-  providerCall: async () => {
-    throw new Error("stubCtx.providerCall used in a test that did not wire ctx");
-  },
   readResource: async () => {
     throw new Error("stubCtx.readResource used in a test that did not wire ctx");
   },
@@ -90,7 +87,7 @@ describe("wrapExtensionFactory", () => {
     // Emits an error event
     const errorEmits = emitCalls.filter((c) => c.type === "error");
     expect(errorEmits).toHaveLength(1);
-    expect(errorEmits[0].message).toContain("something broke");
+    expect(errorEmits[0]!.message).toContain("something broke");
   });
 
   it("catches non-Error thrown values", async () => {
@@ -164,8 +161,8 @@ describe("wrapExtensionFactory", () => {
     );
 
     const liveCtx = {
-      providerCall: async (_pid: string, _args: unknown) => ({
-        content: [{ type: "text", text: "from sidecar" }],
+      readResource: async (_uri: string) => ({
+        contents: [{ uri: "appstrate://api-response/run/1", text: "from sidecar" }],
       }),
     };
 
@@ -180,7 +177,7 @@ describe("wrapExtensionFactory", () => {
 
     await pi.registeredTools[0].execute("call-1", {}, null);
     expect(receivedCtx).toBe(liveCtx);
-    expect(typeof receivedCtx.providerCall).toBe("function");
+    expect(typeof receivedCtx.readResource).toBe("function");
   });
 
   it("re-evaluates the provider on each execute (late binding)", async () => {
@@ -188,12 +185,12 @@ describe("wrapExtensionFactory", () => {
     // client is wired; the ctx ref is swapped at Phase C. The wrapper must
     // read the provider at execute time, not at factory invocation time.
     const stubCtx = {
-      providerCall: async () => {
+      readResource: async () => {
         throw new Error("not ready");
       },
     };
     const wiredCtx = {
-      providerCall: async () => ({ content: [{ type: "text", text: "wired" }] }),
+      readResource: async () => ({ contents: [{ uri: "u", text: "wired" }] }),
     };
     let liveCtx: any = stubCtx;
 
@@ -218,25 +215,21 @@ describe("wrapExtensionFactory", () => {
     expect(receivedCtx).toBe(wiredCtx);
   });
 
-  it("forwards providerCall return value untouched to the tool", async () => {
-    let providerCallResult: any = undefined;
+  it("forwards readResource return value untouched to the tool", async () => {
+    let readResult: any = undefined;
     const factory = makeFactory(
       async (_id: string, _params: unknown, _signal: unknown, ctx: any) => {
-        providerCallResult = await ctx.providerCall("@scope/test", {
-          target: "https://example.com",
-        });
+        readResult = await ctx.readResource("appstrate://api-response/run/abc");
         return { content: [{ type: "text", text: "ok" }] };
       },
     );
 
     const stubbedResponse = {
-      content: [{ type: "text", text: "from upstream" }],
-      isError: false,
-      structuredContent: { foo: "bar" },
+      contents: [{ uri: "appstrate://api-response/run/abc", mimeType: "text/plain", text: "blob" }],
     };
 
     const liveCtx = {
-      providerCall: async (_pid: string, _args: unknown) => stubbedResponse,
+      readResource: async (_uri: string) => stubbedResponse,
     };
 
     const wrapped = wrapExtensionFactory(
@@ -249,6 +242,6 @@ describe("wrapExtensionFactory", () => {
     wrapped(pi as any);
 
     await pi.registeredTools[0].execute("call-1", {}, null);
-    expect(providerCallResult).toEqual(stubbedResponse);
+    expect(readResult).toEqual(stubbedResponse);
   });
 });

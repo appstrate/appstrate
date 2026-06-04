@@ -12,15 +12,7 @@ import { useApiKeys, useAvailableScopes, useRevokeApiKey } from "../hooks/use-ap
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { ApiKeyCreateModal } from "../components/api-key-create-modal";
 import type { ApiKeyInfo } from "@appstrate/shared-types";
-
-function formatDate(iso: string | null): string {
-  if (!iso) return "\u2014";
-  return new Date(iso).toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
+import { formatDateField } from "../lib/markdown";
 
 function isExpired(expiresAt: string | null): boolean {
   return expiresAt ? new Date(expiresAt) < new Date() : false;
@@ -105,17 +97,19 @@ export function ApiKeysPage() {
                 <div className="mt-3 flex flex-col gap-1">
                   <span className="text-muted-foreground text-sm">
                     {key.expiresAt
-                      ? t("settings:apiKeys.expiresOn", { date: formatDate(key.expiresAt) })
+                      ? t("settings:apiKeys.expiresOn", {
+                          date: formatDateField(key.expiresAt, "date"),
+                        })
                       : t("settings:apiKeys.neverExpires")}
                   </span>
                   {key.lastUsedAt && (
                     <span className="text-muted-foreground text-sm">
-                      {t("settings:apiKeys.lastUsed", { date: formatDate(key.lastUsedAt) })}
+                      {t("settings:apiKeys.lastUsed", { date: formatDateField(key.lastUsedAt) })}
                     </span>
                   )}
-                  {key.createdByName && (
+                  {key.created_by_name && (
                     <span className="text-muted-foreground text-sm">
-                      {t("settings:apiKeys.createdByLabel", { name: key.createdByName })}
+                      {t("settings:apiKeys.createdByLabel", { name: key.created_by_name })}
                     </span>
                   )}
                 </div>

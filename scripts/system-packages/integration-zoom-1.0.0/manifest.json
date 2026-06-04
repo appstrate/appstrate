@@ -1,0 +1,93 @@
+{
+  "name": "@appstrate/zoom",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.1",
+  "display_name": "Zoom (API)",
+  "description": "Video conferencing and online meetings platform",
+  "keywords": ["video", "meetings"],
+  "license": "Apache-2.0",
+  "icon": "zoom",
+  "source": {
+    "kind": "none"
+  },
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "authorization_endpoint": "https://zoom.us/oauth/authorize",
+      "token_endpoint": "https://zoom.us/oauth/token",
+      "default_scopes": ["user:read:user", "meeting:read:list_meetings", "meeting:read:meeting"],
+      "token_endpoint_auth_method": "client_secret_basic",
+      "code_challenge_methods_supported": ["S256"],
+      "scope_catalog": [
+        {
+          "value": "user:read:user",
+          "label": "Read user profile"
+        },
+        {
+          "value": "meeting:read:list_meetings",
+          "label": "List meetings"
+        },
+        {
+          "value": "meeting:read:meeting",
+          "label": "Read meeting details"
+        },
+        {
+          "value": "meeting:write:meeting",
+          "label": "Create and update meetings"
+        },
+        {
+          "value": "meeting:delete:meeting",
+          "label": "Delete meetings"
+        },
+        {
+          "value": "recording:read:list_recording_files",
+          "label": "List cloud recordings"
+        },
+        {
+          "value": "recording:read:recording",
+          "label": "Read recording details"
+        },
+        {
+          "value": "webinar:read:list_webinars",
+          "label": "List webinars"
+        },
+        {
+          "value": "webinar:read:webinar",
+          "label": "Read webinar details"
+        },
+        {
+          "value": "report:read:list_meeting_participants",
+          "label": "Read meeting participants report"
+        }
+      ],
+      "authorized_uris": ["https://api.zoom.us/**"],
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": " "
+        },
+        "dev.appstrate/auth": {
+          "required": true
+        }
+      }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/api": {
+      "auths": {
+        "primary": {}
+      }
+    }
+  }
+}

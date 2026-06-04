@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { classifyNetworkErrorKind } from "../../lib/http-classify.ts";
 import { buildBody, type BuiltBody } from "./body.ts";
 import type { ApiCommandOptions, ApiCommandIO } from "./types.ts";
 import { writeVerboseRequest, writeVerboseResponse } from "./verbose.ts";
@@ -16,26 +17,28 @@ function isRetryableStatus(status: number): boolean {
 }
 
 /**
- * Classify a fetch-time error as retryable. DNS resolution failures
- * and timeouts always qualify; connection-refused is opt-in via
- * `--retry-connrefused` (curl semantics — by default, refused means
- * the service is genuinely down and retries won't help).
+ * Classify a fetch-time error as retryable. Delegates the cause-chain
+ * walk to the shared {@link classifyNetworkErrorKind} (single source of
+ * truth with curl-exit-code classification). DNS resolution failures and
+ * timeouts always qualify; connection-level failures are opt-in via
+ * `--retry-connrefused` (curl semantics — by default, a refused/unreachable
+ * peer means the service is genuinely down and retries won't help).
+ *
+ * Note: the shared classifier's `"connect"` kind covers more codes than
+ * the historical `ECONNREFUSED`-only check (also EHOSTUNREACH / ENETUNREACH
+ * / ECONNRESET), all gated behind `--retry-connrefused`. TLS / unknown
+ * failures are not retryable.
  */
 function isRetryableError(err: unknown, retryConnrefused: boolean): boolean {
-  if (!err || typeof err !== "object") return false;
-  // Walk cause chain up to 3 levels (Bun wraps system errors).
-  let current: unknown = err;
-  for (let i = 0; i < 3 && current && typeof current === "object"; i++) {
-    const code = (current as { code?: unknown }).code;
-    if (typeof code === "string") {
-      if (code === "ENOTFOUND" || code === "EAI_AGAIN") return true;
-      if (code === "ECONNREFUSED") return retryConnrefused;
-    }
-    const name = (current as { name?: unknown }).name;
-    if (name === "TimeoutError") return true;
-    current = (current as { cause?: unknown }).cause;
+  switch (classifyNetworkErrorKind(err)) {
+    case "dns":
+    case "timeout":
+      return true;
+    case "connect":
+      return retryConnrefused;
+    default:
+      return false;
   }
-  return false;
 }
 
 /**

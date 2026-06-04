@@ -1,19 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Validates OAuth return URLs against an organization's allowed redirect domains.
- *
- * Security layers:
- * 1. Scheme validation — only https:// (http://localhost for dev)
- * 2. Dangerous scheme blocking — javascript:, data:, vbscript:, file:
- * 3. Domain allowlist matching — parsed host vs allowed domains
- * 4. localhost always allowed in dev mode
+ * Helpers for validating an organization's allowed redirect domains and
+ * detecting the dev environment (used by OAuth redirect-URI + webhook URL
+ * checks).
  */
 
 import { getEnv } from "@appstrate/env";
-import { invalidRequest } from "../lib/errors.ts";
 
-const DANGEROUS_SCHEMES = new Set(["javascript:", "data:", "vbscript:", "file:"]);
 export const LOCALHOST_HOSTS = new Set(["localhost", "127.0.0.1"]);
 
 /**
@@ -25,58 +19,6 @@ export function isDevEnvironment(): boolean {
     return LOCALHOST_HOSTS.has(new URL(getEnv().APP_URL).hostname);
   } catch {
     return false;
-  }
-}
-
-/**
- * Validate a returnUrl against an organization's allowed redirect domains.
- * Throws ApiError if invalid.
- */
-export function validateReturnUrl(returnUrl: string, allowedDomains: string[]): void {
-  // Block protocol-relative URLs
-  if (returnUrl.startsWith("//")) {
-    throw invalidRequest("Protocol-relative URLs are not allowed", "returnUrl");
-  }
-
-  let parsed: URL;
-  try {
-    parsed = new URL(returnUrl);
-  } catch {
-    throw invalidRequest("Malformed URL", "returnUrl");
-  }
-
-  // Block dangerous schemes
-  if (DANGEROUS_SCHEMES.has(parsed.protocol)) {
-    throw invalidRequest(`Scheme '${parsed.protocol}' is not allowed`, "returnUrl");
-  }
-
-  const isDev = isDevEnvironment();
-  const isLocalhost = LOCALHOST_HOSTS.has(parsed.hostname);
-
-  // Enforce HTTPS (except http://localhost in dev)
-  if (parsed.protocol !== "https:") {
-    if (!(parsed.protocol === "http:" && isLocalhost && isDev)) {
-      throw invalidRequest("Only https:// URLs are allowed", "returnUrl");
-    }
-  }
-
-  // Localhost is always allowed in dev mode (skip domain allowlist)
-  if (isLocalhost && isDev) {
-    return;
-  }
-
-  // Check against allowlist
-  const hostname = parsed.hostname.toLowerCase();
-  const isAllowed = allowedDomains.some((domain) => {
-    const d = domain.toLowerCase();
-    return hostname === d || hostname.endsWith(`.${d}`);
-  });
-
-  if (!isAllowed) {
-    throw invalidRequest(
-      `Domain '${parsed.hostname}' is not in the allowed redirect domains`,
-      "returnUrl",
-    );
   }
 }
 

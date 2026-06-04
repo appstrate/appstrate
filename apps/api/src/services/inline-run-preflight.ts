@@ -5,10 +5,8 @@
  *
  * Runs every validation that has no durable side effect:
  *   1. Manifest shape (AFPS + inline caps)
- *   2. providerProfiles body shape
- *   3. config + input against the manifest's own AJV schemas
- *   4. Provider profile resolution (reads DB, no writes)
- *   5. Agent readiness (prompt, skills, tools, provider deps, config)
+ *   2. input against the manifest's own AJV schema
+ *   3. Agent readiness (prompt, skills, tools, config)
  *
  * Two modes:
  *   - "fail-fast" (default) — throws on the first failing stage. Used by
@@ -26,27 +24,23 @@
  *
  * Throws `ApiError` on any failure (same shape the routes already emit).
  */
-import { z } from "zod";
 import type { Actor } from "../lib/actor.ts";
-import type { AgentManifest, LoadedPackage, ProviderProfileMap } from "../types/index.ts";
+import type { AgentManifest, LoadedPackage } from "../types/index.ts";
 import {
   ApiError,
   internalError,
   validationFailed,
-  zodIssuesToFieldErrors,
   type ValidationFieldError,
 } from "../lib/errors.ts";
 import { parsePathMessage } from "../lib/field-errors.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { logger } from "../lib/logger.ts";
-import { validateConfig, validateInput } from "./schema.ts";
+import { validateInput } from "./schema.ts";
 import { validateInlineManifest } from "./inline-manifest-validation.ts";
 import { buildShadowLoadedPackage, generateShadowPackageId } from "./inline-run.ts";
 import { getInlineRunLimits } from "./run-limits.ts";
-import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { validateAgentReadiness, collectAgentReadinessErrors } from "./agent-readiness.ts";
 import { resolveManifestCatalogDeps } from "./package-catalog.ts";
-import { resolveActorProfileContext, resolveProviderProfiles } from "./connection-profiles.ts";
 import type { InlineRunBody } from "@appstrate/core/platform-types";
 
 export type { InlineRunBody };
@@ -56,14 +50,10 @@ export interface InlineRunPreflightResult {
   prompt: string;
   effectiveConfig: Record<string, unknown>;
   effectiveInput: Record<string, unknown> | null;
-  providerProfiles: ProviderProfileMap;
-  providerProfilesOverride: Record<string, string> | undefined;
   modelIdOverride: string | null;
   proxyIdOverride: string | null;
-  resolvedDeps: Pick<LoadedPackage, "skills" | "tools">;
+  resolvedDeps: Pick<LoadedPackage, "skills">;
 }
-
-const providerProfilesSchema = z.record(z.string(), z.uuid()).optional();
 
 type Mode = "fail-fast" | "accumulate";
 
@@ -111,20 +101,13 @@ export async function runInlinePreflight(params: {
   const manifest = validated.valid ? (validated.manifest as AgentManifest) : undefined;
   const prompt = typeof body.prompt === "string" ? body.prompt : "";
 
-  // ----- 2. Body-field validation -----
-  const providerProfilesParsed = providerProfilesSchema.safeParse(body.providerProfiles);
-  if (!providerProfilesParsed.success) {
-    const entries = zodIssuesToFieldErrors(providerProfilesParsed.error.issues, "providerProfiles");
-    if (mode === "fail-fast") throw validationFailed(entries);
-    push(entries);
-  }
-  const providerProfilesOverride = providerProfilesParsed.success
-    ? providerProfilesParsed.data
-    : undefined;
   const modelIdOverride = body.modelId ?? null;
   const proxyIdOverride = body.proxyId ?? null;
 
-  // ----- 3. config + input against manifest schemas (AJV) -----
+  // ----- 2. input against manifest schema (AJV) -----
+  // config + prompt validation are delegated entirely to agent readiness
+  // (stage 3) — the single source of truth for those two fields. Only
+  // `input` is validated here, since readiness has no notion of run input.
   const effectiveConfig =
     body.config && typeof body.config === "object" && !Array.isArray(body.config)
       ? (body.config as Record<string, unknown>)
@@ -135,21 +118,6 @@ export async function runInlinePreflight(params: {
       : null;
 
   if (manifest) {
-    const configSchema = manifest.config?.schema;
-    if (configSchema) {
-      const cv = validateConfig(effectiveConfig, asJSONSchemaObject(configSchema));
-      if (!cv.valid) {
-        const entries: ValidationFieldError[] = cv.errors.map((e) => ({
-          field: e.field ? `config.${e.field}` : "config",
-          code: "invalid_config",
-          title: "Invalid Config",
-          message: e.message,
-        }));
-        if (mode === "fail-fast") throw validationFailed(entries);
-        push(entries);
-      }
-    }
-
     const inputSchema = manifest.input?.schema;
     if (inputSchema) {
       const iv = validateInput(effectiveInput ?? undefined, asJSONSchemaObject(inputSchema));
@@ -166,17 +134,16 @@ export async function runInlinePreflight(params: {
     }
   }
 
-  // ----- 4. Provider profile resolution + readiness -----
-  // These stages require a parsed manifest. In accumulate mode, skip cleanly
+  // ----- 3. Agent readiness -----
+  // This stage requires a parsed manifest. In accumulate mode, skip cleanly
   // when structural validation failed — the manifest-shape errors already
   // explain why. Fail-fast has thrown long before reaching here.
-  let providerProfiles: ProviderProfileMap = {};
-  let resolvedDeps: Pick<LoadedPackage, "skills" | "tools"> = { skills: [], tools: [] };
+  let resolvedDeps: Pick<LoadedPackage, "skills"> = { skills: [] };
   if (manifest) {
-    // Inline manifests only embed registry ID refs for skills/tools; resolve
+    // Inline manifests only embed registry ID refs for skills; resolve
     // them against the org/system catalog up-front so both the readiness
-    // probe here AND the downstream run pipeline (env-builder reads
-    // agent.skills / agent.tools) see the same resolved list.
+    // probe here AND the downstream run pipeline (run-context-builder reads
+    // agent.skills) see the same resolved list.
     resolvedDeps = await resolveManifestCatalogDeps(manifest, orgId);
     const probeAgent = buildShadowLoadedPackage(
       generateShadowPackageId(),
@@ -184,53 +151,28 @@ export async function runInlinePreflight(params: {
       prompt,
       resolvedDeps,
     );
-    const { defaultUserProfileId } = await resolveActorProfileContext(
-      actor,
-      probeAgent.id,
-      null,
-      applicationId,
-    );
 
-    try {
-      providerProfiles = await resolveProviderProfiles(
-        resolveManifestProviders(manifest),
-        defaultUserProfileId,
-        providerProfilesOverride,
-        null,
-        applicationId,
-      );
-    } catch (err) {
-      // Only ApiError is a validation signal. Everything else (DB outage,
-      // network timeout, programmer error) must bubble as-is so the error
-      // handler emits a 5xx and alerting fires.
-      if (mode === "fail-fast" || !(err instanceof ApiError)) throw err;
-      push(apiErrorToFields(err, "providers"));
-      providerProfiles = {};
-    }
-
-    // In accumulate mode, stage 3 already validated config via AJV against
-    // the manifest schema — tell readiness to skip its config check so the
-    // same field never appears twice in `errors[]`. Prompt is NOT skipped:
-    // stage 1's structural check only validates prompt type and byte size,
-    // not emptiness, so readiness remains the single source for the
-    // `empty_prompt` signal.
+    // Readiness is the single source of truth for both config (AJV against
+    // the manifest schema) and prompt emptiness — stage 1's structural check
+    // only covers prompt type and byte size, not emptiness, and stage 2 no
+    // longer touches config. Fail-fast throws the first readiness error;
+    // accumulate folds every readiness entry into the shared accumulator.
     if (mode === "fail-fast") {
       await validateAgentReadiness({
         agent: probeAgent,
-        providerProfiles,
         orgId,
         config: effectiveConfig,
         applicationId,
+        actor,
       });
     } else {
       push(
         await collectAgentReadinessErrors({
           agent: probeAgent,
-          providerProfiles,
           orgId,
           config: effectiveConfig,
           applicationId,
-          skip: { config: true },
+          actor,
         }),
       );
     }
@@ -260,8 +202,6 @@ export async function runInlinePreflight(params: {
     prompt,
     effectiveConfig,
     effectiveInput,
-    providerProfiles,
-    providerProfilesOverride,
     modelIdOverride,
     proxyIdOverride,
     resolvedDeps,
@@ -274,30 +214,4 @@ export async function runInlinePreflight(params: {
  */
 function toFieldError(raw: string, code: string): ValidationFieldError {
   return parsePathMessage(raw, { code, title: "Invalid Inline Manifest" });
-}
-
-/**
- * Fold a caught ApiError into one or more ValidationFieldError entries.
- *
- * If the caught error already carries a populated `errors[]` (e.g. a nested
- * helper that aggregates multiple problems), we forward those entries as-is
- * so we don't collapse rich detail into a single line. Otherwise we synth a
- * single entry from `param` / `code` / `title` / `message`.
- *
- * The runtime `instanceof` guard re-throws any non-ApiError — infrastructure
- * failures (DB, Redis, Docker) must surface as 5xx, never as a 400
- * `validation_failed`. Call sites check the same invariant before calling
- * here; the guard is belt-and-suspenders for future callers.
- */
-function apiErrorToFields(err: unknown, fallbackField: string): ValidationFieldError[] {
-  if (!(err instanceof ApiError)) throw err;
-  if (err.fieldErrors && err.fieldErrors.length > 0) return err.fieldErrors;
-  return [
-    {
-      field: err.param ?? fallbackField,
-      code: err.code,
-      title: err.title,
-      message: err.message,
-    },
-  ];
 }

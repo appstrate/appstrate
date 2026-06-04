@@ -71,7 +71,7 @@ describe("User Agents API", () => {
           version: "0.1.0",
           type: "agent",
           description: "Agent",
-          dependencies: { tools: { "@appstrate/log": "*" } },
+          dependencies: { integrations: { "@appstrate/gmail": "*" } },
         },
       });
 
@@ -91,8 +91,8 @@ describe("User Agents API", () => {
       const m = asRecord(row!.draftManifest);
       const deps = asRecord(m.dependencies);
       expect(deps.skills).toEqual({ "@myorg/skill-a": "^1.0.0" });
-      // Tools should be preserved (left untouched by the skills PUT)
-      expect(deps.tools).toEqual({ "@appstrate/log": "*" });
+      // Other dependency buckets should be preserved (left untouched by the skills PUT)
+      expect(deps.integrations).toEqual({ "@appstrate/gmail": "*" });
     });
 
     it("clears skills when empty array", async () => {
@@ -123,71 +123,6 @@ describe("User Agents API", () => {
       const m = asRecord(row!.draftManifest);
       const deps = asRecord(m.dependencies);
       expect(deps.skills).toEqual({});
-    });
-  });
-
-  describe("PUT /api/agents/:scope/:name/tools", () => {
-    it("returns 401 without authentication", async () => {
-      const res = await app.request("/api/agents/@myorg/test-agent/tools", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ toolIds: [] }),
-      });
-
-      expect(res.status).toBe(401);
-    });
-
-    it("returns 404 for non-existent agent", async () => {
-      const res = await app.request("/api/agents/@myorg/nonexistent/tools", {
-        method: "PUT",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ toolIds: [] }),
-      });
-
-      expect(res.status).toBe(404);
-    });
-
-    it("updates tools in manifest and preserves skills", async () => {
-      await seedPackage({
-        orgId: ctx.orgId,
-        id: "@myorg/tool-x",
-        type: "tool",
-        draftManifest: {
-          name: "@myorg/tool-x",
-          version: "1.0.0",
-          type: "tool",
-          description: "Tool X",
-        },
-      });
-      await seedAgent({
-        id: "@myorg/tools-agent",
-        orgId: ctx.orgId,
-        draftManifest: {
-          name: "@myorg/tools-agent",
-          version: "0.1.0",
-          type: "agent",
-          description: "Agent",
-          dependencies: { skills: { "@myorg/existing-skill": "*" } },
-        },
-      });
-
-      const res = await app.request("/api/agents/@myorg/tools-agent/tools", {
-        method: "PUT",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ toolIds: ["@myorg/tool-x"] }),
-      });
-
-      expect(res.status).toBe(200);
-
-      const [row] = await db
-        .select({ draftManifest: packages.draftManifest })
-        .from(packages)
-        .where(eq(packages.id, "@myorg/tools-agent"));
-      const m = asRecord(row!.draftManifest);
-      const deps = asRecord(m.dependencies);
-      expect(deps.tools).toEqual({ "@myorg/tool-x": "^1.0.0" });
-      // Skills should be preserved (left untouched by the tools PUT)
-      expect(deps.skills).toEqual({ "@myorg/existing-skill": "*" });
     });
   });
 });

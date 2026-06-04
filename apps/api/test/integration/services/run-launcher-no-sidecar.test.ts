@@ -3,10 +3,10 @@
 /**
  * Integration tests for the "no-sidecar" run path.
  *
- * When a run's plan declares an empty `providers[]` AND uses a static
- * API key (not OAuth), the sidecar is no overhead — its sole jobs are
- * credential injection (`provider_call`) and OAuth-LLM passthrough.
- * The launcher must skip `createSidecar` entirely in that case.
+ * When a run's plan declares no integrations AND uses a static API key
+ * (not OAuth), the sidecar is no overhead — its sole jobs are
+ * integration MCP multiplexing and OAuth-LLM passthrough. The launcher
+ * must skip `createSidecar` entirely in that case.
  *
  * This complements `run-launcher-parallel-boot.test.ts` — that file
  * asserts the parallel-create contract WHEN the sidecar is needed.
@@ -48,11 +48,15 @@ function createCountingFake(): {
     async initialize() {},
     async shutdown() {},
     async cleanupOrphans(): Promise<CleanupReport> {
-      return { workloads: 0, isolationBoundaries: 0 };
+      return { workloads: 0, isolationBoundaries: 0, workspaces: 0 };
     },
     async ensureImages() {},
     async createIsolationBoundary(runId: string): Promise<IsolationBoundary> {
-      return { id: `net_${runId}`, name: `appstrate-exec-${runId}` };
+      return {
+        id: `net_${runId}`,
+        name: `appstrate-exec-${runId}`,
+        workspace: { kind: "directory", path: `/tmp/test-ws-${runId}` },
+      };
     },
     async removeIsolationBoundary() {},
     async createSidecar(
@@ -116,8 +120,6 @@ function buildRunPlan(overrides: Partial<AppstrateRunPlan> = {}): AppstrateRunPl
       label: "Test Model",
       isSystemModel: false,
     },
-    tokens: {},
-    providers: [],
     timeout: 60,
     ...overrides,
   };
@@ -132,13 +134,13 @@ describe("run-launcher — sidecar skip decision", () => {
     await truncateAll();
   });
 
-  it("skips createSidecar when providers[] is empty AND llm uses a static API key", async () => {
+  it("skips createSidecar when no integrations AND llm uses a static API key", async () => {
     const { orchestrator, counts } = createCountingFake();
 
     await runPlatformContainer({
       runId: "run_no_sidecar",
       context: buildContext("run_no_sidecar"),
-      plan: buildRunPlan(), // empty providers[] + apiKey set, no credentialId
+      plan: buildRunPlan(), // no integrations + apiKey set, no credentialId
       sinkCredentials: mintSinkCredentials({
         runId: "run_no_sidecar",
         appUrl: "http://platform:3000",
@@ -163,24 +165,26 @@ describe("run-launcher — sidecar skip decision", () => {
     expect(env.MODEL_API_KEY).toBe("sk-test-secret");
   });
 
-  it("creates the sidecar when the plan declares at least one provider", async () => {
+  it("creates the sidecar when the plan declares at least one integration", async () => {
     const { orchestrator, counts } = createCountingFake();
 
     await runPlatformContainer({
-      runId: "run_with_providers",
-      context: buildContext("run_with_providers"),
+      runId: "run_with_integrations",
+      context: buildContext("run_with_integrations"),
       plan: buildRunPlan({
-        providers: [
+        integrations: [
           {
-            id: "gmail",
-            name: "gmail",
-            displayName: "Gmail",
-            authMode: "oauth2",
-          } as AppstrateRunPlan["providers"][number],
+            integrationId: "@test/gmail-mcp",
+            namespace: "gmail",
+            sourceKind: "local",
+            manifest: { name: "@test/gmail-mcp", version: "1.0.0" },
+            spawnEnv: {},
+            toolAllowlist: [],
+          },
         ],
       }),
       sinkCredentials: mintSinkCredentials({
-        runId: "run_with_providers",
+        runId: "run_with_integrations",
         appUrl: "http://platform:3000",
         ttlSeconds: 60,
       }),
@@ -192,6 +196,34 @@ describe("run-launcher — sidecar skip decision", () => {
     // With sidecar wired, the agent env must point at it.
     const env = counts.capturedAgentEnv ?? {};
     expect(env.SIDECAR_URL).toBe("http://sidecar:8080");
+  });
+
+  it("creates the sidecar when a proxy is configured (even with api-key + no integrations)", async () => {
+    const { orchestrator, counts } = createCountingFake();
+
+    await runPlatformContainer({
+      runId: "run_proxy",
+      context: buildContext("run_proxy"),
+      // No integrations + static API key would normally skip the sidecar,
+      // but a configured proxy forces it: the sidecar's forward proxy is
+      // the only path that routes agent egress through the proxy. Skipping
+      // it would silently drop the proxy and leak the host IP.
+      plan: buildRunPlan({ proxyUrl: "http://proxy.local:8080" }),
+      sinkCredentials: mintSinkCredentials({
+        runId: "run_proxy",
+        appUrl: "http://platform:3000",
+        ttlSeconds: 60,
+      }),
+      orchestrator,
+    });
+
+    expect(counts.createSidecarCalls).toBe(1);
+    expect(counts.createWorkloadCalls).toBe(1);
+    // With the sidecar wired, the agent egresses through its forward proxy.
+    const env = counts.capturedAgentEnv ?? {};
+    expect(env.SIDECAR_URL).toBe("http://sidecar:8080");
+    expect(env.HTTP_PROXY).toBe("http://sidecar:8081");
+    expect(env.HTTPS_PROXY).toBe("http://sidecar:8081");
   });
 
   it("skip path passes the real api key through (no placeholder substitution without a sidecar)", async () => {

@@ -4,10 +4,10 @@ Shared TypeScript type definitions used by both frontend (`apps/web`) and backen
 
 ## What it provides
 
-- **DB model re-exports**: `Profile`, `Run`, `RunLog`, `ConnectionProfile`, `Schedule`
+- **DB model re-exports**: `UserProfile`, `Run`, `RunLog`, `Schedule`
 - **Enums**: `RunStatus`, `OrgRole`
 - **API response types**: `AgentListItem`, `AgentDetail`, `OrgPackageItem`, `AppConfig`, `Features`
-- **Provider types**: `ProviderStatus`, `ProviderConfig`, `ConnectionInfo`, `AvailableProvider`
+- **Integration types**: `IntegrationSummary`, `IntegrationDetail`, `IntegrationConnection`, `IntegrationCandidate`, `IntegrationPin`
 - **Headless types**: `ApplicationInfo`, `EndUserInfo`, `ApiKeyInfo`
 - **Utility functions**: `isPromptEmpty()`, `findMissingDependencies()`
 
@@ -20,4 +20,4 @@ import type { AgentDetail, RunStatus } from "@appstrate/shared-types";
 ## Dependencies
 
 - `@appstrate/db` — Schema type imports (Drizzle `InferSelectModel`)
-- `@appstrate/core` — Validation types (`PackageType`, `ResolvedProviderDefinition`)
+- `@appstrate/core` — Validation types (`PackageType`, `IntegrationManifest`)

@@ -2,7 +2,6 @@
 
 import { createAjv } from "@appstrate/core/ajv";
 import { isFileField, type JSONSchemaObject, type JSONSchema7 } from "@appstrate/core/form";
-import { scopedNameRegex } from "@appstrate/core/validation";
 import { validateConfig as validateConfigCore } from "@appstrate/core/schema-validation";
 
 // --- AJV runtime validation ---
@@ -15,6 +14,25 @@ import { validateConfig as validateConfigCore } from "@appstrate/core/schema-val
 // launching PiRunner. `validateInput` and `validateOutput` stay here — they
 // rely on server-only concerns (file-field stripping, output overload).
 const ajv = createAjv({ coerceTypes: true });
+
+// Compiled-validator cache. `validateInput`/`validateOutput`/
+// `validateConnectionCredentials` run on hot paths (per run, per connect)
+// and rebuild a fresh `effectiveSchema` object each call, so AJV's own
+// by-reference cache never hits — compilation (the expensive step) ran every
+// time. Key by the schema's canonical JSON so structurally-equal schemas
+// share one compiled validator. Bounded to cap memory in a long-lived process.
+const validatorCache = new Map<string, ReturnType<typeof ajv.compile>>();
+const MAX_CACHED_VALIDATORS = 500;
+function compileCached(schema: object): ReturnType<typeof ajv.compile> {
+  const key = JSON.stringify(schema);
+  let validate = validatorCache.get(key);
+  if (!validate) {
+    validate = ajv.compile(schema);
+    if (validatorCache.size >= MAX_CACHED_VALIDATORS) validatorCache.clear();
+    validatorCache.set(key, validate);
+  }
+  return validate;
+}
 
 // AJV with coerceTypes coerces null → "" for strings, which incorrectly passes
 // `required` checks. Strip empty/null values so AJV sees them as missing.
@@ -105,8 +123,8 @@ function runValidate(
     };
   }
 
-  // 3. Compile + validate
-  const validate = ajv.compile(effectiveSchema);
+  // 3. Compile (cached) + validate
+  const validate = compileCached(effectiveSchema);
   const valid = validate(effectiveData);
 
   // 4. Per-kind error mapping
@@ -135,6 +153,48 @@ function runValidate(
 // surface unchanged.
 export const validateConfig = validateConfigCore;
 
+/**
+ * Validate a submitted credential bag against an integration auth's
+ * `credentials.schema` (AFPS §4.1.3).
+ *
+ * Beyond catching missing required fields, this catches wrong-cased or
+ * misspelled keys (e.g. `apiKey` when the manifest declares `api_key`):
+ * the manifest schema names the exact field keys, so an unexpected key
+ * leaves the required field absent and fails validation. Without this gate
+ * such a bag persists a healthy-looking connection whose `delivery.http`
+ * injection silently resolves to an empty value at runtime (the credential
+ * header is never injected, yet the run still "succeeds").
+ *
+ * No-op when the auth declares no schema properties — there is nothing to
+ * validate against, and forcing field shape on an undeclared schema would
+ * reject legitimately loose `custom` auths.
+ */
+export function validateConnectionCredentials(
+  schema: JSONSchemaObject | undefined,
+  // Credential values can be any JSON type per JSON Schema 2020-12 §7.5 —
+  // numbers, booleans, objects, arrays, not just strings. The AJV validator
+  // honours the manifest schema's `type` declarations regardless.
+  credentials: Record<string, unknown>,
+): ValidationResult {
+  if (!schema?.properties || Object.keys(schema.properties).length === 0) {
+    return { valid: true, errors: [], data: credentials };
+  }
+  const required = Array.isArray(schema.required) ? schema.required : [];
+  // Mirror the input path: AJV coerceTypes lets "" satisfy `required`, so
+  // strip empty/null values for required keys before validating.
+  const effectiveData = stripEmptyRequired(credentials, required);
+  const validate = compileCached(schema);
+  if (validate(effectiveData)) return { valid: true, errors: [], data: credentials };
+  const errors = (validate.errors || []).map((e) => ({
+    field:
+      e.instancePath.replace(/^\//, "") ||
+      (e.params as { missingProperty?: string })?.missingProperty ||
+      "unknown",
+    message: e.message || "Validation failed",
+  }));
+  return { valid: false, errors };
+}
+
 export function validateInput(
   input: Record<string, unknown> | undefined,
   schema: JSONSchemaObject,
@@ -147,25 +207,4 @@ export function validateOutput(
   schema: JSONSchemaObject,
 ): { valid: boolean; errors: string[] } {
   return runValidate("output", result, schema);
-}
-
-export function validateAgentContent(
-  prompt: string,
-  skills: { id: string; name?: string; description: string; content: string }[],
-): { valid: boolean; errors: string[] } {
-  const errors: string[] = [];
-  if (!prompt || prompt.trim().length === 0) {
-    errors.push("prompt cannot be empty");
-  }
-  const seenIds = new Set<string>();
-  for (const skill of skills) {
-    if (!scopedNameRegex.test(skill.id)) {
-      errors.push(`skill.id '${skill.id}' is not a valid package reference`);
-    }
-    if (seenIds.has(skill.id)) {
-      errors.push(`skill.id '${skill.id}' is duplicated`);
-    }
-    seenIds.add(skill.id);
-  }
-  return { valid: errors.length === 0, errors };
 }

@@ -13,9 +13,6 @@ const defaults: InlineRunLimits = {
   manifest_bytes: 65536,
   prompt_bytes: 200_000,
   max_skills: 20,
-  max_tools: 20,
-  max_authorized_uris: 50,
-  wildcard_uri_allowed: false,
   retention_days: 30,
 };
 
@@ -24,8 +21,8 @@ function baseManifest(overrides: Record<string, unknown> = {}): Record<string, u
     name: "@acme/inline-test",
     version: "1.0.0",
     type: "agent",
-    schemaVersion: "1.0",
-    displayName: "Inline Test",
+    schema_version: "0.1",
+    display_name: "Inline Test",
     author: "ACME",
     ...overrides,
   };
@@ -50,8 +47,6 @@ describe("validateInlineManifest — happy path", () => {
       manifest: baseManifest({
         dependencies: {
           skills: { "@sys/skill-a": "1.0.0", "@sys/skill-b": "^1" },
-          tools: { "@sys/tool-a": "1.0.0" },
-          providers: { "@sys/gmail": "1.0.0" },
         },
       }),
       prompt: "Use the tools.",
@@ -197,18 +192,16 @@ describe("validateInlineManifest — structural", () => {
 // ---------------------------------------------------------------------------
 
 describe("validateInlineManifest — dependency caps", () => {
-  function depsManifest(skillCount: number, toolCount: number): Record<string, unknown> {
+  function depsManifest(skillCount: number): Record<string, unknown> {
     const skills: Record<string, string> = {};
-    const tools: Record<string, string> = {};
     for (let i = 0; i < skillCount; i++) skills[`@sys/skill-${i}`] = "1.0.0";
-    for (let i = 0; i < toolCount; i++) tools[`@sys/tool-${i}`] = "1.0.0";
-    return baseManifest({ dependencies: { skills, tools } });
+    return baseManifest({ dependencies: { skills } });
   }
 
   it("rejects too many skills", () => {
     const tight = { ...defaults, max_skills: 2 };
     const result = validateInlineManifest({
-      manifest: depsManifest(3, 0),
+      manifest: depsManifest(3),
       prompt: "ok",
       limits: tight,
     });
@@ -216,135 +209,12 @@ describe("validateInlineManifest — dependency caps", () => {
     expect(result.errors.some((e) => e.includes("skills: too many"))).toBe(true);
   });
 
-  it("rejects too many tools", () => {
-    const tight = { ...defaults, max_tools: 1 };
-    const result = validateInlineManifest({
-      manifest: depsManifest(0, 3),
-      prompt: "ok",
-      limits: tight,
-    });
-    expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes("tools: too many"))).toBe(true);
-  });
-
   it("accepts exactly cap-many deps", () => {
-    const tight = { ...defaults, max_skills: 2, max_tools: 2 };
+    const tight = { ...defaults, max_skills: 2 };
     const result = validateInlineManifest({
-      manifest: depsManifest(2, 2),
+      manifest: depsManifest(2),
       prompt: "ok",
       limits: tight,
-    });
-    expect(result.valid).toBe(true);
-  });
-
-  it("rejects too many providers", () => {
-    const providers: Record<string, string> = {};
-    for (let i = 0; i < 5; i++) providers[`@sys/p-${i}`] = "1.0.0";
-    const tight = { ...defaults, max_authorized_uris: 3 };
-    const result = validateInlineManifest({
-      manifest: baseManifest({ dependencies: { providers } }),
-      prompt: "ok",
-      limits: tight,
-    });
-    expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes("providers: too many"))).toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Wildcard + authorizedUris caps (defensive — applies to provider manifests)
-// ---------------------------------------------------------------------------
-
-describe("validateInlineManifest — wildcard/uri caps", () => {
-  it("rejects allowAllUris when wildcard disabled", () => {
-    const manifest = {
-      ...baseManifest({ type: "provider" }),
-      displayName: "P",
-      definition: {
-        authMode: "api_key",
-        allowAllUris: true,
-        credentials: {
-          schema: { type: "object", properties: { apikey: { type: "string" } } },
-          fieldName: "apikey",
-        },
-        credentialHeaderName: "X-Api-Key",
-      },
-    };
-    const result = validateInlineManifest({
-      manifest,
-      prompt: "ok",
-      limits: defaults,
-    });
-    expect(result.valid).toBe(false);
-    expect(result.errors.join(" ")).toContain("wildcard access is not allowed");
-  });
-
-  it('rejects explicit "*" entry in authorizedUris', () => {
-    const manifest = {
-      ...baseManifest({ type: "provider" }),
-      displayName: "P",
-      definition: {
-        authMode: "api_key",
-        authorizedUris: ["https://api.example.com", "*"],
-        credentials: {
-          schema: { type: "object", properties: { apikey: { type: "string" } } },
-          fieldName: "apikey",
-        },
-        credentialHeaderName: "X-Api-Key",
-      },
-    };
-    const result = validateInlineManifest({
-      manifest,
-      prompt: "ok",
-      limits: defaults,
-    });
-    expect(result.valid).toBe(false);
-    expect(result.errors.join(" ")).toContain('wildcard "*" entry is not allowed');
-  });
-
-  it("rejects too many authorizedUris", () => {
-    const tight = { ...defaults, max_authorized_uris: 2 };
-    const manifest = {
-      ...baseManifest({ type: "provider" }),
-      displayName: "P",
-      definition: {
-        authMode: "api_key",
-        authorizedUris: ["a", "b", "c"],
-        credentials: {
-          schema: { type: "object", properties: { apikey: { type: "string" } } },
-          fieldName: "apikey",
-        },
-        credentialHeaderName: "X-Api-Key",
-      },
-    };
-    const result = validateInlineManifest({
-      manifest,
-      prompt: "ok",
-      limits: tight,
-    });
-    expect(result.valid).toBe(false);
-    expect(result.errors.join(" ")).toContain("authorizedUris: too many");
-  });
-
-  it("accepts wildcard when wildcard_uri_allowed is true", () => {
-    const permissive = { ...defaults, wildcard_uri_allowed: true };
-    const manifest = {
-      ...baseManifest({ type: "provider" }),
-      displayName: "P",
-      definition: {
-        authMode: "api_key",
-        allowAllUris: true,
-        credentials: {
-          schema: { type: "object", properties: { apikey: { type: "string" } } },
-          fieldName: "apikey",
-        },
-        credentialHeaderName: "X-Api-Key",
-      },
-    };
-    const result = validateInlineManifest({
-      manifest,
-      prompt: "ok",
-      limits: permissive,
     });
     expect(result.valid).toBe(true);
   });
@@ -356,11 +226,11 @@ describe("validateInlineManifest — wildcard/uri caps", () => {
 
 describe("validateInlineManifest — error aggregation", () => {
   it("reports multiple independent violations in one pass", () => {
-    const tight = { ...defaults, max_skills: 0, max_tools: 0 };
+    const tight = { ...defaults, max_skills: 0, manifest_bytes: 10 };
     const manifest = baseManifest({
+      display_name: "P",
       dependencies: {
-        skills: { "@x/a": "1.0.0" },
-        tools: { "@x/b": "1.0.0" },
+        skills: { "@x/a": "1.0.0", "@x/b": "1.0.0" },
       },
     });
     const result = validateInlineManifest({
@@ -369,6 +239,6 @@ describe("validateInlineManifest — error aggregation", () => {
       limits: tight,
     });
     expect(result.valid).toBe(false);
-    expect(result.errors.length).toBeGreaterThanOrEqual(3);
+    expect(result.errors.length).toBeGreaterThanOrEqual(2);
   });
 });

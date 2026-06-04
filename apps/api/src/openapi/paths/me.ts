@@ -21,7 +21,7 @@ export const mePaths = {
       description:
         "Returns every org the caller can access. Cookie sessions and OIDC dashboard JWTs see " +
         "every org the user is a member of. API keys see only their bound org. OIDC end-user " +
-        "JWTs see the single org owning their application's owning org. " +
+        "JWTs see the single org owning their application. " +
         "**Does NOT require `X-Org-Id`** — this endpoint is the prerequisite to setting it.",
       responses: {
         "200": {
@@ -79,24 +79,18 @@ export const mePaths = {
       },
     },
   },
-  "/api/me/application-profile": {
+  "/api/me/connections": {
     get: {
-      operationId: "getMyApplicationProfile",
+      operationId: "listMyConnections",
       tags: ["Profile"],
-      summary: "Get the caller's pinned default profile for the active app",
+      summary: "List the caller's connections across every org/app",
       description:
-        "Returns the connection profile id the caller has pinned as their personal default " +
-        "for the active application, or `null` if no sticky is set. The credential proxy's " +
-        "`resolveProfileId` cascade consults this between the explicit per-run override " +
-        "(`X-Connection-Profile-Id`) and the application default. Member-only — end-user " +
-        "callers always receive `{ connectionProfileId: null }`.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-      ],
+        "Unified user-scope view of the caller's integration connections under a " +
+        "single shape, grouped by source package. Crosses orgs/applications by " +
+        "design — does NOT require `X-Org-Id`.",
       responses: {
         "200": {
-          description: "Sticky profile id (or null)",
+          description: "Connection groups",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
@@ -105,11 +99,135 @@ export const mePaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["connectionProfileId"],
+                required: ["object", "data", "hasMore"],
                 properties: {
-                  connectionProfileId: {
-                    oneOf: [{ type: "string", format: "uuid" }, { type: "null" }],
+                  object: { type: "string", enum: ["list"] },
+                  data: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: [
+                        "kind",
+                        "source_id",
+                        "display_name",
+                        "logo",
+                        "total_connections",
+                        "connections",
+                      ],
+                      properties: {
+                        kind: { type: "string", enum: ["integration"] },
+                        source_id: { type: "string" },
+                        display_name: { type: "string" },
+                        logo: { type: "string" },
+                        total_connections: { type: "integer" },
+                        connections: {
+                          type: "array",
+                          items: {
+                            type: "object",
+                            required: [
+                              "connection_id",
+                              "kind",
+                              "label",
+                              "scopes_granted",
+                              "connected_at",
+                              "needs_reconnection",
+                              "expiresAt",
+                              "identity",
+                              "auth_key",
+                              "shared_with_org",
+                              "reused_by_agents",
+                              "org",
+                              "application",
+                            ],
+                            properties: {
+                              connection_id: { type: "string" },
+                              kind: { type: "string", enum: ["integration"] },
+                              label: { type: ["string", "null"] },
+                              scopes_granted: { type: "array", items: { type: "string" } },
+                              connected_at: { type: "string", format: "date-time" },
+                              needs_reconnection: { type: "boolean" },
+                              expiresAt: {
+                                oneOf: [{ type: "string", format: "date-time" }, { type: "null" }],
+                              },
+                              identity: { type: ["string", "null"] },
+                              reused_by_agents: { type: ["integer", "null"] },
+                              auth_key: { type: ["string", "null"] },
+                              shared_with_org: { type: "boolean" },
+                              org: {
+                                type: "object",
+                                required: ["id", "name"],
+                                properties: {
+                                  id: { type: "string" },
+                                  name: { type: "string" },
+                                },
+                              },
+                              application: {
+                                type: "object",
+                                required: ["id", "name"],
+                                properties: {
+                                  id: { type: "string" },
+                                  name: { type: "string" },
+                                },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
                   },
+                  hasMore: { type: "boolean" },
+                },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+      },
+    },
+  },
+  "/api/me/integration-pins": {
+    get: {
+      operationId: "listMyIntegrationPins",
+      tags: ["Profile"],
+      summary: "List the caller's member-scope integration pins for an agent",
+      description:
+        "Returns the caller's own (integration, authKey) → connectionId pins for the " +
+        "given agent. Used by the agent-page picker to render the collapsed default " +
+        "row. Member-only; end-user callers receive an empty list. Requires " +
+        "`X-Application-Id`.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        {
+          name: "agentPackageId",
+          in: "query",
+          required: true,
+          schema: { type: "string" },
+          description: "Agent package id whose pins to list.",
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Member pins for the agent",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["object", "data", "hasMore"],
+                properties: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: ["integration_package_id", "connection_id"],
+                      properties: {
+                        integration_package_id: { type: "string" },
+                        connection_id: { type: "string", format: "uuid" },
+                      },
+                    },
+                  },
+                  hasMore: { type: "boolean" },
                 },
               },
             },
@@ -119,13 +237,14 @@ export const mePaths = {
       },
     },
     put: {
-      operationId: "setMyApplicationProfile",
+      operationId: "upsertMyIntegrationPin",
       tags: ["Profile"],
-      summary: "Pin a default connection profile for the active app",
+      summary: "Pin a connection for the caller's runs of an agent",
       description:
-        "Sets the caller's per-(member, application) sticky default. The profile must be " +
-        "either a profile the caller owns or an app profile of the active application; " +
-        "anything else is rejected. Idempotent — repeated calls update the same row.",
+        "Persists the caller's preference for a (integration, authKey) on this agent. " +
+        "Sits at cascade layer 4 — wins over the fallback ambiguity but loses to admin " +
+        "pins / run / schedule overrides. Replaces the previous R5 localStorage pick. " +
+        "Idempotent — repeated calls update the row in place.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -136,9 +255,11 @@ export const mePaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["connectionProfileId"],
+              required: ["agent_package_id", "integration_package_id", "connection_id"],
               properties: {
-                connectionProfileId: { type: "string", format: "uuid" },
+                agent_package_id: { type: "string" },
+                integration_package_id: { type: "string" },
+                connection_id: { type: "string", format: "uuid" },
               },
             },
           },
@@ -146,37 +267,74 @@ export const mePaths = {
       },
       responses: {
         "200": {
-          description: "Sticky profile pinned",
+          description: "Member pin set",
           content: {
             "application/json": {
-              schema: {
-                type: "object",
-                required: ["connectionProfileId"],
-                properties: { connectionProfileId: { type: "string", format: "uuid" } },
-              },
+              schema: { $ref: "#/components/schemas/IntegrationPin" },
             },
           },
         },
         "400": {
-          description: "Profile is not owned by the caller and not an app profile of this app",
+          description:
+            "Validation failed (connection wrong integration/auth, or not accessible to caller).",
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
     delete: {
-      operationId: "clearMyApplicationProfile",
+      operationId: "deleteMyIntegrationPin",
       tags: ["Profile"],
-      summary: "Clear the caller's pinned default profile for the active app",
+      summary: "Clear the caller's pin on a (agent, integration)",
       description:
-        "Removes the per-(member, application) sticky default; the cascade falls back to " +
-        "the application default. Idempotent — succeeds even when no row exists.",
+        "Removes the caller's member pin so the resolver falls back to layer 5 " +
+        "(accessible connections). Idempotent — 204 even when no row exists.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
+        {
+          name: "agentPackageId",
+          in: "query",
+          required: true,
+          schema: { type: "string" },
+        },
+        {
+          name: "integrationPackageId",
+          in: "query",
+          required: true,
+          schema: { type: "string" },
+        },
       ],
       responses: {
-        "204": { description: "Sticky cleared" },
+        "204": { description: "Pin cleared (or never existed)" },
+        "400": {
+          description: "Missing required query param (agentPackageId or integrationPackageId).",
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+      },
+    },
+  },
+  "/api/me/connections/{connectionId}": {
+    delete: {
+      operationId: "deleteMyConnection",
+      tags: ["Profile"],
+      summary: "Delete one of the caller's own connections (destructive)",
+      description:
+        "Removes the `integration_connections` row globally. ON DELETE CASCADE vacates " +
+        "every reference (admin pins, member pins, run snapshots, schedule overrides). " +
+        "Intent is destructive: 'I never want to use this credential anywhere again'. " +
+        "Surfaced only from the /connections management page — agent-surface unlinks now " +
+        "drop the member pin instead (see `DELETE /api/me/integration-pins`).",
+      parameters: [
+        {
+          name: "connectionId",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+        },
+      ],
+      responses: {
+        "204": { description: "Connection deleted (or never existed)" },
         "401": { $ref: "#/components/responses/Unauthorized" },
       },
     },

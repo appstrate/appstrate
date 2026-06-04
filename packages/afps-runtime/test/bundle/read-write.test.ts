@@ -63,16 +63,16 @@ const ROOT_MANIFEST = {
   name: "@me/root",
   version: "1.0.0",
   type: "agent",
-  schemaVersion: "1.1",
-  displayName: "Root",
+  schema_version: "0.1",
+  display_name: "Root",
   author: "tester",
 };
 const DEP_MANIFEST = {
   name: "@me/dep",
   version: "1.0.0",
   type: "skill",
-  schemaVersion: "1.1",
-  displayName: "Dep",
+  schema_version: "0.1",
+  display_name: "Dep",
   author: "tester",
 };
 

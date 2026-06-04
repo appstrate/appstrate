@@ -18,7 +18,8 @@
  * Re-test with `stdout: "pipe"` after upgrading Bun to check if the fix is still needed.
  */
 
-import { mkdir, rm, readdir, open as fsOpen } from "node:fs/promises";
+import { mkdir, rm, readdir, open as fsOpen, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { getEnv } from "@appstrate/env";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -32,10 +33,65 @@ import type {
   CleanupReport,
   StopResult,
 } from "@appstrate/core/platform-types";
+import { applySpecToSidecarEnv } from "./sidecar-env.ts";
 
 const DATA_DIR = resolve("./data/runs");
 const SIDECAR_ENTRY = join(import.meta.dir, "../../../../../runtime-pi/sidecar/server.ts");
 const AGENT_ENTRY = join(import.meta.dir, "../../../../../runtime-pi/entrypoint.ts");
+
+/**
+ * Naming prefix for per-run shared workspace directories. Mirrors the
+ * Docker volume prefix in {@link docker.WORKSPACE_VOLUME_PREFIX} so the
+ * boot-time orphan reaper can scan tmpdir() and reclaim leaked
+ * directories from crashed runs using the same convention.
+ */
+const WORKSPACE_DIR_PREFIX = "appstrate-ws-";
+
+/** Compute the host path for a run's workspace directory. */
+function workspaceDirFor(runId: string): string {
+  return join(tmpdir(), `${WORKSPACE_DIR_PREFIX}${runId}`);
+}
+
+/**
+ * Scan `os.tmpdir()` for orphaned per-run workspace directories
+ * (`appstrate-ws-*`) owned by THIS process's uid and remove them.
+ * Boot-time recovery only — runs marked failed by `lib/boot.ts` are by
+ * definition not holding any of these dirs, so removing them is safe.
+ * Returns the count of dirs reclaimed for the {@link CleanupReport}.
+ *
+ * The uid filter avoids two problems on shared hosts:
+ *   - Reaping a workspace owned by another platform instance (running
+ *     as a different uid) — `rm` would silently fail with EPERM, but
+ *     the noisy "skip" path would otherwise log dozens of unrelated
+ *     directories per boot.
+ *   - Counting other-uid dirs in the cleanup report, inflating the
+ *     reclaimed total with directories we never touched.
+ */
+async function reapOrphanWorkspaceDirs(): Promise<number> {
+  let entries: string[];
+  try {
+    entries = (await readdir(tmpdir())) as unknown as string[];
+  } catch {
+    return 0;
+  }
+  const myUid = process.getuid?.() ?? -1;
+  let count = 0;
+  for (const name of entries) {
+    if (!name.startsWith(WORKSPACE_DIR_PREFIX)) continue;
+    const path = join(tmpdir(), name);
+    try {
+      if (myUid >= 0) {
+        const st = await stat(path);
+        if (st.uid !== myUid) continue;
+      }
+      await rm(path, { recursive: true, force: true });
+      count++;
+    } catch {
+      // Permission/stat errors — silently skip.
+    }
+  }
+  return count;
+}
 
 /** Poll interval for tailing the stdout file (ms). */
 const TAIL_POLL_MS = 50;
@@ -136,7 +192,12 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     try {
       entries = (await readdir(DATA_DIR)) as unknown as string[];
     } catch {
-      return { workloads: 0, isolationBoundaries: 0 };
+      // Even when DATA_DIR is missing entirely, sweep tmpdir for
+      // orphan workspace dirs from crashed runs — they live outside
+      // DATA_DIR so the absence of DATA_DIR doesn't imply absence of
+      // leaked workspaces.
+      const workspaces = await reapOrphanWorkspaceDirs();
+      return { workloads: 0, isolationBoundaries: 0, workspaces };
     }
 
     for (const name of entries) {
@@ -167,26 +228,47 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
       isolationBoundaries++;
     }
 
-    return { workloads, isolationBoundaries };
+    const workspaces = await reapOrphanWorkspaceDirs();
+    return { workloads, isolationBoundaries, workspaces };
   }
 
   async createIsolationBoundary(runId: string): Promise<IsolationBoundary> {
     const dir = join(DATA_DIR, runId);
-    await mkdir(dir, { recursive: true });
-    return { id: dir, name: `process-${runId}` };
+    // Create both the pidfile boundary dir and the shared workspace
+    // dir in parallel — independent fs operations, no ordering
+    // constraint. Workspace lives under os.tmpdir() rather than
+    // DATA_DIR so a host-side `rm -rf data/` doesn't accidentally
+    // wipe the workspace for an active run.
+    const workspacePath = workspaceDirFor(runId);
+    await Promise.all([
+      mkdir(dir, { recursive: true }),
+      // 0o700: the workspace sits under the shared `os.tmpdir()` and
+      // holds the agent's run inputs/outputs — keep it readable only by
+      // the platform uid, not world-readable to other local users.
+      mkdir(workspacePath, { recursive: true, mode: 0o700 }),
+    ]);
+    return {
+      id: dir,
+      name: `process-${runId}`,
+      workspace: { kind: "directory", path: workspacePath },
+    };
   }
 
   async removeIsolationBoundary(boundary: IsolationBoundary): Promise<void> {
-    try {
-      await rm(boundary.id, { recursive: true, force: true });
-    } catch {
-      // Best-effort cleanup
-    }
+    // Race boundary teardown and workspace teardown — independent
+    // paths, errors swallowed individually so a stuck workspace can't
+    // block the pidfile dir cleanup.
+    await Promise.allSettled([
+      rm(boundary.id, { recursive: true, force: true }),
+      boundary.workspace.kind === "directory"
+        ? rm(boundary.workspace.path, { recursive: true, force: true })
+        : Promise.resolve(),
+    ]);
   }
 
   async createSidecar(
     runId: string,
-    _boundary: IsolationBoundary,
+    boundary: IsolationBoundary,
     spec: SidecarLaunchSpec,
   ): Promise<WorkloadHandle> {
     const [port, platformApiUrl] = await Promise.all([
@@ -200,26 +282,20 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
       PORT: String(port),
       PLATFORM_API_URL: platformApiUrl,
       RUN_TOKEN: spec.runToken,
+      // Hand the workspace handle to the sidecar so its integration
+      // runtime adapter can wire the same shared surface into runner
+      // subprocesses that opt in via mcp-server _meta.workspace.
+      WORKSPACE_HANDLE_JSON: JSON.stringify(boundary.workspace),
     };
-    if (spec.proxyUrl) env.PROXY_URL = spec.proxyUrl;
-    if (spec.modelContextWindow != null) {
-      env.MODEL_CONTEXT_WINDOW = String(spec.modelContextWindow);
+    // This run is NOT containerized (process orchestrator), so its integrations
+    // must spawn as host subprocesses too. The sidecar selects its integration
+    // runtime purely from INTEGRATION_RUNTIME_ADAPTER (no auto-detection), so we
+    // pin it to mirror this orchestrator's RUN_ADAPTER. Respect an explicit
+    // operator override carried in from the environment.
+    if (!env.INTEGRATION_RUNTIME_ADAPTER) {
+      env.INTEGRATION_RUNTIME_ADAPTER = "process";
     }
-    if (spec.modelMaxTokens != null) {
-      env.MODEL_MAX_TOKENS = String(spec.modelMaxTokens);
-    }
-    if (spec.llm) {
-      if (spec.llm.authMode === "oauth") {
-        // OAuth wire format: ship the LlmProxyOauthConfig as JSON. server.ts
-        // parses it into config.llm at boot so handleOauthLlmRequest can run
-        // from the first request.
-        env.PI_LLM_OAUTH_CONFIG_JSON = JSON.stringify(spec.llm);
-      } else {
-        env.PI_BASE_URL = spec.llm.baseUrl;
-        env.PI_API_KEY = spec.llm.apiKey;
-        env.PI_PLACEHOLDER = spec.llm.placeholder;
-      }
-    }
+    applySpecToSidecarEnv(spec, env);
 
     const proc = Bun.spawn(["bun", "run", SIDECAR_ENTRY], {
       env,
@@ -227,6 +303,11 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
       stderr: "pipe",
     });
     this.drainStderr(proc, id);
+    // The sidecar's `info`-level lines go to stdout; drain them too so
+    // the buffer never fills up (Bun pipes hang at ~64KB without a
+    // reader, freezing whatever was about to be written next — e.g. the
+    // integration-runtime's spawn progress logs).
+    this.drainStderr(proc, id, undefined, "stdout");
     this.processes.set(id, { proc, role: "sidecar", runId });
     this.sidecarPorts.set(runId, port);
     await this.writePidfile(runId, "sidecar", proc.pid);
@@ -242,16 +323,16 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
   }
 
   async createWorkload(spec: WorkloadSpec, boundary: IsolationBoundary): Promise<WorkloadHandle> {
-    const workDir = join(boundary.id, "workspace");
+    // The agent's workspace is the per-run shared directory created by
+    // createIsolationBoundary so spawned mcp-server runner subprocesses
+    // (which receive WORKSPACE_DIR via the sidecar) read and write the
+    // exact same filesystem surface as the agent. Non-agent roles keep
+    // the legacy per-boundary subdirectory.
+    const workDir =
+      spec.role === "agent" && boundary.workspace.kind === "directory"
+        ? boundary.workspace.path
+        : join(boundary.id, "workspace");
     await mkdir(workDir, { recursive: true });
-
-    if (spec.files) {
-      for (const file of spec.files.items) {
-        const filePath = join(workDir, file.name);
-        await mkdir(join(filePath, ".."), { recursive: true });
-        await Bun.write(filePath, file.content);
-      }
-    }
 
     const id = `workload-${spec.runId}-${spec.role}`;
     const sidecarPort = this.sidecarPorts.get(spec.runId);
@@ -458,8 +539,13 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
    * agent-exit error log even when the process dies before the live
    * warn lines reach the user's filtered view.
    */
-  private drainStderr(proc: BunProcess, label: string, tail?: string[]): void {
-    const stderr = proc.stderr;
+  private drainStderr(
+    proc: BunProcess,
+    label: string,
+    tail?: string[],
+    stream: "stderr" | "stdout" = "stderr",
+  ): void {
+    const stderr = stream === "stderr" ? proc.stderr : proc.stdout;
     if (!stderr || typeof stderr === "number") return;
 
     const reader = (stderr as ReadableStream<Uint8Array>).getReader();
@@ -467,7 +553,7 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     let buf = "";
 
     const append = (line: string) => {
-      logger.warn(`[process:${label}:stderr] ${line}`);
+      logger.warn(`[process:${label}:${stream}] ${line}`);
       if (tail) {
         tail.push(line);
         if (tail.length > 50) tail.shift();

@@ -1,0 +1,86 @@
+{
+  "name": "@appstrate/dynamics365",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.1",
+  "display_name": "Microsoft Dynamics 365 (API)",
+  "description": "Enterprise CRM and ERP platform by Microsoft",
+  "keywords": ["crm", "sales", "erp"],
+  "license": "Apache-2.0",
+  "icon": "microsoftdynamics",
+  "source": {
+    "kind": "none"
+  },
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "authorization_endpoint": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+      "token_endpoint": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+      "default_scopes": ["https://dynamics.microsoft.com/user_impersonation", "offline_access"],
+      "token_endpoint_auth_method": "client_secret_post",
+      "code_challenge_methods_supported": ["S256"],
+      "scope_catalog": [
+        {
+          "value": "https://dynamics.microsoft.com/user_impersonation",
+          "label": "Access Dynamics 365 as the user"
+        },
+        {
+          "value": "offline_access",
+          "label": "Offline access (refresh tokens)"
+        },
+        {
+          "value": "openid",
+          "label": "OpenID Connect identity"
+        },
+        {
+          "value": "profile",
+          "label": "Read user profile"
+        },
+        {
+          "value": "email",
+          "label": "Read user email"
+        }
+      ],
+      "authorized_uris": [
+        "https://*.dynamics.com/**",
+        "https://*.api.crm.dynamics.com/**",
+        "https://*.api.crm2.dynamics.com/**",
+        "https://*.api.crm3.dynamics.com/**",
+        "https://*.api.crm4.dynamics.com/**",
+        "https://*.api.crm5.dynamics.com/**",
+        "https://*.api.crm6.dynamics.com/**",
+        "https://*.api.crm7.dynamics.com/**",
+        "https://*.api.crm8.dynamics.com/**",
+        "https://*.api.crm9.dynamics.com/**",
+        "https://*.api.crm10.dynamics.com/**",
+        "https://*.api.crm11.dynamics.com/**"
+      ],
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": " "
+        },
+        "dev.appstrate/auth": {
+          "required": true
+        }
+      }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/api": {
+      "auths": {
+        "primary": {}
+      }
+    }
+  }
+}

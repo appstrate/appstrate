@@ -22,12 +22,7 @@ import { LoadingState, ErrorState } from "../components/page-states";
 import { RunInfoTab } from "../components/run-info-tab";
 import { RunRow } from "../components/run-row";
 import { useMarkRead } from "../hooks/use-notifications";
-import {
-  ACTIVE_RUN_STATUSES,
-  type Run,
-  type RunLog,
-  type EnrichedRun,
-} from "@appstrate/shared-types";
+import { ACTIVE_RUN_STATUSES, type RunLog, type EnrichedRun } from "@appstrate/shared-types";
 import { formatDateField } from "../lib/markdown";
 import { JsonView } from "../components/json-view";
 import { Markdown } from "../components/markdown";
@@ -54,7 +49,7 @@ export function RunDetailPage() {
   // into the React Query cache from the LISTEN/NOTIFY stream, so reading
   // `run?.status` is sufficient — no local mirror needed.
   const status = run?.status;
-  const isRunning = !!status && ACTIVE_RUN_STATUSES.has(status);
+  const isRunning = !!status && (ACTIVE_RUN_STATUSES as ReadonlySet<string>).has(status);
 
   const { data: logs } = useRunLogs(runId);
 
@@ -134,13 +129,13 @@ export function RunDetailPage() {
         // `cost_so_far` instead. The next terminal-status invalidation
         // refetches the canonical row so this in-cache shadow is
         // bounded by the run's lifetime.
-        qc.setQueryData<Run>(["run", orgId, applicationId, runId], (prev) => {
+        qc.setQueryData<EnrichedRun>(["run", orgId, applicationId, runId], (prev) => {
           if (!prev) return prev;
           return {
             ...prev,
-            tokenUsage: metric.tokenUsage ?? prev.tokenUsage,
+            token_usage: metric.token_usage ?? prev.token_usage,
             cost: metric.costSoFar,
-          } as Run;
+          } as EnrichedRun;
         });
       },
       [qc, orgId, applicationId, runId],
@@ -151,19 +146,19 @@ export function RunDetailPage() {
 
   if (error || !run) return <ErrorState message={error?.message} />;
 
-  const enrichedRun = run as EnrichedRun;
-  const date = run.startedAt ? formatDateField(run.startedAt) : "";
-  const isInline = enrichedRun.packageEphemeral === true;
+  const enrichedRun = run;
+  const date = run.started_at ? formatDateField(run.started_at) : "";
+  const isInline = enrichedRun.package_ephemeral === true;
 
   // For inline runs the agent crumb *is* the last crumb (the run itself),
   // so omit href — PageHeader renders it as the current-page indicator.
   const agentCrumb = isInline
     ? {
-        label: enrichedRun.agentName
-          ? `${enrichedRun.agentName} (${t("runs.inlineBadge").toLowerCase()})`
+        label: enrichedRun.agent_name
+          ? `${enrichedRun.agent_name} (${t("runs.inlineBadge").toLowerCase()})`
           : t("runs.inlineBadge"),
       }
-    : { label: agent?.displayName || packageId || "", href: `/agents/${packageId}` };
+    : { label: agent?.display_name || packageId || "", href: `/agents/${packageId}` };
 
   const runCrumbLabel = runNumber
     ? t("exec.breadcrumb", { number: runNumber })
@@ -193,7 +188,7 @@ export function RunDetailPage() {
           agent={agent}
           onSubmit={(input) => {
             runAgent.mutate(
-              { input, version: run.versionLabel ?? undefined },
+              { input, version: run.version_label ?? undefined },
               { onSuccess: () => setInputOpen(false) },
             );
           }}
@@ -237,13 +232,13 @@ export function RunDetailPage() {
         <div className="flex items-center gap-2">
           {/* Token + cost readout — shown at all times (pending, running,
               terminal). While the run is active the pulse dot animates and
-              `onMetric` SSE patches `run.tokenUsage` + `run.cost` in place
+              `onMetric` SSE patches `run.token_usage` + `run.cost` in place
               at the throttled 250 ms cadence; once finalized, the same
               fields hold the authoritative aggregate written by
               `finalizeRun`. Defaults to zeros for runs that never produced
               tokens (the readout is structural, not conditional on data). */}
           {(() => {
-            const liveUsage = run.tokenUsage as {
+            const liveUsage = run.token_usage as {
               input_tokens?: number;
               output_tokens?: number;
             } | null;

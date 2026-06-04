@@ -6,7 +6,12 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./proxy-primitives": "./src/proxy-primitives.ts"
+    "./connect": "./src/connect/index.ts",
+    "./proxy-primitives": "./src/proxy-primitives.ts",
+    "./proxy-ca-planner": "./src/proxy-ca-planner.ts",
+    "./integration-mitm-planner": "./src/integration-mitm-planner.ts",
+    "./integration-credentials": "./src/integration-credentials.ts",
+    "./afps-delivery": "./src/afps-delivery.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -14,10 +19,8 @@
   },
   "dependencies": {
     "@appstrate/afps-runtime": "workspace:*",
+    "@appstrate/afps-shared": "workspace:*",
     "@appstrate/core": "workspace:*",
-    "@appstrate/db": "workspace:*",
-    "@appstrate/env": "workspace:*",
-    "@appstrate/shared-types": "workspace:*",
-    "drizzle-orm": "^0.45.2"
+    "@appstrate/env": "workspace:*"
   }
 }

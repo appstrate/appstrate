@@ -188,7 +188,7 @@ export async function resolveRegistryAgent(
     });
   }
 
-  const prompt = detail.textContent ?? "";
+  const prompt = detail.prompt ?? "";
   const deps = await resolveManifestCatalogDeps(manifest, orgId);
 
   // Build the LoadedPackage from the published version's manifest + prompt
@@ -200,7 +200,6 @@ export async function resolveRegistryAgent(
     manifest,
     prompt,
     skills: deps.skills,
-    tools: deps.tools,
     source: pkg.source,
     ...(pkg.updatedAt ? { updatedAt: pkg.updatedAt } : {}),
   };

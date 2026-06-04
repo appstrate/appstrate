@@ -41,7 +41,7 @@ describe("getOrderedKeys", () => {
     expect(getOrderedKeys(schema)).toEqual(["a", "b", "c"]);
   });
 
-  it("honors propertyOrder and appends unlisted keys", () => {
+  it("honors property_order and appends unlisted keys", () => {
     expect(getOrderedKeys(schema, ["c", "a"])).toEqual(["c", "a", "b"]);
   });
 });
@@ -150,14 +150,16 @@ describe("mapAfpsToRjsf", () => {
           },
         },
       },
-      fileConstraints: {
-        doc: { accept: ".pdf", maxSize: 1_000_000 },
+      file_constraints: {
+        doc: { accept: ".pdf", max_size: 1_000_000 },
         photos: { accept: "image/*" },
       },
     };
     const { uiSchema } = mapAfpsToRjsf(wrapper);
     expect(uiSchema.doc).toMatchObject({
       "ui:widget": "file",
+      // RJSF widget option name (`maxSize`) is camelCase — widget API,
+      // not AFPS manifest field.
       "ui:options": { accept: ".pdf", maxSize: 1_000_000 },
     });
     expect(uiSchema.photos).toMatchObject({
@@ -166,13 +168,13 @@ describe("mapAfpsToRjsf", () => {
     });
   });
 
-  it("maps propertyOrder to ui:order with wildcard", () => {
+  it("maps property_order to ui:order with wildcard", () => {
     const wrapper: SchemaWrapper = {
       schema: {
         type: "object",
         properties: { a: { type: "string" }, b: { type: "string" }, c: { type: "string" } },
       },
-      propertyOrder: ["c", "a"],
+      property_order: ["c", "a"],
     };
     const { uiSchema } = mapAfpsToRjsf(wrapper);
     expect(uiSchema["ui:order"]).toEqual(["c", "a", "b", "*"]);
@@ -187,7 +189,7 @@ describe("mapAfpsToRjsf", () => {
           title: { type: "string", maxLength: 200 },
         },
       },
-      uiHints: { bio: { placeholder: "Tell us…" } },
+      ui_hints: { bio: { placeholder: "Tell us…" } },
     };
     const { uiSchema } = mapAfpsToRjsf(wrapper);
     expect(uiSchema.bio).toMatchObject({ "ui:widget": "textarea", "ui:placeholder": "Tell us…" });

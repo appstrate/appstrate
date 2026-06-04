@@ -8,11 +8,11 @@ import {
   Activity,
   Calendar,
   Wrench,
-  Puzzle,
   Plug,
   Webhook,
   Loader2,
   Users,
+  Boxes,
 } from "lucide-react";
 import { useUnreadCount } from "../hooks/use-notifications";
 import { useAgents } from "../hooks/use-packages";
@@ -22,7 +22,6 @@ import { useAppConfig } from "../hooks/use-app-config";
 import { SidebarNavLink } from "./sidebar-nav-link";
 import {
   SidebarGroup,
-  SidebarGroupLabel,
   SidebarMenu,
   SidebarMenuBadge,
   SidebarMenuButton,
@@ -46,29 +45,26 @@ export function NavOrg() {
     offset: 0,
   });
   const hasRunning =
-    (agents?.some((f) => f.runningRuns > 0) ?? false) || (runningInline?.total ?? 0) > 0;
+    (agents?.some((f) => f.running_runs > 0) ?? false) || (runningInline?.total ?? 0) > 0;
   const unread = unreadCount ?? 0;
 
-  const automationItems = [
+  const beforeRunsItems = [
     { path: "/", label: t("nav.dashboard"), icon: LayoutDashboard },
     { path: "/agents", label: t("nav.agents"), icon: Layers },
     { path: "/schedules", label: t("nav.schedules"), icon: Calendar },
   ];
 
-  const resourceItems = [
+  const afterRunsItems = [
     { path: "/skills", label: t("nav.skills"), icon: Wrench },
-    { path: "/tools", label: t("nav.tools"), icon: Puzzle },
-  ];
-
-  const integrationItems = [
-    { path: "/providers", label: t("nav.connectors"), icon: Plug },
+    { path: "/mcp-servers", label: t("nav.mcpServers"), icon: Plug },
+    { path: "/integrations", label: t("nav.integrations"), icon: Boxes },
     ...(isAdmin && features.webhooks
       ? [{ path: "/webhooks", label: t("nav.webhooks"), icon: Webhook }]
       : []),
     ...(isAdmin ? [{ path: "/end-users", label: t("nav.endUsers"), icon: Users }] : []),
   ];
 
-  const renderItems = (items: typeof automationItems) =>
+  const renderItems = (items: typeof beforeRunsItems) =>
     items.map((item) => (
       <SidebarNavLink
         key={item.path}
@@ -82,55 +78,40 @@ export function NavOrg() {
     ));
 
   return (
-    <>
-      {/* Automatisation */}
-      <SidebarGroup>
-        <SidebarGroupLabel>{t("nav.automationSection")}</SidebarGroupLabel>
-        <SidebarMenu>
-          {renderItems(automationItems)}
-          {/* Runs — with unread badge + running indicator */}
-          <SidebarMenuItem className="relative">
-            <SidebarMenuButton
-              asChild
-              isActive={location.pathname.startsWith("/runs")}
-              tooltip={t("nav.runs")}
-            >
-              <Link to="/runs">
-                <span className="flex size-4 shrink-0 items-center justify-center">
-                  {hasRunning ? (
-                    <Loader2 size={16} className="animate-spin" />
-                  ) : (
-                    <Activity size={16} />
-                  )}
+    <SidebarGroup>
+      <SidebarMenu>
+        {renderItems(beforeRunsItems)}
+        {/* Runs — with unread badge + running indicator */}
+        <SidebarMenuItem className="relative">
+          <SidebarMenuButton
+            asChild
+            isActive={location.pathname.startsWith("/runs")}
+            tooltip={t("nav.runs")}
+          >
+            <Link to="/runs">
+              <span className="flex size-4 shrink-0 items-center justify-center">
+                {hasRunning ? (
+                  <Loader2 size={16} className="animate-spin" />
+                ) : (
+                  <Activity size={16} />
+                )}
+              </span>
+              <span>{t("nav.runs")}</span>
+            </Link>
+          </SidebarMenuButton>
+          {unread > 0 && (
+            <>
+              <SidebarMenuBadge>
+                <span className="bg-destructive text-destructive-foreground flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.6rem] leading-none font-medium">
+                  {unread > 99 ? "99+" : unread}
                 </span>
-                <span>{t("nav.runs")}</span>
-              </Link>
-            </SidebarMenuButton>
-            {unread > 0 && (
-              <>
-                <SidebarMenuBadge>
-                  <span className="bg-destructive text-destructive-foreground flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.6rem] leading-none font-medium">
-                    {unread > 99 ? "99+" : unread}
-                  </span>
-                </SidebarMenuBadge>
-                <span className="ring-sidebar bg-destructive pointer-events-none absolute top-1 right-1 hidden size-2 rounded-full ring-2 group-data-[collapsible=icon]:block" />
-              </>
-            )}
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarGroup>
-
-      {/* Ressources */}
-      <SidebarGroup>
-        <SidebarGroupLabel>{t("nav.resourcesSection")}</SidebarGroupLabel>
-        <SidebarMenu>{renderItems(resourceItems)}</SidebarMenu>
-      </SidebarGroup>
-
-      {/* Intégrations */}
-      <SidebarGroup>
-        <SidebarGroupLabel>{t("nav.integrationsSection")}</SidebarGroupLabel>
-        <SidebarMenu>{renderItems(integrationItems)}</SidebarMenu>
-      </SidebarGroup>
-    </>
+              </SidebarMenuBadge>
+              <span className="ring-sidebar bg-destructive pointer-events-none absolute top-1 right-1 hidden size-2 rounded-full ring-2 group-data-[collapsible=icon]:block" />
+            </>
+          )}
+        </SidebarMenuItem>
+        {renderItems(afterRunsItems)}
+      </SidebarMenu>
+    </SidebarGroup>
   );
 }

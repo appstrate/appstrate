@@ -16,7 +16,7 @@ export const BUNDLE_FORMAT_VERSION = "1.0" as const;
 export type BundleFormatVersion = typeof BUNDLE_FORMAT_VERSION;
 
 /**
- * Template-literal type for package identities. AFPS 1.x mandates
+ * Template-literal type for package identities. AFPS mandates
  * scoped names, so every identity is `@scope/name@version`.
  */
 export type PackageIdentity = `@${string}/${string}@${string}`;
@@ -39,9 +39,7 @@ export interface BundleMetadata {
   createdAt?: string;
   builder?: string;
   sourceRunId?: string;
-  /** Vendor extensions — must use `x-` prefix per spec §4.3. */
-  [key: `x-${string}`]: unknown;
-  /** Reserved-namespace keys preserved on round-trip. */
+  /** Round-trip passthrough for `_meta` reverse-DNS namespaced keys per AFPS §10.1. */
   [key: string]: unknown;
 }
 

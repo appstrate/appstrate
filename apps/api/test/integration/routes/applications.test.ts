@@ -139,7 +139,7 @@ describe("Applications API", () => {
           "applications:read",
           "applications:write",
           "applications:delete",
-          "providers:write",
+          "integrations:read",
         ],
       });
       return {
@@ -212,19 +212,6 @@ describe("Applications API", () => {
         headers: { ...bearer, "Content-Type": "application/json" },
         body: JSON.stringify({ packageId: "@x/y" }),
       });
-      expect(res.status).toBe(403);
-    });
-
-    it("PUT /api/applications/:otherAppId/providers/:p/credentials returns 403", async () => {
-      const { otherAppId, bearer } = await setupTwoAppKey();
-      const res = await app.request(
-        `/api/applications/${otherAppId}/providers/@scope/prov/credentials`,
-        {
-          method: "PUT",
-          headers: { ...bearer, "Content-Type": "application/json" },
-          body: JSON.stringify({ credentials: { apiKey: "secret" } }),
-        },
-      );
       expect(res.status).toBe(403);
     });
 

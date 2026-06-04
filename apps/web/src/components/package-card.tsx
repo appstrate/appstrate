@@ -1,16 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { PackageType } from "@appstrate/core/validation";
 import { ShieldCheck } from "lucide-react";
 import { Badge } from "./status-badge";
 import { RunAgentButton } from "./run-agent-button";
-import { ProviderIcon } from "./provider-icon";
 import { packageDetailPath } from "../lib/package-paths";
 import { ScrollArea, ScrollBar } from "./ui/scroll-area";
-import { useProviders } from "../hooks/use-providers";
 
 interface PackageCardProps {
   id: string;
@@ -20,12 +17,9 @@ interface PackageCardProps {
   source?: "system" | "local";
   runningRuns?: number;
   keywords?: string[];
-  providerIds?: string[];
   usedByAgents?: number;
   unreadCount?: number;
-  statusBadge?: React.ReactNode;
   actions?: React.ReactNode;
-  iconUrl?: string;
   autoInstalled?: boolean;
 }
 
@@ -37,26 +31,14 @@ export function PackageCard({
   source,
   runningRuns,
   keywords,
-  providerIds,
   usedByAgents,
   unreadCount,
-  statusBadge,
   actions,
-  iconUrl,
   autoInstalled,
 }: PackageCardProps) {
   const { t } = useTranslation(["agents", "settings", "common"]);
   const href = packageDetailPath(type, id);
   const navigate = useNavigate();
-  const { data: providers } = useProviders();
-
-  const resolvedProviders = useMemo(() => {
-    if (!providerIds?.length || !providers) return [];
-    const map = new Map(providers.map((p) => [p.id, p]));
-    return providerIds
-      .map((pid) => map.get(pid))
-      .filter((p): p is NonNullable<typeof p> => p != null);
-  }, [providerIds, providers]);
 
   const handleCardClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (window.getSelection()?.toString()) return;
@@ -74,7 +56,6 @@ export function PackageCard({
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
-          {iconUrl && <ProviderIcon src={iconUrl} className="h-5 w-5" />}
           <h2 className="text-foreground truncate text-sm font-medium">{displayName}</h2>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
@@ -88,7 +69,6 @@ export function PackageCard({
               {t("list.badgeAutoInstalled")}
             </span>
           )}
-          {statusBadge}
           {!!unreadCount && unreadCount > 0 && (
             <span className="bg-destructive text-destructive-foreground flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.6rem] leading-none font-medium">
               {unreadCount > 99 ? "99+" : unreadCount}
@@ -110,17 +90,6 @@ export function PackageCard({
       <p className="text-muted-foreground mt-1 line-clamp-2 flex-1 text-xs">{description || ""}</p>
       <ScrollArea className="mt-2 w-full">
         <div className="flex gap-1">
-          {resolvedProviders.map((p) => (
-            <span
-              key={p.id}
-              className="bg-background text-muted-foreground border-border inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[0.7rem]"
-            >
-              {p.iconUrl && (
-                <ProviderIcon src={p.iconUrl} className="h-3 w-3 !bg-transparent !p-0" />
-              )}
-              {p.displayName}
-            </span>
-          ))}
           {keywords?.map((kw) => (
             <span
               key={kw}
@@ -131,7 +100,7 @@ export function PackageCard({
           ))}
           {type !== "agent" && usedByAgents !== undefined && usedByAgents > 0 && (
             <span className="bg-background text-muted-foreground border-border shrink-0 rounded-full border px-2 py-0.5 text-[0.7rem]">
-              {t("list.usedByAgents", { count: usedByAgents, ns: "agents" })}
+              {t("list.used_by_agents", { count: usedByAgents, ns: "agents" })}
             </span>
           )}
         </div>

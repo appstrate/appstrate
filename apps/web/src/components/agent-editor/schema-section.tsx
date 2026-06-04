@@ -25,7 +25,10 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { toSlug, toLiveSlug, toCredentialKey, toLiveCredentialKey } from "../../lib/strings";
-import { CREDENTIAL_KEY_RE } from "@appstrate/core/validation";
+/** Credential keys must be underscore-based to satisfy the sidecar
+ *  substitution contract (lowercase letters, digits and underscores;
+ *  must start with a letter). */
+const CREDENTIAL_KEY_RE = /^[a-z][a-z0-9_]*$/;
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -252,7 +255,7 @@ function SortableFieldCard({
                 type="text"
                 placeholder={t("editor.fieldMaxSize")}
                 value={field.maxSize ?? ""}
-                onChange={(e) => onUpdate(index, { maxSize: e.target.value })}
+                onChange={(e) => onUpdate(index, { maxSize: e.target.value })} // canonical-casing-exempt: SchemaField TS-internal (carve-out); manifest write via fieldsToSchema → `max_size`
                 className="h-7 min-w-[100px] flex-1 text-xs"
                 disabled={readOnly}
               />

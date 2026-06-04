@@ -1,0 +1,90 @@
+{
+  "name": "@appstrate/google-contacts",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.1",
+  "display_name": "Google Contacts (API)",
+  "description": "Contact management service by Google",
+  "keywords": ["contacts", "productivity"],
+  "license": "Apache-2.0",
+  "icon": "googlecontacts",
+  "source": {
+    "kind": "none"
+  },
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "issuer": "https://accounts.google.com",
+      "default_scopes": ["openid", "email", "https://www.googleapis.com/auth/contacts.readonly"],
+      "authorization_params": {
+        "access_type": "offline",
+        "prompt": "consent"
+      },
+      "token_endpoint_auth_method": "client_secret_post",
+      "identity_claims": {
+        "accountId": "$.email",
+        "sub": "$.sub",
+        "email": "$.email",
+        "name": "$.name",
+        "picture": "$.picture"
+      },
+      "scope_catalog": [
+        {
+          "value": "openid",
+          "label": "Identity (OpenID)"
+        },
+        {
+          "value": "email",
+          "label": "Email address"
+        },
+        {
+          "value": "https://www.googleapis.com/auth/contacts.readonly",
+          "label": "Read contacts"
+        },
+        {
+          "value": "https://www.googleapis.com/auth/contacts",
+          "label": "Read and write contacts"
+        },
+        {
+          "value": "https://www.googleapis.com/auth/contacts.other.readonly",
+          "label": "Read 'Other contacts' (auto-suggested)"
+        },
+        {
+          "value": "https://www.googleapis.com/auth/directory.readonly",
+          "label": "Read organization directory (Google Workspace)"
+        },
+        {
+          "value": "https://www.googleapis.com/auth/userinfo.profile",
+          "label": "Read user profile info"
+        }
+      ],
+      "authorized_uris": ["https://people.googleapis.com/**"],
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": " "
+        },
+        "dev.appstrate/auth": {
+          "required": true
+        }
+      }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/api": {
+      "auths": {
+        "primary": {}
+      }
+    }
+  }
+}

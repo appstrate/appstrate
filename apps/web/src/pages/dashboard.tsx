@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Link, Navigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../hooks/use-auth";
 import { useAgents } from "../hooks/use-packages";
@@ -35,11 +35,6 @@ export function DashboardPage() {
 
   const runs = runsData?.data ?? [];
 
-  // No runs → redirect to agents page
-  if (runs.length === 0) {
-    return <Navigate to="/agents" replace />;
-  }
-
   // Build agent lookup map
   const agentMap = new Map<
     string,
@@ -48,19 +43,17 @@ export function DashboardPage() {
       description?: string | null;
       source?: string;
       keywords?: string[];
-      providerIds?: string[];
-      runningRuns?: number;
+      running_runs?: number;
     }
   >();
   if (agents) {
     for (const f of agents) {
       agentMap.set(f.id, {
-        displayName: f.displayName,
+        displayName: f.display_name,
         description: f.description,
         source: f.source,
         keywords: f.keywords,
-        providerIds: Object.keys(f.dependencies.providers ?? {}),
-        runningRuns: f.runningRuns,
+        running_runs: f.running_runs,
       });
     }
   }
@@ -80,8 +73,8 @@ export function DashboardPage() {
 
   // Upcoming schedules: active, with nextRunAt, sorted by soonest first
   const upcomingSchedules = (schedules ?? [])
-    .filter((s) => s.enabled !== false && s.nextRunAt)
-    .sort((a, b) => new Date(a.nextRunAt!).getTime() - new Date(b.nextRunAt!).getTime())
+    .filter((s) => s.enabled !== false && s.next_run_at)
+    .sort((a, b) => new Date(a.next_run_at!).getTime() - new Date(b.next_run_at!).getTime())
     .slice(0, 5);
 
   const firstName = (profile?.displayName || user?.name || "").split(/\s+/)[0];
@@ -142,9 +135,8 @@ export function DashboardPage() {
                     description={agent?.description}
                     type="agent"
                     source={agent?.source as "system" | "local" | undefined}
-                    runningRuns={agent?.runningRuns}
+                    runningRuns={agent?.running_runs}
                     keywords={agent?.keywords}
-                    providerIds={agent?.providerIds}
                     unreadCount={unreadCounts?.[agentId]}
                   />
                 </div>

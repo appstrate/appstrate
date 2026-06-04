@@ -37,7 +37,9 @@ async function makeBundle({ sign }: { sign: boolean }): Promise<{
     type: "agent",
     name: "@acme/bundle",
     version: "1.0.0",
-    schemaVersion: "1.0.0",
+    schema_version: "0.1",
+    display_name: "Bundle",
+    author: "Acme",
   };
   const prompt = new TextEncoder().encode("Prompt body");
   const files = new Map<string, Uint8Array>([

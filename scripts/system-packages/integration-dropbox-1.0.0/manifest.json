@@ -1,0 +1,89 @@
+{
+  "name": "@appstrate/dropbox",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.1",
+  "display_name": "Dropbox (API)",
+  "description": "Cloud file storage, sync, and sharing platform",
+  "keywords": ["storage", "productivity"],
+  "license": "Apache-2.0",
+  "icon": "dropbox",
+  "source": {
+    "kind": "none"
+  },
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "authorization_endpoint": "https://www.dropbox.com/oauth2/authorize",
+      "token_endpoint": "https://api.dropboxapi.com/oauth2/token",
+      "default_scopes": ["account_info.read", "files.metadata.read", "files.content.read"],
+      "token_endpoint_auth_method": "client_secret_post",
+      "code_challenge_methods_supported": ["S256"],
+      "scope_catalog": [
+        {
+          "value": "account_info.read",
+          "label": "Read account info"
+        },
+        {
+          "value": "files.metadata.read",
+          "label": "Read file and folder metadata"
+        },
+        {
+          "value": "files.metadata.write",
+          "label": "Write file and folder metadata"
+        },
+        {
+          "value": "files.content.read",
+          "label": "Read file content"
+        },
+        {
+          "value": "files.content.write",
+          "label": "Write file content"
+        },
+        {
+          "value": "sharing.read",
+          "label": "Read shared files and folders"
+        },
+        {
+          "value": "sharing.write",
+          "label": "Manage shared files and folders"
+        },
+        {
+          "value": "file_requests.read",
+          "label": "Read file requests"
+        },
+        {
+          "value": "file_requests.write",
+          "label": "Manage file requests"
+        }
+      ],
+      "authorized_uris": ["https://api.dropboxapi.com/**", "https://content.dropboxapi.com/**"],
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": " "
+        },
+        "dev.appstrate/auth": {
+          "required": true
+        }
+      }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/api": {
+      "auths": {
+        "primary": {}
+      }
+    }
+  }
+}

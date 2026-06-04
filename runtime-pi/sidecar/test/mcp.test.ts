@@ -3,17 +3,20 @@
 /**
  * MCP endpoint integration tests.
  *
- * The sidecar mounts `/mcp` and exposes `provider_call`, `run_history`,
- * and `recall_memory` as MCP tools. These tests verify wire-format
- * compliance and the auth / authorisation / SSRF guarantees that the
- * MCP path enforces end-to-end.
+ * The sidecar mounts `/mcp` and exposes `run_history` and
+ * `recall_memory` as first-party MCP tools, plus a generic
+ * `{ns}__api_call` tool per integration that opted into `apiCall`. These
+ * tests verify wire-format compliance and the auth / authorisation /
+ * SSRF guarantees that the MCP path enforces end-to-end.
  */
 
 import { describe, it, expect, mock } from "bun:test";
+import { PROXY_INJECTED_FIELD } from "@appstrate/connect/integration-credentials";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { createApp, type AppDeps } from "../app.ts";
-import { MAX_MCP_ENVELOPE_SIZE, MAX_REQUEST_BODY_SIZE } from "../helpers.ts";
+import { createApp, buildSidecarRuntimeDeps, type AppDeps } from "../app.ts";
+import { buildApiCallHost } from "./helpers/api-call-host.ts";
+import { MAX_MCP_ENVELOPE_SIZE } from "../helpers.ts";
 import type { CredentialsResponse } from "../helpers.ts";
 
 function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
@@ -30,13 +33,15 @@ function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
       }),
     ),
     cookieJar: new Map(),
+    // Bun's `Mock` lacks the `preconnect` member that `typeof fetch`
+    // declares; the cast bridges that cross-lib friction.
     fetchFn: mock(
       async () =>
         new Response('{"ok":true}', {
           status: 200,
           headers: { "Content-Type": "application/json" },
         }),
-    ),
+    ) as unknown as typeof fetch,
     isReady: () => true,
     ...overrides,
   };
@@ -162,13 +167,13 @@ describe("POST /mcp — initialize", () => {
 });
 
 describe("POST /mcp — tools/list", () => {
-  it("advertises provider_call, run_history, and recall_memory", async () => {
+  it("advertises run_history and recall_memory (no api_call)", async () => {
     const app = createApp(makeDeps());
     const res = await rpc(app, { method: "tools/list" });
     expect(res.status).toBe(200);
     const result = res.json.result as { tools: Array<{ name: string }> };
     const names = result.tools.map((t) => t.name).sort();
-    expect(names).toEqual(["provider_call", "recall_memory", "run_history"]);
+    expect(names).toEqual(["recall_memory", "run_history"]);
   });
 
   it("declares input schemas matching the legacy contracts", async () => {
@@ -177,15 +182,6 @@ describe("POST /mcp — tools/list", () => {
     const result = res.json.result as {
       tools: Array<{ name: string; inputSchema: { properties: Record<string, unknown> } }>;
     };
-    const proxy = result.tools.find((t) => t.name === "provider_call")!;
-    expect(Object.keys(proxy.inputSchema.properties).sort()).toEqual([
-      "body",
-      "headers",
-      "method",
-      "providerId",
-      "substituteBody",
-      "target",
-    ]);
     const history = result.tools.find((t) => t.name === "run_history")!;
     expect(Object.keys(history.inputSchema.properties).sort()).toEqual(["fields", "limit"]);
     const recall = result.tools.find((t) => t.name === "recall_memory")!;
@@ -195,7 +191,7 @@ describe("POST /mcp — tools/list", () => {
   // Regression — the agent-facing `run_history.fields` enum is the LLM's
   // single source of truth for the wire vocabulary. If the legacy `state`
   // value re-appears here, agents start sending it again and the platform
-  // 400s every call. Lock it to the canonical AFPS 1.4+ values.
+  // 400s every call. Lock it to the canonical AFPS values.
   it("advertises run_history.fields as exactly [checkpoint, result]", async () => {
     const app = createApp(makeDeps());
     const res = await rpc(app, { method: "tools/list" });
@@ -219,7 +215,7 @@ describe("POST /mcp — tools/call run_history", () => {
           headers: { "Content-Type": "application/json" },
         }),
     );
-    const app = createApp(makeDeps({ fetchFn }));
+    const app = createApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
 
     const res = await rpc(app, {
       method: "tools/call",
@@ -233,7 +229,7 @@ describe("POST /mcp — tools/call run_history", () => {
     // Verifies the `limit` and `fields` arguments propagated as query
     // parameters into the underlying platform call.
     expect(fetchFn).toHaveBeenCalledTimes(1);
-    const calledUrl = fetchFn.mock.calls[0]![0] as string;
+    const calledUrl = (fetchFn.mock.calls[0] as unknown as [string])[0];
     expect(calledUrl).toContain("/internal/run-history");
     expect(calledUrl).toContain("limit=5");
     expect(calledUrl).toContain("fields=checkpoint");
@@ -249,7 +245,7 @@ describe("POST /mcp — tools/call recall_memory", () => {
           headers: { "Content-Type": "application/json" },
         }),
     );
-    const app = createApp(makeDeps({ fetchFn }));
+    const app = createApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
 
     const res = await rpc(app, {
       method: "tools/call",
@@ -261,7 +257,7 @@ describe("POST /mcp — tools/call recall_memory", () => {
     expect(result.content[0]!.text).toBe('{"memories":[{"id":1,"content":"x"}]}');
 
     expect(fetchFn).toHaveBeenCalledTimes(1);
-    const calledUrl = fetchFn.mock.calls[0]![0] as string;
+    const calledUrl = (fetchFn.mock.calls[0] as unknown as [string])[0];
     expect(calledUrl).toContain("/internal/memories");
     expect(calledUrl).toContain("q=python");
     expect(calledUrl).toContain("limit=3");
@@ -269,311 +265,15 @@ describe("POST /mcp — tools/call recall_memory", () => {
 
   it("omits empty q from the upstream URL", async () => {
     const fetchFn = mock(async () => new Response('{"memories":[]}', { status: 200 }));
-    const app = createApp(makeDeps({ fetchFn }));
+    const app = createApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
 
     await rpc(app, {
       method: "tools/call",
       params: { name: "recall_memory", arguments: { limit: 1 } },
     });
-    const calledUrl = fetchFn.mock.calls[0]![0] as string;
+    const calledUrl = (fetchFn.mock.calls[0] as unknown as [string])[0];
     expect(calledUrl).not.toContain("q=");
     expect(calledUrl).toContain("limit=1");
-  });
-});
-
-describe("POST /mcp — tools/call provider_call", () => {
-  it("forwards through executeProviderCall with credential injection", async () => {
-    const fetchFn = mock(
-      async () =>
-        new Response('{"id":"abc"}', {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
-    );
-    const app = createApp(makeDeps({ fetchFn }));
-
-    const res = await rpc(app, {
-      method: "tools/call",
-      params: {
-        name: "provider_call",
-        arguments: {
-          providerId: "test-provider",
-          target: "https://api.example.com/items",
-          method: "GET",
-        },
-      },
-    });
-    expect(res.status).toBe(200);
-    const result = res.json.result as { content: Array<{ text: string }>; isError?: boolean };
-    expect(result.isError).toBeUndefined();
-    expect(result.content[0]!.text).toBe('{"id":"abc"}');
-
-    // The credential-inject path must have run — Authorization header
-    // populated by the sidecar from the credentialFieldName/Prefix.
-    const init = fetchFn.mock.calls[0]![1] as RequestInit;
-    const headers = init.headers as Record<string, string>;
-    expect(headers["Authorization"]).toBe("Bearer test-123");
-  });
-
-  it("returns isError: true when the target URL is unauthorized", async () => {
-    // The sidecar's authorizedUris guard is the same code path; the MCP
-    // layer must surface 4xx as tool-level errors, not throws.
-    const app = createApp(makeDeps());
-    const res = await rpc(app, {
-      method: "tools/call",
-      params: {
-        name: "provider_call",
-        arguments: {
-          providerId: "test-provider",
-          target: "https://evil.example.com/exfil",
-          method: "GET",
-        },
-      },
-    });
-    expect(res.status).toBe(200);
-    const result = res.json.result as { content: Array<{ text: string }>; isError: boolean };
-    expect(result.isError).toBe(true);
-    expect(result.content[0]!.text).toContain("not authorized");
-  });
-
-  it("attaches upstream { status, headers } via _meta on success (text body)", async () => {
-    // Header propagation regression test: the sidecar must surface
-    // upstream HTTP status + allowlisted response headers under
-    // `_meta['appstrate/upstream']` so the agent-side resolver can
-    // drive resumable-upload protocols (Location, ETag, Upload-Offset).
-    const fetchFn = mock(
-      async () =>
-        new Response('{"id":"abc"}', {
-          status: 201,
-          headers: {
-            "Content-Type": "application/json",
-            Location: "https://api.example.com/upload/session-123",
-            ETag: '"v1-abc"',
-            "Set-Cookie": "session=secret", // must NOT propagate
-          },
-        }),
-    );
-    const app = createApp(makeDeps({ fetchFn }));
-    const res = await rpc(app, {
-      method: "tools/call",
-      params: {
-        name: "provider_call",
-        arguments: {
-          providerId: "test-provider",
-          target: "https://api.example.com/items",
-          method: "POST",
-          body: '{"x":1}',
-        },
-      },
-    });
-    expect(res.status).toBe(200);
-    const result = res.json.result as {
-      content: Array<{ text: string }>;
-      _meta?: Record<string, unknown>;
-    };
-    expect(result._meta).toBeDefined();
-    const meta = result._meta!["appstrate/upstream"] as {
-      status: number;
-      headers: Record<string, string>;
-    };
-    expect(meta.status).toBe(201);
-    expect(meta.headers.location).toBe("https://api.example.com/upload/session-123");
-    expect(meta.headers.etag).toBe('"v1-abc"');
-    expect(meta.headers["content-type"]).toBe("application/json");
-    // Cookie must not be propagated.
-    expect(meta.headers).not.toHaveProperty("set-cookie");
-    expect(meta.headers).not.toHaveProperty("authorization");
-  });
-
-  it("attaches upstream meta even on tool-level errors (4xx upstream)", async () => {
-    const fetchFn = mock(
-      async () =>
-        new Response('{"error":"not found"}', {
-          status: 404,
-          headers: {
-            "Content-Type": "application/json",
-            "Retry-After": "30",
-          },
-        }),
-    );
-    const app = createApp(makeDeps({ fetchFn }));
-    const res = await rpc(app, {
-      method: "tools/call",
-      params: {
-        name: "provider_call",
-        arguments: {
-          providerId: "test-provider",
-          target: "https://api.example.com/missing",
-        },
-      },
-    });
-    expect(res.status).toBe(200);
-    const result = res.json.result as {
-      isError?: boolean;
-      _meta?: Record<string, unknown>;
-    };
-    // With propagation, a 404 surfaces as a tool-level error.
-    expect(result.isError).toBe(true);
-    const meta = result._meta!["appstrate/upstream"] as {
-      status: number;
-      headers: Record<string, string>;
-    };
-    expect(meta.status).toBe(404);
-    expect(meta.headers["retry-after"]).toBe("30");
-  });
-
-  it("attaches upstream meta when response spills to BlobStore (binary)", async () => {
-    // Even when content[] becomes a `resource_link` (binary spill),
-    // the meta payload still ships so the agent can read upstream
-    // status + headers without fetching the blob.
-    const fetchFn = mock(
-      async () =>
-        new Response(new Uint8Array([1, 2, 3, 4]), {
-          status: 200,
-          headers: {
-            "Content-Type": "application/octet-stream",
-            "Content-Length": "4",
-            ETag: '"bin-abc"',
-          },
-        }),
-    );
-    const app = createApp(makeDeps({ fetchFn }));
-    const res = await rpc(app, {
-      method: "tools/call",
-      params: {
-        name: "provider_call",
-        arguments: {
-          providerId: "test-provider",
-          target: "https://api.example.com/binary",
-        },
-      },
-    });
-    const result = res.json.result as {
-      content: Array<{ type: string; uri?: string }>;
-      _meta?: Record<string, unknown>;
-    };
-    expect(result.content[0]!.type).toBe("resource_link");
-    const meta = result._meta!["appstrate/upstream"] as {
-      status: number;
-      headers: Record<string, string>;
-    };
-    expect(meta.status).toBe(200);
-    expect(meta.headers.etag).toBe('"bin-abc"');
-  });
-
-  it("attaches sanitised finalUrl to _meta after a redirect chain (#471)", async () => {
-    // End-to-end: agent triggers an OAuth-style flow via provider_call
-    // and reads the terminal callback URL (with ?code=…) from
-    // _meta["appstrate/upstream"].finalUrl — without having to parse
-    // an empty/HTML body or rely on headers.location (which is the
-    // *next* hop, undefined on terminal 200/4xx).
-    const fetchFn = mock(async (url: string | URL) => {
-      const u = typeof url === "string" ? url : url.toString();
-      if (u.endsWith("/authorize")) {
-        return new Response(null, {
-          status: 302,
-          headers: { location: "https://api.example.com/login" },
-        });
-      }
-      if (u.endsWith("/login")) {
-        return new Response(null, {
-          status: 302,
-          headers: {
-            // Userinfo + fragment included to prove sidecar sanitises.
-            location: "https://user:secret@api.example.com/callback?code=ABC123#leaked",
-          },
-        });
-      }
-      return new Response("ok", { status: 200 });
-    });
-    const app = createApp(makeDeps({ fetchFn }));
-    const res = await rpc(app, {
-      method: "tools/call",
-      params: {
-        name: "provider_call",
-        arguments: {
-          providerId: "test-provider",
-          target: "https://api.example.com/authorize",
-        },
-      },
-    });
-    expect(res.status).toBe(200);
-    const result = res.json.result as {
-      _meta?: Record<string, unknown>;
-    };
-    const meta = result._meta!["appstrate/upstream"] as {
-      status: number;
-      finalUrl?: string;
-    };
-    expect(meta.status).toBe(200);
-    expect(meta.finalUrl).toBe("https://api.example.com/callback?code=ABC123");
-    // Defence-in-depth: userinfo + fragment never appear in the agent
-    // context regardless of what the upstream Location header carried.
-    expect(meta.finalUrl).not.toContain("user");
-    expect(meta.finalUrl).not.toContain("secret");
-    expect(meta.finalUrl).not.toContain("leaked");
-    expect(meta.finalUrl).not.toContain("#");
-  });
-
-  it("does NOT attach finalUrl on preflight failure (no upstream contact)", async () => {
-    const app = createApp(makeDeps());
-    const res = await rpc(app, {
-      method: "tools/call",
-      params: {
-        name: "provider_call",
-        arguments: {
-          providerId: "test-provider",
-          target: "https://not-allowed.example.com/x",
-        },
-      },
-    });
-    const result = res.json.result as {
-      isError?: boolean;
-      _meta?: Record<string, unknown>;
-    };
-    expect(result.isError).toBe(true);
-    const meta = result._meta!["appstrate/upstream"] as {
-      status: number;
-      headers: Record<string, string>;
-      finalUrl?: string;
-    };
-    expect(meta.status).toBe(0);
-    expect(meta.finalUrl).toBeUndefined();
-  });
-
-  it("spills non-text upstream responses to a resource_link", async () => {
-    // Binary upstream responses are stored in a run-scoped blob cache
-    // and returned as a `resource_link` that the agent can read on
-    // demand via `client.readResource({ uri })`.
-    const fetchFn = mock(
-      async () =>
-        new Response(new Uint8Array([0xde, 0xad, 0xbe, 0xef]), {
-          status: 200,
-          headers: { "Content-Type": "application/octet-stream" },
-        }),
-    );
-    const app = createApp(makeDeps({ fetchFn }));
-    const res = await rpc(app, {
-      method: "tools/call",
-      params: {
-        name: "provider_call",
-        arguments: {
-          providerId: "test-provider",
-          target: "https://api.example.com/binary",
-        },
-      },
-    });
-    const result = res.json.result as {
-      content: Array<{ type: string; uri?: string; mimeType?: string }>;
-      isError?: boolean;
-    };
-    expect(result.isError).toBeUndefined();
-    expect(result.content).toHaveLength(1);
-    expect(result.content[0]!.type).toBe("resource_link");
-    expect(result.content[0]!.uri).toMatch(
-      /^appstrate:\/\/provider-response\/[A-Za-z0-9_-]+\/[A-Z0-9]{26}$/,
-    );
-    expect(result.content[0]!.mimeType).toBe("application/octet-stream");
   });
 });
 
@@ -615,21 +315,13 @@ describe("POST /mcp — per-request transport (stateless mode)", () => {
     const first = await rpc(app, { method: "tools/list" });
     expect(first.status).toBe(200);
     const firstResult = first.json.result as { tools: Array<{ name: string }> };
-    expect(firstResult.tools.map((t) => t.name).sort()).toEqual([
-      "provider_call",
-      "recall_memory",
-      "run_history",
-    ]);
+    expect(firstResult.tools.map((t) => t.name).sort()).toEqual(["recall_memory", "run_history"]);
 
     const second = await rpc(app, { method: "tools/list" });
     expect(second.status).toBe(200);
     expect(second.json.error).toBeUndefined();
     const secondResult = second.json.result as { tools: Array<{ name: string }> };
-    expect(secondResult.tools.map((t) => t.name).sort()).toEqual([
-      "provider_call",
-      "recall_memory",
-      "run_history",
-    ]);
+    expect(secondResult.tools.map((t) => t.name).sort()).toEqual(["recall_memory", "run_history"]);
   });
 
   it("handles two consecutive tools/call invocations on the same app", async () => {
@@ -640,17 +332,13 @@ describe("POST /mcp — per-request transport (stateless mode)", () => {
           headers: { "Content-Type": "application/json" },
         }),
     );
-    const app = createApp(makeDeps({ fetchFn }));
+    const app = createApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
 
-    const args = {
-      providerId: "test-provider",
-      target: "https://api.example.com/items",
-      method: "GET",
-    };
+    const args = { limit: 1 };
 
     const first = await rpc(app, {
       method: "tools/call",
-      params: { name: "provider_call", arguments: args },
+      params: { name: "run_history", arguments: args },
     });
     expect(first.status).toBe(200);
     const firstResult = first.json.result as {
@@ -662,7 +350,7 @@ describe("POST /mcp — per-request transport (stateless mode)", () => {
 
     const second = await rpc(app, {
       method: "tools/call",
-      params: { name: "provider_call", arguments: args },
+      params: { name: "run_history", arguments: args },
     });
     expect(second.status).toBe(200);
     expect(second.json.error).toBeUndefined();
@@ -677,288 +365,6 @@ describe("POST /mcp — per-request transport (stateless mode)", () => {
     // call did not fail at the transport layer before reaching the
     // credential-proxy core.
     expect(fetchFn).toHaveBeenCalledTimes(2);
-  });
-});
-
-describe("POST /mcp — provider_call body / method consistency", () => {
-  it("returns isError: true when body is supplied with GET", async () => {
-    const app = createApp(makeDeps());
-    const res = await rpc(app, {
-      method: "tools/call",
-      params: {
-        name: "provider_call",
-        arguments: {
-          providerId: "test-provider",
-          target: "https://api.example.com/items",
-          method: "GET",
-          body: '{"x":1}',
-        },
-      },
-    });
-    expect(res.status).toBe(200);
-    const result = res.json.result as { content: Array<{ text: string }>; isError: boolean };
-    expect(result.isError).toBe(true);
-    expect(result.content[0]!.text).toContain("'body' is not allowed");
-    expect(result.content[0]!.text).toContain("GET");
-  });
-
-  it("returns isError: true when body is supplied with HEAD", async () => {
-    const app = createApp(makeDeps());
-    const res = await rpc(app, {
-      method: "tools/call",
-      params: {
-        name: "provider_call",
-        arguments: {
-          providerId: "test-provider",
-          target: "https://api.example.com/items",
-          method: "HEAD",
-          body: "anything",
-        },
-      },
-    });
-    const result = res.json.result as { content: Array<{ text: string }>; isError: boolean };
-    expect(result.isError).toBe(true);
-    expect(result.content[0]!.text).toContain("HEAD");
-  });
-});
-
-describe("POST /mcp — provider_call binary body via { fromBytes }", () => {
-  // The agent never sees the raw bytes — runtime resolvers materialise
-  // workspace files (`{ fromFile }`) or in-memory buffers
-  // (`{ fromBytes }`) into base64 before MCP because JSON-RPC has no
-  // native byte type. The sidecar decodes once on the server side and
-  // forwards the bytes byte-for-byte.
-
-  function makeProviderDeps() {
-    return makeDeps({
-      fetchCredentials: mock(
-        async (): Promise<CredentialsResponse> => ({
-          credentials: { access_token: "tok" },
-          authorizedUris: ["https://api.example.com/**"],
-          allowAllUris: false,
-          credentialHeaderName: "Authorization",
-          credentialHeaderPrefix: "Bearer",
-          credentialFieldName: "access_token",
-        }),
-      ),
-    });
-  }
-
-  it("decodes base64 body and forwards bytes verbatim to upstream", async () => {
-    // Non-UTF-8 bytes — would be corrupted by the legacy text path.
-    const binary = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46]);
-    const base64 = Buffer.from(binary).toString("base64");
-    let received: ArrayBuffer | undefined;
-    const fetchFn = mock(async (_url: string, init?: RequestInit) => {
-      received = init?.body as ArrayBuffer | undefined;
-      return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
-    });
-    const app = createApp({ ...makeProviderDeps(), fetchFn: fetchFn as unknown as typeof fetch });
-
-    const res = await rpc(app, {
-      method: "tools/call",
-      params: {
-        name: "provider_call",
-        arguments: {
-          providerId: "@appstrate/test",
-          target: "https://api.example.com/upload",
-          method: "POST",
-          body: { fromBytes: base64, encoding: "base64" },
-        },
-      },
-    });
-    expect(res.status).toBe(200);
-    const result = res.json.result as { isError?: boolean };
-    expect(result.isError).toBeFalsy();
-    expect(received).toBeDefined();
-    expect(new Uint8Array(received as ArrayBuffer)).toEqual(binary);
-  });
-
-  it("rejects body { fromBytes } with invalid base64", async () => {
-    const app = createApp(makeProviderDeps());
-    const res = await rpc(app, {
-      method: "tools/call",
-      params: {
-        name: "provider_call",
-        arguments: {
-          providerId: "@appstrate/test",
-          target: "https://api.example.com/upload",
-          method: "POST",
-          body: { fromBytes: "not-base64!!!", encoding: "base64" },
-        },
-      },
-    });
-    const result = res.json.result as { content: Array<{ text: string }>; isError?: boolean };
-    expect(result.isError).toBe(true);
-    expect(result.content[0]!.text).toContain("not standard base64");
-  });
-
-  it("rejects body { fromBytes } over the per-request cap with structured error", async () => {
-    // Build a payload just past MAX_REQUEST_BODY_SIZE. Use a small
-    // overage so the test stays cheap; the inflated base64 must still
-    // fit the MCP envelope cap (which is sized to accommodate this).
-    const oversizeBytes = MAX_REQUEST_BODY_SIZE + 1024;
-    const payload = Buffer.alloc(oversizeBytes, 0x42); // arbitrary filler
-    const base64 = payload.toString("base64");
-    const app = createApp(makeProviderDeps());
-    const res = await rpc(app, {
-      method: "tools/call",
-      params: {
-        name: "provider_call",
-        arguments: {
-          providerId: "@appstrate/test",
-          target: "https://api.example.com/upload",
-          method: "POST",
-          body: { fromBytes: base64, encoding: "base64" },
-        },
-      },
-    });
-    expect(res.status).toBe(200);
-    const result = res.json.result as {
-      content: Array<{ text: string }>;
-      structuredContent?: {
-        error?: {
-          code?: string;
-          scope?: string;
-          limit?: number;
-          actual?: number;
-          envVar?: string;
-        };
-      };
-      isError?: boolean;
-    };
-    expect(result.isError).toBe(true);
-    expect(result.content[0]!.text).toContain("exceeds the per-request limit");
-    expect(result.structuredContent?.error?.code).toBe("PAYLOAD_TOO_LARGE");
-    expect(result.structuredContent?.error?.scope).toBe("request_body");
-    expect(result.structuredContent?.error?.limit).toBe(MAX_REQUEST_BODY_SIZE);
-    expect(result.structuredContent?.error?.actual).toBe(oversizeBytes);
-    expect(result.structuredContent?.error?.envVar).toBe("SIDECAR_MAX_REQUEST_BODY_BYTES");
-  });
-
-  it("rejects substituteBody: true when body is { fromBytes }", async () => {
-    const app = createApp(makeProviderDeps());
-    const res = await rpc(app, {
-      method: "tools/call",
-      params: {
-        name: "provider_call",
-        arguments: {
-          providerId: "@appstrate/test",
-          target: "https://api.example.com/upload",
-          method: "POST",
-          body: { fromBytes: Buffer.from("hi").toString("base64"), encoding: "base64" },
-          substituteBody: true,
-        },
-      },
-    });
-    const result = res.json.result as { content: Array<{ text: string }>; isError?: boolean };
-    expect(result.isError).toBe(true);
-    expect(result.content[0]!.text).toContain("substituteBody requires a text body");
-  });
-});
-
-describe("POST /mcp — caller cannot forge sidecar control headers", () => {
-  // Regression: the MCP descriptor advertises that routing /
-  // sidecar-control headers are filtered server-side. An earlier
-  // version of `mcp.ts` spread `args.headers` BEFORE the controlled
-  // overrides, so an LLM supplying e.g. `X-Stream-Response: 1` could
-  // opt into the binary streaming path the MCP layer is explicitly
-  // designed not to expose, or `X-Substitute-Body: 1` to inject
-  // {{credential}} placeholders into an attacker-controlled payload.
-
-  for (const forbidden of [
-    "X-Stream-Response",
-    "X-Substitute-Body",
-    "X-Max-Response-Size",
-    "X-Provider",
-    "X-Target",
-  ]) {
-    it(`rejects ${forbidden} supplied via args.headers`, async () => {
-      const fetchFn = mock(
-        async () =>
-          new Response('{"ok":true}', {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          }),
-      );
-      const app = createApp(makeDeps({ fetchFn }));
-
-      const res = await rpc(app, {
-        method: "tools/call",
-        params: {
-          name: "provider_call",
-          arguments: {
-            providerId: "test-provider",
-            target: "https://api.example.com/items",
-            method: "GET",
-            headers: { [forbidden]: "1" },
-          },
-        },
-      });
-
-      expect(res.status).toBe(200);
-      const result = res.json.result as { content: Array<{ text: string }>; isError: boolean };
-      expect(result.isError).toBe(true);
-      expect(result.content[0]!.text).toContain("sidecar-control names");
-      expect(result.content[0]!.text).toContain(forbidden);
-
-      // The forbidden header must NOT have reached the upstream — the
-      // request is rejected before executeProviderCall is invoked.
-      // fetchFn is the upstream stub on the far side of the credential
-      // proxy, so it must not have been called at all.
-      expect(fetchFn).not.toHaveBeenCalled();
-    });
-  }
-
-  it("matches forbidden header names case-insensitively", async () => {
-    const app = createApp(makeDeps());
-    const res = await rpc(app, {
-      method: "tools/call",
-      params: {
-        name: "provider_call",
-        arguments: {
-          providerId: "test-provider",
-          target: "https://api.example.com/items",
-          // HTTP header semantics are case-insensitive — bypass via
-          // case variation must not work.
-          headers: { "x-stream-response": "1" },
-        },
-      },
-    });
-    const result = res.json.result as { content: Array<{ text: string }>; isError: boolean };
-    expect(result.isError).toBe(true);
-    expect(result.content[0]!.text).toContain("sidecar-control names");
-  });
-
-  it("preserves benign caller-supplied headers", async () => {
-    const fetchFn = mock(
-      async () =>
-        new Response('{"ok":true}', {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
-    );
-    const app = createApp(makeDeps({ fetchFn }));
-    const res = await rpc(app, {
-      method: "tools/call",
-      params: {
-        name: "provider_call",
-        arguments: {
-          providerId: "test-provider",
-          target: "https://api.example.com/items",
-          headers: { "X-Custom-Trace": "abc" },
-        },
-      },
-    });
-    // The forbidden-name filter must let benign headers through to
-    // the credential-proxy core without producing a tool-level error.
-    // executeProviderCall further strips hop-by-hop headers before
-    // hitting the upstream — that's the credential proxy's concern,
-    // not the MCP layer's. The contract here is "benign headers don't
-    // get rejected by the MCP filter".
-    const result = res.json.result as { isError?: boolean };
-    expect(result.isError).toBeUndefined();
-    expect(fetchFn).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -1064,7 +470,7 @@ describe("POST /mcp — bounded response read", () => {
           headers: { "Content-Type": "application/json" },
         }),
     );
-    const app = createApp(makeDeps({ fetchFn }));
+    const app = createApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
     const res = await rpc(app, {
       method: "tools/call",
       params: { name: "run_history", arguments: { limit: 1 } },
@@ -1074,7 +480,7 @@ describe("POST /mcp — bounded response read", () => {
     };
     // The token-budget gate must have triggered the blob spill.
     expect(result.content[0]!.type).toBe("resource_link");
-    expect(result.content[0]!.uri).toMatch(/^appstrate:\/\/provider-response\//);
+    expect(result.content[0]!.uri).toMatch(/^appstrate:\/\/api-response\//);
   });
 });
 
@@ -1089,81 +495,97 @@ describe("StreamableHTTPClientTransport interop (smoke test)", () => {
   });
 });
 
-describe("POST /mcp — provider_call concurrency cap (issue #427)", () => {
-  // Regression: without a fan-out cap, an agent that issues N parallel
-  // `provider_call`s funnels their full payloads into the next LLM turn
-  // and blows past the upstream model's TPM window. The sidecar caps
-  // simultaneous upstream hops via `SIDECAR_PROVIDER_CALL_CONCURRENCY`
-  // (default 3). This test sets the cap to 2 and verifies that the 3rd
-  // and 4th calls park until earlier permits release.
+describe("POST /mcp — api_call", () => {
+  const integrationCreds = (token = "integ-tok-1") => ({
+    credentials: { [PROXY_INJECTED_FIELD]: token },
+    authorizedUris: ["https://gmail.googleapis.com/**"],
+    allowAllUris: false,
+    credentialHeaderName: "Authorization",
+    credentialHeaderPrefix: "Bearer",
+    credentialFieldName: PROXY_INJECTED_FIELD,
+  });
 
-  it("limits concurrent upstream hops to SIDECAR_PROVIDER_CALL_CONCURRENCY", async () => {
-    process.env.SIDECAR_PROVIDER_CALL_CONCURRENCY = "2";
-    try {
-      let active = 0;
-      let peak = 0;
-      // Each upstream fetch parks until the test releases it. We track
-      // the peak simultaneous in-flight count: if the cap holds, peak
-      // never exceeds 2 across 4 parallel `provider_call` invocations.
-      const gates: Array<() => void> = [];
-      const fetchFn = mock(async () => {
-        active++;
-        if (active > peak) peak = active;
-        await new Promise<void>((resolve) => gates.push(resolve));
-        active--;
-        return new Response('{"ok":true}', {
+  async function makeApiCallApp(overrides?: Partial<AppDeps>) {
+    const appDeps = makeDeps(overrides);
+    const runtimeDeps = buildSidecarRuntimeDeps(appDeps);
+    const host = await buildApiCallHost(
+      [
+        {
+          namespace: "gmail",
+          integrationId: "@official/gmail",
+          fetchCredentials: async () => integrationCreds(),
+          refreshCredentials: async () => integrationCreds("integ-tok-2"),
+        },
+      ],
+      runtimeDeps,
+    );
+    return createApp({
+      ...appDeps,
+      runtimeDeps,
+      additionalMcpToolsProvider: () => host.buildTools(),
+    });
+  }
+
+  it("advertises {namespace}__api_call in tools/list", async () => {
+    const app = await makeApiCallApp();
+    const res = await rpc(app, { method: "tools/list" });
+    const result = res.json.result as {
+      tools: Array<{
+        name: string;
+        inputSchema: { properties: Record<string, unknown>; required?: string[] };
+      }>;
+    };
+    const apiCall = result.tools.find((t) => t.name === "gmail__api_call");
+    expect(apiCall).toBeDefined();
+    // The cloned descriptor drops `integrationId` — the integration is implied.
+    expect(apiCall!.inputSchema.properties.integrationId).toBeUndefined();
+    expect(apiCall!.inputSchema.required ?? []).not.toContain("integrationId");
+    expect(apiCall!.inputSchema.required ?? []).toContain("target");
+  });
+
+  it("injects the integration credential and forwards upstream", async () => {
+    const fetchFn = mock(
+      async () =>
+        new Response('{"messages":[]}', {
           status: 200,
           headers: { "Content-Type": "application/json" },
-        });
-      });
-      const app = createApp(makeDeps({ fetchFn }));
+        }),
+    );
+    const app = await makeApiCallApp({ fetchFn: fetchFn as unknown as typeof fetch });
+    const res = await rpc(app, {
+      method: "tools/call",
+      params: {
+        name: "gmail__api_call",
+        arguments: { target: "https://gmail.googleapis.com/v1/messages", method: "GET" },
+      },
+    });
+    expect(res.status).toBe(200);
+    const result = res.json.result as { content: Array<{ text: string }>; isError?: boolean };
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0]!.text).toBe('{"messages":[]}');
+    const init = (fetchFn.mock.calls[0] as unknown as [string, RequestInit])[1];
+    const headers = init.headers as Record<string, string>;
+    expect(headers["Authorization"]).toBe("Bearer integ-tok-1");
+  });
 
-      const issue = (id: number) =>
-        rpc(app, {
-          method: "tools/call",
-          params: {
-            name: "provider_call",
-            arguments: {
-              providerId: "test-provider",
-              target: `https://api.example.com/items/${id}`,
-              method: "GET",
-            },
-          },
-        });
+  it("enforces the integration authorizedUris allowlist", async () => {
+    const app = await makeApiCallApp();
+    const res = await rpc(app, {
+      method: "tools/call",
+      params: {
+        name: "gmail__api_call",
+        arguments: { target: "https://evil.example.com/exfil", method: "GET" },
+      },
+    });
+    const result = res.json.result as { content: Array<{ text: string }>; isError: boolean };
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain("not authorized");
+  });
 
-      const calls = Promise.all([issue(1), issue(2), issue(3), issue(4)]);
-
-      // Yield the event loop enough times for the semaphore queue to
-      // settle. We need the first 2 calls to have reached `fetchFn` —
-      // 50 microtask turns is generous for the JSON-RPC + MCP plumbing.
-      for (let i = 0; i < 50; i++) await Promise.resolve();
-      expect(active).toBeLessThanOrEqual(2);
-      expect(peak).toBeLessThanOrEqual(2);
-      expect(gates.length).toBe(2);
-
-      // Release one permit — exactly one more upstream call should
-      // immediately start. Peak must still be capped at 2.
-      gates.shift()!();
-      for (let i = 0; i < 50; i++) await Promise.resolve();
-      expect(peak).toBeLessThanOrEqual(2);
-
-      // Release the rest so the test can wind down.
-      while (gates.length > 0) {
-        gates.shift()!();
-        for (let i = 0; i < 20; i++) await Promise.resolve();
-      }
-
-      const results = await calls;
-      // All four calls eventually succeed.
-      expect(results).toHaveLength(4);
-      for (const r of results) {
-        const result = r.json.result as { isError?: boolean };
-        expect(result.isError).toBeUndefined();
-      }
-      // Cap held throughout the whole test, not just at the start.
-      expect(peak).toBeLessThanOrEqual(2);
-    } finally {
-      delete process.env.SIDECAR_PROVIDER_CALL_CONCURRENCY;
-    }
+  it("registers no api_call tool when no integration opts in", async () => {
+    const app = createApp(makeDeps());
+    const res = await rpc(app, { method: "tools/list" });
+    const result = res.json.result as { tools: Array<{ name: string }> };
+    expect(result.tools.some((t) => t.name.endsWith("__api_call"))).toBe(false);
   });
 });

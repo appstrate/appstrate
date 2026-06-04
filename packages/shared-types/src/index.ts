@@ -1,34 +1,132 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { z } from "zod";
+import type { z } from "zod";
 import type { ModelCost } from "@appstrate/core/module";
+import type { TokenUsage } from "@appstrate/core/token-usage";
 
 export type { WebhookInfo, WebhookCreateResponse, WebhookDelivery } from "./webhooks.ts";
+import type { AgentIntegrationEntry } from "./integrations.ts";
+export type {
+  AccessibleIntegrationConnection,
+  AgentIntegrationEntry,
+  ConsumingAgentSummary,
+  IntegrationAgentResolution,
+  IntegrationAuthStatus,
+  IntegrationAuthType,
+  IntegrationCandidate,
+  IntegrationConnection,
+  IntegrationDetail,
+  IntegrationManifestAuth,
+  IntegrationManifestView,
+  IntegrationOAuthClient,
+  IntegrationOrgDefault,
+  IntegrationPickStatus,
+  IntegrationPin,
+  IntegrationSummary,
+  IntegrationToolCatalogEntry,
+} from "./integrations.ts";
 
-export type { UserProfile, RunLog, ConnectionProfile } from "@appstrate/db/schema";
-import type {
-  PackageType,
-  ProviderSetupGuide,
-  ResolvedProviderDefinition,
-} from "@appstrate/core/validation";
+export type { UserProfile, RunLog } from "@appstrate/db/schema";
+import type { PackageType } from "@appstrate/core/validation";
 export type { PackageType };
 
 export type { Run } from "@appstrate/db/schema";
 
-import type { Run } from "@appstrate/db/schema";
+/**
+ * Stripe-canonical list envelope for HTTP list responses.
+ *
+ * Wire format: `{ object: "list", data: T[], hasMore: boolean, total?, limit? }`.
+ * `total` is the full row count (offset pagination); `limit` is the page size
+ * echoed by cursor-style endpoints (e.g. end-users). Both optional so every
+ * list endpoint variant fits the single canonical shape.
+ */
+export interface ListEnvelope<T> {
+  object: "list";
+  data: T[];
+  hasMore: boolean;
+  total?: number;
+  limit?: number;
+}
+
+import { runStatusEnum as _runStatusEnum } from "@appstrate/db/schema";
+type _RunStatus = (typeof _runStatusEnum.enumValues)[number];
+
+/**
+ * Wire-shape Run DTO returned to API consumers. The Drizzle `Run` row keeps
+ * camelCase field names internally (Better Auth blocker); this is the single
+ * snake_case wire surface every JSON response uses. Universal DB-convention
+ * fields (`id`, `*Id`, `createdAt`, …) stay camelCase per Phase 3 scope.
+ */
+export interface RunWireDto {
+  id: string;
+  packageId: string | null;
+  userId: string | null;
+  endUserId: string | null;
+  apiKeyId: string | null;
+  orgId: string;
+  applicationId: string;
+  scheduleId: string | null;
+  status: _RunStatus;
+  input: unknown;
+  result: unknown;
+  checkpoint: unknown;
+  error: string | null;
+  metadata: unknown;
+  config: unknown;
+  config_override: unknown;
+  started_at: string | null;
+  completed_at: string | null;
+  duration: number | null;
+  cost: number | null;
+  notifiedAt: string | null;
+  readAt: string | null;
+  runNumber: number | null;
+  token_usage: unknown;
+  version_label: string | null;
+  version_dirty: boolean | null;
+  proxy_label: string | null;
+  model_label: string | null;
+  model_source: string | null;
+  runner_name: string | null;
+  runner_kind: string | null;
+  agent_scope: string | null;
+  agent_name: string | null;
+  runOrigin: string | null;
+  contextSnapshot: unknown;
+  modelCredentialId: string | null;
+  connection_overrides: unknown;
+}
+
+/**
+ * One integration connection resolved for a run, projected from the internal
+ * `runs.resolved_connections` snapshot for display. The raw `connectionId` is
+ * deliberately omitted — only display-safe fields cross the wire.
+ */
+export interface RunConnectionUsed {
+  /** Integration package id (`@scope/integration`). */
+  integration_id: string;
+  /** Connection label, denormalized at kickoff. Null on pre-snapshot runs. */
+  label: string | null;
+  /** Account identifier (email, sub), denormalized at kickoff. */
+  account_id: string | null;
+  /** Resolution mechanism (`admin_pin` | `run_override` | `fallback_auto` | …). */
+  source: string;
+}
 
 /** Run with enriched display names from LEFT JOINs (dashboard user, end-user, API key, schedule). */
-export type EnrichedRun = Run & {
-  userName: string | null;
-  endUserName: string | null;
-  apiKeyName: string | null;
-  scheduleName: string | null;
+export type EnrichedRun = RunWireDto & {
+  user_name: string | null;
+  end_user_name: string | null;
+  api_key_name: string | null;
+  schedule_name: string | null;
+  /** Connections resolved for this run, for the "connexions utilisées" panel. Null when the agent declares no integrations. */
+  connections_used: RunConnectionUsed[] | null;
   /** True if the run's source package is an inline/ephemeral shadow (POST /api/runs/inline). */
-  packageEphemeral?: boolean;
+  package_ephemeral?: boolean;
   /** For inline runs only — snapshot of the manifest submitted at run time. Null after compaction. */
-  inlineManifest?: Record<string, unknown> | null;
+  inline_manifest?: Record<string, unknown> | null;
   /** For inline runs only — snapshot of the prompt submitted at run time. Null after compaction. */
-  inlinePrompt?: string | null;
+  inline_prompt?: string | null;
 };
 
 // --- App Config Types ---
@@ -85,12 +183,36 @@ export interface AppConfig {
 
 // --- Package Types ---
 
-/** A reference to a skill or tool dependency with optional metadata. */
+/** A reference to a skill, mcp-server, or integration dependency with optional metadata. */
 export interface ResourceEntry {
   id: string;
   version?: string;
   name?: string;
   description?: string;
+  /**
+   * Niveau 2 — agent's tool allowlist for an integration dependency.
+   * Drives sidecar `tools/list` filtering and OAuth scope inference.
+   * `undefined` keeps legacy "all tools allowed" semantics. The AFPS §4.4
+   * wildcard literal `"*"` opts the agent into every upstream tool (only
+   * valid when the integration declares `allow_undeclared_tools: true`,
+   * §7.8). Ignored for non-integration resource types.
+   */
+  tools?: string[] | "*";
+  /**
+   * Niveau 2 — agent's explicit OAuth scope escape hatch for an
+   * integration dependency, unioned with scopes inferred from `tools`.
+   * `undefined` defaults to "none beyond inference". Ignored for
+   * non-integration resource types.
+   */
+  scopes?: string[];
+  /**
+   * When the depended-on integration declares multiple auth methods,
+   * selects which `auths.<key>` entry this agent dependency uses.
+   * AFPS §4.1. `undefined` keeps the runtime's existing resolver
+   * cascade behaviour (any accessible connection on the integration).
+   * Ignored for non-integration resource types.
+   */
+  auth_key?: string;
 }
 
 // --- Run Types ---
@@ -111,18 +233,39 @@ export type { TerminalRunStatus } from "@appstrate/db/schema";
 import type { Schedule } from "@appstrate/db/schema";
 export type { Schedule };
 
-export interface ScheduleReadiness {
-  status: "ready" | "degraded" | "not_ready";
-  totalProviders: number;
-  connectedProviders: number;
-  missingProviders: string[];
+/**
+ * Wire-shape Schedule DTO — snake_case fields exposed to the API consumer.
+ * Diverges from the Drizzle `Schedule` row (which stays camelCase internally)
+ * because Drizzle field names are a private implementation detail.
+ */
+export interface ScheduleWireDto {
+  id: string;
+  packageId: string;
+  userId: string | null;
+  endUserId: string | null;
+  orgId: string;
+  applicationId: string;
+  name: string | null;
+  enabled: boolean | null;
+  cron_expression: string;
+  timezone: string | null;
+  input: Record<string, unknown> | null;
+  config_override: Record<string, unknown> | null;
+  model_id_override: string | null;
+  proxy_id_override: string | null;
+  version_override: string | null;
+  connection_overrides: Record<string, string> | null;
+  last_run_at: string | null;
+  next_run_at: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
-export type EnrichedSchedule = Schedule & {
-  profileName: string | null;
-  profileType: "user" | "app" | null;
-  profileOwnerName: string | null;
-  readiness: ScheduleReadiness;
+export type EnrichedSchedule = ScheduleWireDto & {
+  /** Display name of the actor (member or end-user) the schedule runs as. */
+  actor_name: string | null;
+  /** Which actor kind owns the schedule run. Null for org/system-owned schedules. */
+  actor_type: "user" | "end_user" | null;
 };
 
 // --- Organization Types ---
@@ -136,10 +279,7 @@ export type EnrichedSchedule = Schedule & {
 import type { OrgRole } from "@appstrate/core/permissions";
 export type { OrgRole };
 
-export const orgSettingsSchema = z.object({
-  apiVersion: z.string().optional(),
-  dashboardSsoEnabled: z.boolean().optional(),
-});
+import type { orgSettingsSchema } from "@appstrate/core/permissions";
 export type OrgSettings = z.infer<typeof orgSettingsSchema>;
 
 export interface OrganizationMember {
@@ -168,86 +308,54 @@ export interface OrgInvitation {
   createdAt: string;
 }
 
-import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
+import type { SchemaWrapper } from "@appstrate/core/form";
 
-// --- Connection Types ---
+// --- Unified Me Connections (R1 refactor) ----------------
+// User-scope view of a user's integration connections under a single
+// shape. Backs `GET /api/me/connections`.
 
-/** Connection record as returned by the API (no encrypted credentials). */
-export interface ConnectionInfo {
-  id: string;
-  connectionProfileId: string;
-  providerId: string;
-  orgId: string;
-  scopesGranted?: string[];
-  needsReconnection: boolean;
-  createdAt: string;
-  updatedAt: string;
-}
+export type MeConnectionKind = "integration";
 
-export type { ConnectionStatusValue } from "@appstrate/db/schema";
-import type { ConnectionStatusValue } from "@appstrate/db/schema";
-
-// --- Org Profile Binding Types ---
-
-export interface EnrichedBinding {
-  providerId: string;
-  sourceProfileId: string;
-  sourceProfileName: string;
-  boundByUserName: string | null;
-  connected: boolean;
-}
-
-// --- User Connection Types ---
-
-export interface UserConnectionEntry {
-  connectionId: string;
-  scopesGranted: string[];
-  connectedAt: string;
-  profile: { id: string; name: string; isDefault: boolean };
+export interface MeConnectionEntry {
+  /** Stable connection id (uuid). */
+  connection_id: string;
+  kind: MeConnectionKind;
+  /** Display label set by the user. */
+  label: string | null;
+  scopes_granted: string[];
+  connected_at: string;
+  needs_reconnection: boolean;
+  expiresAt: string | null;
+  /** Human-friendly identity (accountEmail, sub claim). */
+  identity: string | null;
+  /** Which auth slot this connection satisfies. */
+  auth_key: string | null;
+  /** Admin/owner sharing toggle (per-org). */
+  shared_with_org: boolean;
+  /**
+   * Number of installed agents in this connection's application that
+   * declare this integration in their dependencies. Used by the UI to
+   * surface "reused by N agents" so members understand that the connection
+   * is shared across the org's agents rather than per-agent.
+   */
+  reused_by_agents: number | null;
+  /** Where this connection lives (the connection is keyed per-app). */
+  org: { id: string; name: string };
   application: { id: string; name: string };
 }
 
-export interface UserConnectionOrgGroup {
-  orgId: string;
-  orgName: string;
-  connections: UserConnectionEntry[];
-}
-
-export interface UserConnectionProviderGroup {
-  providerId: string;
-  displayName: string;
+export interface MeConnectionSourceGroup {
+  kind: MeConnectionKind;
+  /** Integration package id. */
+  source_id: string;
+  display_name: string;
   logo: string;
-  totalConnections: number;
-  orgs: UserConnectionOrgGroup[];
+  total_connections: number;
+  connections: MeConnectionEntry[];
 }
-
-export type { ProviderProfileSource } from "@appstrate/db/schema";
-import type { ProviderProfileSource } from "@appstrate/db/schema";
-
-export interface ProviderStatus {
-  id: string;
-  name?: string;
-  provider: string;
-  description: string;
-  status: ConnectionStatusValue;
-  authMode?: string;
-  connectUrl?: string;
-  scopesRequired?: string[];
-  scopesGranted?: string[];
-  scopesSufficient?: boolean;
-  scopesMissing?: string[];
-  /** How the connection profile was resolved — "app_binding" if via app profile delegation, "user_profile" if via personal profile. */
-  source: ProviderProfileSource | null;
-  /** Name of the connection profile used for this provider. */
-  profileName: string | null;
-  /** Name of the user who owns the connection profile. */
-  profileOwnerName: string | null;
-}
-
-export type { RunProviderSnapshot } from "@appstrate/db/schema";
 
 /**
- * Fields shared by every package row when listed (agent or skill/tool/provider).
+ * Fields shared by every package row when listed (agent, skill, or integration).
  * Concrete list shapes (`AgentListItem`, `OrgPackageItem`) extend this with
  * what their respective list endpoints additionally return.
  */
@@ -257,20 +365,20 @@ export interface BasePackageListItem {
   source: "system" | "local";
   scope: string | null;
   version: string | null;
-  forkedFrom: string | null;
+  forked_from: string | null;
 }
 
 export interface AgentListItem extends BasePackageListItem {
-  displayName: string;
-  schemaVersion: string;
+  display_name: string;
+  schema_version: string;
   author: string;
   keywords: string[];
   dependencies: {
-    providers: string[];
-    skills: Record<string, string>;
-    tools: Record<string, string>;
+    skills?: Record<string, string>;
+    mcp_servers?: Record<string, string>;
+    integrations?: Record<string, string>;
   };
-  runningRuns: number;
+  running_runs: number;
   type: PackageType;
   /** Always non-null on agents — narrowed for ergonomics. */
   description: string;
@@ -278,36 +386,44 @@ export interface AgentListItem extends BasePackageListItem {
 
 export interface AgentDetail {
   id: string;
-  displayName: string;
+  display_name: string;
   description: string;
   source: "system" | "local";
   dependencies: {
-    providers: ProviderStatus[];
     skills: { id: string; version: string; name?: string; description?: string }[];
-    tools: { id: string; version: string; name?: string; description?: string }[];
+    /**
+     * Niveau 2 — agent's integration declarations (`dependencies.integrations`
+     * + `integrations_configuration`) flattened by `parseManifestIntegrations`.
+     * Always populated (system + user
+     * agents), so the dashboard's Connexions tab can render the
+     * integration-connection status without depending on the optional
+     * `manifest` field below.
+     */
+    integrations: AgentIntegrationEntry[];
   };
   input?: SchemaWrapper;
   output?: SchemaWrapper;
   config: SchemaWrapper & {
     current: Record<string, unknown>;
   };
-  runningRuns: number;
-  lastRun: Partial<import("@appstrate/db/schema").Run> | null;
+  running_runs: number;
+  last_run: {
+    id: string;
+    status: string;
+    started_at: Date | string | null;
+    duration: number | null;
+  } | null;
   updatedAt: string | null;
-  lockVersion: number;
+  lock_version: number;
   prompt?: string;
   scope: string | null;
   version: string | null;
   manifest?: Record<string, unknown>; // Raw manifest from DB (user agents only)
 
-  populatedProviders?: Record<string, ProviderConfig>;
-  callbackUrl?: string;
-  /** App profile ID configured for this agent. Used for per-provider app bindings. */
-  agentAppProfileId: string | null;
-  agentAppProfileName: string | null;
-  versionCount?: number;
-  hasUnarchivedChanges?: boolean;
-  forkedFrom: string | null;
+  callback_url?: string;
+  version_count?: number;
+  has_unarchived_changes?: boolean;
+  forked_from: string | null;
 }
 
 // --- Organization Package Types ---
@@ -316,68 +432,28 @@ export interface OrgPackageItem extends BasePackageListItem {
   /** Display name from the manifest, may be missing on legacy rows. */
   name: string | null;
   createdBy: string | null;
-  createdByName: string | null;
+  created_by_name: string | null;
   createdAt: string;
   updatedAt: string;
-  usedByAgents: number;
-  autoInstalled: boolean;
+  used_by_agents: number;
+  auto_installed: boolean;
 }
 
 export interface OrgPackageItemDetail extends OrgPackageItem {
   content: string;
   /** Secondary source file content (e.g. .ts for tools). */
-  sourceCode?: string | null;
-  agents: { id: string; displayName: string }[];
+  source_code?: string | null;
+  agents: { id: string; display_name: string }[];
   manifest?: Record<string, unknown>;
-  manifestName?: string | null;
-  lockVersion?: number;
-  versionCount?: number;
-  hasUnarchivedChanges?: boolean;
+  manifest_name?: string | null;
+  lock_version?: number;
+  version_count?: number;
+  has_unarchived_changes?: boolean;
 }
 
-// --- Model Cost Types ---
+// --- Token Usage Types ---
 
-/**
- * Zod validator for {@link ModelCost} (the type itself lives in
- * `@appstrate/core/module`). `cacheRead` / `cacheWrite` are optional —
- * providers without prompt caching simply omit them.
- */
-export const modelCostSchema = z.object({
-  input: z.number().nonnegative(),
-  output: z.number().nonnegative(),
-  cacheRead: z.number().nonnegative().optional(),
-  cacheWrite: z.number().nonnegative().optional(),
-});
-
-/**
- * Token usage as reported by an LLM provider for a single completion call.
- * Wire shape consumed by the runner-event ingestion route and any
- * cost-accounting consumer.
- */
-export const tokenUsageSchema = z.object({
-  input_tokens: z.number().nonnegative(),
-  output_tokens: z.number().nonnegative(),
-  cache_creation_input_tokens: z.number().nonnegative().optional(),
-  cache_read_input_tokens: z.number().nonnegative().optional(),
-});
-export type TokenUsage = z.infer<typeof tokenUsageSchema>;
-
-/**
- * In-place accumulator for {@link TokenUsage} totals.
- *
- * Adds every field of `addition` onto `total`. Optional fields default to
- * zero on both sides — `undefined` on `addition` is a no-op, and the
- * cache-creation / cache-read totals are coerced to a numeric zero on
- * `total` so subsequent reads always yield a number.
- */
-export function accumulateTokenUsage(total: TokenUsage, addition: TokenUsage): void {
-  total.input_tokens += addition.input_tokens ?? 0;
-  total.output_tokens += addition.output_tokens ?? 0;
-  total.cache_creation_input_tokens =
-    (total.cache_creation_input_tokens ?? 0) + (addition.cache_creation_input_tokens ?? 0);
-  total.cache_read_input_tokens =
-    (total.cache_read_input_tokens ?? 0) + (addition.cache_read_input_tokens ?? 0);
-}
+export type { TokenUsage };
 
 // --- Package Version Types ---
 
@@ -385,7 +461,7 @@ interface PackageVersionInfo {
   id: number;
   version: string;
   integrity: string;
-  artifactSize: number;
+  artifact_size: number;
   yanked: boolean;
   createdAt: string;
 }
@@ -401,10 +477,10 @@ export interface VersionDetailResponse extends Omit<PackageVersionInfo, "created
   manifest: Record<string, unknown>;
   content?: string | null;
   /** Secondary source file content (e.g. .ts for tools). */
-  sourceCode?: string | null;
-  yankedReason: string | null;
+  source_code?: string | null;
+  yanked_reason: string | null;
   createdAt: string | null;
-  distTags: string[];
+  dist_tags: string[];
 }
 
 // --- Agent Memory Types ---
@@ -416,13 +492,13 @@ export interface AgentMemoryItem {
   content: string;
   runId: string | null;
   /** Actor scope of this memory row. `shared` = visible to all actors. */
-  actorType: PersistenceActorType;
-  /** Actor identifier. NULL when `actorType === "shared"`. */
-  actorId: string | null;
+  actor_type: PersistenceActorType;
+  /** Actor identifier. NULL when `actor_type === "shared"`. */
+  actor_id: string | null;
   /**
    * When true, this memory is rendered into the system prompt on every
    * run (working set). When false, it lives in the archive and is only
-   * reachable via the `recall_memory` tool. See ADR-012.
+   * reachable via the `recall_memory` tool.
    */
   pinned?: boolean;
   createdAt: string | null;
@@ -433,15 +509,15 @@ export interface AgentPinnedSlotItem {
   /**
    * Slot key (Letta-style label). The reserved key `"checkpoint"` is the
    * carry-over slot snapshotted onto runs.checkpoint; other keys (`"persona"`, `"goals"`, …) are
-   * first-class named pinned blocks. See ADR-013.
+   * first-class named pinned blocks.
    */
   key: string;
   /** Slot content — agent-defined JSON or string. */
   content: unknown;
   /** Run that wrote the latest snapshot, if any. */
   runId: string | null;
-  actorType: PersistenceActorType;
-  actorId: string | null;
+  actor_type: PersistenceActorType;
+  actor_id: string | null;
   createdAt: string | null;
   updatedAt: string | null;
 }
@@ -606,47 +682,11 @@ export interface ApiKeyInfo {
   keyPrefix: string;
   scopes: string[];
   createdBy: string | null;
-  createdByName?: string;
+  created_by_name?: string;
   expiresAt: string | null;
   lastUsedAt: string | null;
   revokedAt: string | null;
   createdAt: string;
-}
-
-// --- Available Provider Types ---
-
-export interface AvailableProvider {
-  uniqueKey: string;
-  provider: string;
-  displayName: string;
-  logo?: string;
-  status: ConnectionStatusValue;
-  authMode?: string;
-  connectionId?: string;
-  connectedAt?: string;
-  scopesGranted?: string[];
-}
-
-// --- Provider Config Types ---
-
-/** Provider config returned by the API — extends core's resolved definition with UI state. */
-export interface ProviderConfig extends Omit<
-  ResolvedProviderDefinition,
-  "authorizationParams" | "tokenParams"
-> {
-  version?: string;
-  description?: string;
-  author?: string;
-  source: "built-in" | "custom";
-  hasCredentials: boolean;
-  enabled: boolean;
-  adminCredentialSchema?: JSONSchemaObject;
-  setupGuide?: ProviderSetupGuide;
-  tokenAuthMethod?: "client_secret_post" | "client_secret_basic";
-  authorizationParams?: Record<string, string>;
-  tokenParams?: Record<string, string>;
-  credentialSchema?: Record<string, unknown>;
-  usedByAgents?: number;
 }
 
 // --- Application Types ---
@@ -666,14 +706,13 @@ export interface InstalledPackage {
   config: Record<string, unknown>;
   modelId: string | null;
   proxyId: string | null;
-  appProfileId: string | null;
-  versionId: number | null;
+  version_id: number | null;
   enabled: boolean;
-  installedAt: string;
+  installed_at: string;
   updatedAt: string;
-  packageType: string;
-  packageSource: string;
-  draftManifest: Record<string, unknown> | null;
+  package_type: string;
+  package_source: string;
+  draft_manifest: Record<string, unknown> | null;
 }
 
 /**
@@ -688,36 +727,7 @@ export interface ResolvedRunConfig {
   modelId: string | null;
   proxyId: string | null;
   /** Pinned semver label (`1.2.3`), or null when the app uses the floating dist-tag. */
-  versionPin: string | null;
-  /** Provider ids declared as dependencies on the package's manifest. */
-  requiredProviders: string[];
-}
-
-// --- Readiness Types (agent preflight) ---
-
-/**
- * Provider readiness reasons — single source of truth shared between the
- * API service that computes them, the CLI that consumes them, and the
- * OpenAPI enum on `GET /api/agents/{scope}/{name}/readiness`.
- */
-export const READINESS_REASONS = [
-  "no_connection",
-  "needs_reconnection",
-  "scope_insufficient",
-  "provider_not_enabled",
-] as const;
-export type ReadinessReason = (typeof READINESS_REASONS)[number];
-
-export interface ReadinessProviderEntry {
-  providerId: string;
-  connectionProfileId: string | null;
-  reason: ReadinessReason;
-  message: string;
-}
-
-export interface ReadinessReport {
-  ready: boolean;
-  missing: ReadinessProviderEntry[];
+  version_pin: string | null;
 }
 
 // --- End-User Types ---
@@ -734,38 +744,10 @@ export interface EndUserInfo {
   updatedAt: string;
 }
 
-export interface EndUserListResponse {
-  object: "list";
-  data: EndUserInfo[];
-  hasMore: boolean;
-  limit: number;
-}
-
 // --- OIDC Module — per-application auth config view types ---
+//
+// These OIDC-module-owned wire types live in ./oidc.ts (the frontend cannot
+// cross the module boundary to import from the API). Re-exported here so
+// existing importers keep working.
 
-// Wire shape for `/api/applications/:id/smtp-config` and
-// `/api/applications/:id/social-providers/:provider`. Lives here so
-// backend services, OpenAPI schemas, and frontend hooks stay in lockstep.
-
-export type SocialProviderId = "google" | "github";
-
-export interface SmtpConfigView {
-  applicationId: string;
-  host: string;
-  port: number;
-  username: string;
-  fromAddress: string;
-  fromName: string | null;
-  secureMode: "auto" | "tls" | "starttls" | "none";
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface SocialProviderView {
-  applicationId: string;
-  provider: SocialProviderId;
-  clientId: string;
-  scopes: string[] | null;
-  createdAt: string;
-  updatedAt: string;
-}
+export type { SocialProviderId, SmtpConfigView, SocialProviderView } from "./oidc.ts";

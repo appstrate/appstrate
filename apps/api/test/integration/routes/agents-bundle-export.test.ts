@@ -34,15 +34,24 @@ function enc(s: string): Uint8Array {
 }
 
 function buildAfps(manifest: Record<string, unknown>, content: string): Uint8Array {
-  return zipSync({
+  const files: Record<string, Uint8Array> = {
     "manifest.json": enc(JSON.stringify(manifest, null, 2)),
-    "prompt.md": enc(content),
-  });
+  };
+  // AFPS §3.3/§3.4 companion-file invariants enforced by the bundle loader:
+  // agents need a non-empty prompt.md, skills need a SKILL.md with a
+  // frontmatter `name`. Emit the right companion for the package type.
+  if (manifest.type === "skill") {
+    const name = typeof manifest.name === "string" ? manifest.name : "@test/skill";
+    files["SKILL.md"] = enc(`---\nname: ${name}\n---\n\n${content}`);
+  } else {
+    files["prompt.md"] = enc(content);
+  }
+  return zipSync(files);
 }
 
 async function seedVersionedPackage(opts: {
   id: `@${string}/${string}`;
-  type: "agent" | "skill" | "tool" | "provider";
+  type: "agent" | "skill";
   version: string;
   orgId: string;
   manifest: Record<string, unknown>;
@@ -87,8 +96,8 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
       name: rootPkgId,
       version: "1.0.0",
       type: "agent",
-      schemaVersion: "1.1",
-      displayName: "Root",
+      schema_version: "0.1",
+      display_name: "Root",
       author: "tester",
       dependencies: { skills: { "@exportorg/skill-a": "^1.0.0" } },
     };
@@ -111,8 +120,8 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
         name: "@exportorg/skill-a",
         version: "1.2.0",
         type: "skill",
-        schemaVersion: "1.1",
-        displayName: "A",
+        schema_version: "0.1",
+        display_name: "A",
         author: "tester",
         dependencies: { skills: { "@exportorg/skill-b": "^1" } },
       },
@@ -127,8 +136,8 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
         name: "@exportorg/skill-b",
         version: "1.0.0",
         type: "skill",
-        schemaVersion: "1.1",
-        displayName: "B",
+        schema_version: "0.1",
+        display_name: "B",
         author: "tester",
       },
       setLatest: true,
@@ -197,8 +206,8 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
         name: rootPkgId,
         version: "1.0.0",
         type: "agent",
-        schemaVersion: "1.1",
-        displayName: "Stable",
+        schema_version: "0.1",
+        display_name: "Stable",
         author: "tester",
       },
       setLatest: true,
@@ -238,8 +247,8 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
         name: rootPkgId,
         version: "1.0.0",
         type: "agent",
-        schemaVersion: "1.1",
-        displayName: "SecretFree",
+        schema_version: "0.1",
+        display_name: "SecretFree",
         author: "tester",
       },
       content: "Plain prompt.",
@@ -280,8 +289,8 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
         name: rootPkgId,
         version: "1.0.0",
         type: "agent",
-        schemaVersion: "1.1",
-        displayName: "VG",
+        schema_version: "0.1",
+        display_name: "VG",
         author: "tester",
       },
       setLatest: true,
@@ -323,8 +332,8 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
         name: rootPkgId,
         version: "1.0.0",
         type: "agent",
-        schemaVersion: "1.1",
-        displayName: "NI",
+        schema_version: "0.1",
+        display_name: "NI",
         author: "tester",
       },
       setLatest: true,

@@ -42,7 +42,7 @@ export const packagesPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["imported", "rootInstalled", "rootPackageId", "rootVersion"],
+                required: ["imported", "root_installed", "root_package_id", "root_version"],
                 properties: {
                   imported: {
                     type: "array",
@@ -60,20 +60,20 @@ export const packagesPaths = {
                           description:
                             "`inserted` means the version is new; `reused` means the version already existed with matching integrity.",
                         },
-                        versionId: {
+                        version_id: {
                           type: ["integer", "null"],
                           description: "DB row id for the version; null for system packages.",
                         },
                       },
                     },
                   },
-                  rootInstalled: {
+                  root_installed: {
                     type: "boolean",
                     description:
                       "Whether the root was installed in the calling application (false if it was already installed).",
                   },
-                  rootPackageId: { type: "string" },
-                  rootVersion: { type: "string" },
+                  root_package_id: { type: "string" },
+                  root_version: { type: "string" },
                 },
               },
             },
@@ -101,7 +101,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Import a package from ZIP",
       description:
-        "Import a package (agent, skill, tool, or provider) from a ZIP file. The ZIP must contain a valid manifest.json. The package scope does not need to match your organization — cross-org packages are imported read-only (fork to modify). Rate-limited to 10 requests/minute. Returns 409 if the target package has unpublished draft changes — re-submit with ?force=true to overwrite.",
+        "Import a package (agent, skill, or integration) from a ZIP file. The ZIP must contain a valid manifest.json. The package scope does not need to match your organization; imported packages are owned by your org and remain editable regardless of their scope name. Rate-limited to 10 requests/minute. Returns 409 if the target package has unpublished draft changes — re-submit with ?force=true to overwrite.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -148,7 +148,7 @@ export const packagesPaths = {
                   packageId: { type: "string", description: "The imported package ID" },
                   type: {
                     type: "string",
-                    description: "Package type (agent/skill/tool/provider)",
+                    description: "Package type (agent/skill/mcp-server/integration)",
                   },
                   version: {
                     type: "string",
@@ -181,7 +181,7 @@ export const packagesPaths = {
                         type: "object",
                         properties: {
                           packageId: { type: "string" },
-                          activeVersion: { type: ["string", "null"] },
+                          active_version: { type: ["string", "null"] },
                         },
                       },
                     },
@@ -216,7 +216,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Import a package from a GitHub URL",
       description:
-        "Import a package (agent, skill, tool, or provider) from a public GitHub repository URL. The URL must point to a directory containing a valid manifest.json. The package scope does not need to match your organization — cross-org packages are imported read-only (fork to modify). Rate-limited to 10 requests/minute.",
+        "Import a package (agent, skill, or integration) from a public GitHub repository URL. The URL must point to a directory containing a valid manifest.json. The package scope does not need to match your organization; imported packages are owned by your org and remain editable regardless of their scope name. Rate-limited to 10 requests/minute.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -255,7 +255,7 @@ export const packagesPaths = {
                   packageId: { type: "string", description: "The imported package ID" },
                   type: {
                     type: "string",
-                    description: "Package type (agent/skill/tool/provider)",
+                    description: "Package type (agent/skill/mcp-server/integration)",
                   },
                   version: {
                     type: "string",
@@ -317,7 +317,7 @@ export const packagesPaths = {
                         type: "object",
                         properties: {
                           packageId: { type: "string" },
-                          activeVersion: { type: ["string", "null"] },
+                          active_version: { type: ["string", "null"] },
                         },
                       },
                     },
@@ -505,13 +505,13 @@ export const packagesPaths = {
                 type: "object",
                 properties: {
                   packageId: { type: "string" },
-                  lockVersion: { type: "integer" },
+                  lock_version: { type: "integer" },
                   message: { type: "string" },
                 },
               },
               example: {
                 packageId: "@acme/summarize",
-                lockVersion: 1,
+                lock_version: 1,
                 message: "Skill created",
               },
             },
@@ -548,8 +548,8 @@ export const packagesPaths = {
               schema: {
                 type: "object",
                 properties: {
-                  latestPublishedVersion: { type: ["string", "null"] },
-                  activeVersion: { type: ["string", "null"] },
+                  latest_published_version: { type: ["string", "null"] },
+                  active_version: { type: ["string", "null"] },
                 },
               },
             },
@@ -685,8 +685,8 @@ export const packagesPaths = {
                 type: "object",
                 properties: {
                   message: { type: "string" },
-                  restoredVersion: { type: "string" },
-                  lockVersion: { type: "integer" },
+                  restored_version: { type: "string" },
+                  lock_version: { type: "integer" },
                 },
               },
             },
@@ -736,11 +736,11 @@ export const packagesPaths = {
                   manifest: { $ref: "#/components/schemas/SkillManifest" },
                   content: { type: ["string", "null"] },
                   yanked: { type: "boolean" },
-                  yankedReason: { type: ["string", "null"] },
+                  yanked_reason: { type: ["string", "null"] },
                   integrity: { type: "string" },
-                  artifactSize: { type: "integer" },
+                  artifact_size: { type: "integer" },
                   createdAt: { type: ["string", "null"], format: "date-time" },
-                  distTags: { type: "array", items: { type: "string" } },
+                  dist_tags: { type: "array", items: { type: "string" } },
                 },
               },
             },
@@ -828,10 +828,6 @@ export const packagesPaths = {
                 description: { type: "string" },
                 content: { type: "string" },
                 version: { type: "string", description: "Semver version (X.Y.Z)" },
-                scopedName: {
-                  type: "string",
-                  description: "Registry scoped name (@scope/name)",
-                },
               },
             },
           },
@@ -850,7 +846,7 @@ export const packagesPaths = {
                 type: "object",
                 properties: {
                   packageId: { type: "string" },
-                  lockVersion: { type: "integer" },
+                  lock_version: { type: "integer" },
                 },
               },
             },
@@ -902,7 +898,7 @@ export const packagesPaths = {
                     type: "array",
                     items: {
                       type: "object",
-                      properties: { id: { type: "string" }, displayName: { type: "string" } },
+                      properties: { id: { type: "string" }, display_name: { type: "string" } },
                     },
                     description: "Agents referencing this skill (for IN_USE)",
                   },
@@ -910,500 +906,9 @@ export const packagesPaths = {
                     type: "array",
                     items: {
                       type: "object",
-                      properties: { id: { type: "string" }, displayName: { type: "string" } },
+                      properties: { id: { type: "string" }, display_name: { type: "string" } },
                     },
                     description: "Packages depending on this skill (for DEPENDED_ON)",
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-    },
-  },
-  "/api/packages/tools": {
-    get: {
-      operationId: "listTools",
-      tags: ["Packages"],
-      summary: "List tools",
-      description: "List all tools (system + org) in the organization.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-      ],
-      responses: {
-        "200": {
-          description: "Tool list",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["object", "data", "hasMore"],
-                properties: {
-                  object: { type: "string", enum: ["list"] },
-                  data: {
-                    type: "array",
-                    items: { $ref: "#/components/schemas/OrgPackageItem" },
-                  },
-                  hasMore: { type: "boolean" },
-                },
-              },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-      },
-    },
-    post: {
-      operationId: "createTool",
-      tags: ["Packages"],
-      summary: "Create a tool",
-      description: "Create a new tool in the organization packages.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-      ],
-      requestBody: {
-        required: true,
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              required: ["id", "content"],
-              properties: {
-                id: { type: "string", description: "Unique tool ID (kebab-case)" },
-                name: { type: "string", description: "Display name (optional)" },
-                description: { type: "string", description: "Tool description (optional)" },
-                content: {
-                  type: "string",
-                  description:
-                    "Tool TypeScript source (Pi SDK ExtensionFactory: export default function(pi: ExtensionAPI) { pi.registerTool(...) })",
-                },
-              },
-            },
-          },
-        },
-      },
-      responses: {
-        "201": {
-          description: "Tool created",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  packageId: { type: "string" },
-                  lockVersion: { type: "integer" },
-                  message: { type: "string" },
-                },
-              },
-            },
-          },
-        },
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-      },
-    },
-  },
-  "/api/packages/tools/{scope}/{name}/versions/info": {
-    get: {
-      operationId: "getToolVersionInfo",
-      tags: ["Packages"],
-      summary: "Get version info for a tool (latest published + draft)",
-      description:
-        "Returns the latest published version and the current draft version from the manifest.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-      ],
-      responses: {
-        "200": {
-          description: "Version info",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  latestPublishedVersion: { type: ["string", "null"] },
-                  activeVersion: { type: ["string", "null"] },
-                },
-              },
-            },
-          },
-        },
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-  },
-  "/api/packages/tools/{scope}/{name}/versions": {
-    get: {
-      operationId: "listToolVersions",
-      tags: ["Packages"],
-      summary: "List tool versions",
-      description: "List all published versions for a tool.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-      ],
-      responses: {
-        "200": {
-          description: "Version list",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  versions: {
-                    type: "array",
-                    items: { $ref: "#/components/schemas/AgentVersion" },
-                  },
-                },
-              },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-    post: {
-      operationId: "createToolVersion",
-      tags: ["Packages"],
-      summary: "Create a version from draft",
-      description:
-        "Create an immutable version snapshot from the current tool draft. Version is determined by the manifest version field unless overridden.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-      ],
-      requestBody: {
-        required: false,
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              properties: {
-                version: {
-                  type: "string",
-                  description: "Optional semver version override (e.g. from bump selector)",
-                },
-              },
-            },
-          },
-        },
-      },
-      responses: {
-        "201": {
-          description: "Version created",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  id: { type: "integer" },
-                  version: { type: "string" },
-                  message: { type: "string" },
-                },
-              },
-            },
-          },
-        },
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-      },
-    },
-  },
-  "/api/packages/tools/{scope}/{name}/versions/{version}/restore": {
-    post: {
-      operationId: "restoreToolVersion",
-      tags: ["Packages"],
-      summary: "Restore a tool version into the draft",
-      description:
-        "Restore a previously published version into the tool draft. Does not create a new version.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-        {
-          name: "version",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Version to restore (exact, dist-tag, or semver range)",
-        },
-      ],
-      responses: {
-        "200": {
-          description: "Version restored",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  message: { type: "string" },
-                  restoredVersion: { type: "string" },
-                  lockVersion: { type: "integer" },
-                },
-              },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-        "409": { description: "Concurrent modification" },
-      },
-    },
-  },
-  "/api/packages/tools/{scope}/{name}/versions/{version}": {
-    get: {
-      operationId: "getToolVersionDetail",
-      tags: ["Packages"],
-      summary: "Get tool version detail",
-      description:
-        "Resolve a version query and return versioned tool data including content extracted from ZIP.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-        {
-          name: "version",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Version query — exact version, dist-tag, or semver range",
-        },
-      ],
-      responses: {
-        "200": {
-          description: "Versioned tool detail",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  id: { type: "integer" },
-                  version: { type: "string" },
-                  manifest: { $ref: "#/components/schemas/ToolManifest" },
-                  content: { type: ["string", "null"] },
-                  yanked: { type: "boolean" },
-                  yankedReason: { type: ["string", "null"] },
-                  integrity: { type: "string" },
-                  artifactSize: { type: "integer" },
-                  createdAt: { type: ["string", "null"], format: "date-time" },
-                  distTags: { type: "array", items: { type: "string" } },
-                },
-              },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-    delete: {
-      operationId: "deleteToolVersion",
-      tags: ["Packages"],
-      summary: "Delete a tool version",
-      description:
-        "Permanently delete a tool version. Reassigns affected dist-tags to the next best stable version.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-        { name: "version", in: "path", required: true, schema: { type: "string" } },
-      ],
-      responses: {
-        "204": {
-          description: "Version deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-  },
-  "/api/packages/tools/{scope}/{name}": {
-    get: {
-      operationId: "getTool",
-      tags: ["Packages"],
-      summary: "Get tool detail",
-      description: "Get a tool's full details including content.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-      ],
-      responses: {
-        "200": {
-          description: "Tool detail",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: { $ref: "#/components/schemas/OrgPackageItemDetail" },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-    put: {
-      operationId: "updateTool",
-      tags: ["Packages"],
-      summary: "Update a tool",
-      description: "Update a tool in the organization packages. Built-in tools cannot be modified.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-      ],
-      requestBody: {
-        required: true,
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              properties: {
-                name: { type: "string", description: "Display name" },
-                description: { type: "string" },
-                content: { type: "string" },
-                version: { type: "string", description: "Semver version (X.Y.Z)" },
-                scopedName: {
-                  type: "string",
-                  description: "Registry scoped name (@scope/name)",
-                },
-              },
-            },
-          },
-        },
-      },
-      responses: {
-        "200": {
-          description: "Tool updated",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  packageId: { type: "string" },
-                  lockVersion: { type: "integer" },
-                },
-              },
-            },
-          },
-        },
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-    delete: {
-      operationId: "deleteTool",
-      tags: ["Packages"],
-      summary: "Delete a tool",
-      description:
-        "Delete a tool from the organization packages. Built-in tools cannot be deleted.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-      ],
-      responses: {
-        "204": {
-          description: "Tool deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-        "409": {
-          description: "Tool is referenced by agents or required by other packages",
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  error: {
-                    type: "string",
-                    enum: ["IN_USE", "DEPENDED_ON"],
-                    description:
-                      "IN_USE: referenced by agents. DEPENDED_ON: required by other packages.",
-                  },
-                  message: { type: "string" },
-                  agents: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: { id: { type: "string" }, displayName: { type: "string" } },
-                    },
-                    description: "Agents referencing this tool (for IN_USE)",
-                  },
-                  dependents: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: { id: { type: "string" }, displayName: { type: "string" } },
-                    },
-                    description: "Packages depending on this tool (for DEPENDED_ON)",
                   },
                 },
               },
@@ -1488,7 +993,7 @@ export const packagesPaths = {
                 type: "object",
                 properties: {
                   packageId: { type: "string" },
-                  lockVersion: { type: "integer" },
+                  lock_version: { type: "integer" },
                   message: { type: "string" },
                 },
               },
@@ -1506,7 +1011,7 @@ export const packagesPaths = {
       operationId: "getAgentPackage",
       tags: ["Packages"],
       summary: "Get agent detail",
-      description: "Returns agent detail including providers, config, state, skills, and tools.",
+      description: "Returns agent detail including integrations, config, state, and skills.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -1547,11 +1052,11 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["manifest", "content", "lockVersion"],
+              required: ["manifest", "content", "lock_version"],
               properties: {
                 manifest: { $ref: "#/components/schemas/AgentManifest" },
                 content: { type: "string" },
-                lockVersion: { type: "integer", description: "Optimistic lock version" },
+                lock_version: { type: "integer", description: "Optimistic lock version" },
               },
             },
           },
@@ -1570,7 +1075,7 @@ export const packagesPaths = {
                 type: "object",
                 properties: {
                   packageId: { type: "string" },
-                  lockVersion: { type: "integer" },
+                  lock_version: { type: "integer" },
                 },
               },
             },
@@ -1631,8 +1136,8 @@ export const packagesPaths = {
               schema: {
                 type: "object",
                 properties: {
-                  latestPublishedVersion: { type: ["string", "null"] },
-                  activeVersion: { type: ["string", "null"] },
+                  latest_published_version: { type: ["string", "null"] },
+                  active_version: { type: ["string", "null"] },
                 },
               },
             },
@@ -1761,8 +1266,8 @@ export const packagesPaths = {
                 type: "object",
                 properties: {
                   message: { type: "string" },
-                  restoredVersion: { type: "string" },
-                  lockVersion: { type: "integer" },
+                  restored_version: { type: "string" },
+                  lock_version: { type: "integer" },
                 },
               },
             },
@@ -1805,11 +1310,11 @@ export const packagesPaths = {
                   manifest: { $ref: "#/components/schemas/AgentManifest" },
                   content: { type: ["string", "null"] },
                   yanked: { type: "boolean" },
-                  yankedReason: { type: ["string", "null"] },
+                  yanked_reason: { type: ["string", "null"] },
                   integrity: { type: "string" },
-                  artifactSize: { type: "integer" },
+                  artifact_size: { type: "integer" },
                   createdAt: { type: ["string", "null"], format: "date-time" },
-                  distTags: { type: "array", items: { type: "string" } },
+                  dist_tags: { type: "array", items: { type: "string" } },
                 },
               },
             },
@@ -1865,7 +1370,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Fork a package to your organization",
       description:
-        "Create an editable copy of a non-owned package under the current organization's scope. The fork is based on the latest published version of the source package — the version manifest, content, and ZIP are copied. A local published version is automatically created. Returns 400 if the source has no published version.",
+        "Create a copy of a package the org does not already own (e.g. a read-only system package) under the current organization's scope. Org-owned packages are editable in place regardless of their scope name, so forking is only needed for packages the org does not own. The fork is based on the latest published version of the source package — the version manifest, content, and ZIP are copied. A local published version is automatically created. Returns 400 if the source has no published version.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -1901,14 +1406,14 @@ export const packagesPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["packageId", "type", "forkedFrom"],
+                required: ["packageId", "type", "forked_from"],
                 properties: {
                   packageId: { type: "string", description: "New package ID under org scope" },
                   type: {
                     type: "string",
-                    enum: ["agent", "skill", "tool", "provider"],
+                    enum: ["agent", "skill", "mcp-server", "integration"],
                   },
-                  forkedFrom: { type: "string", description: "Source package ID" },
+                  forked_from: { type: "string", description: "Source package ID" },
                 },
               },
             },
@@ -1965,461 +1470,6 @@ export const packagesPaths = {
             },
           },
         },
-      },
-    },
-  },
-
-  // --- Packages — Providers ---
-
-  "/api/packages/providers": {
-    get: {
-      operationId: "listProviderPackages",
-      tags: ["Packages"],
-      summary: "List provider packages",
-      description: "List all provider packages (system + org) in the organization.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-      ],
-      responses: {
-        "200": {
-          description: "Provider package list",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["object", "data", "hasMore"],
-                properties: {
-                  object: { type: "string", enum: ["list"] },
-                  data: {
-                    type: "array",
-                    items: { $ref: "#/components/schemas/OrgPackageItem" },
-                  },
-                  hasMore: { type: "boolean" },
-                },
-              },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-      },
-    },
-    post: {
-      operationId: "createProviderPackage",
-      tags: ["Packages"],
-      summary: "Create a provider package",
-      description:
-        "Create a new provider package from manifest and content. Creates an initial version automatically.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-      ],
-      requestBody: {
-        required: true,
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              required: ["manifest", "content"],
-              properties: {
-                manifest: { $ref: "#/components/schemas/ProviderManifest" },
-                content: {
-                  type: "string",
-                  description: "Provider definition JSON (definition.json)",
-                },
-              },
-            },
-          },
-        },
-      },
-      responses: {
-        "201": {
-          description: "Provider package created",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  packageId: { type: "string" },
-                  lockVersion: { type: "integer" },
-                  message: { type: "string" },
-                },
-              },
-            },
-          },
-        },
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-      },
-    },
-  },
-  "/api/packages/providers/{scope}/{name}/versions/info": {
-    get: {
-      operationId: "getProviderPackageVersionInfo",
-      tags: ["Packages"],
-      summary: "Get version info for a provider package (latest published + draft)",
-      description:
-        "Returns the latest published version and the current draft version from the manifest.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-      ],
-      responses: {
-        "200": {
-          description: "Version info",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  latestPublishedVersion: { type: ["string", "null"] },
-                  activeVersion: { type: ["string", "null"] },
-                },
-              },
-            },
-          },
-        },
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-  },
-  "/api/packages/providers/{scope}/{name}/versions": {
-    get: {
-      operationId: "listProviderPackageVersions",
-      tags: ["Packages"],
-      summary: "List provider package versions",
-      description: "List all published versions for a provider package.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-      ],
-      responses: {
-        "200": {
-          description: "Version list",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  versions: {
-                    type: "array",
-                    items: { $ref: "#/components/schemas/AgentVersion" },
-                  },
-                },
-              },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-    post: {
-      operationId: "createProviderPackageVersion",
-      tags: ["Packages"],
-      summary: "Create a version from draft",
-      description:
-        "Create an immutable version snapshot from the current provider package draft. Version is determined by the manifest version field unless overridden.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-      ],
-      requestBody: {
-        required: false,
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              properties: {
-                version: {
-                  type: "string",
-                  description: "Optional semver version override (e.g. from bump selector)",
-                },
-              },
-            },
-          },
-        },
-      },
-      responses: {
-        "201": {
-          description: "Version created",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  id: { type: "integer" },
-                  version: { type: "string" },
-                  message: { type: "string" },
-                },
-              },
-            },
-          },
-        },
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-      },
-    },
-  },
-  "/api/packages/providers/{scope}/{name}/versions/{version}/restore": {
-    post: {
-      operationId: "restoreProviderPackageVersion",
-      tags: ["Packages"],
-      summary: "Restore a provider package version into the draft",
-      description:
-        "Restore a previously published version into the provider package draft. Does not create a new version.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-        {
-          name: "version",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Version to restore (exact, dist-tag, or semver range)",
-        },
-      ],
-      responses: {
-        "200": {
-          description: "Version restored",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  message: { type: "string" },
-                  restoredVersion: { type: "string" },
-                  lockVersion: { type: "integer" },
-                },
-              },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-        "409": { description: "Concurrent modification" },
-      },
-    },
-  },
-  "/api/packages/providers/{scope}/{name}/versions/{version}": {
-    get: {
-      operationId: "getProviderPackageVersionDetail",
-      tags: ["Packages"],
-      summary: "Get provider package version detail",
-      description:
-        "Resolve a version query and return versioned provider data including content extracted from ZIP.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-        {
-          name: "version",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Version query — exact version, dist-tag, or semver range",
-        },
-      ],
-      responses: {
-        "200": {
-          description: "Versioned provider detail",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  id: { type: "integer" },
-                  version: { type: "string" },
-                  manifest: { $ref: "#/components/schemas/ProviderManifest" },
-                  content: { type: ["string", "null"] },
-                  yanked: { type: "boolean" },
-                  yankedReason: { type: ["string", "null"] },
-                  integrity: { type: "string" },
-                  artifactSize: { type: "integer" },
-                  createdAt: { type: ["string", "null"], format: "date-time" },
-                  distTags: { type: "array", items: { type: "string" } },
-                },
-              },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-    delete: {
-      operationId: "deleteProviderPackageVersion",
-      tags: ["Packages"],
-      summary: "Delete a provider package version",
-      description:
-        "Permanently delete a provider package version. Reassigns affected dist-tags to the next best stable version.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-        { name: "version", in: "path", required: true, schema: { type: "string" } },
-      ],
-      responses: {
-        "204": {
-          description: "Version deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-  },
-  "/api/packages/providers/{scope}/{name}": {
-    get: {
-      operationId: "getProviderPackage",
-      tags: ["Packages"],
-      summary: "Get provider package detail",
-      description: "Get a provider package's full details including content.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-      ],
-      responses: {
-        "200": {
-          description: "Provider package detail",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: { $ref: "#/components/schemas/OrgPackageItemDetail" },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-    put: {
-      operationId: "updateProviderPackage",
-      tags: ["Packages"],
-      summary: "Update a provider package",
-      description:
-        "Update a provider package in the organization. Built-in providers cannot be modified.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-      ],
-      requestBody: {
-        required: true,
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              required: ["manifest", "content", "lockVersion"],
-              properties: {
-                manifest: { $ref: "#/components/schemas/ProviderManifest" },
-                content: { type: "string" },
-                lockVersion: { type: "integer", description: "Optimistic lock version" },
-              },
-            },
-          },
-        },
-      },
-      responses: {
-        "200": {
-          description: "Provider package updated",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  packageId: { type: "string" },
-                  lockVersion: { type: "integer" },
-                },
-              },
-            },
-          },
-        },
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-    delete: {
-      operationId: "deleteProviderPackage",
-      tags: ["Packages"],
-      summary: "Delete a provider package",
-      description:
-        "Delete a provider package from the organization. Built-in providers cannot be deleted.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-      ],
-      responses: {
-        "204": {
-          description: "Provider package deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-        "409": { description: "Provider in use by agents" },
       },
     },
   },
@@ -2486,10 +1536,6 @@ export const packagesPaths = {
                 description: { type: "string" },
                 content: { type: "string" },
                 version: { type: "string", description: "Semver version (X.Y.Z)" },
-                scopedName: {
-                  type: "string",
-                  description: "Registry scoped name (@scope/name)",
-                },
               },
             },
           },
@@ -2508,7 +1554,7 @@ export const packagesPaths = {
                 type: "object",
                 properties: {
                   packageId: { type: "string" },
-                  lockVersion: { type: "integer" },
+                  lock_version: { type: "integer" },
                 },
               },
             },
@@ -2564,7 +1610,7 @@ export const packagesPaths = {
                     type: "array",
                     items: {
                       type: "object",
-                      properties: { id: { type: "string" }, displayName: { type: "string" } },
+                      properties: { id: { type: "string" }, display_name: { type: "string" } },
                     },
                     description: "Agents referencing this skill (for IN_USE)",
                   },
@@ -2572,168 +1618,9 @@ export const packagesPaths = {
                     type: "array",
                     items: {
                       type: "object",
-                      properties: { id: { type: "string" }, displayName: { type: "string" } },
+                      properties: { id: { type: "string" }, display_name: { type: "string" } },
                     },
                     description: "Packages depending on this skill (for DEPENDED_ON)",
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-    },
-  },
-  "/api/packages/tools/{id}": {
-    get: {
-      operationId: "getToolById",
-      tags: ["Packages"],
-      summary: "Get tool detail by ID",
-      description: "Get a tool's full details by unscoped package ID.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "id",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package ID (unscoped)",
-        },
-      ],
-      responses: {
-        "200": {
-          description: "Tool detail",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: { $ref: "#/components/schemas/OrgPackageItemDetail" },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-    put: {
-      operationId: "updateToolById",
-      tags: ["Packages"],
-      summary: "Update a tool by ID",
-      description: "Update a tool by unscoped package ID. Built-in tools cannot be modified.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "id",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package ID (unscoped)",
-        },
-      ],
-      requestBody: {
-        required: true,
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              properties: {
-                name: { type: "string", description: "Display name" },
-                description: { type: "string" },
-                content: { type: "string" },
-                version: { type: "string", description: "Semver version (X.Y.Z)" },
-                scopedName: {
-                  type: "string",
-                  description: "Registry scoped name (@scope/name)",
-                },
-              },
-            },
-          },
-        },
-      },
-      responses: {
-        "200": {
-          description: "Tool updated",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  packageId: { type: "string" },
-                  lockVersion: { type: "integer" },
-                },
-              },
-            },
-          },
-        },
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-    delete: {
-      operationId: "deleteToolById",
-      tags: ["Packages"],
-      summary: "Delete a tool by ID",
-      description: "Delete a tool by unscoped package ID. Built-in tools cannot be deleted.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "id",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package ID (unscoped)",
-        },
-      ],
-      responses: {
-        "204": {
-          description: "Tool deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-        "409": {
-          description: "Tool is referenced by agents or required by other packages",
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  error: {
-                    type: "string",
-                    enum: ["IN_USE", "DEPENDED_ON"],
-                    description:
-                      "IN_USE: referenced by agents. DEPENDED_ON: required by other packages.",
-                  },
-                  message: { type: "string" },
-                  agents: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: { id: { type: "string" }, displayName: { type: "string" } },
-                    },
-                    description: "Agents referencing this tool (for IN_USE)",
-                  },
-                  dependents: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: { id: { type: "string" }, displayName: { type: "string" } },
-                    },
-                    description: "Packages depending on this tool (for DEPENDED_ON)",
                   },
                 },
               },
@@ -2749,7 +1636,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Get agent detail by ID",
       description:
-        "Returns agent detail including providers, config, state, skills, and tools by unscoped package ID.",
+        "Returns agent detail including integrations, config, state, and skills by unscoped package ID.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -2801,11 +1688,11 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["manifest", "content", "lockVersion"],
+              required: ["manifest", "content", "lock_version"],
               properties: {
                 manifest: { $ref: "#/components/schemas/AgentManifest" },
                 content: { type: "string" },
-                lockVersion: { type: "integer", description: "Optimistic lock version" },
+                lock_version: { type: "integer", description: "Optimistic lock version" },
               },
             },
           },
@@ -2824,7 +1711,7 @@ export const packagesPaths = {
                 type: "object",
                 properties: {
                   packageId: { type: "string" },
-                  lockVersion: { type: "integer" },
+                  lock_version: { type: "integer" },
                 },
               },
             },
@@ -2863,129 +1750,6 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "409": { description: "Agent in use" },
-      },
-    },
-  },
-  "/api/packages/providers/{id}": {
-    get: {
-      operationId: "getProviderPackageById",
-      tags: ["Packages"],
-      summary: "Get provider package detail by ID",
-      description: "Get a provider package's full details by unscoped package ID.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "id",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package ID (unscoped)",
-        },
-      ],
-      responses: {
-        "200": {
-          description: "Provider package detail",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: { $ref: "#/components/schemas/OrgPackageItemDetail" },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-    put: {
-      operationId: "updateProviderPackageById",
-      tags: ["Packages"],
-      summary: "Update a provider package by ID",
-      description:
-        "Update a provider package by unscoped package ID. Built-in providers cannot be modified.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "id",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package ID (unscoped)",
-        },
-      ],
-      requestBody: {
-        required: true,
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              required: ["manifest", "content", "lockVersion"],
-              properties: {
-                manifest: { $ref: "#/components/schemas/ProviderManifest" },
-                content: { type: "string" },
-                lockVersion: { type: "integer", description: "Optimistic lock version" },
-              },
-            },
-          },
-        },
-      },
-      responses: {
-        "200": {
-          description: "Provider package updated",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  packageId: { type: "string" },
-                  lockVersion: { type: "integer" },
-                },
-              },
-            },
-          },
-        },
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-    delete: {
-      operationId: "deleteProviderPackageById",
-      tags: ["Packages"],
-      summary: "Delete a provider package by ID",
-      description:
-        "Delete a provider package by unscoped package ID. Built-in providers cannot be deleted.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "id",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package ID (unscoped)",
-        },
-      ],
-      responses: {
-        "204": {
-          description: "Provider package deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-        "409": { description: "Provider in use by agents" },
       },
     },
   },

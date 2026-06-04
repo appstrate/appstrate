@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { type ChangeEvent, useEffect, useMemo, useRef } from "react";
+import { type ChangeEvent, type ReactNode, useEffect, useMemo, useRef } from "react";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
@@ -20,10 +20,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { ShieldCheck } from "lucide-react";
+import { ShieldCheck, AlertTriangle } from "lucide-react";
 import { Spinner } from "../spinner";
 import type { ResourceEntry } from "./types";
 import { caretRange } from "./utils";
+import { IntegrationToolPicker } from "./integration-tool-picker";
 
 type ResourceEntriesUpdater = ResourceEntry[] | ((prev: ResourceEntry[]) => ResourceEntry[]);
 
@@ -33,6 +34,14 @@ interface ResourceSectionProps {
   emptyLabel: string;
   selectedEntries: ResourceEntry[];
   onChange: (updater: ResourceEntriesUpdater) => void;
+  /**
+   * Extra entries rendered at the top of the list, before the catalog
+   * items — same visual chrome, different data source. Used to surface
+   * the platform runtime tools as a system "integration" card in the
+   * Integrations section. When present, the empty state is suppressed
+   * (the list always renders so the leading items show).
+   */
+  leadingItems?: ReactNode;
 }
 
 export function VersionSelect({
@@ -41,7 +50,7 @@ export function VersionSelect({
   value,
   onChange,
 }: {
-  type: PackageType | "agent" | "provider";
+  type: PackageType | "agent";
   packageId: string;
   value: string;
   onChange: (version: string) => void;
@@ -92,13 +101,29 @@ export function ResourceSection({
   emptyLabel,
   selectedEntries,
   onChange,
+  leadingItems,
 }: ResourceSectionProps) {
   const { t } = useTranslation(["agents", "common"]);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { data: items, isLoading } = usePackageList(type);
+  // Integrations must be active (installed + enabled) in this app to be
+  // usable. Filter server-side (`?active=true`) so the editor never pulls the
+  // full catalogue — only active integrations are offered.
+  const { data: items, isLoading } = usePackageList(type, {
+    activeOnly: type === "integration",
+  });
   const upload = useUploadPackage(type);
 
   const selectedMap = new Map(selectedEntries.map((e) => [e.id, e]));
+
+  // An agent may still declare an integration that's no longer active here
+  // (uninstalled/disabled since). Those won't come back in the active list, so
+  // surface them in a flagged section — never silently drop a declared
+  // dependency (the run-time gate would reject it with `integration_not_active`).
+  const inactiveDeclaredIds = useMemo(() => {
+    if (type !== "integration" || !items) return [];
+    const present = new Set(items.map((i) => i.id));
+    return selectedEntries.filter((e) => !present.has(e.id)).map((e) => e.id);
+  }, [items, type, selectedEntries]);
 
   const toggle = (id: string) => {
     onChange((prev) => {
@@ -113,6 +138,10 @@ export function ResourceSection({
 
   const updateVersion = (id: string, version: string) => {
     onChange((prev) => prev.map((e) => (e.id === id ? { ...e, version } : e)));
+  };
+
+  const replaceEntry = (id: string, next: ResourceEntry) => {
+    onChange((prev) => prev.map((e) => (e.id === id ? next : e)));
   };
 
   const handleUpload = async (e: ChangeEvent<HTMLInputElement>) => {
@@ -156,7 +185,7 @@ export function ResourceSection({
         <div className="text-muted-foreground flex items-center justify-center py-6">
           <Spinner />
         </div>
-      ) : !items || items.length === 0 ? (
+      ) : (!items || items.length === 0) && inactiveDeclaredIds.length === 0 && !leadingItems ? (
         <>
           <p className="text-muted-foreground text-xs">{emptyLabel}</p>
           <p className="text-muted-foreground text-xs">
@@ -165,46 +194,83 @@ export function ResourceSection({
         </>
       ) : (
         <div className="flex flex-col gap-1">
-          {items.map((item) => {
+          {leadingItems}
+          {(items ?? []).map((item) => {
             const isSelected = selectedMap.has(item.id);
             const isBuiltIn = item.source === "system";
             const entry = selectedMap.get(item.id);
 
             return (
-              <label
+              <div
                 key={item.id}
                 className={cn(
-                  "border-border hover:bg-muted/50 flex cursor-pointer items-center gap-2.5 rounded-md border px-3 py-2 transition-colors",
+                  "border-border rounded-md border transition-colors",
                   isSelected && "border-primary bg-primary/5",
                 )}
               >
-                <Checkbox checked={isSelected} onCheckedChange={() => toggle(item.id)} />
-                <div className="flex min-w-0 flex-1 flex-col">
-                  <span className="flex items-center gap-1.5 truncate text-sm font-medium">
-                    {item.name || item.id}
-                    {isBuiltIn && (
-                      <ShieldCheck className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
-                    )}
-                  </span>
-                  {item.description && (
-                    <span className="text-muted-foreground truncate text-xs">
-                      {item.description}
-                    </span>
+                <label
+                  className={cn(
+                    "flex cursor-pointer items-center gap-2.5 px-3 py-2",
+                    !isSelected && "hover:bg-muted/50 rounded-md",
                   )}
-                </div>
-                {isSelected && (
-                  <div className="ml-auto shrink-0">
-                    <VersionSelect
-                      type={type}
+                >
+                  <Checkbox checked={isSelected} onCheckedChange={() => toggle(item.id)} />
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="flex items-center gap-1.5 truncate text-sm font-medium">
+                      {item.name || item.id}
+                      {isBuiltIn && (
+                        <ShieldCheck className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
+                      )}
+                    </span>
+                    {item.description && (
+                      <span className="text-muted-foreground truncate text-xs">
+                        {item.description}
+                      </span>
+                    )}
+                  </div>
+                  {isSelected && (
+                    <div className="ml-auto shrink-0">
+                      <VersionSelect
+                        type={type}
+                        packageId={item.id}
+                        value={entry?.version ?? "*"}
+                        onChange={(v) => updateVersion(item.id, v)}
+                      />
+                    </div>
+                  )}
+                </label>
+                {isSelected && type === "integration" && entry && (
+                  <div className="px-3 pb-3">
+                    <IntegrationToolPicker
                       packageId={item.id}
-                      value={entry?.version ?? "*"}
-                      onChange={(v) => updateVersion(item.id, v)}
+                      entry={entry}
+                      onChange={(next) => replaceEntry(item.id, next)}
                     />
                   </div>
                 )}
-              </label>
+              </div>
             );
           })}
+
+          {/* Declared but no longer active in this app — flagged so the user
+              can drop them (or an admin can re-activate). Uncheck removes the
+              dependency from the manifest. */}
+          {inactiveDeclaredIds.map((id) => (
+            <div key={id} className="border-destructive/40 bg-destructive/5 rounded-md border">
+              <label className="flex cursor-pointer items-center gap-2.5 px-3 py-2">
+                <Checkbox checked onCheckedChange={() => toggle(id)} />
+                <div className="flex min-w-0 flex-1 flex-col">
+                  <span className="flex items-center gap-1.5 truncate text-sm font-medium">
+                    {id}
+                    <span className="text-destructive inline-flex items-center gap-1 text-xs font-normal">
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                      {t("editor.integrationInactive")}
+                    </span>
+                  </span>
+                </div>
+              </label>
+            </div>
+          ))}
         </div>
       )}
     </SectionCard>

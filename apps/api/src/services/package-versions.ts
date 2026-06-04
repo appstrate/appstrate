@@ -13,8 +13,9 @@ import {
 } from "./package-storage.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { computeIntegrity } from "@appstrate/core/integrity";
-import { extractDependencies } from "@appstrate/core/dependencies";
+import { extractDependencies, detectCycle, type DepEntry } from "@appstrate/core/dependencies";
 import { storeVersionDependencies, clearVersionDependencies } from "./package-version-deps.ts";
+import { packageVersionDependencies } from "@appstrate/db/schema";
 import {
   isValidVersion,
   resolveVersionFromCatalog,
@@ -26,7 +27,6 @@ import { planCreateVersionOutcome, planTagReassignment } from "@appstrate/core/v
 import { buildDependencies } from "./package-items/dependencies.ts";
 import { parseScopedName } from "@appstrate/core/naming";
 import { zipArtifact } from "@appstrate/core/zip";
-import { buildPublishedToolArchive } from "@appstrate/core/tool-bundler";
 import { asRecord, asRecordOrNull } from "@appstrate/core/safe-json";
 import { downloadPackageFiles } from "./package-items/storage.ts";
 import { toISO } from "../lib/date-helpers.ts";
@@ -44,7 +44,17 @@ interface CreateVersionParams {
   createdBy: string | null;
 }
 
-/** Create a new version with semver, integrity, manifest snapshot. Auto-manages "latest" dist-tag. */
+/**
+ * Create a new version with semver, integrity, manifest snapshot. Auto-manages
+ * "latest" dist-tag.
+ *
+ * Returns `null` ONLY for the legitimate no-op cases — an invalid semver, a
+ * version that already exists (with no row to return), or a forward-only
+ * rejection. A genuine DB failure THROWS so callers can distinguish a real
+ * error from a benign skip (e.g. so the ZIP-cleanup path in
+ * {@link createVersionAndUpload} fires and the import doesn't commit an
+ * orphaned packages row without a version).
+ */
 export async function createPackageVersion(params: CreateVersionParams): Promise<{
   id: number;
   version: string;
@@ -56,76 +66,65 @@ export async function createPackageVersion(params: CreateVersionParams): Promise
     return null;
   }
 
-  try {
-    return await db.transaction(async (tx) => {
-      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${packageId}))`);
+  return await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${packageId}))`);
 
-      // Forward-only enforcement (include yanked — duplicates must be rejected even if yanked)
-      const allExisting = await tx
-        .select({ version: packageVersions.version })
-        .from(packageVersions)
-        .where(eq(packageVersions.packageId, packageId));
+    // Forward-only enforcement (include yanked — duplicates must be rejected even if yanked)
+    const allExisting = await tx
+      .select({ version: packageVersions.version })
+      .from(packageVersions)
+      .where(eq(packageVersions.packageId, packageId));
 
-      const [currentLatest] = await tx
-        .select({ version: packageVersions.version })
-        .from(packageDistTags)
-        .innerJoin(packageVersions, eq(packageDistTags.versionId, packageVersions.id))
-        .where(and(eq(packageDistTags.packageId, packageId), eq(packageDistTags.tag, "latest")))
-        .limit(1);
+    const [currentLatest] = await tx
+      .select({ version: packageVersions.version })
+      .from(packageDistTags)
+      .innerJoin(packageVersions, eq(packageDistTags.versionId, packageVersions.id))
+      .where(and(eq(packageDistTags.packageId, packageId), eq(packageDistTags.tag, "latest")))
+      .limit(1);
 
-      const outcome = planCreateVersionOutcome(
-        version,
-        allExisting.map((v) => v.version),
-        currentLatest?.version ?? null,
-      );
-
-      if (outcome.action === "exists") {
-        logger.warn("Version already exists", { packageId, version });
-        const [existingRow] = await tx
-          .select({ id: packageVersions.id, version: packageVersions.version })
-          .from(packageVersions)
-          .where(
-            and(eq(packageVersions.packageId, packageId), eq(packageVersions.version, version)),
-          )
-          .limit(1);
-        return existingRow ?? null;
-      }
-      if (outcome.action === "rejected") {
-        logger.warn("Version rejected", {
-          packageId,
-          version,
-          error: outcome.error,
-          highest: outcome.error === "VERSION_NOT_HIGHER" ? outcome.highest : undefined,
-        });
-        return null;
-      }
-
-      const [row] = await tx
-        .insert(packageVersions)
-        .values({ packageId, version, integrity, artifactSize, manifest, createdBy })
-        .returning({ id: packageVersions.id, version: packageVersions.version });
-
-      // Auto-manage "latest" dist-tag
-      if (outcome.shouldUpdateLatest) {
-        await tx
-          .insert(packageDistTags)
-          .values({ packageId, tag: "latest", versionId: row!.id })
-          .onConflictDoUpdate({
-            target: [packageDistTags.packageId, packageDistTags.tag],
-            set: { versionId: row!.id, updatedAt: new Date() },
-          });
-      }
-
-      return { id: row!.id, version: row!.version };
-    });
-  } catch (err) {
-    logger.error("Failed to create package version", {
-      packageId,
+    const outcome = planCreateVersionOutcome(
       version,
-      error: getErrorMessage(err),
-    });
-    return null;
-  }
+      allExisting.map((v) => v.version),
+      currentLatest?.version ?? null,
+    );
+
+    if (outcome.action === "exists") {
+      logger.warn("Version already exists", { packageId, version });
+      const [existingRow] = await tx
+        .select({ id: packageVersions.id, version: packageVersions.version })
+        .from(packageVersions)
+        .where(and(eq(packageVersions.packageId, packageId), eq(packageVersions.version, version)))
+        .limit(1);
+      return existingRow ?? null;
+    }
+    if (outcome.action === "rejected") {
+      logger.warn("Version rejected", {
+        packageId,
+        version,
+        error: outcome.error,
+        highest: outcome.error === "VERSION_NOT_HIGHER" ? outcome.highest : undefined,
+      });
+      return null;
+    }
+
+    const [row] = await tx
+      .insert(packageVersions)
+      .values({ packageId, version, integrity, artifactSize, manifest, createdBy })
+      .returning({ id: packageVersions.id, version: packageVersions.version });
+
+    // Auto-manage "latest" dist-tag
+    if (outcome.shouldUpdateLatest) {
+      await tx
+        .insert(packageDistTags)
+        .values({ packageId, tag: "latest", versionId: row!.id })
+        .onConflictDoUpdate({
+          target: [packageDistTags.packageId, packageDistTags.tag],
+          set: { versionId: row!.id, updatedAt: new Date() },
+        });
+    }
+
+    return { id: row!.id, version: row!.version };
+  });
 }
 
 // ─────────────────────────────────────────────
@@ -139,14 +138,14 @@ export async function listPackageVersions(packageId: string) {
       id: packageVersions.id,
       version: packageVersions.version,
       integrity: packageVersions.integrity,
-      artifactSize: packageVersions.artifactSize,
+      artifact_size: packageVersions.artifactSize,
       yanked: packageVersions.yanked,
       createdBy: packageVersions.createdBy,
       createdAt: packageVersions.createdAt,
     })
     .from(packageVersions)
     .where(eq(packageVersions.packageId, packageId))
-    .orderBy(desc(packageVersions.createdAt));
+    .orderBy(desc(packageVersions.createdAt), desc(packageVersions.id));
 
   return rows.map((r) => ({
     ...r,
@@ -255,7 +254,7 @@ interface VersionDetail {
   id: number;
   version: string;
   manifest: Record<string, unknown>;
-  textContent: string | null;
+  prompt: string | null;
   content: Record<string, Uint8Array> | null;
   yanked: boolean;
   yankedReason: string | null;
@@ -293,7 +292,7 @@ export async function getVersionDetail(
   if (!row) return null;
 
   // Try to download and extract ZIP content
-  let textContent: string | null = null;
+  let prompt: string | null = null;
   let content: Record<string, Uint8Array> | null = null;
 
   try {
@@ -304,7 +303,7 @@ export async function getVersionDetail(
       // Extract prompt.md from ZIP
       const promptData = files["prompt.md"];
       if (promptData) {
-        textContent = new TextDecoder().decode(promptData);
+        prompt = new TextDecoder().decode(promptData);
       }
     }
   } catch (err) {
@@ -319,7 +318,7 @@ export async function getVersionDetail(
     id: row.id,
     version: row.version,
     manifest: asRecord(row.manifest),
-    textContent,
+    prompt,
     content,
     yanked: row.yanked,
     yankedReason: row.yankedReason,
@@ -431,7 +430,7 @@ export async function getMatchingDistTags(packageId: string, version: string): P
 export async function getVersionInfo(
   packageId: string,
   orgId: string,
-): Promise<{ latestPublishedVersion: string | null; activeVersion: string | null }> {
+): Promise<{ latest_published_version: string | null; active_version: string | null }> {
   const [[pkg], [latestTag]] = await Promise.all([
     db
       .select({ draftManifest: packages.draftManifest })
@@ -458,7 +457,7 @@ export async function getVersionInfo(
     latestPublishedVersion = row?.version ?? null;
   }
 
-  return { latestPublishedVersion, activeVersion };
+  return { latest_published_version: latestPublishedVersion, active_version: activeVersion };
 }
 
 // ─────────────────────────────────────────────
@@ -567,13 +566,7 @@ export async function createVersionFromDraft(params: {
 
   // Build ZIP depending on package type
   let zipBuffer: Buffer;
-  if (pkg.type === "provider") {
-    // Providers store everything in manifest — ZIP contains only manifest.json
-    const entries: Record<string, Uint8Array> = {
-      "manifest.json": new TextEncoder().encode(JSON.stringify(finalManifest, null, 2)),
-    };
-    zipBuffer = Buffer.from(zipArtifact(entries, 6));
-  } else if (pkg.type === "agent") {
+  if (pkg.type === "agent") {
     const storedFiles = await downloadPackageFiles("agents", orgId, packageId);
     if (storedFiles) {
       const entries: Record<string, Uint8Array> = { ...storedFiles };
@@ -584,8 +577,12 @@ export async function createVersionFromDraft(params: {
       // Locally-created agents have no stored files — minimal ZIP is correct
       zipBuffer = buildMinimalZip(finalManifest, content);
     }
-  } else if (pkg.type === "skill") {
-    const files = await downloadPackageFiles("skills", orgId, packageId);
+  } else {
+    // pkg.type === "skill" | "integration" — both bundle their stored files
+    // (skill content / integration entrypoint+bundle) plus the rewritten
+    // manifest, from their respective storage folder.
+    const folder = pkg.type === "integration" ? "integrations" : "skills";
+    const files = await downloadPackageFiles(folder, orgId, packageId);
     if (!files) {
       throw new Error(
         `Cannot create version for ${packageId}: package files not found in storage. Re-upload the package before creating a version.`,
@@ -594,24 +591,6 @@ export async function createVersionFromDraft(params: {
     const entries: Record<string, Uint8Array> = { ...files };
     entries["manifest.json"] = new TextEncoder().encode(JSON.stringify(finalManifest, null, 2));
     zipBuffer = Buffer.from(zipArtifact(entries, 6));
-  } else {
-    // pkg.type === "tool" — bundle the draft's entrypoint into a
-    // self-contained `tool.js` and rewrite `manifest.entrypoint`
-    // accordingly (AFPS §3.4). See `@appstrate/core/tool-bundler`.
-    const files = await downloadPackageFiles("tools", orgId, packageId);
-    if (!files) {
-      throw new Error(
-        `Cannot create version for ${packageId}: package files not found in storage. Re-upload the package before creating a version.`,
-      );
-    }
-    const toolIdForLogs = typeof finalManifest.name === "string" ? finalManifest.name : packageId;
-    const built = await buildPublishedToolArchive({
-      files,
-      manifest: finalManifest,
-      toolId: toolIdForLogs,
-    });
-    finalManifest = built.manifest;
-    zipBuffer = Buffer.from(built.archive);
   }
 
   // Check for duplicate content — reject if identical to the latest version
@@ -635,6 +614,54 @@ export async function createVersionFromDraft(params: {
 // Replace existing version content
 // ─────────────────────────────────────────────
 
+// ─────────────────────────────────────────────
+// AFPS §4.3 — circular dependency detection
+// ─────────────────────────────────────────────
+
+/**
+ * Resolver for {@link detectCycle}: returns the direct dependencies of the
+ * latest published version of `@scope/name` by reading the flattened
+ * `package_version_dependencies` rows. Used at publish time to walk the
+ * transitive dep graph and reject cycles before persistence. The graph is a
+ * conservative snapshot — yanked versions are excluded by
+ * {@link getLatestVersionId}'s preference for "latest" dist-tag.
+ */
+async function resolvePublishedDeps(scope: string, name: string): Promise<DepEntry[]> {
+  const packageId = `${scope}/${name}`;
+  const versionId = await getLatestVersionId(packageId);
+  if (!versionId) return [];
+  const rows = await db
+    .select({
+      depScope: packageVersionDependencies.depScope,
+      depName: packageVersionDependencies.depName,
+      depType: packageVersionDependencies.depType,
+      versionRange: packageVersionDependencies.versionRange,
+    })
+    .from(packageVersionDependencies)
+    .where(eq(packageVersionDependencies.versionId, versionId));
+  return rows.map((r) => ({
+    depScope: r.depScope,
+    depName: r.depName,
+    depType: r.depType as DepEntry["depType"],
+    versionRange: r.versionRange,
+  }));
+}
+
+/**
+ * Walk the dep graph rooted at `packageId` with `directDeps`, rejecting any
+ * cycle with a structured error carrying the cycle path. Wraps
+ * {@link detectCycle} for the publish path; the self-dep fast-path (a package
+ * declaring itself in its own deps) is handled by `detectCycle` directly.
+ */
+async function assertNoCycle(packageId: string, directDeps: DepEntry[]): Promise<void> {
+  // AFPS §4.3 — circular dependency detection.
+  const result = await detectCycle(packageId, directDeps, resolvePublishedDeps);
+  if (result.hasCycle) {
+    const path = result.cyclePath?.join(" → ") ?? packageId;
+    throw new Error(`Circular dependency detected: ${path}`);
+  }
+}
+
 /** Replace the content of an existing version (integrity, artifactSize, manifest) and re-upload ZIP. */
 export async function replaceVersionContent(params: {
   packageId: string;
@@ -645,6 +672,13 @@ export async function replaceVersionContent(params: {
   const { packageId, version, zipBuffer, manifest } = params;
   const integrity = computeIntegrity(new Uint8Array(zipBuffer));
   const artifactSize = zipBuffer.byteLength;
+
+  // Validate dep shape + reject cycles BEFORE uploading or mutating DB so a
+  // bad manifest can't leave a partial side-effect (uploaded ZIP, stale row).
+  // `extractDependencies` itself rejects invalid scoped names and invalid
+  // semver ranges (invalid ranges are rejected upstream here).
+  const deps = extractDependencies(manifest);
+  await assertNoCycle(packageId, deps);
 
   // Upload ZIP first to avoid integrity mismatch if upload fails after DB update
   await uploadPackageZip(packageId, version, zipBuffer);
@@ -660,9 +694,9 @@ export async function replaceVersionContent(params: {
     return;
   }
 
-  // Clear old deps and re-store from new manifest
+  // Clear old deps and re-store from new manifest. Invalid ranges are
+  // rejected upstream by `extractDependencies`.
   await clearVersionDependencies(row.id);
-  const deps = extractDependencies(manifest);
   if (deps.length > 0) {
     await storeVersionDependencies(row.id, deps);
   }
@@ -687,6 +721,13 @@ export async function createVersionAndUpload(params: {
   const integrity = computeIntegrity(new Uint8Array(zipBuffer));
   const artifactSize = zipBuffer.byteLength;
 
+  // Validate dep shape + reject cycles BEFORE uploading or persisting the
+  // version row. `extractDependencies` rejects invalid scoped names and
+  // invalid semver ranges (invalid ranges are rejected upstream
+  // here, so the throw propagates and no ZIP / row is created).
+  const deps = extractDependencies(manifest);
+  await assertNoCycle(packageId, deps);
+
   // Upload ZIP first — a ZIP without a DB row is safer than a DB row without a ZIP
   await uploadPackageZip(packageId, version, zipBuffer);
 
@@ -701,7 +742,6 @@ export async function createVersionAndUpload(params: {
     });
 
     if (result) {
-      const deps = extractDependencies(manifest);
       if (deps.length > 0) {
         await storeVersionDependencies(result.id, deps);
       }

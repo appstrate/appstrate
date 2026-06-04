@@ -3,7 +3,7 @@
 /**
  * Tests for the sidecar's `/mcp` resource surface:
  *   - `resources/list` + `resources/read` backed by the run-scoped blob cache.
- *   - `provider_call` spilling oversized / binary upstream responses to
+ *   - `api_call` spilling oversized / binary upstream responses to
  *     `resource_link` blocks.
  *
  * The tests reuse the same `rpc()` JSON-RPC helper pattern as
@@ -11,7 +11,8 @@
  */
 
 import { describe, it, expect, mock } from "bun:test";
-import { createApp, type AppDeps } from "../app.ts";
+import { createApp, buildSidecarRuntimeDeps, type AppDeps } from "../app.ts";
+import { buildApiCallHost } from "./helpers/api-call-host.ts";
 import { type CredentialsResponse } from "../helpers.ts";
 
 function makeDeps(overrides: Partial<AppDeps> = {}): AppDeps {
@@ -45,6 +46,42 @@ function makeDeps(overrides: Partial<AppDeps> = {}): AppDeps {
   };
 }
 
+/**
+ * Build the `/mcp` app with `test__api_call` hosted on an McpHost and the
+ * SAME run-scoped blob store wired into the outer server's resource
+ * provider — so a `resource_link` spilled by the in-process api_call tool
+ * resolves via `resources/read` across the McpHost boundary.
+ */
+async function makeResourcesApp(overrides: Partial<AppDeps> = {}) {
+  const appDeps = makeDeps(overrides);
+  const runtimeDeps = buildSidecarRuntimeDeps(appDeps);
+  const host = await buildApiCallHost(
+    [
+      {
+        namespace: "test",
+        integrationId: "@test/integ",
+        fetchCredentials: integResCreds,
+        refreshCredentials: integResCreds,
+      },
+    ],
+    runtimeDeps,
+  );
+  return createApp({
+    ...appDeps,
+    runtimeDeps,
+    additionalMcpToolsProvider: () => host.buildTools(),
+  });
+}
+
+const integResCreds = async (): Promise<CredentialsResponse> => ({
+  credentials: { access_token: "test-123" },
+  authorizedUris: ["https://api.example.com/**"],
+  allowAllUris: false,
+  credentialHeaderName: "Authorization",
+  credentialHeaderPrefix: "Bearer",
+  credentialFieldName: "access_token",
+});
+
 async function rpc(
   app: ReturnType<typeof createApp>,
   payload: { method: string; params?: Record<string, unknown>; id?: number },
@@ -74,7 +111,7 @@ async function rpc(
   };
 }
 
-describe("POST /mcp — provider_call resource spillover", () => {
+describe("POST /mcp — api_call resource spillover", () => {
   it("returns a resource_link block for binary upstream responses", async () => {
     const fetchFn = mock(
       async () =>
@@ -83,13 +120,12 @@ describe("POST /mcp — provider_call resource spillover", () => {
           headers: { "Content-Type": "application/pdf" },
         }),
     );
-    const app = createApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
+    const app = await makeResourcesApp({ fetchFn: fetchFn as unknown as typeof fetch });
     const res = await rpc(app, {
       method: "tools/call",
       params: {
-        name: "provider_call",
+        name: "test__api_call",
         arguments: {
-          providerId: "test-provider",
           target: "https://api.example.com/document.pdf",
         },
       },
@@ -102,9 +138,7 @@ describe("POST /mcp — provider_call resource spillover", () => {
     expect(result.content).toHaveLength(1);
     expect(result.content[0]!.type).toBe("resource_link");
     expect(result.content[0]!.mimeType).toBe("application/pdf");
-    expect(result.content[0]!.uri).toMatch(
-      /^appstrate:\/\/provider-response\/run-test\/[A-Z0-9]{26}$/,
-    );
+    expect(result.content[0]!.uri).toMatch(/^appstrate:\/\/api-response\/run-test\/[A-Z0-9]{26}$/);
   });
 
   it("spills oversized text responses to a resource_link", async () => {
@@ -117,13 +151,12 @@ describe("POST /mcp — provider_call resource spillover", () => {
           headers: { "Content-Type": "application/json" },
         }),
     );
-    const app = createApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
+    const app = await makeResourcesApp({ fetchFn: fetchFn as unknown as typeof fetch });
     const res = await rpc(app, {
       method: "tools/call",
       params: {
-        name: "provider_call",
+        name: "test__api_call",
         arguments: {
-          providerId: "test-provider",
           target: "https://api.example.com/large.json",
         },
       },
@@ -150,13 +183,12 @@ describe("POST /mcp — provider_call resource spillover", () => {
           headers: { "Content-Type": "application/json" },
         }),
     );
-    const app = createApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
+    const app = await makeResourcesApp({ fetchFn: fetchFn as unknown as typeof fetch });
     const callRes = await rpc(app, {
       method: "tools/call",
       params: {
-        name: "provider_call",
+        name: "test__api_call",
         arguments: {
-          providerId: "test-provider",
           target: "https://api.example.com/medium.json",
         },
       },
@@ -195,13 +227,12 @@ describe("POST /mcp — provider_call resource spillover", () => {
           headers: { "Content-Type": "application/pdf" },
         }),
     );
-    const app = createApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
+    const app = await makeResourcesApp({ fetchFn: fetchFn as unknown as typeof fetch });
     const callRes = await rpc(app, {
       method: "tools/call",
       params: {
-        name: "provider_call",
+        name: "test__api_call",
         arguments: {
-          providerId: "test-provider",
           target: "https://api.example.com/large.pdf",
         },
       },
@@ -236,13 +267,12 @@ describe("POST /mcp — provider_call resource spillover", () => {
           headers: { "Content-Type": "application/json" },
         }),
     );
-    const app = createApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
+    const app = await makeResourcesApp({ fetchFn: fetchFn as unknown as typeof fetch });
     const res = await rpc(app, {
       method: "tools/call",
       params: {
-        name: "provider_call",
+        name: "test__api_call",
         arguments: {
-          providerId: "test-provider",
           target: "https://api.example.com/ping",
         },
       },
@@ -261,7 +291,7 @@ describe("POST /mcp — resources/list + resources/read", () => {
     expect(result.resources).toEqual([]);
   });
 
-  it("reads a resource that was previously spilled by provider_call", async () => {
+  it("reads a resource that was previously spilled by api_call", async () => {
     const pdfBytes = new Uint8Array([0xde, 0xad, 0xbe, 0xef, 0x00, 0xff]);
     const fetchFn = mock(
       async () =>
@@ -270,22 +300,21 @@ describe("POST /mcp — resources/list + resources/read", () => {
           headers: { "Content-Type": "application/pdf" },
         }),
     );
-    const app = createApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
+    const app = await makeResourcesApp({ fetchFn: fetchFn as unknown as typeof fetch });
 
-    // 1. Call provider_call to spill bytes into the blob cache.
+    // 1. Call api_call to spill bytes into the blob cache.
     const callRes = await rpc(app, {
       method: "tools/call",
       params: {
-        name: "provider_call",
+        name: "test__api_call",
         arguments: {
-          providerId: "test-provider",
           target: "https://api.example.com/document.pdf",
         },
       },
     });
     const callResult = callRes.json.result as { content: Array<{ uri: string }> };
     const uri = callResult.content[0]!.uri;
-    expect(uri).toMatch(/^appstrate:\/\/provider-response\/run-test\//);
+    expect(uri).toMatch(/^appstrate:\/\/api-response\/run-test\//);
 
     // 2. Read the resource and verify the bytes round-trip.
     const readRes = await rpc(app, {
@@ -314,13 +343,12 @@ describe("POST /mcp — resources/list + resources/read", () => {
           headers: { "Content-Type": "application/json" },
         }),
     );
-    const app = createApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
+    const app = await makeResourcesApp({ fetchFn: fetchFn as unknown as typeof fetch });
     const callRes = await rpc(app, {
       method: "tools/call",
       params: {
-        name: "provider_call",
+        name: "test__api_call",
         arguments: {
-          providerId: "test-provider",
           target: "https://api.example.com/large.json",
         },
       },
@@ -343,7 +371,7 @@ describe("POST /mcp — resources/list + resources/read", () => {
     const app = createApp(makeDeps());
     const res = await rpc(app, {
       method: "resources/read",
-      params: { uri: "appstrate://provider-response/run-test/01HZX0Q3ABCDEFGHJKMNPQRSTV" },
+      params: { uri: "appstrate://api-response/run-test/01HZX0Q3ABCDEFGHJKMNPQRSTV" },
     });
     expect(res.json.error).toBeDefined();
     expect(res.json.error!.code).toBe(-32602);
@@ -354,7 +382,7 @@ describe("POST /mcp — resources/list + resources/read", () => {
     const app = createApp(makeDeps()); // runId = run-test
     const res = await rpc(app, {
       method: "resources/read",
-      params: { uri: "appstrate://provider-response/run-other/01HZX0Q3ABCDEFGHJKMNPQRSTV" },
+      params: { uri: "appstrate://api-response/run-other/01HZX0Q3ABCDEFGHJKMNPQRSTV" },
     });
     expect(res.json.error).toBeDefined();
     expect(res.json.error!.code).toBe(-32602);

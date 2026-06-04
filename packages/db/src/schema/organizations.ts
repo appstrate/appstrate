@@ -11,6 +11,7 @@ import {
   index,
   uniqueIndex,
   primaryKey,
+  check,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { orgRoleEnum, invitationStatusEnum } from "./enums.ts";
@@ -23,8 +24,8 @@ export const organizations = pgTable("organizations", {
   slug: text("slug").unique().notNull(),
   orgSettings: jsonb("org_settings").notNull().default({}),
   createdBy: text("created_by").references(() => user.id),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 export const organizationMembers = pgTable(
@@ -37,7 +38,7 @@ export const organizationMembers = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     role: orgRoleEnum("role").notNull(),
-    joinedAt: timestamp("joined_at").defaultNow().notNull(),
+    joinedAt: timestamp("joined_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     primaryKey({ columns: [table.orgId, table.userId] }),
@@ -60,9 +61,9 @@ export const orgInvitations = pgTable(
     status: invitationStatusEnum("status").notNull().default("pending"),
     invitedBy: text("invited_by").references(() => user.id),
     acceptedBy: text("accepted_by").references(() => user.id),
-    expiresAt: timestamp("expires_at").notNull(),
-    acceptedAt: timestamp("accepted_at"),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_org_invitations_token").on(table.token),
@@ -91,10 +92,10 @@ export const apiKeys = pgTable(
       .notNull()
       .default(sql`'{}'::text[]`),
     createdBy: text("created_by").references(() => user.id),
-    expiresAt: timestamp("expires_at"),
-    lastUsedAt: timestamp("last_used_at"),
-    revokedAt: timestamp("revoked_at"),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_api_keys_org_id").on(table.orgId),
@@ -117,14 +118,15 @@ export const orgProxies = pgTable(
     isDefault: boolean("is_default").notNull().default(false),
     source: text("source").notNull().default("custom"), // "built-in" | "custom"
     createdBy: text("created_by").references(() => user.id),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_org_proxies_org_id").on(table.orgId),
     uniqueIndex("idx_org_proxies_one_default")
       .on(table.orgId)
       .where(sql`${table.isDefault} = true`),
+    check("org_proxies_source_valid", sql`source IN ('built-in', 'custom')`),
   ],
 );
 
@@ -171,10 +173,10 @@ export const modelProviderCredentials = pgTable(
      * expires_at < cutoff`) covers the backfill window without a one-shot
      * decrypt-and-rewrite migration.
      */
-    expiresAt: timestamp("expires_at"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
     createdBy: text("created_by").references(() => user.id),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [
     index("idx_model_provider_credentials_org_id").on(t.orgId),
@@ -197,7 +199,7 @@ export const modelProviderCredentials = pgTable(
  *      plaintext token returned to the browser ONCE (never re-served).
  *   2. Helper decodes the token client-side, runs the provider's loopback
  *      OAuth dance, then POSTs the resulting credentials to
- *      /api/model-providers-oauth/import using the pairing token as
+ *      /api/model-providers-oauth/pair/redeem using the pairing token as
  *      Bearer credentials. The platform-side Bearer auth re-hashes the
  *      secret portion (SHA-256, base64url) and looks the row up by
  *      `token_hash`.
@@ -229,9 +231,9 @@ export const modelProviderPairings = pgTable(
       .references(() => organizations.id, { onDelete: "cascade" }),
     /** Provider id from the OAuth model provider registry. */
     providerId: text("provider_id").notNull(),
-    expiresAt: timestamp("expires_at").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     /** When the helper successfully POSTed credentials. NULL means still pending. */
-    consumedAt: timestamp("consumed_at"),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
     /** IP address that consumed the pairing — kept alongside `consumedAt` for audit. */
     consumedFromIp: text("consumed_from_ip"),
     /**
@@ -240,8 +242,10 @@ export const modelProviderPairings = pgTable(
      * to the dashboard via `GET /pairing/:id` so the UI can act on the new
      * credential without polling the credential list.
      */
-    credentialId: uuid("credential_id"),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
+    credentialId: uuid("credential_id").references(() => modelProviderCredentials.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_model_provider_pairings_org_id").on(table.orgId),
@@ -285,13 +289,14 @@ export const orgModels = pgTable(
     isDefault: boolean("is_default").notNull().default(false),
     source: text("source").notNull().default("custom"), // "built-in" | "custom"
     createdBy: text("created_by").references(() => user.id),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_org_models_org_id").on(table.orgId),
     uniqueIndex("idx_org_models_one_default")
       .on(table.orgId)
       .where(sql`${table.isDefault} = true`),
+    check("org_models_source_valid", sql`source IN ('built-in', 'custom')`),
   ],
 );

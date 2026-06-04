@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/core",
-  "version": "2.20.0",
+  "version": "2.22.0",
   "description": "Shared validation, storage, and utility library for Appstrate packages",
   "license": "Apache-2.0",
   "type": "module",
@@ -49,7 +49,11 @@
     "./storage-fs": "./src/storage-fs.ts",
     "./errors": "./src/errors.ts",
     "./validation": "./src/validation.ts",
+    "./integration": "./src/integration.ts",
+    "./mcp-server": "./src/mcp-server.ts",
+    "./mcp-server-bundle": "./src/mcp-server-bundle/index.ts",
     "./zip": "./src/zip.ts",
+    "./companion-files": "./src/companion-files.ts",
     "./naming": "./src/naming.ts",
     "./dependencies": "./src/dependencies.ts",
     "./integrity": "./src/integrity.ts",
@@ -57,7 +61,8 @@
     "./dist-tags": "./src/dist-tags.ts",
     "./version-policy": "./src/version-policy.ts",
     "./system-packages": "./src/system-packages.ts",
-    "./tool-bundler": "./src/tool-bundler.ts",
+    "./runtime-tools-catalog": "./src/runtime-tools-catalog.ts",
+    "./runtime-tool-defs": "./src/runtime-tool-defs.ts",
     "./ssrf": "./src/ssrf.ts",
     "./html": "./src/html.ts",
     "./schemas": "./src/schemas.ts",
@@ -67,18 +72,22 @@
     "./module": "./src/module.ts",
     "./permissions": "./src/permissions.ts",
     "./platform-types": "./src/platform-types.ts",
+    "./token-usage": "./src/token-usage.ts",
     "./sidecar-types": "./src/sidecar-types.ts",
     "./pairing-token": "./src/pairing-token.ts",
-    "./jwt": "./src/jwt.ts"
+    "./jwt": "./src/jwt.ts",
+    "./credential-template": "./src/credential-template.ts",
+    "./dedupe-label": "./src/dedupe-label.ts"
   },
   "dependencies": {
-    "@afps-spec/schema": "^1.5.0",
+    "@afps-spec/schema": "^0.6.0",
+    "@appstrate/afps-shared": "^0.1.0",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
     "fflate": "^0.8.0",
     "pino": "^10.3.1",
     "semver": "^7.7.1",
-    "zod": "^4.3.6"
+    "zod": "^4.4.3"
   },
   "peerDependencies": {
     "@aws-sdk/client-s3": "^3",

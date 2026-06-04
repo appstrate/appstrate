@@ -24,11 +24,9 @@ import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { validate as validateOpenAPI } from "@readme/openapi-parser";
 import { lintFromString, createConfig } from "@redocly/openapi-core";
+import type { OpenApiSchemaEntry } from "@appstrate/core/module";
 import { buildOpenApiSpec } from "../apps/api/src/openapi/index.ts";
-import {
-  buildZodSchemaRegistry,
-  type ZodSchemaEntry,
-} from "../apps/api/src/openapi/zod-schema-registry.ts";
+import { buildZodSchemaRegistry } from "../apps/api/src/openapi/zod-schema-registry.ts";
 import { collectModuleOpenApi } from "./lib/module-openapi.ts";
 
 // ---------------------------------------------------------------------------
@@ -71,17 +69,15 @@ const expectedEndpoints = [
   // Agents (runtime — agents.ts + user-agents.ts junction endpoints)
   "GET /api/agents",
   "PUT /api/agents/{scope}/{name}/config",
-  // Unified persistence (ADR-011 + ADR-013) — pinned slots + memories
+  // Unified persistence — pinned slots + memories
   "GET /api/agents/{scope}/{name}/persistence",
   "DELETE /api/agents/{scope}/{name}/persistence",
   "DELETE /api/agents/{scope}/{name}/persistence/memories/{id}",
   "DELETE /api/agents/{scope}/{name}/persistence/pinned/{id}",
   "PUT /api/agents/{scope}/{name}/skills",
-  "PUT /api/agents/{scope}/{name}/tools",
   "GET /api/agents/{scope}/{name}/model",
   "PUT /api/agents/{scope}/{name}/model",
   "GET /api/agents/{scope}/{name}/bundle",
-  "GET /api/agents/{scope}/{name}/readiness",
 
   // Runs
   "POST /api/agents/{scope}/{name}/run",
@@ -105,52 +101,28 @@ const expectedEndpoints = [
   "PUT /api/schedules/{id}",
   "DELETE /api/schedules/{id}",
 
-  // Connections
-  "GET /api/connections",
-  "GET /api/connections/integrations",
-  "POST /api/connections/connect/{scope}/{name}",
-  "POST /api/connections/connect/{scope}/{name}/api-key",
-  "POST /api/connections/connect/{scope}/{name}/credentials",
-  "GET /api/connections/callback",
-  "DELETE /api/connections/{scope}/{name}",
-
-  // Providers
-  "GET /api/providers",
-  "POST /api/providers",
-  "PUT /api/providers/{scope}/{name}",
-  "DELETE /api/providers/{scope}/{name}",
-
-  // Provider Credentials
-  "PUT /api/providers/credentials/{scope}/{name}",
-  "DELETE /api/providers/credentials/{scope}/{name}",
-
-  // Connection Profiles (org-scoped user profiles)
-  "GET /api/connection-profiles",
-  "POST /api/connection-profiles",
-  "PUT /api/connection-profiles/{id}",
-  "DELETE /api/connection-profiles/{id}",
-
-  // App Profiles (app-scoped)
-  "GET /api/app-profiles",
-  "POST /api/app-profiles",
-  "GET /api/app-profiles/connections",
-  "DELETE /api/app-profiles/connections",
-  "GET /api/app-profiles/my-bindings",
-  "PUT /api/app-profiles/{id}",
-  "DELETE /api/app-profiles/{id}",
-  "GET /api/app-profiles/{id}/agents",
-  "GET /api/app-profiles/{id}/bindings",
-  "POST /api/app-profiles/{id}/bind",
-  "DELETE /api/app-profiles/{id}/bind/{providerScope}/{providerName}",
-  "GET /api/app-profiles/{id}/connections",
-
-  // Agent Provider Profiles
-  "GET /api/agents/{scope}/{name}/provider-profiles",
-  "PUT /api/agents/{scope}/{name}/provider-profiles",
-  "DELETE /api/agents/{scope}/{name}/provider-profiles",
-
-  // Agent App Profile
-  "PUT /api/agents/{scope}/{name}/app-profile",
+  // Integrations (INTEGRATIONS_PROPOSAL Phase 1.3 — marketplace UI)
+  "GET /api/integrations",
+  "GET /api/integrations/callback",
+  "GET /api/integrations/{packageId}",
+  "POST /api/integrations/{packageId}/activate",
+  "DELETE /api/integrations/{packageId}/deactivate",
+  "GET /api/integrations/{packageId}/oauth-clients/{authKey}",
+  "PUT /api/integrations/{packageId}/oauth-clients/{authKey}",
+  "DELETE /api/integrations/{packageId}/oauth-clients/{authKey}",
+  "POST /api/integrations/{packageId}/auths/{authKey}/connect/fields",
+  "POST /api/integrations/{packageId}/auths/{authKey}/connect/oauth2",
+  "GET /api/integrations/{packageId}/connections",
+  "GET /api/integrations/{packageId}/agent-resolution/{agentPackageId}",
+  "GET /api/integrations/{packageId}/consuming-agents",
+  "PATCH /api/integrations/{packageId}/connections/{connectionId}",
+  "PATCH /api/integrations/{packageId}/settings",
+  "GET /api/integrations/{packageId}/pins",
+  "PUT /api/integrations/{packageId}/pins/{agentPackageId}",
+  "DELETE /api/integrations/{packageId}/pins/{agentPackageId}",
+  "GET /api/integrations/{packageId}/default",
+  "PUT /api/integrations/{packageId}/default",
+  "DELETE /api/integrations/{packageId}/default",
 
   // Agent Proxy
   "GET /api/agents/{scope}/{name}/proxy",
@@ -166,7 +138,6 @@ const expectedEndpoints = [
   "POST /api/model-provider-credentials/{id}/test",
   // OAuth Model Providers (subscription billing)
   "POST /api/model-providers-oauth/pair/redeem",
-  "POST /api/model-providers-oauth/import", // legacy alias kept for back-compat
   "POST /api/model-providers-oauth/pairing",
   "GET /api/model-providers-oauth/pairing/{id}",
   "DELETE /api/model-providers-oauth/pairing/{id}",
@@ -212,38 +183,6 @@ const expectedEndpoints = [
   "DELETE /api/packages/skills/{scope}/{name}/versions/{version}",
   "GET /api/packages/skills/{scope}/{name}/versions/{version}",
 
-  // Packages — Tools
-  "GET /api/packages/tools",
-  "POST /api/packages/tools",
-  "GET /api/packages/tools/{scope}/{name}",
-  "PUT /api/packages/tools/{scope}/{name}",
-  "DELETE /api/packages/tools/{scope}/{name}",
-  "GET /api/packages/tools/{id}",
-  "PUT /api/packages/tools/{id}",
-  "DELETE /api/packages/tools/{id}",
-  "GET /api/packages/tools/{scope}/{name}/versions",
-  "GET /api/packages/tools/{scope}/{name}/versions/info",
-  "POST /api/packages/tools/{scope}/{name}/versions",
-  "POST /api/packages/tools/{scope}/{name}/versions/{version}/restore",
-  "DELETE /api/packages/tools/{scope}/{name}/versions/{version}",
-  "GET /api/packages/tools/{scope}/{name}/versions/{version}",
-
-  // Packages — Providers (package CRUD)
-  "GET /api/packages/providers",
-  "POST /api/packages/providers",
-  "GET /api/packages/providers/{scope}/{name}",
-  "PUT /api/packages/providers/{scope}/{name}",
-  "DELETE /api/packages/providers/{scope}/{name}",
-  "GET /api/packages/providers/{id}",
-  "PUT /api/packages/providers/{id}",
-  "DELETE /api/packages/providers/{id}",
-  "GET /api/packages/providers/{scope}/{name}/versions",
-  "GET /api/packages/providers/{scope}/{name}/versions/info",
-  "POST /api/packages/providers/{scope}/{name}/versions",
-  "POST /api/packages/providers/{scope}/{name}/versions/{version}/restore",
-  "DELETE /api/packages/providers/{scope}/{name}/versions/{version}",
-  "GET /api/packages/providers/{scope}/{name}/versions/{version}",
-
   // Packages — Agents
   "GET /api/packages/agents",
   "POST /api/packages/agents",
@@ -278,9 +217,11 @@ const expectedEndpoints = [
   "POST /api/profiles/batch",
   "GET /api/me/orgs",
   "GET /api/me/models",
-  "GET /api/me/application-profile",
-  "PUT /api/me/application-profile",
-  "DELETE /api/me/application-profile",
+  "GET /api/me/connections",
+  "DELETE /api/me/connections/{connectionId}",
+  "GET /api/me/integration-pins",
+  "PUT /api/me/integration-pins",
+  "DELETE /api/me/integration-pins",
 
   // Invitations
   "GET /invite/{token}/info",
@@ -292,10 +233,11 @@ const expectedEndpoints = [
   // Internal
   "GET /internal/run-history",
   "GET /internal/memories",
-  "GET /internal/credentials/{scope}/{name}",
-  "POST /internal/credentials/{scope}/{name}/refresh",
   "GET /internal/oauth-token/{credentialId}",
   "POST /internal/oauth-token/{credentialId}/refresh",
+  "GET /internal/mcp-server-bundle/{scope}/{name}",
+  "GET /internal/integration-credentials/{scope}/{name}",
+  "POST /internal/integration-credentials/{scope}/{name}/refresh",
 
   // Meta
   "GET /api/openapi.json",
@@ -313,6 +255,9 @@ const expectedEndpoints = [
   "POST /api/runs/{runId}/events",
   "POST /api/runs/{runId}/events/finalize",
   "POST /api/runs/{runId}/events/heartbeat",
+  "GET /api/runs/{runId}/workspace",
+  "GET /api/runs/{runId}/documents",
+  "GET /api/runs/{runId}/documents/{name}",
   "PATCH /api/runs/{runId}/sink/extend",
 
   // Packages
@@ -341,11 +286,6 @@ const expectedEndpoints = [
   "DELETE /api/applications/{applicationId}/packages/{scope}/{name}",
   "GET /api/applications/{applicationId}/packages/{scope}/{name}/run-config",
 
-  // Application Providers
-  "GET /api/applications/{applicationId}/providers",
-  "PUT /api/applications/{applicationId}/providers/{scope}/{name}/credentials",
-  "DELETE /api/applications/{applicationId}/providers/{scope}/{name}/credentials",
-
   // End-Users
   "POST /api/end-users",
   "GET /api/end-users",
@@ -357,7 +297,7 @@ const expectedEndpoints = [
   "POST /api/uploads",
   "PUT /api/uploads/_content",
 
-  // Credential proxy (AFPS 1.3 BYOI) — registered as router.all() in code,
+  // Credential proxy (AFPS BYOI) — registered as router.all() in code,
   // every verb is documented because upstream provider semantics are method-defined.
   "GET /api/credential-proxy/proxy",
   "POST /api/credential-proxy/proxy",
@@ -614,7 +554,7 @@ function normalizeType(schema: Record<string, unknown>): {
 }
 
 interface SchemaDiscrepancy {
-  entry: ZodSchemaEntry;
+  entry: OpenApiSchemaEntry;
   issues: string[];
 }
 
@@ -980,8 +920,8 @@ const SKIP_FILES = new Set<string>([
   // see them.
   "routes/llm-proxy",
   // packages.ts iterates ROUTE_CONFIGS with template-literal paths
-  // (router.get(`/${path}/...`, …) where `path` ∈ {skills, tools, agents,
-  // providers}). All concrete paths are already enumerated in
+  // (router.get(`/${path}/...`, …) where `path` ∈ {skills, agents,
+  // integrations}). All concrete paths are already enumerated in
   // expectedEndpoints, so check #1 catches drift on this file.
   "routes/packages",
 ]);

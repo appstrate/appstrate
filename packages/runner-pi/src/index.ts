@@ -3,24 +3,19 @@
 export {
   PiRunner,
   installSessionBridge,
+  deriveProviderFromApi,
   type PiRunnerOptions,
   type PiModelConfig,
   type BridgeableSession,
   type InternalSink,
 } from "./pi-runner.ts";
 
-export {
-  prepareBundleForPi,
-  type PrepareBundleOptions,
-  type PreparedBundle,
-} from "./bundle-extensions.ts";
+export { prepareBundleForPi, type PrepareBundleOptions } from "./bundle-extensions.ts";
 
 export {
-  buildProviderCallExtensionFactory,
-  readProviderRefs,
-  type BuildProviderCallExtensionFactoryOptions,
-  type ProviderEventEmitter,
-} from "./provider-bridge.ts";
+  buildApiCallExtensionFactory,
+  type BuildApiCallExtensionFactoryOptions,
+} from "./api-call-bridge.ts";
 
 export {
   buildRuntimePiEnv,
@@ -33,8 +28,10 @@ export {
 
 export {
   emitRuntimeReady,
+  emitBootProgress,
   CURRENT_RUNTIME_PROTOCOL_VERSION,
   type RuntimeReadyPayload,
+  type BootProgressOptions,
 } from "./runtime-ready.ts";
 
 export {
@@ -49,12 +46,22 @@ export {
   RUN_HISTORY_INJECTED_TOOL,
   RECALL_MEMORY_INJECTED_TOOL,
   RUNTIME_INJECTED_TOOLS,
-  loadRuntimeToolDoc,
   type RuntimeInjectedTool,
 } from "./runtime-tools/index.ts";
 
 export {
   buildRuntimeToolFactories,
+  callToolResultToPi,
   type BuildRuntimeToolFactoriesOptions,
-  type RuntimeToolEventEmitter,
+  type RuntimeEventEmitter,
 } from "./runtime-tools/mcp-forward.ts";
+
+export {
+  buildRuntimeToolExtensions,
+  type BuildRuntimeToolExtensionsOptions,
+} from "./runtime-tools/runtime-tool-extensions.ts";
+
+export {
+  spillResourcesToWorkspace,
+  type ResourceSpillOptions,
+} from "./runtime-tools/resource-spill.ts";

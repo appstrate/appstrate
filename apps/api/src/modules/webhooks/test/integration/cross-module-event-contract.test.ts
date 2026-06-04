@@ -129,4 +129,35 @@ describe("cross-module contract — onRunStatusChange → webhook delivery", () 
       .where(eq(webhookDeliveries.webhookId, webhook.id));
     expect(rows).toHaveLength(0);
   });
+
+  it("webhooks module exposes an onRunConnectionMissing handler", () => {
+    expect(webhooksModule.events?.onRunConnectionMissing).toBeDefined();
+  });
+
+  it("the onRunConnectionMissing handler persists a run.connection_missing delivery", async () => {
+    const webhook = await createWebhook({
+      level: "application",
+      scope: { orgId, applicationId },
+      url: "https://no-such-domain-xyz123.test/hook",
+      events: ["run.connection_missing"],
+    });
+
+    await webhooksModule.events!.onRunConnectionMissing!({
+      orgId,
+      applicationId,
+      packageId: "@scope/agent",
+      actor: { type: "user", id: "u_test" },
+      errors: [
+        {
+          field: "integrations.@official/gmail.api_key",
+          code: "missing_integration_connection",
+          message: "Connect Gmail to run this agent",
+        },
+      ],
+    });
+
+    const row = await waitForDelivery(webhook.id, WAIT_TIMEOUT_MS);
+    expect(row).not.toBeNull();
+    expect(row?.eventType).toBe("run.connection_missing");
+  });
 });

@@ -17,8 +17,8 @@ const MANIFEST = {
   name: "@acme/research",
   version: "1.0.0",
   type: "agent",
-  schemaVersion: "1.1",
-  displayName: "Research Agent",
+  schema_version: "0.1",
+  display_name: "Research Agent",
   author: "Acme",
 };
 

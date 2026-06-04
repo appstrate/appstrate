@@ -48,11 +48,11 @@ describe("Multi-tenancy isolation", () => {
         headers: authHeaders(orgB, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           content: "Hijacked prompt",
-          lockVersion: pkg.lockVersion,
+          lock_version: pkg.lockVersion,
         }),
       });
 
-      // 403: requireOwnedPackage rejects scope mismatch before handler runs
+      // 403: requirePackageInOrg rejects cross-org DB ownership before handler runs
       expect([403, 404]).toContain(res.status);
     });
 
@@ -64,7 +64,7 @@ describe("Multi-tenancy isolation", () => {
         headers: authHeaders(orgB),
       });
 
-      // 403: requireOwnedPackage rejects scope mismatch before handler runs
+      // 403: requirePackageInOrg rejects cross-org DB ownership before handler runs
       expect([403, 404]).toContain(res.status);
     });
 
@@ -203,14 +203,14 @@ describe("Multi-tenancy isolation", () => {
         headers: authHeaders(orgB),
       });
 
-      // 403 (scope mismatch via requireOwnedPackage) or 404
+      // 403 (cross-org DB ownership via requirePackageInOrg) or 404
       expect([403, 404]).toContain(res.status);
     });
   });
 
-  // ─── Skill / Tool isolation ──────────────────────────────
+  // ─── Skill isolation ─────────────────────────────────────
 
-  describe("Skills and Tools", () => {
+  describe("Skills", () => {
     it("cannot read another org's skill", async () => {
       await seedAgent({
         id: "@org-a/my-skill",
@@ -224,27 +224,6 @@ describe("Multi-tenancy isolation", () => {
       });
 
       const res = await app.request("/api/packages/skills/@org-a/my-skill", {
-        headers: authHeaders(orgB),
-      });
-
-      expect(res.status).toBe(404);
-    });
-
-    it("cannot read another org's tool", async () => {
-      await seedAgent({
-        id: "@org-a/my-tool",
-        orgId: orgA.orgId,
-        type: "tool",
-        draftManifest: {
-          name: "@org-a/my-tool",
-          version: "1.0.0",
-          type: "tool",
-          entrypoint: "tool.ts",
-          tool: { name: "my-tool", description: "Test", inputSchema: { type: "object" } },
-        },
-      });
-
-      const res = await app.request("/api/packages/tools/@org-a/my-tool", {
         headers: authHeaders(orgB),
       });
 
@@ -265,18 +244,6 @@ describe("Multi-tenancy isolation", () => {
       });
 
       // requireAgent() guard returns 404 for cross-org
-      expect(res.status).toBe(404);
-    });
-
-    it("cannot modify another org's agent tools", async () => {
-      await seedAgent({ id: "@org-a/agent", orgId: orgA.orgId });
-
-      const res = await app.request("/api/agents/@org-a/agent/tools", {
-        method: "PUT",
-        headers: authHeaders(orgB, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ toolIds: ["@org-b/evil-tool"] }),
-      });
-
       expect(res.status).toBe(404);
     });
   });

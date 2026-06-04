@@ -190,14 +190,10 @@ describe("CoreResources ↔ CORE_RESOURCE_NAMES drift", () => {
       members: true,
       agents: true,
       skills: true,
-      tools: true,
-      providers: true,
+      "mcp-servers": true,
       runs: true,
       schedules: true,
       persistence: true,
-      connections: true,
-      profiles: true,
-      "app-profiles": true,
       models: true,
       "model-provider-credentials": true,
       proxies: true,
@@ -206,6 +202,7 @@ describe("CoreResources ↔ CORE_RESOURCE_NAMES drift", () => {
       "end-users": true,
       "credential-proxy": true,
       "llm-proxy": true,
+      integrations: true,
     };
     for (const name of Object.keys(allCoreResources)) {
       expect(CORE_RESOURCE_NAMES.has(name)).toBe(true);
@@ -218,14 +215,10 @@ describe("CoreResources ↔ CORE_RESOURCE_NAMES drift", () => {
       members: true,
       agents: true,
       skills: true,
-      tools: true,
-      providers: true,
+      "mcp-servers": true,
       runs: true,
       schedules: true,
       persistence: true,
-      connections: true,
-      profiles: true,
-      "app-profiles": true,
       models: true,
       "model-provider-credentials": true,
       proxies: true,
@@ -234,6 +227,7 @@ describe("CoreResources ↔ CORE_RESOURCE_NAMES drift", () => {
       "end-users": true,
       "credential-proxy": true,
       "llm-proxy": true,
+      integrations: true,
     };
     const interfaceNames = new Set(Object.keys(allCoreResources));
     for (const name of CORE_RESOURCE_NAMES) {

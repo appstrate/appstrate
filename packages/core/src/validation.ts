@@ -2,60 +2,198 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { z } from "zod";
-import { SLUG_PATTERN } from "./naming.ts";
 import {
-  agentManifestSchema as afpsAgentManifestSchema,
+  agentManifestObjectSchema as afpsAgentManifestObjectSchema,
+  refineIntegrationsConfiguration,
   skillManifestSchema as afpsSkillManifestSchema,
-  toolManifestSchema as afpsToolManifestSchema,
-  providerManifestSchema as afpsProviderManifestSchema,
-  authModeEnum as afpsAuthModeEnum,
-  setupGuide as afpsSetupGuide,
-  oauthTokenAuthMethodEnum as afpsOAuthTokenAuthMethodEnum,
-  oauthTokenContentTypeEnum as afpsOAuthTokenContentTypeEnum,
-  credentialTransform as afpsCredentialTransform,
-  credentialTransformEncodingEnum as afpsCredentialTransformEncodingEnum,
-  uploadProtocolEnum as afpsUploadProtocolEnum,
+  tokenEndpointAuthMethodEnum as afpsTokenEndpointAuthMethodEnum,
+  dependenciesSchema as afpsDependenciesSchema,
+  scopedName as afpsScopedName,
+  packageTypeEnum as afpsPackageTypeEnum,
+  metaSchema as afpsMetaSchema,
 } from "@afps-spec/schema";
+import { integrationManifestSchema, type IntegrationManifest } from "./integration.ts";
+import { mcpServerManifestSchema, type McpServerManifest } from "./mcp-server.ts";
+import { SELECTABLE_RUNTIME_TOOLS } from "./runtime-tools-catalog.ts";
+
+export { integrationManifestSchema, type IntegrationManifest };
+export { mcpServerManifestSchema, type McpServerManifest };
 
 // ─────────────────────────────────────────────
 // Base manifest schema — common fields for all package types
 // ─────────────────────────────────────────────
 
-/** Regex matching scoped package names in the format `@scope/package-name`. */
-export const scopedNameRegex = new RegExp(`^@${SLUG_PATTERN}\\/${SLUG_PATTERN}$`);
+/**
+ * Regex matching scoped package names in the format `@scope/package-name`.
+ * Derived from the canonical AFPS `scopedName` Zod schema at module-load time
+ * so the regex source can never drift from the spec. The schema package
+ * exposes `scopedName` (a Zod schema) but not the raw regex constant — we
+ * extract it from the schema's internal regex check. Falls back to a
+ * structurally-equivalent literal if the internal shape changes (defensive;
+ * a unit test asserts the extraction stays sound).
+ */
+/**
+ * Regex matching AFPS `schema_version` values (Appendix B): `MAJOR.MINOR` with
+ * no leading zeros on either component. The canonical `schemaVersionField` in
+ * `@afps-spec/schema` is parameterized by major version and lives as a closure
+ * private inside `createSchemas` — it is not exported as a raw constant. We
+ * inline the spec-mandated pattern here so the base manifest schema can enforce
+ * it without binding to a specific major.
+ */
+export const SCHEMA_VERSION_REGEX: RegExp = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
 
-/** Zod enum for the four supported AFPS package types. */
-export const packageTypeEnum = z.enum(["agent", "skill", "tool", "provider"]);
-/** Union type of supported package types: "agent" | "skill" | "tool" | "provider". */
+/**
+ * Highest AFPS `schema_version` MAJOR this build supports. Per spec §2.4,
+ * consumers MUST reject manifests whose MAJOR exceeds the highest known
+ * MAJOR — a forward-major manifest may carry breaking changes that this
+ * build can't safely interpret. Higher MINOR within the same MAJOR is
+ * best-effort accepted (additive-only per §2.4).
+ */
+export const SUPPORTED_SCHEMA_VERSION_MAJOR = 0 as const;
+
+export const scopedNameRegex: RegExp = (() => {
+  // Zod 4 internal: scopedName._zod.def.checks[0]._zod.def.pattern : RegExp
+  type ZodInternalCheck = { _zod?: { def?: { pattern?: RegExp } } };
+  type ZodInternalSchema = { _zod?: { def?: { checks?: ZodInternalCheck[] } } };
+  const internal = afpsScopedName as unknown as ZodInternalSchema;
+  const pattern = internal._zod?.def?.checks?.[0]?._zod?.def?.pattern;
+  if (pattern instanceof RegExp) return pattern;
+  // Defensive fallback — keep validation working if Zod's internal shape changes.
+  // Matches the canonical AFPS SCOPED_NAME_REGEX (spec.md §2.2 / schema package).
+  return /^@[a-z0-9]([a-z0-9-]*[a-z0-9])?\/[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
+})();
+
+/** Zod enum for supported AFPS package types. Canonical export re-exposed from `@afps-spec/schema`. */
+export const packageTypeEnum = afpsPackageTypeEnum;
+/** Union type of supported package types. */
 export type PackageType = z.infer<typeof packageTypeEnum>;
 /** Array of all valid package type strings. */
 export const PACKAGE_TYPES = packageTypeEnum.options;
 
 /** AFPS JSON Schema URLs by package type — for the `$schema` field in manifest.json. */
 export const AFPS_SCHEMA_URLS: Record<PackageType, string> = {
-  agent: "https://afps.appstrate.dev/packages/schema/v1/agent.schema.json",
-  skill: "https://afps.appstrate.dev/packages/schema/v1/skill.schema.json",
-  tool: "https://afps.appstrate.dev/packages/schema/v1/tool.schema.json",
-  provider: "https://afps.appstrate.dev/packages/schema/v1/provider.schema.json",
+  agent: "https://schemas.afps.dev/v0/agent.schema.json",
+  skill: "https://schemas.afps.dev/v0/skill.schema.json",
+  "mcp-server": "https://schemas.afps.dev/v0/mcp-server.schema.json",
+  integration: "https://schemas.afps.dev/v0/integration.schema.json",
 };
 
-/** Base Zod schema for package manifests — common fields shared by all package types. */
+// ── AFPS common-field shapes (§3.1) ──
+// TODO: Upstream these shapes to `@afps-spec/schema`. The canonical
+// `commonFields` table (authorObject / repositoryObject / iconObject /
+// compatibilityObject) lives inside `createSchemas` as a closure-private const;
+// promoting them to named exports would let consumers like appstrate-core import
+// them directly instead of redeclaring (drift risk). A parity snapshot test
+// below pins these locals against the canonical agent manifest schema — any
+// divergence breaks the suite.
+
+/** MCPB/npm-aligned author object (§3.1). */
+const authorObjectSchema = z.looseObject({
+  name: z.string().min(1),
+  email: z.string().optional(),
+  url: z.string().optional(),
+});
+/** `author` accepts a bare string OR a structured object (§3.1). */
+const authorFieldSchema = z.union([z.string().min(1), authorObjectSchema]);
+
+/** MCPB/npm-aligned repository object (§3.1). */
+const repositoryObjectSchema = z.looseObject({
+  type: z.string().min(1),
+  url: z.string().min(1),
+  directory: z.string().optional(),
+});
+/** `repository` accepts a bare string OR a structured object (§3.1). */
+const repositoryFieldSchema = z.union([z.string().min(1), repositoryObjectSchema]);
+
+/** Icon variant (MCPB-aligned, §3.1). `size` is `WIDTHxHEIGHT`. */
+const iconObjectSchema = z.looseObject({
+  src: z.string().min(1),
+  size: z
+    .string()
+    .regex(/^\d+x\d+$/, { error: 'size must be "WIDTHxHEIGHT", e.g. "128x128"' })
+    .optional(),
+  theme: z.enum(["light", "dark", "high-contrast"]).optional(),
+});
+
+/** Compatibility (MCPB-aligned, §3.1). */
+const compatibilityObjectSchema = z.looseObject({
+  platforms: z.array(z.enum(["darwin", "win32", "linux"])).optional(),
+  runtimes: z.record(z.string(), z.string()).optional(),
+  clients: z.record(z.string(), z.string()).optional(),
+});
+
+/**
+ * AFPS Appendix B `META_NAMESPACE_KEY` regex — an OPTIONAL reverse-DNS namespace
+ * prefix (lowercase, hyphenated, with at least one dot) followed by `/` then an
+ * identifier (`[A-Za-z0-9._-]+`); a bare identifier with no `/` is also valid.
+ *
+ * Local copy that mirrors the AFPS 0.1 Appendix B pattern. The upstream
+ * `@afps-spec/schema` package now exports its own `META_NAMESPACE_KEY_REGEX`,
+ * but only from the schema module (not from the package entry point), so it
+ * cannot be cleanly re-exported here. The upstream variant additionally folds
+ * in the §10.1 reserved-prefix negative-lookahead; this local copy deliberately
+ * OMITS that lookahead because its sole consumer
+ * (`apps/api/src/services/integration-install-warnings.ts`) only emits
+ * non-blocking install-time warnings — reserved-prefix keys are already
+ * hard-rejected upstream at manifest-validation time and never reach the
+ * warning path, so adding the lookahead here would not change behavior.
+ */
+export const META_NAMESPACE_KEY_REGEX: RegExp = /^([a-z0-9-]+(\.[a-z0-9-]+)+\/)?[A-Za-z0-9._-]+$/;
+
+/**
+ * `_meta` reverse-DNS extension namespace (§10). Delegates fully to the upstream
+ * `@afps-spec/schema` `metaSchema`. As of AFPS 0.1 the upstream schema is STRICT:
+ * it enforces the Appendix B `META_NAMESPACE_KEY` pattern AND rejects the
+ * MCP-reserved `mcp/` / `modelcontextprotocol/` prefixes at parse time (the
+ * pattern bakes in a reserved-prefix negative-lookahead). Well-formed unknown
+ * namespaces are accepted (consumers MUST NOT reject them per §10.1); malformed
+ * keys and reserved prefixes are hard-rejected (a malformed `_meta` key makes the
+ * package malformed per §2). The earlier local soft-fail layer is gone — appstrate
+ * no longer owns any `_meta` policy.
+ */
+export const metaSchema = afpsMetaSchema;
+
+/** Base Zod schema for package manifests — common fields shared by all package types (AFPS snake_case). */
 export const manifestSchema = z.looseObject({
   name: z.string().regex(scopedNameRegex, { error: "Must follow the format @scope/package-name" }),
   version: z.string().min(1),
   type: packageTypeEnum,
-  displayName: z.string().optional(),
+  schema_version: z
+    .string()
+    .regex(SCHEMA_VERSION_REGEX, {
+      error: 'schema_version must follow MAJOR.MINOR format with no leading zeros (e.g. "0.1")',
+    })
+    .refine(
+      (v) => {
+        const major = parseInt(v.split(".")[0]!, 10);
+        return Number.isFinite(major) && major <= SUPPORTED_SCHEMA_VERSION_MAJOR;
+      },
+      {
+        error: `schema_version MAJOR exceeds highest supported (${SUPPORTED_SCHEMA_VERSION_MAJOR}) — per AFPS §2.4, consumers MUST reject forward-major manifests`,
+      },
+    )
+    .optional(),
+  display_name: z.string().optional(),
   description: z.string().optional(),
+  long_description: z.string().optional(),
   keywords: z.array(z.string()).optional(),
   license: z.string().optional(),
-  repository: z.string().optional(),
-  dependencies: z
-    .looseObject({
-      skills: z.record(z.string(), z.string()).optional(),
-      tools: z.record(z.string(), z.string()).optional(),
-      providers: z.record(z.string(), z.string()).optional(),
-    })
-    .optional(),
+  author: authorFieldSchema.optional(),
+  repository: repositoryFieldSchema.optional(),
+  homepage: z.string().optional(),
+  documentation: z.string().optional(),
+  support: z.string().optional(),
+  icon: z.string().optional(),
+  icons: z.array(iconObjectSchema).optional(),
+  screenshots: z.array(z.string()).optional(),
+  privacy_policies: z.array(z.string()).optional(),
+  compatibility: compatibilityObjectSchema.optional(),
+  // Flat dependency maps per AFPS §4.1: each value is a bare semver range
+  // string. Per-integration agent configuration lives in the top-level
+  // `integrations_configuration` map (§4.4). Schema is re-used from the
+  // canonical `@afps-spec/schema` package to keep appstrate from drifting.
+  dependencies: afpsDependenciesSchema,
+  _meta: metaSchema.optional(),
 });
 
 /** Inferred type from the base manifest schema. */
@@ -65,17 +203,77 @@ export type Manifest = z.infer<typeof manifestSchema>;
 // Agent manifest schema — extends AFPS with core enhancements
 // ─────────────────────────────────────────────
 
-/** Zod schema for agent manifests — extends AFPS with relaxed optional metadata for local drafts. */
-export const agentManifestSchema = afpsAgentManifestSchema.extend({
-  // All standard fields (name, version, schemaVersion, dependencies,
-  // displayName, providersConfiguration, input/output/config, timeout) inherited from AFPS.
-  // Override metadata fields with .catch(undefined) for tolerant local editing.
-  // AFPS requires author (MUST) for publication; core relaxes it for local drafts.
-  author: z.string().optional(),
+/**
+ * Zod schema for agent manifests — extends AFPS with relaxed optional metadata for local drafts
+ * AND the Phase 1.0 `dependencies.integrations` map (proposal §4.2.3).
+ */
+const agentManifestObjectSchema = afpsAgentManifestObjectSchema.extend({
+  // All standard fields (name, version, schema_version, dependencies,
+  // display_name, input/output/config, timeout) inherited from the AFPS
+  // schema.
+  // AFPS requires author (MUST, non-empty) for publication; core relaxes it
+  // for local drafts (the agent-editor stores `author: ""` until the user
+  // fills it in). Accepts both the AFPS §3.1 structured-object form and
+  // the bare-string form (including the empty-string draft sentinel).
+  author: z.union([z.string(), authorObjectSchema]).optional(),
   description: z.string().optional(),
   keywords: z.array(z.string()).optional(),
   license: z.string().optional(),
-  repository: z.string().optional(),
+  // Mirror the AFPS canonical: `repository` accepts string OR `{ type, url, directory? }`.
+  repository: repositoryFieldSchema.optional(),
+  // `dependencies` and `integrations_configuration` are inherited verbatim
+  // from the canonical AFPS `agentManifestSchema` (§4.1 flat semver-range
+  // maps + §4.4 per-integration config, including the rule that every
+  // `integrations_configuration` key matches a declared integration dep).
+  // We do not override those fields here to avoid drifting from the spec.
+  // The §4.4 `tools` wildcard (`string[] | "*"`, issue #547) is supported by
+  // the canonical schema as of @afps-spec/schema@0.5.0; no local widening is
+  // needed — the inherited shape already matches the Appstrate runtime
+  // contract (`dependencies.ts` `ToolsWildcard` / `isToolsWildcard`).
+  // First-party runtime tools enabled for this agent — all opt-in, none
+  // auto-injected (`output` included). `output` is required to be present
+  // only when an output schema is declared (enforced by the superRefine
+  // below). Snake_case `runtime_tools`. This is an
+  // Appstrate manifest extension with no AFPS equivalent — kept as a
+  // documented top-level snake_case field rather than namespaced under
+  // `_meta`, because it is woven through the run pipeline (catalog
+  // validation, prompt builder, sidecar tool registration) and namespacing
+  // it would be disproportionate.
+  runtime_tools: z.array(z.enum(SELECTABLE_RUNTIME_TOOLS)).optional(),
+});
+
+/**
+ * `output` is opt-in like every runtime tool (none is auto-injected). But an
+ * agent that declares an `output.schema` promises a typed result, so it MUST
+ * enable the `output` tool — otherwise it has no way to emit that result and
+ * the run would fail post-hoc output validation. Caught at save/install time
+ * here so the editor surfaces it on the `runtimeTools` field. Agents with no
+ * output schema may finish without ever calling output (side-effect-only run).
+ */
+export const agentManifestSchema = agentManifestObjectSchema.superRefine((m, ctx) => {
+  // AFPS §4.4 — re-apply the canonical orphan-key rule (the base AFPS schema
+  // is the plain object here so it stays extendable; the rule lives in the
+  // shared `refineIntegrationsConfiguration` to avoid drift).
+  refineIntegrationsConfiguration(m, ctx);
+
+  const outputSchema = (m as { output?: { schema?: unknown } }).output?.schema;
+  const hasOutputSchema =
+    outputSchema != null &&
+    typeof outputSchema === "object" &&
+    Object.keys(outputSchema as object).length > 0;
+  if (!hasOutputSchema) return;
+
+  const runtimeTools = (m as { runtime_tools?: unknown }).runtime_tools;
+  const selectsOutput = Array.isArray(runtimeTools) && runtimeTools.includes("output");
+  if (!selectsOutput) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["runtime_tools"],
+      message:
+        "The 'output' runtime tool must be enabled when an output schema is defined — " +
+        "an agent that declares an output schema must be able to return its result.",
+    });
+  }
 });
 
 /** Inferred type from the agent manifest schema. */
@@ -90,340 +288,28 @@ export const skillManifestSchema = afpsSkillManifestSchema.extend({
   description: z.string().optional(),
   keywords: z.array(z.string()).optional(),
   license: z.string().optional(),
-  repository: z.string().optional(),
+  // Mirror the AFPS canonical: `repository` accepts string OR `{ type, url, directory? }`.
+  repository: repositoryFieldSchema.optional(),
 });
 
 /** Inferred type from the skill manifest schema. */
 export type SkillManifest = z.infer<typeof skillManifestSchema>;
 
-// ─────────────────────────────────────────────
-// Tool manifest schema — extends AFPS with core enhancements
-// ─────────────────────────────────────────────
-
-/** Zod schema for tool manifests — extends AFPS with relaxed optional metadata. */
-export const toolManifestSchema = afpsToolManifestSchema.extend({
-  description: z.string().optional(),
-  keywords: z.array(z.string()).optional(),
-  license: z.string().optional(),
-  repository: z.string().optional(),
-});
-
-/** Inferred type from the tool manifest schema. */
-export type ToolManifest = z.infer<typeof toolManifestSchema>;
-
-// ─────────────────────────────────────────────
-// Provider manifest schema — extends AFPS (superRefine inherited)
-// ─────────────────────────────────────────────
-
 /**
- * Provider auth-mode Zod enum, re-exported from `@afps-spec/schema` so
- * appstrate route validators can reference the canonical AFPS values
- * without redeclaring the literal array. AFPS v1: `oauth2 | oauth1 |
- * api_key | basic | custom`.
- */
-export const authModeEnum = afpsAuthModeEnum;
-
-/** Closed list of valid auth-mode strings — derived from {@link authModeEnum}. */
-export const AUTH_MODES = authModeEnum.options;
-
-/** Auth mode union type derived from the AFPS Zod enum. */
-export type AuthMode = z.infer<typeof authModeEnum>;
-
-/**
- * Provider upload-protocol Zod enum, re-exported from `@afps-spec/schema`
- * so the runtime can advertise the `provider_upload` tool only for protocols
- * declared in the canonical AFPS enum. AFPS v1 (§7.7): `google-resumable |
- * s3-multipart | tus | ms-resumable`.
- */
-export const uploadProtocolEnum = afpsUploadProtocolEnum;
-
-/** Closed list of valid upload-protocol strings — derived from {@link uploadProtocolEnum}. */
-export const UPLOAD_PROTOCOLS = uploadProtocolEnum.options;
-
-/** Upload protocol union type derived from the AFPS Zod enum. */
-export type UploadProtocol = z.infer<typeof uploadProtocolEnum>;
-
-const _setupGuideSchema = afpsSetupGuide;
-
-/** Provider setup guide type derived from the Zod schema. */
-export type ProviderSetupGuide = NonNullable<z.infer<typeof _setupGuideSchema>>;
-
-/** Available scope entry for OAuth provider configuration. */
-export interface AvailableScope {
-  value: string;
-  label: string;
-}
-
-/**
- * Zod schema for provider manifests — extends AFPS with relaxed optional metadata.
- * Uses `.safeExtend()` because AFPS provider schema has `.superRefine()` (Zod 4 restriction).
- */
-export const providerManifestSchema = afpsProviderManifestSchema.safeExtend({
-  keywords: z.array(z.string()).optional(),
-  license: z.string().optional(),
-  repository: z.string().optional(),
-});
-
-/** Inferred type from the provider manifest schema. */
-export type ProviderManifest = z.infer<typeof providerManifestSchema>;
-
-/**
- * Canonical credential key pattern — shared by the provider schema editor,
- * the AFPS validation and the Zod route schemas.
+ * OAuth2 token-endpoint client-authentication method (AFPS §7.3,
+ * `token_endpoint_auth_method`). Derived from the canonical Zod enum so
+ * appstrate cannot drift. Consumed by `@appstrate/connect` token refresh /
+ * exchange for OAuth model providers + integrations.
  *
- * Matches the `\w+` regex used by the sidecar substitution engine
- * (`runtime-pi/sidecar/helpers.ts`) and by `buildSidecarCredentials` /
- * `evaluateCredentialTransform` in `@appstrate/connect`. Keys produced by
- * the UI must round-trip through those engines without escaping.
+ * Default-when-missing semantics (AFPS / CHANGELOG, CC-10): when a
+ * manifest omits `token_endpoint_auth_method`, callers default to
+ * `"client_secret_basic"` — the RFC 8414 §2 / RFC 7591 §2 default. An
+ * earlier AFPS draft documented `"client_secret_post"` as the default; the flip
+ * aligns with the wider OAuth 2.1 ecosystem (Anthropic, Google, GitHub,
+ * Slack all accept Basic; some IdPs require it). Manifest-explicit
+ * values continue to work unchanged.
  */
-export const CREDENTIAL_KEY_RE = /^[a-z][a-z0-9_]*$/;
-
-/**
- * Structured error emitted by {@link validateProviderCredentialKeys}. The
- * `field` discriminator lets callers (e.g. Zod refinements) route the issue
- * to the right input path instead of a generic `credentials` bucket.
- */
-export interface CredentialKeyError {
-  /** Which conceptual field failed. */
-  field: "schemaKey" | "fieldName";
-  /** Offending schema property key — only set when `field === "schemaKey"`. */
-  key?: string;
-  /** Human-readable message suitable for direct display. */
-  message: string;
-}
-
-/**
- * Validate credential-related fields on a provider manifest definition.
- * Pure function — returns structured errors (empty array = valid).
- *
- * Rules (api_key / basic / custom only — OAuth modes don't declare credentials):
- *  - `definition.credentials.schema.properties` keys match {@link CREDENTIAL_KEY_RE}
- *  - `definition.credentials.fieldName` (when present) matches the pattern
- *  - `fieldName` references an existing property in the schema
- *
- * Called from:
- *  - {@link validateManifest} (ZIP import + package update)
- *  - `routes/providers.ts` Zod schemas (POST / PUT)
- */
-export function validateProviderCredentialKeys(
-  manifest: Record<string, unknown>,
-): CredentialKeyError[] {
-  const errors: CredentialKeyError[] = [];
-  const def = (manifest.definition ?? {}) as Record<string, unknown>;
-  const authMode = def.authMode as string | undefined;
-
-  if (authMode !== "api_key" && authMode !== "basic" && authMode !== "custom") {
-    return errors;
-  }
-
-  const credentials = def.credentials as Record<string, unknown> | undefined;
-  const schema = credentials?.schema as Record<string, unknown> | undefined;
-  const properties = (schema?.properties ?? {}) as Record<string, unknown>;
-  const propertyKeys = Object.keys(properties);
-
-  for (const key of propertyKeys) {
-    if (!CREDENTIAL_KEY_RE.test(key)) {
-      errors.push({
-        field: "schemaKey",
-        key,
-        message: `key "${key}" must match ${CREDENTIAL_KEY_RE} (lowercase letters, digits and underscores; must start with a letter)`,
-      });
-    }
-  }
-
-  const fieldName = credentials?.fieldName as string | undefined;
-  if (fieldName !== undefined) {
-    if (!CREDENTIAL_KEY_RE.test(fieldName)) {
-      errors.push({
-        field: "fieldName",
-        message: `"${fieldName}" must match ${CREDENTIAL_KEY_RE}`,
-      });
-    } else if (propertyKeys.length > 0 && !propertyKeys.includes(fieldName)) {
-      errors.push({
-        field: "fieldName",
-        message: `"${fieldName}" is not declared in definition.credentials.schema.properties`,
-      });
-    }
-  }
-
-  return errors;
-}
-
-/**
- * Format a {@link CredentialKeyError} into the dotted `path: message` shape
- * used by {@link validateManifest}'s flat string error list.
- */
-export function formatCredentialKeyError(error: CredentialKeyError): string {
-  const path =
-    error.field === "schemaKey"
-      ? "definition.credentials.schema.properties"
-      : "definition.credentials.fieldName";
-  return `${path}: ${error.message}`;
-}
-
-/**
- * OAuth2 token-endpoint auth method, `tokenContentType` and
- * `credentialTransform` are part of AFPS v1 (§7.2 and §7.4). Types are
- * derived from the canonical Zod enums so appstrate cannot drift.
- */
-export type OAuthTokenAuthMethod = z.infer<typeof afpsOAuthTokenAuthMethodEnum>;
-export type OAuthTokenContentType = z.infer<typeof afpsOAuthTokenContentTypeEnum>;
-
-/**
- * Whitelisted post-substitution transforms for `credentialTransform.encoding`.
- * AFPS v1 defines a single value (`base64`); extend by updating the spec.
- * Derived from the canonical AFPS enum so appstrate cannot drift.
- */
-export type CredentialTransformEncoding = z.infer<typeof afpsCredentialTransformEncodingEnum>;
-
-/**
- * Template-based pre-encoding for api_key providers. See AFPS v1 §7.4.
- *
- * The `template` string is rendered with the same `{{var}}` substitution
- * engine used for URLs and headers (keys resolved against the user-provided
- * credential fields), then passed through `encoding` to produce the final
- * value injected under `credentials.fieldName`.
- *
- * Derived from the canonical AFPS schema; the AFPS schema is declared as
- * `looseObject`, so extra keys are tolerated on the wire but appstrate only
- * reads `template` and `encoding`.
- */
-export type CredentialTransform = Pick<
-  z.infer<typeof afpsCredentialTransform>,
-  "template" | "encoding"
->;
-
-/** Resolved provider definition built from a raw manifest JSONB object. */
-export interface ResolvedProviderDefinition {
-  id: string;
-  displayName: string;
-  authMode: AuthMode | undefined;
-  authorizationUrl?: string;
-  tokenUrl?: string;
-  refreshUrl?: string;
-  defaultScopes: string[];
-  scopeSeparator: string;
-  pkceEnabled: boolean;
-  tokenAuthMethod?: OAuthTokenAuthMethod;
-  tokenContentType?: OAuthTokenContentType;
-  authorizationParams: Record<string, string>;
-  tokenParams: Record<string, string>;
-  credentialSchema?: Record<string, unknown>;
-  credentialFieldName?: string;
-  credentialHeaderName?: string;
-  credentialHeaderPrefix?: string;
-  credentialTransform?: CredentialTransform;
-  authorizedUris?: string[];
-  allowAllUris: boolean;
-  availableScopes?: AvailableScope[];
-  requestTokenUrl?: string;
-  accessTokenUrl?: string;
-  iconUrl?: string;
-  categories: string[];
-  docsUrl?: string;
-}
-
-/**
- * Build a fully resolved provider definition from a raw manifest JSONB object.
- * Reads from nested manifest structure (oauth2/oauth1/credentials sub-objects)
- * and produces a flat resolved type for runtime convenience.
- * Pure function — no DB, no side effects.
- * Used by both the provider API routes and the connect package.
- */
-export function buildProviderDefinitionFromManifest(
-  id: string,
-  manifest: Record<string, unknown>,
-): ResolvedProviderDefinition {
-  const rawDef = (manifest.definition ?? {}) as Record<string, unknown>;
-  const authMode = rawDef.authMode as AuthMode | undefined;
-
-  // Read from nested sub-objects (may be undefined if not applicable for this auth mode)
-  const oauth2 = rawDef.oauth2 as Record<string, unknown> | undefined;
-  const oauth1 = rawDef.oauth1 as Record<string, unknown> | undefined;
-  const credentials = rawDef.credentials as Record<string, unknown> | undefined;
-
-  return {
-    id,
-    displayName: (manifest.displayName as string) ?? id,
-    authMode,
-    // OAuth2 fields (from definition.oauth2)
-    authorizationUrl: oauth2?.authorizationUrl as string | undefined,
-    tokenUrl: oauth2?.tokenUrl as string | undefined,
-    refreshUrl: oauth2?.refreshUrl as string | undefined,
-    defaultScopes: (oauth2?.defaultScopes as string[]) ?? [],
-    scopeSeparator: (oauth2?.scopeSeparator as string) ?? " ",
-    pkceEnabled: (oauth2?.pkceEnabled as boolean) ?? true,
-    tokenAuthMethod: oauth2?.tokenAuthMethod as OAuthTokenAuthMethod | undefined,
-    tokenContentType: oauth2?.tokenContentType as OAuthTokenContentType | undefined,
-    authorizationParams: (oauth2?.authorizationParams as Record<string, string>) ?? {},
-    tokenParams: (oauth2?.tokenParams as Record<string, string>) ?? {},
-    // OAuth1 fields (from definition.oauth1)
-    requestTokenUrl: oauth1?.requestTokenUrl as string | undefined,
-    accessTokenUrl: oauth1?.accessTokenUrl as string | undefined,
-    // OAuth1 also uses authorizationUrl and authorizationParams (for user redirect)
-    ...(authMode === "oauth1"
-      ? {
-          authorizationUrl: oauth1?.authorizationUrl as string | undefined,
-          authorizationParams: (oauth1?.authorizationParams as Record<string, string>) ?? {},
-        }
-      : {}),
-    // Credential fields (from definition.credentials)
-    credentialSchema: credentials?.schema as Record<string, unknown> | undefined,
-    credentialFieldName: credentials?.fieldName as string | undefined,
-    // Transport fields (from definition level — cross-cutting, implementation-specific)
-    credentialHeaderName: rawDef.credentialHeaderName as string | undefined,
-    credentialHeaderPrefix: rawDef.credentialHeaderPrefix as string | undefined,
-    credentialTransform: rawDef.credentialTransform as CredentialTransform | undefined,
-    // Transversal fields
-    authorizedUris: (rawDef.authorizedUris as string[])?.length
-      ? (rawDef.authorizedUris as string[])
-      : undefined,
-    allowAllUris: (rawDef.allowAllUris as boolean) ?? false,
-    availableScopes: (rawDef.availableScopes as AvailableScope[])?.length
-      ? (rawDef.availableScopes as AvailableScope[])
-      : undefined,
-    // Presentation fields
-    iconUrl: manifest.iconUrl as string | undefined,
-    categories: (manifest.categories as string[]) ?? [],
-    docsUrl: manifest.docsUrl as string | undefined,
-  };
-}
-
-/** JSON Schema object type used for admin credential schemas. */
-export interface AdminCredentialSchema {
-  type: "object";
-  properties: Record<string, { type: string; description: string }>;
-  required?: string[];
-}
-
-/**
- * Generate default admin credential schema per auth mode.
- * Returns null for auth modes that don't need admin credentials (api_key, basic, custom).
- */
-export function getDefaultAdminCredentialSchema(authMode: string): AdminCredentialSchema | null {
-  switch (authMode) {
-    case "oauth2":
-      return {
-        type: "object",
-        properties: {
-          clientId: { type: "string", description: "Client ID" },
-          clientSecret: { type: "string", description: "Client Secret" },
-        },
-        required: ["clientId", "clientSecret"],
-      };
-    case "oauth1":
-      return {
-        type: "object",
-        properties: {
-          consumerKey: { type: "string", description: "Consumer Key" },
-          consumerSecret: { type: "string", description: "Consumer Secret" },
-        },
-        required: ["consumerKey", "consumerSecret"],
-      };
-    default:
-      return null;
-  }
-}
+export type OAuthTokenAuthMethod = z.infer<typeof afpsTokenEndpointAuthMethodEnum>;
 
 // ─────────────────────────────────────────────
 // Unified validateManifest — dispatches by type
@@ -434,7 +320,7 @@ export type ValidateManifestResult =
   | {
       valid: true;
       errors: [];
-      manifest: Manifest | AgentManifest | SkillManifest | ToolManifest | ProviderManifest;
+      manifest: Manifest | AgentManifest | SkillManifest | IntegrationManifest | McpServerManifest;
     }
   | { valid: false; errors: string[]; manifest?: undefined };
 
@@ -443,21 +329,19 @@ function parseWithSchema(
     | typeof manifestSchema
     | typeof agentManifestSchema
     | typeof skillManifestSchema
-    | typeof toolManifestSchema
-    | typeof providerManifestSchema,
+    | typeof integrationManifestSchema
+    | typeof mcpServerManifestSchema,
   raw: unknown,
 ): ValidateManifestResult {
+  // `_meta` validation is delegated entirely to the canonical per-type schema.
+  // As of AFPS 0.1 the upstream `metaSchema` is STRICT — it enforces the
+  // Appendix B `META_NAMESPACE_KEY` pattern and hard-rejects the reserved
+  // `mcp/` / `modelcontextprotocol/` prefixes at parse time, so a malformed or
+  // reserved `_meta` key already surfaces as a `safeParse` failure below.
   const result = schema.safeParse(raw);
   if (!result.success) {
     const errors = result.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`);
     return { valid: false, errors };
-  }
-
-  if (schema === providerManifestSchema) {
-    const credentialErrors = validateProviderCredentialKeys(result.data as Record<string, unknown>);
-    if (credentialErrors.length > 0) {
-      return { valid: false, errors: credentialErrors.map(formatCredentialKeyError) };
-    }
   }
 
   return { valid: true, errors: [], manifest: result.data };
@@ -465,28 +349,48 @@ function parseWithSchema(
 
 /**
  * Validate a raw manifest object by dispatching to the appropriate type-specific schema.
- * Determines the schema from the `type` field (agent, skill, tool, provider) and validates accordingly.
+ * Determines the schema from the `type` field (agent, skill, integration) and validates accordingly.
  * @param raw - The raw manifest object to validate (typically parsed from JSON)
  * @returns Validation result with parsed manifest on success, or error messages on failure
  */
 export function validateManifest(raw: unknown): ValidateManifestResult {
-  if (raw && typeof raw === "object" && "type" in raw) {
-    const type = (raw as Record<string, unknown>).type;
-    const schema =
-      type === "agent"
-        ? agentManifestSchema
-        : type === "skill"
-          ? skillManifestSchema
-          : type === "provider"
-            ? providerManifestSchema
-            : type === "tool"
-              ? toolManifestSchema
-              : manifestSchema;
-    return parseWithSchema(schema, raw);
+  // AFPS: `type` is the canonical discriminator and MUST be one of
+  // `agent | skill | mcp-server | integration`. An unknown or missing `type`
+  // is a dispatcher-level error, not a partial base-schema validation
+  // failure — fail fast with a single structured Zod issue keyed on
+  // `["type"]` so callers/UI get a typed signal rather than a permissive
+  // list of base-schema field errors.
+  if (!raw || typeof raw !== "object") {
+    return {
+      valid: false,
+      errors: [
+        "type: Unknown package type — manifest must declare type as one of: agent, skill, mcp-server, integration",
+      ],
+    };
   }
-  // No `type` field — run the base schema so every missing-field error is
-  // surfaced in a single pass (instead of short-circuiting on `type` alone).
-  return parseWithSchema(manifestSchema, raw);
+  const obj = raw as Record<string, unknown>;
+  const type = obj.type;
+
+  // AFPS (§3.4): mcp-server identity lives at the manifest root —
+  // `type: "mcp-server"`, `name`, `schema_version`, and `dependencies` are
+  // all root fields. Dispatch purely on the root `type` discriminator.
+  if (type === "mcp-server") return parseWithSchema(mcpServerManifestSchema, raw);
+  if (type === "agent") return parseWithSchema(agentManifestSchema, raw);
+  if (type === "skill") return parseWithSchema(skillManifestSchema, raw);
+  if (type === "integration") return parseWithSchema(integrationManifestSchema, raw);
+
+  // Unknown / missing type: emit a single typed issue and stop. Any value
+  // that isn't one of the four canonical package types lands here and
+  // produces the typed error rather than a confusing list of partial
+  // base-schema errors.
+  const received =
+    typeof type === "string" ? `"${type}"` : type === undefined ? "missing" : String(type);
+  return {
+    valid: false,
+    errors: [
+      `type: Unknown package type ${received} — manifest must declare type as one of: agent, skill, mcp-server, integration`,
+    ],
+  };
 }
 
 function stripQuotes(value: string): string {
@@ -534,120 +438,6 @@ export function extractSkillMeta(content: string): {
   return { name, description, warnings };
 }
 
-/** Result of tool source code validation with errors and warnings. */
-export interface ToolSourceValidationResult {
-  valid: boolean;
-  errors: string[];
-  warnings: string[];
-}
-
-function stripLineComments(source: string): string {
-  return source
-    .split("\n")
-    .map((line) => {
-      const idx = line.indexOf("//");
-      return idx === -1 ? line : line.slice(0, idx);
-    })
-    .join("\n");
-}
-
-function countParams(paramStr: string): number {
-  const trimmed = paramStr.trim();
-  if (trimmed === "") return 0;
-
-  let depth = 0;
-  let count = 1;
-  for (const ch of trimmed) {
-    if (ch === "<" || ch === "(") depth++;
-    else if (ch === ">" || ch === ")") depth--;
-    else if (ch === "," && depth === 0) count++;
-  }
-  return count;
-}
-
-/** Optional metadata fields extracted from a manifest, with DB column naming conventions. */
-export interface ManifestMetadata {
-  description?: string;
-  keywords?: string[];
-  license?: string;
-  /** Maps from manifest `repository` field to DB `repositoryUrl` column. */
-  repositoryUrl?: string;
-  displayName?: string;
-}
-
-/** Extract optional metadata fields from a manifest.
- *  Maps `repository` to `repositoryUrl` to match the DB column convention. */
-export function extractManifestMetadata(manifest: Partial<Manifest>): ManifestMetadata {
-  const metadata: ManifestMetadata = {};
-  if (manifest.description !== undefined) metadata.description = manifest.description;
-  if (manifest.keywords !== undefined) metadata.keywords = manifest.keywords;
-  if (manifest.license !== undefined) metadata.license = manifest.license;
-  if (manifest.repository !== undefined) metadata.repositoryUrl = manifest.repository;
-  if (manifest.displayName !== undefined) metadata.displayName = manifest.displayName;
-  return metadata;
-}
-
-/**
- * Validate a tool's TypeScript source code for structural correctness.
- * Checks for export default, registerTool() call, non-empty tool name, and correct execute signature.
- * @param source - The TypeScript source code of the tool
- * @returns Validation result with errors (structural issues) and warnings (best-practice suggestions)
- */
-export function validateToolSource(source: string): ToolSourceValidationResult {
-  const errors: string[] = [];
-  const warnings: string[] = [];
-
-  if (source.trim().length === 0) {
-    return { valid: false, errors: ["Tool content is empty"], warnings };
-  }
-
-  if (!/export\s+default\b/.test(source)) {
-    errors.push(
-      "Tool must have an `export default function`. " +
-        "Example: export default function(pi: ToolAPI) { ... }",
-    );
-  }
-
-  if (!/\.registerTool\s*\(/.test(source)) {
-    warnings.push(
-      "Tool does not call `pi.registerTool()`. " + "Make sure to register at least one tool.",
-    );
-  }
-
-  // Check for empty tool name in registerTool({ name: "" })
-  if (/registerTool\s*\(\s*\{[^}]{0,200}name\s*:\s*["']\s*["']/.test(source)) {
-    errors.push(
-      "Tool `name` must not be empty in `registerTool()`. " +
-        'Example: pi.registerTool({ name: "my_tool", ... })',
-    );
-  }
-
-  const cleaned = stripLineComments(source);
-  const executeMatches = [...cleaned.matchAll(/execute\s*\(([^)]{0,500})\)/g)];
-  for (const match of executeMatches) {
-    const paramStr = match[1]!;
-    const paramCount = countParams(paramStr);
-    if (paramCount === 1) {
-      errors.push(
-        "The `execute` signature has only one parameter. " +
-          "The Pi SDK calls execute(toolCallId, params, signal) — with a single parameter, " +
-          "your function will receive the toolCallId (string) instead of params. " +
-          "Fix: execute(_toolCallId, params, signal) { ... }",
-      );
-      break;
-    }
-  }
-
-  if (executeMatches.length > 0 && !/content\s*:/.test(cleaned)) {
-    warnings.push(
-      "The `execute` function does not seem to return `{ content: [...] }`. " +
-        'Expected format: { content: [{ type: "text", text: "..." }] }',
-    );
-  }
-
-  return { valid: errors.length === 0, errors, warnings };
-}
-
 // ─────────────────────────────────────────────
 // Agent readiness utilities
 // ─────────────────────────────────────────────
@@ -659,10 +449,12 @@ export function isPromptEmpty(prompt: string): boolean {
 
 /**
  * Find IDs declared in `required` but missing from `installed`.
- * Works for both skills and tools.
+ * Works for both skills and integrations. The dep value type is left
+ * open (`unknown`) to accept both the bare-string and AFPS §4.1
+ * object forms — only the keys are read.
  */
 export function findMissingDependencies(
-  required: Record<string, string>,
+  required: Record<string, unknown>,
   installedIds: string[],
 ): string[] {
   const installed = new Set(installedIds);

@@ -24,14 +24,11 @@ import { agentsPaths } from "./paths/agents.ts";
 import { runsPaths } from "./paths/runs.ts";
 import { realtimePaths } from "./paths/realtime.ts";
 import { schedulesPaths } from "./paths/schedules.ts";
-import { connectionsPaths } from "./paths/connections.ts";
-import { providersPaths } from "./paths/providers.ts";
+import { integrationsPaths } from "./paths/integrations.ts";
 import { modelsPaths } from "./paths/models.ts";
 import { modelProviderCredentialsPaths } from "./paths/model-provider-credentials.ts";
 import { modelProvidersOAuthPaths } from "./paths/model-providers-oauth.ts";
 import { proxiesPaths } from "./paths/proxies.ts";
-import { connectionProfilesPaths } from "./paths/connection-profiles.ts";
-import { appProfilesPaths } from "./paths/app-profiles.ts";
 import { apiKeysPaths } from "./paths/api-keys.ts";
 import { organizationsPaths } from "./paths/organizations.ts";
 import { profilePaths } from "./paths/profile.ts";
@@ -56,14 +53,11 @@ const corePaths = {
   ...runsPaths,
   ...realtimePaths,
   ...schedulesPaths,
-  ...connectionsPaths,
-  ...providersPaths,
+  ...integrationsPaths,
   ...modelsPaths,
   ...modelProviderCredentialsPaths,
   ...modelProvidersOAuthPaths,
   ...proxiesPaths,
-  ...connectionProfilesPaths,
-  ...appProfilesPaths,
   ...apiKeysPaths,
   ...organizationsPaths,
   ...profilePaths,

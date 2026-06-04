@@ -10,7 +10,9 @@
  * Hono routers. It is declared as an optional peer dependency.
  */
 
+import { z } from "zod";
 import type { Hono } from "hono";
+import type { ValidationFieldError } from "./api-errors.ts";
 import type { Logger } from "./logger.ts";
 import type { OrgRole } from "./permissions.ts";
 import type { ModelApiShape, OAuthWireFormat } from "./sidecar-types.ts";
@@ -21,8 +23,6 @@ import type {
   InlinePreflightResult,
   InlineRunBody,
   PlatformApplication,
-  PlatformConnectionProviderGroup,
-  PlatformListResponse,
   PlatformModel,
   PlatformPackage,
   PubSub,
@@ -360,7 +360,7 @@ export interface AppstrateModule {
    * modelProviders: () => [{
    *   providerId: "my-oauth-provider",
    *   displayName: "My OAuth Provider",
-   *   apiShape: "openai-chat",
+   *   apiShape: "openai-completions",
    *   authMode: "oauth2",
    *   oauth: { clientId: "...", ... },
    *   featuredModels: [...],
@@ -490,6 +490,15 @@ export interface ModuleHooks {
 export interface ModuleEvents {
   /** Run status changed — broadcast on every run lifecycle transition. */
   onRunStatusChange: (params: RunStatusChangeParams) => void | Promise<void>;
+  /**
+   * Run kickoff was blocked because one or more integration connections were
+   * missing or under-scoped — broadcast when `validateAgentReadiness` returns
+   * integration field errors. No run row exists yet at this point; the payload
+   * carries the would-be kickoff context (agent, actor) plus the field-level
+   * errors that triggered the block. Useful for surfacing under-provisioned
+   * agents to downstream dashboards without polling for 4xx responses.
+   */
+  onRunConnectionMissing: (params: RunConnectionMissingParams) => void | Promise<void>;
   /** Org created — broadcast after a new organization is created. */
   onOrgCreate: (orgId: string, userEmail: string) => void | Promise<void>;
   /** Org deleted — broadcast before an organization is deleted. */
@@ -524,6 +533,17 @@ export interface ModelCost {
   /** USD per 1M cache-write tokens (Anthropic-style prompt caching). */
   cacheWrite?: number;
 }
+
+/**
+ * Zod validator for {@link ModelCost}. `cacheRead` / `cacheWrite` are optional —
+ * providers without prompt caching simply omit them.
+ */
+export const modelCostSchema = z.object({
+  input: z.number().nonnegative(),
+  output: z.number().nonnegative(),
+  cacheRead: z.number().nonnegative().optional(),
+  cacheWrite: z.number().nonnegative().optional(),
+});
 
 /** OAuth2 endpoints + client config for OAuth-authenticated providers. */
 export interface ModelProviderOAuthConfig {
@@ -948,6 +968,27 @@ export interface RunStatusChangeParams {
   extra?: Record<string, unknown>;
 }
 
+/**
+ * Single field-level error entry carried on
+ * {@link RunConnectionMissingParams.errors}. Aliases the core
+ * {@link ValidationFieldError} (the shape platform routes return as 4xx
+ * envelopes) so modules can forward it verbatim to downstream consumers
+ * (webhook payloads, Slack messages) without remapping.
+ */
+export type RunConnectionMissingError = ValidationFieldError;
+
+/** Parameters passed to the `onRunConnectionMissing` event. */
+export interface RunConnectionMissingParams {
+  orgId: string;
+  applicationId: string;
+  /** Agent package id whose kickoff was blocked. */
+  packageId: string;
+  /** Actor whose request was blocked (user or end_user from the headless API). */
+  actor: { type: "user" | "end_user"; id: string };
+  /** Field-level errors that triggered the block (same shape as 4xx envelopes). */
+  errors: RunConnectionMissingError[];
+}
+
 // ---------------------------------------------------------------------------
 // Init context — platform services injected into modules
 // ---------------------------------------------------------------------------
@@ -1063,18 +1104,13 @@ export interface PlatformServices {
     search(args: {
       query: string;
       orgId: string;
-      kind: "agent" | "skill" | "tool" | "provider";
+      kind: "agent" | "skill";
       limit?: number;
     }): Promise<PlatformPackage[]>;
   };
   /** Application helpers. */
   applications: {
     getDefault(orgId: string): Promise<PlatformApplication | null>;
-  };
-  /** Connection manager helpers. */
-  connections: {
-    /** Returns the Stripe-canonical list envelope `{ object: "list", data, hasMore }`. */
-    listAllForActor(actor: Actor): Promise<PlatformListResponse<PlatformConnectionProviderGroup>>;
   };
   /**
    * Run lifecycle operations (append log, update, abort).

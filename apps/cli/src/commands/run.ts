@@ -4,7 +4,7 @@
  * `appstrate run <bundle.afps>` — execute an AFPS bundle locally.
  *
  * Runs the bundle in-process via @appstrate/runner-pi → PiRunner. The
- * LLM API key is user-supplied (env var / flag); provider credentials
+ * LLM API key is user-supplied (env var / flag); integration credentials
  * are resolved via the Appstrate instance (default), a local JSON file,
  * or disabled entirely.
  *
@@ -21,7 +21,8 @@ import * as path from "node:path";
 import {
   PiRunner,
   prepareBundleForPi,
-  buildProviderCallExtensionFactory,
+  buildApiCallExtensionFactory,
+  buildRuntimeToolExtensions,
   emitRuntimeReady,
   startSinkHeartbeat,
   type SinkHeartbeatHandle,
@@ -46,10 +47,12 @@ import {
 import { createConsoleSink } from "./run/sink.ts";
 import { resolveVerbosity } from "./run/format.ts";
 import {
-  buildResolver,
-  parseProviderMode,
+  buildIntegrationResolver,
+  parseIntegrationMode,
   ResolverConfigError,
-  type ProviderMode,
+  ERR_LOCAL_REQUIRES_CREDS,
+  ERR_REMOTE_REQUIRES_AUTH,
+  type IntegrationMode,
   type RemoteResolverInputs,
   type LocalResolverInputs,
 } from "./run/resolver.ts";
@@ -83,12 +86,6 @@ import {
   type InheritedRunConfig,
 } from "./run/inherit-config.ts";
 import {
-  parseProviderProfileOverrides,
-  resolveConnectionProfileSelection,
-  ConnectionProfileResolutionError,
-} from "./run/connection-profiles.ts";
-import { preflightCheck, PreflightAbortError } from "./run/preflight.ts";
-import {
   resolveExecutionMode,
   validateOptsForMode,
   ExecutionModeError,
@@ -106,7 +103,7 @@ export interface RunCommandOptions {
   inputFile?: string;
   config?: string;
   snapshot?: string;
-  providers?: string;
+  integrations?: string;
   credsFile?: string;
   model?: string;
   modelApi?: string;
@@ -143,24 +140,6 @@ export interface RunCommandOptions {
    * must not drift the run.
    */
   noInherit?: boolean;
-  /**
-   * Connection profile id or name. Used as `X-Connection-Profile-Id`
-   * on every credential-proxy call. Falls back to the sticky default
-   * pinned via `appstrate connections profile switch`, then to the
-   * platform's implicit-default chain.
-   */
-  connectionProfile?: string;
-  /**
-   * Per-provider profile overrides — `["@scope/provider=uuid", ...]`.
-   * Each entry is split on `=`; the resolver applies the override only
-   * for that provider's calls, falling back to the default profile for
-   * everything else. Mirrors the dashboard's per-agent override surface.
-   */
-  providerProfile?: string[];
-  /** Skip the readiness preflight entirely (CI mode). */
-  noPreflight?: boolean;
-  /** Override the preflight polling timeout. Default 5 minutes. */
-  preflightTimeout?: number;
   /**
    * Verbose tool-call rendering — pretty-print args + emit the full
    * truncated result (~2 KB). Mutually exclusive with `--quiet`.
@@ -214,11 +193,11 @@ export async function runCommand(opts: RunCommandOptions): Promise<void> {
 }
 
 async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
-  // ─── 1. Resolve provider mode + profile state ──────────────────────
-  const mode: ProviderMode = parseProviderMode(opts.providers);
+  // ─── 1. Resolve integration mode + profile state ──────────────────
+  const mode: IntegrationMode = parseIntegrationMode(opts.integrations);
   const target = parseRunTarget(opts.bundle);
   // Auto-default to `preset` when the user runs an agent by id (the
-  // "UI parity" path) AND has a remote provider context. Path mode
+  // "UI parity" path) AND has a remote integration context. Path mode
   // keeps `env` as the default — local file = local execution = local
   // credentials. The user can always override via --model-source or
   // APPSTRATE_MODEL_SOURCE.
@@ -226,32 +205,12 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     autoPreset: target.kind === "id" && mode !== "none" && mode !== "local",
   });
 
-  // Build provider resolver inputs FIRST so preset mode can reuse the
+  // Build integration resolver inputs FIRST so preset mode can reuse the
   // bearer token — they share the same auth surface.
   const resolverInputs = await buildResolverInputs(mode, opts);
 
-  // ─── 1b. Connection profile + per-provider overrides ─────────────
-  // Apply the explicit `--connection-profile` flag (or the sticky
-  // default pinned by `appstrate connections profile switch`) and
-  // any `--provider-profile <p>=<ref>` overrides. Names need an API
-  // round-trip; UUIDs pass through verbatim. No-op when not in remote
-  // mode — local/none resolvers don't speak to the credential proxy.
-  const connectionSelection = await resolveConnectionProfileForRun(resolverInputs, opts);
-  const resolverInputsWithProfiles =
-    resolverInputs && "bearerToken" in resolverInputs && connectionSelection
-      ? {
-          ...resolverInputs,
-          ...(connectionSelection.connectionProfileId
-            ? { connectionProfileId: connectionSelection.connectionProfileId }
-            : {}),
-          ...(Object.keys(connectionSelection.providerProfileOverrides).length > 0
-            ? { providerProfileOverrides: connectionSelection.providerProfileOverrides }
-            : {}),
-        }
-      : resolverInputs;
-
   // ─── 1a. Inherited run-config ────────────────────────────────────
-  // When the user runs an agent by id with a remote provider context,
+  // When the user runs an agent by id with a remote integration context,
   // pull the per-app run-config so flags + env vars cascade over the
   // same persisted state the dashboard "Run" button uses. Skipped for
   // path-mode (local file, no platform handle) and for `--no-inherit`
@@ -283,7 +242,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   //     instance (with deps inlined) into memory only. The bytes are
   //     verified against the server's integrity header and discarded
   //     when the run finishes — no on-disk cache. Requires a remote
-  //     provider mode so we already have the bearer token + applicationId in
+  //     integration mode so we already have the bearer token + applicationId in
   //     `resolverInputs`. The inherited `versionPin` is applied as the
   //     spec when the user did not type `@spec` themselves.
   const bundleTarget =
@@ -297,49 +256,19 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
       : readBundleFromBuffer(bundleSource.bytes);
   const bundleLabel = bundleSource.label;
 
-  // ─── 3.5 Preflight readiness ─────────────────────────────────────
-  // Only meaningful when the user is running an agent by id against a
-  // remote instance — in path-mode there's no platform handle, and in
-  // local/none provider modes there are no credentials to be ready
-  // about. The check itself reuses the same dependency-validation
-  // machinery the run pipeline uses, so the answer is in lockstep with
-  // what the run would actually do.
-  if (
-    target.kind === "id" &&
-    resolverInputs &&
-    "bearerToken" in resolverInputs &&
-    !opts.noPreflight
-  ) {
-    await preflightCheck({
-      instance: resolverInputs.instance,
-      bearerToken: resolverInputs.bearerToken,
-      applicationId: resolverInputs.applicationId,
-      orgId: resolverInputs.orgId,
-      scope: target.scope,
-      name: target.name,
-      ...(connectionSelection?.connectionProfileId
-        ? { connectionProfileId: connectionSelection.connectionProfileId }
-        : {}),
-      ...(connectionSelection?.providerProfileOverrides &&
-      Object.keys(connectionSelection.providerProfileOverrides).length > 0
-        ? { perProviderOverrides: connectionSelection.providerProfileOverrides }
-        : {}),
-      json: opts.json === true,
-      skip: false,
-      ...(opts.preflightTimeout ? { timeoutSeconds: opts.preflightTimeout } : {}),
-    });
-  }
-
   // ─── 3a. Optional: register run + build reporting session ─────────
   const reportSession = await resolveReportSession(opts, bundle, bundleSource, resolverInputs);
 
-  // ─── 3b. Build the ProviderResolver ────────────────────────────────
+  // ─── 3b. Build the integration api_call resolver ──────────────────
   // Thread X-Run-Id into credential-proxy calls when reporting is on.
+  // Serverless `apiCall` integrations (the unified integration
+  // surface) get credential-injected HTTP calls; the resolver yields one
+  // `{ns}__api_call` tool per integration.
   const effectiveResolverInputs =
-    resolverInputsWithProfiles && reportSession
-      ? appendResolverHeaders(resolverInputsWithProfiles, reportSession.proxyHeaders)
-      : resolverInputsWithProfiles;
-  const providerResolver = buildResolver(mode, effectiveResolverInputs);
+    resolverInputs && reportSession
+      ? appendResolverHeaders(resolverInputs, reportSession.proxyHeaders)
+      : resolverInputs;
+  const integrationResolver = buildIntegrationResolver(mode, effectiveResolverInputs);
 
   // ─── 5. Parse input ────────────────────────────────────────────────
   // The merged config (deep-merge of `--config` over the inherited
@@ -367,12 +296,10 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   }
 
   // ─── 6. ExecutionContext + prompt inputs ──────────────────────────
-  // Derive the full platform prompt (tools / skills / providers /
-  // schemas / output) from the bundle BEFORE prepareBundleForPi — the
-  // bundled `@appstrate/output` tool reads `process.env.OUTPUT_SCHEMA`
-  // at import time and must see the schema to expose it as constrained
-  // decoding to the LLM. Matches the platform container's wiring via
-  // `buildRuntimePiEnv`.
+  // Derive the full platform prompt (tools / skills / schemas / output)
+  // from the bundle. The runtime `output` tool receives the output schema as
+  // a parameter (`buildRuntimeToolExtensions({ outputSchema })` below), not
+  // via the environment.
   //
   // `--snapshot` seeds `memories` / `history` / `state` onto the
   // context so dev-loop replays (previously served by `afps run`) keep
@@ -391,15 +318,6 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   });
   const systemPrompt = renderPlatformPrompt(promptInputs);
 
-  const priorOutputSchema = process.env.OUTPUT_SCHEMA;
-  if (promptInputs.outputSchema !== undefined) {
-    process.env.OUTPUT_SCHEMA = JSON.stringify(promptInputs.outputSchema);
-  }
-  const restoreOutputSchema = (): void => {
-    if (priorOutputSchema === undefined) delete process.env.OUTPUT_SCHEMA;
-    else process.env.OUTPUT_SCHEMA = priorOutputSchema;
-  };
-
   // System tools (`@appstrate/output`, `@appstrate/report`, …) read
   // `AGENT_RUN_ID` from the env when stamping their stdout-JSONL events.
   // The stdout bridge installed below re-stamps events with the canonical
@@ -414,35 +332,45 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
 
   // ─── 7. Temp workspace + extension prep ────────────────────────────
   const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "appstrate-run-"));
-  const prepared = await prepareBundleForPi(bundle, {
-    workspaceDir,
-    onError: (message, err) => {
-      if (!opts.json) {
-        process.stderr.write(`warn: ${message}${err ? `: ${getErrorMessage(err)}` : ""}\n`);
-      }
-    },
-  });
+  await prepareBundleForPi(bundle, { workspaceDir });
 
-  // ─── 7a. Provider tools — bridge AFPS ProviderResolver → Pi factories ──
-  // PiRunner takes pre-built Pi extension factories; the AFPS provider
-  // resolver yields one tool per declared provider, exposed to the LLM
-  // through a single `provider_call({providerId, ...})` Pi tool — same
-  // surface as runtime-pi's MCP-backed `provider_call` so prompts are
-  // identical regardless of execution mode.
-  const providerFactories = await buildProviderCallExtensionFactory({
+  // ─── 7a. Integration api_call tools — one {ns}__api_call per integration ──
+  // PiRunner takes pre-built Pi extension factories; the integration
+  // resolver yields one tool per serverless `apiCall` integration, exposed
+  // to the LLM as `{ns}__api_call` — same surface as the platform sidecar's
+  // `{ns}__api_call` MCP tool, so prompts are identical regardless of
+  // execution mode. Pure MCP-server integrations are skipped here (no
+  // generic call surface in-process).
+  const apiCallFactories = await buildApiCallExtensionFactory({
     bundle,
-    providerResolver,
+    integrationResolver,
     runId,
     workspace: workspaceDir,
-    emitProvider: () => {
-      // Provider `ctx.emit` events are currently swallowed in CLI mode;
-      // the stdout JSONL sink already reflects tool-call activity via
-      // Pi SDK's own `tool_execution_start` events. A dedicated
-      // `provider.called` stream can be wired later if useful.
+    emitEvent: () => {
+      // Events are swallowed in the CLI — the run-result aggregate is
+      // assembled from stdout CloudEvents, not from these telemetry hooks.
     },
   });
-  if (!opts.json && providerFactories.length > 0) {
-    process.stderr.write(`→ wired ${providerFactories.length} provider tool(s)\n`);
+  if (!opts.json && apiCallFactories.length > 0) {
+    process.stderr.write(`→ wired ${apiCallFactories.length} integration api_call tool(s)\n`);
+  }
+
+  // ─── 7b. Platform runtime tools (output/log/note/pin/report) ──────────
+  // Selected via `manifest.runtime_tools`. With no sidecar (the CLI always
+  // runs in-process), register the shared MCP tool definitions
+  // (`@appstrate/core/runtime-tool-defs`) as Pi extensions. The default
+  // emitter writes the canonical events as stdout-JSONL, harvested by the
+  // `attachStdoutBridge` wired below into the run sink — same wire contract
+  // the former built-in tools used.
+  const rootRuntimeTools = (
+    bundle.packages.get(bundle.root)?.manifest as { runtime_tools?: string[] } | undefined
+  )?.runtime_tools;
+  const runtimeToolFactories = buildRuntimeToolExtensions({
+    ...(rootRuntimeTools ? { runtimeTools: rootRuntimeTools } : {}),
+    outputSchema: (promptInputs.outputSchema ?? null) as Record<string, unknown> | null,
+  });
+  if (!opts.json && runtimeToolFactories.length > 0) {
+    process.stderr.write(`→ wired ${runtimeToolFactories.length} runtime tool(s)\n`);
   }
 
   // ─── 8. Cancellation wiring ───────────────────────────────────────
@@ -474,8 +402,8 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     envValue: process.env.APPSTRATE_VERBOSE,
   });
   // Stdout-JSONL bridge wiring (see `attachStdoutBridge` for the full
-  // rationale). System tools (`@appstrate/output`, `@appstrate/report`,
-  // `@appstrate/note`, `@appstrate/pin`) emit canonical events via
+  // rationale). The built-in runtime tools (`output`, `report`, `note`, `pin`)
+  // emit canonical events via
   // `process.stdout.write(JSON+\n)`. Without the bridge these events
   // never reach the configured sink — they're printed as raw JSON noise
   // and lost. The bridge intercepts stdout, parses canonical events,
@@ -507,7 +435,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   // CLI's safety-net finalize in the cleanup doesn't double-post.
   // PiRunner finalises itself on success and on non-abort errors, but
   // explicitly does NOT on cancellation — and any throw during setup
-  // (provider extension build, runtime-ready emit, …) bypasses
+  // (integration extension build, runtime-ready emit, …) bypasses
   // PiRunner entirely. Without this safety net the run sits open
   // until the watchdog times out.
   const wasHttpSinkFinalized = reportSession ? attachFinalizeTracker(reportSession.httpSink) : null;
@@ -577,9 +505,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
       // back to the original — required for tests; production processes
       // exit immediately after cleanup but the symmetry costs nothing.
       bridge.restore();
-      restoreOutputSchema();
       restoreAgentRunId();
-      await prepared.cleanup().catch(() => {});
       await fs.rm(workspaceDir, { recursive: true, force: true }).catch(() => {});
     })();
     return cleanupPromise;
@@ -594,7 +520,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
       systemPrompt,
       cwd: workspaceDir,
       agentDir: path.join(workspaceDir, ".pi-agent"),
-      extensionFactories: [...prepared.extensionFactories, ...providerFactories],
+      extensionFactories: [...apiCallFactories, ...runtimeToolFactories],
       authStoragePath: path.join(workspaceDir, ".pi-auth.json"),
     });
 
@@ -614,7 +540,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     // phase entirely because ES module imports are evaluated before any
     // top-level statement runs.
     const emittedRunId = reportSession?.runId ?? runId;
-    const extensionsCount = prepared.extensionFactories.length + providerFactories.length;
+    const extensionsCount = apiCallFactories.length + runtimeToolFactories.length;
     await emitRuntimeReady(sink, emittedRunId, {
       bundleLoaded: true,
       extensions: extensionsCount,
@@ -649,7 +575,6 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     await runner.run({
       bundle,
       context,
-      providerResolver,
       eventSink: sink,
       signal: shutdownSignal,
     });
@@ -825,7 +750,7 @@ function raceFinalizeAgainstTimeout(p: Promise<void>, timeoutMs: number): Promis
  * Resolve the effective `--model-source`. Exported for unit tests.
  * Precedence: explicit flag > `APPSTRATE_MODEL_SOURCE` env > auto.
  * Auto picks `preset` when the caller passes `{ autoPreset: true }`
- * (id-mode + remote provider context, the UI-parity path) and `env`
+ * (id-mode + remote integration context, the UI-parity path) and `env`
  * otherwise (local file, or any local-credentials run).
  */
 export function parseModelSource(
@@ -868,8 +793,8 @@ async function resolveLlmConfig(
   // Appstrate bearer token, which lives in the remote resolver inputs.
   if (!resolverInputs || !("bearerToken" in resolverInputs)) {
     throw new ModelResolutionError(
-      "--model-source preset requires remote provider mode",
-      "Remove --providers=none/local, or log in with `appstrate login`.",
+      "--model-source preset requires remote integration mode",
+      "Remove --integrations=none/local, or log in with `appstrate login`.",
     );
   }
   const profileName = await resolveProfileNameForPreset(opts);
@@ -900,15 +825,15 @@ async function resolveProfileNameForPreset(opts: RunCommandOptions): Promise<str
 }
 
 async function buildResolverInputs(
-  mode: ProviderMode,
+  mode: IntegrationMode,
   opts: RunCommandOptions,
 ): Promise<RemoteResolverInputs | LocalResolverInputs | null> {
   if (mode === "none") return null;
   if (mode === "local") {
     if (!opts.credsFile) {
       throw new ResolverConfigError(
-        "--providers=local requires --creds-file <path>",
-        "Pass a JSON file with { version: 1, providers: {…} }",
+        ERR_LOCAL_REQUIRES_CREDS.message,
+        ERR_LOCAL_REQUIRES_CREDS.hint,
       );
     }
     return { credsFilePath: path.resolve(opts.credsFile) };
@@ -975,10 +900,7 @@ async function buildInteractiveRemoteInputs(
   const resolved = await resolveActiveProfile(opts.profile).catch(() => null);
   const profile = resolved?.profile;
   if (!resolved || !profile) {
-    throw new ResolverConfigError(
-      "--providers=remote requires a logged-in profile or an API key",
-      "Run `appstrate login`, or set APPSTRATE_API_KEY + APPSTRATE_INSTANCE + APPSTRATE_APP_ID (headless)",
-    );
+    throw new ResolverConfigError(ERR_REMOTE_REQUIRES_AUTH.message, ERR_REMOTE_REQUIRES_AUTH.hint);
   }
   if (!profile.applicationId) {
     throw new ResolverConfigError(
@@ -1128,46 +1050,8 @@ function resolverInputsInstance(inputs: RemoteResolverInputs | LocalResolverInpu
 }
 
 /**
- * Resolve `--connection-profile` + `--provider-profile` flags into the
- * concrete ids the resolver forwards as `X-Connection-Profile-Id`. The
- * sticky default (`Profile.connectionProfileId`) acts as the fallback
- * when the user did not pass `--connection-profile`. No-op when the
- * provider mode has no remote handle (`local`, `none`).
- */
-async function resolveConnectionProfileForRun(
-  resolverInputs: RemoteResolverInputs | LocalResolverInputs | null,
-  opts: RunCommandOptions,
-): Promise<{
-  connectionProfileId: string | undefined;
-  providerProfileOverrides: Record<string, string>;
-} | null> {
-  if (!resolverInputs || !("bearerToken" in resolverInputs)) return null;
-
-  const perProvider = parseProviderProfileOverrides(opts.providerProfile);
-  // No flags + no sticky → nothing to do, no need to load profiles.
-  const resolved = await resolveActiveProfile(opts.profile).catch(() => null);
-  const pinnedId = resolved?.profile?.connectionProfileId;
-  if (!opts.connectionProfile && !pinnedId && perProvider.length === 0) {
-    return { connectionProfileId: undefined, providerProfileOverrides: {} };
-  }
-
-  if (!resolved) {
-    throw new ConnectionProfileResolutionError(
-      "--connection-profile / --provider-profile require an active CLI profile",
-      "Run `appstrate login`, or pass --profile.",
-    );
-  }
-  return resolveConnectionProfileSelection({
-    profileName: resolved.profileName,
-    flagRef: opts.connectionProfile,
-    pinnedId,
-    perProvider,
-  });
-}
-
-/**
  * Pull the resolved run-config from the pinned instance when running an
- * agent by id with a remote provider context. Returns a zeroed
+ * agent by id with a remote integration context. Returns a zeroed
  * inheritance record when the call cannot or should not be made — the
  * caller treats every field as a no-op merge in that case.
  */
@@ -1252,7 +1136,7 @@ async function resolveBundleSource(
     return { kind: "path", path: abs, label: path.basename(abs) };
   }
 
-  // id mode — needs remote provider context so we have a bearer + applicationId
+  // id mode — needs remote integration context so we have a bearer + applicationId
   // to authenticate the bundle download against the pinned instance.
   if (!resolverInputs || !("bearerToken" in resolverInputs)) {
     throw new PackageSpecError(
@@ -1295,8 +1179,6 @@ export {
   PackageSpecError,
   BundleFetchError,
   RunConfigFetchError,
-  ConnectionProfileResolutionError,
-  PreflightAbortError,
   ExecutionModeError,
   RemoteRunError,
 };
@@ -1308,7 +1190,7 @@ export {
  * asserted without spinning up a real profile / browser / instance.
  */
 export async function _buildResolverInputsForTesting(
-  mode: ProviderMode,
+  mode: IntegrationMode,
   opts: RunCommandOptions,
 ): Promise<RemoteResolverInputs | LocalResolverInputs | null> {
   return buildResolverInputs(mode, opts);
@@ -1316,7 +1198,7 @@ export async function _buildResolverInputsForTesting(
 
 /**
 /**
- * Pull the AFPS 1.x `config.schema` JSON Schema out of the bundle's
+ * Pull the AFPS `config.schema` JSON Schema out of the bundle's
  * root package manifest. Returns `undefined` when the agent declares
  * no config schema (so validation is a no-op). Mirrors the unexported
  * helper in `@appstrate/afps-runtime/bundle/platform-prompt-inputs`.

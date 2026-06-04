@@ -43,38 +43,38 @@ export const agentsPaths = {
                 data: [
                   {
                     id: "@acme/email-sorter",
-                    displayName: "Email Sorter",
+                    display_name: "Email Sorter",
                     description: "Automatically sorts and labels incoming emails",
-                    schemaVersion: "1.1",
+                    schema_version: "0.1",
                     author: "Acme Corp",
                     keywords: ["email", "automation"],
                     source: "local",
                     scope: "@acme",
                     version: "1.2.0",
                     type: "agent",
-                    runningRuns: 1,
+                    running_runs: 1,
                     dependencies: {
-                      providers: { "@appstrate/gmail": "^1.0.0" },
                       skills: {},
-                      tools: {},
+                      mcp_servers: {},
+                      integrations: {},
                     },
                   },
                   {
                     id: "@appstrate/code-reviewer",
-                    displayName: "Code Reviewer",
+                    display_name: "Code Reviewer",
                     description: "Reviews pull requests and suggests improvements",
-                    schemaVersion: "1.1",
+                    schema_version: "0.1",
                     author: "Appstrate",
                     keywords: ["code", "review", "github"],
                     source: "system",
                     scope: "@appstrate",
                     version: "2.0.0",
                     type: "agent",
-                    runningRuns: 0,
+                    running_runs: 0,
                     dependencies: {
-                      providers: { "@appstrate/github": "^1.0.0" },
                       skills: { "@appstrate/summarize": "^1.0.0" },
-                      tools: {},
+                      mcp_servers: { "@appstrate/filesystem-mcp": "^1.0.0" },
+                      integrations: { "@appstrate/github": "^2.0.0" },
                     },
                   },
                 ],
@@ -221,7 +221,7 @@ export const agentsPaths = {
       tags: ["Agents"],
       summary: "List unified agent persistence (pinned slots + memories)",
       description:
-        "Returns the agent's named pinned slots and archive memories visible to the caller's actor scope. Pinned slots include the `checkpoint` carry-over slot alongside Letta-style named blocks (`persona`, `goals`, …). Admins inspecting at agent level (no `actorType` and no `runId`) see every actor's pinned slots; members always see their own actor scope plus shared rows. See ADR-011, ADR-013.",
+        "Returns the agent's named pinned slots and archive memories visible to the caller's actor scope. Pinned slots include the `checkpoint` carry-over slot alongside Letta-style named blocks (`persona`, `goals`, …). Admins inspecting at agent level (no `actor_type` and no `runId`) see every actor's pinned slots; members always see their own actor scope plus shared rows.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -235,18 +235,18 @@ export const agentsPaths = {
           description: "Limit the response to one kind. Omitted → both.",
         },
         {
-          name: "actorType",
+          name: "actor_type",
           in: "query",
           required: false,
           schema: { type: "string", enum: ["user", "end_user", "shared"] },
           description: "Admin-only scope override. Defaults to caller's actor scope.",
         },
         {
-          name: "actorId",
+          name: "actor_id",
           in: "query",
           required: false,
           schema: { type: "string" },
-          description: "Required when `actorType` is `user` or `end_user`.",
+          description: "Required when `actor_type` is `user` or `end_user`.",
         },
         {
           name: "runId",
@@ -277,8 +277,8 @@ export const agentsPaths = {
                         key: { type: "string" },
                         content: {},
                         runId: { type: ["string", "null"] },
-                        actorType: { type: "string", enum: ["user", "end_user", "shared"] },
-                        actorId: { type: ["string", "null"] },
+                        actor_type: { type: "string", enum: ["user", "end_user", "shared"] },
+                        actor_id: { type: ["string", "null"] },
                         createdAt: { type: ["string", "null"], format: "date-time" },
                         updatedAt: { type: ["string", "null"], format: "date-time" },
                       },
@@ -292,8 +292,8 @@ export const agentsPaths = {
                         id: { type: "integer" },
                         content: {},
                         runId: { type: ["string", "null"] },
-                        actorType: { type: "string", enum: ["user", "end_user", "shared"] },
-                        actorId: { type: ["string", "null"] },
+                        actor_type: { type: "string", enum: ["user", "end_user", "shared"] },
+                        actor_id: { type: ["string", "null"] },
                         createdAt: { type: ["string", "null"], format: "date-time" },
                       },
                     },
@@ -313,7 +313,7 @@ export const agentsPaths = {
       tags: ["Agents"],
       summary: "Bulk-delete persistence rows for an agent",
       description:
-        "Wipes memories (always) and optionally the `checkpoint` slot (when `actorType` + `actorId` resolve to a single scope). Other named pinned slots must be deleted individually via DELETE /persistence/pinned/{id}. Admin-only.",
+        "Wipes memories (always) and optionally the `checkpoint` slot (when `actor_type` + `actor_id` resolve to a single scope). Other named pinned slots must be deleted individually via DELETE /persistence/pinned/{id}. Admin-only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -326,13 +326,13 @@ export const agentsPaths = {
           schema: { type: "string", enum: ["pinned", "memory"] },
         },
         {
-          name: "actorType",
+          name: "actor_type",
           in: "query",
           required: false,
           schema: { type: "string", enum: ["user", "end_user", "shared"] },
         },
         {
-          name: "actorId",
+          name: "actor_id",
           in: "query",
           required: false,
           schema: { type: "string" },
@@ -350,8 +350,8 @@ export const agentsPaths = {
               schema: {
                 type: "object",
                 properties: {
-                  memoriesDeleted: { type: "integer" },
-                  checkpointDeleted: { type: "boolean" },
+                  memories_deleted: { type: "integer" },
+                  checkpoint_deleted: { type: "boolean" },
                 },
               },
             },
@@ -571,320 +571,6 @@ export const agentsPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-  },
-  "/api/agents/{scope}/{name}/tools": {
-    put: {
-      operationId: "updateAgentTools",
-      tags: ["Agents"],
-      summary: "Update linked tools",
-      description: "Set the tool references for a user agent.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-      ],
-      requestBody: {
-        required: true,
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              required: ["toolIds"],
-              properties: {
-                toolIds: {
-                  type: "array",
-                  items: {
-                    type: "string",
-                    pattern: "^@[a-z0-9]([a-z0-9-]*[a-z0-9])?/[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-      responses: {
-        "200": {
-          description: "Tools updated",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  packageId: { type: "string" },
-                  toolIds: { type: "array", items: { type: "string" } },
-                  message: { type: "string" },
-                },
-              },
-            },
-          },
-        },
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-  },
-  "/api/agents/{scope}/{name}/provider-profiles": {
-    get: {
-      operationId: "getAgentProviderProfiles",
-      tags: ["Agents"],
-      summary: "Get per-provider profile overrides",
-      description:
-        "Returns the per-provider connection profile overrides for an agent. Each key is a provider ID mapped to a profile ID.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-      ],
-      responses: {
-        "200": {
-          description: "Provider profile overrides",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  overrides: {
-                    type: "object",
-                    additionalProperties: { type: "string" },
-                    description: "Map of provider ID to profile ID",
-                  },
-                },
-              },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-    put: {
-      operationId: "setAgentProviderProfile",
-      tags: ["Agents"],
-      summary: "Set a per-provider profile override",
-      description: "Override the connection profile used for a specific provider in this agent.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-      ],
-      requestBody: {
-        required: true,
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              required: ["providerId", "connectionProfileId"],
-              properties: {
-                providerId: { type: "string", minLength: 1 },
-                connectionProfileId: { type: "string", format: "uuid" },
-              },
-            },
-          },
-        },
-      },
-      responses: {
-        "200": {
-          description: "Provider profile override set",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: { type: "object", properties: { success: { type: "boolean" } } },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-    delete: {
-      operationId: "removeAgentProviderProfile",
-      tags: ["Agents"],
-      summary: "Remove a per-provider profile override",
-      description:
-        "Remove the connection profile override for a specific provider, reverting to the default profile.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-      ],
-      requestBody: {
-        required: true,
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              required: ["providerId"],
-              properties: {
-                providerId: { type: "string", minLength: 1 },
-              },
-            },
-          },
-        },
-      },
-      responses: {
-        "200": {
-          description: "Provider profile override removed",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: { type: "object", properties: { success: { type: "boolean" } } },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-  },
-  "/api/agents/{scope}/{name}/app-profile": {
-    put: {
-      operationId: "setAgentAppProfile",
-      tags: ["Agents"],
-      summary: "Set app profile for an agent",
-      description:
-        "Set or clear the application-level connection profile for this agent. Pass a profile ID to set, or null to clear.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-      ],
-      requestBody: {
-        required: true,
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              required: ["appProfileId"],
-              properties: {
-                appProfileId: {
-                  type: ["string", "null"],
-                  format: "uuid",
-                  description: "App profile ID or null to clear",
-                },
-              },
-            },
-          },
-        },
-      },
-      responses: {
-        "200": {
-          description: "App profile updated",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: { type: "object", properties: { success: { type: "boolean" } } },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-  },
-  "/api/agents/{scope}/{name}/readiness": {
-    get: {
-      operationId: "getAgentReadiness",
-      tags: ["Agents"],
-      summary: "Preflight provider readiness for an agent",
-      description:
-        "Returns `{ ready, missing[] }` describing which provider connections are unsatisfied for this agent under the given profile context. The CLI uses this before triggering a run to decide whether to prompt the user to open the browser and connect missing providers; the dashboard can use it to surface live readiness status. Reuses the same resolution logic the run pipeline applies, so the preflight answer is in lockstep with what the run would actually do.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-        {
-          in: "query",
-          name: "connectionProfileId",
-          required: false,
-          description:
-            "Override the default profile lookup with an explicit profile UUID. When unset, the route falls back to the caller's actor default (mirrors the run pipeline).",
-          schema: { type: "string", format: "uuid" },
-        },
-      ],
-      responses: {
-        "200": {
-          description: "Readiness report",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["ready", "missing"],
-                properties: {
-                  ready: { type: "boolean" },
-                  missing: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      required: ["providerId", "connectionProfileId", "reason", "message"],
-                      properties: {
-                        providerId: { type: "string" },
-                        connectionProfileId: { type: ["string", "null"], format: "uuid" },
-                        reason: {
-                          type: "string",
-                          enum: [
-                            "no_connection",
-                            "needs_reconnection",
-                            "scope_insufficient",
-                            "provider_not_enabled",
-                          ],
-                        },
-                        message: { type: "string" },
-                      },
-                    },
-                  },
-                },
-              },
-              example: {
-                ready: false,
-                missing: [
-                  {
-                    providerId: "@afps/gmail",
-                    connectionProfileId: "550e8400-e29b-41d4-a716-446655440010",
-                    reason: "no_connection",
-                    message: "Provider '@afps/gmail' is not connected",
-                  },
-                ],
-              },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },

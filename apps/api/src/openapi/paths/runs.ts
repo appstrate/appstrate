@@ -47,6 +47,12 @@ export const runsPaths = {
                   description:
                     "Per-run config override. Deep-merged with the per-application persisted config (`application_packages.config`): override leaves replace, plain-object children merge recursively, arrays are replaced wholesale, `null` at a leaf sets the value to null (validated as missing for required string fields), missing keys fall through. Re-validated against the manifest config schema after the merge — a 400 `invalid_config` is returned if the merged result violates the schema. Top-level `null` is rejected (returns 400) — omit the field to inherit persisted defaults, send `{}` for an explicit empty override. Mirrors the OpenAPI Assistants `runs.create { instructions, model, tools }` and Argo Workflows `submitOptions.parameters` SOTA — every client (UI, CLI, SDK) reaches the same resolved config for the same `(persisted, override)` pair.",
                 },
+                connection_overrides: {
+                  type: "object",
+                  description:
+                    'Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor.',
+                  additionalProperties: { type: "string" },
+                },
               },
             },
             example: {
@@ -91,7 +97,7 @@ export const runsPaths = {
         },
         "400": {
           description:
-            "Agent readiness validation failed (empty prompt, missing skill/tool, provider not connected, or incomplete config)",
+            "Agent readiness validation failed (empty prompt, missing skill, integration not connected, or incomplete config)",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -237,7 +243,7 @@ export const runsPaths = {
                 manifest: {
                   type: "object",
                   description:
-                    "Full AFPS manifest (agent type). All referenced skills/tools/providers must already exist in the org or system catalog — registry-only dependencies.",
+                    "Full AFPS manifest (agent type). All referenced skills/integrations must already exist in the org or system catalog — registry-only dependencies.",
                 },
                 prompt: {
                   type: "string",
@@ -252,24 +258,18 @@ export const runsPaths = {
                   description:
                     "Per-run config overrides validated against manifest.config.schema (AJV).",
                 },
-                providerProfiles: {
-                  type: "object",
-                  additionalProperties: { type: "string", format: "uuid" },
-                  description:
-                    "Map of providerId → connection-profile UUID. Per-provider override layered over the caller's default profile.",
-                },
                 modelId: { type: ["string", "null"] },
                 proxyId: { type: ["string", "null"] },
               },
             },
             example: {
               manifest: {
-                $schema: "https://afps.appstrate.dev/packages/schema/v1/agent.schema.json",
+                $schema: "https://schemas.afps.dev/v0/agent.schema.json",
                 name: "@inline/one-shot",
-                displayName: "One-shot summary",
+                display_name: "One-shot summary",
                 version: "0.0.0",
                 type: "agent",
-                schemaVersion: "1.1",
+                schema_version: "0.1",
                 dependencies: {},
               },
               prompt: "Summarize the attached document in three bullet points.",
@@ -329,7 +329,7 @@ export const runsPaths = {
       tags: ["Runs"],
       summary: "Validate an inline manifest without firing a run",
       description:
-        "Dry-run validator. Runs the same preflight as `POST /api/runs/inline` — manifest shape, config + input against manifest schemas, and provider readiness — but never inserts a shadow package, never fires the pipeline, and never consumes run credits. Returns `200 { ok: true }` on success, `400` problem+json otherwise. Lets developers iterate on a manifest without leaving run history behind.\n\n**Rate limit:** shares the same per-user bucket as `POST /api/runs/inline` (`INLINE_RUN_LIMITS.rate_per_min`). Iterative validation calls count against the same quota as actual runs — tight loops can trigger `429`.",
+        "Dry-run validator. Runs the same preflight as `POST /api/runs/inline` — manifest shape, config + input against manifest schemas, and integration readiness — but never inserts a shadow package, never fires the pipeline, and never consumes run credits. Returns `200 { ok: true }` on success, `400` problem+json otherwise. Lets developers iterate on a manifest without leaving run history behind.\n\n**Rate limit:** shares the same per-user bucket as `POST /api/runs/inline` (`INLINE_RUN_LIMITS.rate_per_min`). Iterative validation calls count against the same quota as actual runs — tight loops can trigger `429`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -348,10 +348,6 @@ export const runsPaths = {
                 prompt: { type: "string" },
                 input: { type: "object" },
                 config: { type: "object" },
-                providerProfiles: {
-                  type: "object",
-                  additionalProperties: { type: "string", format: "uuid" },
-                },
                 modelId: { type: ["string", "null"] },
                 proxyId: { type: ["string", "null"] },
               },
@@ -361,7 +357,7 @@ export const runsPaths = {
       },
       responses: {
         "200": {
-          description: "Manifest + inputs + provider readiness all pass",
+          description: "Manifest + inputs + integration readiness all pass",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
@@ -380,7 +376,7 @@ export const runsPaths = {
           },
         },
         "400": {
-          description: "Invalid manifest, schema mismatch, or missing provider readiness",
+          description: "Invalid manifest, schema mismatch, or missing connection readiness",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -399,7 +395,7 @@ export const runsPaths = {
       tags: ["Runs"],
       summary: "List runs across the application (global view)",
       description:
-        "Org + application scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, and a date range. Inline runs surface via `packageEphemeral: true` on each row. Note: `kind`, `status`, and date filters are ignored when `user=me` (self-view uses a simpler path).",
+        "Org + application scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, and a date range. Inline runs surface via `package_ephemeral: true` on each row. Note: `kind`, `status`, and date filters are ignored when `user=me` (self-view uses a simpler path).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -493,22 +489,21 @@ export const runsPaths = {
                 input: { folder: "inbox", maxEmails: 50 },
                 result: { processed: 42, labeled: 38 },
                 checkpoint: { lastProcessedId: "msg_99f2a" },
-                tokenUsage: {
+                token_usage: {
                   input_tokens: 8200,
                   output_tokens: 4250,
                   cache_creation_input_tokens: 0,
                   cache_read_input_tokens: 1024,
                 },
-                startedAt: "2026-01-15T10:30:00Z",
-                completedAt: "2026-01-15T10:31:12Z",
+                started_at: "2026-01-15T10:30:00Z",
+                completed_at: "2026-01-15T10:31:12Z",
                 duration: 72000,
-                connectionProfileId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                 scheduleId: "sched_cm1abc456def789",
-                versionLabel: "1.2.0",
-                versionDirty: false,
-                proxyLabel: null,
-                modelLabel: "Claude Sonnet 4",
-                modelSource: "system",
+                version_label: "1.2.0",
+                version_dirty: false,
+                proxy_label: null,
+                model_label: "Claude Sonnet 4",
+                model_source: "system",
                 cost: 0.0034,
                 endUserId: null,
                 applicationId: "app_m4n5o6p7",
@@ -639,13 +634,9 @@ export const runsPaths = {
                         manifest: {
                           type: "object",
                           description:
-                            "Full AFPS manifest (agent type). All referenced skills/tools/providers must already exist in the org or system catalog.",
+                            "Full AFPS manifest (agent type). All referenced skills/integrations must already exist in the org or system catalog.",
                         },
                         prompt: { type: "string", minLength: 1 },
-                        providerProfiles: {
-                          type: "object",
-                          additionalProperties: { type: "string" },
-                        },
                         config: { type: "object" },
                         modelId: { type: ["string", "null"] },
                         proxyId: { type: ["string", "null"] },
@@ -666,7 +657,7 @@ export const runsPaths = {
                           enum: ["draft", "published"],
                           default: "published",
                           description:
-                            "`draft` reads `draftManifest`/`draftContent` (mutable, mirrors the dashboard Run button on never-published agents); `published` resolves a concrete `package_versions` row.",
+                            "`draft` reads `draft_manifest`/`draftContent` (mutable, mirrors the dashboard Run button on never-published agents); `published` resolves a concrete `package_versions` row.",
                         },
                         spec: {
                           type: "string",
@@ -677,10 +668,6 @@ export const runsPaths = {
                           type: "string",
                           description:
                             "Optional SRI digest (`sha256-…`) the runner received with the bundle download. Triggers a structured warn-log when the resolved version's stored artifact integrity diverges (dist-tag drift, mid-flight draft edit). Never a rejection signal.",
-                        },
-                        providerProfiles: {
-                          type: "object",
-                          additionalProperties: { type: "string" },
                         },
                         config: { type: "object" },
                         modelId: { type: ["string", "null"] },
@@ -963,6 +950,113 @@ export const runsPaths = {
         },
         "401": { description: "Signature verification failed" },
         "404": { description: "run_not_found" },
+        "410": { description: "run_sink_closed | run_sink_expired" },
+        "429": { $ref: "#/components/responses/RateLimited" },
+      },
+    },
+  },
+  "/api/runs/{runId}/workspace": {
+    get: {
+      operationId: "fetchRunWorkspace",
+      tags: ["Runs"],
+      summary: "Fetch the run bundle archive (HMAC)",
+      description:
+        "Fetched by the agent runtime at startup to self-provision its `/workspace`. Returns the AFPS bundle (`agent-package.afps` = manifest + prompt + skills; itself a ZIP) verbatim — small and constant; the agent writes it straight to its workspace root. Input documents are NOT bundled here; the agent fetches them separately and streams each to disk (`GET /api/runs/{runId}/documents`). This pull-based delivery means workspace correctness no longer depends on a shared run volume's driver (a tmpfs-backed `local` volume is not shared between the seed helper and the agent — see issue #549). Same Standard Webhooks HMAC auth as the event routes: the signature covers the empty GET body. A 404 means no bundle was provisioned, which the runtime treats as a fatal provisioning fault (the platform always uploads the agent package).",
+      parameters: [
+        { name: "runId", in: "path", required: true, schema: { type: "string" } },
+        { name: "webhook-id", in: "header", required: true, schema: { type: "string" } },
+        { name: "webhook-timestamp", in: "header", required: true, schema: { type: "string" } },
+        { name: "webhook-signature", in: "header", required: true, schema: { type: "string" } },
+      ],
+      security: [],
+      responses: {
+        "200": {
+          description: "Bundle archive (ZIP)",
+          content: {
+            "application/zip": {
+              schema: { type: "string", format: "binary" },
+            },
+          },
+        },
+        "401": { description: "Signature verification failed" },
+        "404": { description: "run_not_found | no workspace provisioned" },
+        "410": { description: "run_sink_closed | run_sink_expired" },
+        "429": { $ref: "#/components/responses/RateLimited" },
+      },
+    },
+  },
+  "/api/runs/{runId}/documents": {
+    get: {
+      operationId: "fetchRunDocumentsManifest",
+      tags: ["Runs"],
+      summary: "List the run's input documents (HMAC)",
+      description:
+        "Fetched by the agent runtime to enumerate the input documents it must provision. Returns the manifest of documents the run carries; the agent then fetches each via `GET /api/runs/{runId}/documents/{name}`. Same Standard Webhooks HMAC auth as the workspace route. A 404 means the run carries no input documents (the common case), which the runtime treats as an empty document set — not a fault.",
+      parameters: [
+        { name: "runId", in: "path", required: true, schema: { type: "string" } },
+        { name: "webhook-id", in: "header", required: true, schema: { type: "string" } },
+        { name: "webhook-timestamp", in: "header", required: true, schema: { type: "string" } },
+        { name: "webhook-signature", in: "header", required: true, schema: { type: "string" } },
+      ],
+      security: [],
+      responses: {
+        "200": {
+          description: "Documents manifest",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["documents"],
+                properties: {
+                  documents: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: ["name", "size"],
+                      properties: {
+                        name: { type: "string" },
+                        size: { type: "integer" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "401": { description: "Signature verification failed" },
+        "404": { description: "run_not_found | no input documents" },
+        "410": { description: "run_sink_closed | run_sink_expired" },
+        "429": { $ref: "#/components/responses/RateLimited" },
+      },
+    },
+  },
+  "/api/runs/{runId}/documents/{name}": {
+    get: {
+      operationId: "fetchRunDocument",
+      tags: ["Runs"],
+      summary: "Fetch a single run input document (HMAC)",
+      description:
+        "Fetched by the agent runtime for each entry in the documents manifest. The bytes are streamed straight from storage so neither the platform nor the agent buffers the whole document; the agent streams the response body to `documents/{name}` on disk. Same Standard Webhooks HMAC auth as the workspace route. A 404 on a document the manifest listed is a fatal provisioning fault.",
+      parameters: [
+        { name: "runId", in: "path", required: true, schema: { type: "string" } },
+        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { name: "webhook-id", in: "header", required: true, schema: { type: "string" } },
+        { name: "webhook-timestamp", in: "header", required: true, schema: { type: "string" } },
+        { name: "webhook-signature", in: "header", required: true, schema: { type: "string" } },
+      ],
+      security: [],
+      responses: {
+        "200": {
+          description: "Document bytes",
+          content: {
+            "application/octet-stream": {
+              schema: { type: "string", format: "binary" },
+            },
+          },
+        },
+        "401": { description: "Signature verification failed" },
+        "404": { description: "run_not_found | document not found" },
         "410": { description: "run_sink_closed | run_sink_expired" },
         "429": { $ref: "#/components/responses/RateLimited" },
       },

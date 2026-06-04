@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useMemo, useCallback, type FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { PACKAGE_CONFIG } from "./use-packages";
@@ -16,7 +15,7 @@ import { useUnsavedChanges } from "./use-unsaved-changes";
  */
 export interface EditorStateBase {
   manifest: Record<string, unknown>;
-  lockVersion?: number;
+  lock_version?: number;
 }
 
 export interface UseEditorStateOptions<S extends EditorStateBase> {
@@ -25,9 +24,9 @@ export interface UseEditorStateOptions<S extends EditorStateBase> {
   packageId: string | undefined;
   isEdit: boolean;
   /**
-   * Build the wire body (manifest + content + sourceCode + …) sent to
+   * Build the wire body (manifest + content + source_code + …) sent to
    * `POST /packages/:type` on create and to `PUT /packages/:type/:id`
-   * on update. `lockVersion` is appended automatically by the hook
+   * on update. `lock_version` is appended automatically by the hook
    * for updates and draft saves — do not include it here.
    */
   toWireBody: (state: S) => Record<string, unknown>;
@@ -61,7 +60,7 @@ export interface UseEditorStateReturn<S extends EditorStateBase> {
 }
 
 /**
- * Shared form-state machinery for package editors (agent/skill/tool/provider).
+ * Shared form-state machinery for package editors (agent/skill).
  *
  * Owns: state snapshot, dirty detection, unsaved-changes blocker, error,
  * jsonEditorKey, draft save, and create/update submission. Editor-specific
@@ -73,7 +72,6 @@ export function useEditorState<S extends EditorStateBase>(
   opts: UseEditorStateOptions<S>,
 ): UseEditorStateReturn<S> {
   const { initialState, packageType, packageId, isEdit, toWireBody, validate } = opts;
-  const navigate = useNavigate();
   const qc = useQueryClient();
   const createPkg = useCreatePackage(packageType);
   const updatePkg = useUpdatePackage(packageType, packageId || "");
@@ -108,12 +106,18 @@ export function useEditorState<S extends EditorStateBase>(
       method: "PUT",
       body: JSON.stringify({
         ...toWireBody(state),
-        lockVersion: state.lockVersion!,
+        lock_version: state.lock_version!,
       }),
     });
     qc.invalidateQueries({ queryKey: ["packages"] });
-    if (packageType === "agent") qc.invalidateQueries({ queryKey: ["agents"] });
-    if (packageType === "provider") qc.invalidateQueries({ queryKey: ["providers"] });
+    qc.invalidateQueries({ queryKey: ["version-info"] });
+    if (packageType === "agent") {
+      qc.invalidateQueries({ queryKey: ["agents"] });
+      // Tools → required scopes → per-integration agent-resolution verdict.
+      // Refresh the integrations subtree so the Connections tab reflects a
+      // newly-required reconnection/upgrade without a page reload.
+      qc.invalidateQueries({ queryKey: ["integrations"] });
+    }
   }, [state, isEdit, packageId, packageType, qc, toWireBody]);
 
   const handleSubmit = useCallback(
@@ -134,7 +138,10 @@ export function useEditorState<S extends EditorStateBase>(
       const body = toWireBody(state);
       if (isEdit) {
         updatePkg.mutate(
-          { ...(body as Parameters<typeof updatePkg.mutate>[0]), lockVersion: state.lockVersion! },
+          {
+            ...(body as Parameters<typeof updatePkg.mutate>[0]),
+            lock_version: state.lock_version!,
+          },
           { onError: (err) => setError(err.message) },
         );
       } else {
@@ -147,10 +154,6 @@ export function useEditorState<S extends EditorStateBase>(
   );
 
   const isPending = createPkg.isPending || updatePkg.isPending;
-
-  // navigate is unused in the public surface (callers handle their own
-  // cancel routing) but we keep the import: future onCancel helper.
-  void navigate;
 
   return {
     state,

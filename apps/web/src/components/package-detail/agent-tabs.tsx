@@ -16,7 +16,6 @@ import {
   type JSONSchema7,
 } from "@appstrate/core/form";
 import { useOrg } from "../../hooks/use-org";
-import { AgentProvidersSection } from "./agent-providers-section";
 import { RunList } from "../run-list";
 import { ScheduleCard } from "../schedule-card";
 import { RunAgentButton } from "../run-agent-button";
@@ -39,8 +38,8 @@ export function AgentRunsTab({
 
   if (!detail) return null;
 
-  const { hasRequiredConfig, hasPrompt, hasRequiredSkills, hasRequiredTools } = readiness;
-  const runDisabled = !hasPrompt || !hasRequiredSkills || !hasRequiredTools || !hasRequiredConfig;
+  const { hasRequiredConfig, hasPrompt, hasRequiredSkills } = readiness;
+  const runDisabled = !hasPrompt || !hasRequiredSkills || !hasRequiredConfig;
 
   return (
     <RunList
@@ -90,16 +89,6 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
       )}
     </>
   );
-}
-
-export function AgentConnectorsTab({
-  packageId,
-  detail,
-}: {
-  packageId: string;
-  detail?: import("@appstrate/shared-types").AgentDetail;
-}) {
-  return <AgentProvidersSection packageId={packageId} detail={detail} />;
 }
 
 export function AgentMemoryTab({ packageId }: { packageId: string }) {

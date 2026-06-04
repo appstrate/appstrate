@@ -28,22 +28,19 @@ const app = getTestApp();
 function validManifest() {
   return {
     name: "@inline/r-ignored", // overridden by the platform
-    displayName: "Ad-hoc Agent",
+    display_name: "Ad-hoc Agent",
     version: "0.0.0",
     type: "agent",
     description: "Inline run",
-    schemaVersion: "1.0",
+    schema_version: "0.1",
     dependencies: {
       skills: {},
-      tools: {},
-      providers: {},
     },
   };
 }
 
 function manifestWithDeps(
   deps: {
-    tools?: Record<string, string>;
     skills?: Record<string, string>;
   } = {},
 ) {
@@ -51,8 +48,6 @@ function manifestWithDeps(
     ...validManifest(),
     dependencies: {
       skills: deps.skills ?? {},
-      tools: deps.tools ?? {},
-      providers: {},
     },
   };
 }
@@ -107,33 +102,6 @@ describe("POST /api/runs/inline — validation", () => {
     expect(body.detail ?? "").toMatch(/manifest|bytes/i);
   });
 
-  it("rejects a manifest with wildcard authorizedUris when wildcard_uri_allowed=false", async () => {
-    // Wildcard rejection targets embedded provider definitions
-    // (manifest.definition), not the providers dependency map. Use a
-    // provider-type inline manifest to exercise the branch.
-    const manifest = {
-      name: "@inline/r-provider",
-      displayName: "Inline Provider",
-      version: "0.0.0",
-      type: "provider",
-      description: "Inline",
-      schemaVersion: "1.0",
-      definition: {
-        authMode: "api_key",
-        authorizedUris: ["https://api.example.com", "*"],
-        credentials: {
-          schema: { type: "object", properties: { apikey: { type: "string" } } },
-          fieldName: "apikey",
-        },
-        credentialHeaderName: "X-Api-Key",
-      },
-    };
-    const res = await post({ manifest, prompt: "hi" });
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { detail?: string };
-    expect(body.detail ?? "").toMatch(/wildcard/i);
-  });
-
   it("rejects unauthenticated requests with 401", async () => {
     const res = await app.request("/api/runs/inline", {
       method: "POST",
@@ -175,16 +143,16 @@ describe("POST /api/runs/inline — dependency resolution", () => {
   // `executeAgentInBackground()` whose async tail would keep writing to the
   // runs/run_logs tables past the end of the test — a source of flakiness
   // when the next test's `truncateAll()` races the background work.
-  // The bogus-tool case below is enough to prove the /inline route wires
+  // The bogus-skill case below is enough to prove the /inline route wires
   // the preflight correctly; readiness rejects BEFORE the shadow row is
   // inserted, so no pipeline fires.
 
-  it("returns 400 missing_tool when tool dep is bogus", async () => {
-    const manifest = manifestWithDeps({ tools: { "@fake/nope": "^1.0.0" } });
+  it("returns 400 missing_skill when skill dep is bogus", async () => {
+    const manifest = manifestWithDeps({ skills: { "@fake/nope": "^1.0.0" } });
     const res = await post({ manifest, prompt: "do something" });
     expect(res.status).toBe(400);
     const body = (await res.json()) as { code?: string };
-    expect(body.code).toBe("missing_tool");
+    expect(body.code).toBe("missing_skill");
   });
 });
 

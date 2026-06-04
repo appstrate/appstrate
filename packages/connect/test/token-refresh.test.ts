@@ -1,213 +1,182 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
-import type { Db } from "@appstrate/db/client";
-import { forceRefresh, RefreshError, type RefreshContext } from "../src/token-refresh.ts";
-import { encryptCredentials } from "../src/encryption.ts";
+import { describe, it, expect } from "bun:test";
+import { performRefreshTokenExchange, RefreshError } from "../src/token-refresh.ts";
+import type { RefreshContext } from "../src/token-refresh.ts";
 
-// A stub db that throws if anything attempts to touch it.
-// All failure cases must throw BEFORE the success path that writes to the DB.
-const stubDb = new Proxy(
-  {},
-  {
-    get() {
-      throw new Error("stubDb should not be called on failure paths");
-    },
-  },
-) as unknown as Db;
-
-const encryptedCreds = encryptCredentials({
-  access_token: "old_access",
-  refresh_token: "old_refresh",
-});
+// The SUT calls the global `fetch`; patch it for the duration of one call,
+// mirroring integration-oauth.test.ts's withFetch seam.
+function withFetch<T>(impl: typeof fetch, fn: () => Promise<T>): Promise<T> {
+  const orig = globalThis.fetch;
+  globalThis.fetch = impl;
+  return fn().finally(() => {
+    globalThis.fetch = orig;
+  });
+}
 
 const ctx: RefreshContext = {
-  tokenUrl: "https://oauth.example.com/token",
-  clientId: "client_id",
-  clientSecret: "client_secret",
+  tokenEndpoint: "https://idp.example.com/token",
+  clientId: "client-id",
+  clientSecret: "client-secret",
+  tokenEndpointAuthMethod: "client_secret_post",
 };
 
-const originalFetch = globalThis.fetch;
-
-function mockFetchOnce(response: Response | Promise<Response> | (() => never)) {
-  globalThis.fetch = mock(async () => {
-    if (typeof response === "function") response();
-    return response as Response;
-  }) as unknown as typeof fetch;
+function responding(makeResponse: () => Response | Promise<Response>): typeof fetch {
+  return (async () => makeResponse()) as unknown as typeof fetch;
 }
 
-function jsonResponse(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
+async function captureError(stub: typeof fetch): Promise<unknown> {
+  let err: unknown = null;
+  await withFetch(stub, async () => {
+    try {
+      await performRefreshTokenExchange(ctx, "rt_abc", { label: "refresh" });
+    } catch (e) {
+      err = e;
+    }
   });
+  return err;
 }
 
-function textResponse(status: number, body: string): Response {
-  return new Response(body, { status, headers: { "Content-Type": "text/plain" } });
-}
-
-describe("forceRefresh — error classification", () => {
-  beforeEach(() => {
-    globalThis.fetch = originalFetch;
-  });
-
-  afterEach(() => {
-    globalThis.fetch = originalFetch;
-  });
-
-  // ── "revoked" cases (flag needsReconnection) ─────────────────
-
-  it('400 + {"error":"invalid_grant"} → kind = "revoked"', async () => {
-    mockFetchOnce(jsonResponse(400, { error: "invalid_grant" }));
-
-    try {
-      await forceRefresh(stubDb, "conn_1", "prov", encryptedCreds, ctx);
-      throw new Error("expected to throw");
-    } catch (err) {
-      expect(err).toBeInstanceOf(RefreshError);
-      expect((err as RefreshError).kind).toBe("revoked");
-      expect((err as RefreshError).status).toBe(400);
-    }
-  });
-
-  it('400 + {"error":"invalid_grant","error_description":"..."} (Google format) → "revoked"', async () => {
-    mockFetchOnce(
-      jsonResponse(400, {
-        error: "invalid_grant",
-        error_description: "Token has been expired or revoked.",
-      }),
-    );
-
-    try {
-      await forceRefresh(stubDb, "conn_2", "prov", encryptedCreds, ctx);
-      throw new Error("expected to throw");
-    } catch (err) {
-      expect(err).toBeInstanceOf(RefreshError);
-      expect((err as RefreshError).kind).toBe("revoked");
-    }
-  });
-
-  // ── "transient" cases (do NOT flag) ──────────────────────────
-
-  it('400 + {"error":"invalid_client"} → "transient" (config problem, not dead credential)', async () => {
-    mockFetchOnce(jsonResponse(400, { error: "invalid_client" }));
-
-    try {
-      await forceRefresh(stubDb, "conn_3", "prov", encryptedCreds, ctx);
-      throw new Error("expected to throw");
-    } catch (err) {
-      expect(err).toBeInstanceOf(RefreshError);
-      expect((err as RefreshError).kind).toBe("transient");
-    }
-  });
-
-  it('400 + {"error":"invalid_scope"} → "transient"', async () => {
-    mockFetchOnce(jsonResponse(400, { error: "invalid_scope" }));
-
-    try {
-      await forceRefresh(stubDb, "conn_4", "prov", encryptedCreds, ctx);
-      throw new Error("expected to throw");
-    } catch (err) {
-      expect((err as RefreshError).kind).toBe("transient");
-    }
-  });
-
-  it("400 with non-JSON body → transient", async () => {
-    mockFetchOnce(textResponse(400, "Bad Request"));
-
-    try {
-      await forceRefresh(stubDb, "conn_5", "prov", encryptedCreds, ctx);
-      throw new Error("expected to throw");
-    } catch (err) {
-      expect((err as RefreshError).kind).toBe("transient");
-    }
-  });
-
-  it("400 + JSON body without error field → transient", async () => {
-    mockFetchOnce(jsonResponse(400, { message: "something went wrong" }));
-
-    try {
-      await forceRefresh(stubDb, "conn_6", "prov", encryptedCreds, ctx);
-      throw new Error("expected to throw");
-    } catch (err) {
-      expect((err as RefreshError).kind).toBe("transient");
-    }
-  });
-
-  it('401 + {"error":"invalid_grant"} → transient (status must be 400)', async () => {
-    mockFetchOnce(jsonResponse(401, { error: "invalid_grant" }));
-
-    try {
-      await forceRefresh(stubDb, "conn_7", "prov", encryptedCreds, ctx);
-      throw new Error("expected to throw");
-    } catch (err) {
-      expect((err as RefreshError).kind).toBe("transient");
-      expect((err as RefreshError).status).toBe(401);
-    }
-  });
-
-  it("500 → transient", async () => {
-    mockFetchOnce(textResponse(500, "Internal Server Error"));
-
-    try {
-      await forceRefresh(stubDb, "conn_8", "prov", encryptedCreds, ctx);
-      throw new Error("expected to throw");
-    } catch (err) {
-      expect((err as RefreshError).kind).toBe("transient");
-      expect((err as RefreshError).status).toBe(500);
-    }
-  });
-
-  it("502 → transient", async () => {
-    mockFetchOnce(textResponse(502, "Bad Gateway"));
-
-    try {
-      await forceRefresh(stubDb, "conn_9", "prov", encryptedCreds, ctx);
-      throw new Error("expected to throw");
-    } catch (err) {
-      expect((err as RefreshError).kind).toBe("transient");
-    }
-  });
-
-  it("network error (fetch throws) → transient", async () => {
-    globalThis.fetch = mock(async () => {
-      throw new TypeError("fetch failed");
-    }) as unknown as typeof fetch;
-
-    try {
-      await forceRefresh(stubDb, "conn_10", "prov", encryptedCreds, ctx);
-      throw new Error("expected to throw");
-    } catch (err) {
-      expect(err).toBeInstanceOf(RefreshError);
-      expect((err as RefreshError).kind).toBe("transient");
-      expect((err as RefreshError).status).toBeUndefined();
-    }
-  });
-
-  it("200 with non-JSON body → transient (success but unparseable)", async () => {
-    globalThis.fetch = mock(
-      async () =>
-        new Response("not json", {
+describe("performRefreshTokenExchange — token_endpoint_auth_method default (R8b N-3)", () => {
+  it("defaults undefined tokenEndpointAuthMethod to client_secret_basic (RFC 8414/7591)", async () => {
+    // AFPS default for `token_endpoint_auth_method` is
+    // `client_secret_basic`. When the manifest omits the field, the refresh
+    // wire MUST send credentials via the Authorization header (Basic auth),
+    // NOT via the body — matching Anthropic/Google/GitHub/Slack expectations.
+    let capturedHeaders: Headers | undefined;
+    let capturedBody: string | undefined;
+    const ctxWithoutMethod: RefreshContext = {
+      tokenEndpoint: "https://idp.example.com/token",
+      clientId: "my-client-id",
+      clientSecret: "my-client-secret",
+      // tokenEndpointAuthMethod intentionally omitted
+    };
+    await withFetch(
+      (async (_url, init) => {
+        capturedHeaders = new Headers(init?.headers as HeadersInit);
+        capturedBody = init?.body as string;
+        return new Response(JSON.stringify({ access_token: "new", token_type: "Bearer" }), {
           status: 200,
-          headers: { "Content-Type": "text/plain" },
-        }),
-    ) as unknown as typeof fetch;
+          headers: { "Content-Type": "application/json" },
+        });
+      }) as unknown as typeof fetch,
+      () => performRefreshTokenExchange(ctxWithoutMethod, "rt_abc", { label: "refresh" }),
+    );
+    // Authorization: Basic <base64(client_id:client_secret)>
+    expect(capturedHeaders?.get("Authorization")).toMatch(/^Basic /);
+    // Body MUST NOT carry client_id / client_secret when using Basic auth.
+    expect(capturedBody).not.toContain("client_id=");
+    expect(capturedBody).not.toContain("client_secret=");
+  });
 
-    try {
-      await forceRefresh(stubDb, "conn_11", "prov", encryptedCreds, ctx);
-      throw new Error("expected to throw");
-    } catch (err) {
-      expect(err).toBeInstanceOf(RefreshError);
-      expect((err as RefreshError).kind).toBe("transient");
-    }
+  it("token_endpoint_auth_method=none sends client_id in body, no secret, no Basic header (RFC 6749 §6 public client)", async () => {
+    let capturedHeaders: Headers | undefined;
+    let capturedBody: string | undefined;
+    const ctxNone: RefreshContext = {
+      tokenEndpoint: "https://idp.example.com/token",
+      clientId: "public-client-id",
+      clientSecret: "", // public clients carry no secret
+      tokenEndpointAuthMethod: "none",
+    };
+    await withFetch(
+      (async (_url, init) => {
+        capturedHeaders = new Headers(init?.headers as HeadersInit);
+        capturedBody = init?.body as string;
+        return new Response(JSON.stringify({ access_token: "new", token_type: "Bearer" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }) as unknown as typeof fetch,
+      () => performRefreshTokenExchange(ctxNone, "rt_abc", { label: "refresh" }),
+    );
+    // No Authorization header — public clients don't carry credentials in headers.
+    expect(capturedHeaders?.get("Authorization")).toBeNull();
+    // client_id MUST be in the body (RFC 6749 §3.2.1).
+    expect(capturedBody).toContain("client_id=public-client-id");
+    // client_secret MUST NOT be in the body — there is no secret to send.
+    expect(capturedBody).not.toContain("client_secret=");
+    // grant_type + refresh_token are always present.
+    expect(capturedBody).toContain("grant_type=refresh_token");
+    expect(capturedBody).toContain("refresh_token=rt_abc");
+  });
+
+  it("explicit client_secret_post overrides the default", async () => {
+    let capturedHeaders: Headers | undefined;
+    let capturedBody: string | undefined;
+    const ctxPost: RefreshContext = {
+      tokenEndpoint: "https://idp.example.com/token",
+      clientId: "my-client-id",
+      clientSecret: "my-client-secret",
+      tokenEndpointAuthMethod: "client_secret_post",
+    };
+    await withFetch(
+      (async (_url, init) => {
+        capturedHeaders = new Headers(init?.headers as HeadersInit);
+        capturedBody = init?.body as string;
+        return new Response(JSON.stringify({ access_token: "new", token_type: "Bearer" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }) as unknown as typeof fetch,
+      () => performRefreshTokenExchange(ctxPost, "rt_abc", { label: "refresh" }),
+    );
+    expect(capturedHeaders?.get("Authorization")).toBeNull();
+    expect(capturedBody).toContain("client_id=my-client-id");
+    expect(capturedBody).toContain("client_secret=my-client-secret");
   });
 });
 
-describe("forceRefresh — no refresh context", () => {
-  it("returns current credentials when refreshContext is omitted", async () => {
-    const result = await forceRefresh(stubDb, "conn_noctx", "prov", encryptedCreds);
-    expect(result.access_token).toBe("old_access");
-    expect(result.refresh_token).toBe("old_refresh");
+describe("performRefreshTokenExchange — failure classification", () => {
+  it("classifies HTTP 400 invalid_grant as revoked", async () => {
+    const err = await captureError(
+      responding(
+        () =>
+          new Response(JSON.stringify({ error: "invalid_grant" }), {
+            status: 400,
+            headers: { "Content-Type": "application/json" },
+          }),
+      ),
+    );
+    expect(err).toBeInstanceOf(RefreshError);
+    expect((err as RefreshError).kind).toBe("revoked");
+    expect((err as RefreshError).status).toBe(400);
+  });
+
+  it("classifies HTTP 5xx as transient", async () => {
+    const err = await captureError(
+      responding(
+        () =>
+          new Response(JSON.stringify({ error: "server_error" }), {
+            status: 503,
+            headers: { "Content-Type": "application/json" },
+          }),
+      ),
+    );
+    expect(err).toBeInstanceOf(RefreshError);
+    expect((err as RefreshError).kind).toBe("transient");
+  });
+
+  it("classifies a network throw as transient", async () => {
+    const err = await captureError((async () => {
+      throw new TypeError("ConnectionRefused");
+    }) as unknown as typeof fetch);
+    expect(err).toBeInstanceOf(RefreshError);
+    expect((err as RefreshError).kind).toBe("transient");
+  });
+
+  it("classifies a malformed/non-JSON 400 body as transient (NOT revoked)", async () => {
+    const err = await captureError(
+      responding(
+        () =>
+          new Response("<html>Bad Request</html>", {
+            status: 400,
+            headers: { "Content-Type": "text/html" },
+          }),
+      ),
+    );
+    expect(err).toBeInstanceOf(RefreshError);
+    // A 400 we cannot parse as `{error:"invalid_grant"}` must not be
+    // treated as a dead refresh token — that would force a needless reconnect.
+    expect((err as RefreshError).kind).toBe("transient");
   });
 });

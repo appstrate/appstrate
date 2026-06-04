@@ -110,12 +110,12 @@ const TEST_ENC = new TextEncoder();
 /**
  * Build a {@link BundlePackage} from a scoped name + version + file map.
  * `type` is baked into the package manifest so {@link prepareBundleForPi}'s
- * type-based partition (skill/provider/tool) picks up each dep correctly.
+ * type-based partition (skill) picks up each dep correctly.
  */
 export function makeBundlePackage(
   name: `@${string}/${string}`,
   version: string,
-  type: "agent" | "tool" | "skill" | "provider",
+  type: "agent" | "skill",
   files: Record<string, string | Uint8Array> = {},
   extraManifest: Record<string, unknown> = {},
 ): BundlePackage {

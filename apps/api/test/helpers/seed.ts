@@ -13,6 +13,7 @@
 import { db } from "./db.ts";
 import {
   packages,
+  applicationPackages,
   runs,
   runLogs,
   applications,
@@ -22,11 +23,8 @@ import {
   orgProxies,
   modelProviderCredentials,
   orgModels,
-  connectionProfiles,
-  userProviderConnections,
   orgInvitations,
   packageVersions,
-  applicationProviderCredentials,
 } from "@appstrate/db/schema";
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 
@@ -64,6 +62,27 @@ export async function seedPackage(
 
 /** Alias for seedPackage — the default type is already "agent". */
 export const seedAgent = seedPackage;
+
+/**
+ * Install (activate) a package in an application — creates the
+ * `application_packages` row the runtime gate requires for a package to be
+ * usable in that app. Idempotent.
+ */
+export async function seedInstalledPackage(
+  applicationId: string,
+  packageId: string,
+  overrides?: Partial<InferInsertModel<typeof applicationPackages>>,
+): Promise<void> {
+  await db
+    .insert(applicationPackages)
+    .values({ applicationId, packageId, ...overrides })
+    .onConflictDoUpdate({
+      target: [applicationPackages.applicationId, applicationPackages.packageId],
+      // Apply overrides on conflict so callers can flip e.g. `enabled` on an
+      // already-installed package; no-op write when there are none.
+      set: overrides && Object.keys(overrides).length > 0 ? overrides : { applicationId },
+    });
+}
 
 // ─── Package Versions ─────────────────────────────────────
 
@@ -173,7 +192,6 @@ export async function seedEndUser(
 
 type ScheduleInsert = Partial<InferInsertModel<typeof schedules>> & {
   packageId: string;
-  connectionProfileId: string;
   orgId: string;
   applicationId: string;
 };
@@ -284,7 +302,6 @@ function defaultProviderId(apiShape: string | undefined, baseUrl: string | undef
     case "openai-responses":
       return "openai";
     case "openai":
-    case "openai-chat":
       return "openai-compatible";
     case "openai-completions":
       return "cerebras";
@@ -386,104 +403,6 @@ export async function seedOrgModel(
     })
     .returning();
   return model!;
-}
-
-// ─── Connection Profiles ──────────────────────────────────
-
-type ConnectionProfileInsert = Partial<InferInsertModel<typeof connectionProfiles>> &
-  ({ userId: string } | { applicationId: string });
-
-export async function seedConnectionProfile(
-  overrides: ConnectionProfileInsert,
-): Promise<InferSelectModel<typeof connectionProfiles>> {
-  const [profile] = await db
-    .insert(connectionProfiles)
-    .values({
-      name: "Test Profile",
-      ...overrides,
-    })
-    .returning();
-  return profile!;
-}
-
-// ─── User Provider Connections ────────────────────────────
-
-type UserConnectionInsert = Partial<InferInsertModel<typeof userProviderConnections>> & {
-  connectionProfileId: string;
-  providerId: string;
-  orgId: string;
-  providerCredentialId: string;
-};
-
-export async function seedUserConnection(
-  overrides: UserConnectionInsert,
-): Promise<InferSelectModel<typeof userProviderConnections>> {
-  const [conn] = await db
-    .insert(userProviderConnections)
-    .values({
-      credentialsEncrypted: "test-encrypted",
-      ...overrides,
-    })
-    .returning();
-  return conn!;
-}
-
-// ─── Provider Credentials ────────────────────────────────
-
-type ProviderCredentialsInsert = Partial<
-  InferInsertModel<typeof applicationProviderCredentials>
-> & {
-  applicationId: string;
-  providerId: string;
-};
-
-export async function seedProviderCredentials(
-  overrides: ProviderCredentialsInsert,
-): Promise<InferInsertModel<typeof applicationProviderCredentials> & { id: string }> {
-  const values = {
-    enabled: true,
-    credentialsEncrypted: "test-admin-encrypted",
-    ...overrides,
-  };
-  const [row] = await db
-    .insert(applicationProviderCredentials)
-    .values(values)
-    .onConflictDoUpdate({
-      target: [
-        applicationProviderCredentials.applicationId,
-        applicationProviderCredentials.providerId,
-      ],
-      set: values,
-    })
-    .returning();
-  return { ...values, id: row!.id };
-}
-
-// ─── Connections (with auto-created provider credentials) ──
-
-import { saveConnection } from "@appstrate/connect";
-
-/**
- * Seed a user connection with auto-created applicationProviderCredentials.
- * Simplifies tests by handling the providerCredentialId requirement.
- */
-export async function seedConnectionForApp(
-  connectionProfileId: string,
-  providerId: string,
-  orgId: string,
-  applicationId: string,
-  credentials: Record<string, unknown>,
-  options?: { scopesGranted?: string[]; expiresAt?: string | null },
-): Promise<void> {
-  // Ensure provider package exists (FK target for applicationProviderCredentials)
-  await seedPackage({ orgId: null, id: providerId, type: "provider", source: "system" }).catch(
-    () => {},
-  );
-  const cred = await seedProviderCredentials({ applicationId, providerId });
-  await saveConnection(db, connectionProfileId, providerId, orgId, credentials, {
-    providerCredentialId: cred.id,
-    ...options,
-  });
 }
 
 // ─── Invitations ──────────────────────────────────────────

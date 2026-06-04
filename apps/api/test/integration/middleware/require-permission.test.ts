@@ -169,7 +169,6 @@ describe("RBAC — Permission enforcement", () => {
         method: "POST",
         headers: authHeaders(member, { "Content-Type": "application/json" }),
         body: JSON.stringify({
-          connectionProfileId: "00000000-0000-0000-0000-000000000000",
           cronExpression: "0 9 * * 1",
         }),
       });
@@ -191,7 +190,6 @@ describe("RBAC — Permission enforcement", () => {
         method: "POST",
         headers: authHeaders(viewer, { "Content-Type": "application/json" }),
         body: JSON.stringify({
-          connectionProfileId: "00000000-0000-0000-0000-000000000000",
           cronExpression: "0 9 * * 1",
         }),
       });

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, useMemo, useState } from "react";
+import { useState } from "react";
 import { useWatch } from "react-hook-form";
 import { useAppForm } from "../hooks/use-app-form";
 import { useTranslation } from "react-i18next";
@@ -22,8 +22,6 @@ import { SchemaForm } from "@appstrate/ui/schema-form";
 import { useSchemaFormLabels } from "../hooks/use-schema-form-labels";
 import { uploadClient } from "../api";
 import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
-import { useConnectionProfiles, useAppProfiles } from "../hooks/use-connection-profiles";
-import { CombinedProfileSelect, type ForeignProfile } from "./combined-profile-select";
 import { RunOverridesPanel, type RunOverridesValue } from "./run-overrides-panel";
 
 function getCronPresets(t: (key: string) => string) {
@@ -47,9 +45,8 @@ const TIMEZONES = [
 ] as const;
 
 export interface ScheduleSaveData {
-  connectionProfileId: string;
   name?: string;
-  cronExpression: string;
+  cron_expression: string;
   timezone?: string;
   input?: Record<string, unknown>;
   enabled?: boolean;
@@ -58,25 +55,34 @@ export interface ScheduleSaveData {
    * the application's persisted config every time the schedule fires.
    * `null` clears a previously-set override on edit.
    */
-  configOverride?: Record<string, unknown> | null;
-  modelIdOverride?: string | null;
-  proxyIdOverride?: string | null;
-  versionOverride?: string | null;
+  config_override?: Record<string, unknown> | null;
+  model_id_override?: string | null;
+  proxy_id_override?: string | null;
+  version_override?: string | null;
+  /**
+   * Per-integration connection picks frozen on the schedule row
+   * (`package_schedules.connection_overrides`). Flat map keyed by
+   * integration id: `{ "@scope/integration": "<connection_id>" }`. Same
+   * wire shape as the run-route's `connection_overrides` (validated by
+   * `routes/schedules.ts`'s `z.record(z.string(), z.string())`); `null`
+   * clears on edit.
+   */
+  connection_overrides?: Record<string, string> | null;
 }
 
 interface ScheduleFormProps {
   mode: "create" | "edit";
   defaultValues?: {
-    connectionProfileId?: string;
     name?: string;
-    cronExpression?: string;
+    cron_expression?: string;
     timezone?: string;
     enabled?: boolean;
     input?: Record<string, unknown>;
-    configOverride?: Record<string, unknown> | null;
-    modelIdOverride?: string | null;
-    proxyIdOverride?: string | null;
-    versionOverride?: string | null;
+    config_override?: Record<string, unknown> | null;
+    model_id_override?: string | null;
+    proxy_id_override?: string | null;
+    version_override?: string | null;
+    connection_overrides?: Record<string, string> | null;
   };
   inputSchema?: JSONSchemaObject;
   /** Agent's config schema — drives the override panel's config form. */
@@ -89,6 +95,12 @@ interface ScheduleFormProps {
   persistedVersion?: string | null;
   /** Package id needed by RunOverridesPanel to fetch versions. */
   packageId?: string;
+  /**
+   * Agent's declared integration deps — surfaces the connectionOverrides
+   * picker. Pass an empty array to hide. Read from
+   * `agentDetail.dependencies.integrations` at the page level.
+   */
+  agentIntegrations?: Array<{ id: string; tools?: string[] | "*" }>;
   agents?: Array<{ id: string; displayName: string }>;
   selectedAgentId?: string;
   onAgentChange?: (agentId: string) => void;
@@ -97,14 +109,11 @@ interface ScheduleFormProps {
   onDelete?: () => void;
   isPending?: boolean;
   blockedMessage?: string;
-  /** Profile owned by another user — shown read-only in the selector */
-  foreignProfile?: ForeignProfile;
 }
 
 interface FormFields {
   name: string;
-  connectionProfileId: string;
-  cronExpression: string;
+  cron_expression: string;
   timezone: string;
   enabled: boolean;
 }
@@ -115,6 +124,7 @@ export function ScheduleForm({
   inputSchema,
   configSchema,
   persistedConfig,
+  agentIntegrations,
   persistedModelId,
   persistedProxyId,
   persistedVersion,
@@ -127,18 +137,10 @@ export function ScheduleForm({
   onDelete,
   isPending,
   blockedMessage,
-  foreignProfile,
 }: ScheduleFormProps) {
   const { t } = useTranslation(["agents", "common"]);
   const cronPresets = getCronPresets(t);
   const isEdit = mode === "edit";
-
-  const { data: userProfiles } = useConnectionProfiles();
-  const { data: appProfiles } = useAppProfiles();
-  const allProfiles = useMemo(
-    () => [...(userProfiles ?? []), ...(appProfiles ?? [])],
-    [userProfiles, appProfiles],
-  );
 
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -156,17 +158,23 @@ export function ScheduleForm({
   // every fire (vs. the Run modal which only applies them once).
   const [overrides, setOverrides] = useState<RunOverridesValue>(() => {
     const v: RunOverridesValue = {};
-    if (defaultValues?.configOverride) v.configOverride = defaultValues.configOverride;
-    if (defaultValues?.modelIdOverride) v.modelIdOverride = defaultValues.modelIdOverride;
-    if (defaultValues?.proxyIdOverride) v.proxyIdOverride = defaultValues.proxyIdOverride;
-    if (defaultValues?.versionOverride) v.versionOverride = defaultValues.versionOverride;
+    if (defaultValues?.config_override) v.config_override = defaultValues.config_override;
+    if (defaultValues?.connection_overrides)
+      v.connection_overrides = defaultValues.connection_overrides;
+    if (defaultValues?.model_id_override) v.model_id_override = defaultValues.model_id_override;
+    if (defaultValues?.proxy_id_override) v.proxy_id_override = defaultValues.proxy_id_override;
+    if (defaultValues?.version_override) v.version_override = defaultValues.version_override;
     return v;
   });
   const initialOverridesNonEmpty =
-    !!(defaultValues?.configOverride && Object.keys(defaultValues.configOverride).length > 0) ||
-    !!defaultValues?.modelIdOverride ||
-    !!defaultValues?.proxyIdOverride ||
-    !!defaultValues?.versionOverride;
+    !!(defaultValues?.config_override && Object.keys(defaultValues.config_override).length > 0) ||
+    !!defaultValues?.model_id_override ||
+    !!defaultValues?.proxy_id_override ||
+    !!defaultValues?.version_override ||
+    !!(
+      defaultValues?.connection_overrides &&
+      Object.keys(defaultValues.connection_overrides).length > 0
+    );
   const [overridesOpen, setOverridesOpen] = useState(initialOverridesNonEmpty);
 
   const {
@@ -180,24 +188,16 @@ export function ScheduleForm({
   } = useAppForm<FormFields>({
     defaultValues: {
       name: defaultValues?.name ?? "",
-      connectionProfileId: defaultValues?.connectionProfileId ?? allProfiles[0]?.id ?? "",
-      cronExpression: defaultValues?.cronExpression ?? "0 9 * * *",
+      cron_expression: defaultValues?.cron_expression ?? "0 9 * * *",
       timezone: defaultValues?.timezone ?? "UTC",
       enabled: defaultValues?.enabled ?? true,
     },
   });
 
-  const [connectionProfileId, cronExpression, timezone, enabled] = useWatch({
+  const [cronExpression, timezone, enabled] = useWatch({
     control,
-    name: ["connectionProfileId", "cronExpression", "timezone", "enabled"],
+    name: ["cron_expression", "timezone", "enabled"],
   });
-
-  // When profiles load after form init, set the default if still empty
-  useEffect(() => {
-    if (!connectionProfileId && allProfiles.length > 0) {
-      setValue("connectionProfileId", allProfiles[0]!.id);
-    }
-  }, [connectionProfileId, allProfiles, setValue]);
 
   const onFormSubmit = handleSubmit((data) => {
     const input = hasInputSchema ? inputValues : undefined;
@@ -208,22 +208,29 @@ export function ScheduleForm({
     // existing override untouched per the Zod schema's optional rule.
     const overridePayload = isEdit
       ? {
-          configOverride: overrides.configOverride ?? null,
-          modelIdOverride: overrides.modelIdOverride ?? null,
-          proxyIdOverride: overrides.proxyIdOverride ?? null,
-          versionOverride: overrides.versionOverride ?? null,
+          config_override: overrides.config_override ?? null,
+          model_id_override: overrides.model_id_override ?? null,
+          proxy_id_override: overrides.proxy_id_override ?? null,
+          version_override: overrides.version_override ?? null,
+          connection_overrides: overrides.connection_overrides ?? null,
         }
       : {
-          ...(overrides.configOverride ? { configOverride: overrides.configOverride } : {}),
-          ...(overrides.modelIdOverride ? { modelIdOverride: overrides.modelIdOverride } : {}),
-          ...(overrides.proxyIdOverride ? { proxyIdOverride: overrides.proxyIdOverride } : {}),
-          ...(overrides.versionOverride ? { versionOverride: overrides.versionOverride } : {}),
+          ...(overrides.config_override ? { config_override: overrides.config_override } : {}),
+          ...(overrides.model_id_override
+            ? { model_id_override: overrides.model_id_override }
+            : {}),
+          ...(overrides.proxy_id_override
+            ? { proxy_id_override: overrides.proxy_id_override }
+            : {}),
+          ...(overrides.version_override ? { version_override: overrides.version_override } : {}),
+          ...(overrides.connection_overrides
+            ? { connection_overrides: overrides.connection_overrides }
+            : {}),
         };
 
     onSubmit({
-      connectionProfileId: data.connectionProfileId,
       name: data.name || undefined,
-      cronExpression: data.cronExpression,
+      cron_expression: data.cron_expression,
       timezone: data.timezone,
       input,
       ...(isEdit ? { enabled: data.enabled } : {}),
@@ -265,23 +272,6 @@ export function ScheduleForm({
         </div>
       )}
 
-      {/* Connection profile */}
-      {(allProfiles.length > 1 || foreignProfile) && (
-        <div className="space-y-3">
-          <Label htmlFor="sched-profile">{t("schedule.connectionProfile")}</Label>
-          <CombinedProfileSelect
-            value={connectionProfileId}
-            onChange={(v) => {
-              if (v != null) setValue("connectionProfileId", v);
-              else if (allProfiles.length > 0) setValue("connectionProfileId", allProfiles[0]!.id);
-            }}
-            triggerClassName="w-full"
-            id="sched-profile"
-            foreignProfile={foreignProfile}
-          />
-        </div>
-      )}
-
       {/* Name */}
       <div className="space-y-3">
         <Label htmlFor="sched-name">{t("schedule.name")}</Label>
@@ -310,8 +300,8 @@ export function ScheduleForm({
                   : "text-muted-foreground",
               )}
               onClick={() => {
-                setValue("cronExpression", p.cron);
-                clearErrors("cronExpression");
+                setValue("cron_expression", p.cron);
+                clearErrors("cron_expression");
               }}
             >
               {p.label}
@@ -323,19 +313,19 @@ export function ScheduleForm({
           <Input
             id="sched-cron"
             type="text"
-            {...register("cronExpression", {
+            {...register("cron_expression", {
               validate: (v) => {
                 if (!v.trim()) return t("validation.required", { ns: "common" });
                 return undefined;
               },
             })}
             placeholder="*/30 * * * *"
-            aria-invalid={showError("cronExpression") ? true : undefined}
-            className={cn(showError("cronExpression") && "border-destructive")}
+            aria-invalid={showError("cron_expression") ? true : undefined}
+            className={cn(showError("cron_expression") && "border-destructive")}
           />
           <p className="text-muted-foreground text-sm">{t("schedule.cronHint")}</p>
-          {showError("cronExpression") && errors.cronExpression?.message && (
-            <p className="text-destructive text-sm">{errors.cronExpression.message}</p>
+          {showError("cron_expression") && errors.cron_expression?.message && (
+            <p className="text-destructive text-sm">{errors.cron_expression.message}</p>
           )}
         </div>
       </div>
@@ -415,6 +405,7 @@ export function ScheduleForm({
               persistedModelId={persistedModelId ?? null}
               persistedProxyId={persistedProxyId ?? null}
               persistedVersion={persistedVersion ?? null}
+              {...(agentIntegrations ? { agentIntegrations } : {})}
               value={overrides}
               onChange={setOverrides}
             />
@@ -456,7 +447,7 @@ export function ScheduleForm({
         <Button type="button" variant="outline" onClick={onCancel}>
           {t("btn.cancel")}
         </Button>
-        <Button type="submit" disabled={isPending || allProfiles.length === 0}>
+        <Button type="submit" disabled={isPending}>
           {isEdit ? t("btn.save") : t("btn.create")}
         </Button>
       </div>

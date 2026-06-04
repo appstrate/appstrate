@@ -7,17 +7,13 @@
  *   - `BETTER_AUTH_SECRETS`     — JSON `{ kid: secret }` map of every
  *                                  secret a verifier should accept.
  *
- * Backward compat: if `BETTER_AUTH_SECRETS` is empty (the default), we
- * derive `{ [BETTER_AUTH_ACTIVE_KID]: BETTER_AUTH_SECRET }` so existing
+ * If `BETTER_AUTH_SECRETS` is empty (the default), we derive
+ * `{ [BETTER_AUTH_ACTIVE_KID]: BETTER_AUTH_SECRET }` so existing
  * deployments keep working unchanged.
  *
  * Signature wire format used by `signAuthHmac` / `verifyAuthHmac`:
  *
  *     <kid>$<base64url-hmac>
- *
- * Verifiers also accept the legacy un-prefixed `<base64url-hmac>` form
- * (computed against the active secret only) so a deployment can roll the
- * helper in without invalidating in-flight cookies.
  */
 
 import { createHmac, timingSafeEqual } from "node:crypto";
@@ -64,23 +60,20 @@ export function signAuthHmac(payload: string): string {
 }
 
 /**
- * Verifies a signature against any known secret. Accepts the prefixed
- * `<kid>$<sig>` form (preferred) and the legacy un-prefixed `<sig>` form
- * (verified against the active secret only) for rollout compatibility.
+ * Verifies a signature against any known secret. Accepts only the prefixed
+ * `<kid>$<sig>` form.
  */
 export function verifyAuthHmac(payload: string, signature: string): boolean {
   const { map } = loadSecrets();
 
-  if (signature.includes("$")) {
-    const sep = signature.indexOf("$");
-    const kid = signature.slice(0, sep);
-    const sig = signature.slice(sep + 1);
-    const secret = map[kid];
-    if (!secret) return false;
-    return constantTimeEquals(hmacBase64Url(secret, payload), sig);
-  }
+  if (!signature.includes("$")) return false;
 
-  return constantTimeEquals(hmacBase64Url(getActiveAuthSecret(), payload), signature);
+  const sep = signature.indexOf("$");
+  const kid = signature.slice(0, sep);
+  const sig = signature.slice(sep + 1);
+  const secret = map[kid];
+  if (!secret) return false;
+  return constantTimeEquals(hmacBase64Url(secret, payload), sig);
 }
 
 function constantTimeEquals(a: string, b: string): boolean {

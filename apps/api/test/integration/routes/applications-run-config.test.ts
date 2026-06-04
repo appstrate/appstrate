@@ -32,7 +32,7 @@ describe("GET /api/applications/:applicationId/packages/:scope/:name/run-config"
         name: "@testorg/agent",
         version: "1.0.0",
         type: "agent",
-        dependencies: { providers: { "@afps/gmail": "^1.0.0" } },
+        dependencies: { integrations: { "@afps/gmail": "^1.0.0" } },
       },
     });
     const version = await seedPackageVersion({
@@ -59,8 +59,7 @@ describe("GET /api/applications/:applicationId/packages/:scope/:name/run-config"
       config: { dryRun: true, retries: 3 },
       modelId: "claude-sonnet",
       proxyId: null,
-      versionPin: "1.2.3",
-      requiredProviders: ["@afps/gmail"],
+      version_pin: "1.2.3",
     });
   });
 
@@ -96,7 +95,7 @@ describe("GET /api/applications/:applicationId/packages/:scope/:name/run-config"
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
-    expect(body.versionPin).toBeNull();
+    expect(body.version_pin).toBeNull();
     expect(body.modelId).toBeNull();
     expect(body.proxyId).toBeNull();
   });

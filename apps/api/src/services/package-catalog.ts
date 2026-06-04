@@ -8,7 +8,7 @@ import { caretRange } from "@appstrate/core/semver";
 import type { AgentManifest, LoadedPackage } from "../types/index.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
-import { extractDepsFromManifest, parseDraftManifest } from "../lib/manifest-utils.ts";
+import { extractSkillIdsFromManifest, parseDraftManifest } from "../lib/manifest-utils.ts";
 import { hasPackageAccess } from "./application-packages.ts";
 
 interface DbPackageRow {
@@ -35,27 +35,26 @@ function mapDependencies(
       const m = parseDraftManifest(d.draftManifest);
       // Manifest's declared range is the source of truth. If the
       // manifest doesn't carry one for a dep that resolved (data
-      // inconsistency — extractDepsFromManifest reads the same
+      // inconsistency — extractSkillIdsFromManifest reads the same
       // section), fall back to caret-of-current so we never emit a
       // bare wildcard. `m.version` is "0.0.0" only for malformed
       // drafts, in which case the dep wouldn't load at runtime anyway.
       return {
         id: d.dependencyId,
         version: versionMap[d.dependencyId] ?? caretRange(m.version ?? "0.0.0"),
-        name: m.displayName ?? undefined,
+        name: m.display_name ?? undefined,
         description: m.description ?? undefined,
       };
     });
 }
 
-function pickSkillsAndTools(
+function pickSkills(
   depRefs: NonNullable<DbPackageRow["depRefs"]>,
   manifest: AgentManifest,
-): Pick<LoadedPackage, "skills" | "tools"> {
+): Pick<LoadedPackage, "skills"> {
   const deps = manifest.dependencies ?? {};
   return {
     skills: mapDependencies(depRefs, "skill", (deps.skills ?? {}) as Record<string, string>),
-    tools: mapDependencies(depRefs, "tool", (deps.tools ?? {}) as Record<string, string>),
   };
 }
 
@@ -65,7 +64,7 @@ function dbRowToLoadedPackage(row: DbPackageRow): LoadedPackage {
     id: row.id,
     manifest,
     prompt: row.draftContent,
-    ...pickSkillsAndTools(row.depRefs ?? [], manifest),
+    ...pickSkills(row.depRefs ?? [], manifest),
     source: (row.source as "system" | "local") ?? "local",
     updatedAt: row.updatedAt,
   };
@@ -77,11 +76,10 @@ async function resolveDepRefs(
   orgId: string,
 ): Promise<NonNullable<DbPackageRow["depRefs"]>> {
   const m = parseDraftManifest(manifest);
-  const { skillIds, toolIds, providerIds } = extractDepsFromManifest(m);
-  const allDepIds = [...skillIds, ...toolIds, ...providerIds];
-  if (allDepIds.length === 0) return [];
+  const skillIds = extractSkillIdsFromManifest(m);
+  if (skillIds.length === 0) return [];
 
-  const conditions = [inArray(packages.id, allDepIds), orgOrSystemFilter(orgId)];
+  const conditions = [inArray(packages.id, skillIds), orgOrSystemFilter(orgId)];
 
   const rows = await db
     .select({
@@ -100,19 +98,19 @@ async function resolveDepRefs(
 }
 
 /**
- * Resolve the skills + tools declared in an inline manifest's `dependencies`
+ * Resolve the skills declared in an inline manifest's `dependencies`
  * against the org/system catalog. Inline manifests only embed ID refs
  * (`"@scope/name": "^1.0.0"`), so the shadow LoadedPackage needs the same
  * mapped-dep shape as a persisted package before it reaches
- * `validateAgentReadiness`. Returns empty arrays when the manifest declares
- * no skill/tool deps — no DB read happens in that case.
+ * `validateAgentReadiness`. Returns an empty array when the manifest declares
+ * no skill deps — no DB read happens in that case.
  */
 export async function resolveManifestCatalogDeps(
   manifest: AgentManifest,
   orgId: string,
-): Promise<Pick<LoadedPackage, "skills" | "tools">> {
+): Promise<Pick<LoadedPackage, "skills">> {
   const depRefs = await resolveDepRefs(manifest, orgId);
-  return pickSkillsAndTools(depRefs, manifest);
+  return pickSkills(depRefs, manifest);
 }
 
 /**
@@ -180,7 +178,7 @@ export async function getPackageWithAccess(
  * Select packages scoped to `orgId` (system + user) with shared projection,
  * `notEphemeral` + type filter, and the system-first ordering. Callers pass
  * additional `where` predicates and an optional row cap; everything else is
- * held constant so `listPackages` and `searchPackages` stay in lockstep.
+ * held constant so callers stay in lockstep.
  */
 async function selectScopedPackages(args: {
   orgId: string;
@@ -220,7 +218,7 @@ async function selectScopedPackages(args: {
 
 /**
  * Free-text catalog search for external modules via PlatformServices.
- * Matches `id` and manifest fields (`name`, `displayName`, `description`)
+ * Matches `id` and manifest fields (`name`, `display_name`, `description`)
  * with Postgres `ILIKE` — fine for the few-hundred-packages-per-org
  * scale; a full-text index can be bolted on later if volume grows.
  *
@@ -244,19 +242,11 @@ export async function searchPackages(args: {
     extra: or(
       sql`${packages.id} ILIKE ${pattern}`,
       sql`${packages.draftManifest}->>'name' ILIKE ${pattern}`,
-      sql`${packages.draftManifest}->>'displayName' ILIKE ${pattern}`,
+      sql`${packages.draftManifest}->>'display_name' ILIKE ${pattern}`,
       sql`${packages.draftManifest}->>'description' ILIKE ${pattern}`,
     ),
     limit: limit + 1,
   });
-}
-
-/** List packages by type: system (orgId: null) + user packages (from DB, scoped by org). Defaults to "agent". */
-export async function listPackages(
-  orgId: string,
-  type: PackageType = "agent",
-): Promise<LoadedPackage[]> {
-  return selectScopedPackages({ orgId, type });
 }
 
 /** Get all package IDs (system + user, scoped by org). Used for collision checks. */

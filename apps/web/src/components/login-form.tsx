@@ -12,8 +12,7 @@ import { useTheme } from "../stores/theme-store";
 import { useAuth } from "../hooks/use-auth";
 import { useAppConfig } from "../hooks/use-app-config";
 import { Mail } from "lucide-react";
-import { GoogleSignInButton } from "./google-sign-in-button";
-import { GitHubSignInButton } from "./github-sign-in-button";
+import { SocialSignInButton } from "./social-sign-in-button";
 import { LegalFooter } from "./legal-footer";
 
 type LoginFormData = {
@@ -181,8 +180,12 @@ export function LoginForm({
               </span>
             </div>
             <div className="flex flex-col gap-2">
-              {features.googleAuth && <GoogleSignInButton callbackURL={socialCallbackURL} />}
-              {features.githubAuth && <GitHubSignInButton callbackURL={socialCallbackURL} />}
+              {features.googleAuth && (
+                <SocialSignInButton provider="google" callbackURL={socialCallbackURL} />
+              )}
+              {features.githubAuth && (
+                <SocialSignInButton provider="github" callbackURL={socialCallbackURL} />
+              )}
               {features.smtp && (
                 <Button
                   variant="outline"

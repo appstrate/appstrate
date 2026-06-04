@@ -1,0 +1,84 @@
+{
+  "name": "@appstrate/jira",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.1",
+  "display_name": "Jira (API)",
+  "description": "Project tracking and issue management platform by Atlassian",
+  "keywords": ["project-management", "issue-tracking"],
+  "license": "Apache-2.0",
+  "icon": "jira",
+  "source": {
+    "kind": "none"
+  },
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "authorization_endpoint": "https://auth.atlassian.com/authorize",
+      "token_endpoint": "https://auth.atlassian.com/oauth/token",
+      "default_scopes": ["read:jira-work", "read:jira-user", "offline_access"],
+      "token_endpoint_auth_method": "client_secret_post",
+      "scope_catalog": [
+        {
+          "value": "read:jira-work",
+          "label": "Read project and issue data"
+        },
+        {
+          "value": "write:jira-work",
+          "label": "Create and edit issues"
+        },
+        {
+          "value": "read:jira-user",
+          "label": "Read user information"
+        },
+        {
+          "value": "manage:jira-project",
+          "label": "Manage project settings"
+        },
+        {
+          "value": "manage:jira-configuration",
+          "label": "Manage Jira global settings"
+        },
+        {
+          "value": "manage:jira-webhook",
+          "label": "Manage webhooks"
+        },
+        {
+          "value": "read:me",
+          "label": "Read authenticated user profile"
+        },
+        {
+          "value": "offline_access",
+          "label": "Refresh tokens for offline access"
+        }
+      ],
+      "authorized_uris": ["https://api.atlassian.com/**"],
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": " "
+        },
+        "dev.appstrate/auth": {
+          "required": true
+        }
+      }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/api": {
+      "auths": {
+        "primary": {}
+      }
+    }
+  }
+}

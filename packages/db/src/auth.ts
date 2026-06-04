@@ -582,12 +582,59 @@ function buildAuth(
     // Better Auth the active secret (not the legacy single-value var).
     secret: env.BETTER_AUTH_SECRETS[env.BETTER_AUTH_ACTIVE_KID] ?? env.BETTER_AUTH_SECRET,
 
+    // Route Better Auth's internal logs through our structured pino logger
+    // instead of its default console writer (repo rule: no console.*). Only
+    // warn/error reach this sink (BA's default level), so the volume matches
+    // the prior console output — it's just redirected and JSON-structured.
+    //
+    // Suppress one construction-time false positive: the google/github social
+    // providers below are registered with empty placeholder creds ON PURPOSE
+    // so the per-app OIDC social override (`enterSocialOverride`) has a live
+    // provider factory to flow tenant creds through at request time. BA's
+    // `!clientId` guard runs once at construction and can't see that
+    // request-time override, so "Social provider … is missing clientId or
+    // clientSecret" is noise here, not an actionable warning.
+    logger: {
+      log: (level, message, ...args) => {
+        if (
+          level === "warn" &&
+          /^Social provider \w+ is missing clientId or clientSecret$/.test(message)
+        ) {
+          return;
+        }
+        logger[level](message, args.length > 0 ? { args } : undefined);
+      },
+    },
+
     plugins: [...basePlugins, ...extraPlugins],
 
     emailAndPassword: {
       enabled: true,
       minPasswordLength: 8,
       requireEmailVerification: smtpEnabled,
+      // Test-only fast password hasher. Better Auth's default is scrypt
+      // (deliberately slow — ~35ms/hash), which dominates the test suite since
+      // most tests sign up a real user per `beforeEach`. When the test harness
+      // sets AUTH_FAST_TEST_HASH=1 (see test/setup/preload.ts), swap in a plain
+      // SHA-256 hash: the round-trip (hash→verify) still works, so every auth
+      // code path keeps full coverage — only the (irrelevant-to-tests) hash
+      // strength changes. Hard-gated on NODE_ENV !== "production" so a leaked
+      // flag can never weaken real password hashing in a production deployment.
+      ...(process.env.AUTH_FAST_TEST_HASH === "1" &&
+        process.env.NODE_ENV !== "production" && {
+          password: {
+            hash: async (password: string): Promise<string> =>
+              new Bun.CryptoHasher("sha256").update(password).digest("hex"),
+            verify: async ({
+              hash,
+              password,
+            }: {
+              hash: string;
+              password: string;
+            }): Promise<boolean> =>
+              new Bun.CryptoHasher("sha256").update(password).digest("hex") === hash,
+          },
+        }),
       ...(smtpEnabled && {
         sendResetPassword: async ({ user, url }) => {
           try {

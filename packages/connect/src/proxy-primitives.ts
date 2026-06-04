@@ -4,23 +4,25 @@
  * Shared primitives used by the credential-proxy server route
  * (`apps/api/src/routes/credential-proxy.ts`) and the in-container
  * sidecar (`runtime-pi/sidecar/app.ts`). Both code paths implement the
- * same wire protocol (X-Provider/X-Target/Set-Cookie passthrough) and
- * share the AFPS 1.3 spec-compliant URL allowlist matcher so drift is
+ * same wire protocol (X-Integration-Id/X-Target/Set-Cookie passthrough) and
+ * share the AFPS spec-compliant URL allowlist matcher so drift is
  * impossible by construction.
  */
+
+import { substituteVars as substituteVarsCore } from "@appstrate/afps-runtime/resolvers";
 
 /**
  * Substitute `{{field}}` placeholders in `input` using `credentials`.
  *
  * Whitespace inside the `{{…}}` is tolerated so hand-written templates
- * can keep `{{ field }}`. Unknown placeholders are **left intact** —
- * callers MAY inspect the result via {@link findUnresolvedPlaceholders}
- * to fail closed, matching the sidecar's defensive pattern.
+ * can keep `{{ field }}`. Unknown placeholders are **left intact**
+ * (`keepUnresolved`) — callers MAY inspect the result via
+ * {@link findUnresolvedPlaceholders} to fail closed, matching the
+ * sidecar's defensive pattern. Delegates to the single canonical
+ * implementation in `@appstrate/afps-runtime`.
  */
 export function substituteVars(input: string, credentials: Record<string, string>): string {
-  return input.replace(/\{\{\s*(\w+)\s*\}\}/g, (match, key: string) => {
-    return key in credentials ? credentials[key]! : match;
-  });
+  return substituteVarsCore(input, credentials, { keepUnresolved: true });
 }
 
 /** Return the names of every unresolved `{{field}}` still present in `input`. */
@@ -33,23 +35,23 @@ export function findUnresolvedPlaceholders(input: string): string[] {
 }
 
 /**
- * AFPS 1.3 spec-compliant URL allowlist matcher. Re-exported from
+ * AFPS spec-compliant URL allowlist matcher. Re-exported from
  * `@appstrate/afps-runtime/resolvers` so the credential-proxy route,
- * the sidecar, and the in-bundle `provider-tool` all enforce the exact
+ * the sidecar, and the in-bundle `http-call-core` all enforce the exact
  * same glob semantics by construction.
  */
 export { matchesAuthorizedUriSpec } from "@appstrate/afps-runtime/resolvers";
 
 /**
- * Payload returned by `resolveCredentialsForProxy` /
- * `forceRefreshCredentials` (platform, DB-backed) and by the sidecar's
- * `/internal/providers/credentials` HTTP fetch (container, HTTP-backed).
- * Single type definition — both entrypoints import it from here, so the
- * wire format cannot drift between platform and sidecar.
+ * Payload produced by the platform's DB-backed integration credential
+ * resolver (`apps/api/src/services/integration-credentials-resolver.ts`) and
+ * by the sidecar's `/internal/integration-credentials` HTTP fetch (container,
+ * HTTP-backed). Single type definition — both entrypoints import it from here,
+ * so the wire format cannot drift between platform and sidecar.
  *
- * Lives in `proxy-primitives.ts` rather than `credentials.ts` so the
- * sidecar (which must not pull @appstrate/db) can consume it via the
- * `@appstrate/connect/proxy-primitives` subpath.
+ * Lives in `proxy-primitives.ts` (not a `@appstrate/db`-importing module) so
+ * the sidecar can consume it via the `@appstrate/connect/proxy-primitives`
+ * subpath without pulling in the DB layer.
  */
 export interface ProxyCredentialsPayload {
   /** Credential fields keyed by name (e.g. `access_token`, `api_key`, `subdomain`, ...). */
@@ -197,7 +199,7 @@ export const HOP_BY_HOP_HEADERS = new Set<string>([
 /**
  * Strip host, content-length, and RFC 7230 hop-by-hop headers. `extraSkip`
  * provides a hook for entrypoint-specific control headers (e.g.
- * `x-provider`, `x-target`) that must also be kept out of the upstream
+ * `x-integration`, `x-target`) that must also be kept out of the upstream
  * request.
  *
  * Preserves the original header casing from the caller.

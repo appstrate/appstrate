@@ -7,7 +7,7 @@ export const modelProvidersOAuthPaths = {
       tags: ["Model Provider Credentials"],
       summary: "Mint a one-shot pairing token for the connect helper",
       description:
-        "Creates a single-use pairing token surfaced in the dashboard as a `npx @appstrate/connect-helper <token>` command. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to `/api/model-providers-oauth/pair/redeem` using this token as Bearer credentials. (The legacy `/api/model-providers-oauth/import` path remains accepted as a deprecation alias for helper versions already in the wild via `npx`.) The plaintext token is returned exactly once — only its SHA-256 hash is persisted. Org-scoped: only `X-Org-Id` is required (no `X-Application-Id` — the resulting credential lives in `model_provider_credentials`, which has no app affinity).",
+        "Creates a single-use pairing token surfaced in the dashboard as a `npx @appstrate/connect-helper <token>` command. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to `/api/model-providers-oauth/pair/redeem` using this token as Bearer credentials. The plaintext token is returned exactly once — only its SHA-256 hash is persisted. Org-scoped: only `X-Org-Id` is required (no `X-Application-Id` — the resulting credential lives in `model_provider_credentials`, which has no app affinity).",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -45,7 +45,7 @@ export const modelProvidersOAuthPaths = {
                   token: {
                     type: "string",
                     description:
-                      "Plaintext pairing token (`appp_<header>.<secret>`). Returned ONCE — never exposed by GET /pairing/:id. Carry as `Authorization: Bearer <token>` on POST /pair/redeem (or the legacy /import alias).",
+                      "Plaintext pairing token (`appp_<header>.<secret>`). Returned ONCE — never exposed by GET /pairing/:id. Carry as `Authorization: Bearer <token>` on POST /pair/redeem.",
                   },
                   command: {
                     type: "string",
@@ -203,93 +203,6 @@ export const modelProvidersOAuthPaths = {
       responses: {
         "200": {
           description: "Connection persisted; matching provider key created.",
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["credentialId", "providerId", "availableModelIds"],
-                properties: {
-                  credentialId: { type: "string", format: "uuid" },
-                  providerId: { type: "string" },
-                  email: { type: "string", format: "email" },
-                  availableModelIds: { type: "array", items: { type: "string" } },
-                },
-              },
-            },
-          },
-        },
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": {
-          description: "Forbidden — caller lacks `model-provider-credentials:write`.",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-  },
-  "/api/model-providers-oauth/import": {
-    post: {
-      operationId: "importOAuthModelProviderConnection",
-      tags: ["Model Provider Credentials"],
-      summary: "[Deprecated] Legacy alias of POST /api/model-providers-oauth/pair/redeem",
-      description:
-        '**Deprecated.** Use `POST /api/model-providers-oauth/pair/redeem` instead. This path is kept indefinitely as a backward-compatibility alias for `@appstrate/connect-helper` versions already in the wild via `npx @appstrate/connect-helper@latest <token>` — behaviour is identical to the canonical route. Responses carry `Deprecation: true` and a `Link: <…/pair/redeem>; rel="successor-version"` header. Same auth contract: `Authorization: Bearer appp_<token>` only.',
-      deprecated: true,
-      requestBody: {
-        required: true,
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              required: ["providerId", "accessToken", "refreshToken"],
-              properties: {
-                providerId: {
-                  type: "string",
-                  pattern: "^[a-z0-9-]+$",
-                  description:
-                    "Canonical provider id. Must match the pairing's pinned providerId AND resolve to a registered OAuth provider. Unknown ids → 404; mismatched → 400.",
-                },
-                label: {
-                  type: "string",
-                  minLength: 1,
-                  maxLength: 120,
-                  description:
-                    "Display name for the credential. Optional — the platform derives one from the provider's `displayName` when omitted (`@appstrate/connect-helper` no longer invents one client-side).",
-                },
-                accessToken: { type: "string", minLength: 1 },
-                refreshToken: { type: "string", minLength: 1 },
-                expiresAt: {
-                  type: ["integer", "null"],
-                  description: "Unix milliseconds since epoch — when the access token expires.",
-                },
-                email: {
-                  type: "string",
-                  format: "email",
-                  maxLength: 320,
-                  description:
-                    "Account email — either forwarded from the OAuth response body or re-derived server-side by the provider's `extractTokenIdentity` hook.",
-                },
-                accountId: {
-                  type: "string",
-                  minLength: 1,
-                  maxLength: 120,
-                  description:
-                    "Abstract account/tenant identifier — the well-known `accountId` slot from the provider's identity surface. When the CLI forwards it, the platform persists this value verbatim; otherwise the provider's `extractTokenIdentity` hook fills it in server-side.",
-                },
-              },
-            },
-          },
-        },
-      },
-      responses: {
-        "200": {
-          description:
-            'Connection persisted; matching provider key created. Carries `Deprecation: true` and `Link: <…/pair/redeem>; rel="successor-version"`.',
           content: {
             "application/json": {
               schema: {

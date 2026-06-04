@@ -2,7 +2,7 @@
 // Copyright 2026 Appstrate
 
 /**
- * Token-aware context budgeting for `provider_call` tool outputs.
+ * Token-aware context budgeting for `api_call` tool outputs.
  *
  * Background — see issue #390. The byte-based caps in `helpers.ts`
  * (`MAX_RESPONSE_SIZE`, `ABSOLUTE_MAX_RESPONSE_SIZE`) protect against
@@ -15,7 +15,7 @@
  *
  * A 256 KB JSON response that fits under the byte cap can therefore
  * burn through a 200 K-token context window in a single call. Worse,
- * 50 successive `provider_call`s each at ~30 KB JSON (well under the
+ * 50 successive `api_call`s each at ~30 KB JSON (well under the
  * 32 KB inline threshold) accumulate ~400 K tokens of context with no
  * guard-rail — every call is judged in isolation.
  *
@@ -37,7 +37,7 @@
  * Why a heuristic by default?
  *
  *   - The sidecar runs in-container, on the hot path of every
- *     `provider_call`. A real tokenizer (`@anthropic-ai/tokenizer`
+ *     `api_call`. A real tokenizer (`@anthropic-ai/tokenizer`
  *     for legacy Claude, `js-tiktoken` with `p50k_base` as a Claude
  *     proxy, or the Anthropic `count_tokens` API) costs anywhere from
  *     5-50 ms per call — adding 50-500 ms of overhead to typical
@@ -99,7 +99,7 @@ export const DEFAULT_INLINE_OUTPUT_TOKENS = 8_000;
  * history; this budget covers tool outputs only.
  *
  * Tightened from 200 K after issue #427: an agent fanning out 8
- * parallel `provider_call`s could pack ~525 KB of JSON (~150 K tokens)
+ * parallel `api_call`s could pack ~525 KB of JSON (~150 K tokens)
  * of tool output into a single LLM turn and blow past the upstream
  * model's TPM window before any retry / Retry-After negotiation
  * could land. Keeping the ceiling well below typical model context

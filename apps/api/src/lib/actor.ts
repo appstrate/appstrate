@@ -16,7 +16,7 @@ export function getActor(c: Context): Actor {
 
 /**
  * Produces the `{userId, endUserId}` column pair for an INSERT. Both `runs`
- * and `connection_profiles` use those exact column names, so callers can
+ * and `integration_connections` use those exact column names, so callers can
  * spread the result into the values object directly without further mapping.
  */
 export function actorInsert(actor: Actor): {
@@ -39,7 +39,7 @@ export function actorFromIds(userId: string | null, endUserId: string | null): A
 /**
  * Produces the WHERE clause to filter by actor. Pass the `{userId, endUserId}`
  * column pair from whichever table is being scoped (e.g. `runs.userId` /
- * `runs.endUserId`, or `connectionProfiles.userId` / `endUserId`).
+ * `runs.endUserId`, or `integrationConnections.userId` / `endUserId`).
  */
 export function actorFilter(actor: Actor, cols: { userId: Column; endUserId: Column }) {
   return actor.type === "end_user" ? eq(cols.endUserId, actor.id) : eq(cols.userId, actor.id);

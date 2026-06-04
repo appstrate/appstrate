@@ -377,8 +377,8 @@ export async function apiFetch<T>(
  * unwrapped `data` array so callers don't repeat the envelope shape
  * inline.
  *
- * Mirrors `apps/web/src/api.ts::apiList<T>` and the
- * `PlatformListResponse<T>` contract in `@appstrate/core/platform-types`.
+ * Mirrors `apps/web/src/api.ts::apiList<T>` and the canonical
+ * list-envelope contract (`{ object, data, hasMore }`).
  *
  * Strict by design: a payload missing `data` or whose `data` is not an
  * array trips `ApiError(500, …)` instead of silently returning `[]`.

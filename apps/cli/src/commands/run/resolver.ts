@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Build the {@link ProviderResolver} used by `appstrate run`.
+ * Build the {@link IntegrationApiCallResolver} used by `appstrate run`.
  *
- * Three modes, one per semantic:
+ * Serverless `apiCall` integrations (the unified integration
+ * surface) are exposed to the agent as `{ns}__api_call` tools. Three
+ * modes, one per semantic:
  *
- *   - `remote` — default. Delegates every provider call through the
- *     pinned Appstrate instance's `/api/credential-proxy/proxy`
- *     endpoint. Credentials stay server-side; the CLI sends only
- *     scope markers. Accepts either:
+ *   - `remote` — default. Delegates every `api_call` through the pinned
+ *     Appstrate instance's `/api/credential-proxy/proxy` endpoint, with
+ *     the integration id as the `X-Integration-Id` scope marker. Credentials
+ *     stay server-side; the CLI sends only scope markers. Accepts either:
  *       * an `ask_…` API key (headless CI / GitHub Action) with the
  *         `credential-proxy:call` scope, or
  *       * a device-flow JWT access token from `appstrate login`
@@ -17,21 +19,21 @@
  *     Bearer <token>` header — see `apps/cli/src/commands/run.ts` for
  *     the resolution priority.
  *
- *   - `local`  — reads a local JSON creds file for offline runs.
- *     Credentials are plaintext on disk; the CLI never refreshes
- *     OAuth tokens here. Intended for air-gapped development only.
+ *   - `local`  — reads a local JSON creds file (integration-keyed) for
+ *     offline runs. Credentials are plaintext on disk; the CLI never
+ *     refreshes OAuth tokens here. Intended for air-gapped development.
  *
  *   - `none`   — returns an empty tool list. For agents that declare
- *     no provider dependencies.
+ *     no integration dependencies.
  */
 
-import type { ProviderResolver } from "@appstrate/afps-runtime/resolvers";
+import type { IntegrationApiCallResolver } from "@appstrate/afps-runtime/resolvers";
 import {
-  LocalProviderResolver,
-  RemoteAppstrateProviderResolver,
+  LocalIntegrationResolver,
+  RemoteAppstrateIntegrationResolver,
 } from "@appstrate/afps-runtime/resolvers";
 
-export type ProviderMode = "remote" | "local" | "none";
+export type IntegrationMode = "remote" | "local" | "none";
 
 export interface RemoteResolverInputs {
   instance: string;
@@ -55,17 +57,9 @@ export interface RemoteResolverInputs {
   /**
    * Extra headers attached to every credential-proxy call (e.g.
    * `X-Run-Id` when `--report` is active). Forwarded verbatim by
-   * {@link RemoteAppstrateProviderResolver}.
+   * {@link RemoteAppstrateIntegrationResolver}.
    */
   extraHeaders?: Record<string, string>;
-  /**
-   * Default connection profile id sent on every credential-proxy call
-   * as `X-Connection-Profile-Id`. Per-provider overrides
-   * ({@link providerProfileOverrides}) take precedence on a per-call basis.
-   */
-  connectionProfileId?: string;
-  /** Per-provider profile id overrides (`@scope/provider` → uuid). */
-  providerProfileOverrides?: Record<string, string>;
 }
 
 export interface LocalResolverInputs {
@@ -82,15 +76,30 @@ export class ResolverConfigError extends Error {
   }
 }
 
+// Shared (message, hint) pairs so the two precondition gates — the eager
+// one in `run.ts:buildResolverInputs` and the safety-net one in
+// `buildIntegrationResolver` below — can't drift apart.
+export const ERR_LOCAL_REQUIRES_CREDS = {
+  message: "--integrations=local requires --creds-file <path>",
+  hint: "Pass a JSON file with { version: 1, integrations: {…} }",
+} as const;
+export const ERR_REMOTE_REQUIRES_AUTH = {
+  message: "--integrations=remote requires a logged-in profile or an API key",
+  hint: "Run `appstrate login`, or set APPSTRATE_API_KEY + APPSTRATE_INSTANCE + APPSTRATE_APP_ID (headless)",
+} as const;
+
 /**
- * Build a ProviderResolver matching the requested mode. Each mode's
- * pre-conditions are checked upfront: we'd rather fail here than
- * surface a confusing resolver error mid-run.
+ * Build an {@link IntegrationApiCallResolver} matching the requested mode.
+ * Serverless `apiCall` integrations (the unified integration
+ * shape) get credential-injected HTTP calls; the resolver yields one
+ * `{ns}__api_call` tool per integration. Each mode's pre-conditions are
+ * checked upfront: we'd rather fail here than surface a confusing resolver
+ * error mid-run.
  */
-export function buildResolver(
-  mode: ProviderMode,
+export function buildIntegrationResolver(
+  mode: IntegrationMode,
   inputs: RemoteResolverInputs | LocalResolverInputs | null,
-): ProviderResolver {
+): IntegrationApiCallResolver {
   switch (mode) {
     case "none":
       return { resolve: async () => [] };
@@ -99,48 +108,44 @@ export function buildResolver(
       const local = inputs as LocalResolverInputs | null;
       if (!local?.credsFilePath) {
         throw new ResolverConfigError(
-          "--providers=local requires --creds-file <path>",
-          "Pass a JSON file with { version: 1, providers: {…} }",
+          ERR_LOCAL_REQUIRES_CREDS.message,
+          ERR_LOCAL_REQUIRES_CREDS.hint,
         );
       }
-      return new LocalProviderResolver({ creds: local.credsFilePath });
+      return new LocalIntegrationResolver({ creds: local.credsFilePath });
     }
 
     case "remote": {
       const remote = inputs as RemoteResolverInputs | null;
       if (!remote) {
         throw new ResolverConfigError(
-          "--providers=remote requires a logged-in profile or an API key",
-          "Run `appstrate login`, or set APPSTRATE_API_KEY + APPSTRATE_INSTANCE + APPSTRATE_APP_ID",
+          ERR_REMOTE_REQUIRES_AUTH.message,
+          ERR_REMOTE_REQUIRES_AUTH.hint,
         );
       }
       if (!remote.instance || !remote.bearerToken || !remote.applicationId) {
         throw new ResolverConfigError(
-          "--providers=remote requires instance + bearerToken + applicationId",
+          "--integrations=remote requires instance + bearerToken + applicationId",
           "Ensure your profile has an applicationId set (run `appstrate app switch`) and a usable session (run `appstrate login`)",
         );
       }
-      return new RemoteAppstrateProviderResolver({
+      return new RemoteAppstrateIntegrationResolver({
         instance: remote.instance,
         apiKey: remote.bearerToken,
         applicationId: remote.applicationId,
         ...(remote.orgId ? { orgId: remote.orgId } : {}),
         endUserId: remote.endUserId,
         extraHeaders: remote.extraHeaders,
-        ...(remote.connectionProfileId ? { connectionProfileId: remote.connectionProfileId } : {}),
-        ...(remote.providerProfileOverrides
-          ? { providerProfileOverrides: remote.providerProfileOverrides }
-          : {}),
       });
     }
   }
 }
 
-export function parseProviderMode(raw: string | undefined): ProviderMode {
+export function parseIntegrationMode(raw: string | undefined): IntegrationMode {
   const value = raw ?? "remote";
   if (value !== "remote" && value !== "local" && value !== "none") {
     throw new ResolverConfigError(
-      `Invalid --providers value "${value}"`,
+      `Invalid --integrations value "${value}"`,
       "Accepted: remote | local | none",
     );
   }

@@ -75,7 +75,7 @@ export function buildIdentityHeaders(
  * transform (no `systemPrepend`, no `forceStream`, no `forceStore`).
  *
  * The `/llm/*` route does NOT share the MCP envelope cap enforced inside
- * `mcp.ts` (that one only governs `provider_call`'s base64-decoded body),
+ * `mcp.ts` (that one only governs `api_call`'s base64-decoded body),
  * so we gate buffered LLM bodies explicitly here against the same
  * {@link MAX_REQUEST_BODY_SIZE} (configurable via `SIDECAR_MAX_REQUEST_BODY_BYTES`,
  * default 10 MB). Refusing oversized payloads early prevents the parse +

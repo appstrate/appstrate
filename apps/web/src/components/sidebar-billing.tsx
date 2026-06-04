@@ -25,13 +25,13 @@ export function SidebarBilling() {
       <div className="flex items-center justify-between text-xs">
         <span className="text-muted-foreground">{t("nav.credits")}</span>
         <span className="font-medium">
-          {billing.creditsUsed.toLocaleString()} / {billing.creditQuota.toLocaleString()}
+          {billing.credits_used.toLocaleString()} / {billing.credit_quota.toLocaleString()}
         </span>
       </div>
       <div className="bg-border h-1.5 overflow-hidden rounded-full">
         <div
-          className={`h-full rounded-full transition-all ${getUsageBarColor(billing.usagePercent)}`}
-          style={{ width: `${Math.min(billing.usagePercent, 100)}%` }}
+          className={`h-full rounded-full transition-all ${getUsageBarColor(billing.usage_percent)}`}
+          style={{ width: `${Math.min(billing.usage_percent, 100)}%` }}
         />
       </div>
     </div>
@@ -55,7 +55,7 @@ export function SidebarBilling() {
             </Link>
           </SidebarMenuButton>
           <span
-            className={`ring-sidebar pointer-events-none absolute top-1 right-1 size-2 rounded-full ring-2 ${getUsageBarColor(billing.usagePercent)}`}
+            className={`ring-sidebar pointer-events-none absolute top-1 right-1 size-2 rounded-full ring-2 ${getUsageBarColor(billing.usage_percent)}`}
           />
         </SidebarMenuItem>
       </SidebarMenu>
@@ -72,20 +72,20 @@ export function SidebarBilling() {
               {t("nav.credits")}
             </span>
             <span className="text-sidebar-foreground font-medium">
-              {billing.creditsUsed.toLocaleString()} / {billing.creditQuota.toLocaleString()}
+              {billing.credits_used.toLocaleString()} / {billing.credit_quota.toLocaleString()}
             </span>
           </div>
           <div
             className="bg-sidebar-border h-1.5 overflow-hidden rounded-full"
             role="progressbar"
-            aria-valuenow={Math.min(billing.usagePercent, 100)}
+            aria-valuenow={Math.min(billing.usage_percent, 100)}
             aria-valuemin={0}
             aria-valuemax={100}
             aria-label={t("nav.credits")}
           >
             <div
-              className={`h-full rounded-full transition-all ${getUsageBarColor(billing.usagePercent)}`}
-              style={{ width: `${Math.min(billing.usagePercent, 100)}%` }}
+              className={`h-full rounded-full transition-all ${getUsageBarColor(billing.usage_percent)}`}
+              style={{ width: `${Math.min(billing.usage_percent, 100)}%` }}
             />
           </div>
         </Link>

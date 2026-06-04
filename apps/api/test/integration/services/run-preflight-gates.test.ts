@@ -22,14 +22,13 @@ function loadedPackage(id: string, timeoutOverride?: number): LoadedPackage {
     manifest: {
       name: id,
       version: "0.1.0",
-      schemaVersion: "1.3",
-      displayName: id,
+      schema_version: "0.1",
+      display_name: id,
       type: "agent",
       ...(timeoutOverride !== undefined ? { timeout: timeoutOverride } : {}),
     } as unknown as LoadedPackage["manifest"],
     prompt: "x",
     skills: [],
-    tools: [],
     source: "local",
   };
 }
@@ -47,9 +46,7 @@ describe("runPreflightGates", () => {
     const agent = loadedPackage("@gates/agent", 60);
     const res = await runPreflightGates({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
       agent,
-      providerProfiles: {},
     });
     expect(res.ok).toBe(true);
     if (res.ok) expect(res.agent.manifest.timeout).toBe(60);
@@ -60,9 +57,7 @@ describe("runPreflightGates", () => {
     const agent = loadedPackage("@gates/agent", limits.timeout_ceiling_seconds + 60);
     const res = await runPreflightGates({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
       agent,
-      providerProfiles: {},
     });
     expect(res.ok).toBe(true);
     if (res.ok) {

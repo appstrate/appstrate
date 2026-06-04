@@ -23,7 +23,6 @@ import { db } from "@appstrate/db/client";
 import { user as userTable } from "@appstrate/db/schema";
 import { getAuth } from "@appstrate/db/auth";
 import { validateApiKey } from "../services/api-keys.ts";
-import { ensureDefaultProfile } from "../services/connection-profiles.ts";
 import { requireOrgContext } from "../middleware/org-context.ts";
 import { requirePlatformRealm } from "../middleware/realm-guard.ts";
 import { isEndUserInApp } from "../services/end-users.ts";
@@ -33,7 +32,6 @@ import { resolvePermissions, resolveApiKeyPermissions } from "./permissions.ts";
 import { getClientIp, propagateRequestClientIp } from "./client-ip.ts";
 import { logger } from "./logger.ts";
 import type { AppEnv } from "../types/index.ts";
-import { getErrorMessage } from "@appstrate/core/errors";
 
 export interface AuthPipelineOptions {
   /**
@@ -229,14 +227,6 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
       .limit(1);
     if (userRow) c.set("sessionRealm", userRow.realm);
 
-    // Ensure the user has a default connection profile (fire-and-forget)
-    ensureDefaultProfile({ type: "user", id: session.user.id }).catch((err) => {
-      logger.warn("Failed to ensure default profile", {
-        userId: session.user.id,
-        error: getErrorMessage(err),
-      });
-    });
-
     return next();
   });
 
@@ -291,19 +281,22 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
  * same rule (e.g. app-context, api-version) can share this function.
  *
  * `headers` is optional and lets callers signal a request-scoped bypass
- * (e.g. pairing-token bearer auth on /import) without polluting the
+ * (e.g. pairing-token bearer auth on /pair/redeem) without polluting the
  * static `publicPaths` allowlist with conditionals.
  */
 export function skipAuth(path: string, publicPaths: Set<string>, headers?: Headers): boolean {
   if (!path.startsWith("/api/")) return true;
   if (path.startsWith("/api/auth/")) return true; // Better Auth handles its own auth
   if (path.startsWith("/api/realtime/")) return true; // SSE endpoints use cookie auth internally
-  if (path === "/api/connections/callback") return true; // OAuth redirect — no session
+  if (path === "/api/integrations/callback") return true; // Integration OAuth redirect — no session
   if (path === "/api/uploads/_content") return true; // FS direct-upload sink — auth via HMAC token
   if (path === "/api/docs" || path === "/api/openapi.json") return true;
-  // Unified-runner event ingestion: `/api/runs/:runId/events` and
-  // `/api/runs/:runId/events/finalize` authenticate via Standard Webhooks
-  // HMAC signature at the route layer — not via JWT / API key / cookie.
+  // Unified-runner run-scoped routes: event ingestion
+  // (`/api/runs/:runId/events[/finalize|/heartbeat]`) and the agent
+  // workspace self-provisioning fetches (`/api/runs/:runId/workspace`,
+  // `/documents`, `/documents/:name`). All authenticate via a Standard
+  // Webhooks HMAC signature at the route layer — not via JWT / API key /
+  // cookie.
   if (REMOTE_RUN_EVENT_PATH_PATTERN.test(path)) return true;
   if (publicPaths.has(path)) return true; // module-contributed public paths
   // OAuth model-provider pair-redeem is bearer-only: `Authorization: Bearer appp_…`
@@ -312,22 +305,15 @@ export function skipAuth(path: string, publicPaths: Set<string>, headers?: Heade
   // providerId become the request context, replacing the cookie/API-key
   // chain entirely. Requests without the bearer reach the route handler
   // and 401 there.
-  //
-  // The canonical path is `/pair/redeem`; `/import` is a deprecation alias
-  // kept indefinitely for `@appstrate/connect-helper` versions already in
-  // the wild via `npx`. Both share the same auth-bypass rule.
-  if (
-    (path === "/api/model-providers-oauth/pair/redeem" ||
-      path === "/api/model-providers-oauth/import") &&
-    headers
-  ) {
+  if (path === "/api/model-providers-oauth/pair/redeem" && headers) {
     const auth = headers.get("authorization") ?? headers.get("Authorization");
     if (auth?.startsWith("Bearer appp_")) return true;
   }
   return false;
 }
 
-const REMOTE_RUN_EVENT_PATH_PATTERN = /^\/api\/runs\/[^/]+\/events(\/finalize|\/heartbeat)?$/;
+const REMOTE_RUN_EVENT_PATH_PATTERN =
+  /^\/api\/runs\/[^/]+\/(events(\/finalize|\/heartbeat)?|workspace|documents(\/[^/]+)?)$/;
 
 /**
  * Device-flow + CLI-token content-type shim.
@@ -399,5 +385,13 @@ export function skipOrgContext(path: string): boolean {
   // resolved. Other `/api/me/*` routes (e.g. `/api/me/models`) DO require
   // org context and are intentionally not listed here.
   if (path === "/api/me/orgs" || path === "/api/me/orgs/") return true;
+  // `/api/me/connections` is the unified user-scope connection view: it
+  // crosses orgs/applications by design, so requiring `X-Org-Id` would be
+  // both wrong (no single org represents the caller's full inventory) and
+  // user-hostile (would force the SPA to pick one before showing the list).
+  if (path === "/api/me/connections" || path === "/api/me/connections/") return true;
+  // `DELETE /api/me/connections/:id` — destructive global delete, derives
+  // applicationId from the row itself. Same rationale as the list above.
+  if (/^\/api\/me\/connections\/[^/]+\/?$/.test(path)) return true;
   return false;
 }

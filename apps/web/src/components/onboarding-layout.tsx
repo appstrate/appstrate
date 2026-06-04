@@ -10,7 +10,7 @@ import { useTheme } from "../stores/theme-store";
 import { useAppConfig } from "../hooks/use-app-config";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 
-export type StepKey = "create" | "plan" | "model" | "providers" | "members" | "complete";
+export type StepKey = "create" | "plan" | "model" | "members" | "complete";
 
 interface StepDef {
   key: StepKey;
@@ -21,15 +21,14 @@ const ALL_STEPS: (StepDef & { showWhen?: "billing" })[] = [
   { key: "create", route: "/onboarding/create" },
   { key: "plan", route: "/onboarding/plan", showWhen: "billing" },
   { key: "model", route: "/onboarding/model" },
-  { key: "providers", route: "/onboarding/providers" },
   { key: "members", route: "/onboarding/members" },
   { key: "complete", route: "/onboarding/complete" },
 ];
 
 /**
  * Returns the active onboarding steps filtered by feature flags.
- * OSS: create → model → providers → members → complete
- * Cloud: create → plan → providers → members → complete
+ * OSS: create → model → members → complete
+ * Cloud: create → plan → members → complete
  */
 // eslint-disable-next-line react-refresh/only-export-components
 export function useOnboardingSteps(): StepDef[] {

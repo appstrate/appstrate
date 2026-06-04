@@ -1,0 +1,107 @@
+{
+  "name": "@appstrate/zoho-crm",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.1",
+  "display_name": "Zoho CRM (API)",
+  "description": "Customer relationship management platform for sales and marketing",
+  "keywords": ["crm", "sales", "marketing"],
+  "license": "Apache-2.0",
+  "icon": "zoho",
+  "source": {
+    "kind": "none"
+  },
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "authorization_endpoint": "https://accounts.zoho.com/oauth/v2/auth",
+      "token_endpoint": "https://accounts.zoho.com/oauth/v2/token",
+      "default_scopes": ["ZohoCRM.modules.READ", "ZohoCRM.users.READ"],
+      "token_endpoint_auth_method": "client_secret_post",
+      "scope_catalog": [
+        {
+          "value": "ZohoCRM.modules.READ",
+          "label": "Read CRM module data"
+        },
+        {
+          "value": "ZohoCRM.modules.CREATE",
+          "label": "Create records in CRM modules"
+        },
+        {
+          "value": "ZohoCRM.modules.UPDATE",
+          "label": "Update CRM module records"
+        },
+        {
+          "value": "ZohoCRM.modules.DELETE",
+          "label": "Delete CRM module records"
+        },
+        {
+          "value": "ZohoCRM.modules.ALL",
+          "label": "Full access to CRM modules"
+        },
+        {
+          "value": "ZohoCRM.users.READ",
+          "label": "Read user information"
+        },
+        {
+          "value": "ZohoCRM.users.ALL",
+          "label": "Full access to users"
+        },
+        {
+          "value": "ZohoCRM.settings.READ",
+          "label": "Read CRM settings"
+        },
+        {
+          "value": "ZohoCRM.settings.ALL",
+          "label": "Full access to settings"
+        },
+        {
+          "value": "ZohoCRM.coql.READ",
+          "label": "Execute COQL queries"
+        },
+        {
+          "value": "ZohoCRM.bulk.READ",
+          "label": "Read bulk operations"
+        },
+        {
+          "value": "ZohoCRM.bulk.CREATE",
+          "label": "Create bulk operations"
+        }
+      ],
+      "authorized_uris": [
+        "https://www.zohoapis.com/**",
+        "https://www.zohoapis.eu/**",
+        "https://www.zohoapis.in/**",
+        "https://www.zohoapis.com.au/**",
+        "https://www.zohoapis.jp/**",
+        "https://www.zohoapis.com.cn/**"
+      ],
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Zoho-oauthtoken",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": ","
+        },
+        "dev.appstrate/auth": {
+          "required": true
+        }
+      }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/api": {
+      "auths": {
+        "primary": {}
+      }
+    }
+  }
+}

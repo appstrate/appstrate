@@ -67,15 +67,22 @@ export async function recordAudit(input: RecordAuditInput): Promise<void> {
  * Convenience wrapper: derive `actorType`, `actorId`, `ip`, `userAgent`,
  * `requestId`, and `applicationId` from the Hono context. Routes still
  * pass the audit-specific fields (`action`, `resourceType`, …).
+ *
+ * Org routes run without org-context middleware (the orgId comes from URL
+ * params or is freshly created), so they pass `orgIdOverride` to supply the
+ * orgId explicitly instead of reading it from context. The end_user /
+ * applicationId derivation is a safe superset for org routes (both are unset
+ * there).
  */
 export async function recordAuditFromContext(
   c: Context<AppEnv>,
   input: Omit<
     RecordAuditInput,
     "orgId" | "applicationId" | "actorType" | "actorId" | "ip" | "userAgent" | "requestId"
-  >,
+  > & { orgIdOverride?: string },
 ): Promise<void> {
-  const orgId = c.get("orgId");
+  const { orgIdOverride, ...auditInput } = input;
+  const orgId = orgIdOverride ?? c.get("orgId");
   if (!orgId) return;
 
   const user = c.get("user");
@@ -96,7 +103,7 @@ export async function recordAuditFromContext(
   }
 
   await recordAudit({
-    ...input,
+    ...auditInput,
     orgId,
     applicationId: c.get("applicationId") ?? null,
     actorType,

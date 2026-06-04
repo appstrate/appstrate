@@ -5,7 +5,16 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { modelProviderCredentials, runs, userProviderConnections } from "@appstrate/db/schema";
+import {
+  applicationPackages,
+  modelProviderCredentials,
+  packageVersions,
+  runs,
+} from "@appstrate/db/schema";
+import { sql } from "drizzle-orm";
+import { asRecord } from "@appstrate/core/safe-json";
+import { downloadVersionZip } from "../services/package-storage.ts";
+import { getSystemPackages } from "../services/system-packages.ts";
 import { logger } from "../lib/logger.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { parseSignedToken } from "../lib/run-token.ts";
@@ -20,45 +29,18 @@ import {
 } from "../services/state/package-persistence.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { getPackage } from "../services/package-catalog.ts";
-import {
-  resolveCredentialsForProxy,
-  forceRefreshCredentials,
-  getProviderCredentialId,
-  getConnection,
-  RefreshError,
-} from "@appstrate/connect";
-import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { unauthorized, forbidden, notFound, invalidRequest, internalError } from "../lib/errors.ts";
 import { actorFromIds, type Actor } from "../lib/actor.ts";
 import {
   forceRefreshOAuthModelProviderToken,
   resolveOAuthTokenForSidecar,
 } from "../services/model-providers/token-resolver.ts";
-
-/**
- * Safety margin used when deciding whether a stored access token is still
- * "fresh enough" that a forced refresh would be wasteful. The sidecar calls
- * the refresh endpoint on any upstream 401; if the stored token has more
- * than this much lifetime remaining, the 401 cannot be an expiry issue and
- * must come from the agent's request itself (wrong header, wrong endpoint,
- * missing scope) — so we skip the refresh entirely. Keeping a full minute
- * absorbs reasonable clock skew between this server and the OAuth provider.
- */
-const REFRESH_FRESHNESS_THRESHOLD_MS = 60_000;
-
-/**
- * Returns true when the stored access token still has enough lifetime left
- * that refreshing it would be pointless. Null / missing / unparseable
- * `expiresAt` (providers without `expires_in`, legacy connections, non-OAuth2
- * auth modes) returns false — we fall back to the existing refresh behavior
- * in that case.
- */
-export function isTokenFresh(expiresAt: string | Date | null | undefined): boolean {
-  if (!expiresAt) return false;
-  const ts = expiresAt instanceof Date ? expiresAt.getTime() : Date.parse(expiresAt);
-  if (Number.isNaN(ts)) return false;
-  return ts - Date.now() > REFRESH_FRESHNESS_THRESHOLD_MS;
-}
+import {
+  resolveLiveIntegrationCredentials,
+  serializeIntegrationCredentialsWire,
+} from "../services/integration-credentials-resolver.ts";
+import { fetchIntegrationManifest } from "../services/integration-service.ts";
+import { getLocalServerRef } from "../services/integration-manifest-helpers.ts";
 
 /**
  * Verify the run token from the Authorization header.
@@ -73,10 +55,14 @@ async function verifyRunToken(c: Context): Promise<{
     orgId: string;
     applicationId: string;
     status: string;
-    connectionProfileId: string | null;
-    providerProfileIds: Record<string, string> | null;
     modelCredentialId: string | null;
     runOrigin: "platform" | "remote";
+    /**
+     * Snapshot of the connection resolver output frozen at run kickoff
+     * (#199). The credentials resolver uses it to honour admin pins and
+     * per-run overrides past the kickoff handoff.
+     */
+    resolvedConnections: Record<string, { connectionId: string; source: string }> | null;
   };
 }> {
   const authHeader = c.req.header("Authorization");
@@ -103,10 +89,9 @@ async function verifyRunToken(c: Context): Promise<{
       orgId: runs.orgId,
       applicationId: runs.applicationId,
       status: runs.status,
-      connectionProfileId: runs.connectionProfileId,
-      providerProfileIds: runs.providerProfileIds,
       modelCredentialId: runs.modelCredentialId,
       runOrigin: runs.runOrigin,
+      resolvedConnections: runs.resolvedConnections,
     })
     .from(runs)
     .where(eq(runs.id, runId))
@@ -130,10 +115,9 @@ async function verifyRunToken(c: Context): Promise<{
       orgId: run.orgId,
       applicationId: run.applicationId,
       status: run.status,
-      connectionProfileId: run.connectionProfileId,
-      providerProfileIds: run.providerProfileIds ?? null,
       modelCredentialId: run.modelCredentialId ?? null,
       runOrigin: run.runOrigin,
+      resolvedConnections: run.resolvedConnections ?? null,
     },
   };
 }
@@ -161,9 +145,7 @@ export function createInternalRouter() {
       .catch(10)
       .parse(limitParam ?? 10);
 
-    // Wire field names — `state` (AFPS ≤ 1.3) is no longer accepted.
-    // The floor of supported runners is now AFPS 1.4 (ADR-011 final cut).
-    // Unknown values fail loudly with 400 so a stale runner schema can't
+    // Unknown field names fail loudly with 400 so a stale runner schema can't
     // silently strip fields the agent is asking for.
     let fields: RunHistoryField[] = ["checkpoint"];
     if (fieldsParam !== undefined) {
@@ -245,8 +227,8 @@ export function createInternalRouter() {
           id: m.id,
           content: m.content,
           createdAt: m.createdAt.toISOString(),
-          actorType: m.actorType,
-          actorId: m.actorId,
+          actor_type: m.actorType,
+          actor_id: m.actorId,
         })),
       });
     } catch (err) {
@@ -255,171 +237,6 @@ export function createInternalRouter() {
         error: getErrorMessage(err),
       });
       throw internalError();
-    }
-  });
-
-  // GET /internal/credentials/:scope/:name — called from inside containers
-  // Auth: Bearer <signedToken> (same HMAC mechanism as run-history)
-  // Returns unified format: { credentials: Record<string, string>, authorizedUris: string[] | null }
-  router.get("/credentials/:scope{@[^/]+}/:name", async (c) => {
-    const { runId, run } = await verifyRunToken(c);
-    const providerId = `${c.req.param("scope")}/${c.req.param("name")}`;
-
-    // Load the agent to validate the requested provider. Inline runs use
-    // an ephemeral shadow package — `includeEphemeral` keeps the lookup
-    // working for `POST /api/runs/inline` flows without changing the
-    // strict default that public package listings exclude shadows.
-    const agent = await getPackage(run.packageId, run.orgId, { includeEphemeral: true });
-    if (!agent) {
-      throw notFound("Agent not found");
-    }
-
-    const provider = resolveManifestProviders(agent.manifest).find((s) => s.id === providerId);
-    if (!provider) {
-      logger.warn("Credential request for unknown provider", {
-        runId,
-        providerId,
-        packageId: run.packageId,
-      });
-      throw notFound(`Provider '${providerId}' is not required by this agent`);
-    }
-
-    // Look up the stored connectionProfileId from the run record
-    const connectionProfileId = run.providerProfileIds?.[providerId];
-    if (!connectionProfileId) {
-      throw notFound(`No profile resolved for provider '${providerId}'`);
-    }
-
-    const credentialId = await getProviderCredentialId(db, run.applicationId, provider.id);
-    if (!credentialId) {
-      throw notFound(`No provider credentials configured for '${providerId}' in application`);
-    }
-    const result = await resolveCredentialsForProxy(
-      db,
-      connectionProfileId,
-      provider.id,
-      run.orgId,
-      credentialId,
-    );
-
-    if (!result) {
-      throw notFound(`No credentials for provider '${providerId}'`);
-    }
-
-    logger.info("Credential access", {
-      runId,
-      providerId,
-      packageId: run.packageId,
-      connectionProfileId,
-    });
-
-    return c.json(result);
-  });
-
-  // POST /internal/credentials/:scope/:name/refresh — sidecar requests a forced token refresh on 401
-  router.post("/credentials/:scope{@[^/]+}/:name/refresh", async (c) => {
-    const { runId, run } = await verifyRunToken(c);
-    const providerId = `${c.req.param("scope")}/${c.req.param("name")}`;
-
-    const connectionProfileId = run.providerProfileIds?.[providerId];
-    if (!connectionProfileId) {
-      throw notFound(`No profile resolved for provider '${providerId}'`);
-    }
-
-    const credentialId = await getProviderCredentialId(db, run.applicationId, providerId);
-    if (!credentialId) {
-      throw notFound(`No provider credentials configured for '${providerId}' in application`);
-    }
-
-    // Skip the OAuth refresh round-trip if the stored token still has
-    // significant lifetime left. A 401 on a demonstrably-fresh token cannot
-    // be an expiry issue — it must come from the agent's request itself
-    // (wrong header, wrong endpoint, missing scope). Refreshing here would
-    // burn provider rate limits, add latency, and churn rotating
-    // refresh_tokens for no benefit.
-    const connection = await getConnection(
-      db,
-      connectionProfileId,
-      providerId,
-      run.orgId,
-      credentialId,
-    );
-    if (connection && isTokenFresh(connection.expiresAt)) {
-      const passthrough = await resolveCredentialsForProxy(
-        db,
-        connectionProfileId,
-        providerId,
-        run.orgId,
-        credentialId,
-      );
-      if (!passthrough) {
-        throw notFound(`No credentials for provider '${providerId}'`);
-      }
-
-      logger.info("Skipping refresh — stored token still fresh", {
-        runId,
-        providerId,
-        connectionProfileId,
-        expiresInMs: Date.parse(connection.expiresAt!) - Date.now(),
-      });
-
-      return c.json(passthrough);
-    }
-
-    try {
-      const result = await forceRefreshCredentials(
-        db,
-        connectionProfileId,
-        providerId,
-        run.orgId,
-        credentialId,
-      );
-      if (!result) {
-        throw notFound(`No credentials for provider '${providerId}'`);
-      }
-
-      logger.info("Forced credential refresh", { runId, providerId, connectionProfileId });
-      return c.json(result);
-    } catch (err) {
-      // Only a definitive "refresh_token is dead" signal (RFC 6749 §5.2:
-      // HTTP 400 + body.error === "invalid_grant") justifies flagging the
-      // connection. Transient failures (network, 5xx, timeout, non-JSON,
-      // other OAuth error codes) must not flag — the credential might still
-      // be valid and the initial 401 that triggered this refresh may have
-      // come from a malformed agent request, not a dead token.
-      if (err instanceof RefreshError && err.kind === "revoked") {
-        await db
-          .update(userProviderConnections)
-          .set({ needsReconnection: true, updatedAt: new Date() })
-          .where(
-            and(
-              eq(userProviderConnections.connectionProfileId, connectionProfileId),
-              eq(userProviderConnections.providerId, providerId),
-              eq(userProviderConnections.orgId, run.orgId),
-              eq(userProviderConnections.providerCredentialId, credentialId),
-            ),
-          );
-
-        logger.warn("Refresh token revoked, connection flagged for reconnection", {
-          runId,
-          providerId,
-          connectionProfileId,
-          status: err.status,
-        });
-
-        throw unauthorized(`Token refresh failed for provider '${providerId}': credential revoked`);
-      }
-
-      logger.warn("Transient refresh failure, connection left unchanged", {
-        runId,
-        providerId,
-        connectionProfileId,
-        kind: err instanceof RefreshError ? err.kind : "unknown",
-        status: err instanceof RefreshError ? err.status : undefined,
-        error: getErrorMessage(err),
-      });
-
-      throw unauthorized(`Token refresh failed for provider '${providerId}' (transient)`);
     }
   });
 
@@ -454,6 +271,188 @@ export function createInternalRouter() {
     await assertOAuthModelCredential(credentialId, run.orgId, run.modelCredentialId);
     return c.json(await forceRefreshOAuthModelProviderToken(credentialId, run.orgId));
   });
+
+  /**
+   * Pin: the running agent must declare this integration in
+   * `dependencies.integrations` AND it must be installed in the run's
+   * application. Same guard used by /mcp-server-bundle and the
+   * /integration-credentials endpoints to keep a leaked run token from
+   * enumerating integration secrets across the org.
+   */
+  async function assertAgentDeclaresIntegration(
+    packageId: string,
+    run: { packageId: string; orgId: string; applicationId: string },
+    runId: string,
+  ): Promise<void> {
+    const agent = await getPackage(run.packageId, run.orgId, { includeEphemeral: true });
+    if (!agent) throw notFound("Agent not found");
+    const deps = asRecord(asRecord(agent.manifest).dependencies);
+    const integrations = asRecord(deps.integrations);
+    if (!(packageId in integrations)) {
+      logger.warn("Integration credentials request rejected — not declared by agent", {
+        runId,
+        packageId,
+        agentId: agent.id,
+      });
+      throw notFound(`Integration '${packageId}' is not a dependency of the running agent`);
+    }
+    const [installRow] = await db
+      .select({ packageId: applicationPackages.packageId })
+      .from(applicationPackages)
+      .where(
+        and(
+          eq(applicationPackages.applicationId, run.applicationId),
+          eq(applicationPackages.packageId, packageId),
+        ),
+      )
+      .limit(1);
+    if (!installRow) {
+      throw notFound(`Integration '${packageId}' is not installed in this application`);
+    }
+  }
+
+  // GET /internal/integration-credentials/:scope/:name
+  // Sidecar-only. Returns the LIVE credential payload + per-auth HTTP
+  // delivery plans for an integration the running agent depends on.
+  // OAuth tokens are refreshed proactively if within the lead window;
+  // POST .../refresh forces a refresh regardless.
+  router.get("/integration-credentials/:scope{@[^/]+}/:name", async (c) => {
+    const { runId, run } = await verifyRunToken(c);
+    const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
+    await assertAgentDeclaresIntegration(packageId, run, runId);
+    const actor: Actor | null = actorFromIds(run.userId, run.endUserId);
+    const result = await resolveLiveIntegrationCredentials(packageId, {
+      runId,
+      orgId: run.orgId,
+      applicationId: run.applicationId,
+      agentPackageId: run.packageId,
+      actor,
+      resolvedConnections: run.resolvedConnections,
+    });
+    logger.info("Integration credentials delivered", {
+      runId,
+      packageId,
+      authCount: result.auths.length,
+      deliveryPlanCount: Object.keys(result.deliveryPlans).length,
+    });
+    return c.json(serializeIntegrationCredentialsWire(result));
+  });
+
+  // POST /internal/integration-credentials/:scope/:name/refresh
+  // Sidecar-only. Force-refresh every OAuth2 auth on this integration,
+  // then return the freshly-resolved payload. Called by the MITM
+  // listener's `refreshOnUnauthorized` hook when upstream returns 401.
+  router.post("/integration-credentials/:scope{@[^/]+}/:name/refresh", async (c) => {
+    const { runId, run } = await verifyRunToken(c);
+    const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
+    await assertAgentDeclaresIntegration(packageId, run, runId);
+    const actor: Actor | null = actorFromIds(run.userId, run.endUserId);
+    const result = await resolveLiveIntegrationCredentials(
+      packageId,
+      {
+        runId,
+        orgId: run.orgId,
+        applicationId: run.applicationId,
+        agentPackageId: run.packageId,
+        actor,
+        resolvedConnections: run.resolvedConnections,
+      },
+      { forceRefresh: true },
+    );
+    logger.info("Integration credentials refreshed", {
+      runId,
+      packageId,
+      authCount: result.auths.length,
+    });
+    return c.json(serializeIntegrationCredentialsWire(result));
+  });
+
+  // GET /internal/mcp-server-bundle/:scope/:name
+  // Returns the mcp-server package's .afps bundle bytes (the runnable MCP
+  // server code). In AFPS a local-source integration references a SEPARATE
+  // mcp-server package via `source.server.name`; the sidecar fetches that
+  // package's bundle here before spawning a runner. Authorised by the same
+  // Bearer run-token as the credentials surface; additionally verifies the
+  // run's agent declares an installed integration that references this
+  // mcp-server, so a leaked run token can't enumerate arbitrary server source.
+  router.get("/mcp-server-bundle/:scope{@[^/]+}/:name", async (c) => {
+    const { runId, run } = await verifyRunToken(c);
+    const mcpServerId = `${c.req.param("scope")}/${c.req.param("name")}`;
+    await assertAgentReferencesMcpServer(mcpServerId, run, runId);
+
+    // Resolve bytes: system package from in-memory map, local from S3
+    const sys = getSystemPackages().get(mcpServerId);
+    if (sys?.zipBuffer) {
+      logger.info("mcp-server bundle delivered (system)", {
+        runId,
+        mcpServerId,
+        bytes: sys.zipBuffer.length,
+      });
+      return new Response(Buffer.from(sys.zipBuffer), {
+        status: 200,
+        headers: { "Content-Type": "application/zip" },
+      });
+    }
+    const [latest] = await db
+      .select({ version: packageVersions.version, integrity: packageVersions.integrity })
+      .from(packageVersions)
+      .where(
+        and(eq(packageVersions.packageId, mcpServerId), sql`${packageVersions.yanked} = false`),
+      )
+      .orderBy(sql`${packageVersions.createdAt} DESC`)
+      .limit(1);
+    if (!latest) throw notFound(`No published version for '${mcpServerId}'`);
+    const bytes = await downloadVersionZip(mcpServerId, latest.version, latest.integrity);
+    if (!bytes) throw notFound(`Bundle bytes unavailable for '${mcpServerId}'`);
+    logger.info("mcp-server bundle delivered (storage)", {
+      runId,
+      mcpServerId,
+      version: latest.version,
+      bytes: bytes.length,
+    });
+    return new Response(bytes, { status: 200, headers: { "Content-Type": "application/zip" } });
+  });
+
+  /**
+   * Authorise an mcp-server bundle fetch: the running agent must declare at
+   * least one integration (in `dependencies.integrations`) that (a) is
+   * installed in the run's application AND (b) references this mcp-server via
+   * `source.server.name`. This keeps a leaked run token from enumerating
+   * arbitrary server source across the org.
+   */
+  async function assertAgentReferencesMcpServer(
+    mcpServerId: string,
+    run: { packageId: string; orgId: string; applicationId: string },
+    runId: string,
+  ): Promise<void> {
+    const agent = await getPackage(run.packageId, run.orgId, { includeEphemeral: true });
+    if (!agent) throw notFound("Agent not found");
+    const deps = asRecord(asRecord(agent.manifest).dependencies);
+    const integrations = asRecord(deps.integrations);
+    for (const integrationId of Object.keys(integrations)) {
+      const [installRow] = await db
+        .select({ packageId: applicationPackages.packageId })
+        .from(applicationPackages)
+        .where(
+          and(
+            eq(applicationPackages.applicationId, run.applicationId),
+            eq(applicationPackages.packageId, integrationId),
+          ),
+        )
+        .limit(1);
+      if (!installRow) continue;
+      const res = await fetchIntegrationManifest(integrationId);
+      if (!res.ok) continue;
+      const ref = getLocalServerRef(res.manifest);
+      if (ref?.name === mcpServerId) return;
+    }
+    logger.warn("mcp-server bundle request rejected — not referenced by agent", {
+      runId,
+      mcpServerId,
+      agentId: agent.id,
+    });
+    throw notFound(`mcp-server '${mcpServerId}' is not referenced by the running agent`);
+  }
 
   return router;
 }

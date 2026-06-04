@@ -4,7 +4,8 @@
 // PostgreSQL instance. Verifies the IaC contract: stable JSON output,
 // idempotent re-runs, owner-not-found error path.
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { it, expect, beforeEach } from "bun:test";
+import { describeRequiresPostgres } from "../helpers/tier.ts";
 import { resolve } from "node:path";
 import { eq } from "drizzle-orm";
 import { db, truncateAll } from "../helpers/db.ts";
@@ -30,7 +31,9 @@ async function runScript(args: string[]): Promise<ScriptResult> {
   return { exitCode, stdout: JSON.parse(lastLine) as Record<string, unknown> };
 }
 
-describe("scripts/bootstrap-org.ts", () => {
+// Spawns the script as a child process, which must attach to the same DB —
+// impossible against an embedded single-process PGlite, so skipped in tier0.
+describeRequiresPostgres("scripts/bootstrap-org.ts", () => {
   beforeEach(async () => {
     await truncateAll();
   });

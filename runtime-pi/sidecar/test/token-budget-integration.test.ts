@@ -7,8 +7,8 @@
  * These tests exercise the full path:
  *
  *   agent → POST /mcp (JSON-RPC) → mountMcp → tools/call →
- *     provider_call / run_history / recall_memory →
- *       executeProviderCall (or platform fetchFn) →
+ *     api_call / run_history / recall_memory →
+ *       executeApiCall (or platform fetchFn) →
  *         responseToToolResult — the function under test, where the
  *         token-budget tracker is consulted.
  *
@@ -21,7 +21,7 @@
  *   - `_meta` payload carries the budget accounting so the agent
  *     runtime can react to structured truncation events.
  *   - `run_history` and `recall_memory` honour the same gate as
- *     `provider_call`.
+ *     `api_call`.
  *   - Without a token budget configured, the legacy byte threshold
  *     remains in force (no regression for embedders that don't wire
  *     the budget).
@@ -29,8 +29,9 @@
 
 import { describe, it, expect, mock } from "bun:test";
 import { Hono } from "hono";
-import { createApp, type AppDeps } from "../app.ts";
+import { createApp, buildSidecarRuntimeDeps, type AppDeps } from "../app.ts";
 import { mountMcp } from "../mcp.ts";
+import { buildApiCallHost } from "./helpers/api-call-host.ts";
 import { BlobStore } from "../blob-store.ts";
 import { TokenBudget, estimateTokens } from "../token-budget.ts";
 import type { CredentialsResponse } from "../helpers.ts";
@@ -49,11 +50,21 @@ function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
       }),
     ),
     cookieJar: new Map(),
-    fetchFn: mock(async () => new Response("{}", { status: 200 })),
+    // bun:test Mock lacks fetch.preconnect — cross-lib friction with DOM `typeof fetch`.
+    fetchFn: mock(async () => new Response("{}", { status: 200 })) as unknown as typeof fetch,
     isReady: () => true,
     ...overrides,
   };
 }
+
+const defaultFetchCredentials = async (): Promise<CredentialsResponse> => ({
+  credentials: { access_token: "test-123" },
+  authorizedUris: ["https://api.example.com/**"],
+  allowAllUris: false,
+  credentialHeaderName: "Authorization",
+  credentialHeaderPrefix: "Bearer",
+  credentialFieldName: "access_token",
+});
 
 async function rpc(
   app: ReturnType<typeof createApp>,
@@ -72,7 +83,7 @@ async function rpc(
   return { status: res.status, json: JSON.parse(text) };
 }
 
-const TOKEN_BUDGET_META_KEY = "appstrate://token-budget";
+const TOKEN_BUDGET_META_KEY = "dev.appstrate/token-budget";
 
 interface BudgetMeta {
   estimatedTokens: number;
@@ -107,23 +118,40 @@ interface CallToolResult {
  * `createApp` so tests can drive the budget independently of env vars
  * (which createApp reads at boot).
  */
-function buildTestApp(opts: {
+async function buildTestApp(opts: {
   deps: AppDeps;
   tokenBudget?: TokenBudget;
   blobStore?: BlobStore;
-}): Hono {
+}): Promise<Hono> {
   const app = new Hono();
   const blobStore = opts.blobStore ?? new BlobStore("run-test");
+  const proxyDeps = {
+    config: opts.deps.config,
+    cookieJar: opts.deps.cookieJar,
+    fetchFn: opts.deps.fetchFn ?? fetch,
+    fetchCredentials: opts.deps.fetchCredentials,
+    reportedAuthFailures: new Set<string>(),
+  };
+  // The credential-proxy core (token-budget / blob spillover) is exercised
+  // through the generic `{ns}__api_call` tool, now hosted as a trusted
+  // in-process MCP server on an McpHost. The SAME blobStore + tokenBudget
+  // flow into both the api_call tool (via the host) and the outer server.
+  const host = await buildApiCallHost(
+    [
+      {
+        namespace: "test",
+        integrationId: "@test/integ",
+        fetchCredentials: opts.deps.fetchCredentials,
+        refreshCredentials: opts.deps.fetchCredentials,
+      },
+    ],
+    { proxyDeps, blobStore, ...(opts.tokenBudget ? { tokenBudget: opts.tokenBudget } : {}) },
+  );
   mountMcp(app, {
     blobStore,
     ...(opts.tokenBudget ? { tokenBudget: opts.tokenBudget } : {}),
-    proxyDeps: {
-      config: opts.deps.config,
-      cookieJar: opts.deps.cookieJar,
-      fetchFn: opts.deps.fetchFn ?? fetch,
-      fetchCredentials: opts.deps.fetchCredentials,
-      reportedAuthFailures: new Set<string>(),
-    },
+    additionalToolsProvider: () => host.buildTools(),
+    proxyDeps,
   });
   return app;
 }
@@ -144,14 +172,16 @@ describe("token-aware spill — dense JSON (issue #390 primary)", () => {
         }),
     );
     const tokenBudget = new TokenBudget({ inlineCapTokens: 4_000, runBudgetTokens: 100_000 });
-    const app = buildTestApp({ deps: makeDeps({ fetchFn }), tokenBudget });
+    const app = await buildTestApp({
+      deps: makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }),
+      tokenBudget,
+    });
 
     const res = await rpc(app, {
       method: "tools/call",
       params: {
-        name: "provider_call",
+        name: "test__api_call",
         arguments: {
-          providerId: "test-provider",
           target: "https://api.example.com/items",
           method: "GET",
         },
@@ -159,7 +189,7 @@ describe("token-aware spill — dense JSON (issue #390 primary)", () => {
     });
     const result = res.json.result as CallToolResult;
     expect(result.content[0]!.type).toBe("resource_link");
-    expect(result.content[0]!.uri).toMatch(/^appstrate:\/\/provider-response\//);
+    expect(result.content[0]!.uri).toMatch(/^appstrate:\/\/api-response\//);
 
     const meta = result._meta?.[TOKEN_BUDGET_META_KEY] as BudgetMeta | undefined;
     expect(meta).toBeDefined();
@@ -179,14 +209,16 @@ describe("token-aware spill — dense JSON (issue #390 primary)", () => {
         }),
     );
     const tokenBudget = new TokenBudget({ inlineCapTokens: 4_000, runBudgetTokens: 100_000 });
-    const app = buildTestApp({ deps: makeDeps({ fetchFn }), tokenBudget });
+    const app = await buildTestApp({
+      deps: makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }),
+      tokenBudget,
+    });
 
     const res = await rpc(app, {
       method: "tools/call",
       params: {
-        name: "provider_call",
+        name: "test__api_call",
         arguments: {
-          providerId: "test-provider",
           target: "https://api.example.com/items",
           method: "GET",
         },
@@ -225,7 +257,10 @@ describe("token-aware spill — cumulative pressure (issue #390 secondary)", () 
     // Inline cap allows each call individually; run budget tight
     // enough to exhaust within 50 calls.
     const tokenBudget = new TokenBudget({ inlineCapTokens: 4_000, runBudgetTokens: 20_000 });
-    const app = buildTestApp({ deps: makeDeps({ fetchFn }), tokenBudget });
+    const app = await buildTestApp({
+      deps: makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }),
+      tokenBudget,
+    });
 
     let inlineCount = 0;
     let spillCount = 0;
@@ -235,9 +270,8 @@ describe("token-aware spill — cumulative pressure (issue #390 secondary)", () 
       const res = await rpc(app, {
         method: "tools/call",
         params: {
-          name: "provider_call",
+          name: "test__api_call",
           arguments: {
-            providerId: "test-provider",
             target: "https://api.example.com/items",
             method: "GET",
           },
@@ -274,14 +308,16 @@ describe("token-aware spill — `_meta` accounting", () => {
         }),
     );
     const tokenBudget = new TokenBudget({ inlineCapTokens: 4_000, runBudgetTokens: 100_000 });
-    const app = buildTestApp({ deps: makeDeps({ fetchFn }), tokenBudget });
+    const app = await buildTestApp({
+      deps: makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }),
+      tokenBudget,
+    });
 
     const res = await rpc(app, {
       method: "tools/call",
       params: {
-        name: "provider_call",
+        name: "test__api_call",
         arguments: {
-          providerId: "test-provider",
           target: "https://api.example.com/items",
           method: "GET",
         },
@@ -308,16 +344,18 @@ describe("token-aware spill — `_meta` accounting", () => {
         }),
     );
     const tokenBudget = new TokenBudget({ inlineCapTokens: 4_000, runBudgetTokens: 100_000 });
-    const app = buildTestApp({ deps: makeDeps({ fetchFn }), tokenBudget });
+    const app = await buildTestApp({
+      deps: makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }),
+      tokenBudget,
+    });
 
     const consumed: number[] = [];
     for (let i = 0; i < 3; i++) {
       const res = await rpc(app, {
         method: "tools/call",
         params: {
-          name: "provider_call",
+          name: "test__api_call",
           arguments: {
-            providerId: "test-provider",
             target: "https://api.example.com/items",
             method: "GET",
           },
@@ -334,6 +372,35 @@ describe("token-aware spill — `_meta` accounting", () => {
     expect(consumed[1]).toBeGreaterThan(consumed[0]!);
     expect(consumed[2]).toBeGreaterThan(consumed[1]!);
   });
+
+  // AFPS (Phase F1 follow-up): `_meta` keys must match Appendix B's
+  // `META_NAMESPACE_KEY` regex — either a bare token or `<reverse-dns>/<id>`.
+  // Writers always emit `dev.appstrate/token-budget`.
+  it("writers emit the AFPS reverse-DNS key", async () => {
+    const fetchFn = mock(
+      async () =>
+        new Response('{"hello":"world"}', {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    const tokenBudget = new TokenBudget({ inlineCapTokens: 4_000, runBudgetTokens: 100_000 });
+    const app = await buildTestApp({
+      deps: makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }),
+      tokenBudget,
+    });
+
+    const res = await rpc(app, {
+      method: "tools/call",
+      params: {
+        name: "test__api_call",
+        arguments: { target: "https://api.example.com/items", method: "GET" },
+      },
+    });
+    const result = res.json.result as CallToolResult;
+    // Canonical key present.
+    expect(result._meta?.[TOKEN_BUDGET_META_KEY]).toBeDefined();
+  });
 });
 
 describe("token-aware spill — applied to all platform tools", () => {
@@ -347,7 +414,10 @@ describe("token-aware spill — applied to all platform tools", () => {
         }),
     );
     const tokenBudget = new TokenBudget({ inlineCapTokens: 4_000, runBudgetTokens: 100_000 });
-    const app = buildTestApp({ deps: makeDeps({ fetchFn }), tokenBudget });
+    const app = await buildTestApp({
+      deps: makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }),
+      tokenBudget,
+    });
 
     const res = await rpc(app, {
       method: "tools/call",
@@ -370,7 +440,10 @@ describe("token-aware spill — applied to all platform tools", () => {
         }),
     );
     const tokenBudget = new TokenBudget({ inlineCapTokens: 4_000, runBudgetTokens: 100_000 });
-    const app = buildTestApp({ deps: makeDeps({ fetchFn }), tokenBudget });
+    const app = await buildTestApp({
+      deps: makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }),
+      tokenBudget,
+    });
 
     const res = await rpc(app, {
       method: "tools/call",
@@ -396,14 +469,15 @@ describe("token-aware spill — backwards compatibility", () => {
         }),
     );
     // Build app with NO tokenBudget passed — exercise the legacy path.
-    const app = buildTestApp({ deps: makeDeps({ fetchFn }) });
+    const app = await buildTestApp({
+      deps: makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }),
+    });
 
     const res = await rpc(app, {
       method: "tools/call",
       params: {
-        name: "provider_call",
+        name: "test__api_call",
         arguments: {
-          providerId: "test-provider",
           target: "https://api.example.com/items",
           method: "GET",
         },
@@ -423,13 +497,14 @@ describe("token-aware spill — backwards compatibility", () => {
           headers: { "Content-Type": "application/json" },
         }),
     );
-    const app = buildTestApp({ deps: makeDeps({ fetchFn }) });
+    const app = await buildTestApp({
+      deps: makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }),
+    });
     const res = await rpc(app, {
       method: "tools/call",
       params: {
-        name: "provider_call",
+        name: "test__api_call",
         arguments: {
-          providerId: "test-provider",
           target: "https://api.example.com/items",
           method: "GET",
         },
@@ -463,13 +538,31 @@ describe("token-aware spill — env-var configuration via createApp", () => {
             headers: { "Content-Type": "application/json" },
           }),
       );
-      const app = createApp(makeDeps({ fetchFn }));
+      // Build runtimeDeps explicitly so the env-var-driven TokenBudget is
+      // shared with the in-process api_call host (mirrors server.ts).
+      const appDeps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
+      const runtimeDeps = buildSidecarRuntimeDeps(appDeps);
+      const host = await buildApiCallHost(
+        [
+          {
+            namespace: "test",
+            integrationId: "@test/integ",
+            fetchCredentials: defaultFetchCredentials,
+            refreshCredentials: defaultFetchCredentials,
+          },
+        ],
+        runtimeDeps,
+      );
+      const app = createApp({
+        ...appDeps,
+        runtimeDeps,
+        additionalMcpToolsProvider: () => host.buildTools(),
+      });
       const res = await rpc(app, {
         method: "tools/call",
         params: {
-          name: "provider_call",
+          name: "test__api_call",
           arguments: {
-            providerId: "test-provider",
             target: "https://api.example.com/items",
             method: "GET",
           },
@@ -517,14 +610,17 @@ describe("token-aware spill — fallback when blob store is full", () => {
         }),
     );
     const tokenBudget = new TokenBudget({ inlineCapTokens: 4_000, runBudgetTokens: 100_000 });
-    const app = buildTestApp({ deps: makeDeps({ fetchFn }), tokenBudget, blobStore });
+    const app = await buildTestApp({
+      deps: makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }),
+      tokenBudget,
+      blobStore,
+    });
 
     const res = await rpc(app, {
       method: "tools/call",
       params: {
-        name: "provider_call",
+        name: "test__api_call",
         arguments: {
-          providerId: "test-provider",
           target: "https://api.example.com/items",
           method: "GET",
         },

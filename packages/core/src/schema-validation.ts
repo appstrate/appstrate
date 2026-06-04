@@ -16,6 +16,7 @@
 
 import { createAjv } from "./ajv.ts";
 import type { JSONSchemaObject } from "./form.ts";
+import { isPlainObject } from "./safe-json.ts";
 
 const ajv = createAjv({ coerceTypes: true });
 
@@ -104,8 +105,4 @@ export function deepMergeConfig(
     }
   }
   return out;
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

@@ -6,28 +6,27 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Spinner } from "./spinner";
 import { PageHeader, type BreadcrumbEntry } from "./page-header";
-import type { PackageType } from "@appstrate/core/validation";
 import { packageDetailPath, packageListPath } from "../lib/package-paths";
 
-const emojiMap: Record<PackageType, string> = {
+// Only agent + skill have an editor route (see app.tsx).
+type EditablePackageType = "agent" | "skill" | "integration";
+
+const emojiMap: Record<EditablePackageType, string> = {
   agent: "⚡",
   skill: "🧠",
-  tool: "🔧",
-  provider: "🔌",
+  integration: "🧩",
 };
 
-const breadcrumbNewKeys: Record<PackageType, string> = {
+const breadcrumbNewKeys: Record<EditablePackageType, string> = {
   agent: "editor.breadcrumbNew",
   skill: "editor.breadcrumbNewSkill",
-  tool: "editor.breadcrumbNewTool",
-  provider: "editor.breadcrumbNewProvider",
+  integration: "editor.breadcrumbNewIntegration",
 };
 
-const listLabelKeys: Record<PackageType, { key: string; ns?: string }> = {
+const listLabelKeys: Record<EditablePackageType, { key: string; ns?: string }> = {
   agent: { key: "detail.breadcrumb" },
   skill: { key: "packages.type.skills", ns: "settings" },
-  tool: { key: "packages.type.tools", ns: "settings" },
-  provider: { key: "packages.type.providers", ns: "settings" },
+  integration: { key: "packages.type.integrations", ns: "settings" },
 };
 
 interface EditorTab {
@@ -36,7 +35,7 @@ interface EditorTab {
 }
 
 interface EditorShellProps {
-  type: PackageType;
+  type: EditablePackageType;
   packageId: string | undefined;
   isEdit: boolean;
   displayName: string | undefined;

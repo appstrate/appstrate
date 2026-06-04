@@ -19,14 +19,13 @@ export function toLiveSlug(value: string): string {
 }
 
 /**
- * Canonicalize a provider credential schema key — matches the contract in
- * `@appstrate/core/validation#CREDENTIAL_KEY_RE` (`^[a-z][a-z0-9_]*$`).
+ * Canonicalize a credential schema key to the `^[a-z][a-z0-9_]*$` shape.
  *
  * Underscores are preserved (unlike {@link toSlug}) because the sidecar
- * substitution regex (`\w+`) does not match hyphens. Use in credentials mode
- * of `SchemaSection` and in the provider editor field-name input.
+ * substitution regex (`\w+`) does not match hyphens. Used by the agent
+ * editor's credentials mode for the field-name input.
  *
- * Guarantees the output is either empty or matches `CREDENTIAL_KEY_RE` — in
+ * Guarantees the output is either empty or matches `^[a-z][a-z0-9_]*$` — in
  * particular, strips any leading non-letter characters (digits, underscores)
  * so the pattern's `^[a-z]` anchor is never violated.
  */

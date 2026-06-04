@@ -6,7 +6,7 @@
  *
  * The sidecar exposes a single `/mcp` endpoint to the agent. Inside, we
  * aggregate tools from multiple MCP servers:
- *   - First-party (in-process): provider_call, run_history, recall_memory.
+ *   - First-party (in-process): {ns}__api_call, run_history, recall_memory.
  *   - Third-party (subprocess via SubprocessTransport): notion-mcp,
  *     filesystem-mcp, etc.
  *
@@ -28,7 +28,8 @@
  *     SubprocessTransport.
  */
 
-import { isValidToolNameForExisting } from "@appstrate/core/naming";
+import { isValidToolName } from "@appstrate/core/naming";
+import { RUNTIME_TOOL_EVENTS_META_KEY } from "@appstrate/core/runtime-tool-defs";
 import {
   sanitiseToolDescriptor,
   type AppstrateMcpClient,
@@ -37,11 +38,72 @@ import {
   type Tool,
 } from "@appstrate/mcp-transport";
 
+/**
+ * Drop the first-party runtime-event channel from a third-party tool result.
+ * `dev.appstrate/events` under `_meta` is the trusted channel the platform's
+ * own runtime tools (output/log/note/pin/report) use to surface canonical run
+ * events; an integration upstream has no legitimate reason to set it, so we
+ * remove it to prevent run-event forgery. Returns the result untouched when
+ * the key is not present (the common case).
+ */
+function stripForgedRuntimeEvents(result: CallToolResult): CallToolResult {
+  const meta = result._meta;
+  if (!meta || !(RUNTIME_TOOL_EVENTS_META_KEY in meta)) {
+    return result;
+  }
+  const { [RUNTIME_TOOL_EVENTS_META_KEY]: _dropped, ...rest } = meta;
+  return { ...result, _meta: rest };
+}
+
 export interface McpHostUpstream {
   /** Stable identifier for this upstream — appears in tool name prefix. */
   namespace: string;
   /** Connected client (any transport). */
   client: AppstrateMcpClient;
+  /**
+   * Niveau 2 Phase 3 — agent-declared MCP tool allowlist. When set, only
+   * tools whose ORIGINAL name (as advertised by the upstream's
+   * `tools/list`) appears here are registered with the host; excluded
+   * tools are silently dropped (with an audit log) so the agent's LLM
+   * never sees a tool it isn't authorised to call.
+   *
+   * `undefined` (default) preserves the legacy "all tools allowed"
+   * behaviour. Empty `[]` is a valid explicit "register nothing".
+   */
+  allowedTools?: readonly string[];
+  /**
+   * R8a defensive filter — names from the integration manifest's
+   * `hidden_tools` field. Applied AFTER `allowedTools`: a tool that
+   * survives the allowlist is still dropped if it appears here. This
+   * mirrors the install-time `resolveIntegrationToolCatalog` policy
+   * (which already excludes hidden tools from the agent's selection),
+   * adding a runtime-side guarantee that the same names can never reach
+   * the agent even when fixtures / direct DB writes bypass install-time
+   * validation. `undefined` / empty = no extra filtering.
+   */
+  hiddenTools?: readonly string[];
+  /**
+   * Trusted first-party upstream (e.g. the sidecar's own in-process
+   * `api_call` server). Skips the tool-poisoning sanitiser
+   * (`sanitiseToolDescriptor`) — which is designed for UNTRUSTED
+   * third-party MCP servers and caps every `description` to 512 bytes /
+   * the whole schema to 8 KB. Our first-party tools ship deliberately
+   * rich, audited documentation (the `api_call` body / multipart docs the
+   * agent needs to format requests) that must survive intact. Namespacing
+   * + tool-name validation still apply.
+   */
+  trusted?: boolean;
+  /**
+   * Register this upstream's tools UNDER an existing namespace instead of
+   * allocating a fresh (possibly suffixed) one. Used to attach the in-process
+   * `api_call` tool to an integration that ALSO spawns its own MCP server, so
+   * the agent sees `{ns}__api_call` alongside `{ns}__<native tools>` under one
+   * namespace. The pre-existing upstream stays the namespace's PRIMARY (what
+   * {@link McpHost.getUpstreamClient} returns, e.g. for the connect-login
+   * tool); these merged tools route to THIS client via the per-tool index.
+   * The namespace must already exist (register the primary server first).
+   */
+  intoNamespace?: string;
 }
 
 export interface McpHostOptions {
@@ -67,6 +129,13 @@ export interface McpHostOptions {
 export class McpHost {
   private readonly upstreams = new Map<string, McpHostUpstream>();
   private readonly toolToNamespace = new Map<string, string>();
+  // Per-tool → owning client. Decoupled from `upstreams` (namespace → primary
+  // client) so a single namespace can aggregate tools from more than one
+  // client (e.g. a spawned server + the in-process `api_call`, see
+  // `intoNamespace`). Dispatch routes by this map, never by namespace alone.
+  private readonly toolToClient = new Map<string, AppstrateMcpClient>();
+  // Every distinct client registered, primary or merged — closed on dispose.
+  private readonly clients = new Set<AppstrateMcpClient>();
   private readonly originalToolNames = new Map<string, string>();
   private readonly toolDescriptors: Tool[] = [];
   private readonly options: McpHostOptions;
@@ -81,14 +150,47 @@ export class McpHost {
    * subsequent server-side `notifications/tools/list_changed` are NOT
    * tracked yet (third-party MCP servers rarely emit them in practice).
    */
-  async register(upstream: McpHostUpstream): Promise<void> {
+  /**
+   * Ingest an upstream MCP server. Returns the ALLOCATED namespace — the
+   * normalised slug, possibly disambiguated with a `_2`/`_3`/… suffix on
+   * collision. This is the value {@link getUpstreamClient} keys against, so
+   * callers that need to reach the raw client afterwards (e.g. the P2
+   * connect-login hook) must use the returned namespace, not the one they
+   * passed in.
+   */
+  async register(upstream: McpHostUpstream): Promise<string> {
     if (this.disposed) throw new Error("McpHost: cannot register after dispose()");
-    if (this.upstreams.has(upstream.namespace)) {
-      throw new Error(`McpHost: namespace '${upstream.namespace}' already registered`);
-    }
-    const normalisedNs = normaliseNamespace(upstream.namespace);
-    if (!normalisedNs) {
+    const baseNamespace = normaliseNamespace(upstream.namespace);
+    if (!baseNamespace) {
       throw new Error(`McpHost: namespace '${upstream.namespace}' is empty after normalisation`);
+    }
+    // Per integrations spec §5.4.5: collision between two integrations
+    // sharing the same last-segment slug (e.g. `@official/gmail` vs
+    // `@vendor/gmail`) → auto-suffix `_2`, `_3`, … with an audit log,
+    // instead of throwing. Throwing would let one badly-named package
+    // gate every install of any other package sharing its slug.
+    // `intoNamespace` merges into an existing namespace (no allocation, no
+    // suffix); otherwise allocate a fresh slot, disambiguating on collision.
+    const merging = upstream.intoNamespace !== undefined;
+    if (merging && !this.upstreams.has(upstream.intoNamespace!)) {
+      throw new Error(
+        `McpHost: intoNamespace '${upstream.intoNamespace}' is not a registered namespace`,
+      );
+    }
+    const normalisedNs = merging ? upstream.intoNamespace! : this.allocateNamespace(baseNamespace);
+    const effectiveUpstream: McpHostUpstream = { ...upstream, namespace: normalisedNs };
+    this.clients.add(effectiveUpstream.client);
+    if (!merging && normalisedNs !== baseNamespace) {
+      this.options.onLog?.({
+        source: `host:${normalisedNs}`,
+        level: "warn",
+        data: {
+          event: "namespace_disambiguated",
+          requestedNamespace: upstream.namespace,
+          base: baseNamespace,
+          allocated: normalisedNs,
+        },
+      });
     }
 
     // Capture the upstream's MCP `initialize` snapshot so operator
@@ -97,10 +199,10 @@ export class McpHost {
     // we can skip `tools/list` against a server that didn't advertise
     // the `tools` capability — JSON-RPC error round-trips on every
     // register would otherwise add a per-server failure mode.
-    const serverVersion = upstream.client.getServerVersion();
-    const capabilities = upstream.client.getServerCapabilities();
+    const serverVersion = effectiveUpstream.client.getServerVersion();
+    const capabilities = effectiveUpstream.client.getServerCapabilities();
     this.options.onLog?.({
-      source: `host:${upstream.namespace}`,
+      source: `host:${normalisedNs}`,
       level: "info",
       data: {
         event: "upstream_registered",
@@ -111,21 +213,56 @@ export class McpHost {
 
     if (capabilities && !capabilities.tools) {
       // Server explicitly does NOT support tools — no point asking.
-      this.upstreams.set(upstream.namespace, upstream);
-      return;
+      if (!merging) this.upstreams.set(normalisedNs, effectiveUpstream);
+      return normalisedNs;
     }
 
-    const { tools } = await upstream.client.listTools();
+    const { tools } = await effectiveUpstream.client.listTools();
+    // Niveau 2 Phase 3 — pre-filter against the agent-declared allowlist
+    // before any sanitisation / registration. The check uses the
+    // ORIGINAL upstream tool name; namespacing happens downstream and
+    // wouldn't survive a Set lookup against the agent's declared names.
+    const allowlist = upstream.allowedTools ? new Set<string>(upstream.allowedTools) : null;
+    // R8a defensive filter — `hidden_tools` exclusion runs AFTER the
+    // allowlist (a tool that survives the allowlist can still be hidden).
+    // Empty set = no extra exclusion. Original-name matching, same as
+    // the allowlist, so authors declare names exactly as the upstream
+    // advertises them.
+    const hiddenSet = upstream.hiddenTools ? new Set<string>(upstream.hiddenTools) : null;
     for (const tool of tools) {
+      if (allowlist && !allowlist.has(tool.name)) {
+        this.options.onLog?.({
+          source: `host:${normalisedNs}`,
+          level: "info",
+          data: {
+            event: "tool_excluded_by_allowlist",
+            originalName: tool.name,
+          },
+        });
+        continue;
+      }
+      if (hiddenSet && hiddenSet.has(tool.name)) {
+        this.options.onLog?.({
+          source: `host:${normalisedNs}`,
+          level: "info",
+          data: {
+            event: "tool_excluded_by_hidden_tools",
+            originalName: tool.name,
+          },
+        });
+        continue;
+      }
       // Strip hidden Unicode, cap field lengths, defeat tool poisoning
       // before any third-party descriptor reaches
       // the agent's LLM. A descriptor that exceeds the schema-size cap
       // after sanitisation is dropped entirely; the host emits a log
-      // event so operators can audit the rejection.
-      const sanitised = sanitiseToolDescriptor(tool);
+      // event so operators can audit the rejection. Trusted first-party
+      // upstreams (our own in-process api_call server) bypass the
+      // sanitiser so their rich audited docs survive intact.
+      const sanitised = upstream.trusted ? tool : sanitiseToolDescriptor(tool);
       if (!sanitised) {
         this.options.onLog?.({
-          source: `host:${upstream.namespace}`,
+          source: `host:${normalisedNs}`,
           level: "warn",
           data: {
             event: "tool_rejected",
@@ -137,15 +274,62 @@ export class McpHost {
       }
       const sanitisedToolBody = sanitiseToolBody(sanitised.name);
       const namespacedName = sanitisedToolBody ? `${normalisedNs}__${sanitisedToolBody}` : "";
-      const finalName = isValidToolNameForExisting(namespacedName)
+      let finalName = isValidToolName(namespacedName)
         ? namespacedName
         : `${normalisedNs}__tool_${this.toolDescriptors.length}`;
-      this.toolToNamespace.set(finalName, upstream.namespace);
+      // Dedup: two DISTINCT upstream tools can converge onto the same
+      // `finalName` after `sanitiseToolBody` collapses separators (e.g.
+      // `list-issues`, `list_issues`, and `list.issues` all → `list_issues`).
+      // Without this guard the later tool would silently overwrite the
+      // earlier one's index entries (toolToClient / originalToolNames) while
+      // both still get pushed onto `toolDescriptors` — the agent would see a
+      // duplicate name and the first tool would become unreachable. Suffix
+      // `_2`, `_3`, … until free, mirroring namespace disambiguation.
+      if (this.toolToNamespace.has(finalName)) {
+        const base = finalName;
+        let suffix = 2;
+        while (this.toolToNamespace.has(finalName)) {
+          finalName = `${base}_${suffix}`;
+          suffix += 1;
+        }
+        this.options.onLog?.({
+          source: `host:${normalisedNs}`,
+          level: "warn",
+          data: {
+            event: "tool_name_collision",
+            originalName: tool.name,
+            base,
+            allocated: finalName,
+          },
+        });
+      }
+      this.toolToNamespace.set(finalName, normalisedNs);
+      this.toolToClient.set(finalName, effectiveUpstream.client);
       this.originalToolNames.set(finalName, tool.name);
       this.toolDescriptors.push({ ...sanitised, name: finalName });
     }
 
-    this.upstreams.set(upstream.namespace, upstream);
+    // Merged upstreams (`intoNamespace`) contribute tools but never become the
+    // namespace's primary client — keep the pre-existing primary in place.
+    if (!merging) this.upstreams.set(normalisedNs, effectiveUpstream);
+    return normalisedNs;
+  }
+
+  /**
+   * Find a free namespace slot. The base slug is tried first; if it is
+   * already in use we suffix `_2`, `_3`, … until we find an unused slot.
+   * The chosen slot is what every subsequent index ({@link toolToNamespace},
+   * {@link upstreams}) keys against.
+   */
+  private allocateNamespace(base: string): string {
+    if (!this.upstreams.has(base)) return base;
+    for (let suffix = 2; suffix < 1000; suffix += 1) {
+      const candidate = `${base}_${suffix}`;
+      if (!this.upstreams.has(candidate)) return candidate;
+    }
+    // 998 collisions on the same namespace is operator error, not a
+    // condition the host should silently paper over with a 4-digit suffix.
+    throw new Error(`McpHost: exhausted disambiguation suffixes for namespace '${base}'`);
   }
 
   /** Total number of upstream-advertised tools currently known. */
@@ -154,11 +338,28 @@ export class McpHost {
   }
 
   /**
+   * Connect-login primitive (P1) — return the underlying MCP client for a
+   * registered upstream so a caller can invoke a tool directly (bypassing
+   * the namespaced tool-dispatch surface). `namespace` is the normalised
+   * form used as the `{namespace}__tool` prefix (the same value
+   * {@link normaliseNamespace} produces, after any collision-disambiguation
+   * suffix). Returns `undefined` when no upstream is registered under it.
+   *
+   * The returned client exposes `.callTool({ name, arguments }, { signal? })`
+   * — the connect-login primitive uses it to call the integration's `login`
+   * tool while the credential source's transient-input substitution window
+   * is open.
+   */
+  getUpstreamClient(namespace: string): AppstrateMcpClient | undefined {
+    return this.upstreams.get(namespace)?.client;
+  }
+
+  /**
    * Build {@link AppstrateToolDefinition}s — a flat list ready for
    * `createMcpServer(...)`. The handler dispatches `tools/call` to the
    * upstream client identified by the prefix.
    *
-   * Optional `inject` parameter merges first-party tools (provider_call,
+   * Optional `inject` parameter merges first-party tools ({ns}__api_call,
    * run_history, recall_memory) into the same flat list. The host does
    * not validate name collisions between first-party and third-party
    * tools — first-party names take precedence.
@@ -168,19 +369,26 @@ export class McpHost {
     const thirdParty: AppstrateToolDefinition[] = [];
     for (const desc of this.toolDescriptors) {
       if (firstPartyNames.has(desc.name)) continue;
-      const namespace = this.toolToNamespace.get(desc.name)!;
       const originalName = this.originalToolNames.get(desc.name)!;
-      const upstream = this.upstreams.get(namespace);
-      if (!upstream) continue;
+      // Route by the per-tool client index, not the namespace — a namespace
+      // may aggregate tools from more than one client (`intoNamespace`).
+      const client = this.toolToClient.get(desc.name);
+      if (!client) continue;
       thirdParty.push({
         descriptor: desc,
         handler: async (args, extra): Promise<CallToolResult> => {
           // Forward to upstream with the original (un-namespaced) name.
           // Cancellation via the SDK's RequestHandlerExtra signal.
-          return upstream.client.callTool(
+          const result = await client.callTool(
             { name: originalName, arguments: args },
             { ...(extra.signal ? { signal: extra.signal } : {}) },
           );
+          // Trust boundary (defense-in-depth): the canonical run-event channel
+          // (`appstrate/events`) belongs to the platform's first-party runtime
+          // tools only. No third-party integration tool routed through here
+          // legitimately produces it, so strip the key before returning —
+          // a forged `_meta` can't reach the agent's re-emit path.
+          return stripForgedRuntimeEvents(result);
         },
       });
     }
@@ -202,8 +410,8 @@ export class McpHost {
     if (this.disposed) return;
     this.disposed = true;
     await Promise.all(
-      [...this.upstreams.values()].map((u) =>
-        u.client.close().catch(() => {
+      [...this.clients].map((c) =>
+        c.close().catch(() => {
           // Swallow close errors — we're tearing down; the caller
           // already learned the run is over.
         }),
@@ -211,6 +419,8 @@ export class McpHost {
     );
     this.upstreams.clear();
     this.toolToNamespace.clear();
+    this.toolToClient.clear();
+    this.clients.clear();
     this.originalToolNames.clear();
     this.toolDescriptors.length = 0;
   }
@@ -221,7 +431,7 @@ export class McpHost {
  * the V3 tool-name regex. Returns `""` when the input is empty or
  * contains nothing usable.
  */
-function normaliseNamespace(raw: string): string {
+export function normaliseNamespace(raw: string): string {
   if (typeof raw !== "string") return "";
   const out = raw
     .replace(/^@/, "")

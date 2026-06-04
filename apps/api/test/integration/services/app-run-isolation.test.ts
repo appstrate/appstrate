@@ -3,8 +3,8 @@
 /**
  * Cross-app isolation tests for run state functions.
  *
- * Verifies that getLastCheckpoint, getRecentRuns, getRunningRunCounts,
- * and deletePackageRuns properly scope to applicationId.
+ * Verifies that getRecentRuns, getRunningRunCounts, and deletePackageRuns
+ * properly scope to applicationId.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -13,7 +13,6 @@ import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedRun, seedApplication } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
 import {
-  getLastCheckpoint,
   getRecentRuns,
   getRunningRunCounts,
   deletePackageRuns,
@@ -33,65 +32,6 @@ describe("Cross-app run isolation (service layer)", () => {
     await seedAgent({ id: agentId, orgId: ctx.orgId, createdBy: ctx.user.id });
     await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, agentId);
     await installPackage({ orgId: ctx.orgId, applicationId: appBId }, agentId);
-  });
-
-  describe("getLastCheckpoint", () => {
-    it("returns state only from the requested application", async () => {
-      // Seed a run with state in AppA
-      await seedRun({
-        packageId: agentId,
-        orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
-        status: "success",
-        checkpoint: { source: "appA" },
-        startedAt: new Date("2025-01-01"),
-      });
-
-      // Seed a more recent run with state in AppB
-      await seedRun({
-        packageId: agentId,
-        orgId: ctx.orgId,
-        applicationId: appBId,
-        userId: ctx.user.id,
-        status: "success",
-        checkpoint: { source: "appB" },
-        startedAt: new Date("2025-01-02"),
-      });
-
-      // AppA should get its own state, not AppB's (even though AppB's is more recent)
-      const stateA = await getLastCheckpoint(
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        agentId,
-        null,
-      );
-      expect(stateA).toEqual({ source: "appA" });
-
-      const stateB = await getLastCheckpoint(
-        { orgId: ctx.orgId, applicationId: appBId },
-        agentId,
-        null,
-      );
-      expect(stateB).toEqual({ source: "appB" });
-    });
-
-    it("returns null when no runs exist in the requested application", async () => {
-      await seedRun({
-        packageId: agentId,
-        orgId: ctx.orgId,
-        applicationId: appBId,
-        userId: ctx.user.id,
-        status: "success",
-        checkpoint: { source: "appB" },
-      });
-
-      const state = await getLastCheckpoint(
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        agentId,
-        null,
-      );
-      expect(state).toBeNull();
-    });
   });
 
   describe("getRecentRuns", () => {

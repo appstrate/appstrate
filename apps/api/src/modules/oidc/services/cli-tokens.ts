@@ -759,7 +759,7 @@ export async function revokeFamilyForUser(params: {
 
 /**
  * Revoke every active CLI session family belonging to a user. Server
- * primitive backing `appstrate logout --all` (ADR-006) and the dashboard
+ * primitive backing `appstrate logout --all` and the dashboard
  * "Revoke all sessions" button. Idempotent — already-revoked families
  * are skipped at the SQL level.
  *

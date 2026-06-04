@@ -37,15 +37,15 @@ function ctx(overrides: Partial<ExecutionContext> = {}): ExecutionContext {
 }
 
 describe("buildPlatformPromptInputs", () => {
-  it("extracts template + schemaVersion + timeout from the root package", () => {
+  it("extracts template + schema_version + timeout from the root package", () => {
     const root = pkg(
       "@acme/agent@1.0.0",
-      { type: "agent", schemaVersion: "1.3", timeout: 120 },
+      { type: "agent", schema_version: "0.1", timeout: 120 },
       { "prompt.md": "HELLO" },
     );
     const inputs = buildPlatformPromptInputs(bundleOf(root), ctx());
     expect(inputs.template).toBe("HELLO");
-    expect(inputs.schemaVersion).toBe("1.3");
+    expect(inputs.schemaVersion).toBe("0.1");
     expect(inputs.timeoutSeconds).toBe(120);
   });
 
@@ -70,71 +70,29 @@ describe("buildPlatformPromptInputs", () => {
     });
   });
 
-  it("classifies dependencies by manifest.type (tool / skill / provider)", () => {
+  it("collects skill dependencies (mcp-servers are advertised via MCP tools/list, not derived here)", () => {
     const root = pkg("@acme/agent@1.0.0", { type: "agent" }, { "prompt.md": "" });
-    const tool = pkg(
-      "@acme/t1@1.0.0",
-      { type: "tool", name: "tool-one", description: "First" },
-      { "TOOL.md": "# tool-one docs" },
+    // An `mcp-server` package must NOT surface — only skills are collected;
+    // mcp-server tools reach the model via MCP `tools/list`.
+    const mcp = pkg(
+      "@acme/m1@1.0.0",
+      {
+        manifest_version: "0.3",
+        name: "@acme/m1",
+        version: "1.0.0",
+        type: "mcp-server",
+        schema_version: "0.1",
+        server: {
+          type: "node",
+          entry_point: "server/index.js",
+          mcp_config: { command: "node", args: ["server/index.js"] },
+        },
+      },
+      { "server/index.js": "//" },
     );
     const skill = pkg("@acme/s1@1.0.0", { type: "skill", name: "skill-one" });
-    const provider = pkg("@acme/p1@1.0.0", {
-      type: "provider",
-      name: "Gmail",
-      definition: {
-        authMode: "oauth2",
-        authorizedUris: ["https://gmail.googleapis.com/**"],
-        docsUrl: "https://developers.google.com/gmail/api",
-      },
-    });
-    const inputs = buildPlatformPromptInputs(bundleOf(root, tool, skill, provider), ctx());
-    expect(inputs.availableTools).toEqual([
-      { id: "@acme/t1", name: "tool-one", description: "First" },
-    ]);
+    const inputs = buildPlatformPromptInputs(bundleOf(root, mcp, skill), ctx());
     expect(inputs.availableSkills).toEqual([{ id: "@acme/s1", name: "skill-one" }]);
-    expect(inputs.toolDocs).toEqual([{ id: "@acme/t1", content: "# tool-one docs" }]);
-    expect(inputs.providers).toEqual([
-      {
-        id: "@acme/p1",
-        displayName: "Gmail",
-        authMode: "oauth2",
-        docsUrl: "https://developers.google.com/gmail/api",
-        authorizedUris: ["https://gmail.googleapis.com/**"],
-      },
-    ]);
-  });
-
-  it("prefers manifest.tool.name over manifest.name as the LLM-facing tool identifier", () => {
-    // AFPS 1.5+ tool packages declare the LLM-facing tool name under
-    // `manifest.tool.name` (e.g. @appstrate/pin → "pin"). The package's
-    // `name` is the display identifier. The runtime gating in
-    // `renderPlatformPrompt` (#368) keys off `availableTools[i].name`,
-    // so the LLM-facing name MUST win when both are present — otherwise
-    // gates like `t.name === "pin"` would never match real bundles.
-    const root = pkg("@acme/agent@1.0.0", { type: "agent" }, { "prompt.md": "" });
-    const pinTool = pkg("@appstrate/pin@1.0.0", {
-      name: "@appstrate/pin",
-      type: "tool",
-      description: "Upsert a pinned slot",
-      tool: { name: "pin" },
-    });
-    const inputs = buildPlatformPromptInputs(bundleOf(root, pinTool), ctx());
-    expect(inputs.availableTools).toEqual([
-      { id: "@appstrate/pin", name: "pin", description: "Upsert a pinned slot" },
-    ]);
-  });
-
-  it("falls back to manifest.name when manifest.tool.name is absent (legacy/non-tool-block packages)", () => {
-    const root = pkg("@acme/agent@1.0.0", { type: "agent" }, { "prompt.md": "" });
-    const legacy = pkg("@acme/legacy@1.0.0", {
-      name: "legacy-tool",
-      type: "tool",
-      description: "Legacy",
-    });
-    const inputs = buildPlatformPromptInputs(bundleOf(root, legacy), ctx());
-    expect(inputs.availableTools).toEqual([
-      { id: "@acme/legacy", name: "legacy-tool", description: "Legacy" },
-    ]);
   });
 
   it("applies scalar overrides verbatim (platformName, timeoutSeconds)", () => {
@@ -147,74 +105,36 @@ describe("buildPlatformPromptInputs", () => {
     expect(inputs.timeoutSeconds).toBe(300);
   });
 
-  it("merges provider overrides by id (override fields win, bundle fields fill gaps)", () => {
-    const root = pkg("@acme/agent@1.0.0", { type: "agent" }, { "prompt.md": "" });
-    const provider = pkg("@acme/p1@1.0.0", {
-      type: "provider",
-      name: "Gmail",
-      definition: { authMode: "oauth2", authorizedUris: ["https://old.example.com/**"] },
-    });
-    const inputs = buildPlatformPromptInputs(bundleOf(root, provider), ctx(), {
-      providers: [
-        {
-          id: "@acme/p1",
-          authorizedUris: ["https://gmail.googleapis.com/**", "https://oauth2.googleapis.com/**"],
-        },
-      ],
-    });
-    expect(inputs.providers).toEqual([
-      {
-        id: "@acme/p1",
-        displayName: "Gmail",
-        authMode: "oauth2",
-        authorizedUris: ["https://gmail.googleapis.com/**", "https://oauth2.googleapis.com/**"],
-      },
-    ]);
-  });
-
-  it("providersReplace: true swaps bundle-derived providers for the override list", () => {
-    const root = pkg("@acme/agent@1.0.0", { type: "agent" }, { "prompt.md": "" });
-    const gmail = pkg("@acme/gmail@1.0.0", { type: "provider", name: "Gmail" });
-    const slack = pkg("@acme/slack@1.0.0", { type: "provider", name: "Slack" });
-    const inputs = buildPlatformPromptInputs(bundleOf(root, gmail, slack), ctx(), {
-      providers: [
-        { id: "@acme/gmail", displayName: "Gmail", authorizedUris: ["https://g.example/**"] },
-      ],
-      providersReplace: true,
-    });
-    expect(inputs.providers).toEqual([
-      { id: "@acme/gmail", displayName: "Gmail", authorizedUris: ["https://g.example/**"] },
-    ]);
-  });
-
-  it("appends override-only providers after bundle-derived ones", () => {
-    const root = pkg("@acme/agent@1.0.0", { type: "agent" }, { "prompt.md": "" });
-    const provider = pkg("@acme/p1@1.0.0", { type: "provider", name: "Gmail" });
-    const inputs = buildPlatformPromptInputs(bundleOf(root, provider), ctx(), {
-      providers: [{ id: "@acme/extra", displayName: "Extra", allowAllUris: true }],
-    });
-    expect(inputs.providers?.map((p) => p.id)).toEqual(["@acme/p1", "@acme/extra"]);
-  });
-
   it("produces options that renderPlatformPrompt accepts end-to-end", () => {
     const root = pkg(
       "@acme/agent@1.0.0",
       {
         type: "agent",
-        schemaVersion: "1.3",
+        schema_version: "0.1",
         timeout: 60,
         output: { schema: { properties: { msg: { type: "string" } }, required: ["msg"] } },
       },
       { "prompt.md": "Do the thing." },
     );
-    const tool = pkg("@acme/t@1.0.0", { type: "tool", name: "t", description: "d" });
+    const mcp = pkg("@acme/m@1.0.0", {
+      manifest_version: "0.3",
+      name: "@acme/m",
+      version: "1.0.0",
+      type: "mcp-server",
+      schema_version: "0.1",
+      server: {
+        type: "node",
+        entry_point: "server/index.js",
+        mcp_config: { command: "node", args: ["server/index.js"] },
+      },
+    });
     const prompt = renderPlatformPrompt(
-      buildPlatformPromptInputs(bundleOf(root, tool), ctx(), { platformName: "Test" }),
+      buildPlatformPromptInputs(bundleOf(root, mcp), ctx(), { platformName: "Test" }),
     );
     expect(prompt).toContain("running on the Test platform");
     expect(prompt).toContain("**Timeout**: You have 60 seconds");
-    expect(prompt).toContain("### Tools");
-    expect(prompt).toContain("**t**: d");
+    // mcp-server tools are advertised via MCP tools/list — not in the prompt.
+    expect(prompt).not.toContain("### Tools");
     expect(prompt).toContain("## Output Format");
     expect(prompt).toContain("Do the thing.");
   });
@@ -222,10 +142,7 @@ describe("buildPlatformPromptInputs", () => {
   it("omits section-driving fields when the bundle has none", () => {
     const root = pkg("@acme/agent@1.0.0", { type: "agent" }, { "prompt.md": "" });
     const inputs = buildPlatformPromptInputs(bundleOf(root), ctx());
-    expect(inputs.availableTools).toEqual([]);
     expect(inputs.availableSkills).toEqual([]);
-    expect(inputs.providers).toEqual([]);
-    expect(inputs.toolDocs).toEqual([]);
     expect(inputs.inputSchema).toBeUndefined();
     expect(inputs.outputSchema).toBeUndefined();
   });

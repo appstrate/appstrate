@@ -15,11 +15,8 @@
 export {
   agentManifestSchema,
   skillManifestSchema,
-  toolManifestSchema,
-  providerManifestSchema,
-  providerDefinition,
-  providerConfiguration,
-  authModeEnum,
+  mcpServerManifestSchema,
+  integrationManifestSchema,
   createSchemas,
 } from "@afps-spec/schema";
 
@@ -27,14 +24,16 @@ import type { z } from "zod";
 import {
   agentManifestSchema,
   skillManifestSchema,
-  toolManifestSchema,
-  providerManifestSchema,
+  mcpServerManifestSchema,
+  integrationManifestSchema,
 } from "@afps-spec/schema";
 
 /**
- * TypeScript types inferred from the AFPS v1 manifest schemas.
+ * TypeScript types inferred from the AFPS manifest schemas. The 1.x
+ * `tool`/`provider` package types were replaced by `mcp-server` (MCPB) and
+ * `integration` (§3.4/§3.5).
  */
 export type AgentManifest = z.infer<typeof agentManifestSchema>;
 export type SkillManifest = z.infer<typeof skillManifestSchema>;
-export type ToolManifest = z.infer<typeof toolManifestSchema>;
-export type ProviderManifest = z.infer<typeof providerManifestSchema>;
+export type McpServerManifest = z.infer<typeof mcpServerManifestSchema>;
+export type IntegrationManifest = z.infer<typeof integrationManifestSchema>;

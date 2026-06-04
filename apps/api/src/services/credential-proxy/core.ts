@@ -2,15 +2,19 @@
 
 /**
  * Credential-proxy core — shared server-side logic for substituting
- * provider credentials into agent-generated requests and forwarding the
+ * integration credentials into agent-generated requests and forwarding the
  * result upstream.
  *
  * Consumed by the `/api/credential-proxy/proxy` public endpoint, used
  * by external runners (CLI, GitHub Action, third-party agents) to
- * reach the application's providers from outside Appstrate. The caller
+ * reach the application's integrations from outside Appstrate. The caller
  * authenticates via an API key scoped with `credential-proxy:call`.
  *
- * The in-container sidecar uses its own `executeProviderCall` helper
+ * Credentials are resolved from `integration_connections` (the same
+ * machinery behind the sidecar's `/internal/integration-credentials/*`
+ * surface) via {@link resolveIntegrationProxyCredentials}.
+ *
+ * The in-container sidecar uses its own `executeApiCall` helper
  * (`runtime-pi/sidecar/credential-proxy.ts`) — same algorithm, same
  * shared primitives in `@appstrate/connect/proxy-primitives`, but
  * tailored to the per-run-token authorisation model.
@@ -18,14 +22,10 @@
  * The module deliberately does NOT implement rate-limiting, authz, or
  * audit logging — those are the caller's responsibility. This function
  * assumes it has already been authorised to issue a call against
- * (applicationId, providerId) and focuses purely on the mechanics.
+ * (applicationId, integrationId) and focuses purely on the mechanics.
  */
 
-import type { Db } from "@appstrate/db/client";
 import {
-  resolveCredentialsForProxy,
-  forceRefreshCredentials,
-  getProviderCredentialId,
   substituteVars,
   findUnresolvedPlaceholders,
   matchesAuthorizedUriSpec,
@@ -33,6 +33,13 @@ import {
   normalizeAuthSchemeOnHeaders,
 } from "@appstrate/connect";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
+import type { Actor } from "../../lib/actor.ts";
+import {
+  resolveIntegrationProxyCredentials,
+  forceRefreshIntegrationProxyCredentials,
+  IntegrationCredentialNotFoundError,
+  IntegrationCredentialRevokedError,
+} from "./integration-resolver.ts";
 
 /**
  * Hard cap on the time we wait for the upstream provider. Mirrors the
@@ -44,32 +51,41 @@ const OUTBOUND_TIMEOUT_MS = 30_000;
 
 /**
  * Minimal async cookie-jar shape consumed by {@link proxyCall}. The full
- * store implementation lives in `./cookie-jar.ts`; we only depend on the
+ * store implementation lives in `infra/cookie-jar/`; we only depend on the
  * narrow contract here so the core stays free of infra imports.
  */
 export interface CookieJarAdapter {
-  get(sessionId: string, providerKey: string): Promise<string[]>;
-  set(sessionId: string, providerKey: string, cookies: string[], ttlSeconds: number): Promise<void>;
+  get(sessionId: string, integrationKey: string): Promise<string[]>;
+  set(
+    sessionId: string,
+    integrationKey: string,
+    cookies: string[],
+    ttlSeconds: number,
+  ): Promise<void>;
 }
 
 export interface ProxyCallInput {
   /** Application that owns the credentials. */
   applicationId: string;
-  /** Organisation that owns the application (RBAC scope). */
-  orgId: string;
   /**
-   * Connection profile ID. For end-user impersonation this is the
-   * end-user's `connectionProfileId`; for application-scoped keys it's
-   * the application's default profile.
+   * Actor whose `integration_connections` row is decrypted. End-user
+   * impersonation (`Appstrate-User`) yields an `end_user` actor; dashboard
+   * / CLI-JWT / API-key callers yield a `user` actor.
    */
-  connectionProfileId: string;
+  actor: Actor;
+  /**
+   * Optional `integration_connections` id pin (from the `X-Connection-Id`
+   * header). When set, narrows to that specific connection (validated
+   * against the actor's accessible set).
+   */
+  connectionId?: string;
 
-  /** Scoped provider package name (e.g. `@afps/gmail`). */
-  providerId: string;
+  /** Scoped integration package name (e.g. `@afps/gmail`). */
+  integrationId: string;
 
   /** Upstream HTTP method. */
   method: string;
-  /** Upstream URL — validated against the provider's `authorizedUris`. */
+  /** Upstream URL — validated against the integration's `authorizedUris`. */
   target: string;
   /**
    * Headers forwarded to upstream. Placeholder substitution (`{{field}}`)
@@ -98,10 +114,10 @@ export interface ProxyCallInput {
   cookieJar?: CookieJarAdapter;
   /**
    * Jar lookup key (usually `sessionId`). Combined with `sessionKey`
-   * below to scope cookies per-provider within one session.
+   * below to scope cookies per-integration within one session.
    */
   jarSessionId?: string;
-  /** Per-provider scope key for the jar. Defaults to `providerId`. */
+  /** Per-integration scope key for the jar. Defaults to `integrationId`. */
   sessionKey?: string;
   /** TTL applied on each write. Required when `cookieJar` is provided. */
   cookieJarTtlSeconds?: number;
@@ -174,25 +190,27 @@ export class ProxySubstitutionError extends Error {
  * caller's response — the only thing that crosses the boundary is the
  * upstream response headers + body, streamed back as-is.
  */
-export async function proxyCall(db: Db, input: ProxyCallInput): Promise<ProxyCallResult> {
+export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult> {
   const fetchImpl = input.fetch ?? fetch;
-  const sessionKey = input.sessionKey ?? input.providerId;
+  const sessionKey = input.sessionKey ?? input.integrationId;
 
-  const credentialId = await getProviderCredentialId(db, input.applicationId, input.providerId);
-  if (!credentialId) {
-    throw new ProxyCredentialError(
-      `No provider credentials configured for '${input.providerId}' in application ${input.applicationId}`,
-    );
-  }
-  const resolved = await resolveCredentialsForProxy(
-    db,
-    input.connectionProfileId,
-    input.providerId,
-    input.orgId,
-    credentialId,
-  );
-  if (!resolved) {
-    throw new ProxyCredentialError(`No credentials for provider '${input.providerId}'`);
+  let resolved;
+  try {
+    const result = await resolveIntegrationProxyCredentials({
+      integrationId: input.integrationId,
+      applicationId: input.applicationId,
+      actor: input.actor,
+      ...(input.connectionId ? { connectionId: input.connectionId } : {}),
+    });
+    resolved = result.payload;
+  } catch (err) {
+    if (err instanceof IntegrationCredentialNotFoundError) {
+      throw new ProxyCredentialError(err.message);
+    }
+    if (err instanceof IntegrationCredentialRevokedError) {
+      throw new ProxyCredentialError(err.message);
+    }
+    throw err;
   }
 
   // Substitute placeholders in target (fail-closed on unresolved refs —
@@ -207,17 +225,20 @@ export async function proxyCall(db: Db, input: ProxyCallInput): Promise<ProxyCal
     );
   }
 
-  // authorizedUris gate (AFPS spec: `*` = one segment, `**` = any substring).
-  // When `allowAllUris` is set we still block private/internal network
+  // authorized_uris gate (AFPS spec: `*` = one segment, `**` = any substring).
+  // When `allow_all_uris` is set we still block private/internal network
   // targets — mirror of the sidecar's SSRF safety net so the public
   // route can't be turned into an SSRF primitive by flipping a single
-  // flag on a provider manifest.
+  // flag on an integration manifest. (Internal TS field names stay
+  // camelCase per the documented Zone 3 carve-out — see
+  // docs/CASING_CONVENTIONS.md — but user-facing error strings refer
+  // to the AFPS wire vocabulary.)
   if (!resolved.allowAllUris) {
     const allowlist = resolved.authorizedUris ?? [];
     const ok = allowlist.some((p) => matchesAuthorizedUriSpec(p, target));
     if (!ok) {
       throw new ProxyAuthorizationError(
-        `Target ${target} is not in the authorizedUris allowlist for ${input.providerId}`,
+        `Target ${target} is not in the authorized_uris allowlist for ${input.integrationId}`,
       );
     }
     if (allowlist.length === 0 && isBlockedUrl(target)) {
@@ -299,13 +320,13 @@ export async function proxyCall(db: Db, input: ProxyCallInput): Promise<ProxyCal
   // fresh body stream).
   if (res.status === 401 && !isStreamBody) {
     try {
-      const refreshed = await forceRefreshCredentials(
-        db,
-        input.connectionProfileId,
-        input.providerId,
-        input.orgId,
-        credentialId,
-      );
+      const refreshedResult = await forceRefreshIntegrationProxyCredentials({
+        integrationId: input.integrationId,
+        applicationId: input.applicationId,
+        actor: input.actor,
+        ...(input.connectionId ? { connectionId: input.connectionId } : {}),
+      });
+      const refreshed = refreshedResult?.payload ?? null;
       if (refreshed) {
         // Rebuild the credential header from the rotated token. We drop
         // the previous injected header first so `applyInjectedCredentialHeaderToHeaders`
@@ -342,13 +363,12 @@ export async function proxyCall(db: Db, input: ProxyCallInput): Promise<ProxyCal
   // can signal the client to retry itself with a fresh body stream.
   if (res.status === 401 && isStreamBody) {
     try {
-      await forceRefreshCredentials(
-        db,
-        input.connectionProfileId,
-        input.providerId,
-        input.orgId,
-        credentialId,
-      );
+      await forceRefreshIntegrationProxyCredentials({
+        integrationId: input.integrationId,
+        applicationId: input.applicationId,
+        actor: input.actor,
+        ...(input.connectionId ? { connectionId: input.connectionId } : {}),
+      });
     } catch {
       // Refresh itself failed (invalid_grant, revoked token, etc.) —
       // surface the 401 as-is; the caller will handle re-authentication.
@@ -363,8 +383,18 @@ export async function proxyCall(db: Db, input: ProxyCallInput): Promise<ProxyCal
 
   const cap = input.maxResponseBytes ?? 0;
   if (cap > 0 && res.body) {
-    const { body: capped, truncated } = capResponseBody(res.body, cap);
-    return { status: res.status, headers: res.headers, body: capped, truncated };
+    const capped = capResponseBody(res.body, cap);
+    // `truncated` flips only once the stream is consumed by the caller, so
+    // forward it as a live getter — snapshotting it here (the old
+    // `const { truncated } = …`) always captured the initial `false`.
+    return {
+      status: res.status,
+      headers: res.headers,
+      body: capped.body,
+      get truncated() {
+        return capped.truncated;
+      },
+    };
   }
 
   return {
@@ -380,14 +410,14 @@ export async function proxyCall(db: Db, input: ProxyCallInput): Promise<ProxyCal
  * is sliced at the exact boundary — downstream consumers never see more
  * than `maxBytes` cumulative bytes.
  *
- * `truncated` is a flag object so the caller can read it after the stream
- * completes. It flips to `true` the moment the cap fires; it stays `false`
- * if the upstream ends naturally under the cap.
+ * `truncated` is exposed as a getter so the caller reads the up-to-date value
+ * after the stream has been consumed. It flips to `true` the moment the cap
+ * fires; it stays `false` if the upstream ends naturally under the cap.
  */
 function capResponseBody(
   source: ReadableStream<Uint8Array>,
   maxBytes: number,
-): { body: ReadableStream<Uint8Array>; truncated: boolean } {
+): { body: ReadableStream<Uint8Array>; readonly truncated: boolean } {
   const state = { truncated: false };
   let sent = 0;
   const reader = source.getReader();
@@ -418,13 +448,14 @@ function capResponseBody(
     },
   });
   // Expose the flag via a getter so the caller reads the up-to-date value
-  // after the stream has been consumed.
+  // after the stream has been consumed. The explicit return type (no cast)
+  // keeps the getter typed without an `as` lie.
   return {
     body,
     get truncated() {
       return state.truncated;
     },
-  } as { body: ReadableStream<Uint8Array>; truncated: boolean };
+  };
 }
 
 /** @internal Exported for unit testing */

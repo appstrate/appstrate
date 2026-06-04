@@ -49,7 +49,7 @@ export function createLibraryRouter() {
         .orderBy(packages.id),
     ]);
 
-    // Group: packageId → { meta, installedIn[] }
+    // Group: packageId → { meta, installed_in[] }
     const pkgMap = new Map<
       string,
       {
@@ -58,7 +58,7 @@ export function createLibraryRouter() {
         source: string;
         name: string;
         description: string;
-        installedIn: string[];
+        installed_in: string[];
       }
     >();
 
@@ -70,14 +70,14 @@ export function createLibraryRouter() {
           id: row.id,
           type: row.type,
           source: row.source,
-          name: typeof m.displayName === "string" ? m.displayName : row.id,
+          name: typeof m.display_name === "string" ? m.display_name : row.id,
           description: typeof m.description === "string" ? m.description : "",
-          installedIn: [],
+          installed_in: [],
         };
         pkgMap.set(row.id, entry);
       }
       if (row.applicationId) {
-        entry.installedIn.push(row.applicationId);
+        entry.installed_in.push(row.applicationId);
       }
     }
 
@@ -86,8 +86,8 @@ export function createLibraryRouter() {
     const grouped: Record<string, Entry[]> = {
       agent: [],
       skill: [],
-      tool: [],
-      provider: [],
+      "mcp-server": [],
+      integration: [],
     };
     for (const pkg of pkgMap.values()) {
       grouped[pkg.type]?.push(pkg);

@@ -46,15 +46,13 @@ export interface RuntimePiEnvOptions {
   sidecarProxyLlmUrl?: string;
   /**
    * When `true`, no sidecar will be attached to the run. The entrypoint
-   * skips the MCP wiring phase entirely (no `provider_call`, `run_history`,
+   * skips the MCP wiring phase entirely (no `{ns}__api_call`, `run_history`,
    * `recall_memory` tools), `SIDECAR_URL` is not emitted, and the agent
    * talks to the upstream LLM directly via {@link sidecarProxyLlmUrl} or
    * the model's native baseUrl. Only valid for runs that declare no
    * providers and use a static API key.
    */
   noSidecar?: boolean;
-  /** IDs of the providers the agent may call. Serialised as a comma-separated list. */
-  connectedProviders?: ReadonlyArray<string>;
   /** Optional JSON Schema injected for constrained decoding. */
   outputSchema?: unknown;
   /** Forward-proxy URL reachable from the agent container. When set, HTTP(S)_PROXY + NO_PROXY are emitted. */
@@ -118,10 +116,6 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
   if (opts.runId) env.AGENT_RUN_ID = opts.runId;
   if (opts.agentInput !== undefined) env.AGENT_INPUT = JSON.stringify(opts.agentInput);
 
-  if (opts.connectedProviders && opts.connectedProviders.length > 0) {
-    env.CONNECTED_PROVIDERS = opts.connectedProviders.join(",");
-  }
-
   // MODEL_BASE_URL is only emitted when going through a proxy — Pi SDK
   // falls back to upstream defaults when unset, so emitting an empty
   // string would silently override the SDK's per-API defaults.
@@ -170,7 +164,7 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
   }
 
   // Forward operator-tunable sidecar caps so the agent container's
-  // runtime-side mirror (afps-runtime/.../provider-tool.ts) agrees with
+  // runtime-side mirror (afps-runtime/.../http-call-core.ts) agrees with
   // the sidecar on what counts as "too large" — otherwise large uploads
   // would fail with a 413 from the sidecar instead of a typed
   // RESOLVER_BODY_TOO_LARGE caught client-side. Only the request-body

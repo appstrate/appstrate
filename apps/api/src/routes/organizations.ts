@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { apiKeyOrgScopeGuard } from "../middleware/guards.ts";
@@ -22,7 +22,7 @@ import {
   orgSettingsSchema,
 } from "../services/organizations.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { toSlug } from "@appstrate/core/naming";
+import { toSlug, SLUG_REGEX } from "@appstrate/core/naming";
 import { ApiError, forbidden, invalidRequest, notFound, parseBody } from "../lib/errors.ts";
 import { listResponse } from "../lib/list-response.ts";
 import {
@@ -40,61 +40,16 @@ import { isPlatformAdmin } from "@appstrate/db/auth-policy";
 import { createDefaultApplication } from "../services/applications.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 import { logger } from "../lib/logger.ts";
-import { recordAudit } from "../services/audit.ts";
-
-/**
- * Audit helper for org routes — these operate without org context middleware
- * (the orgId comes from URL params or is being created), so we cannot rely on
- * `recordAuditFromContext`. Derive actor + transport metadata from the request
- * the same way it does, but pass `orgId` explicitly.
- */
-async function recordOrgAudit(
-  c: Context<AppEnv>,
-  orgId: string,
-  input: {
-    action: string;
-    resourceType: string;
-    resourceId?: string | null;
-    after?: Record<string, unknown> | null;
-    before?: Record<string, unknown> | null;
-  },
-): Promise<void> {
-  const user = c.get("user");
-  const apiKeyId = c.get("apiKeyId");
-  let actorType: "user" | "api_key" | "system" = "system";
-  let actorId: string | null = null;
-  if (apiKeyId) {
-    actorType = "api_key";
-    actorId = apiKeyId;
-  } else if (user) {
-    actorType = "user";
-    actorId = user.id;
-  }
-  await recordAudit({
-    ...input,
-    orgId,
-    actorType,
-    actorId,
-    ip: c.req.header("x-forwarded-for") ?? null,
-    userAgent: c.req.header("user-agent") ?? null,
-    requestId: c.get("requestId") ?? null,
-  });
-}
+import { recordAuditFromContext } from "../services/audit.ts";
 
 export const createOrgSchema = z.object({
   name: z.string().min(1, "Name is required"),
-  slug: z
-    .string()
-    .regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/, "Invalid slug (kebab-case required)")
-    .optional(),
+  slug: z.string().regex(SLUG_REGEX, "Invalid slug (kebab-case required)").optional(),
 });
 
 export const updateOrgSchema = z.object({
   name: z.string().min(1).optional(),
-  slug: z
-    .string()
-    .regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/, "Invalid slug (kebab-case required)")
-    .optional(),
+  slug: z.string().regex(SLUG_REGEX, "Invalid slug (kebab-case required)").optional(),
 });
 
 export const addMemberSchema = z.object({
@@ -194,11 +149,12 @@ router.post("/", async (c) => {
     await provisionDefaultAgentForOrg(org.id, org.slug, user.id, defaultApp.id).catch(() => {});
   }
 
-  await recordOrgAudit(c, org.id, {
+  await recordAuditFromContext(c, {
     action: "org.created",
     resourceType: "org",
     resourceId: org.id,
     after: { name: org.name, slug: org.slug },
+    orgIdOverride: org.id,
   });
 
   return c.json(
@@ -283,11 +239,12 @@ router.put("/:orgId", async (c) => {
     ...(data.slug ? { slug: data.slug } : {}),
   });
 
-  await recordOrgAudit(c, orgId, {
+  await recordAuditFromContext(c, {
     action: "org.updated",
     resourceType: "org",
     resourceId: orgId,
     after: data as unknown as Record<string, unknown>,
+    orgIdOverride: orgId,
   });
 
   return c.json(updated);
@@ -310,10 +267,11 @@ router.delete("/:orgId", async (c) => {
     throw new ApiError({ status: 400, code: "delete_failed", title: "Bad Request", detail: msg });
   }
 
-  await recordOrgAudit(c, orgId, {
+  await recordAuditFromContext(c, {
     action: "org.deleted",
     resourceType: "org",
     resourceId: orgId,
+    orgIdOverride: orgId,
   });
 
   return c.json({ ok: true });
@@ -349,11 +307,12 @@ router.post("/:orgId/members", async (c) => {
         skipEmail: true,
       });
       void sendMagicLinkInvitation(invitation);
-      await recordOrgAudit(c, orgId, {
+      await recordAuditFromContext(c, {
         action: "org.invitation_created",
         resourceType: "invitation",
         resourceId: invitation.id,
         after: { email: invitation.email, role },
+        orgIdOverride: orgId,
       });
       return c.json({ invited: true, email: invitation.email, role }, 201);
     }
@@ -368,11 +327,12 @@ router.post("/:orgId/members", async (c) => {
         detail: err instanceof Error ? err.message : "Failed to add member",
       });
     }
-    await recordOrgAudit(c, orgId, {
+    await recordAuditFromContext(c, {
       action: "org.member_added",
       resourceType: "member",
       resourceId: targetUser.id,
       after: { email: data.email.trim(), role },
+      orgIdOverride: orgId,
     });
     return c.json({ userId: targetUser.id, role, added: true }, 201);
   }
@@ -386,11 +346,12 @@ router.post("/:orgId/members", async (c) => {
       invitedBy: user.id,
     });
 
-    await recordOrgAudit(c, orgId, {
+    await recordAuditFromContext(c, {
       action: "org.invitation_created",
       resourceType: "invitation",
       resourceId: invitation.id,
       after: { email: invitation.email, role },
+      orgIdOverride: orgId,
     });
     return c.json({ invited: true, email: invitation.email, role, token: invitation.token }, 201);
   } catch (err) {
@@ -411,10 +372,11 @@ router.delete("/:orgId/invitations/:invitationId", async (c) => {
 
   await requireOrgRole(orgId, user.id, ["owner", "admin"], "Admin access required");
   await cancelInvitation(invitationId, orgId);
-  await recordOrgAudit(c, orgId, {
+  await recordAuditFromContext(c, {
     action: "org.invitation_cancelled",
     resourceType: "invitation",
     resourceId: invitationId,
+    orgIdOverride: orgId,
   });
   return c.json({ ok: true });
 });
@@ -435,11 +397,12 @@ router.put("/:orgId/invitations/:invitationId", async (c) => {
     throw notFound("Invitation not found or already accepted");
   }
 
-  await recordOrgAudit(c, orgId, {
+  await recordAuditFromContext(c, {
     action: "org.invitation_role_updated",
     resourceType: "invitation",
     resourceId: invitationId,
     after: { role: data.role },
+    orgIdOverride: orgId,
   });
 
   return c.json({ id: updated.id, role: updated.role });
@@ -467,10 +430,11 @@ router.delete("/:orgId/members/:userId", async (c) => {
   }
 
   await removeMember(orgId, targetUserId);
-  await recordOrgAudit(c, orgId, {
+  await recordAuditFromContext(c, {
     action: "org.member_removed",
     resourceType: "member",
     resourceId: targetUserId,
+    orgIdOverride: orgId,
   });
   return c.json({ ok: true });
 });
@@ -492,18 +456,26 @@ router.put("/:orgId/members/:userId", async (c) => {
   }
 
   await updateMemberRole(orgId, targetUserId, data.role);
-  await recordOrgAudit(c, orgId, {
+  await recordAuditFromContext(c, {
     action: "org.member_role_updated",
     resourceType: "member",
     resourceId: targetUserId,
     after: { role: data.role },
+    orgIdOverride: orgId,
   });
   return c.json({ userId: targetUserId, role: data.role });
 });
 
-// GET /api/orgs/:orgId/settings — get org settings
+// GET /api/orgs/:orgId/settings — get org settings (any member)
 router.get("/:orgId/settings", async (c) => {
+  const user = c.get("user");
   const orgId = c.req.param("orgId");
+
+  // Membership gate — without it any cookie-session user could read an
+  // arbitrary org's settings by passing its id (apiKeyOrgScopeGuard only
+  // pins API keys, not sessions). Mirrors the PUT handler below.
+  const member = await getOrgMember(orgId, user.id);
+  if (!member) throw forbidden("Not a member of this organization");
 
   const settings = await getOrgSettings(orgId);
   return c.json(settings);
@@ -525,11 +497,12 @@ router.put("/:orgId/settings", async (c) => {
   const data = parseBody(orgSettingsSchema.partial(), raw);
 
   const settings = await updateOrgSettings(orgId, data);
-  await recordOrgAudit(c, orgId, {
+  await recordAuditFromContext(c, {
     action: "org.settings_updated",
     resourceType: "org",
     resourceId: orgId,
     after: data as unknown as Record<string, unknown>,
+    orgIdOverride: orgId,
   });
   return c.json(settings);
 });

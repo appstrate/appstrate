@@ -86,7 +86,7 @@ log "Launching \`appstrate install --yes\`"
 exec "$DEST" install --yes "$@"
 ```
 
-**Edit 2** — keep the `--yes` exec path stripped of the long #199 comment block (move the rationale into ADR-006 supplement, see "Cleanup"). The comment stays valuable but doesn't need to live next to a 2-line `exec`.
+**Edit 2** — keep the `--yes` exec path stripped of the long #199 comment block (move the rationale into a design note, see "Cleanup"). The comment stays valuable but doesn't need to live next to a 2-line `exec`.
 
 ### `apps/cli/src/commands/install.ts`
 
@@ -158,7 +158,7 @@ This is the only platform-side change. Everything else is CLI-only.
 
 | File                                  | Lines                                            | Action                                                                                                                                       | Rationale                                                                                                                                    |
 | ------------------------------------- | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bootstrap.sh`                        | 532-545 (#199 comment block)                     | Move to `docs/adr/ADR-006-cli-device-flow-monorepo.md` § "Bun setRawMode regressions"                                                        | The exec is now in two places; the rationale belongs in the ADR supplement, not next to every callsite.                                      |
+| `bootstrap.sh`                        | 532-545 (#199 comment block)                     | Move to a design note § "Bun setRawMode regressions"                                                                                         | The exec is now in two places; the rationale belongs in the ADR supplement, not next to every callsite.                                      |
 | `bootstrap.sh`                        | 501-510 (`APPSTRATE_NO_LAUNCH`)                  | **Keep**                                                                                                                                     | Still useful for fully-scripted provisioning that wants the binary only.                                                                     |
 | `apps/cli/src/commands/install.ts`    | 134-138 (nonInteractive comment)                 | Update to reflect new closed-by-default semantic                                                                                             | The comment claims `nonInteractive` means "fail fast on port conflicts + defaults" — true, but now also means "closed-by-default bootstrap". |
 | `apps/cli/src/commands/install.ts`    | `clack.note` in `resolveTier` line 580-585       | **Keep**                                                                                                                                     | The `--yes: Tier 3 selected automatically` notice still fires, just less often (only when actually `--yes`).                                 |
@@ -171,7 +171,7 @@ This is the only platform-side change. Everything else is CLI-only.
 
 **Code that becomes definitively dead and can be deleted:**
 
-- The `#199 setRawMode regression` workaround comment (lines 522-545 of `bootstrap.sh`) — the workaround stays, but the comment block is moved to ADR-006 and replaced with a 2-line pointer. Net: ~25 lines removed from the hot path.
+- The `#199 setRawMode regression` workaround comment (lines 522-545 of `bootstrap.sh`) — the workaround stays, but the comment block is moved to a design note and replaced with a 2-line pointer. Net: ~25 lines removed from the hot path.
 - Nothing else qualifies as outright dead code. The two-step pattern is additive — every existing branch (env override, upgrade, Tier 0, dual-install) still fires.
 
 ## Test plan
@@ -205,7 +205,7 @@ Existing tests to verify still pass: all `resolveTier --yes` regression tests (#
 6. `website/content/docs/self-hosting/troubleshooting.mdx` — add an entry for "I ran `curl … | bash` and nothing happened" (it dropped the binary, run `appstrate install` next).
 7. `apps/api/src/modules/README.md` — no change (modules unaffected).
 8. `CLAUDE.md` (root + appstrate/) — add `AUTH_BOOTSTRAP_TOKEN` to the env table.
-9. `docs/adr/ADR-006-cli-device-flow-monorepo.md` — add supplement "§ Two-step install + Bun setRawMode regression backstory" with the comment block from `bootstrap.sh`.
+9. A design note — add supplement "§ Two-step install + Bun setRawMode regression backstory" with the comment block from `bootstrap.sh`.
 
 ## Migration / rollout
 

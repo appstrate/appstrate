@@ -1,0 +1,97 @@
+{
+  "name": "@appstrate/salesforce",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.1",
+  "display_name": "Salesforce (API)",
+  "description": "Cloud-based CRM platform for sales, service, and marketing",
+  "keywords": ["crm", "sales", "marketing"],
+  "license": "Apache-2.0",
+  "icon": "salesforce",
+  "source": {
+    "kind": "none"
+  },
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "authorization_endpoint": "https://login.salesforce.com/services/oauth2/authorize",
+      "token_endpoint": "https://login.salesforce.com/services/oauth2/token",
+      "default_scopes": ["api", "refresh_token", "offline_access"],
+      "token_endpoint_auth_method": "client_secret_post",
+      "code_challenge_methods_supported": ["S256"],
+      "scope_catalog": [
+        {
+          "value": "api",
+          "label": "Access REST API"
+        },
+        {
+          "value": "refresh_token",
+          "label": "Refresh token access"
+        },
+        {
+          "value": "offline_access",
+          "label": "Offline access (refresh tokens)"
+        },
+        {
+          "value": "full",
+          "label": "Full access to all resources"
+        },
+        {
+          "value": "chatter_api",
+          "label": "Access Chatter API"
+        },
+        {
+          "value": "wave_api",
+          "label": "Access Analytics API"
+        },
+        {
+          "value": "content",
+          "label": "Access content resources"
+        },
+        {
+          "value": "openid",
+          "label": "OpenID Connect identity"
+        },
+        {
+          "value": "profile",
+          "label": "Read user profile"
+        },
+        {
+          "value": "email",
+          "label": "Read user email"
+        }
+      ],
+      "authorized_uris": [
+        "https://*.salesforce.com/**",
+        "https://*.force.com/**",
+        "https://*.my.salesforce.com/**"
+      ],
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": " "
+        },
+        "dev.appstrate/auth": {
+          "required": true
+        }
+      }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/api": {
+      "auths": {
+        "primary": {}
+      }
+    }
+  }
+}

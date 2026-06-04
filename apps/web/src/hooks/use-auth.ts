@@ -244,16 +244,6 @@ export function useAuth() {
     });
   }, []);
 
-  const signInWithGoogle = useCallback(
-    (callbackURL?: string) => signInWithSocial("google", callbackURL),
-    [signInWithSocial],
-  );
-
-  const signInWithGithub = useCallback(
-    (callbackURL?: string) => signInWithSocial("github", callbackURL),
-    [signInWithSocial],
-  );
-
   const linkGoogle = useCallback(() => linkSocial("google"), [linkSocial]);
 
   const linkGithub = useCallback(() => linkSocial("github"), [linkSocial]);
@@ -278,8 +268,6 @@ export function useAuth() {
     logout,
     updatePassword,
     signInWithSocial,
-    signInWithGoogle,
-    signInWithGithub,
     linkSocial,
     linkGoogle,
     linkGithub,

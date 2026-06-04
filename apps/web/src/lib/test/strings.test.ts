@@ -2,7 +2,8 @@
 
 import { describe, it, expect } from "bun:test";
 import { toCredentialKey, toLiveCredentialKey } from "../strings";
-import { CREDENTIAL_KEY_RE } from "@appstrate/core/validation";
+
+const CREDENTIAL_KEY_RE = /^[a-z][a-z0-9_]*$/;
 
 describe("toCredentialKey", () => {
   it("preserves already-canonical keys", () => {

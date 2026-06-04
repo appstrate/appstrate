@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import i18n from "../../i18n";
 import { AppWindow, Settings } from "lucide-react";
 import { usePermissions } from "../../hooks/use-permissions";
 import { Button } from "@/components/ui/button";
@@ -12,6 +11,7 @@ import { useApplications } from "../../hooks/use-applications";
 import { useAppSwitcher } from "../../hooks/use-current-application";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { ApplicationCreateModal } from "../../components/application-create-modal";
+import { formatDateField } from "../../lib/markdown";
 
 export function OrgSettingsApplicationsPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -60,11 +60,7 @@ export function OrgSettingsApplicationsPage() {
                   <h3 className="text-[0.95rem] font-semibold">{app.name}</h3>
                   <span className="text-muted-foreground text-sm">
                     {t("applications.createdAt", {
-                      date: new Date(app.createdAt).toLocaleDateString(i18n.language, {
-                        day: "numeric",
-                        month: "long",
-                        year: "numeric",
-                      }),
+                      date: formatDateField(app.createdAt, "date"),
                     })}
                   </span>
                 </div>

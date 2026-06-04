@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { and, eq } from "drizzle-orm";
-import { db, isEmbeddedDb, getPGliteClient, reservePgConnection } from "@appstrate/db/client";
-import { packages, packageVersions } from "@appstrate/db/schema";
+import { db, isEmbeddedDb, reservePgConnection } from "@appstrate/db/client";
 import { expireOldInvitations } from "../services/invitations.ts";
 import { cleanupExpiredKeys } from "../services/api-keys.ts";
 import { cleanupExpiredUploads, startUploadGc } from "../services/uploads.ts";
@@ -13,6 +11,7 @@ import {
   getModules,
   getModuleContributions,
   getModuleModelProviders,
+  callAllHooks,
 } from "./modules/module-loader.ts";
 import { getModuleRegistry, buildModuleInitContext } from "./modules/registry.ts";
 import { registerEmailOverrides } from "@appstrate/emails";
@@ -32,15 +31,7 @@ import { initSystemModelProviderKeys } from "../services/model-registry.ts";
 import { registerModelProviders } from "../services/model-providers/registry.ts";
 import { initRunLimits } from "../services/run-limits.ts";
 import { initProxyLimits } from "../services/proxy-limits.ts";
-import {
-  initSystemPackages,
-  getSystemPackages,
-  getAllSystemPackageVersions,
-  type SystemPackageEntry,
-} from "../services/system-packages.ts";
-import { createVersionAndUpload } from "../services/package-versions.ts";
-import { uploadPackageFiles, SYSTEM_STORAGE_NAMESPACE } from "../services/package-items/storage.ts";
-import { storageFolderForType } from "../services/package-items/config.ts";
+import { initSystemPackages, syncSystemPackagesToDb } from "../services/system-packages.ts";
 import { listOrphanRunIds } from "../services/state/runs.ts";
 import { synthesiseFinalize } from "../services/run-event-ingestion.ts";
 import { initScheduleWorker } from "../services/scheduler.ts";
@@ -111,27 +102,14 @@ export async function boot(): Promise<void> {
       registerEmailOverrides(mod.emailOverrides);
     }
   }
-  // Broadcast `beforeSignup` to EVERY loaded module (not first-match-wins
-  // like other hooks). The cloud module's free-tier gate AND the OIDC
-  // module's per-client signup policy both need to run on every signup;
-  // first throw aborts the user creation. Iteration is inline (rather
-  // than going through `callHook`) because the semantics differ from the
-  // generic first-match-wins path in `module-loader.ts`.
-  setBeforeSignupHook(async (email, ctx) => {
-    for (const mod of getModules().values()) {
-      const hook = mod.hooks?.beforeSignup;
-      if (hook) await hook(email, ctx);
-    }
-  });
-  // Broadcast `afterSignup` to every loaded module too — OIDC uses it to
-  // auto-join the newly created user to the org pinned by the in-flight
-  // OAuth client so the onward /authorize redirect completes cleanly.
-  setAfterSignupHook(async (user, ctx) => {
-    for (const mod of getModules().values()) {
-      const hook = mod.hooks?.afterSignup;
-      if (hook) await hook(user, ctx);
-    }
-  });
+  // `beforeSignup` / `afterSignup` broadcast to EVERY loaded module (not
+  // first-match-wins like the other hooks) via `callAllHooks`: the cloud
+  // free-tier gate AND the OIDC per-client signup policy both run on every
+  // signup, and a throwing `beforeSignup` aborts user creation. OIDC's
+  // `afterSignup` auto-joins the new user to the org pinned by the in-flight
+  // OAuth client so the onward /authorize redirect completes.
+  setBeforeSignupHook((email, ctx) => callAllHooks("beforeSignup", email, ctx));
+  setAfterSignupHook((user, ctx) => callAllHooks("afterSignup", user, ctx));
   // Self-hosting bootstrap side effects (issue #228). Fires only when
   // `createBootstrapOrg` actually inserted the org row. Mirrors the post-
   // create sequence in `routes/organizations.ts` so the bootstrap owner
@@ -155,7 +133,7 @@ export async function boot(): Promise<void> {
   // the internet lets any client spoof its source IP, which in turn
   // bypasses every per-IP rate limit in the platform (notably the
   // OIDC `/oauth2/token` limiter and the CLI device-flow limiters
-  // added in ADR-006). We can't detect a real proxy with certainty,
+  // added recently). We can't detect a real proxy with certainty,
   // but we can flag the most common misconfigurations.
   warnOnTrustProxyMisconfig(env.TRUST_PROXY, env.NODE_ENV);
 
@@ -339,158 +317,18 @@ export async function boot(): Promise<void> {
  */
 async function loadAndSyncSystemPackages(): Promise<void> {
   await initSystemPackages();
-  const canonicalPackages = getSystemPackages();
-  const allVersions = getAllSystemPackageVersions();
-  if (canonicalPackages.size === 0) return;
-
-  let syncedPackages = 0;
-  let syncedVersions = 0;
-
-  // Step 1 — UPSERT one `packages` row per packageId, using the canonical
-  // (highest semver) version. This drives `draftManifest`/`draftContent`,
-  // file uploads, and the public package-list UI.
-  const syncCanonical = async (id: string, entry: SystemPackageEntry) => {
-    const { manifest, type, version } = entry;
-
-    // `updatedAt` is bumped only when this canonical version is genuinely
-    // new — re-boots over an unchanged set must remain side-effect-free
-    // for downstream consumers that watch `updatedAt`.
-    const [existingVersion] = await db
-      .select({ id: packageVersions.id })
-      .from(packageVersions)
-      .where(and(eq(packageVersions.packageId, id), eq(packageVersions.version, version)))
-      .limit(1);
-    const isNewVersion = !existingVersion;
-
-    await db
-      .insert(packages)
-      .values({
-        id,
-        orgId: null,
-        type,
-        source: "system",
-        draftManifest: manifest as unknown as Record<string, unknown>,
-        draftContent: entry.content,
-      })
-      .onConflictDoUpdate({
-        target: packages.id,
-        set: {
-          draftManifest: manifest as unknown as Record<string, unknown>,
-          draftContent: entry.content,
-          source: "system",
-          orgId: null,
-          ...(isNewVersion ? { updatedAt: new Date() } : {}),
-        },
-      });
-
-    if (Object.keys(entry.files).length > 1) {
-      await uploadPackageFiles(
-        storageFolderForType(type),
-        SYSTEM_STORAGE_NAMESPACE,
-        id,
-        entry.files,
-      );
-    }
-
-    syncedPackages++;
-  };
-
-  // Step 2 — register every loaded version in `package_versions` so semver
-  // ranges (e.g. `^1.0.0`) keep resolving when a newer major ships
-  // alongside the legacy line. createVersionAndUpload is idempotent.
-  const syncVersion = async (entry: SystemPackageEntry) => {
-    await createVersionAndUpload({
-      packageId: entry.packageId,
-      version: entry.version,
-      createdBy: null,
-      zipBuffer: entry.zipBuffer,
-      manifest: entry.manifest as unknown as Record<string, unknown>,
-    });
-    syncedVersions++;
-  };
-
-  await Promise.all(
-    Array.from(canonicalPackages).map(([id, entry]) =>
-      syncCanonical(id, entry).catch((err) => {
-        logger.warn("Failed to sync canonical system package", {
-          packageId: id,
-          error: getErrorMessage(err),
-        });
-      }),
-    ),
-  );
-  await Promise.all(
-    allVersions.map((entry) =>
-      syncVersion(entry).catch((err) => {
-        logger.warn("Failed to register system package version", {
-          packageId: entry.packageId,
-          version: entry.version,
-          error: getErrorMessage(err),
-        });
-      }),
-    ),
-  );
-
-  logger.info("System packages synced", {
-    packages: syncedPackages,
-    versions: syncedVersions,
-  });
+  await syncSystemPackagesToDb();
 }
 
 /**
  * Apply Drizzle migrations programmatically for PGlite (embedded mode).
- * Uses a custom migrator that splits multi-statement SQL files into individual
- * statements, since PGlite does not support multi-statement prepared queries.
+ * Delegates to the shared `applyCorePGliteMigrations` helper so the embedded
+ * boot path and the tier0 test preload run identical migration logic.
  */
 async function applyEmbeddedMigrations(): Promise<void> {
-  const { resolve, join } = await import("node:path");
-  const { readFileSync, existsSync } = await import("node:fs");
-
-  const migrationsDir = resolve(import.meta.dir, "../../../../packages/db/drizzle");
-  const journalPath = join(migrationsDir, "meta/_journal.json");
-
-  if (!existsSync(journalPath)) {
-    logger.warn("No migration journal found, skipping PGlite migrations");
-    return;
-  }
-
-  const pg = getPGliteClient()!;
-
-  // Create migrations tracking table
-  await pg.exec(`
-    CREATE TABLE IF NOT EXISTS "__drizzle_migrations" (
-      id SERIAL PRIMARY KEY,
-      hash TEXT NOT NULL,
-      created_at BIGINT DEFAULT (EXTRACT(EPOCH FROM now()) * 1000)
-    )
-  `);
-
-  // Read journal to get migration order
-  const journal = JSON.parse(readFileSync(journalPath, "utf-8")) as {
-    entries: { idx: number; tag: string }[];
-  };
-
-  // Get already-applied migrations
-  const { rows } = await pg.query<{ hash: string }>('SELECT hash FROM "__drizzle_migrations"');
-  const applied = new Set(rows.map((r) => r.hash));
-
-  for (const entry of journal.entries) {
-    if (applied.has(entry.tag)) continue;
-
-    const sqlFile = join(migrationsDir, `${entry.tag}.sql`);
-    if (!existsSync(sqlFile)) {
-      logger.warn("Migration file not found, skipping", { tag: entry.tag });
-      continue;
-    }
-
-    const content = readFileSync(sqlFile, "utf-8");
-    // PGlite exec() supports multi-statement SQL natively
-    await pg.exec(content.replaceAll("--> statement-breakpoint", ""));
-    // Record migration as applied
-    await pg.query('INSERT INTO "__drizzle_migrations" (hash) VALUES ($1)', [entry.tag]);
-  }
-
-  logger.info("PGlite migrations applied", { count: journal.entries.length - applied.size });
+  const { resolve } = await import("node:path");
+  const { applyCorePGliteMigrations } = await import("./modules/migrate.ts");
+  await applyCorePGliteMigrations(resolve(import.meta.dir, "../../../../packages/db/drizzle"));
 }
 
 /**

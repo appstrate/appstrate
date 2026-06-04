@@ -9,6 +9,7 @@ import type { CatalogModelEntry } from "@appstrate/shared-types";
 import type { ModelCost } from "@appstrate/core/module";
 import { logger } from "../lib/logger.ts";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
+import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import type { ModelMetadata, OrgModelInfo, TestResult } from "@appstrate/shared-types";
 import {
   loadInferenceCredentials,
@@ -132,11 +133,10 @@ export async function deriveModelLabel(
     .select({ label: orgModels.label })
     .from(orgModels)
     .where(scopedWhere(orgModels, { orgId }));
-  const existing = new Set(rows.map((r) => r.label));
-  if (!existing.has(base)) return base;
-  let counter = 2;
-  while (existing.has(`${base} (${counter})`)) counter++;
-  return `${base} (${counter})`;
+  return dedupeLabel(
+    base,
+    rows.map((r) => r.label),
+  );
 }
 
 // --- CRUD (DB models only) ---
@@ -323,7 +323,7 @@ export async function setDefaultModel(orgId: string, modelDbId: string | null): 
 
 /**
  * Canonical resolved-model shape — produced by {@link resolveModel} /
- * {@link loadModel}, consumed by the env-builder. Passed through to the
+ * {@link loadModel}, consumed by the run-context-builder. Passed through to the
  * run executor verbatim as `AppstrateRunPlan.llmConfig`; the executor
  * only reads inference fields. `accountId` is set for OAuth credentials
  * whose provider hook surfaced an identity claim — the sidecar re-reads

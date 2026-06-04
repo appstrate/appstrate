@@ -37,7 +37,7 @@ export type Actor = { type: "user"; id: string } | { type: "end_user"; id: strin
 // ---------------------------------------------------------------------------
 
 /**
- * A skill or tool referenced by a package's manifest, hydrated against the
+ * A skill or integration referenced by a package's manifest, hydrated against the
  * org/system catalog. Optional fields mirror what was resolvable at load
  * time — modules use them to render dependency lists without re-querying.
  */
@@ -49,12 +49,12 @@ export interface PlatformPackageDependency {
 }
 
 /**
- * Stable public fields of a loaded package (agent, skill, tool, provider).
+ * Stable public fields of a loaded package (agent, skill, integration).
  *
- * `prompt`, `skills`, `tools` are populated by the platform when it resolves
+ * `prompt`, `skills` are populated by the platform when it resolves
  * a package row — modules that render or reason about a package can read
  * them without re-implementing manifest traversal. They remain optional so
- * future package shapes (e.g. provider definitions with no prompt) stay
+ * package shapes that lack them (e.g. integrations have no prompt) stay
  * assignable, and so adding more hydrated fields is non-breaking.
  */
 export interface PlatformPackage {
@@ -66,8 +66,6 @@ export interface PlatformPackage {
   readonly prompt?: string;
   /** Resolved skill dependencies declared in the manifest. */
   readonly skills?: ReadonlyArray<PlatformPackageDependency>;
-  /** Resolved tool dependencies declared in the manifest. */
-  readonly tools?: ReadonlyArray<PlatformPackageDependency>;
 }
 
 /**
@@ -149,33 +147,6 @@ export interface PlatformApplication {
   readonly isDefault: boolean;
 }
 
-/**
- * Stripe-canonical list envelope for HTTP list responses.
- *
- * Wire format: `{ object: "list", data: T[], hasMore: boolean, total?: number }`.
- * Mirrored verbatim by `apps/api/src/lib/list-response.ts::ListResponse<T>`.
- */
-export interface PlatformListResponse<T> {
-  readonly object: "list";
-  readonly data: ReadonlyArray<T>;
-  readonly hasMore: boolean;
-  readonly total?: number;
-}
-
-/** A user's connections grouped by provider, then by org — shape returned by `connections.listAllForActor`. */
-export interface PlatformConnectionProviderGroup {
-  readonly providerId: string;
-  readonly displayName: string;
-  readonly logo: string;
-  readonly totalConnections: number;
-  readonly orgs: ReadonlyArray<{
-    readonly orgId: string;
-    readonly orgName: string;
-    /** Connection entries — cast to `UserConnectionEntry` (from shared-types) at the call site. */
-    readonly connections: ReadonlyArray<unknown>;
-  }>;
-}
-
 // ---------------------------------------------------------------------------
 // Workload / orchestrator value types
 // ---------------------------------------------------------------------------
@@ -192,28 +163,66 @@ export interface WorkloadResources {
   pidsLimit?: number;
 }
 
-export interface InjectableFile {
-  name: string;
-  content: Buffer;
-}
-
 export interface WorkloadSpec {
   runId: string;
   role: string;
   image: string;
   env: Record<string, string>;
   resources: WorkloadResources;
-  files?: { items: InjectableFile[]; targetDir: string };
+  /**
+   * Place this workload on the egress network (direct internet + platform
+   * reachability) instead of the internal isolation boundary. Set for the
+   * agent in `skipSidecar` runs: with no sidecar there is no egress proxy,
+   * so the agent must reach the upstream LLM and the platform sink itself —
+   * the same network treatment the orchestrator gives the sidecar. Ignored
+   * by orchestrators without network isolation (e.g. the process orchestrator).
+   */
+  egress?: boolean;
 }
 
 export interface IsolationBoundary {
   readonly id: string;
   readonly name: string;
+  /**
+   * Per-run shared workspace handle. Backs `/workspace` on the agent
+   * container and (opt-in via mcp-server `_meta["dev.appstrate/workspace"]`)
+   * on per-integration runner containers. Shape varies by orchestrator:
+   *
+   *   - Docker: `{ kind: "volume", name: string }` — a named Docker
+   *     volume created alongside the per-run network.
+   *   - Process: `{ kind: "directory", path: string }` — a host
+   *     directory under `os.tmpdir()/appstrate-ws-<runId>/`.
+   *
+   * Non-optional: every built-in orchestrator provides a handle. The
+   * `WorkspaceHandle` union (not an optional field) is what keeps the
+   * door open for a future orchestrator to add a third shape without
+   * touching call sites that already branch on `kind`.
+   */
+  readonly workspace: WorkspaceHandle;
 }
+
+/**
+ * Opaque handle that the orchestrator hands to its sidecar so the
+ * sidecar can ask the integration runtime adapter to mount the same
+ * workspace under a runner container. The shape is orchestrator-specific
+ * — sidecar code branches on `kind` (not on `RUN_ADAPTER`) so a future
+ * orchestrator can introduce a third workspace shape without touching
+ * the adapter dispatch.
+ */
+export type WorkspaceHandle =
+  | { readonly kind: "volume"; readonly name: string }
+  | { readonly kind: "directory"; readonly path: string };
 
 export interface CleanupReport {
   workloads: number;
   isolationBoundaries: number;
+  /**
+   * Per-run shared workspaces (Docker named volumes or host
+   * directories under `os.tmpdir()`) reclaimed by the sweep. Counted
+   * alongside boundaries so operators see the full per-run resource
+   * footprint, not just network leaks.
+   */
+  workspaces: number;
 }
 
 export type StopResult = "stopped" | "not_found" | "already_stopped";
@@ -252,7 +261,12 @@ export interface ContainerOrchestrator {
     spec: SidecarLaunchSpec,
   ): Promise<WorkloadHandle>;
 
-  /** Create a workload (agent). Does NOT start it — file injection included in the spec. */
+  /**
+   * Create a workload (agent). Does NOT start it. The agent self-provisions
+   * its workspace at startup by fetching from the platform (the AFPS bundle
+   * and any input documents), so workspace contents are not delivered through
+   * this spec.
+   */
   createWorkload(spec: WorkloadSpec, boundary: IsolationBoundary): Promise<WorkloadHandle>;
 
   /** Start a created workload. */
@@ -325,7 +339,6 @@ export interface InlineRunBody {
   prompt?: unknown;
   input?: Record<string, unknown>;
   config?: Record<string, unknown>;
-  providerProfiles?: Record<string, string>;
   modelId?: string | null;
   proxyId?: string | null;
 }
@@ -347,21 +360,19 @@ export interface InlinePreflightInput {
 }
 
 /**
- * Public DTO returned by `inline.preflight`. Manifest and provider-profile
- * payloads are `unknown` — modules cast at the call site if they need the
- * richer apps/api shape. Adding optional fields here is non-breaking; adding
- * required fields would break consumers and requires a major bump.
+ * Public DTO returned by `inline.preflight`. The manifest payload is
+ * `unknown` — modules cast at the call site if they need the richer apps/api
+ * shape. Adding optional fields here is non-breaking; adding required fields
+ * would break consumers and requires a major bump.
  */
 export interface InlinePreflightResult {
   manifest: unknown;
   prompt: string;
   effectiveConfig: Record<string, unknown>;
   effectiveInput: Record<string, unknown> | null;
-  providerProfiles: unknown;
-  providerProfilesOverride: Record<string, string> | undefined;
   modelIdOverride: string | null;
   proxyIdOverride: string | null;
-  resolvedDeps: { skills: unknown; tools: unknown };
+  resolvedDeps: { skills: unknown };
 }
 
 // ---------------------------------------------------------------------------

@@ -212,7 +212,7 @@ describe("mergeEnv", () => {
   });
 
   it("APPSTRATE_VERSION ALWAYS takes the fresh value, even when existing has one", () => {
-    // Lockstep invariant (ADR-006): the Docker image tag must track the
+    // Lockstep invariant: the Docker image tag must track the
     // CLI that orchestrates it. Preserving an existing APPSTRATE_VERSION
     // would leave a CLI-upgraded install pointing at the old images.
     const existing = {

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it, afterEach } from "bun:test";
+import { expect, it, afterEach } from "bun:test";
+import { describeRequiresDocker } from "../../helpers/tier.ts";
 import {
   pullImage,
   createContainer,
@@ -8,7 +9,6 @@ import {
   streamLogs,
   waitForExit,
   removeContainer,
-  injectFiles,
   stopContainer,
   createNetwork,
   connectContainerToNetwork,
@@ -16,7 +16,11 @@ import {
   cleanupOrphanedContainers,
   cleanupOrphanedNetworks,
   cleanupOrphanedRunNetworks,
-  getContainerHostPort,
+  cleanupOrphanedVolumes,
+  createVolume,
+  removeVolume,
+  runEphemeralCommand,
+  WORKSPACE_VOLUME_PREFIX,
 } from "../../../src/services/docker.ts";
 
 // ─── Constants ──────────────────────────────────────────────
@@ -29,6 +33,7 @@ const TIMEOUT = 15_000;
 
 const containersToCleanup: string[] = [];
 const networksToCleanup: string[] = [];
+const volumesToCleanup: string[] = [];
 
 function trackContainer(id: string): string {
   containersToCleanup.push(id);
@@ -38,6 +43,11 @@ function trackContainer(id: string): string {
 function trackNetwork(id: string): string {
   networksToCleanup.push(id);
   return id;
+}
+
+function trackVolume(name: string): string {
+  volumesToCleanup.push(name);
+  return name;
 }
 
 function untrackContainer(id: string): void {
@@ -63,14 +73,28 @@ async function rawRemoveNetwork(id: string): Promise<void> {
   }
 }
 
+async function rawRemoveVolume(name: string): Promise<void> {
+  try {
+    await fetch(`${DOCKER_URL}/volumes/${encodeURIComponent(name)}?force=true`, {
+      method: "DELETE",
+    });
+  } catch {
+    // ignore
+  }
+}
+
 afterEach(async () => {
-  // Clean up containers first (they may be connected to networks)
+  // Clean up containers first (they may be connected to networks / volumes)
   await Promise.allSettled(containersToCleanup.map(rawRemoveContainer));
   containersToCleanup.length = 0;
 
-  // Then clean up networks
-  await Promise.allSettled(networksToCleanup.map(rawRemoveNetwork));
+  // Then clean up networks and volumes (independent — race them).
+  await Promise.allSettled([
+    ...networksToCleanup.map(rawRemoveNetwork),
+    ...volumesToCleanup.map(rawRemoveVolume),
+  ]);
   networksToCleanup.length = 0;
+  volumesToCleanup.length = 0;
 });
 
 // ─── Helpers ────────────────────────────────────────────────
@@ -89,8 +113,6 @@ async function createRawContainer(
   opts: {
     env?: string[];
     labels?: Record<string, string>;
-    exposedPorts?: Record<string, object>;
-    portBindings?: Record<string, Array<{ HostPort: string }>>;
   } = {},
 ): Promise<string> {
   const name = `appstrate-test-raw-${uid()}`;
@@ -102,10 +124,6 @@ async function createRawContainer(
       Cmd: cmd,
       Tty: false,
       Env: opts.env,
-      ExposedPorts: opts.exposedPorts,
-      HostConfig: {
-        PortBindings: opts.portBindings,
-      },
       Labels: {
         "appstrate.managed": "true",
         "appstrate.run": `test-${uid()}`,
@@ -124,7 +142,7 @@ async function createRawContainer(
 
 // ─── pullImage ──────────────────────────────────────────────
 
-describe("pullImage", () => {
+describeRequiresDocker("pullImage", () => {
   it(
     "pulls alpine:3.20 (cached, fast)",
     async () => {
@@ -144,7 +162,7 @@ describe("pullImage", () => {
 
 // ─── createContainer ────────────────────────────────────────
 
-describe("createContainer", () => {
+describeRequiresDocker("createContainer", () => {
   it(
     "creates a container and returns its ID",
     async () => {
@@ -224,7 +242,7 @@ describe("createContainer", () => {
 
 // ─── startContainer ─────────────────────────────────────────
 
-describe("startContainer", () => {
+describeRequiresDocker("startContainer", () => {
   it(
     "starts a container successfully",
     async () => {
@@ -241,7 +259,7 @@ describe("startContainer", () => {
 
 // ─── streamLogs ─────────────────────────────────────────────
 
-describe("streamLogs", () => {
+describeRequiresDocker("streamLogs", () => {
   it(
     "captures stdout output",
     async () => {
@@ -303,7 +321,7 @@ describe("streamLogs", () => {
 
 // ─── waitForExit ────────────────────────────────────────────
 
-describe("waitForExit", () => {
+describeRequiresDocker("waitForExit", () => {
   it(
     "returns exit code 0 for successful command",
     async () => {
@@ -331,7 +349,7 @@ describe("waitForExit", () => {
 
 // ─── stopContainer ──────────────────────────────────────────
 
-describe("stopContainer", () => {
+describeRequiresDocker("stopContainer", () => {
   it(
     "stops a running container",
     async () => {
@@ -354,7 +372,7 @@ describe("stopContainer", () => {
 
 // ─── removeContainer ────────────────────────────────────────
 
-describe("removeContainer", () => {
+describeRequiresDocker("removeContainer", () => {
   it(
     "removes a container",
     async () => {
@@ -379,71 +397,9 @@ describe("removeContainer", () => {
   );
 });
 
-// ─── injectFiles ────────────────────────────────────────────
-
-describe("injectFiles", () => {
-  it(
-    "injects a file into a container and verifies content via cat",
-    async () => {
-      const fileContent = "hello from injected file";
-      const id = await createRawContainer(["cat", "/tmp/test.txt"]);
-
-      await injectFiles(id, [{ name: "test.txt", content: Buffer.from(fileContent) }], "/tmp");
-
-      await startContainer(id);
-
-      const lines: string[] = [];
-      for await (const line of streamLogs(id)) {
-        lines.push(line);
-      }
-
-      expect(lines).toContain(fileContent);
-    },
-    TIMEOUT,
-  );
-
-  it(
-    "injects multiple files in a single tar archive",
-    async () => {
-      const id = await createRawContainer(["sh", "-c", "cat /tmp/a.txt && cat /tmp/b.txt"]);
-
-      await injectFiles(
-        id,
-        [
-          { name: "a.txt", content: Buffer.from("content-a") },
-          { name: "b.txt", content: Buffer.from("content-b") },
-        ],
-        "/tmp",
-      );
-
-      await startContainer(id);
-
-      const lines: string[] = [];
-      for await (const line of streamLogs(id)) {
-        lines.push(line);
-      }
-
-      const output = lines.join("\n");
-      expect(output).toContain("content-a");
-      expect(output).toContain("content-b");
-    },
-    TIMEOUT,
-  );
-
-  it(
-    "does nothing when files array is empty",
-    async () => {
-      const id = await createRawContainer(["true"]);
-      await injectFiles(id, [], "/tmp");
-      // No error thrown
-    },
-    TIMEOUT,
-  );
-});
-
 // ─── createNetwork ──────────────────────────────────────────
 
-describe("createNetwork", () => {
+describeRequiresDocker("createNetwork", () => {
   it(
     "creates a bridge network and returns its ID",
     async () => {
@@ -477,7 +433,7 @@ describe("createNetwork", () => {
 
 // ─── connectContainerToNetwork ──────────────────────────────
 
-describe("connectContainerToNetwork", () => {
+describeRequiresDocker("connectContainerToNetwork", () => {
   it(
     "connects a container to a network with aliases",
     async () => {
@@ -505,7 +461,7 @@ describe("connectContainerToNetwork", () => {
 
 // ─── removeNetwork ──────────────────────────────────────────
 
-describe("removeNetwork", () => {
+describeRequiresDocker("removeNetwork", () => {
   it(
     "creates and removes a network",
     async () => {
@@ -529,39 +485,9 @@ describe("removeNetwork", () => {
   );
 });
 
-// ─── getContainerHostPort ───────────────────────────────────
-
-describe("getContainerHostPort", () => {
-  it(
-    "returns the mapped host port for a container with port binding",
-    async () => {
-      // Create container with port binding via raw API
-      const id = await createRawContainer(["sh", "-c", "nc -l -p 8080 || sleep 10"], {
-        exposedPorts: { "8080/tcp": {} },
-        portBindings: { "8080/tcp": [{ HostPort: "0" }] },
-      });
-      await startContainer(id);
-
-      const port = await getContainerHostPort(id, "8080/tcp");
-      expect(port).toBeNumber();
-      expect(port!).toBeGreaterThan(0);
-    },
-    TIMEOUT,
-  );
-
-  it(
-    "returns null for non-existent container",
-    async () => {
-      const port = await getContainerHostPort("nonexistent-container-12345", "8080/tcp");
-      expect(port).toBeNull();
-    },
-    TIMEOUT,
-  );
-});
-
 // ─── cleanupOrphanedContainers ──────────────────────────────
 
-describe("cleanupOrphanedContainers", () => {
+describeRequiresDocker("cleanupOrphanedContainers", () => {
   it(
     "cleans up labeled containers and networks",
     async () => {
@@ -612,7 +538,7 @@ describe("cleanupOrphanedContainers", () => {
 
 // ─── cleanupOrphanedNetworks ─────────────────────────────────
 
-describe("cleanupOrphanedNetworks", () => {
+describeRequiresDocker("cleanupOrphanedNetworks", () => {
   it(
     "reclaims appstrate-exec-* networks without touching unrelated networks",
     async () => {
@@ -642,7 +568,7 @@ describe("cleanupOrphanedNetworks", () => {
 
 // ─── cleanupOrphanedRunNetworks ──────────────────────────────
 
-describe("cleanupOrphanedRunNetworks", () => {
+describeRequiresDocker("cleanupOrphanedRunNetworks", () => {
   it(
     "only reclaims appstrate-exec-* — leaves egress alone",
     async () => {
@@ -668,17 +594,11 @@ describe("cleanupOrphanedRunNetworks", () => {
 
 // ─── Full lifecycle ─────────────────────────────────────────
 
-describe("Full lifecycle", () => {
-  it("create -> inject -> start -> streamLogs -> waitForExit -> remove", async () => {
-    // Create container with a command that cats an injected file
-    const id = await createRawContainer(["sh", "/tmp/run.sh"], { env: ["GREETING=world"] });
-
-    // Inject a script before starting
-    await injectFiles(
-      id,
-      [{ name: "run.sh", content: Buffer.from('#!/bin/sh\necho "hello $GREETING"') }],
-      "/tmp",
-    );
+describeRequiresDocker("Full lifecycle", () => {
+  it("create -> start -> streamLogs -> waitForExit -> remove", async () => {
+    const id = await createRawContainer(["sh", "-c", 'echo "hello $GREETING"'], {
+      env: ["GREETING=world"],
+    });
 
     await startContainer(id);
 
@@ -701,4 +621,170 @@ describe("Full lifecycle", () => {
     const res = await fetch(`${DOCKER_URL}/containers/${id}/json`);
     expect(res.status).toBe(404);
   }, 30_000);
+});
+
+// ─── Docker Volume operations ───────────────────────────────
+
+describeRequiresDocker("createVolume / removeVolume", () => {
+  it(
+    "creates a volume with the appstrate.managed label and removes it",
+    async () => {
+      const name = `${WORKSPACE_VOLUME_PREFIX}create-${uid()}`;
+      trackVolume(name);
+      const created = await createVolume(name, { labels: { "appstrate.run": "vol-test" } });
+      expect(created).toBe(name);
+
+      const inspect = await fetch(`${DOCKER_URL}/volumes/${encodeURIComponent(name)}`);
+      expect(inspect.ok).toBe(true);
+      const body = (await inspect.json()) as { Labels: Record<string, string> };
+      expect(body.Labels["appstrate.managed"]).toBe("true");
+      expect(body.Labels["appstrate.run"]).toBe("vol-test");
+
+      await removeVolume(name);
+      const gone = await fetch(`${DOCKER_URL}/volumes/${encodeURIComponent(name)}`);
+      expect(gone.status).toBe(404);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "is idempotent — removing an absent volume does not throw (404 swallowed)",
+    async () => {
+      await expect(
+        removeVolume(`${WORKSPACE_VOLUME_PREFIX}missing-${uid()}`),
+      ).resolves.toBeUndefined();
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "accepts tmpfs driver options and creates a RAM-backed volume",
+    async () => {
+      const name = `${WORKSPACE_VOLUME_PREFIX}tmpfs-${uid()}`;
+      trackVolume(name);
+      await createVolume(name, {
+        labels: { "appstrate.run": "tmpfs-test" },
+        driverOpts: { type: "tmpfs", device: "tmpfs", o: "size=4m" },
+      });
+      const inspect = await fetch(`${DOCKER_URL}/volumes/${encodeURIComponent(name)}`);
+      expect(inspect.ok).toBe(true);
+      const body = (await inspect.json()) as { Options?: Record<string, string> };
+      expect(body.Options?.type).toBe("tmpfs");
+      expect(body.Options?.o).toContain("size=4m");
+    },
+    TIMEOUT,
+  );
+});
+
+describeRequiresDocker("cleanupOrphanedVolumes", () => {
+  it(
+    "reclaims appstrate-ws-* volumes without touching unrelated ones",
+    async () => {
+      // Pre-condition: clear any leftovers from earlier runs.
+      await cleanupOrphanedVolumes();
+
+      const orphan1 = await createVolume(`${WORKSPACE_VOLUME_PREFIX}orphan-${uid()}`);
+      const orphan2 = await createVolume(`${WORKSPACE_VOLUME_PREFIX}orphan-${uid()}`);
+      const bystander = await createVolume(`appstrate-test-keepme-${uid()}`);
+      trackVolume(bystander);
+
+      const reclaimed = await cleanupOrphanedVolumes();
+      expect(reclaimed).toBeGreaterThanOrEqual(2);
+
+      for (const name of [orphan1, orphan2]) {
+        const res = await fetch(`${DOCKER_URL}/volumes/${encodeURIComponent(name)}`);
+        expect(res.status).toBe(404);
+      }
+      const stillThere = await fetch(`${DOCKER_URL}/volumes/${encodeURIComponent(bystander)}`);
+      expect(stillThere.status).toBe(200);
+    },
+    TIMEOUT,
+  );
+});
+
+describeRequiresDocker("cleanupOrphanedContainers includes volumes in report", () => {
+  it(
+    "reports container + network + volume counts",
+    async () => {
+      await cleanupOrphanedContainers();
+
+      const orphanVol = await createVolume(`${WORKSPACE_VOLUME_PREFIX}report-${uid()}`);
+      const report = await cleanupOrphanedContainers();
+
+      expect(report.volumes).toBeGreaterThanOrEqual(1);
+      const gone = await fetch(`${DOCKER_URL}/volumes/${encodeURIComponent(orphanVol)}`);
+      expect(gone.status).toBe(404);
+    },
+    TIMEOUT,
+  );
+});
+
+describeRequiresDocker("runEphemeralCommand", () => {
+  it(
+    "runs a one-shot busybox container, exits zero, auto-removes",
+    async () => {
+      // Use the same image we already pull elsewhere — keeps the test
+      // fast on a warm Docker daemon.
+      await expect(runEphemeralCommand({ image: IMAGE, cmd: ["true"] })).resolves.toBeUndefined();
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "throws on non-zero exit with the exit code in the message",
+    async () => {
+      await expect(
+        runEphemeralCommand({ image: IMAGE, cmd: ["sh", "-c", "exit 7"] }),
+      ).rejects.toThrow(/exit.*7/);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "chowns a volume so a non-root UID can write to it (workspace init pattern)",
+    async () => {
+      const volName = `${WORKSPACE_VOLUME_PREFIX}chown-${uid()}`;
+      trackVolume(volName);
+      await createVolume(volName);
+
+      // 1. Init: chown to UID 1001 (the agent's `pi` user — same
+      // pattern the docker orchestrator uses on createIsolationBoundary).
+      // The marker file is required: Docker resets the mount-point
+      // uid:gid on subsequent remounts of an otherwise-empty volume,
+      // so we pin the chown by anchoring it to a real file.
+      await runEphemeralCommand({
+        image: IMAGE,
+        cmd: ["sh", "-c", "touch /mnt/.init && chown 1001:1001 /mnt /mnt/.init"],
+        binds: [`${volName}:/mnt`],
+      });
+
+      // 2. Verify by re-mounting the volume in a second container and
+      // reading the numeric owner from `stat`. A separate container
+      // exercises the same code path the agent would: chown writes
+      // persist across mounts.
+      const probeName = `appstrate-test-stat-${uid()}`;
+      const createRes = await fetch(`${DOCKER_URL}/containers/create?name=${probeName}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          Image: IMAGE,
+          // `sh -c` so we can chain commands and surface stat output
+          // unambiguously (a bare `stat` Cmd works too but logs sometimes
+          // race with container teardown — wrapping in sh + sleep is the
+          // belt-and-suspenders pattern used elsewhere in this file).
+          Cmd: ["sh", "-c", "stat -c '%u:%g' /mnt; sleep 0.1"],
+          HostConfig: { Binds: [`${volName}:/mnt`], AutoRemove: false },
+        }),
+      });
+      expect(createRes.ok).toBe(true);
+      const probeId = trackContainer(((await createRes.json()) as { Id: string }).Id);
+      await startContainer(probeId);
+      await waitForExit(probeId);
+      // streamLogs after wait → exit code observable + log buffer flushed.
+      const out: string[] = [];
+      for await (const line of streamLogs(probeId)) out.push(line);
+      expect(out.join("").trim()).toContain("1001:1001");
+    },
+    TIMEOUT,
+  );
 });

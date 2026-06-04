@@ -96,38 +96,21 @@ const OWNER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "skills:read",
   "skills:write",
   "skills:delete",
-  // Tools
-  "tools:read",
-  "tools:write",
-  "tools:delete",
-  // Providers
-  "providers:read",
-  "providers:write",
-  "providers:delete",
   // Runs
   "runs:read",
   "runs:cancel",
   "runs:delete",
+  // MCP servers (AFPS §3.4 — browse/import/delete, no editor)
+  "mcp-servers:read",
+  "mcp-servers:write",
+  "mcp-servers:delete",
   // Schedules
   "schedules:read",
   "schedules:write",
   "schedules:delete",
-  // Persistence (unified checkpoints + memories — see ADR-011)
+  // Persistence (unified checkpoints + memories)
   "persistence:read",
   "persistence:delete",
-  // Connections
-  "connections:read",
-  "connections:connect",
-  "connections:disconnect",
-  // Profiles
-  "profiles:read",
-  "profiles:write",
-  "profiles:delete",
-  // Org profiles
-  "app-profiles:read",
-  "app-profiles:write",
-  "app-profiles:delete",
-  "app-profiles:bind",
   // Infrastructure
   "models:read",
   "models:write",
@@ -152,6 +135,14 @@ const OWNER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "credential-proxy:call",
   // LLM proxy (remote-backed CLI execution — see API_KEY_ALLOWED_SCOPES note below)
   "llm-proxy:call",
+  // Integrations (INTEGRATIONS_PROPOSAL Phase 1.3 — marketplace UI)
+  "integrations:read",
+  "integrations:write",
+  "integrations:delete",
+  "integrations:install",
+  "integrations:uninstall",
+  "integrations:connect",
+  "integrations:disconnect",
 ]);
 
 /** Admin: everything except org:delete and members:change-role. */
@@ -167,10 +158,10 @@ const MEMBER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   // Agents (read + run, no write/configure/delete)
   "agents:read",
   "agents:run",
-  // Skills, Tools, Providers (read only)
+  // Skills (read only)
   "skills:read",
-  "tools:read",
-  "providers:read",
+  // MCP servers (read only — import/delete is admin)
+  "mcp-servers:read",
   // Runs (read + cancel own)
   "runs:read",
   "runs:cancel",
@@ -180,17 +171,11 @@ const MEMBER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "schedules:delete",
   // Persistence (read only — unified checkpoints + memories)
   "persistence:read",
-  // Connections (full self-service)
-  "connections:read",
-  "connections:connect",
-  "connections:disconnect",
-  // Profiles (personal)
-  "profiles:read",
-  "profiles:write",
-  "profiles:delete",
-  // Org profiles (read + bind own connections)
-  "app-profiles:read",
-  "app-profiles:bind",
+  // Integrations (members can browse + self-connect their connections;
+  // install/uninstall is admin)
+  "integrations:read",
+  "integrations:connect",
+  "integrations:disconnect",
   // Infrastructure (read only, except model-provider-credentials which is admin-only)
   "models:read",
   "proxies:read",
@@ -206,18 +191,15 @@ const VIEWER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "members:read",
   "agents:read",
   "skills:read",
-  "tools:read",
-  "providers:read",
+  "mcp-servers:read",
   "runs:read",
   "schedules:read",
   "persistence:read",
-  "connections:read",
-  "profiles:read",
-  "app-profiles:read",
   "models:read",
   "proxies:read",
   "applications:read",
   "end-users:read",
+  "integrations:read",
 ]);
 
 /** Role → core-permissions mapping. Module contributions are layered on top via the provider hook below. */
@@ -251,14 +233,10 @@ export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permissio
   "skills:read",
   "skills:write",
   "skills:delete",
-  // Tools
-  "tools:read",
-  "tools:write",
-  "tools:delete",
-  // Providers
-  "providers:read",
-  "providers:write",
-  "providers:delete",
+  // MCP servers (AFPS §3.4 — import/delete via API key for headless flows)
+  "mcp-servers:read",
+  "mcp-servers:write",
+  "mcp-servers:delete",
   // Runs
   "runs:read",
   "runs:cancel",
@@ -274,10 +252,16 @@ export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permissio
   "proxies:read",
   "proxies:write",
   "proxies:delete",
-  // Connections (end-user OAuth via API key + Appstrate-User header)
-  "connections:read",
-  "connections:connect",
-  "connections:disconnect",
+  // Integrations (author/edit the manifest + browse catalog + install/connect
+  // via API key for headless flows, incl. end-user OAuth via Appstrate-User
+  // header)
+  "integrations:read",
+  "integrations:write",
+  "integrations:delete",
+  "integrations:install",
+  "integrations:uninstall",
+  "integrations:connect",
+  "integrations:disconnect",
   // Applications & End-Users
   "applications:read",
   "applications:write",

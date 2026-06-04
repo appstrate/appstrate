@@ -22,6 +22,32 @@ describe("renderPlatformPrompt", () => {
     expect(out).toContain("Ephemeral container");
   });
 
+  it("emits a Communication section forbidding free-text replies to the user", () => {
+    const out = renderPlatformPrompt({ template: "TEMPLATE", context: ctx() });
+    expect(out).toContain("### Communication");
+    expect(out).toContain("never delivered to the user");
+    expect(out).toContain("The only way to communicate with the user is by calling a tool.");
+  });
+
+  it("renders the Communication section and no Tools section (tools come from tools/list)", () => {
+    const out = renderPlatformPrompt({ template: "T", context: ctx() });
+    expect(out.indexOf("### Communication")).toBeGreaterThan(-1);
+    expect(out).not.toContain("### Tools");
+  });
+
+  it("keeps the Communication section tool-agnostic (no opt-in tool names)", () => {
+    // Per the #368 contract, platform-owned section prose must not hardcode
+    // a specific tool's usage — that belongs on each tool's MCP descriptor
+    // `description` (surfaced via `tools/list`).
+    const out = renderPlatformPrompt({ template: "T", context: ctx() });
+    const start = out.indexOf("### Communication");
+    const end = out.indexOf("### Tools", start);
+    const slice = out.slice(start, end > -1 ? end : out.indexOf("\n---\n", start));
+    expect(slice).not.toContain("output(");
+    expect(slice).not.toContain("log(");
+    expect(slice).not.toContain("note(");
+  });
+
   it("uses the overridden platformName", () => {
     const out = renderPlatformPrompt({
       template: "T",
@@ -42,111 +68,74 @@ describe("renderPlatformPrompt", () => {
     expect(out).not.toContain("**Timeout**");
   });
 
-  it("lists tools + skills when provided", () => {
+  it("lists skills (tools come from MCP tools/list, never the prompt)", () => {
     const out = renderPlatformPrompt({
       template: "T",
       context: ctx(),
-      availableTools: [{ id: "@x/tool", name: "x-tool", description: "Do X" }],
       availableSkills: [{ id: "@x/skill", name: "x-skill" }],
     });
-    expect(out).toContain("### Tools");
-    expect(out).toContain("**x-tool**: Do X");
+    expect(out).not.toContain("### Tools");
     expect(out).toContain("### Skills");
     expect(out).toContain("**x-skill**");
   });
 
-  it("appends raw toolDocs verbatim after the Tools section", () => {
+  it("omits the API Documentation subsection when an integration has no INTEGRATION.md", () => {
     const out = renderPlatformPrompt({
       template: "T",
       context: ctx(),
-      toolDocs: [{ id: "@x/tool", content: "## How to use x-tool\n\nBe careful." }],
-    });
-    expect(out).toContain("## How to use x-tool");
-    expect(out).toContain("Be careful");
-  });
-
-  it("emits the Connected Providers section pointing to the provider_call MCP tool", () => {
-    const out = renderPlatformPrompt({
-      template: "T",
-      context: ctx(),
-      providers: [
+      integrations: [
         {
-          id: "@appstrate/gmail",
-          displayName: "Gmail",
-          authMode: "oauth2",
-          authorizedUris: ["https://gmail.googleapis.com/**"],
+          id: "@org/github-mcp",
+          description: "GitHub integration",
         },
       ],
     });
-    expect(out).toContain("## Connected Providers");
-    expect(out).toContain("provider_call");
-    expect(out).toContain("**Gmail** (`@appstrate/gmail`)");
-    expect(out).toContain("Authorized URLs: https://gmail.googleapis.com/**");
-    expect(out).toContain("provider-<scope>-<name>");
-    expect(out).toContain("<available_skills>");
-    expect(out).not.toContain(".pi/providers/");
-    // Per-provider alias names are gone — every call goes through provider_call({ providerId, … }).
-    expect(out).not.toContain("appstrate_gmail_call");
+    expect(out).toContain("## Integration: @org/github-mcp");
+    expect(out).toContain("GitHub integration");
+    expect(out).not.toContain("### API Documentation");
   });
 
-  it("documents binary upload/download contract when providers are connected", () => {
+  it("inlines INTEGRATION.md content under an API Documentation subsection when present", () => {
     const out = renderPlatformPrompt({
       template: "T",
       context: ctx(),
-      providers: [
+      integrations: [
         {
-          id: "@appstrate/gmail",
-          displayName: "Gmail",
-          authMode: "oauth2",
-          authorizedUris: ["https://gmail.googleapis.com/**"],
+          id: "@org/github-mcp",
+          description: "GitHub integration",
+          doc: "## GitHub API\n\nCall `list_issues` to fetch issues.",
         },
       ],
     });
-    // Binary contract guidance must appear so the LLM picks fromFile / toFile
-    // over base64-stuffing large payloads into tool args.
-    expect(out).toContain("fromFile");
-    expect(out).toContain("toFile");
-    expect(out).toContain("body.kind");
+    expect(out).toContain("## Integration: @org/github-mcp");
+    expect(out).toContain("### API Documentation");
+    expect(out).toContain("## GitHub API");
+    expect(out).toContain("Call `list_issues` to fetch issues.");
   });
 
-  it("omits the binary upload/download contract when no providers are connected", () => {
+  it("treats whitespace-only INTEGRATION.md as absent (no API Documentation subsection)", () => {
+    const out = renderPlatformPrompt({
+      template: "T",
+      context: ctx(),
+      integrations: [{ id: "@org/github-mcp", doc: "   \n\n  " }],
+    });
+    expect(out).toContain("## Integration: @org/github-mcp");
+    expect(out).not.toContain("### API Documentation");
+  });
+
+  it("omits every integration section when none are passed in", () => {
     const out = renderPlatformPrompt({ template: "T", context: ctx() });
-    expect(out).not.toContain("fromFile");
-    expect(out).not.toContain("toFile");
+    expect(out).not.toContain("## Integration:");
+    expect(out).not.toContain("### API Documentation");
+  });
+
+  it("never emits a Connected Providers section or provider_call instructions", () => {
+    // Outbound API access is surfaced via integration MCP tools
+    // (`{ns}__api_call`), self-documented through MCP tools/list — never
+    // through the prompt. The provider prompt dimension is fully removed.
+    const out = renderPlatformPrompt({ template: "T", context: ctx() });
     expect(out).not.toContain("## Connected Providers");
-  });
-
-  it("shows 'all public URLs' when allowAllUris is true", () => {
-    const out = renderPlatformPrompt({
-      template: "T",
-      context: ctx(),
-      providers: [
-        {
-          id: "@x/open",
-          displayName: "Open",
-          authMode: "api_key",
-          allowAllUris: true,
-        },
-      ],
-    });
-    expect(out).toContain("Authorized URLs: all public URLs");
-  });
-
-  it("does not surface docsUrl in the providers list (carried by the provider skill instead)", () => {
-    const out = renderPlatformPrompt({
-      template: "T",
-      context: ctx(),
-      providers: [
-        {
-          id: "@x/linked",
-          displayName: "Linked",
-          authMode: "oauth2",
-          docsUrl: "https://docs.linked.example/api",
-        },
-      ],
-    });
-    expect(out).not.toContain("Documentation: https://docs.linked.example/api");
-    expect(out).not.toContain(".pi/providers/");
+    expect(out).not.toContain("provider_call");
   });
 
   it("renders the User Input section with schema type/required info", () => {
@@ -225,11 +214,12 @@ describe("renderPlatformPrompt", () => {
       expect(out).toContain("resume work");
     });
 
-    it("does NOT mention specific tool names — usage prose belongs to TOOL.md (#368)", () => {
+    it("does NOT mention specific tool names — usage prose lives on the MCP descriptor (#368)", () => {
       // Post-#368 contract: the platform owns the data shell, tools own
       // their usage prose. The Checkpoint section must not name any
-      // tool — instructions for updating the checkpoint flow in via
-      // `@appstrate/pin`'s TOOL.md when that tool is loaded.
+      // tool — instructions for updating the checkpoint flow in via the
+      // `pin` tool's MCP descriptor `description` (surfaced through
+      // `tools/list`) when that tool is loaded.
       const out = renderPlatformPrompt({
         template: "T",
         context: ctx({ checkpoint: { cursor: "abc" } }),
@@ -310,10 +300,11 @@ describe("renderPlatformPrompt", () => {
       expect(out).toContain('"secondary"');
     });
 
-    it("does NOT mention specific tool names — usage prose belongs to TOOL.md (#368)", () => {
+    it("does NOT mention specific tool names — usage prose lives on the MCP descriptor (#368)", () => {
       // Post-#368 contract: data block only. The `pin` instructions
-      // for updating slots come from `@appstrate/pin`'s TOOL.md when
-      // that package is in the bundle's dependency tree.
+      // for updating slots come from the `pin` tool's MCP descriptor
+      // `description` (surfaced via `tools/list`) when that tool is in
+      // the bundle's dependency tree.
       const out = renderPlatformPrompt({
         template: "T",
         context: ctx({ pinnedSlots: { persona: "anything" } }),
@@ -367,10 +358,10 @@ describe("renderPlatformPrompt", () => {
       expect(out).not.toContain("No memories are currently pinned");
     });
 
-    it("does NOT mention specific tool names — archive APIs belong to TOOL.md", () => {
+    it("does NOT mention specific tool names — archive APIs live on the MCP descriptor", () => {
       // Post-#368 contract: data block only. Instructions for `note`,
-      // `recall_memory`, `pin` come from each tool's TOOL.md / runtime-
-      // injected doc when the tool is wired.
+      // `recall_memory`, `pin` come from each tool's MCP descriptor
+      // `description` (surfaced via `tools/list`) when the tool is wired.
       const out = renderPlatformPrompt({
         template: "T",
         context: ctx({
@@ -386,40 +377,35 @@ describe("renderPlatformPrompt", () => {
     });
 
     it("renders memories regardless of which tools are wired — data is data", () => {
-      // The v1→v2 dep-removal scenario: agent v1 shipped `@appstrate/note`
+      // The v1→v2 dep-removal scenario: agent v1 shipped the `note` tool
       // and accumulated memories; v2 dropped the dep. The platform
       // still surfaces the carry-over memory list (it's informative
-      // context); the absence of a `note` TOOL.md in the prompt is
+      // context); the absence of the `note` tool from `tools/list` is
       // what tells the LLM it cannot write new ones.
       const out = renderPlatformPrompt({
         template: "T",
         context: ctx({
           memories: [{ content: "carry-over fact", createdAt: 1_700_000_000_000 }],
         }),
-        availableTools: [],
       });
       expect(out).toContain("## Memory");
       expect(out).toContain("- carry-over fact");
     });
 
-    it("forwards toolDocs verbatim — the LLM learns archive APIs from TOOL.md", () => {
-      // Confirms the TOOL.md flow that replaces the old hardcoded
-      // footer: a runtime-injected `recall_memory` doc (or any bundle
-      // TOOL.md) flows in via `toolDocs` and reaches the LLM.
+    it("does not inject recall_memory docs into the prompt (the LLM learns it from tools/list)", () => {
+      // The archive API is documented on the `recall_memory` MCP tool's
+      // own description (surfaced via tools/list), never re-rendered in
+      // the prompt.
       const recallDoc =
         "## recall_memory\n\nUse `recall_memory({ q?, limit? })` to search the archive.";
       const out = renderPlatformPrompt({
         template: "T",
         context: ctx({ memories: [{ content: "x", createdAt: 1 }] }),
-        availableTools: [
-          { id: "recall_memory", name: "recall_memory", description: "Search archive." },
-        ],
-        toolDocs: [{ id: "recall_memory", content: recallDoc }],
       });
-      expect(out).toContain(recallDoc);
+      expect(out).not.toContain(recallDoc);
+      expect(out).not.toContain("recall_memory");
     });
   });
-
 
   it("never emits sidecar-knowledge sections — run history is surfaced via a typed tool", () => {
     // Before the run_history tool migration, a `## Run History` section
@@ -433,17 +419,10 @@ describe("renderPlatformPrompt", () => {
     expect(out).not.toContain("$SIDECAR_URL");
   });
 
-  it("surfaces run_history in the Tools section when present in availableTools", () => {
-    const out = renderPlatformPrompt({
-      template: "T",
-      context: ctx(),
-      availableTools: [
-        { id: "run_history", name: "run_history", description: "Fetch prior run metadata." },
-      ],
-    });
-    expect(out).toContain("### Tools");
-    expect(out).toContain("run_history");
-    expect(out).toContain("Fetch prior run metadata.");
+  it("does not surface run_history in a Tools section (it's a typed MCP tool)", () => {
+    const out = renderPlatformPrompt({ template: "T", context: ctx() });
+    expect(out).not.toContain("### Tools");
+    expect(out).not.toContain("run_history");
     expect(out).not.toContain("$SIDECAR_URL");
   });
 

@@ -4,14 +4,14 @@ import { useQuery } from "@tanstack/react-query";
 import { api, apiList } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
-import type { Run, RunLog } from "@appstrate/shared-types";
+import type { EnrichedRun, RunLog } from "@appstrate/shared-types";
 
 export function useRuns(packageId: string | undefined) {
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
   return useQuery({
     queryKey: ["runs", orgId, applicationId, packageId],
-    queryFn: () => apiList<Run>(`/agents/${packageId}/runs`),
+    queryFn: () => apiList<EnrichedRun>(`/agents/${packageId}/runs`),
     enabled: !!packageId && !!applicationId,
   });
 }
@@ -22,7 +22,7 @@ export function useRun(runId: string | undefined) {
   return useQuery({
     queryKey: ["run", orgId, applicationId, runId],
     queryFn: async () => {
-      return api<Run>(`/runs/${runId}`);
+      return api<EnrichedRun>(`/runs/${runId}`);
     },
     enabled: !!runId && !!applicationId,
   });

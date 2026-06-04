@@ -368,8 +368,25 @@ function extractErrorCode(err: unknown): string | undefined {
   return undefined;
 }
 
-/** Connection-level error codes that warrant a retry. */
+/**
+ * Connection-level error codes that warrant a retry. Two naming
+ * conventions coexist in the JS ecosystem and we must accept both:
+ *
+ *   - **Node/undici** uses E-prefix UPPER_SNAKE_CASE (`ECONNREFUSED`,
+ *     `ENOTFOUND`, …) — the canonical libuv-derived names.
+ *   - **Bun's fetch** uses PascalCase (`ConnectionRefused`,
+ *     `ConnectionTimeout`, `DNSNotFound`, …) — its own naming, not
+ *     Node-compatible.
+ *
+ * Without the Bun aliases, `isFatalConnectError()` would classify
+ * Bun-side `ConnectionRefused` as fatal (no recognized retryable code
+ * + `TypeError` falls through) and bypass the retry loop entirely. The
+ * agent container's MCP handshake against the still-booting sidecar
+ * would then fail on the very first attempt instead of riding through
+ * the warm-path race window (~50-200 ms).
+ */
 const RETRYABLE_CODES = new Set([
+  // Node / undici
   "ECONNREFUSED",
   "ENOTFOUND",
   "ETIMEDOUT",
@@ -378,6 +395,13 @@ const RETRYABLE_CODES = new Set([
   "EPIPE",
   "UND_ERR_SOCKET",
   "UND_ERR_CONNECT_TIMEOUT",
+  // Bun fetch (PascalCase, no E-prefix)
+  "ConnectionRefused",
+  "ConnectionReset",
+  "ConnectionClosed",
+  "ConnectionTimeout",
+  "DNSNotFound",
+  "DNSTimeout",
 ]);
 
 /**

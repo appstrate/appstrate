@@ -15,13 +15,12 @@ import {
   check,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+import type { TokenUsage } from "@appstrate/afps-shared/token-usage";
 import { runStatusEnum, llmUsageSourceEnum, runOriginEnum } from "./enums.ts";
 import { user } from "./auth.ts";
 import { applications, endUsers } from "./applications.ts";
 import { apiKeys, organizations, modelProviderCredentials } from "./organizations.ts";
 import { packages } from "./packages.ts";
-import { connectionProfiles } from "./connections.ts";
-import type { RunProviderSnapshot } from "./types.ts";
 
 export const runs = pgTable(
   "runs",
@@ -74,32 +73,40 @@ export const runs = pgTable(
     // in `run-info-tab.tsx`. Do NOT rename to camelCase without a data
     // migration and a coordinated wire-schema bump — the JSONB payloads
     // already in production use snake_case.
-    tokenUsage: jsonb("token_usage").$type<{
-      input_tokens?: number;
-      output_tokens?: number;
-      cache_creation_input_tokens?: number;
-      cache_read_input_tokens?: number;
-    }>(),
-    startedAt: timestamp("started_at").defaultNow().notNull(),
-    completedAt: timestamp("completed_at"),
+    tokenUsage: jsonb("token_usage").$type<TokenUsage>(),
+    startedAt: timestamp("started_at", { withTimezone: true }).defaultNow().notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
     duration: integer("duration"),
-    connectionProfileId: uuid("connection_profile_id").references(() => connectionProfiles.id, {
-      onDelete: "set null",
-    }),
     scheduleId: text("schedule_id").references(() => schedules.id, {
       onDelete: "set null",
     }),
     versionLabel: text("version_label"),
     versionDirty: boolean("version_dirty").default(false).notNull(),
-    notifiedAt: timestamp("notified_at"),
-    readAt: timestamp("read_at"),
+    notifiedAt: timestamp("notified_at", { withTimezone: true }),
+    readAt: timestamp("read_at", { withTimezone: true }),
     proxyLabel: text("proxy_label"),
     modelLabel: text("model_label"),
     modelSource: text("model_source"),
     cost: doublePrecision("cost"),
     runNumber: integer("run_number"),
-    providerProfileIds: jsonb("provider_profile_ids").$type<Record<string, string>>(),
-    providerStatuses: jsonb("provider_statuses").$type<RunProviderSnapshot[]>(),
+    // Per-run integration connection overrides — the caller's explicit
+    // choice at run kickoff (e.g. "for this run, use my Gmail-Boulot
+    // not my Gmail-Perso"). Shape: { "@scope/integration": "<connection_id>" }.
+    // Loses to admin pin. Resolution snapshot lives in resolvedConnections
+    // below. Flat (no per-authKey nesting): one connection per integration.
+    connectionOverrides: jsonb("connection_overrides").$type<Record<string, string>>(),
+    // Snapshot of the resolver output at run start — what connection
+    // was actually used per integration, plus the source
+    // ("admin_pin" | "run_override" | "schedule_override" | "member_pin" | "fallback_*").
+    // Audit trail: a run's identity in the upstream provider logs maps
+    // back through this column even after pins/connections are mutated.
+    resolvedConnections:
+      jsonb("resolved_connections").$type<
+        Record<
+          string,
+          { connectionId: string; source: string; label?: string | null; accountId?: string | null }
+        >
+      >(),
     apiKeyId: text("api_key_id").references(() => apiKeys.id, {
       onDelete: "set null",
     }),
@@ -132,10 +139,10 @@ export const runs = pgTable(
     // verify HMAC signatures against.
     sinkSecretEncrypted: text("sink_secret_encrypted"),
     // Hard cap after which /events rejects. Also the "sink is active" signal.
-    sinkExpiresAt: timestamp("sink_expires_at"),
+    sinkExpiresAt: timestamp("sink_expires_at", { withTimezone: true }),
     // Set on finalize (terminal event, /finalize POST, explicit revocation).
     // Presence means the sink is closed; subsequent events reject with 410.
-    sinkClosedAt: timestamp("sink_closed_at"),
+    sinkClosedAt: timestamp("sink_closed_at", { withTimezone: true }),
     // Highest successfully persisted sequence number; drives the ordering
     // buffer fast-path (CAS update on sequence = last_event_sequence + 1).
     lastEventSequence: integer("last_event_sequence").notNull().default(0),
@@ -144,7 +151,7 @@ export const runs = pgTable(
     // slipped past the threshold and routes them through `finalizeRun` as
     // `failed` (same convergence point as natural termination and
     // container-exit synthesis — identical for platform + remote runners).
-    lastHeartbeatAt: timestamp("last_heartbeat_at").defaultNow().notNull(),
+    lastHeartbeatAt: timestamp("last_heartbeat_at", { withTimezone: true }).defaultNow().notNull(),
     // CLI-provided execution environment metadata (os, cli version, git sha,
     // ...). Capped at 16 KiB by the route Zod schema.
     contextSnapshot: jsonb("context_snapshot").$type<Record<string, unknown>>(),
@@ -187,7 +194,20 @@ export const runs = pgTable(
     index("idx_runs_status").on(table.status),
     index("idx_runs_user_id").on(table.userId),
     index("idx_runs_end_user_id").on(table.endUserId),
-    index("idx_runs_application_id").on(table.applicationId),
+    // Per-agent run history (the hottest list path): WHERE package_id = ?
+    // ORDER BY started_at DESC. Also serves getLastRun / getRecentRuns /
+    // nextRunNumber. A backward scan satisfies the DESC
+    // sort, so a plain composite suffices.
+    index("idx_runs_package_started").on(table.packageId, table.startedAt),
+    // schedule_id is LEFT JOINed on every enriched run list and the FK
+    // SET NULL on schedule delete scans runs by it — partial index keeps it
+    // tiny (most runs are ad-hoc, schedule_id NULL).
+    index("idx_runs_schedule_id")
+      .on(table.scheduleId)
+      .where(sql`${table.scheduleId} IS NOT NULL`),
+    // Application-scoped lookups (incl. the FK cascade on app delete) are
+    // served by the leftmost prefix of idx_runs_app_status_started — no
+    // separate single-column applicationId index needed.
     index("idx_runs_app_status_started").on(table.applicationId, table.status, table.startedAt),
     index("idx_runs_org_id").on(table.orgId),
     index("idx_runs_notification").on(table.userId, table.orgId, table.notifiedAt, table.readAt),
@@ -226,19 +246,22 @@ export const runLogs = pgTable(
     event: text("event"),
     message: text("message"),
     data: jsonb("data").$type<Record<string, unknown>>(),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_run_logs_run_id").on(table.runId),
     index("idx_run_logs_lookup").on(table.runId, table.id),
     index("idx_run_logs_org_id").on(table.orgId),
+    // `level` has a fixed domain in the app (appendRunLog) but `type` is
+    // intentionally open-ended (progress/event kinds modules invent freely).
+    check("run_logs_level_valid", sql`level IN ('debug', 'info', 'warn', 'error')`),
   ],
 );
 
 /**
  * Unified agent persistence — one row per piece of cross-run state the agent
  * chooses to keep, regardless of its shape. The shape collapses two
- * orthogonal dimensions instead of an enum (ADR-012):
+ * orthogonal dimensions instead of an enum:
  *
  * - `key` — nullable string. When set, the row is upsert-by-key (single
  *   slot per `(package, app, actor, key)`); when null, the row is append-
@@ -255,9 +278,6 @@ export const runLogs = pgTable(
  *
  * Actor columns mirror the `runs` convention: `actor_type ∈
  * {'user', 'end_user', 'shared'}`, `actor_id` NULL iff `actor_type='shared'`.
- *
- * See `docs/adr/ADR-011-checkpoint-unification.md` and
- * `docs/adr/ADR-012-memory-as-tool.md`.
  */
 export const packagePersistence = pgTable(
   "package_persistence",
@@ -280,8 +300,8 @@ export const packagePersistence = pgTable(
     runId: text("run_id").references(() => runs.id, {
       onDelete: "set null",
     }),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     // Upsert target for named slots. The partial WHERE keeps archive rows
@@ -388,7 +408,7 @@ export const llmUsage = pgTable(
     // Proxy dedup key — one per upstream call minted by the proxy route.
     // Null on runner-source rows (they dedup on run_id instead).
     requestId: text("request_id"),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_llm_usage_org_id").on(table.orgId),
@@ -423,10 +443,9 @@ export const llmUsage = pgTable(
  * provider id, target host, HTTP status, and duration for observability /
  * abuse-detection / per-org telemetry.
  *
- * `cost_usd` is 0 today and excluded from `computeRunCost` — see
- * `apps/api/src/services/credential-proxy-usage.ts` header. When a metered
- * credential provider ships, route its cost rows through `llm_usage` with a
- * new `source` enum value rather than resurrecting a SUM here, so the
+ * No cost column: this is an audit ledger, not a billing ledger. When a
+ * metered credential provider ships, route its cost rows through `llm_usage`
+ * with a new `source` enum value rather than adding a SUM here, so the
  * single-ledger invariant for `runs.cost` is preserved.
  *
  * `request_id` is the dedup key: the credential-proxy route derives one per
@@ -452,16 +471,15 @@ export const credentialProxyUsage = pgTable(
     applicationId: text("application_id").references(() => applications.id, {
       onDelete: "set null",
     }),
-    // Provider id the call hit (e.g. "gmail", "clickup"). Matches the
-    // credential-proxy route path parameter.
-    providerId: text("provider_id").notNull(),
+    // Integration id the call hit (e.g. "@appstrate/gmail"). Matches the
+    // credential-proxy `X-Integration-Id` request header.
+    integrationId: text("integration_id").notNull(),
     // Upstream host for audit (no path/query — avoid logging secrets).
     targetHost: text("target_host"),
     httpStatus: integer("http_status"),
     durationMs: integer("duration_ms"),
-    costUsd: doublePrecision("cost_usd").notNull().default(0),
     requestId: text("request_id").notNull().unique(),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_credential_proxy_usage_org_id").on(table.orgId),
@@ -478,9 +496,12 @@ export const schedules = pgTable(
     packageId: text("package_id")
       .notNull()
       .references(() => packages.id, { onDelete: "cascade" }),
-    connectionProfileId: uuid("connection_profile_id")
-      .notNull()
-      .references(() => connectionProfiles.id, { onDelete: "cascade" }),
+    // Actor the scheduled run executes as. Exactly one of userId / endUserId
+    // is set (or both null for an org-level / system-owned schedule).
+    userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
+    endUserId: text("end_user_id").references(() => endUsers.id, {
+      onDelete: "cascade",
+    }),
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
@@ -504,15 +525,24 @@ export const schedules = pgTable(
     // ("latest", "next"). Resolved at fire time the same way the run
     // route resolves `?version=`.
     versionOverride: text("version_override"),
-    lastRunAt: timestamp("last_run_at"),
-    nextRunAt: timestamp("next_run_at"),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+    // Per-schedule integration connection overrides — frozen at schedule
+    // creation/edit (mirrors `configOverride`). Same shape as
+    // `runs.connectionOverrides`. Loses to admin pin at fire time.
+    connectionOverrides: jsonb("connection_overrides").$type<Record<string, string>>(),
+    lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+    nextRunAt: timestamp("next_run_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_schedules_package_id").on(table.packageId),
-    index("idx_schedules_connection_profile_id").on(table.connectionProfileId),
+    index("idx_schedules_user_id").on(table.userId),
+    index("idx_schedules_end_user_id").on(table.endUserId),
     index("idx_package_schedules_org_id").on(table.orgId),
     index("idx_package_schedules_app_id").on(table.applicationId),
+    check(
+      "package_schedules_at_most_one_actor",
+      sql`NOT (user_id IS NOT NULL AND end_user_id IS NOT NULL)`,
+    ),
   ],
 );

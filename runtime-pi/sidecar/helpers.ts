@@ -12,7 +12,7 @@
 export { isBlockedHost, isBlockedUrl } from "./ssrf.ts";
 
 // Accepts both simple IDs (gmail) and scoped IDs (@appstrate/gmail)
-export const PROVIDER_ID_RE = /^(@[a-z0-9][a-z0-9-]*\/)?[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
+export const INTEGRATION_ID_RE = /^(@[a-z0-9][a-z0-9-]*\/)?[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
 // Default cap on upstream response bytes the sidecar buffers before
 // returning them inline. Set generously enough that typical provider
@@ -23,17 +23,16 @@ export const PROVIDER_ID_RE = /^(@[a-z0-9][a-z0-9-]*\/)?[a-z0-9]([a-z0-9-]*[a-z0
 export const MAX_RESPONSE_SIZE = 256 * 1024; // 256 KB
 export const ABSOLUTE_MAX_RESPONSE_SIZE = 32 * 1024 * 1024; // 32 MB — hard cap when blob store is present (covers PDFs/images/archives), aligned with MAX_MCP_ENVELOPE_SIZE × 2
 export const OUTBOUND_TIMEOUT_MS = 30_000;
-export const MAX_SUBSTITUTE_BODY_SIZE = 5 * 1024 * 1024; // 5MB
 export const LLM_PROXY_TIMEOUT_MS = 1_800_000; // 30 minutes (patched from 300_000 — was killing legitimate long-running agentic runs at exactly 5 min)
 
 /**
- * Default cap on simultaneous `provider_call` MCP invocations per run.
+ * Default cap on simultaneous `api_call` MCP invocations per run.
  * Three matches the typical browsing concurrency a single LLM turn can
  * usefully exploit while leaving headroom under most providers' per-IP
  * rate limits. Operators can override via
- * `SIDECAR_PROVIDER_CALL_CONCURRENCY`.
+ * `SIDECAR_API_CALL_CONCURRENCY`.
  */
-export const DEFAULT_PROVIDER_CALL_CONCURRENCY = 3;
+export const DEFAULT_API_CALL_CONCURRENCY = 3;
 
 /** Absolute hard-cap for any body-size env override. Above this, raising
  *  the limit requires real engineering (streaming refactor, chunked
@@ -94,7 +93,7 @@ export function readPositiveByteEnv(
 }
 
 /**
- * Hard upper bound on `provider_call` request bodies after base64 decode
+ * Hard upper bound on `api_call` request bodies after base64 decode
  * (binary path) or string materialization (text path). Configurable via
  * `SIDECAR_MAX_REQUEST_BODY_BYTES`. Default 10 MB.
  *
@@ -152,7 +151,7 @@ export type {
 // wire-identical to what the platform's `/api/credential-proxy/proxy`
 // route resolves from the DB — both are `ProxyCredentialsPayload`. The
 // local alias keeps call sites readable (this is the HTTP response
-// body from `/internal/providers/credentials`).
+// body from `/internal/integration-credentials/{scope}/{name}`).
 export type { ProxyCredentialsPayload as CredentialsResponse } from "@appstrate/connect/proxy-primitives";
 
 // Import from the dedicated subpath so the compiled sidecar binary does
@@ -168,34 +167,11 @@ export {
   normalizeAuthScheme,
 } from "@appstrate/connect/proxy-primitives";
 
-import { matchesAuthorizedUriSpec } from "@appstrate/connect/proxy-primitives";
-
-/**
- * Check a target URL against a list of `authorizedUris` patterns using
- * the AFPS 1.3 spec semantics (`*` matches a single path segment, `**`
- * matches any substring). Thin wrapper exposing a `(url, patterns[])`
- * call shape.
- */
-export function matchesAuthorizedUri(url: string, patterns: string[]): boolean {
-  return patterns.some((p) => matchesAuthorizedUriSpec(p, url));
-}
-
-/**
- * Strip userinfo (`user:pass@`) and fragment (`#…`) from a URL. Mirrors
- * WHATWG Fetch `Response.url` sanitisation. Used on every redirect hop
- * before policy checks / re-fetch (block attacker-injected basic-auth,
- * keep allowlist matcher host-based) and on the `finalUrl` envelope
- * field (no credential or implicit-flow-fragment leakage to agents).
- * Returns `undefined` on parse failure so callers can omit the field.
- */
-export function stripUserInfoAndFragment(url: string): string | undefined {
-  try {
-    const u = new URL(url);
-    u.username = "";
-    u.password = "";
-    u.hash = "";
-    return u.toString();
-  } catch {
-    return undefined;
-  }
-}
+// `matchesAuthorizedUri` (`(url, patterns[])` allowlist check, AFPS spec
+// `*`/`**` semantics) and `stripUserInfoAndFragment` (WHATWG-style URL
+// sanitisation used on redirect hops + the `finalUrl` envelope) are
+// single-sourced from the shared outbound-HTTP engine in
+// `@appstrate/afps-runtime/resolvers` — the same module the sidecar's
+// `executeApiCall` redirect-follower uses, so allowlist matching can never
+// drift between the preflight here and the per-hop checks there.
+export { matchesAuthorizedUri, stripUserInfoAndFragment } from "@appstrate/afps-runtime/resolvers";

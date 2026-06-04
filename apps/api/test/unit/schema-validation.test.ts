@@ -3,28 +3,26 @@
 import { describe, it, expect } from "bun:test";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 import { validateManifest } from "@appstrate/core/validation";
-import {
-  validateConfig,
-  validateInput,
-  validateOutput,
-  validateAgentContent,
-} from "../../src/services/schema.ts";
+import { validateConfig, validateInput, validateOutput } from "../../src/services/schema.ts";
 
 // --- Fixtures ---
 
 const VALID_MANIFEST = {
-  schemaVersion: "1.0",
+  schema_version: "0.1",
   name: "@test-org/test-agent",
   version: "1.0.0",
   type: "agent",
-  displayName: "Test Agent",
+  display_name: "Test Agent",
   description: "A test agent",
   author: "test",
   dependencies: {
-    providers: { "@appstrate/gmail": "1.0.0" },
+    integrations: { "@appstrate/gmail": "1.0.0" },
     skills: { "@appstrate/greeting-style": "*" },
-    tools: { "@appstrate/web-search": "*" },
+    mcp_servers: { "@appstrate/web-search": "*" },
   },
+  // Declares an output schema below, so the `output` runtime tool must be
+  // enabled (enforced by agentManifestSchema's superRefine).
+  runtime_tools: ["output"],
   config: {
     schema: {
       type: "object",
@@ -109,14 +107,14 @@ describe("validateManifest", () => {
 
   it("accepts manifest without optional sections (input, output, state)", () => {
     const minimal = {
-      schemaVersion: "1.0",
+      schema_version: "0.1",
       name: "@test-org/minimal",
       version: "1.0.0",
       type: "agent",
-      displayName: "Minimal",
+      display_name: "Minimal",
       description: "Minimal agent",
       author: "test",
-      dependencies: { providers: {} },
+      dependencies: { integrations: {} },
     };
     const result = validateManifest(minimal);
     expect(result.valid).toBe(true);
@@ -145,11 +143,11 @@ describe("validateManifest", () => {
 
   it("rejects manifest missing required fields", () => {
     const bad = {
-      schemaVersion: "1.0",
+      schema_version: "0.1",
       name: "@test-org/test",
       version: "1.0.0",
       type: "agent",
-      dependencies: { providers: {} },
+      dependencies: { integrations: {} },
     };
     const result = validateManifest(bad);
     expect(result.valid).toBe(false);
@@ -445,58 +443,5 @@ describe("validateOutput", () => {
     const result = validateOutput({ summary: "Done", count: "5" }, OUTPUT_SCHEMA);
     // AJV with coerceTypes should accept "5" as a number
     expect(result.valid).toBe(true);
-  });
-});
-
-// =====================================================
-// validateAgentContent
-// =====================================================
-
-describe("validateAgentContent", () => {
-  it("bare slug without scope is rejected", () => {
-    const result = validateAgentContent("Do something", [
-      { id: "web-search", description: "Search", content: "..." },
-    ]);
-    expect(result.valid).toBe(false);
-    expect(result.errors[0]).toContain("web-search");
-  });
-
-  it("valid prompt and skills pass (scoped name)", () => {
-    const result = validateAgentContent("Do something", [
-      { id: "@appstrate/web-search", description: "Search", content: "..." },
-    ]);
-    expect(result.valid).toBe(true);
-    expect(result.errors).toHaveLength(0);
-  });
-
-  it("empty prompt fails", () => {
-    const result = validateAgentContent("", []);
-    expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes("prompt"))).toBe(true);
-  });
-
-  it("invalid skill ID fails", () => {
-    const result = validateAgentContent("Do something", [
-      { id: "Invalid Skill!", description: "Bad", content: "..." },
-    ]);
-    expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes("Invalid Skill!"))).toBe(true);
-  });
-
-  it("invalid scoped skill ID fails", () => {
-    const result = validateAgentContent("Do something", [
-      { id: "@UPPER/case", description: "Bad", content: "..." },
-    ]);
-    expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes("@UPPER/case"))).toBe(true);
-  });
-
-  it("duplicate skill IDs fail", () => {
-    const result = validateAgentContent("Do something", [
-      { id: "@appstrate/search", description: "A", content: "..." },
-      { id: "@appstrate/search", description: "B", content: "..." },
-    ]);
-    expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes("duplicated"))).toBe(true);
   });
 });

@@ -1972,7 +1972,7 @@ export function createOidcRouter() {
   // instead; the 8-char form aligns with GitHub's device flow UX while
   // still satisfying the spec's "2⁻¹⁶ probability of a successful attack
   // in 15 minutes" example when combined with per-IP rate limiting.
-  // ADR-006 §Protocol parameters: 5/15min/IP on this SSR endpoint; the
+  // Protocol parameters: 5/15min/IP on this SSR endpoint; the
   // BA-direct `/device/approve` carries its own 10/min/IP ceiling in
   // `oidcGuardsPlugin`. Combined with the per-row `MAX_APPROVE_ATTEMPTS=5`
   // counter, a single IP cannot burn through enough wrong-realm /

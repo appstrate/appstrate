@@ -6,7 +6,7 @@
  *
  * The package already ships several typed errors close to where they
  * are raised (`BundleError`, `BundleSignaturePolicyError`,
- * `AfpsEntrypointError`, `RunTimeoutError`). This module sits at the
+ * `RunTimeoutError`). This module sits at the
  * top so consumers can:
  *
  *   - import every typed error from a single subpath
@@ -33,19 +33,17 @@ import {
   BundleSignaturePolicyError,
   type SignaturePolicyReason,
 } from "./bundle/signature-policy.ts";
-import { AfpsEntrypointError, type AfpsEntrypointErrorCode } from "./bundle/tool-entrypoint.ts";
 
 /** Stable, machine-readable code for every error class in this module. */
 export type AfpsErrorCode =
   | BundleErrorCode
   | SignaturePolicyReason
   | "unsigned_required"
-  | AfpsEntrypointErrorCode
   | "RUN_TIMEOUT"
   | "RUN_CANCELLED"
   | "WORKLOAD_EXIT_NONZERO"
-  | "PROVIDER_AUTHORIZED_URIS_EMPTY"
-  | "PROVIDER_AUTHORIZED_URIS_MISMATCH"
+  | "AUTHORIZED_URIS_EMPTY"
+  | "AUTHORIZED_URIS_MISMATCH"
   | "RESOLVER_INVALID_TOOL_SHAPE"
   | "RESOLVER_MISSING_REQUIRED"
   | "RESOLVER_BODY_REFERENCE_FORBIDDEN"
@@ -54,6 +52,8 @@ export type AfpsErrorCode =
   | "RESOLVER_PATH_OUTSIDE_ALLOWED_ROOTS"
   | "RESOLVER_PATH_SYMLINK_REFUSED"
   | "RESOLVER_PATH_INVALID"
+  | "RESOLVER_URL_BLOCKED"
+  | "RESOLVER_REDIRECT_BLOCKED"
   | "RUN_HISTORY_FETCH_FAILED"
   | "RUN_HISTORY_BAD_RESPONSE"
   | "RUN_HISTORY_TIMEOUT"
@@ -114,13 +114,13 @@ export class WorkloadExitError extends AfpsRuntimeError {
   }
 }
 
-/** A provider tool tried to call a target outside its allowlist. */
-export class ProviderAuthorizationError extends AfpsRuntimeError {
-  override readonly name = "ProviderAuthorizationError";
-  readonly code: "PROVIDER_AUTHORIZED_URIS_EMPTY" | "PROVIDER_AUTHORIZED_URIS_MISMATCH";
+/** An integration `api_call` tool tried to call a target outside its allowlist. */
+export class AuthorizedUrisError extends AfpsRuntimeError {
+  override readonly name = "AuthorizedUrisError";
+  readonly code: "AUTHORIZED_URIS_EMPTY" | "AUTHORIZED_URIS_MISMATCH";
 
   constructor(
-    code: "PROVIDER_AUTHORIZED_URIS_EMPTY" | "PROVIDER_AUTHORIZED_URIS_MISMATCH",
+    code: "AUTHORIZED_URIS_EMPTY" | "AUTHORIZED_URIS_MISMATCH",
     message: string,
     details?: Record<string, unknown>,
   ) {
@@ -140,7 +140,9 @@ export class ResolverError extends AfpsRuntimeError {
     | "RESOLVER_BODY_INVALID"
     | "RESOLVER_PATH_OUTSIDE_ALLOWED_ROOTS"
     | "RESOLVER_PATH_SYMLINK_REFUSED"
-    | "RESOLVER_PATH_INVALID";
+    | "RESOLVER_PATH_INVALID"
+    | "RESOLVER_URL_BLOCKED"
+    | "RESOLVER_REDIRECT_BLOCKED";
 
   constructor(
     code:
@@ -151,7 +153,12 @@ export class ResolverError extends AfpsRuntimeError {
       | "RESOLVER_BODY_INVALID"
       | "RESOLVER_PATH_OUTSIDE_ALLOWED_ROOTS"
       | "RESOLVER_PATH_SYMLINK_REFUSED"
-      | "RESOLVER_PATH_INVALID",
+      | "RESOLVER_PATH_INVALID"
+      // The standalone CLI's `LocalIntegrationResolver` surfaces these
+      // when the shared outbound-HTTP engine refuses the initial target
+      // (SSRF blocklist) or a redirect hop (per-hop SSRF / off-allowlist).
+      | "RESOLVER_URL_BLOCKED"
+      | "RESOLVER_REDIRECT_BLOCKED",
     message: string,
     details?: Record<string, unknown>,
   ) {
@@ -239,8 +246,6 @@ export function toProblem(
 export {
   BundleError,
   BundleSignaturePolicyError,
-  AfpsEntrypointError,
   type BundleErrorCode,
   type SignaturePolicyReason,
-  type AfpsEntrypointErrorCode,
 };

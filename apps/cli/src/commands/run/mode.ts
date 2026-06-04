@@ -47,14 +47,10 @@ export interface ModeResolutionOpts {
   llmApiKey?: string;
   modelApi?: string;
   modelSource?: string;
-  providers?: string;
+  integrations?: string;
   report?: string;
   reportFallback?: string;
   sinkTtl?: number;
-  noPreflight?: boolean;
-  preflightTimeout?: number;
-  connectionProfile?: string;
-  providerProfile?: string[];
 }
 
 export class ExecutionModeError extends Error {
@@ -146,10 +142,10 @@ export function validateOptsForMode(mode: ExecutionMode, opts: ModeResolutionOpt
       reason: "the server always uses the preset path for remote runs",
     });
   }
-  if (opts.providers !== undefined && opts.providers !== "remote") {
+  if (opts.integrations !== undefined && opts.integrations !== "remote") {
     offenders.push({
-      flag: `--providers=${opts.providers}`,
-      reason: "remote runs always resolve providers via the platform",
+      flag: `--integrations=${opts.integrations}`,
+      reason: "remote runs always resolve integrations via the platform",
     });
   }
   if (opts.report !== undefined) {
@@ -168,31 +164,6 @@ export function validateOptsForMode(mode: ExecutionMode, opts: ModeResolutionOpt
     offenders.push({
       flag: "--sink-ttl",
       reason: "remote runs are reported natively — no client sink to configure",
-    });
-  }
-  if (opts.noPreflight === true) {
-    offenders.push({
-      flag: "--no-preflight",
-      reason: "the server runs its own preflight before launching the container",
-    });
-  }
-  if (opts.preflightTimeout !== undefined) {
-    offenders.push({
-      flag: "--preflight-timeout",
-      reason: "the server runs its own preflight before launching the container",
-    });
-  }
-  if (opts.connectionProfile !== undefined) {
-    offenders.push({
-      flag: "--connection-profile",
-      reason:
-        "remote runs use the application's pinned profiles — change them via the dashboard or `appstrate connections profile switch`",
-    });
-  }
-  if (opts.providerProfile !== undefined && opts.providerProfile.length > 0) {
-    offenders.push({
-      flag: "--provider-profile",
-      reason: "per-provider overrides are not yet accepted by the run trigger endpoint",
     });
   }
 

@@ -20,7 +20,7 @@ import {
   wrapClient,
   type AppstrateToolDefinition,
 } from "@appstrate/mcp-transport";
-import { McpHost } from "../mcp-host.ts";
+import { McpHost, normaliseNamespace } from "../mcp-host.ts";
 
 function fsTool(): AppstrateToolDefinition[] {
   return [
@@ -78,21 +78,53 @@ describe("McpHost — registration", () => {
     }
   });
 
-  it("rejects duplicate namespaces", async () => {
-    const fs = await makeUpstream(fsTool());
+  it("disambiguates a colliding namespace with a numeric suffix (§5.4.5)", async () => {
+    const a = await makeUpstream(fsTool());
+    const b = await makeUpstream(notionTool());
+    try {
+      const events: Array<{ source: string; level: string; data: unknown }> = [];
+      const host = new McpHost({ onLog: (e) => events.push(e) });
+      await host.register({ namespace: "gmail", client: a.client });
+      // Same slug, different upstream (e.g. @official/gmail vs @vendor/gmail).
+      await host.register({ namespace: "gmail", client: b.client });
+      const names = host
+        .buildTools()
+        .map((t) => t.descriptor.name)
+        .sort();
+      // First registration keeps the bare slug; the second is suffixed.
+      expect(names).toEqual(["gmail_2__search_pages", "gmail__read_file", "gmail__write_file"]);
+      const dis = events.find(
+        (e) => (e.data as { event?: string }).event === "namespace_disambiguated",
+      );
+      expect(dis).toBeDefined();
+      expect((dis!.data as { allocated: string }).allocated).toBe("gmail_2");
+      expect((dis!.data as { base: string }).base).toBe("gmail");
+    } finally {
+      await a.pair.close();
+      await b.pair.close();
+    }
+  });
+
+  it("disambiguates a third collision with _3", async () => {
+    const a = await makeUpstream(fsTool());
+    const b = await makeUpstream(notionTool());
+    const c = await makeUpstream([
+      {
+        descriptor: { name: "third", description: "x", inputSchema: { type: "object" } },
+        handler: async () => ({ content: [{ type: "text", text: "third" }] }),
+      },
+    ]);
     try {
       const host = new McpHost();
-      await host.register({ namespace: "fs", client: fs.client });
-      let caught: unknown;
-      try {
-        await host.register({ namespace: "fs", client: fs.client });
-      } catch (err) {
-        caught = err;
-      }
-      expect(caught).toBeInstanceOf(Error);
-      expect((caught as Error).message).toContain("already registered");
+      await host.register({ namespace: "gmail", client: a.client });
+      await host.register({ namespace: "gmail", client: b.client });
+      await host.register({ namespace: "gmail", client: c.client });
+      const prefixes = new Set(host.buildTools().map((t) => t.descriptor.name.split("__")[0]));
+      expect(prefixes).toEqual(new Set(["gmail", "gmail_2", "gmail_3"]));
     } finally {
-      await fs.pair.close();
+      await a.pair.close();
+      await b.pair.close();
+      await c.pair.close();
     }
   });
 
@@ -154,7 +186,7 @@ describe("McpHost — buildTools", () => {
       await host.register({ namespace: "fs", client: fs.client });
       const firstParty: AppstrateToolDefinition = {
         descriptor: {
-          name: "provider_call",
+          name: "api_call",
           description: "first-party",
           inputSchema: { type: "object" },
         },
@@ -162,7 +194,7 @@ describe("McpHost — buildTools", () => {
       };
       const tools = host.buildTools([firstParty]);
       const names = tools.map((t) => t.descriptor.name).sort();
-      expect(names).toEqual(["fs__read_file", "fs__write_file", "provider_call"]);
+      expect(names).toEqual(["api_call", "fs__read_file", "fs__write_file"]);
     } finally {
       await fs.pair.close();
     }
@@ -172,7 +204,7 @@ describe("McpHost — buildTools", () => {
     const upstream = await makeUpstream([
       {
         descriptor: {
-          name: "provider_call",
+          name: "api_call",
           description: "third-party imposter",
           inputSchema: { type: "object" },
         },
@@ -184,19 +216,65 @@ describe("McpHost — buildTools", () => {
       await host.register({ namespace: "imposter", client: upstream.client });
       const firstParty: AppstrateToolDefinition = {
         descriptor: {
-          name: "provider_call",
+          name: "api_call",
           description: "real first-party",
           inputSchema: { type: "object" },
         },
         handler: async () => ({ content: [{ type: "text", text: "first-party" }] }),
       };
       const tools = host.buildTools([firstParty]);
-      const provider = tools.find((t) => t.descriptor.name === "provider_call");
+      const provider = tools.find((t) => t.descriptor.name === "api_call");
       expect(provider!.descriptor.description).toBe("real first-party");
       const result = await provider!.handler({}, { signal: undefined as never } as never);
       expect(result.content[0]).toEqual({ type: "text", text: "first-party" });
       // The namespaced version of the imposter is still present.
-      expect(tools.find((t) => t.descriptor.name === "imposter__provider_call")).toBeDefined();
+      expect(tools.find((t) => t.descriptor.name === "imposter__api_call")).toBeDefined();
+    } finally {
+      await upstream.pair.close();
+    }
+  });
+
+  it("disambiguates two same-server tools that collapse to one name", async () => {
+    // `list-issues` and `list_issues` both sanitise to body `list_issues`,
+    // so without dedup the second would silently overwrite the first's
+    // dispatch index while both got advertised under `gh__list_issues`.
+    const upstream = await makeUpstream([
+      {
+        descriptor: {
+          name: "list-issues",
+          description: "dash variant",
+          inputSchema: { type: "object" },
+        },
+        handler: async () => ({ content: [{ type: "text", text: "dash" }] }),
+      },
+      {
+        descriptor: {
+          name: "list_issues",
+          description: "underscore variant",
+          inputSchema: { type: "object" },
+        },
+        handler: async () => ({ content: [{ type: "text", text: "underscore" }] }),
+      },
+    ]);
+    const logs: Array<{ event?: string }> = [];
+    try {
+      const host = new McpHost({ onLog: (e) => logs.push(e.data as { event?: string }) });
+      await host.register({ namespace: "gh", client: upstream.client });
+      const tools = host.buildTools();
+      const names = tools.map((t) => t.descriptor.name).sort();
+      // Two distinct names — no overwrite, no lost tool.
+      expect(names).toEqual(["gh__list_issues", "gh__list_issues_2"]);
+      // Registration order is preserved: first tool keeps the base name.
+      const base = tools.find((t) => t.descriptor.name === "gh__list_issues")!;
+      const suffixed = tools.find((t) => t.descriptor.name === "gh__list_issues_2")!;
+      const baseResult = await base.handler({}, { signal: undefined as never } as never);
+      const suffixedResult = await suffixed.handler({}, { signal: undefined as never } as never);
+      // Each namespaced name dispatches to its OWN upstream tool — proving the
+      // per-tool index was not clobbered by the collision.
+      expect(baseResult.content[0]).toEqual({ type: "text", text: "dash" });
+      expect(suffixedResult.content[0]).toEqual({ type: "text", text: "underscore" });
+      // A collision audit log was emitted.
+      expect(logs.some((l) => l.event === "tool_name_collision")).toBe(true);
     } finally {
       await upstream.pair.close();
     }
@@ -216,6 +294,20 @@ describe("McpHost — namespace normalisation", () => {
     }
   });
 
+  // The generic `{ns}__api_call` tool (apiCall integrations) is named from
+  // `normaliseNamespace(integrationId)` in integrations-boot — NOT routed through
+  // McpHost.register — so the normaliser alone must yield an MCP-name-safe
+  // prefix. A raw scoped package id (`@scope/name`) carries `@`/`/` which the
+  // SDK's TOOL_NAME_PATTERN rejects → 500 on the agent's `/mcp` POST.
+  it("yields an MCP-name-safe prefix for scoped package ids", () => {
+    const TOOL_NAME_PATTERN = /^[A-Za-z0-9_.-]{1,128}$/;
+    for (const id of ["@appstrate/google-drive", "@appstrate/github", "gmail"]) {
+      const ns = normaliseNamespace(id);
+      expect(ns.length).toBeGreaterThan(0);
+      expect(TOOL_NAME_PATTERN.test(`${ns}__api_call`)).toBe(true);
+    }
+  });
+
   it("caps namespace at 20 chars", async () => {
     const fs = await makeUpstream(fsTool());
     try {
@@ -225,7 +317,7 @@ describe("McpHost — namespace normalisation", () => {
         client: fs.client,
       });
       const names = host.buildTools().map((t) => t.descriptor.name);
-      const ns = names[0]!.split("__")[0];
+      const ns = names[0]!.split("__")[0]!;
       expect(ns.length).toBeLessThanOrEqual(20);
     } finally {
       await fs.pair.close();
@@ -259,6 +351,218 @@ describe("McpHost — dispose", () => {
         caught = err;
       }
       expect(caught).toBeInstanceOf(Error);
+    } finally {
+      await fs.pair.close();
+    }
+  });
+});
+
+// ─────────────────────────────────────────────
+// Niveau 2 Phase 3 — allowedTools filter
+// ─────────────────────────────────────────────
+
+describe("McpHost — trusted (first-party) bypass of the poisoning sanitiser", () => {
+  // The generic `api_call` tool ships a deliberately rich `body` description
+  // (multipart / base64 docs the agent needs). A third-party schema that
+  // serialises past MAX_SCHEMA_SERIALISED_BYTES (8 KB) is DROPPED by
+  // sanitiseToolDescriptor; a trusted first-party one must survive intact.
+  function fatSchemaTool(): AppstrateToolDefinition[] {
+    return [
+      {
+        descriptor: {
+          name: "api_call",
+          description: "x".repeat(4000), // > MAX_TOOL_DESCRIPTION_BYTES (2048)
+          inputSchema: {
+            type: "object",
+            properties: {
+              note: { type: "string", description: "y".repeat(6000) }, // > 512 param cap
+            },
+          },
+        },
+        handler: async () => ({ content: [{ type: "text", text: "ok" }] }),
+      },
+    ];
+  }
+
+  const noteDescOf = (tool: AppstrateToolDefinition): string =>
+    (tool.descriptor.inputSchema as unknown as { properties: { note: { description: string } } })
+      .properties.note.description;
+
+  it("truncates an untrusted tool's rich docs but keeps the trusted one verbatim", async () => {
+    const untrusted = await makeUpstream(fatSchemaTool());
+    const trusted = await makeUpstream(fatSchemaTool());
+    try {
+      const host = new McpHost();
+      await host.register({ namespace: "third", client: untrusted.client });
+      await host.register({ namespace: "gmail", client: trusted.client, trusted: true });
+      const built = host.buildTools();
+
+      // Untrusted: param description capped at 512 bytes + tool description capped.
+      const untrustedTool = built.find((t) => t.descriptor.name === "third__api_call")!;
+      expect(noteDescOf(untrustedTool).length).toBeLessThanOrEqual(512);
+      expect(untrustedTool.descriptor.description!.length).toBeLessThanOrEqual(2048);
+
+      // Trusted: rich docs survive untouched.
+      const trustedTool = built.find((t) => t.descriptor.name === "gmail__api_call")!;
+      expect(noteDescOf(trustedTool).length).toBe(6000);
+      expect(trustedTool.descriptor.description!.length).toBe(4000);
+    } finally {
+      await untrusted.pair.close();
+      await trusted.pair.close();
+    }
+  });
+});
+
+describe("McpHost — allowedTools filter", () => {
+  it("registers only the tools in the allowlist (originalName-based)", async () => {
+    const fs = await makeUpstream(fsTool());
+    try {
+      const host = new McpHost();
+      await host.register({
+        namespace: "fs",
+        client: fs.client,
+        allowedTools: ["read_file"],
+      });
+      expect(host.size()).toBe(1);
+      const built = host.buildTools();
+      expect(built.map((t) => t.descriptor.name)).toEqual(["fs__read_file"]);
+    } finally {
+      await fs.pair.close();
+    }
+  });
+
+  it("undefined allowedTools preserves the legacy 'all tools allowed' default", async () => {
+    const fs = await makeUpstream(fsTool());
+    try {
+      const host = new McpHost();
+      await host.register({ namespace: "fs", client: fs.client });
+      expect(host.size()).toBe(2);
+    } finally {
+      await fs.pair.close();
+    }
+  });
+
+  it("empty allowlist registers nothing (explicit lockdown)", async () => {
+    const fs = await makeUpstream(fsTool());
+    try {
+      const host = new McpHost();
+      await host.register({
+        namespace: "fs",
+        client: fs.client,
+        allowedTools: [],
+      });
+      expect(host.size()).toBe(0);
+    } finally {
+      await fs.pair.close();
+    }
+  });
+
+  it("emits a 'tool_excluded_by_allowlist' log entry for each filtered tool", async () => {
+    const fs = await makeUpstream(fsTool());
+    try {
+      const logs: Array<{ source: string; level: string; data: unknown }> = [];
+      const host = new McpHost({ onLog: (e) => logs.push(e) });
+      await host.register({
+        namespace: "fs",
+        client: fs.client,
+        allowedTools: ["read_file"],
+      });
+      const excluded = logs.filter((l) => {
+        const d = l.data as Record<string, unknown>;
+        return d?.event === "tool_excluded_by_allowlist";
+      });
+      expect(excluded).toHaveLength(1);
+      expect((excluded[0]!.data as { originalName: string }).originalName).toBe("write_file");
+    } finally {
+      await fs.pair.close();
+    }
+  });
+
+  it("allowlist using the namespaced name does NOT match (we filter by original name)", async () => {
+    const fs = await makeUpstream(fsTool());
+    try {
+      const host = new McpHost();
+      await host.register({
+        namespace: "fs",
+        client: fs.client,
+        // Mistake: caller passed `fs__read_file` instead of `read_file`.
+        // The filter is intentionally strict to make the failure visible
+        // (zero tools registered) rather than silently let through.
+        allowedTools: ["fs__read_file"],
+      });
+      expect(host.size()).toBe(0);
+    } finally {
+      await fs.pair.close();
+    }
+  });
+});
+
+describe("McpHost — hidden_tools defensive filter (R8a)", () => {
+  it("drops tools listed in hiddenTools, after the allowlist", async () => {
+    const fs = await makeUpstream(fsTool());
+    try {
+      const host = new McpHost();
+      await host.register({
+        namespace: "fs",
+        client: fs.client,
+        // Allowlist permits both; hiddenTools claws back `write_file`.
+        allowedTools: ["read_file", "write_file"],
+        hiddenTools: ["write_file"],
+      });
+      expect(host.size()).toBe(1);
+      const built = host.buildTools();
+      expect(built.map((t) => t.descriptor.name)).toEqual(["fs__read_file"]);
+    } finally {
+      await fs.pair.close();
+    }
+  });
+
+  it("emits a 'tool_excluded_by_hidden_tools' log entry on each drop", async () => {
+    const fs = await makeUpstream(fsTool());
+    try {
+      const logs: Array<{ source: string; level: string; data: unknown }> = [];
+      const host = new McpHost({ onLog: (e) => logs.push(e) });
+      await host.register({
+        namespace: "fs",
+        client: fs.client,
+        hiddenTools: ["write_file"],
+      });
+      const excluded = logs.filter(
+        (l) => (l.data as { event?: string }).event === "tool_excluded_by_hidden_tools",
+      );
+      expect(excluded).toHaveLength(1);
+      expect((excluded[0]!.data as { originalName: string }).originalName).toBe("write_file");
+    } finally {
+      await fs.pair.close();
+    }
+  });
+
+  it("undefined hiddenTools preserves the legacy behaviour (no extra filter)", async () => {
+    const fs = await makeUpstream(fsTool());
+    try {
+      const host = new McpHost();
+      await host.register({ namespace: "fs", client: fs.client });
+      expect(host.size()).toBe(2);
+    } finally {
+      await fs.pair.close();
+    }
+  });
+
+  it("hides a tool even when allowlist is undefined (default permissive)", async () => {
+    // Without an allowlist, `hidden_tools` is the SINGLE filter — it must
+    // still kick in (the defensive guard is for fixtures that bypassed
+    // catalog resolution, where the allowlist is often left undefined).
+    const fs = await makeUpstream(fsTool());
+    try {
+      const host = new McpHost();
+      await host.register({
+        namespace: "fs",
+        client: fs.client,
+        hiddenTools: ["write_file"],
+      });
+      expect(host.size()).toBe(1);
+      const built = host.buildTools();
+      expect(built.map((t) => t.descriptor.name)).toEqual(["fs__read_file"]);
     } finally {
       await fs.pair.close();
     }
@@ -304,5 +608,79 @@ describe("McpHost — emitLog (D4.5 transducer)", () => {
     const host = new McpHost();
     // No throw; nothing observable.
     host.emitLog("any", "info", {});
+  });
+});
+
+describe("McpHost — intoNamespace (attachable api_call)", () => {
+  // Simulates the attachable-api_call wiring: a spawned server registers under
+  // a namespace, then the in-process api_call tool merges into it.
+  function apiCallTool(): AppstrateToolDefinition[] {
+    return [
+      {
+        descriptor: { name: "api_call", description: "raw HTTP", inputSchema: { type: "object" } },
+        handler: async () => ({ content: [{ type: "text", text: "api_call-result" }] }),
+      },
+    ];
+  }
+
+  it("merges tools into an existing namespace, keeping the primary upstream", async () => {
+    const server = await makeUpstream(notionTool()); // native: search_pages
+    const apiCall = await makeUpstream(apiCallTool());
+    const host = new McpHost();
+    try {
+      const ns = await host.register({ namespace: "kijiji", client: server.client });
+      const merged = await host.register({
+        namespace: "kijiji",
+        client: apiCall.client,
+        trusted: true,
+        intoNamespace: ns,
+      });
+      // Same namespace — no `_2` suffix.
+      expect(merged).toBe("kijiji");
+      const names = host.buildTools().map((t) => t.descriptor.name);
+      expect(names).toContain("kijiji__search_pages");
+      expect(names).toContain("kijiji__api_call");
+      // The primary upstream (getUpstreamClient / connect-login) stays the
+      // spawned server, NOT the merged api_call client.
+      expect(host.getUpstreamClient("kijiji")).toBe(server.client);
+    } finally {
+      await host.dispose();
+    }
+  });
+
+  it("routes each merged tool to its OWN client", async () => {
+    const server = await makeUpstream(notionTool());
+    const apiCall = await makeUpstream(apiCallTool());
+    const host = new McpHost();
+    try {
+      const ns = await host.register({ namespace: "kijiji", client: server.client });
+      await host.register({
+        namespace: "kijiji",
+        client: apiCall.client,
+        trusted: true,
+        intoNamespace: ns,
+      });
+      const tools = host.buildTools();
+      const search = tools.find((t) => t.descriptor.name === "kijiji__search_pages")!;
+      const apicall = tools.find((t) => t.descriptor.name === "kijiji__api_call")!;
+      const r1 = await search.handler({}, {} as never);
+      const r2 = await apicall.handler({}, {} as never);
+      expect((r1.content as unknown as [{ text: string }])[0].text).toBe("notion-results");
+      expect((r2.content as unknown as [{ text: string }])[0].text).toBe("api_call-result");
+    } finally {
+      await host.dispose();
+    }
+  });
+
+  it("throws when intoNamespace targets an unregistered namespace", async () => {
+    const apiCall = await makeUpstream(apiCallTool());
+    const host = new McpHost();
+    try {
+      await expect(
+        host.register({ namespace: "kijiji", client: apiCall.client, intoNamespace: "ghost" }),
+      ).rejects.toThrow(/not a registered namespace/);
+    } finally {
+      await host.dispose();
+    }
   });
 });

@@ -16,6 +16,7 @@ COPY apps/api/package.json apps/api/
 COPY apps/cli/package.json apps/cli/
 COPY apps/web/package.json apps/web/
 COPY packages/afps-runtime/package.json packages/afps-runtime/
+COPY packages/afps-shared/package.json packages/afps-shared/
 COPY packages/connect/package.json packages/connect/
 COPY packages/core/package.json packages/core/
 COPY packages/db/package.json packages/db/
@@ -90,6 +91,11 @@ COPY --from=build /app/packages/core/package.json ./packages/core/
 COPY --from=build /app/packages/afps-runtime/src ./packages/afps-runtime/src
 COPY --from=build /app/packages/afps-runtime/package.json ./packages/afps-runtime/
 
+# AFPS shared (zero-dep leaf — companion-files, semver, integrity, credential-template, …)
+# Required by @appstrate/core, @appstrate/afps-runtime, @appstrate/connect at runtime.
+COPY --from=build /app/packages/afps-shared/src ./packages/afps-shared/src
+COPY --from=build /app/packages/afps-shared/package.json ./packages/afps-shared/
+
 # Runner-pi adapter (buildRuntimePiEnv — used by API's Pi orchestrator at runtime)
 COPY --from=build /app/packages/runner-pi/src ./packages/runner-pi/src
 COPY --from=build /app/packages/runner-pi/package.json ./packages/runner-pi/
@@ -132,19 +138,10 @@ COPY --from=build /app/apps/web/dist ./apps/web/dist
 # Create mount points for runtime volumes (data + storage)
 RUN mkdir -p data storage && chown -R bun:bun data storage
 
-# `@appstrate/core/tool-bundler` writes scratch builds to
-# `node_modules/.cache/afps-bundler/` so Bun.build resolves
-# bare-specifier imports (ajv, zod, …) against the caller's dep
-# graph. Default permissions on COPYed node_modules belong to root,
-# so the unprivileged `bun` user can't mkdir there. Pre-create the
-# `.cache` dir owned by `bun` for every workspace whose
-# node_modules tree is on the runtime image.
-RUN for ws in packages/core packages/connect packages/db packages/env \
-              packages/shared-types packages/afps-runtime packages/runner-pi \
-              apps/api; do \
-      mkdir -p /app/$ws/node_modules/.cache; \
-    done \
- && chown -R bun:bun /app/packages /app/apps/api/node_modules
+# Ensure the unprivileged `bun` user owns the workspace package trees
+# COPYed in as root (so any runtime scratch writes under node_modules
+# succeed).
+RUN chown -R bun:bun /app/packages /app/apps/api/node_modules
 
 # Root package.json needed for workspace resolution
 COPY --from=build /app/package.json ./

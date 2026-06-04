@@ -17,6 +17,16 @@ type Subscriber = {
     orgId: string;
     applicationId: string;
     isAdmin?: boolean;
+    /**
+     * Actor identity for the `connection_update` channel. The trigger
+     * fires for every connection on the application; the subscriber
+     * forwards a row when it belongs to this actor (own connection).
+     * Cross-actor shared-connection invalidations rely on the consumer
+     * refetching from the server, so we don't need the shared/owner
+     * tables here. Either `userId` or `endUserId` is set, never both.
+     */
+    userId?: string;
+    endUserId?: string;
   };
   send: (event: RealtimeEvent) => void;
 };
@@ -98,6 +108,43 @@ export async function initRealtime(): Promise<void> {
       }
     } catch (err) {
       logger.error("Failed to parse run_metric payload", {
+        error: getErrorMessage(err),
+      });
+    }
+  });
+
+  // `connection_update` carries every INSERT/UPDATE/DELETE on
+  // `integration_connections` so the dashboard can patch its caches in
+  // real time — the orange "Reconnection required" badge, the agent
+  // page's member picker verdict, the integration detail's connection
+  // row all read off React Query keys that this event invalidates.
+  //
+  // Filter is per-application; the subscriber owns its actor identity
+  // (set at SSE auth time) so a member only sees their own rows. The
+  // payload deliberately omits `org_id` (the table has none) — tenant
+  // isolation is bound to the upstream SSE auth gate proving
+  // `applicationId ∈ orgId`.
+  await listenClient.listen("connection_update", (payload) => {
+    try {
+      const raw = JSON.parse(payload) as Record<string, unknown>;
+      const data = snakeToCamel(raw);
+      for (const sub of subscribers.values()) {
+        if (sub.filter.applicationId !== raw.application_id) continue;
+        // Actor filter: only fan out rows the subscriber owns. Without
+        // this, every member of an app would receive every other
+        // member's connection events (org-wide cache pollution).
+        if (sub.filter.userId !== undefined) {
+          if (raw.user_id !== sub.filter.userId) continue;
+        } else if (sub.filter.endUserId !== undefined) {
+          if (raw.end_user_id !== sub.filter.endUserId) continue;
+        } else {
+          // No actor filter on the subscription — skip rather than leak.
+          continue;
+        }
+        sub.send({ event: "connection_update", data });
+      }
+    } catch (err) {
+      logger.error("Failed to parse connection_update payload", {
         error: getErrorMessage(err),
       });
     }

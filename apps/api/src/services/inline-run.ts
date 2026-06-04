@@ -99,7 +99,7 @@ export async function insertShadowPackage(params: InsertShadowPackageParams): Pr
  * Build a `LoadedPackage` from an already-inserted shadow row. Inline
  * manifests only embed ID refs, so callers must pass the resolved
  * skills/tools (via `resolveManifestCatalogDeps`) when the returned
- * package will flow into the run pipeline — otherwise `env-builder`
+ * package will flow into the run pipeline — otherwise `run-context-builder`
  * will see empty arrays and skip skill/tool injection into the
  * container. Defaults to empty arrays for callers that only need the
  * shape (e.g. deserialization, tests).
@@ -108,14 +108,13 @@ export function buildShadowLoadedPackage(
   id: string,
   manifest: AgentManifest,
   prompt: string,
-  deps: Pick<LoadedPackage, "skills" | "tools"> = { skills: [], tools: [] },
+  deps: Pick<LoadedPackage, "skills"> = { skills: [] },
 ): LoadedPackage {
   return {
     id,
     manifest,
     prompt,
     skills: deps.skills,
-    tools: deps.tools,
     source: "local",
   };
 }
@@ -143,14 +142,13 @@ export async function triggerInlineRun(params: {
 }): Promise<{ runId: string; packageId: string }> {
   const { orgId, applicationId, actor, body, apiKeyId, traceparent } = params;
 
-  // ----- 1. Preflight — shape + providers + readiness (no side effects). -----
+  // ----- 1. Preflight — shape + readiness (no side effects). -----
   const preflight = await runInlinePreflight({ orgId, applicationId, actor, body });
   const {
     manifest,
     prompt,
     effectiveConfig,
     effectiveInput,
-    providerProfiles,
     modelIdOverride,
     proxyIdOverride,
     resolvedDeps,
@@ -167,7 +165,6 @@ export async function triggerInlineRun(params: {
     await prepareAndExecuteRun({
       runId,
       agent: shadowAgent,
-      providerProfiles,
       orgId,
       actor,
       input: effectiveInput,

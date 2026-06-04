@@ -40,7 +40,7 @@ interface BaseEnvelope {
 }
 
 /**
- * `@afps/memory` — `note()` tool (AFPS 1.5+; replaces `add_memory()`).
+ * `@afps/memory` — `note()` tool (AFPS; replaces `add_memory()`).
  *
  * Append-only archive write. Reachable from the agent only via the
  * `recall_memory` tool — never injected into the system prompt.
@@ -56,12 +56,12 @@ interface BaseEnvelope {
 export interface MemoryAddedEvent extends BaseEnvelope {
   type: "memory.added";
   content: string;
-  /** AFPS 1.4+. Defaults to `"actor"` when omitted. */
+  /** AFPS scope dimension. Defaults to `"actor"` when omitted. */
   scope?: "actor" | "shared";
 }
 
 /**
- * `@afps/pin` — `pin(key, content)` tool (AFPS 1.5+; replaces
+ * `@afps/pin` — `pin(key, content)` tool (AFPS; replaces
  * `set_checkpoint()`).
  *
  * Upsert-by-key into a named pinned slot. Last-write-wins per `(scope,
@@ -82,7 +82,7 @@ export interface PinnedSetEvent extends BaseEnvelope {
   key: string;
   /** Arbitrary JSON value stored under the pinned slot. */
   content: unknown;
-  /** AFPS 1.4+. Defaults to `"actor"` when omitted. */
+  /** AFPS scope dimension. Defaults to `"actor"` when omitted. */
   scope?: "actor" | "shared";
 }
 

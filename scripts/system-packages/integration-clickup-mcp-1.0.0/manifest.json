@@ -1,0 +1,99 @@
+{
+  "name": "@appstrate/clickup-mcp",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.1",
+  "display_name": "ClickUp",
+  "description": "ClickUp integration backed by ClickUp's official remote MCP server (mcp.clickup.com/mcp). The sidecar opens a Streamable HTTP MCP client and injects the actor's OAuth2 access token as `Authorization: Bearer …` on every request — the user authorises Appstrate once, ClickUp's MCP handles tool execution. ClickUp does not use OAuth scopes (the access token authorises the full set of capabilities allowed by the workspace member's role), so the niveau 2 scope model is degenerate here: no `scope_catalog`, no per-tool `required_scopes`, no scope inference, and no missing-scope diff panel. Phase 1 install validation and Phase 3 `tools/list` allowlist still apply — agent authors pick which tools the LLM sees, even though OAuth grants are workspace-wide. Phase 4 (per-tool URL envelope) is N/A — every tool transits the same `/mcp` endpoint, ClickUp's RBAC is the only gate. Rate limits: 50 calls / 24h on Free plan, 300 calls / 24h on Unlimited+. Currently in public beta upstream.",
+  "license": "Apache-2.0",
+  "source": {
+    "kind": "remote",
+    "remote": {
+      "url": "https://mcp.clickup.com/mcp",
+      "transport": "streamable-http"
+    }
+  },
+  "auths": {
+    "oauth": {
+      "type": "oauth2",
+      "issuer": "https://mcp.clickup.com",
+      "default_scopes": ["read", "write"],
+      "token_endpoint_auth_method": "none",
+      "authorized_uris": ["https://mcp.clickup.com/**"],
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer ",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": " "
+        },
+        "dev.appstrate/auth": {
+          "required": true
+        }
+      }
+    }
+  },
+  "tools_policy": {
+    "clickup_add_tag_to_task": {},
+    "clickup_add_task_dependency": {},
+    "clickup_add_task_link": {},
+    "clickup_add_task_to_list": {},
+    "clickup_add_time_entry": {},
+    "clickup_attach_task_file": {},
+    "clickup_create_document": {},
+    "clickup_create_document_page": {},
+    "clickup_create_folder": {},
+    "clickup_create_list": {},
+    "clickup_create_list_in_folder": {},
+    "clickup_create_reminder": {},
+    "clickup_create_task": {},
+    "clickup_create_task_comment": {},
+    "clickup_delete_task": {},
+    "clickup_filter_tasks": {},
+    "clickup_find_member_by_name": {},
+    "clickup_get_bulk_tasks_time_in_status": {},
+    "clickup_get_chat_channel_messages": {},
+    "clickup_get_chat_channels": {},
+    "clickup_get_chat_message_replies": {},
+    "clickup_get_current_time_entry": {},
+    "clickup_get_custom_fields": {},
+    "clickup_get_document_pages": {},
+    "clickup_get_folder": {},
+    "clickup_get_list": {},
+    "clickup_get_task": {},
+    "clickup_get_task_comments": {},
+    "clickup_get_task_time_entries": {},
+    "clickup_get_task_time_in_status": {},
+    "clickup_get_threaded_comments": {},
+    "clickup_get_time_entries": {},
+    "clickup_get_workspace_hierarchy": {},
+    "clickup_get_workspace_members": {},
+    "clickup_list_document_pages": {},
+    "clickup_move_task": {},
+    "clickup_remove_tag_from_task": {},
+    "clickup_remove_task_dependency": {},
+    "clickup_remove_task_from_list": {},
+    "clickup_remove_task_link": {},
+    "clickup_resolve_assignees": {},
+    "clickup_search": {},
+    "clickup_search_reminders": {},
+    "clickup_send_chat_message": {},
+    "clickup_start_time_tracking": {},
+    "clickup_stop_time_tracking": {},
+    "clickup_update_document_page": {},
+    "clickup_update_folder": {},
+    "clickup_update_list": {},
+    "clickup_update_reminder": {},
+    "clickup_update_task": {}
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    }
+  }
+}

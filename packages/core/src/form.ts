@@ -19,6 +19,7 @@
 // ─── JSON Schema Types (from @types/json-schema, draft-07 — compatible with 2020-12) ─
 
 import type { JSONSchema7, JSONSchema7Type, JSONSchema7TypeName } from "json-schema";
+import { isFileField as isFileFieldShared } from "@appstrate/afps-shared/file-field";
 export type { JSONSchema7, JSONSchema7Type, JSONSchema7TypeName };
 
 /** A JSON Schema object with typed properties — the root of input/config/output schemas. */
@@ -44,7 +45,7 @@ export interface FileConstraint {
   /** Accepted MIME types or file extensions (e.g. "image/*", ".pdf"). */
   accept?: string;
   /** Maximum file size in bytes. */
-  maxSize?: number;
+  max_size?: number;
 }
 
 /** UI rendering hints for form fields. */
@@ -58,11 +59,11 @@ export interface SchemaWrapper {
   /** The JSON Schema object defining the form structure. */
   schema: JSONSchemaObject;
   /** Per-field file upload constraints, keyed by property name. */
-  fileConstraints?: Record<string, FileConstraint>;
+  file_constraints?: Record<string, FileConstraint>;
   /** Per-field UI rendering hints, keyed by property name. */
-  uiHints?: Record<string, UIHint>;
+  ui_hints?: Record<string, UIHint>;
   /** Ordered list of property names controlling form field display order. */
-  propertyOrder?: string[];
+  property_order?: string[];
 }
 
 // ─── Internal helpers ────────────────────────────────────────────────────────
@@ -85,12 +86,13 @@ function getItems(prop: JSONSchema7): JSONSchema7 | undefined {
 
 // ─── File Field Detection ────────────────────────────────────────────────────
 
-/** Detect a file field: format "uri" + contentMediaType present (single or array). */
+/**
+ * Detect a file field: format "uri" + contentMediaType present (single or array).
+ * Delegates to the canonical `@appstrate/afps-shared` predicate (single source
+ * of truth) — the observable behaviour is unchanged for core consumers.
+ */
 export function isFileField(prop: JSONSchema7): boolean {
-  if (prop.format === "uri" && prop.contentMediaType) return true;
-  const items = getItems(prop);
-  if (getType(prop) === "array" && items?.format === "uri" && items?.contentMediaType) return true;
-  return false;
+  return isFileFieldShared(prop);
 }
 
 /** Detect a multiple-files field (array of file URIs). */
@@ -107,12 +109,12 @@ export function schemaHasFileFields(schema?: JSONSchemaObject): boolean {
 
 // ─── Ordered Keys ────────────────────────────────────────────────────────────
 
-/** Return schema property keys respecting propertyOrder, with unlisted keys appended. */
-export function getOrderedKeys(schema: JSONSchemaObject, propertyOrder?: string[]): string[] {
+/** Return schema property keys respecting property_order, with unlisted keys appended. */
+export function getOrderedKeys(schema: JSONSchemaObject, property_order?: string[]): string[] {
   const allKeys = Object.keys(schema.properties ?? {});
-  if (!propertyOrder?.length) return allKeys;
-  const ordered = propertyOrder.filter((k) => k in schema.properties);
-  const rest = allKeys.filter((k) => !propertyOrder.includes(k));
+  if (!property_order?.length) return allKeys;
+  const ordered = property_order.filter((k) => k in schema.properties);
+  const rest = allKeys.filter((k) => !property_order.includes(k));
   return rest.length ? [...ordered, ...rest] : ordered;
 }
 
@@ -158,7 +160,7 @@ export interface RjsfUiSchemaField {
 /**
  * Map an AFPS `SchemaWrapper` to the two inputs RJSF needs:
  *   - `schema`: pure JSON Schema 2020-12 (passed through as-is).
- *   - `uiSchema`: derived from `fileConstraints`, `uiHints`, `propertyOrder`,
+ *   - `uiSchema`: derived from `file_constraints`, `ui_hints`, `property_order`,
  *     and file-field detection.
  *
  * File fields are marked `ui:widget = "file"`. The widget implementation on
@@ -166,11 +168,16 @@ export interface RjsfUiSchemaField {
  * and writing back a `"upload://upl_xxx"` URI into the form data — this
  * module does not know about the upload protocol.
  */
-export function mapAfpsToRjsf(wrapper: SchemaWrapper): {
+export function mapAfpsToRjsf(rawWrapper: SchemaWrapper): {
   schema: JSONSchemaObject;
   uiSchema: RjsfUiSchema;
 } {
-  const { schema: rawSchema, fileConstraints, uiHints, propertyOrder } = wrapper;
+  const wrapper = rawWrapper;
+  const fileConstraints = wrapper.file_constraints;
+  const uiHints = wrapper.ui_hints;
+  const propertyOrder = wrapper.property_order;
+
+  const rawSchema = wrapper.schema;
   const uiSchema: RjsfUiSchema = {};
   const properties: Record<string, JSONSchema7> = { ...(rawSchema?.properties ?? {}) };
   const schema: JSONSchemaObject = { ...rawSchema, properties };
@@ -187,6 +194,7 @@ export function mapAfpsToRjsf(wrapper: SchemaWrapper): {
     const field: RjsfUiSchemaField = {};
     const hint = uiHints?.[key];
     const constraint = fileConstraints?.[key];
+    const constraintMaxSize = constraint?.max_size;
     const items = getItems(prop);
     const isArrayOfEnum =
       getType(prop) === "array" && Array.isArray(items?.enum) && items.enum.length > 0;
@@ -205,7 +213,9 @@ export function mapAfpsToRjsf(wrapper: SchemaWrapper): {
       const opts: Record<string, unknown> = {};
       if (isMultipleFileField(prop)) opts.multiple = true;
       if (constraint?.accept) opts.accept = constraint.accept;
-      if (constraint?.maxSize != null) opts.maxSize = constraint.maxSize;
+      // RJSF widget option name (`maxSize`) is widget-side API and stays
+      // camelCase — the snake_case rename only applies to the AFPS manifest.
+      if (constraintMaxSize != null) opts.maxSize = constraintMaxSize;
       if (prop.maxItems != null) opts.maxFiles = prop.maxItems;
       if (Object.keys(opts).length > 0) field["ui:options"] = opts;
     } else if (isArrayOfEnum) {

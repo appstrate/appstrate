@@ -23,7 +23,7 @@ export const DEV_CLI_VERSION = "0.0.0";
  * Resolve the Docker image tag to inject into generated `.env` files
  * for tiers 1/2/3.
  *
- * ADR-006 §Lockstep versioning makes this a hard invariant: the image
+ * Lockstep versioning makes this a hard invariant: the image
  * tag MUST equal `CLI_VERSION`. There is no sensible fallback — a dev
  * CLI (`CLI_VERSION === "0.0.0"`) has no matching release on GHCR, so
  * any tag we guess at would either 404 or point at a version the CLI

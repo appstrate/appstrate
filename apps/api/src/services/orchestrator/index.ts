@@ -9,7 +9,6 @@ export type {
   ContainerOrchestrator,
   WorkloadHandle,
   WorkloadResources,
-  InjectableFile,
   WorkloadSpec,
   IsolationBoundary,
   CleanupReport,

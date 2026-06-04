@@ -13,8 +13,9 @@ import type { Context } from "hono";
 import type { UploadedFile } from "./run-launcher/types.ts";
 import { isFileField, type JSONSchemaObject, type JSONSchema7 } from "@appstrate/core/form";
 import { validateInput } from "./schema.ts";
-import { invalidRequest, validationFailed } from "../lib/errors.ts";
+import { invalidRequest, payloadTooLarge, validationFailed } from "../lib/errors.ts";
 import { consumeUpload, isUploadUri, parseUploadUri } from "./uploads.ts";
+import { getEnv } from "@appstrate/env";
 
 export interface ParsedInput {
   input?: Record<string, unknown>;
@@ -37,6 +38,14 @@ export interface ParsedInput {
    * and the run-record column (`runs.config_override`).
    */
   configOverride?: Record<string, unknown>;
+  /**
+   * Per-integration connection picks for THIS run (#199).
+   * Wire field `connectionOverrides` on the request body; flows into the
+   * resolver's mechanism #2 and is persisted on `runs.connection_overrides`.
+   * Flat shape: `{ "<integrationId>": "<connectionId>" }` — one connection
+   * per integration; the chosen connection carries its own authKey.
+   */
+  connectionOverrides?: Record<string, string>;
 }
 
 interface RunRequestBody {
@@ -44,6 +53,7 @@ interface RunRequestBody {
   modelId?: string;
   proxyId?: string;
   config?: Record<string, unknown>;
+  connection_overrides?: Record<string, string>;
 }
 
 function getArrayItems(prop: JSONSchema7): JSONSchema7 | undefined {
@@ -91,6 +101,22 @@ export function collectUploadRefs(
 }
 
 /**
+ * Reject when the combined size of a run's input documents exceeds the
+ * per-run ceiling. Pure so it can be unit-tested without a DB or request
+ * context; callers pass `getEnv().WORKSPACE_MAX_DOCS_BYTES` as the limit.
+ * Throws `payloadTooLarge` (413) — a policy violation, surfaced before the
+ * run launches rather than as a mid-flight failure.
+ */
+export function assertDocsWithinCap(files: { size: number }[], maxBytes: number): void {
+  const total = files.reduce((sum, f) => sum + f.size, 0);
+  if (total > maxBytes) {
+    throw payloadTooLarge(
+      `Input documents total ${total} bytes; the per-run limit is ${maxBytes} bytes`,
+    );
+  }
+}
+
+/**
  * Parse and validate the run request body. Returns parsed input + resolved
  * uploaded files. Throws `ApiError` (invalidRequest / notFound) on any
  * validation or resolution failure.
@@ -131,6 +157,13 @@ export async function parseRequestInput(
       }),
     );
 
+    // Bound the total input-document payload. Documents are delivered to the
+    // agent out-of-band (fetched + streamed to disk), so an oversized payload
+    // is a policy violation rather than a crash — but enforcing it here also
+    // caps what the platform buffers per run. Reject before launch so the
+    // caller gets a clean 413 instead of a run that fails mid-flight.
+    assertDocsWithinCap(uploadedFiles, getEnv().WORKSPACE_MAX_DOCS_BYTES);
+
     const inputValidation = validateInput(input, inputSchema);
     if (!inputValidation.valid) {
       throw validationFailed(
@@ -165,11 +198,33 @@ export async function parseRequestInput(
     );
   }
 
+  // `connection_overrides` shape guard. Flat map: integrationId → connectionId.
+  // Invalid bodies produce a 400 with a precise param so the picker UI can
+  // highlight the offender.
+  if (body.connection_overrides !== undefined) {
+    if (
+      body.connection_overrides === null ||
+      typeof body.connection_overrides !== "object" ||
+      Array.isArray(body.connection_overrides)
+    ) {
+      throw invalidRequest("`connection_overrides` must be a JSON object", "connection_overrides");
+    }
+    for (const [intId, connId] of Object.entries(body.connection_overrides)) {
+      if (typeof connId !== "string" || connId.length === 0) {
+        throw invalidRequest(
+          `\`connection_overrides["${intId}"]\` must be a non-empty connection id`,
+          `connection_overrides.${intId}`,
+        );
+      }
+    }
+  }
+
   return {
     input,
     uploadedFiles: uploadedFiles.length > 0 ? uploadedFiles : undefined,
     modelIdOverride: body.modelId,
     proxyIdOverride: body.proxyId,
     configOverride: body.config,
+    connectionOverrides: body.connection_overrides,
   };
 }

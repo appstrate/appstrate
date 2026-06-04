@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { collectUploadRefs } from "../../src/services/input-parser.ts";
+import { collectUploadRefs, assertDocsWithinCap } from "../../src/services/input-parser.ts";
 import { ApiError } from "../../src/lib/errors.ts";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 
@@ -106,6 +106,33 @@ describe("collectUploadRefs — array-of-files fields", () => {
     } catch (e) {
       expect(e).toBeInstanceOf(ApiError);
       expect((e as ApiError).message).toContain("docs");
+    }
+  });
+});
+
+describe("assertDocsWithinCap", () => {
+  it("passes when the total is under the cap", () => {
+    expect(() => assertDocsWithinCap([{ size: 100 }, { size: 200 }], 1000)).not.toThrow();
+  });
+
+  it("passes when the total is exactly the cap (boundary)", () => {
+    expect(() => assertDocsWithinCap([{ size: 600 }, { size: 400 }], 1000)).not.toThrow();
+  });
+
+  it("passes with no documents", () => {
+    expect(() => assertDocsWithinCap([], 1000)).not.toThrow();
+  });
+
+  it("throws 413 when the total exceeds the cap", () => {
+    try {
+      assertDocsWithinCap([{ size: 600 }, { size: 600 }], 1000);
+      throw new Error("expected to throw");
+    } catch (e) {
+      expect(e).toBeInstanceOf(ApiError);
+      expect((e as ApiError).status).toBe(413);
+      // Reports both the offending total and the limit for actionable errors.
+      expect((e as ApiError).message).toContain("1200");
+      expect((e as ApiError).message).toContain("1000");
     }
   });
 });

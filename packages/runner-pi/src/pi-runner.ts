@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * PiRunner — AFPS 1.3 {@link Runner} implementation backed by the
+ * PiRunner — AFPS {@link Runner} implementation backed by the
  * {@link https://www.npmjs.com/package/@mariozechner/pi-coding-agent | Pi Coding Agent SDK}.
  *
  * The same class runs inside an Appstrate agent container (via
@@ -35,7 +35,8 @@ import {
   SettingsManager,
   type ExtensionFactory,
 } from "@mariozechner/pi-coding-agent";
-import type { Api, Model } from "@mariozechner/pi-ai";
+import type { Api, KnownApi, Model } from "@mariozechner/pi-ai";
+import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 import {
   emptyRunResult,
@@ -58,9 +59,8 @@ export interface PiRunnerOptions {
   /** LLM model configuration passed to the Pi SDK. Required. */
   model: PiModelConfig;
   /**
-   * LLM API key. Registered on a {@link AuthStorage} under the provider
-   * derived from `model.api`. Callers can also pass a pre-built
-   * `authStorage` to wire multi-provider auth.
+   * LLM API key. Registered on a {@link AuthStorage} under `model.provider`.
+   * Callers can also pass a pre-built `authStorage` to wire multi-provider auth.
    */
   apiKey?: string;
   /**
@@ -84,9 +84,9 @@ export interface PiRunnerOptions {
   agentDir?: string;
   /**
    * Tool extension factories to load into the Pi SDK session. The AFPS
-   * {@link Runner} contract does not mandate where tools come from —
-   * callers typically resolve them from the bundle via a
-   * {@link ToolResolver} and map to Pi extension factories before
+   * {@link Runner} contract does not mandate where tools come from — in
+   * AFPS tools come from spawned `mcp-server` packages and
+   * integrations; callers map those to Pi extension factories before
    * constructing the Runner. Default: empty (no extensions).
    */
   extensionFactories?: ExtensionFactory[];
@@ -159,8 +159,8 @@ export function derivePiCompactionSettings(
  * Convert a Pi `MODEL_API` string into the provider key the Pi SDK's
  * {@link AuthStorage} uses to look up API keys.
  */
-function deriveProviderFromApi(api: string): string {
-  const known: Record<string, string> = {
+export function deriveProviderFromApi(api: string): string {
+  const known: Record<ModelApiShape, string> = {
     "anthropic-messages": "anthropic",
     "openai-completions": "openai",
     "openai-responses": "openai",
@@ -171,10 +171,15 @@ function deriveProviderFromApi(api: string): string {
     "azure-openai-responses": "azure-openai-responses",
     "bedrock-converse-stream": "amazon-bedrock",
   };
-  const provider = known[api];
+  const provider = (known as Record<string, string>)[api];
   if (!provider) throw new Error(`PiRunner: unknown model api "${api}"`);
   return provider;
 }
+
+// Compile error if appstrate ever declares an apiShape Pi does not know.
+type _ApiShapeSubsetOfPi = ModelApiShape extends KnownApi ? true : never;
+const _assertApiShapeSubsetOfPi: _ApiShapeSubsetOfPi = true;
+void _assertApiShapeSubsetOfPi;
 
 export class PiRunner implements Runner {
   readonly name = "pi-runner";
@@ -278,8 +283,9 @@ export class PiRunner implements Runner {
       this.opts.authStorage ??
       AuthStorage.create(this.opts.authStoragePath ?? "/tmp/pi-auth/auth.json");
     if (!this.opts.authStorage && apiKey) {
-      const provider = deriveProviderFromApi(model.api);
-      authStorage.setRuntimeApiKey(provider, apiKey);
+      // `model.provider` is the Pi SDK's AuthStorage key the SDK resolves
+      // credentials against; register the key under the same value.
+      authStorage.setRuntimeApiKey(model.provider, apiKey);
     }
 
     const modelRegistry = ModelRegistry.create(authStorage);
@@ -638,8 +644,8 @@ export function installSessionBridge(
         if (u) {
           const inputDelta = u.input ?? 0;
           const outputDelta = u.output ?? 0;
-          totalUsage.input_tokens += inputDelta;
-          totalUsage.output_tokens += outputDelta;
+          totalUsage.input_tokens = (totalUsage.input_tokens ?? 0) + inputDelta;
+          totalUsage.output_tokens = (totalUsage.output_tokens ?? 0) + outputDelta;
           totalUsage.cache_creation_input_tokens =
             (totalUsage.cache_creation_input_tokens ?? 0) + (u.cacheWrite ?? 0);
           totalUsage.cache_read_input_tokens =

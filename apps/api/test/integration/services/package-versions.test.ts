@@ -8,21 +8,16 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestUser } from "../../helpers/auth.ts";
 import { createTestOrg } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
 import {
   createPackageVersion,
-  createVersionFromDraft,
+  createVersionAndUpload,
   listPackageVersions,
   getLatestVersionId,
   getVersionCount,
   getVersionInfo,
   getLatestVersionCreatedAt,
 } from "../../../src/services/package-versions.ts";
-import { uploadPackageFiles } from "../../../src/services/package-items/storage.ts";
-import { downloadVersionZip } from "../../../src/services/package-storage.ts";
-import { parsePackageZip } from "@appstrate/core/zip";
+import { buildMinimalZip } from "../../../src/services/package-storage.ts";
 describe("package-versions service", () => {
   let userId: string;
   let orgId: string;
@@ -264,8 +259,8 @@ describe("package-versions service", () => {
       });
 
       const info = await getVersionInfo(`@${orgSlug}/info-no-ver`, orgId);
-      expect(info.activeVersion).toBe("0.5.0");
-      expect(info.latestPublishedVersion).toBeNull();
+      expect(info.active_version).toBe("0.5.0");
+      expect(info.latest_published_version).toBeNull();
     });
 
     it("returns latestPublishedVersion from the latest dist-tag", async () => {
@@ -289,8 +284,8 @@ describe("package-versions service", () => {
       });
 
       const info = await getVersionInfo(pkg.id, orgId);
-      expect(info.activeVersion).toBe("2.0.0");
-      expect(info.latestPublishedVersion).toBe("1.0.0");
+      expect(info.active_version).toBe("2.0.0");
+      expect(info.latest_published_version).toBe("1.0.0");
     });
 
     it("returns null activeVersion when manifest has no version", async () => {
@@ -301,8 +296,8 @@ describe("package-versions service", () => {
       });
 
       const info = await getVersionInfo(`@${orgSlug}/info-no-manifest-ver`, orgId);
-      expect(info.activeVersion).toBeNull();
-      expect(info.latestPublishedVersion).toBeNull();
+      expect(info.active_version).toBeNull();
+      expect(info.latest_published_version).toBeNull();
     });
   });
 
@@ -345,125 +340,31 @@ describe("package-versions service", () => {
     });
   });
 
-  // ── createVersionFromDraft — tool bundling ────────────────
-
-  describe("createVersionFromDraft (tool)", () => {
-    it("bundles the tool source and rewrites manifest.entrypoint to the emitted artifact", async () => {
-      const toolId = `@${orgSlug}/my-tool`;
-      // Source imports a sibling helper — proves the bundler inlines
-      // relative imports, not just runs on single-file tools.
-      const toolSource = [
-        `import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";`,
-        `import { suffix } from "./helper.ts";`,
-        `export default function (pi: ExtensionAPI) {`,
-        `  (pi as unknown as { _value: string })._value = "ok" + suffix;`,
-        `  return "ok" + suffix;`,
-        `}`,
-      ].join("\n");
-      const helperSource = `export const suffix = "-ok";`;
-
-      await seedPackage({
-        orgId,
-        id: toolId,
-        type: "tool",
-        draftManifest: {
-          name: toolId,
-          version: "1.0.0",
-          type: "tool",
-          entrypoint: "tool.ts",
-          tool: { name: "my_tool", description: "t", inputSchema: {} },
-        },
-      });
-
-      await uploadPackageFiles("tools", orgId, toolId, {
-        "manifest.json": new TextEncoder().encode(
-          JSON.stringify({
-            name: toolId,
-            version: "1.0.0",
-            type: "tool",
-            entrypoint: "tool.ts",
-            tool: { name: "my_tool", description: "t", inputSchema: {} },
-          }),
-        ),
-        "tool.ts": new TextEncoder().encode(toolSource),
-        "helper.ts": new TextEncoder().encode(helperSource),
-      });
-
-      const result = await createVersionFromDraft({
-        packageId: toolId,
-        orgId,
-        userId,
+  // ── AFPS §4.3 — circular dependency detection at publish ─────
+  describe("createVersionAndUpload — cycle detection", () => {
+    it("rejects a self-dependency at publish (fast-path)", async () => {
+      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/self-dep` });
+      const manifest: Record<string, unknown> = {
+        name: pkg.id,
         version: "1.0.0",
-      });
-      if ("error" in result) throw new Error(`createVersionFromDraft: ${result.error}`);
+        type: "agent",
+        // Self-reference — same package id appears in its own deps.
+        dependencies: { skills: { [pkg.id]: "^1.0.0" } },
+      };
+      const zip = Buffer.from(buildMinimalZip(manifest, "prompt"));
 
-      const zip = await downloadVersionZip(toolId, "1.0.0");
-      expect(zip).not.toBeNull();
-
-      const parsed = parsePackageZip(new Uint8Array(zip!));
-      expect(parsed.type).toBe("tool");
-      // Published archive: entrypoint rewritten to the bundled artifact.
-      expect((parsed.manifest as Record<string, unknown>).entrypoint).toBe("tool.js");
-
-      const bundled = parsed.files["tool.js"];
-      expect(bundled).toBeDefined();
-      const bundledText = new TextDecoder().decode(bundled!);
-      // Relative import inlined — no sibling file reference remains.
-      expect(bundledText).not.toContain(`from "./helper`);
-      expect(bundledText).not.toContain(`from './helper`);
-      // Source kept in the archive for reviewability/attribution.
-      expect(parsed.files["tool.ts"]).toBeDefined();
-
-      // E2E: the bundled artifact must be dynamic-importable and
-      // actually register an extension factory. We write it to a
-      // scratch path and invoke `import()` — same code path as
-      // `prepareBundleForPi`.
-      const scratchDir = await fs.mkdtemp(path.join(os.tmpdir(), "e2e-tool-"));
-      try {
-        const bundledPath = path.join(scratchDir, "tool.js");
-        await fs.writeFile(bundledPath, bundled!);
-        const mod = (await import(bundledPath)) as { default?: unknown };
-        expect(typeof mod.default).toBe("function");
-        const fakePi = {} as Record<string, unknown>;
-        const returned = (mod.default as (pi: unknown) => unknown)(fakePi);
-        expect(returned).toBe("ok-ok");
-        expect(fakePi._value).toBe("ok-ok");
-      } finally {
-        await fs.rm(scratchDir, { recursive: true, force: true });
-      }
-    });
-
-    it("rejects tools whose manifest is missing entrypoint", async () => {
-      const toolId = `@${orgSlug}/no-entry`;
-      await seedPackage({
-        orgId,
-        id: toolId,
-        type: "tool",
-        draftManifest: {
-          name: toolId,
+      await expect(
+        createVersionAndUpload({
+          packageId: pkg.id,
           version: "1.0.0",
-          type: "tool",
-          tool: { name: "x", description: "t", inputSchema: {} },
-          // Deliberately missing `entrypoint`
-        },
-      });
-      await uploadPackageFiles("tools", orgId, toolId, {
-        "manifest.json": new TextEncoder().encode("{}"),
-      });
+          createdBy: userId,
+          zipBuffer: zip,
+          manifest,
+        }),
+      ).rejects.toThrow(/Circular dependency/);
 
-      let threw = false;
-      try {
-        await createVersionFromDraft({
-          packageId: toolId,
-          orgId,
-          userId,
-          version: "1.0.0",
-        });
-      } catch (err) {
-        threw = true;
-        expect((err as Error).message).toMatch(/entrypoint/);
-      }
-      expect(threw).toBe(true);
+      // No version row created.
+      expect(await getVersionCount(pkg.id)).toBe(0);
     });
   });
 });

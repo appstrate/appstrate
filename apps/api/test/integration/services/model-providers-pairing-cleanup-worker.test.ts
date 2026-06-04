@@ -24,9 +24,10 @@ describe("pairing cleanup worker — init/shutdown", () => {
 
   it("init is idempotent and shutdown leaves no resources behind", async () => {
     await initPairingCleanupWorker();
-    await initPairingCleanupWorker(); // second call must not throw
-    await shutdownPairingCleanupWorker();
-    await shutdownPairingCleanupWorker(); // shutdown is also idempotent
-    expect(true).toBe(true);
+    // Double init/shutdown must resolve (not throw / hang) — the only
+    // observable contract of the worker's lifecycle wiring.
+    await expect(initPairingCleanupWorker()).resolves.toBeUndefined();
+    await expect(shutdownPairingCleanupWorker()).resolves.toBeUndefined();
+    await expect(shutdownPairingCleanupWorker()).resolves.toBeUndefined();
   });
 });

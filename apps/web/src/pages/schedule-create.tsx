@@ -40,7 +40,7 @@ export function ScheduleCreatePage() {
       <ScheduleForm
         key={effectiveAgentId}
         mode="create"
-        agents={agents?.map((f) => ({ id: f.id, displayName: f.displayName })) ?? []}
+        agents={agents?.map((f) => ({ id: f.id, displayName: f.display_name })) ?? []}
         selectedAgentId={effectiveAgentId}
         onAgentChange={setSelectedAgentId}
         inputSchema={deps?.inputSchema}
@@ -50,6 +50,7 @@ export function ScheduleCreatePage() {
         persistedProxyId={deps?.persistedProxyId ?? null}
         persistedVersion={deps?.persistedVersion ?? null}
         packageId={effectiveAgentId || undefined}
+        agentIntegrations={deps?.agentIntegrations ?? []}
         blockedMessage={deps?.hasFileInputs ? t("schedule.fileInputBlocked") : undefined}
         isPending={createSchedule.isPending}
         onSubmit={(data) => {

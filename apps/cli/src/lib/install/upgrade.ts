@@ -3,7 +3,7 @@
 /**
  * Upgrade + rollback primitives for `appstrate install`.
  *
- * Background: the first cut of the new CLI-driven install (ADR-006)
+ * Background: the first cut of the new CLI-driven install
  * unconditionally overwrote `.env` + `docker-compose.yml`. Re-running
  * `appstrate install` on an existing deployment therefore rotated
  * BETTER_AUTH_SECRET (which invalidates every logged-in session) and —
@@ -153,7 +153,7 @@ export function parseEnvFile(body: string): EnvVars {
  * not secrets: preserving an old value across re-installs would defeat
  * the invariant the CLI enforces.
  *
- *   - APPSTRATE_VERSION: ADR-006 §Lockstep versioning. The Docker image
+ *   - APPSTRATE_VERSION: lockstep versioning. The Docker image
  *     tag must track the CLI that orchestrates it; otherwise a `bun
  *     upgrade` of the CLI leaves the install pointing at stale images.
  */

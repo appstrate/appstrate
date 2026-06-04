@@ -10,13 +10,10 @@
  */
 
 import { toJSONSchema } from "zod/v4/core";
-import {
-  agentManifestSchema,
-  skillManifestSchema,
-  toolManifestSchema,
-  providerManifestSchema,
-  afpsJsonSchemaOverride,
-} from "@afps-spec/schema";
+import { afpsJsonSchemaOverride } from "@afps-spec/schema";
+import { agentManifestSchema, skillManifestSchema } from "../src/validation.ts";
+import { integrationManifestSchema } from "../src/integration.ts";
+import { mcpServerManifestSchema } from "../src/mcp-server.ts";
 
 // Bun-native pathing — `import.meta.dir` is the directory of this script.
 const OUTPUT_DIR = `${import.meta.dir}/../schema`;
@@ -36,20 +33,22 @@ const appstrateSchemas = [
   {
     filename: "skill.schema.json",
     title: "Appstrate Skill Manifest",
-    description: "Appstrate skill manifest — AFPS skill with no extensions.",
+    description: "Appstrate skill manifest — AFPS skill with relaxed optional metadata.",
     schema: skillManifestSchema,
   },
   {
-    filename: "tool.schema.json",
-    title: "Appstrate Tool Manifest",
-    description: "Appstrate tool manifest — AFPS tool with no extensions.",
-    schema: toolManifestSchema,
+    filename: "mcp-server.schema.json",
+    title: "Appstrate MCP-Server Manifest",
+    description:
+      "Appstrate mcp-server manifest — the canonical AFPS / MCPB schema (re-exported from @afps-spec/schema). The AFPS identity contract (type, name, schema_version, dependencies) lives at the manifest root (AFPS §3.4 / §11.2).",
+    schema: mcpServerManifestSchema,
   },
   {
-    filename: "provider.schema.json",
-    title: "Appstrate Provider Manifest",
-    description: "Appstrate provider manifest — AFPS provider with no extensions.",
-    schema: providerManifestSchema,
+    filename: "integration.schema.json",
+    title: "Appstrate Integration Manifest",
+    description:
+      "Appstrate integration manifest — AFPS (packages/core/src/integration.ts). Cross-field rules (≥1 auth, oauth2 discovery, delivery, scope-catalog subset, per-tool auth-key) are enforced by the Zod superRefines and are not representable in JSON Schema.",
+    schema: integrationManifestSchema,
   },
 ];
 
@@ -57,11 +56,12 @@ const appstrateSchemas = [
 // Generate
 // ─────────────────────────────────────────────
 
-// Clear and recreate OUTPUT_DIR — Bun.$ shells out to /bin/rm + mkdir, so
-// we use the standard $ template (Bun's recommended pathing primitive)
-// instead of `node:fs/promises`.
-await Bun.$`rm -rf ${OUTPUT_DIR}`.quiet();
+// Every schema is generated from its canonical Zod source: the base schemas
+// come from @afps-spec/schema, with the Appstrate superRefines layered on top.
 await Bun.$`mkdir -p ${OUTPUT_DIR}`.quiet();
+for (const entry of appstrateSchemas) {
+  await Bun.$`rm -f ${OUTPUT_DIR}/${entry.filename}`.quiet();
+}
 
 for (const entry of appstrateSchemas) {
   const jsonSchema = toJSONSchema(entry.schema, {

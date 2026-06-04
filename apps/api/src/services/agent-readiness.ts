@@ -5,53 +5,63 @@
  * before a run. Called from all run paths (manual, scheduled).
  */
 
-import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
-import { collectDependencyErrors } from "./dependency-validation.ts";
+import type { LoadedPackage } from "../types/index.ts";
+import {
+  resolveConnectionsForRun,
+  translateResolutionError,
+} from "./integration-connection-resolver.ts";
 import { validateConfig } from "./schema.ts";
-import { resolveManifestProviders, extractManifestSchemas } from "../lib/manifest-utils.ts";
+import { extractManifestSchemas } from "../lib/manifest-utils.ts";
 import { isPromptEmpty, findMissingDependencies } from "@appstrate/core/validation";
 import { deepMergeConfig } from "@appstrate/core/schema-validation";
+import type { ConnectionOverrides } from "@appstrate/core/integration";
 import { ApiError, type ValidationFieldError } from "../lib/errors.ts";
-import { resolveProviderProfiles } from "./connection-profiles.ts";
-import type {
-  ReadinessProviderEntry,
-  ReadinessReason,
-  ReadinessReport,
-} from "@appstrate/shared-types";
-
-export type { ReadinessProviderEntry, ReadinessReason, ReadinessReport };
+import type { Actor } from "../lib/actor.ts";
+import { emitEvent } from "../lib/modules/module-loader.ts";
 
 export interface AgentReadinessParams {
   agent: LoadedPackage;
-  providerProfiles: ProviderProfileMap;
   orgId: string;
   config?: Record<string, unknown>;
   applicationId: string;
   /**
-   * Skip individual checks already performed by an upstream validator. Used
-   * by the inline-run preflight, which validates `prompt` via the manifest
-   * structural check and `config` via AJV at its own stage, then calls
-   * readiness for the remaining dependency checks. Avoids emitting duplicate
-   * entries for the same field in `accumulate` mode.
+   * Actor whose integration connections we validate. Run kickoff paths
+   * pass an actor so missing or under-scoped connections produce a 412
+   * before the run is created. `null` skips integration gating — callers
+   * that resolve the actor from request context may not have one.
    */
-  skip?: { prompt?: boolean; config?: boolean };
+  actor: Actor | null;
+  /**
+   * Caller's run-time connection picks (mechanism #2 of the resolver
+   * cascade). Threaded into the readiness check so the must_choose-retry
+   * UX loop in `MissingConnectionsModal` actually completes: without it,
+   * readiness re-fires must_choose on >1 candidates even when the caller
+   * already disambiguated via `connection_overrides` on the request body.
+   */
+  runOverrides?: ConnectionOverrides | null;
+  /**
+   * Schedule's frozen connection picks (mechanism #3). Plumbed for parity
+   * with `run-pipeline.ts:resolveRunConnectionsOrError` — schedules apply
+   * their overrides once at fire time, and readiness should honour them.
+   */
+  scheduleOverrides?: ConnectionOverrides | null;
 }
 
 /**
  * Collect every readiness error as structured field entries (non-throwing).
  *
  * Single source of truth for readiness checks — the throwing wrapper
- * `validateAgentReadiness` delegates to this. Order matches the historical
- * fail-fast sequence: prompt → skills → tools → provider deps → config.
+ * `validateAgentReadiness` delegates to this. Fail-fast sequence:
+ * prompt → skills → integration connections → config.
  */
 export async function collectAgentReadinessErrors(
   params: AgentReadinessParams,
 ): Promise<ValidationFieldError[]> {
-  const { agent, providerProfiles, orgId, config, applicationId, skip } = params;
+  const { agent, orgId, config, applicationId, actor, runOverrides, scheduleOverrides } = params;
   const { manifest } = agent;
   const errors: ValidationFieldError[] = [];
 
-  if (!skip?.prompt && isPromptEmpty(agent.prompt)) {
+  if (isPromptEmpty(agent.prompt)) {
     errors.push({
       field: "prompt",
       code: "empty_prompt",
@@ -73,25 +83,33 @@ export async function collectAgentReadinessErrors(
     });
   }
 
-  const missingTools = findMissingDependencies(
-    (manifest.dependencies?.tools ?? {}) as Record<string, string>,
-    agent.tools.map((e) => e.id),
-  );
-  for (const toolId of missingTools) {
-    errors.push({
-      field: `dependencies.tools.${toolId}`,
-      code: "missing_tool",
-      title: "Missing Tool",
-      message: `Required tool '${toolId}' is not installed`,
+  // Resolver enumerates own + shared connections, applies
+  // pin > run override > schedule override > fallback, and surfaces
+  // structured errors per (integration, authKey). Skipped when the caller
+  // has no actor context (integration gating only applies to run kickoff).
+  //
+  // `runOverrides` / `scheduleOverrides` are threaded so the must_choose
+  // recovery loop in `MissingConnectionsModal` can complete: the user
+  // picks a candidate, the modal POSTs `connection_overrides`, readiness
+  // honours the pick instead of re-firing must_choose on the same N>1
+  // candidate set. run-pipeline.ts re-runs the resolver after readiness
+  // (with the same overrides) to produce the persisted snapshot — both
+  // passes see the same inputs so they cannot disagree.
+  if (actor) {
+    const resolution = await resolveConnectionsForRun({
+      agentManifest: manifest as Record<string, unknown>,
+      packageId: agent.id,
+      actor,
+      scope: { orgId, applicationId },
+      ...(runOverrides ? { runOverrides } : {}),
+      ...(scheduleOverrides ? { scheduleOverrides } : {}),
     });
+    for (const e of resolution.errors) {
+      errors.push(translateResolutionError(e));
+    }
   }
 
-  const manifestProviders = resolveManifestProviders(manifest);
-  errors.push(
-    ...(await collectDependencyErrors(manifestProviders, providerProfiles, orgId, applicationId)),
-  );
-
-  if (!skip?.config && config) {
+  if (config) {
     const { config: configSchema } = extractManifestSchemas(manifest);
     const effectiveSchema = configSchema ?? { type: "object" as const, properties: {} };
     const configValidation = validateConfig(config, effectiveSchema);
@@ -119,6 +137,39 @@ export async function collectAgentReadinessErrors(
 export async function validateAgentReadiness(params: AgentReadinessParams): Promise<void> {
   const errors = await collectAgentReadinessErrors(params);
   if (errors.length === 0) return;
+
+  // Integration errors get their own 412 envelope with every integration
+  // failure populated on `errors[]` so the dashboard's MissingConnections
+  // modal can render the full list in one round trip.
+  const integrationErrors = errors.filter((e) => e.field.startsWith("integrations."));
+  if (integrationErrors.length > 0) {
+    const first = integrationErrors[0]!;
+    // Fire-and-forget — modules opting in (e.g. webhooks) get a structured
+    // notification before we throw. Integration errors only accumulate when
+    // an actor was present, so the guard narrows the type for the payload.
+    if (params.actor) {
+      void emitEvent("onRunConnectionMissing", {
+        orgId: params.orgId,
+        applicationId: params.applicationId,
+        packageId: params.agent.id,
+        actor: { type: params.actor.type, id: params.actor.id },
+        errors: integrationErrors.map((e) => ({
+          field: e.field,
+          code: e.code,
+          message: e.message,
+          ...(e.title ? { title: e.title } : {}),
+        })),
+      });
+    }
+    throw new ApiError({
+      status: 412,
+      code: "missing_integration_connection",
+      title: "Missing Integration Connection",
+      detail: first.message,
+      errors: integrationErrors,
+    });
+  }
+
   const first = errors[0]!;
   throw new ApiError({
     status: 400,
@@ -141,10 +192,7 @@ export async function validateAgentReadiness(params: AgentReadinessParams): Prom
  * the contract of `validateAgentReadiness` so existing error mapping handles
  * it without special cases. No-op when the manifest declares no config schema.
  */
-export function validateMergedConfigOrThrow(
-  agent: LoadedPackage,
-  config: Record<string, unknown>,
-): void {
+function validateMergedConfigOrThrow(agent: LoadedPackage, config: Record<string, unknown>): void {
   const { config: configSchema } = extractManifestSchemas(agent.manifest);
   if (!configSchema) return;
   const result = validateConfig(config, configSchema);
@@ -162,7 +210,7 @@ export function validateMergedConfigOrThrow(
  * Apply a per-run config override on top of the persisted config and re-validate
  * against the manifest schema. No-op when `override` is null/undefined — returns
  * `persisted` verbatim. Throws `ApiError(400, "invalid_config")` if the merged
- * result violates the manifest schema (mirrors `validateMergedConfigOrThrow`).
+ * result violates the manifest schema (via `validateMergedConfigOrThrow`).
  *
  * Single source of truth for the merge+validate sequence shared by `POST /run`
  * and the scheduler — every per-run invocation reaches an identical resolved
@@ -177,79 +225,4 @@ export function mergeAndValidateConfigOverride(
   const merged = deepMergeConfig(persisted, override);
   validateMergedConfigOrThrow(agent, merged);
   return merged;
-}
-
-// ---------------------------------------------------------------------------
-// Readiness preflight — read-only contract for the CLI (and dashboard) to
-// inspect provider readiness before a run, without committing to one.
-// Reuses resolveProviderProfiles + collectDependencyErrors so the answer
-// stays in lockstep with what the run pipeline would actually do.
-// ---------------------------------------------------------------------------
-
-export interface ReadinessQuery {
-  agent: LoadedPackage;
-  applicationId: string;
-  orgId: string;
-  /** Default user profile id (X-Connection-Profile-Id equivalent). */
-  defaultUserProfileId: string | null;
-  /** Per-provider profile overrides, mirrors `--provider-profile` on the CLI. */
-  perProviderOverrides?: Record<string, string>;
-  /** Optional app profile id (used when the request is in app-profile mode). */
-  appProfileId?: string | null;
-}
-
-/**
- * Compute the set of unsatisfied providers for an agent under the given
- * profile context. Single source of truth for both the CLI's preflight
- * call and any future dashboard inspector that wants to surface "which
- * connections do I still need?" without triggering a run.
- */
-export async function resolveAgentReadiness(query: ReadinessQuery): Promise<ReadinessReport> {
-  const { agent, applicationId, orgId, defaultUserProfileId, perProviderOverrides, appProfileId } =
-    query;
-  const manifestProviders = resolveManifestProviders(agent.manifest);
-  const providerProfiles = await resolveProviderProfiles(
-    manifestProviders,
-    defaultUserProfileId,
-    perProviderOverrides,
-    appProfileId ?? null,
-    applicationId,
-  );
-  const errors = await collectDependencyErrors(
-    manifestProviders,
-    providerProfiles,
-    orgId,
-    applicationId,
-  );
-
-  const seen = new Set<string>();
-  const missing: ReadinessProviderEntry[] = [];
-  for (const err of errors) {
-    const providerId = err.field.startsWith("providers.")
-      ? err.field.slice("providers.".length)
-      : err.field;
-    if (seen.has(providerId)) continue;
-    seen.add(providerId);
-    missing.push({
-      providerId,
-      connectionProfileId: providerProfiles[providerId]?.connectionProfileId ?? null,
-      reason: mapReason(err.code),
-      message: err.message,
-    });
-  }
-  return { ready: missing.length === 0, missing };
-}
-
-function mapReason(code: string): ReadinessReason {
-  switch (code) {
-    case "needs_reconnection":
-      return "needs_reconnection";
-    case "scope_insufficient":
-      return "scope_insufficient";
-    case "provider_not_enabled":
-    case "provider_not_configured":
-      return "provider_not_enabled";
-    default:
-      return "no_connection";
-  }
 }

@@ -1,0 +1,55 @@
+{
+  "name": "@appstrate/telegram",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.1",
+  "display_name": "Telegram (API)",
+  "description": "Messaging platform — send messages, manage bots, and interact with chats via the Bot API",
+  "keywords": ["messaging", "communications"],
+  "license": "Apache-2.0",
+  "icon": "telegram",
+  "source": {
+    "kind": "none"
+  },
+  "auths": {
+    "primary": {
+      "type": "api_key",
+      "authorized_uris": ["https://api.telegram.org/**"],
+      "credentials": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "bot_token": {
+              "type": "string",
+              "description": "Bot API token from @BotFather (format: 123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11)"
+            }
+          },
+          "required": ["bot_token"]
+        }
+      },
+      "delivery": {
+        "env": {
+          "TELEGRAM_BOT_TOKEN": {
+            "value": "{$credential.bot_token}",
+            "sensitive": true
+          }
+        }
+      },
+      "_meta": {
+        "dev.appstrate/auth": {
+          "required": true
+        }
+      }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/api": {
+      "auths": {
+        "primary": {}
+      }
+    }
+  }
+}

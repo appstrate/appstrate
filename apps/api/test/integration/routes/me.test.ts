@@ -21,9 +21,41 @@ import {
   orgOnlyHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedApiKey, seedConnectionProfile } from "../../helpers/seed.ts";
+import { seedApiKey, seedPackage } from "../../helpers/seed.ts";
+import { db } from "../../helpers/db.ts";
+import { integrationConnections } from "@appstrate/db/schema";
+import { eq } from "drizzle-orm";
 
 const app = getTestApp();
+
+async function seedConnectionFor(opts: {
+  orgId: string;
+  applicationId: string;
+  integrationId: string;
+  userId: string;
+  label?: string;
+}): Promise<string> {
+  await seedPackage({
+    id: opts.integrationId,
+    orgId: opts.orgId,
+    type: "integration",
+    source: "local",
+  });
+  const [row] = await db
+    .insert(integrationConnections)
+    .values({
+      integrationId: opts.integrationId,
+      authKey: "google",
+      accountId: `acct-${crypto.randomUUID().slice(0, 8)}`,
+      applicationId: opts.applicationId,
+      userId: opts.userId,
+      credentialsEncrypted: "x",
+      scopesGranted: ["openid", "email"],
+      label: opts.label ?? null,
+    })
+    .returning({ id: integrationConnections.id });
+  return row!.id;
+}
 
 describe("Me API (/api/me)", () => {
   beforeEach(async () => {
@@ -183,98 +215,175 @@ describe("Me API (/api/me)", () => {
     });
   });
 
-  describe("GET/PUT/DELETE /api/me/application-profile", () => {
-    it("returns null when no sticky is set", async () => {
-      const ctx = await createTestContext({ orgSlug: "appprof" });
-      const res = await app.request("/api/me/application-profile", {
-        headers: authHeaders(ctx),
-      });
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { connectionProfileId: string | null };
-      expect(body.connectionProfileId).toBeNull();
-    });
+  describe("GET /api/me/connections", () => {
+    type Group = {
+      kind: string;
+      source_id: string;
+      total_connections: number;
+      connections: Array<{ connection_id: string; kind: string; org: { id: string } }>;
+    };
 
-    it("PUT pins a profile owned by the caller and round-trips on GET", async () => {
-      const ctx = await createTestContext({ orgSlug: "appprof" });
-      const profile = await seedConnectionProfile({
-        userId: ctx.user.id,
-        name: "Work",
-        isDefault: false,
-      });
-
-      const putRes = await app.request("/api/me/application-profile", {
-        method: "PUT",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ connectionProfileId: profile.id }),
-      });
-      expect(putRes.status).toBe(200);
-
-      const getRes = await app.request("/api/me/application-profile", {
-        headers: authHeaders(ctx),
-      });
-      const body = (await getRes.json()) as { connectionProfileId: string | null };
-      expect(body.connectionProfileId).toBe(profile.id);
-    });
-
-    it("PUT accepts an app profile of the same application", async () => {
-      const ctx = await createTestContext({ orgSlug: "appprof" });
-      const appProfile = await seedConnectionProfile({
+    it("returns the caller's integration connections grouped by source", async () => {
+      const ctx = await createTestContext({ orgSlug: "conn-org" });
+      await seedConnectionFor({
+        orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        name: "App Profile",
-        isDefault: false,
-      });
-      const res = await app.request("/api/me/application-profile", {
-        method: "PUT",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ connectionProfileId: appProfile.id }),
-      });
-      expect(res.status).toBe(200);
-    });
-
-    it("PUT 400 when the profile is owned by another user", async () => {
-      const ctx = await createTestContext({ orgSlug: "appprof" });
-      const otherUser = await createTestUser();
-      const otherProfile = await seedConnectionProfile({
-        userId: otherUser.id,
-        name: "Not Mine",
-        isDefault: false,
-      });
-      const res = await app.request("/api/me/application-profile", {
-        method: "PUT",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ connectionProfileId: otherProfile.id }),
-      });
-      expect(res.status).toBe(400);
-    });
-
-    it("DELETE clears the sticky and is idempotent on absence", async () => {
-      const ctx = await createTestContext({ orgSlug: "appprof" });
-      const profile = await seedConnectionProfile({
+        integrationId: "@conn/gmail",
         userId: ctx.user.id,
-        name: "Temp",
-        isDefault: false,
       });
-      await app.request("/api/me/application-profile", {
-        method: "PUT",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ connectionProfileId: profile.id }),
-      });
-      const del1 = await app.request("/api/me/application-profile", {
-        method: "DELETE",
-        headers: authHeaders(ctx),
-      });
-      expect(del1.status).toBe(204);
-      const del2 = await app.request("/api/me/application-profile", {
-        method: "DELETE",
-        headers: authHeaders(ctx),
-      });
-      expect(del2.status).toBe(204);
 
-      const getRes = await app.request("/api/me/application-profile", {
-        headers: authHeaders(ctx),
+      // Crosses orgs/apps by design — must succeed WITHOUT X-Org-Id.
+      const res = await app.request("/api/me/connections", {
+        headers: { Cookie: ctx.cookie },
       });
-      const body = (await getRes.json()) as { connectionProfileId: string | null };
-      expect(body.connectionProfileId).toBeNull();
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { object: "list"; data: Group[] };
+      expect(body.object).toBe("list");
+      const group = body.data.find((g) => g.source_id === "@conn/gmail");
+      expect(group).toBeDefined();
+      expect(group?.kind).toBe("integration");
+      expect(group?.total_connections).toBe(1);
+      expect(group?.connections[0]?.kind).toBe("integration");
+    });
+
+    it("aggregates connections across multiple orgs the caller belongs to", async () => {
+      const user = await createTestUser();
+      const { org: orgA, defaultAppId: appA } = await createTestOrg(user.id, { slug: "org-aa" });
+      const { org: orgB, defaultAppId: appB } = await createTestOrg(user.id, { slug: "org-bb" });
+      await seedConnectionFor({
+        orgId: orgA.id,
+        applicationId: appA,
+        integrationId: "@conn/a",
+        userId: user.id,
+      });
+      await seedConnectionFor({
+        orgId: orgB.id,
+        applicationId: appB,
+        integrationId: "@conn/b",
+        userId: user.id,
+      });
+
+      const res = await app.request("/api/me/connections", {
+        headers: { Cookie: user.cookie },
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: Group[] };
+      const sourceIds = body.data.map((g) => g.source_id);
+      expect(sourceIds).toContain("@conn/a");
+      expect(sourceIds).toContain("@conn/b");
+    });
+
+    it("does not leak another user's connections", async () => {
+      const ctx = await createTestContext({ orgSlug: "owner-org" });
+      const other = await createTestUser();
+      await seedConnectionFor({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        integrationId: "@conn/secret",
+        userId: ctx.user.id,
+      });
+
+      const res = await app.request("/api/me/connections", {
+        headers: { Cookie: other.cookie },
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: Group[] };
+      expect(body.data.find((g) => g.source_id === "@conn/secret")).toBeUndefined();
+    });
+
+    it("returns 401 without authentication", async () => {
+      const res = await app.request("/api/me/connections");
+      expect(res.status).toBe(401);
+    });
+  });
+
+  describe("DELETE /api/me/connections/:connectionId", () => {
+    it("returns 204 and deletes nothing for a nonexistent connection id (no disclosure)", async () => {
+      const ctx = await createTestContext({ orgSlug: "del-org" });
+      // Seed one real connection so we can prove the no-op delete left it intact.
+      const survivorId = await seedConnectionFor({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        integrationId: "@del/gmail",
+        userId: ctx.user.id,
+      });
+
+      // A random UUID that has no matching row. The route returns 204 (not
+      // 404) so a caller probing ids can't distinguish "never existed" from
+      // "already deleted" — same end state, no information disclosure.
+      const randomId = crypto.randomUUID();
+      const res = await app.request(`/api/me/connections/${randomId}`, {
+        method: "DELETE",
+        headers: { Cookie: ctx.cookie },
+      });
+      expect(res.status).toBe(204);
+
+      // The unrelated survivor row is untouched.
+      const rows = await db.select({ id: integrationConnections.id }).from(integrationConnections);
+      expect(rows.map((r) => r.id)).toContain(survivorId);
+      expect(rows).toHaveLength(1);
+    });
+
+    it("does not let actor B delete actor A's connection (ownership boundary)", async () => {
+      // Actor A owns the connection in their own org/app.
+      const ctxA = await createTestContext({ orgSlug: "victim-org" });
+      const connId = await seedConnectionFor({
+        orgId: ctxA.orgId,
+        applicationId: ctxA.defaultAppId,
+        integrationId: "@del/owned-by-a",
+        userId: ctxA.user.id,
+      });
+
+      // Actor B is a completely separate user. /me/* skips org/app context,
+      // so B can address the row by id — but the service's (userId | endUserId)
+      // ownership filter must refuse to delete a row B doesn't own.
+      const userB = await createTestUser();
+      const res = await app.request(`/api/me/connections/${connId}`, {
+        method: "DELETE",
+        headers: { Cookie: userB.cookie },
+      });
+      // The route still returns 204 (it re-derives scope from the row and the
+      // service no-ops on the ownership filter rather than 404-ing), but A's
+      // row MUST survive — that's the security boundary under test.
+      expect([204, 404]).toContain(res.status);
+
+      const after = await db
+        .select({ id: integrationConnections.id })
+        .from(integrationConnections)
+        .where(eq(integrationConnections.id, connId));
+      expect(after).toHaveLength(1);
+    });
+
+    it("lets the owner delete their own connection (204, row gone)", async () => {
+      const ctx = await createTestContext({ orgSlug: "self-del-org" });
+      const connId = await seedConnectionFor({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        integrationId: "@del/mine",
+        userId: ctx.user.id,
+      });
+
+      const res = await app.request(`/api/me/connections/${connId}`, {
+        method: "DELETE",
+        headers: { Cookie: ctx.cookie },
+      });
+      expect(res.status).toBe(204);
+
+      const after = await db
+        .select({ id: integrationConnections.id })
+        .from(integrationConnections)
+        .where(eq(integrationConnections.id, connId));
+      expect(after).toHaveLength(0);
+    });
+
+    it("returns 401 without authentication", async () => {
+      const res = await app.request(`/api/me/connections/${crypto.randomUUID()}`, {
+        method: "DELETE",
+      });
+      expect(res.status).toBe(401);
     });
   });
 });

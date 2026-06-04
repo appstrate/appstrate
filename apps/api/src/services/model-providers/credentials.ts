@@ -27,6 +27,7 @@ import { toISORequired } from "../../lib/date-helpers.ts";
 import { getModelProvider } from "./registry.ts";
 import type { ModelApiShape, OAuthTokenResponse } from "@appstrate/core/sidecar-types";
 import type { ModelProviderIdentity } from "@appstrate/core/module";
+import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import { getSystemModelProviderKeys } from "../model-registry.ts";
 import { logger } from "../../lib/logger.ts";
 import type { ModelProviderCredentialInfo } from "@appstrate/shared-types";
@@ -335,10 +336,9 @@ export async function updateModelProviderCredential(
 /**
  * Derive a credential label when the caller doesn't supply one. Picks the
  * provider's `displayName` (registry) and dedupes against existing labels
- * in the same org by appending ` (2)`, ` (3)`, … on collision — mirrors
- * the frontend's `deduplicateLabel()` helper, but resolved server-side so
- * automation (CLI, connect-helper, OAuth import) doesn't have to invent a
- * name.
+ * in the same org by appending ` (2)`, ` (3)`, … on collision, resolved
+ * server-side so automation (CLI, connect-helper, OAuth import) doesn't have
+ * to invent a name.
  *
  * Unknown providerIds fall back to the literal id — defensive only;
  * upstream callers reject unknown ids before we get here.
@@ -350,11 +350,10 @@ export async function deriveCredentialLabel(orgId: string, providerId: string): 
     .select({ label: modelProviderCredentials.label })
     .from(modelProviderCredentials)
     .where(scopedWhere(modelProviderCredentials, { orgId }));
-  const existing = new Set(rows.map((r) => r.label));
-  if (!existing.has(base)) return base;
-  let counter = 2;
-  while (existing.has(`${base} (${counter})`)) counter++;
-  return `${base} (${counter})`;
+  return dedupeLabel(
+    base,
+    rows.map((r) => r.label),
+  );
 }
 
 /**
@@ -370,10 +369,19 @@ export interface UpdateOAuthCredentialTokensInput {
   accountId?: string;
 }
 
-export async function updateOAuthCredentialTokens(
+/**
+ * Shared OAuth-blob read-modify-write: select → decrypt → kind-gate → apply
+ * `mutate` → re-encrypt → update (org-scoped). `mutate` returns the next blob.
+ * A missing row or non-`oauth` kind is a no-op (handled by the pre-guards
+ * here, before `mutate` runs). The denormalized `expiresAt` column is mirrored
+ * ONLY when the next blob's `expiresAt` differs from the existing one — so
+ * callers that don't touch expiry (e.g. {@link markCredentialNeedsReconnection})
+ * leave the column untouched.
+ */
+async function updateOAuthBlob(
   orgId: string,
   id: string,
-  fresh: UpdateOAuthCredentialTokensInput,
+  mutate: (existing: OAuthBlob) => OAuthBlob,
 ): Promise<void> {
   const [row] = await db
     .select({ credentialsEncrypted: modelProviderCredentials.credentialsEncrypted })
@@ -389,24 +397,21 @@ export async function updateOAuthCredentialTokens(
   const existing = decryptBlob(row.credentialsEncrypted);
   if (existing?.kind !== "oauth") return;
 
-  const next: OAuthBlob = {
-    ...existing,
-    accessToken: fresh.accessToken,
-    refreshToken: fresh.refreshToken,
-    expiresAt: fresh.expiresAt,
-    needsReconnection: false,
-    ...(fresh.accountId ? { accountId: fresh.accountId } : {}),
+  const next = mutate(existing);
+  const set: Record<string, unknown> = {
+    credentialsEncrypted: encryptCredentials(next as unknown as Record<string, unknown>),
+    updatedAt: new Date(),
   };
+  // Keep the denormalized cache in lockstep with the blob — the refresh worker
+  // scan filters on this column to skip the per-row decrypt. Only write it when
+  // the mutation actually changed the expiry.
+  if (next.expiresAt !== existing.expiresAt) {
+    set.expiresAt = next.expiresAt !== null ? new Date(next.expiresAt) : null;
+  }
 
   await db
     .update(modelProviderCredentials)
-    .set({
-      credentialsEncrypted: encryptCredentials(next as unknown as Record<string, unknown>),
-      // Keep the denormalized cache in lockstep with the blob — the refresh
-      // worker scan filters on this column to skip the per-row decrypt.
-      expiresAt: fresh.expiresAt !== null ? new Date(fresh.expiresAt) : null,
-      updatedAt: new Date(),
-    })
+    .set(set)
     .where(
       scopedWhere(modelProviderCredentials, {
         orgId,
@@ -415,34 +420,23 @@ export async function updateOAuthCredentialTokens(
     );
 }
 
-export async function markCredentialNeedsReconnection(orgId: string, id: string): Promise<void> {
-  const [row] = await db
-    .select({ credentialsEncrypted: modelProviderCredentials.credentialsEncrypted })
-    .from(modelProviderCredentials)
-    .where(
-      scopedWhere(modelProviderCredentials, {
-        orgId,
-        extra: [eq(modelProviderCredentials.id, id)],
-      }),
-    )
-    .limit(1);
-  if (!row) return;
-  const existing = decryptBlob(row.credentialsEncrypted);
-  if (existing?.kind !== "oauth") return;
+export async function updateOAuthCredentialTokens(
+  orgId: string,
+  id: string,
+  fresh: UpdateOAuthCredentialTokensInput,
+): Promise<void> {
+  await updateOAuthBlob(orgId, id, (existing) => ({
+    ...existing,
+    accessToken: fresh.accessToken,
+    refreshToken: fresh.refreshToken,
+    expiresAt: fresh.expiresAt,
+    needsReconnection: false,
+    ...(fresh.accountId ? { accountId: fresh.accountId } : {}),
+  }));
+}
 
-  const next: OAuthBlob = { ...existing, needsReconnection: true };
-  await db
-    .update(modelProviderCredentials)
-    .set({
-      credentialsEncrypted: encryptCredentials(next as unknown as Record<string, unknown>),
-      updatedAt: new Date(),
-    })
-    .where(
-      scopedWhere(modelProviderCredentials, {
-        orgId,
-        extra: [eq(modelProviderCredentials.id, id)],
-      }),
-    );
+export async function markCredentialNeedsReconnection(orgId: string, id: string): Promise<void> {
+  await updateOAuthBlob(orgId, id, (existing) => ({ ...existing, needsReconnection: true }));
 }
 
 // ─── Delete ────────────────────────────────────────────────────────────────
@@ -503,7 +497,7 @@ export async function listOrgModelProviderCredentials(
       return {
         id: r.id,
         label: r.label,
-        apiShape: cfg?.apiShape ?? "openai-chat",
+        apiShape: cfg?.apiShape ?? "openai-completions",
         baseUrl: effectiveBaseUrl(r.providerId, r.baseUrlOverride) ?? "",
         source: "custom",
         authMode: cfg?.authMode ?? "api_key",

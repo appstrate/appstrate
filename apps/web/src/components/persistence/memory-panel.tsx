@@ -24,7 +24,7 @@ export interface MemoryPanelProps {
 }
 
 /**
- * Unified memory view (ADR-013): pinned slots (always-in-prompt blocks
+ * Unified memory view: pinned slots (always-in-prompt blocks
  * including `checkpoint`) on top, archive memories below.
  * Mirrors the Letta ADE pattern of one inspector with two tiers visible
  * side by side.
@@ -85,7 +85,7 @@ export function MemoryPanel({ packageId, runId }: MemoryPanelProps) {
         isEmpty={pinnedCount === 0}
       >
         <div className="space-y-2">
-          {pinned!.map((slot) => (
+          {(pinned ?? []).map((slot) => (
             <PinnedSlotCard
               key={slot.id}
               slot={slot}
@@ -107,7 +107,7 @@ export function MemoryPanel({ packageId, runId }: MemoryPanelProps) {
         isEmpty={memoriesCount === 0}
       >
         <div className="space-y-1.5">
-          {memories!.map((mem) => (
+          {(memories ?? []).map((mem) => (
             <MemoryRow
               key={mem.id}
               memory={mem}

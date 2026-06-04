@@ -42,7 +42,7 @@ import { runPlatformContainer } from "../../../src/services/run-launcher/pi.ts";
 import {
   executeAgentInBackground,
   type ExecuteAgentInBackgroundInput,
-} from "../../../src/routes/runs.ts";
+} from "../../../src/services/run-launcher/execute-background.ts";
 import { finalizeRun, getRunSinkContext } from "../../../src/services/run-event-ingestion.ts";
 import { mintSinkCredentials } from "../../../src/lib/mint-sink-credentials.ts";
 import type { AppstrateRunPlan } from "../../../src/services/run-launcher/types.ts";
@@ -87,11 +87,15 @@ function createFakeOrchestrator(config: FakeOrchestratorConfig = {}): FakeOrches
     async initialize() {},
     async shutdown() {},
     async cleanupOrphans(): Promise<CleanupReport> {
-      return { workloads: 0, isolationBoundaries: 0 };
+      return { workloads: 0, isolationBoundaries: 0, workspaces: 0 };
     },
     async ensureImages() {},
     async createIsolationBoundary(runId: string): Promise<IsolationBoundary> {
-      const boundary: IsolationBoundary = { id: `net_${runId}`, name: `appstrate-exec-${runId}` };
+      const boundary: IsolationBoundary = {
+        id: `net_${runId}`,
+        name: `appstrate-exec-${runId}`,
+        workspace: { kind: "directory", path: `/tmp/test-ws-${runId}` },
+      };
       handle.boundaries.push(boundary);
       return boundary;
     },
@@ -188,8 +192,6 @@ function buildRunPlan(): AppstrateRunPlan {
       label: "Test Model",
       isSystemModel: false,
     },
-    tokens: {},
-    providers: [],
     timeout: 60,
   };
 }
@@ -206,8 +208,6 @@ function buildAgent(id: string): LoadedPackage {
     manifest: { name: id, version: "1.0.0", type: "agent" },
     prompt: "Do the thing.",
     skills: [],
-    tools: [],
-    providers: [],
   } as unknown as LoadedPackage;
 }
 

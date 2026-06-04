@@ -68,4 +68,35 @@ describe("buildEventEnvelope", () => {
     const data = payload.data as { object: Record<string, unknown> };
     expect(data.object.package).toBeUndefined();
   });
+
+  it("lets the caller override the inner `object` discriminator (run.connection_missing path)", () => {
+    // run.connection_missing fires before a run row exists, so the caller
+    // tags the `run` payload with `object: "run_attempt"` to make it
+    // self-describing. The envelope passes the caller's `object` through.
+    const { payload } = buildEventEnvelope({
+      eventType: "run.connection_missing",
+      run: {
+        object: "run_attempt",
+        packageId: "@acme/agent",
+        actor: { type: "user", id: "u1" },
+        errors: [{ field: "integrations.@acme/x", code: "missing_integration_connection" }],
+      },
+      payloadMode: "full",
+    });
+
+    const data = payload.data as { object: Record<string, unknown> };
+    expect(data.object.object).toBe("run_attempt");
+    expect(data.object.packageId).toBe("@acme/agent");
+  });
+
+  it("defaults the inner `object` to 'run' when the caller omits it", () => {
+    const { payload } = buildEventEnvelope({
+      eventType: "run.success",
+      run: { id: "run_xyz", status: "success" },
+      payloadMode: "full",
+    });
+
+    const data = payload.data as { object: Record<string, unknown> };
+    expect(data.object.object).toBe("run");
+  });
 });

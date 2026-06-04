@@ -22,12 +22,9 @@ export interface CardItem {
   source?: "system" | "local";
   runningRuns?: number;
   keywords?: string[];
-  providerIds?: string[];
   usedByAgents?: number;
   unreadCount?: number;
-  statusBadge?: ReactNode;
   actions?: ReactNode;
-  iconUrl?: string;
   autoInstalled?: boolean;
 }
 
@@ -103,13 +100,12 @@ export function PackageList() {
 
   const items: CardItem[] | undefined = agents?.map((f) => ({
     id: f.id,
-    displayName: f.displayName,
+    displayName: f.display_name,
     description: f.description,
     type: "agent",
     source: f.source,
-    runningRuns: f.runningRuns,
+    runningRuns: f.running_runs,
     keywords: f.keywords,
-    providerIds: Object.keys(f.dependencies.providers ?? {}),
     unreadCount: unreadCounts?.[f.id],
   }));
 

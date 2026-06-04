@@ -1,0 +1,112 @@
+{
+  "name": "@appstrate/xero",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.1",
+  "display_name": "Xero (API)",
+  "description": "Cloud-based accounting and bookkeeping platform for small businesses",
+  "keywords": ["accounting", "finance"],
+  "license": "Apache-2.0",
+  "icon": "xero",
+  "source": {
+    "kind": "none"
+  },
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "authorization_endpoint": "https://login.xero.com/identity/connect/authorize",
+      "token_endpoint": "https://identity.xero.com/connect/token",
+      "default_scopes": [
+        "openid",
+        "profile",
+        "email",
+        "accounting.transactions.read",
+        "accounting.contacts.read",
+        "offline_access"
+      ],
+      "token_endpoint_auth_method": "client_secret_basic",
+      "code_challenge_methods_supported": ["S256"],
+      "scope_catalog": [
+        {
+          "value": "openid",
+          "label": "OpenID Connect"
+        },
+        {
+          "value": "profile",
+          "label": "User profile"
+        },
+        {
+          "value": "email",
+          "label": "User email"
+        },
+        {
+          "value": "offline_access",
+          "label": "Refresh tokens"
+        },
+        {
+          "value": "accounting.transactions.read",
+          "label": "Read transactions and invoices"
+        },
+        {
+          "value": "accounting.transactions",
+          "label": "Read/write transactions and invoices"
+        },
+        {
+          "value": "accounting.contacts.read",
+          "label": "Read contacts"
+        },
+        {
+          "value": "accounting.contacts",
+          "label": "Read/write contacts"
+        },
+        {
+          "value": "accounting.settings.read",
+          "label": "Read organisation settings"
+        },
+        {
+          "value": "accounting.settings",
+          "label": "Read/write organisation settings"
+        },
+        {
+          "value": "accounting.reports.read",
+          "label": "Read reports"
+        },
+        {
+          "value": "accounting.journals.read",
+          "label": "Read journals"
+        },
+        {
+          "value": "accounting.attachments",
+          "label": "Read/write attachments"
+        }
+      ],
+      "authorized_uris": ["https://api.xero.com/**"],
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": " "
+        },
+        "dev.appstrate/auth": {
+          "required": true
+        }
+      }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/api": {
+      "auths": {
+        "primary": {}
+      }
+    }
+  }
+}

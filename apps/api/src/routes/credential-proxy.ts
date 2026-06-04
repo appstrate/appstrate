@@ -4,11 +4,10 @@
  * /api/credential-proxy/proxy — public authenticated credential proxy.
  *
  * Used by external runners (CLI, GitHub Action, third-party agents) to
- * reach an application's providers without copying raw credentials out
- * of Appstrate. The CLI's `RemoteAppstrateProviderResolver` (spec.md
- * §8.3) is the canonical consumer; in-container runs reach the same
- * `executeProviderCall` helper via the sidecar's MCP `provider_call`
- * tool instead.
+ * reach an application's integrations without copying raw credentials out
+ * of Appstrate. The CLI's `RemoteAppstrateIntegrationResolver` is the
+ * canonical consumer; in-container runs reach the same credential-proxy
+ * core via the sidecar's MCP `{ns}__api_call` tools instead.
  *
  * Security: this is the single most sensitive endpoint in the public
  * API surface. Controls:
@@ -25,9 +24,9 @@
  *     or `user:<id>`) — cookie jars can never be shared between a bearer
  *     JWT and an API key, nor between two API keys of the same org.
  *   - Audit log on every call (requestId, authMethod, apiKeyId, userId,
- *     endUserId, providerId, target, status)
- *   - URL allowlist enforced via the provider manifest
- *     (`authorizedUris` / `allowAllUris`)
+ *     endUserId, integrationId, target, status)
+ *   - URL allowlist enforced via the integration manifest
+ *     (`authorized_uris` / `allow_all_uris`)
  *   - Request / response size caps
  */
 
@@ -42,10 +41,8 @@ const MAX_STREAMED_BODY_SIZE = 100 * 1024 * 1024; // 100 MB
 
 /** Wall-clock timeout for piping an upstream streaming response to the client. */
 export const STREAMING_PIPE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
-import { and, eq, isNull, sql } from "drizzle-orm";
-import { db } from "@appstrate/db/client";
-import { connectionProfiles, userApplicationProfiles } from "@appstrate/db/schema";
 import { filterHeaders } from "@appstrate/connect/proxy-primitives";
+import { getActor } from "../lib/actor.ts";
 import { logger } from "../lib/logger.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
@@ -67,136 +64,8 @@ import { isValidSessionId, bindOrCheckSession } from "../services/credential-pro
 import { insertCredentialProxyUsage } from "../services/credential-proxy-usage.ts";
 import type { AppEnv } from "../types/index.ts";
 
-/**
- * Resolve the connection profile holding the credentials:
- *   - end-user in context: the end-user's default profile.
- *   - authenticated user (dashboard / CLI JWT) with no app-default:
- *     the user's own default profile. Mirrors how the platform dashboard
- *     resolves providers — the user's personal connection chain is used
- *     when no app-level profile has been provisioned.
- *   - else: the application's default profile (API-key callers).
- *
- * Applications on fresh installs often have no app-default profile —
- * they rely on `app-profile-bindings` to user profiles instead. Without
- * the user-profile fallback a `oauth2-instance`/`oauth2-dashboard`
- * caller would hit a 404 on every provider call despite having their
- * own connected account; that mismatch would make the CLI remote-run
- * flow unusable unless every admin hand-crafts an app-default profile.
- */
-export async function resolveProfileId(args: {
-  applicationId: string;
-  endUserId?: string;
-  userId?: string;
-  /**
-   * Optional explicit profile id from the `X-Connection-Profile-Id`
-   * header. When set the resolver narrows to that profile after
-   * validating the caller is allowed to use it (own user/end-user
-   * profile, or an app profile in the request's application). Mismatched
-   * ids surface as `null` so the route returns `404 — no credentials`,
-   * keeping the failure mode aligned with the implicit-default path.
-   */
-  explicitProfileId?: string;
-}): Promise<string | null> {
-  if (args.explicitProfileId) {
-    const [row] = await db
-      .select({
-        id: connectionProfiles.id,
-        userId: connectionProfiles.userId,
-        endUserId: connectionProfiles.endUserId,
-        applicationId: connectionProfiles.applicationId,
-      })
-      .from(connectionProfiles)
-      .where(eq(connectionProfiles.id, args.explicitProfileId))
-      .limit(1);
-    if (!row) return null;
-    // Authorisation: the profile must belong to one of three buckets
-    // the caller already owns. Anything else (another user's profile,
-    // another app's profile) surfaces as null → 404.
-    const ownsUser = row.userId !== null && row.userId === args.userId;
-    const ownsEndUser = row.endUserId !== null && row.endUserId === args.endUserId;
-    const ownsAppProfile = row.applicationId !== null && row.applicationId === args.applicationId;
-    if (!ownsUser && !ownsEndUser && !ownsAppProfile) return null;
-    return row.id;
-  }
-  if (args.endUserId) {
-    const rows = await db
-      .select({ id: connectionProfiles.id })
-      .from(connectionProfiles)
-      .where(
-        and(
-          eq(connectionProfiles.endUserId, args.endUserId),
-          eq(connectionProfiles.isDefault, true),
-        ),
-      )
-      .limit(1);
-    return rows[0]?.id ?? null;
-  }
-  // Member's per-(user, app) sticky default — set via the dashboard
-  // preferences page (or `appstrate connections profile switch` once the
-  // CLI is server-aligned). Wins over the app's shared default but loses
-  // to an explicit per-run override above.
-  if (args.userId) {
-    const stickyRows = await db
-      .select({ id: userApplicationProfiles.connectionProfileId })
-      .from(userApplicationProfiles)
-      .where(
-        and(
-          eq(userApplicationProfiles.userId, args.userId),
-          eq(userApplicationProfiles.applicationId, args.applicationId),
-        ),
-      )
-      .limit(1);
-    if (stickyRows[0]) return stickyRows[0].id;
-  }
-  const appRows = await db
-    .select({ id: connectionProfiles.id })
-    .from(connectionProfiles)
-    .where(
-      and(
-        eq(connectionProfiles.applicationId, args.applicationId),
-        eq(connectionProfiles.isDefault, true),
-        isNull(connectionProfiles.userId),
-        isNull(connectionProfiles.endUserId),
-      ),
-    )
-    .orderBy(sql`created_at asc`)
-    .limit(1);
-  if (appRows[0]) return appRows[0].id;
-
-  if (args.userId) {
-    const userRows = await db
-      .select({ id: connectionProfiles.id })
-      .from(connectionProfiles)
-      .where(
-        and(
-          eq(connectionProfiles.userId, args.userId),
-          eq(connectionProfiles.isDefault, true),
-          isNull(connectionProfiles.applicationId),
-          isNull(connectionProfiles.endUserId),
-        ),
-      )
-      .limit(1);
-    if (userRows[0]) return userRows[0].id;
-  }
-  return null;
-}
-
-/**
- * Auth methods the credential proxy accepts. The value is the
- * `c.get("authMethod")` string set by the auth pipeline — `"api_key"` for
- * headless `ask_` bearers, `"oauth2-instance"` for device-flow JWTs minted
- * by the interactive CLI (`/api/auth/cli/token`), `"oauth2-dashboard"`
- * for dashboard-session JWTs obtained via the OIDC authorization-code
- * flow. Cookie sessions (`"session"`) and any unknown strategy id are
- * rejected.
- */
-const ACCEPTED_AUTH_METHODS: ReadonlySet<string> = new Set([
-  "api_key",
-  "oauth2-instance",
-  "oauth2-dashboard",
-]);
-
-import { getCookieJarStore } from "../services/credential-proxy/cookie-jar.ts";
+import { assertBearerOnly } from "../lib/bearer-only.ts";
+import { getCookieJarStore } from "../infra/index.ts";
 import { getCredentialProxyLimits } from "../services/proxy-limits.ts";
 
 export function createCredentialProxyRouter() {
@@ -217,15 +86,12 @@ export function createCredentialProxyRouter() {
       // Accept headless API keys and bearer JWTs from the interactive CLI
       // (device-flow `oauth2-instance`) or dashboard (`oauth2-dashboard`).
       // Cookie sessions are refused — they would let a drive-by CSRF
-      // trigger arbitrary provider calls on behalf of a logged-in user.
+      // trigger arbitrary upstream calls on behalf of a logged-in user.
       const authMethod = c.get("authMethod");
-      if (!ACCEPTED_AUTH_METHODS.has(authMethod)) {
-        throw forbidden(
-          `Credential proxy does not accept auth method "${authMethod}" (cookie sessions and unknown strategies rejected)`,
-        );
-      }
+      assertBearerOnly(authMethod, "Credential proxy");
 
-      const providerId = c.req.header("X-Provider");
+      // Canonical header is `X-Integration-Id` (suffix parity with `X-Connection-Id`).
+      const integrationId = c.req.header("X-Integration-Id");
       const target = c.req.header("X-Target");
       const sessionId = c.req.header("X-Session-Id");
       const substituteBody = c.req.header("X-Substitute-Body") === "true";
@@ -235,14 +101,16 @@ export function createCredentialProxyRouter() {
       // mismatched runId is a reporting oddity, not a security boundary.
       const runIdHeader = c.req.header("X-Run-Id");
       const runId = runIdHeader && runIdHeader.length > 0 ? runIdHeader : null;
-      // X-Connection-Profile-Id is optional — when set the route narrows
-      // to that profile (after ownership validation in resolveProfileId);
-      // when absent the implicit default chain still applies.
-      const explicitProfileHeader = c.req.header("X-Connection-Profile-Id");
-      const explicitProfileId =
-        explicitProfileHeader && explicitProfileHeader.length > 0 ? explicitProfileHeader : null;
+      // X-Connection-Id is optional — when set the route narrows to that
+      // connection (validated against the actor's accessible set in the
+      // resolver); when absent the implicit default chain still applies.
+      const explicitConnectionHeader = c.req.header("X-Connection-Id");
+      const explicitConnectionId =
+        explicitConnectionHeader && explicitConnectionHeader.length > 0
+          ? explicitConnectionHeader
+          : null;
 
-      if (!providerId) throw invalidRequest("Missing X-Provider header");
+      if (!integrationId) throw invalidRequest("Missing X-Integration-Id header");
       if (!target) throw invalidRequest("Missing X-Target header");
       if (!sessionId) throw invalidRequest("Missing X-Session-Id header");
       if (!isValidSessionId(sessionId)) {
@@ -281,36 +149,13 @@ export function createCredentialProxyRouter() {
       const userId = c.get("user").id;
       const endUser = c.get("endUser");
 
-      // Resolve the profile that owns the credentials:
-      //   - end-user profile when `Appstrate-User` was supplied
-      //   - app-default profile, else
-      //   - authenticated user's personal profile (dashboard / CLI JWT flows
-      //     only — API keys operate on apps, not users).
-      const userFallback =
-        authMethod === "oauth2-dashboard" || authMethod === "oauth2-instance" ? userId : undefined;
-      let connectionProfileId: string | null;
-      try {
-        connectionProfileId = await resolveProfileId({
-          applicationId,
-          endUserId: endUser?.id,
-          ...(userFallback ? { userId: userFallback } : {}),
-          ...(explicitProfileId ? { explicitProfileId } : {}),
-        });
-      } catch (err) {
-        logger.error("credential-proxy: profile resolution failed", {
-          applicationId,
-          endUserId: endUser?.id,
-          error: getErrorMessage(err),
-        });
-        throw internalError();
-      }
-      if (!connectionProfileId) {
-        throw notFound(
-          endUser
-            ? `End-user ${endUser.id} has no connection profile in application ${applicationId}`
-            : `Application ${applicationId} has no default connection profile`,
-        );
-      }
+      // The actor selects which `integration_connections` row is decrypted:
+      //   - `Appstrate-User` impersonation → the end-user's connection
+      //   - dashboard / CLI-JWT / API-key callers → the platform user's
+      //     own connection (or any `shared_with_org` connection in the app).
+      // `X-Connection-Id` (when present) pins a specific connection id,
+      // validated against the actor's accessible set in the resolver.
+      const actor = getActor(c);
 
       // Streaming control headers from the runtime.
       const streamRequest = c.req.header("x-stream-request") === "1";
@@ -330,7 +175,7 @@ export function createCredentialProxyRouter() {
       const streamLogCtx = {
         requestId: c.get("requestId"),
         orgId,
-        providerId,
+        integrationId,
         target,
       };
 
@@ -389,11 +234,11 @@ export function createCredentialProxyRouter() {
         // streamRequest is true, the stream body is forwarded with
         // duplex: "half" and 401-retry is suppressed (body unreplayable);
         // authRefreshed is surfaced on the result instead.
-        const result = await proxyCall(db, {
+        const result = await proxyCall({
           applicationId,
-          orgId,
-          connectionProfileId,
-          providerId,
+          actor,
+          ...(explicitConnectionId ? { connectionId: explicitConnectionId } : {}),
+          integrationId,
           method,
           target,
           headers: fwdHeaders,
@@ -402,7 +247,7 @@ export function createCredentialProxyRouter() {
           cookieJar: jar,
           jarSessionId: sessionId,
           cookieJarTtlSeconds: limits.session_ttl_seconds,
-          sessionKey: providerId,
+          sessionKey: integrationId,
           // When the client wants a streamed response, skip the platform
           // response-size cap — the capping transform stream in this
           // route enforces MAX_STREAMED_BODY_SIZE instead.
@@ -418,7 +263,7 @@ export function createCredentialProxyRouter() {
           userId,
           endUserId: endUser?.id,
           applicationId,
-          providerId,
+          integrationId,
           method,
           target,
           status: result.status,
@@ -436,11 +281,10 @@ export function createCredentialProxyRouter() {
           userId: apiKeyId ? null : userId,
           runId,
           applicationId,
-          providerId,
+          integrationId,
           targetHost: safeTargetHost(target),
           httpStatus: result.status,
           durationMs,
-          costUsd: 0,
           requestId: c.get("requestId"),
         });
 
@@ -490,9 +334,17 @@ export function createCredentialProxyRouter() {
           });
         }
 
+        // Buffer the (already size-capped) body before responding: the
+        // `truncated` flag only flips once the capped stream is consumed, so
+        // we must drain it here to know whether to emit `X-Truncated: true`.
+        // The cap bounds this buffer to `limits.max_response_bytes`.
+        let responseBody: ArrayBuffer | null = null;
+        if (result.body) {
+          responseBody = await new Response(result.body).arrayBuffer();
+        }
         if (result.truncated) responseHeaders.set("X-Truncated", "true");
 
-        return new Response(result.body, {
+        return new Response(responseBody, {
           status: result.status,
           headers: responseHeaders,
         });
@@ -503,7 +355,7 @@ export function createCredentialProxyRouter() {
             apiKeyId,
             userId,
             applicationId,
-            providerId,
+            integrationId,
             target,
           });
           throw forbidden(err.message);
@@ -519,7 +371,7 @@ export function createCredentialProxyRouter() {
           apiKeyId,
           userId,
           applicationId,
-          providerId,
+          integrationId,
           error: getErrorMessage(err),
         });
         throw internalError();
@@ -531,13 +383,14 @@ export function createCredentialProxyRouter() {
 }
 
 const PROXY_CONTROL_HEADERS = new Set([
-  "x-provider",
+  "x-integration",
+  "x-integration-id",
   "x-target",
   "x-session-id",
   "x-substitute-body",
   "x-run-id",
   "x-application-id",
-  "x-connection-profile-id",
+  "x-connection-id",
   // Streaming transport hints — consumed by this route, must not reach upstream.
   "x-stream-request",
   "x-stream-response",
@@ -581,7 +434,7 @@ const HOP_BY_HOP = new Set([
 interface StreamCapLogCtx {
   requestId: string;
   orgId: string;
-  providerId: string;
+  integrationId: string;
   target: string;
   direction: "upload" | "download";
 }
@@ -619,7 +472,7 @@ function capStreamingBody(
         logger.warn("credential-proxy: streaming body exceeded size cap", {
           requestId: ctx.requestId,
           orgId: ctx.orgId,
-          providerId: ctx.providerId,
+          integrationId: ctx.integrationId,
           target: ctx.target,
           direction: ctx.direction,
           bytesReceived: received,
@@ -648,7 +501,7 @@ function capStreamingBody(
       logger.warn("credential-proxy: streaming pipe aborted", {
         requestId: ctx.requestId,
         orgId: ctx.orgId,
-        providerId: ctx.providerId,
+        integrationId: ctx.integrationId,
         target: ctx.target,
         direction: ctx.direction,
         bytesReceived: received,

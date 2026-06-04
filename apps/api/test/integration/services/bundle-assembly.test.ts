@@ -20,15 +20,11 @@ import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import * as storage from "@appstrate/db/storage";
 import { computeIntegrity } from "@appstrate/core/integrity";
-import {
-  buildBundleFromDb,
-  buildBundleFromInlinePayload,
-} from "../../../src/services/bundle-assembly.ts";
+import { buildBundleFromDb } from "../../../src/services/bundle-assembly.ts";
 import {
   extractRootFromAfps,
   readBundleFromBuffer,
   writeBundleToBuffer,
-  type BundlePackage,
   type PackageIdentity,
 } from "@appstrate/afps-runtime/bundle";
 
@@ -39,15 +35,24 @@ function enc(s: string): Uint8Array {
 }
 
 function buildAfps(manifest: Record<string, unknown>, content: string): Uint8Array {
-  return zipSync({
+  const files: Record<string, Uint8Array> = {
     "manifest.json": enc(JSON.stringify(manifest, null, 2)),
-    "prompt.md": enc(content),
-  });
+  };
+  // AFPS §3.3/§3.4 companion-file invariants enforced by the bundle loader:
+  // agents need a non-empty prompt.md, skills need a SKILL.md with a
+  // frontmatter `name`. Emit the right companion for the package type.
+  if (manifest.type === "skill") {
+    const name = typeof manifest.name === "string" ? manifest.name : "@test/skill";
+    files["SKILL.md"] = enc(`---\nname: ${name}\n---\n\n${content}`);
+  } else {
+    files["prompt.md"] = enc(content);
+  }
+  return zipSync(files);
 }
 
 async function seedPackageWithZip(opts: {
   id: `@${string}/${string}`;
-  type: "agent" | "skill" | "tool" | "provider";
+  type: "agent" | "skill";
   version: string;
   orgId: string;
   manifest: Record<string, unknown>;
@@ -90,8 +95,8 @@ describe("bundle-assembly — end-to-end via DbPackageCatalog", () => {
         name: "@test/agent-root",
         version: "1.0.0",
         type: "agent",
-        schemaVersion: "1.1",
-        displayName: "Root",
+        schema_version: "0.1",
+        display_name: "Root",
         author: "tester",
         dependencies: { skills: { "@test/skill-a": "^1.0.0" } },
       },
@@ -106,8 +111,8 @@ describe("bundle-assembly — end-to-end via DbPackageCatalog", () => {
         name: "@test/skill-a",
         version: "1.2.0",
         type: "skill",
-        schemaVersion: "1.1",
-        displayName: "A",
+        schema_version: "0.1",
+        display_name: "A",
         author: "tester",
         dependencies: { skills: { "@test/skill-dep": "^1" } },
       },
@@ -121,8 +126,8 @@ describe("bundle-assembly — end-to-end via DbPackageCatalog", () => {
         name: "@test/skill-dep",
         version: "1.0.0",
         type: "skill",
-        schemaVersion: "1.1",
-        displayName: "Dep",
+        schema_version: "0.1",
+        display_name: "Dep",
         author: "tester",
       },
     });
@@ -135,8 +140,8 @@ describe("bundle-assembly — end-to-end via DbPackageCatalog", () => {
         name: "@test/agent-root",
         version: "1.0.0",
         type: "agent",
-        schemaVersion: "1.1",
-        displayName: "Root",
+        schema_version: "0.1",
+        display_name: "Root",
         author: "tester",
         dependencies: { skills: { "@test/skill-a": "^1.0.0" } },
       },
@@ -162,66 +167,5 @@ describe("bundle-assembly — end-to-end via DbPackageCatalog", () => {
 
     // Second serialization is byte-identical (determinism canary).
     expect(writeBundleToBuffer(bundle)).toEqual(bytes);
-  });
-
-  it("composes in-memory + DB catalogs for inline runs (payload wins)", async () => {
-    // Pre-register a DB version that should be SHADOWED by the inline
-    // payload (same identity, different bytes).
-    await seedPackageWithZip({
-      id: "@test/skill-x",
-      type: "skill",
-      version: "1.0.0",
-      orgId: ORG_ID,
-      manifest: {
-        name: "@test/skill-x",
-        version: "1.0.0",
-        type: "skill",
-        schemaVersion: "1.1",
-        displayName: "X",
-        author: "tester",
-      },
-      content: "DB VERSION",
-    });
-
-    // Inline-supplied root + same-identity skill with different bytes.
-    const rootAfps = buildAfps(
-      {
-        name: "@test/inline-root",
-        version: "1.0.0",
-        type: "agent",
-        schemaVersion: "1.1",
-        displayName: "InlineRoot",
-        author: "tester",
-        dependencies: { skills: { "@test/skill-x": "^1.0.0" } },
-      },
-      "p",
-    );
-    const root = extractRootFromAfps(rootAfps);
-
-    const inlineSkill: BundlePackage = extractRootFromAfps(
-      buildAfps(
-        {
-          name: "@test/skill-x",
-          version: "1.0.0",
-          type: "skill",
-          schemaVersion: "1.1",
-          displayName: "X",
-          author: "tester",
-        },
-        "INLINE VERSION",
-      ),
-    );
-
-    const bundle = await buildBundleFromInlinePayload(root, [inlineSkill], {
-      orgId: ORG_ID,
-      applicationId: APP_ID,
-    });
-
-    const resolved = bundle.packages.get("@test/skill-x@1.0.0" as PackageIdentity);
-    expect(resolved).toBeDefined();
-    // The inline BundlePackage carried its own files — the payload won.
-    // The DB version's "DB VERSION" content should NOT be in the bundle.
-    const skillRoot = new TextDecoder().decode(resolved!.files.get("prompt.md")!);
-    expect(skillRoot).toBe("INLINE VERSION");
   });
 });

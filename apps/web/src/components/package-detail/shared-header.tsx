@@ -10,8 +10,8 @@ import { PageHeader } from "../page-header";
 const emojiMap: Record<PackageType, string> = {
   agent: "⚡",
   skill: "🧠",
-  tool: "🔧",
-  provider: "🔌",
+  "mcp-server": "🔌",
+  integration: "🧩",
 };
 
 interface SharedHeaderDetail {

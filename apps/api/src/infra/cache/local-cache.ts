@@ -17,6 +17,9 @@ export class LocalCache implements KeyValueCache {
 
   constructor() {
     this.purgeInterval = setInterval(() => this.purge(), 60_000);
+    // Don't let the background purge keep the event loop alive on its own —
+    // the server's listener does that in prod, and tests can exit cleanly.
+    this.purgeInterval.unref?.();
   }
 
   async get(key: string): Promise<string | null> {

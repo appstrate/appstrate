@@ -19,30 +19,30 @@ Appstrate uses the [AFPS](https://github.com/appstrate/afps-spec) (Agent Format 
   Goal          │  Agent                        │  "What should the AI accomplish?"
                 │  prompt.md + manifest.json    │  Runs autonomously in a container.
                 ├───────────────────────────────┤
-  Capability    │  Skill (declarative)          │  Reusable instructions (SKILL.md).
-                │  Tool  (executable)           │  TypeScript code the agent can call.
+  Capability    │  Skill       (declarative)    │  Reusable instructions (SKILL.md).
+                │  MCP server  (executable)     │  Packaged MCP Bundle exposing tools.
                 ├───────────────────────────────┤
-  Connection    │  Provider                     │  OAuth2, API key, or custom auth
-                │                               │  for external services.
+  Connection    │  Integration                  │  OAuth 2.0, API key, basic, mTLS,
+                │                               │  or custom auth for external services.
                 └───────────────────────────────┘
 ```
 
-- An **agent** is the primary unit. It declares a goal (`prompt.md`), its dependencies (skills, tools, providers), and input/output/config schemas. Each run creates a fresh Docker container, injects the prompt and credentials via a sidecar proxy, and produces a structured result.
-- A **skill** adds knowledge — reusable instructions the agent follows during a run (compatible with the [Agent Skills](https://agentskills.io/) format).
-- A **tool** adds capability — executable TypeScript code the agent can invoke at runtime.
-- A **provider** adds connectivity — authentication metadata for external services (Gmail, ClickUp, Stripe, etc.). Users connect once; credentials are encrypted and injected via the sidecar.
+- An **agent** is the primary unit. It declares a goal (`prompt.md`), its dependencies (skills, mcp-servers, integrations), and input/output/config schemas. Each run creates a fresh Docker container, injects the prompt and credentials via a sidecar proxy, and produces a structured result.
+- A **skill** adds knowledge — reusable instructions the agent follows during a run (`SKILL.md` + the [Anthropic Agent Skills](https://agentskills.io/) format).
+- An **mcp-server** adds runnable tools. A packaged MCP Bundle (MCPB-vocabulary `server` / `tools` / `user_config`) that runs as a subprocess and speaks JSON-RPC. The agent calls its tools through the sidecar. `server.type ∈ { node, python, binary, uv }` with an optional `_meta["dev.appstrate/mcp-server"].runtime: "bun"` override for Bun-native servers.
+- An **integration** adds authenticated access to an external service. Declares a `source` (local mcp-server, remote MCP endpoint, or HTTP API), one or more `auths` methods, and `delivery` for credential injection. Supports OAuth 2.0 (with RFC 8414 discovery + RFC 8707 resource indicators + PKCE), API key, basic auth, mTLS, and custom credential flows.
 
 Agents are **prompt-driven**: the AI coding agent inside the container interprets the goal and writes its own execution code. Change the prompt, change the behavior — no node graphs, no pre-scripted steps.
 
 ## Features
 
 - **Autonomous AI agents** — Each run executes in an isolated Docker container with a Pi Coding Agent
-- **OAuth2 + API key connections** — Connect external services (OAuth2/PKCE, OAuth 1.0a, API key, basic auth, custom credentials)
+- **Flexible authentication** — Connect external services with OAuth 2.0 (RFC 8414 discovery + RFC 8707 resource indicators + PKCE), API key, basic auth, mTLS, and custom credential flows
 - **Sandboxed runs** — Containers are created, run, and destroyed per run
 - **Sidecar isolation** — Credential injection via a sidecar proxy (agent never sees raw credentials)
 - **Cron scheduling** — Schedule agents with cron expressions, distributed lock prevents duplicates
-- **Package import** — Import agents, skills, extensions, and providers from ZIP/AFPS files
-- **Skills & extensions** — Extend agent capabilities with SKILL.md instructions and TypeScript tool extensions
+- **Package import** — Import agents, skills, MCP servers, and integrations from ZIP/AFPS files
+- **Skills & MCP servers** — Extend agent capabilities with SKILL.md instructions and packaged MCP Bundles (`server.type ∈ node | python | binary | uv`)
 - **Realtime** — SSE-based run monitoring with LISTEN/NOTIFY
 - **Multi-tenant** — Organization-based isolation with role-based access (owner/admin/member)
 - **API keys** — Programmatic access via `ask_*` prefixed API keys
@@ -191,11 +191,11 @@ appstrate/
 │   ├── shared-types/         # @appstrate/shared-types — Drizzle InferSelectModel re-exports
 │   └── connect/              # @appstrate/connect — OAuth2/PKCE, API key, credential encryption (v1 envelope + multi-key keyring)
 │
-├── system-packages/           # System package ZIPs (providers, skills, tools, agents — loaded at boot)
+├── system-packages/           # System package ZIPs (skills, mcp-servers, integrations, agents — loaded at boot)
 │
 ├── runtime-pi/               # Docker image: Pi Coding Agent SDK
 │   ├── entrypoint.ts         # SDK session → HMAC-signed CloudEvents to platform sink
-│   └── sidecar/server.ts     # Credential-isolating MCP server (provider_call, run_history, recall_memory)
+│   └── sidecar/server.ts     # Credential-isolating MCP server — first-party tools (run_history, recall_memory) + per-integration {ns}__api_call (+ optional {ns}__api_upload)
 │
 └── scripts/verify-openapi.ts # OpenAPI validation (coverage + structure + lint + Zod ↔ spec + Code ⊆ Spec)
 ```
@@ -204,46 +204,47 @@ appstrate/
 
 The API is organized into 30+ route domains with 258 documented endpoints:
 
-| Domain                  | Description                                                                                             |
-| ----------------------- | ------------------------------------------------------------------------------------------------------- |
-| **Auth**                | Better Auth email/password + cookie sessions                                                            |
-| **Agents**              | Agent CRUD, config, skills/tools binding, versions, bundle export                                       |
-| **Runs**                | Run agents, list runs, logs, cancel, remote run minting + HMAC event ingestion + sink TTL extension     |
-| **Realtime**            | SSE streams for run monitoring (with `Last-Event-ID` resume)                                            |
-| **Schedules**           | Cron-based agent scheduling                                                                             |
-| **Connections**         | OAuth2/API key service connections                                                                      |
-| **Connection Profiles** | Shared connection sets across agents                                                                    |
-| **Providers**           | Provider package configuration (OAuth2, OAuth1, API key, basic, custom)                                 |
-| **Provider Keys**       | Org-level LLM provider API key management                                                               |
-| **Proxies**             | Org-level and agent-level HTTP proxy config                                                             |
-| **API Keys**            | Programmatic access tokens (`ask_*`)                                                                    |
-| **Packages**            | Org packages CRUD, import (incl. `.afps-bundle` multi-package), publish, dist-tags, version pinning     |
-| **Library**             | Consolidated package list with per-app install state                                                    |
-| **Notifications**       | Run notification management                                                                             |
-| **Organizations**       | Org CRUD, members, invitations                                                                          |
-| **Profile**             | User profile management                                                                                 |
-| **Invitations**         | Magic link invitation acceptance                                                                        |
-| **Welcome**             | Post-invite profile setup                                                                               |
-| **Internal**            | Container-to-host routes (credentials, run history)                                                     |
-| **Meta**                | OpenAPI spec + Swagger UI                                                                               |
-| **Models**              | Org-level LLM model configuration and testing                                                           |
-| **Health**              | Health check                                                                                            |
-| **Applications**        | Primary workspace boundary — scopes agents, runs, schedules, webhooks, connections, packages, end-users |
-| **App Profiles**        | Application-scoped connection profile management                                                        |
-| **End-Users**           | External end-user management for headless API (cursor pagination via `startingAfter`/`endingBefore`)    |
-| **Webhooks**            | Run event webhooks with HMAC signing (Standard Webhooks)                                                |
-| **Credential Proxy**    | Server-side credential injection for external runners (5 verbs: GET/POST/PUT/PATCH/DELETE)              |
-| **LLM Proxy**           | Server-side LLM model injection — OpenAI + Anthropic protocol families                                  |
-| **OAuth Clients**       | OIDC module — instance/end-user OAuth 2.1 client management                                             |
-| **CLI Sessions**        | OIDC module — admin oversight of CLI sessions per org (`cli-sessions` RBAC resource)                    |
+| Domain                  | Description                                                                                                                     |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| **Auth**                | Better Auth email/password + cookie sessions                                                                                    |
+| **Agents**              | Agent CRUD, config, skills/mcp-servers/integrations binding, versions, bundle export                                            |
+| **Runs**                | Run agents, list runs, logs, cancel, remote run minting + HMAC event ingestion + sink TTL extension                             |
+| **Realtime**            | SSE streams for run monitoring (with `Last-Event-ID` resume)                                                                    |
+| **Schedules**           | Cron-based agent scheduling                                                                                                     |
+| **Connections**         | OAuth 2.0 / API key / basic / mTLS / custom service connections                                                                 |
+| **Connection Profiles** | Shared connection sets across agents                                                                                            |
+| **Integrations**        | Integration package configuration (OAuth 2.0 + discovery, API key, basic, mTLS, custom; `source.kind = local \| remote \| api`) |
+| **Model Provider Keys** | Org-level LLM model provider API key management (OpenAI, Anthropic, etc.) — distinct from AFPS integrations                     |
+| **Proxies**             | Org-level and agent-level HTTP proxy config                                                                                     |
+| **API Keys**            | Programmatic access tokens (`ask_*`)                                                                                            |
+| **Packages**            | Org packages CRUD, import (incl. `.afps-bundle` multi-package), publish, dist-tags, version pinning                             |
+| **Library**             | Consolidated package list with per-app install state                                                                            |
+| **Notifications**       | Run notification management                                                                                                     |
+| **Organizations**       | Org CRUD, members, invitations                                                                                                  |
+| **Profile**             | User profile management                                                                                                         |
+| **Invitations**         | Magic link invitation acceptance                                                                                                |
+| **Welcome**             | Post-invite profile setup                                                                                                       |
+| **Internal**            | Container-to-host routes (credentials, run history)                                                                             |
+| **Meta**                | OpenAPI spec + Swagger UI                                                                                                       |
+| **Models**              | Org-level LLM model configuration and testing                                                                                   |
+| **Health**              | Health check                                                                                                                    |
+| **Applications**        | Primary workspace boundary — scopes agents, runs, schedules, webhooks, connections, packages, end-users                         |
+| **App Profiles**        | Application-scoped connection profile management                                                                                |
+| **End-Users**           | External end-user management for headless API (cursor pagination via `startingAfter`/`endingBefore`)                            |
+| **Webhooks**            | Run event webhooks with HMAC signing (Standard Webhooks)                                                                        |
+| **Credential Proxy**    | Server-side credential injection for external runners (5 verbs: GET/POST/PUT/PATCH/DELETE)                                      |
+| **LLM Proxy**           | Server-side LLM model injection — OpenAI + Anthropic protocol families                                                          |
+| **OAuth Clients**       | OIDC module — instance/end-user OAuth 2.1 client management                                                                     |
+| **CLI Sessions**        | OIDC module — admin oversight of CLI sessions per org (`cli-sessions` RBAC resource)                                            |
 
 ### Agent runtime — MCP-only
 
-Agents inside the sandboxed container interact with the platform exclusively through MCP (Model Context Protocol). The sidecar exposes `/mcp` as a Streamable HTTP server; the agent never sees raw credentials, the platform API URL, or HTTP routes. Three first-party tools cover every cross-boundary capability:
+Agents inside the sandboxed container interact with the platform exclusively through MCP (Model Context Protocol). The sidecar exposes `/mcp` as a Streamable HTTP server; the agent never sees raw credentials, the platform API URL, or HTTP routes. First-party tools cover platform capabilities; per-integration tools cover outbound service access:
 
-- `provider_call({ providerId, method, target, headers?, body?, responseMode? })` — credential-injecting proxy for connected services.
 - `run_history({ limit?, fields? })` — past-run metadata via per-run signed token.
-- `recall_memory({ q?, limit? })` — search the agent's archive memories written via the `note(content)` system tool.
+- `recall_memory({ query?, limit? })` — search the agent's archive memories written via the `note(content)` built-in runtime tool.
+- Per spawned integration the sidecar exposes `{ns}__api_call({ method, target, headers?, body?, responseMode? })` — credentials injected server-side; URLs validated against the integration's `auths.{key}.authorized_uris`. Optional `{ns}__api_upload` when the integration declares `source.api.upload_protocols`.
+- Integrations backed by an MCP server (`source.kind = local` or `remote`) additionally surface their own tools under the same `{ns}__{tool}` prefix.
 
 The agent's primary completions are served by the sidecar's `/llm/*` HTTP passthrough route the Pi SDK calls natively; sub-agent flows are handled by spawning a separate run via the platform API. The legacy HTTP `/proxy` and `/run-history` routes have been retired — runners 1.x are not compatible with the current platform. See `packages/mcp-transport/README.md` and `runtime-pi/sidecar/README.md`.
 

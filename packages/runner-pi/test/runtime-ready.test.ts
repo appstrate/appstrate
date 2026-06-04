@@ -9,7 +9,11 @@
 import { describe, it, expect } from "bun:test";
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
-import { CURRENT_RUNTIME_PROTOCOL_VERSION, emitRuntimeReady } from "../src/runtime-ready.ts";
+import {
+  CURRENT_RUNTIME_PROTOCOL_VERSION,
+  emitRuntimeReady,
+  emitBootProgress,
+} from "../src/runtime-ready.ts";
 
 function collectingSink(): { sink: EventSink; events: RunEvent[] } {
   const events: RunEvent[] = [];
@@ -111,6 +115,46 @@ describe("emitRuntimeReady", () => {
         extensions: 0,
         bootDurationMs: 0,
       }),
+    ).rejects.toThrow(/retryable 500/);
+  });
+});
+
+describe("emitBootProgress", () => {
+  it("emits an appstrate.progress breadcrumb with the message + default info level", async () => {
+    const { sink, events } = collectingSink();
+    await emitBootProgress(sink, "run_abc", "MCP connected", { now: () => 1_700_000_000_000 });
+
+    expect(events).toHaveLength(1);
+    const raw = events[0]! as unknown as Record<string, unknown>;
+    expect(raw.type).toBe("appstrate.progress");
+    expect(raw.runId).toBe("run_abc");
+    expect(raw.timestamp).toBe(1_700_000_000_000);
+    expect(raw.message).toBe("MCP connected");
+    expect(raw.level).toBe("info");
+    expect(raw.data).toBeUndefined();
+  });
+
+  it("carries the caller-supplied level + structured data", async () => {
+    const { sink, events } = collectingSink();
+    await emitBootProgress(sink, "run_x", "@scope/x: failed after 12ms — boom", {
+      level: "error",
+      data: { integrationId: "@scope/x", durationMs: 12, error: "boom" },
+    });
+
+    const raw = events[0]! as unknown as Record<string, unknown>;
+    expect(raw.level).toBe("error");
+    expect(raw.data).toEqual({ integrationId: "@scope/x", durationMs: 12, error: "boom" });
+  });
+
+  it("propagates sink errors so the boot path can escalate", async () => {
+    const failingSink: EventSink = {
+      async handle() {
+        throw new Error("HttpSink: retryable 500");
+      },
+      async finalize() {},
+    };
+    await expect(
+      emitBootProgress(failingSink, "run_x", "runtime adapter: process"),
     ).rejects.toThrow(/retryable 500/);
   });
 });

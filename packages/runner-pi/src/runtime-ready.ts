@@ -30,13 +30,13 @@ import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 export interface RuntimeReadyPayload {
   /** True when a concrete `.afps`/`.afps-bundle` was loaded from disk. */
   bundleLoaded: boolean;
-  /** Count of extension factories (bundle tools + runtime-shipped extensions + provider tools). */
+  /** Count of extension factories (bundle tools + runtime-shipped extensions + integration tools). */
   extensions: number;
   /** Caller-computed elapsed ms since its own "boot start" (process entry for runtime-pi, command entry for the CLI). */
   bootDurationMs: number;
   /**
    * Runtime ↔ platform wire protocol version. MAJOR.MINOR — runners on
-   * `2.0` advertise MCP-native tool surfaces (`provider_call`,
+   * `2.0` advertise MCP-native tool surfaces (`{ns}__api_call`,
    * `run_history`, `recall_memory`) and resource URIs. Old consumers
    * that don't read the field are unaffected (additive on the event
    * envelope).
@@ -74,5 +74,41 @@ export async function emitRuntimeReady(
       runtimeProtocolVersion: protocolVersion,
     },
     level: "info",
+  });
+}
+
+/** Options for {@link emitBootProgress}. */
+export interface BootProgressOptions {
+  /** Maps to the `run_logs` level on the emitted event. Defaults to `"info"`. */
+  level?: "info" | "warn" | "error";
+  /** Structured fields persisted alongside the log line (durations, ids, …). */
+  data?: Record<string, unknown>;
+  /** Clock override for tests. */
+  now?: () => number;
+}
+
+/**
+ * Emit a single granular boot breadcrumb as an `appstrate.progress` event.
+ *
+ * Complements {@link emitRuntimeReady}: where that emits the single terminal
+ * "runtime ready" line, this emits the per-phase trail leading up to it
+ * (bundle loaded, MCP connected, per-integration spawn timings, …) so the
+ * dashboard shows *why* a cold start took as long as it did — and surfaces an
+ * integration that failed to boot. Routed through the same event pipeline, so
+ * each breadcrumb lands in `run_logs` at its own level.
+ */
+export async function emitBootProgress(
+  sink: EventSink,
+  runId: string,
+  message: string,
+  opts: BootProgressOptions = {},
+): Promise<void> {
+  await sink.handle({
+    type: "appstrate.progress",
+    timestamp: (opts.now ?? Date.now)(),
+    runId,
+    message,
+    ...(opts.data ? { data: opts.data } : {}),
+    level: opts.level ?? "info",
   });
 }

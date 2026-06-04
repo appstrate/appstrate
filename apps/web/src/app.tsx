@@ -22,7 +22,6 @@ import { WelcomePage } from "./pages/welcome";
 import { OnboardingCreateStep } from "./pages/onboarding/create-step";
 import { OnboardingPlanStep } from "./pages/onboarding/plan-step";
 import { OnboardingModelStep } from "./pages/onboarding/model-step";
-import { OnboardingProvidersStep } from "./pages/onboarding/providers-step";
 import { OnboardingMembersStep } from "./pages/onboarding/members-step";
 import { OnboardingDoneStep } from "./pages/onboarding/done-step";
 import { OnboardingWaitingStep } from "./pages/onboarding/waiting-step";
@@ -36,15 +35,14 @@ import { OrgSettingsBillingPage } from "./pages/org-settings/billing";
 import { OrgSettingsCliSessionsPage } from "./pages/org-settings/cli-sessions";
 import { OrgSettingsApplicationsPage } from "./pages/org-settings/applications";
 import { OrgSettingsAppGeneralPage } from "./pages/org-settings/app/general";
-import { OrgSettingsAppProfilesPage } from "./pages/org-settings/app/profiles";
 import { OrgSettingsAppAuthPage } from "./pages/org-settings/app/auth";
 import { OrgSettingsAppOauthPage } from "./pages/org-settings/app/oauth";
 import { ApiKeysPage } from "./pages/api-keys-page";
 import { EndUsersPage } from "./pages/end-users-page";
 import { SkillsPage } from "./pages/skills-page";
-import { ToolsPage } from "./pages/tools-page";
-import { ProvidersPage } from "./pages/providers-page";
-import { AppProfileDetailPage } from "./pages/app-profile-detail";
+import { McpServersPage } from "./pages/mcp-servers-page";
+import { IntegrationsPage } from "./pages/integrations-page";
+import { IntegrationDetailPage } from "./pages/integration-detail";
 import { ScheduleDetailPage } from "./pages/schedule-detail";
 import { ScheduleCreatePage } from "./pages/schedule-create";
 import { ScheduleEditPage } from "./pages/schedule-edit";
@@ -52,8 +50,7 @@ import { PreferencesLayout } from "./pages/preferences/layout";
 import { PreferencesGeneralPage } from "./pages/preferences/general";
 import { PreferencesAppearancePage } from "./pages/preferences/appearance";
 import { PreferencesSecurityPage } from "./pages/preferences/security";
-import { PreferencesConnectorsPage } from "./pages/preferences/connectors";
-import { PreferencesProfilesPage } from "./pages/preferences/profiles";
+import { PreferencesConnectionsPage } from "./pages/preferences/connections";
 import { PreferencesDevicesPage } from "./pages/preferences/devices";
 import { LibraryPage } from "./pages/library-page";
 import { LoginPage } from "./pages/login";
@@ -352,7 +349,6 @@ export function App() {
           <Route path="/onboarding/create" element={<OnboardingCreateStep />} />
           <Route path="/onboarding/plan" element={<OnboardingPlanStep />} />
           <Route path="/onboarding/model" element={<OnboardingModelStep />} />
-          <Route path="/onboarding/providers" element={<OnboardingProvidersStep />} />
           <Route path="/onboarding/members" element={<OnboardingMembersStep />} />
           <Route path="/onboarding/complete" element={<OnboardingDoneStep />} />
           <Route
@@ -381,13 +377,13 @@ export function App() {
             <Route path="/schedules/:id" element={<ScheduleDetailPage />} />
             <Route path="/schedules/:id/edit" element={<ScheduleEditPage />} />
             <Route path="/skills" element={<SkillsPage />} />
-            <Route path="/tools" element={<ToolsPage />} />
-            <Route path="/providers" element={<ProvidersPage />} />
+            <Route path="/integrations" element={<IntegrationsPage />} />
+            <Route path="/integrations/new" element={<PackageEditorPage type="integration" />} />
             <Route
-              path="/app-profiles"
-              element={<Navigate to="/org-settings/app/profiles" replace />}
+              path="/integrations/:scope/:name/edit"
+              element={<PackageEditorPage type="integration" />}
             />
-            <Route path="/app-profiles/:id" element={<AppProfileDetailPage />} />
+            <Route path="/integrations/:scope/:name" element={<IntegrationDetailPage />} />
             <Route path="/skills/new" element={<PackageEditorPage type="skill" />} />
             <Route path="/skills/:scope/:name/edit" element={<PackageEditorPage type="skill" />} />
             <Route
@@ -398,25 +394,14 @@ export function App() {
               path="/skills/:scope/:name/:version"
               element={<UnifiedPackageDetailPage type="skill" />}
             />
-            <Route path="/tools/new" element={<PackageEditorPage type="tool" />} />
-            <Route path="/tools/:scope/:name/edit" element={<PackageEditorPage type="tool" />} />
-            <Route path="/tools/:scope/:name" element={<UnifiedPackageDetailPage type="tool" />} />
+            <Route path="/mcp-servers" element={<McpServersPage />} />
             <Route
-              path="/tools/:scope/:name/:version"
-              element={<UnifiedPackageDetailPage type="tool" />}
-            />
-            <Route path="/providers/new" element={<PackageEditorPage type="provider" />} />
-            <Route
-              path="/providers/:scope/:name/edit"
-              element={<PackageEditorPage type="provider" />}
+              path="/mcp-servers/:scope/:name"
+              element={<UnifiedPackageDetailPage type="mcp-server" />}
             />
             <Route
-              path="/providers/:scope/:name"
-              element={<UnifiedPackageDetailPage type="provider" />}
-            />
-            <Route
-              path="/providers/:scope/:name/:version"
-              element={<UnifiedPackageDetailPage type="provider" />}
+              path="/mcp-servers/:scope/:name/:version"
+              element={<UnifiedPackageDetailPage type="mcp-server" />}
             />
             <Route path="/library" element={<LibraryPage />} />
             <Route
@@ -429,8 +414,7 @@ export function App() {
               <Route path="appearance" element={<PreferencesAppearancePage />} />
               <Route path="security" element={<PreferencesSecurityPage />} />
               <Route path="devices" element={<PreferencesDevicesPage />} />
-              <Route path="connectors" element={<PreferencesConnectorsPage />} />
-              <Route path="profiles" element={<PreferencesProfilesPage />} />
+              <Route path="connections" element={<PreferencesConnectionsPage />} />
             </Route>
             {features.webhooks && (
               <>
@@ -469,7 +453,6 @@ export function App() {
               <Route path="cli-sessions" element={<OrgSettingsCliSessionsPage />} />
               <Route path="billing" element={<OrgSettingsBillingPage />} />
               <Route path="app/general" element={<OrgSettingsAppGeneralPage />} />
-              <Route path="app/profiles" element={<OrgSettingsAppProfilesPage />} />
               <Route path="app/api-keys" element={<ApiKeysPage />} />
               <Route path="app/auth" element={<OrgSettingsAppAuthPage />} />
               <Route path="app/oauth" element={<OrgSettingsAppOauthPage />} />

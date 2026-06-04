@@ -37,13 +37,8 @@ import { resolveRunnerContext } from "../lib/runner-context.ts";
 import { resolveRegistryAgent } from "../services/registry-run-resolver.ts";
 import { validateConfig, validateInput } from "../services/schema.ts";
 import { validateAgentReadiness } from "../services/agent-readiness.ts";
-import {
-  resolveActorProfileContext,
-  resolveProviderProfiles,
-} from "../services/connection-profiles.ts";
-import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
-import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
+import type { LoadedPackage } from "../types/index.ts";
 import type { AppEnv } from "../types/index.ts";
 
 // ---------------------------------------------------------------------------
@@ -73,7 +68,6 @@ const CreateRemoteRunBodySchema = z
         kind: z.literal("inline"),
         manifest: z.record(z.string(), z.unknown()),
         prompt: z.string().min(1),
-        providerProfiles: z.record(z.string(), z.string()).optional(),
         config: z.record(z.string(), z.unknown()).optional(),
         modelId: z.string().nullable().optional(),
         proxyId: z.string().nullable().optional(),
@@ -96,7 +90,6 @@ const CreateRemoteRunBodySchema = z
          * for no security gain (no untrusted bytes are loaded server-side).
          */
         integrity: z.string().optional(),
-        providerProfiles: z.record(z.string(), z.string()).optional(),
         config: z.record(z.string(), z.unknown()).optional(),
         modelId: z.string().nullable().optional(),
         proxyId: z.string().nullable().optional(),
@@ -152,7 +145,6 @@ export function createRunsRemoteRouter() {
 
       let agentForRun: LoadedPackage;
       let overrideVersionLabel: string | undefined;
-      let providerProfiles: ProviderProfileMap;
       let effectiveInput: Record<string, unknown> | null;
       let effectiveConfig: Record<string, unknown>;
       let modelIdOverride: string | null;
@@ -177,9 +169,6 @@ export function createRunsRemoteRouter() {
         overrideVersionLabel = resolved.versionLabel;
         attributionPath = "registry";
 
-        // Body-supplied providerProfiles already validated as
-        // Record<string,string> by the discriminated-union schema above.
-        const providerProfilesOverride = src.providerProfiles;
         modelIdOverride = src.modelId ?? null;
         proxyIdOverride = src.proxyId ?? null;
 
@@ -222,28 +211,13 @@ export function createRunsRemoteRouter() {
           }
         }
 
-        // Provider profile resolution — same cascade as the inline path.
-        const { defaultUserProfileId } = await resolveActorProfileContext(
-          actor,
-          agentForRun.id,
-          null,
-          applicationId,
-        );
-        providerProfiles = await resolveProviderProfiles(
-          resolveManifestProviders(agentForRun.manifest),
-          defaultUserProfileId,
-          providerProfilesOverride,
-          null,
-          applicationId,
-        );
-
         // Readiness gate — same checks the inline preflight ends with.
         await validateAgentReadiness({
           agent: agentForRun,
-          providerProfiles,
           orgId,
           config: effectiveConfig,
           applicationId,
+          actor,
         });
       } else {
         // Inline path — the runner ships a manifest+prompt blob. Validate
@@ -259,7 +233,6 @@ export function createRunsRemoteRouter() {
             prompt: src.prompt,
             input: body.input,
             config: src.config,
-            providerProfiles: src.providerProfiles,
             modelId: src.modelId,
             proxyId: src.proxyId,
           },
@@ -268,7 +241,6 @@ export function createRunsRemoteRouter() {
         agentForRun = await createShadowAgent(preflight);
         attributionPath = "inline_shadow";
 
-        providerProfiles = preflight.providerProfiles;
         effectiveInput = preflight.effectiveInput;
         effectiveConfig = preflight.effectiveConfig;
         modelIdOverride = preflight.modelIdOverride;
@@ -296,14 +268,12 @@ export function createRunsRemoteRouter() {
       const runId = `run_${crypto.randomUUID()}`;
       const runner = await resolveRunnerContext(c);
       const result = await createRun({
-        origin: "remote",
         runId,
         orgId,
         applicationId,
         actor,
         agent: agentForRun,
         ...(overrideVersionLabel ? { overrideVersionLabel } : {}),
-        providerProfiles,
         input: effectiveInput,
         config: effectiveConfig,
         modelId: modelIdOverride,

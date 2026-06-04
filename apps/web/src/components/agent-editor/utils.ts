@@ -16,7 +16,11 @@ import {
   type SchemaWrapper,
 } from "@appstrate/core/form";
 import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
-import { parseManifestProviders, writeManifestProviders } from "@appstrate/core/dependencies";
+import {
+  isToolsWildcard,
+  parseManifestIntegrations,
+  writeManifestIntegrations,
+} from "@appstrate/core/dependencies";
 
 // ─── Version ranges ─────────────────────────────────────────
 
@@ -33,34 +37,19 @@ export function caretRange(version: string): string {
 
 // ─── Default state ──────────────────────────────────────────
 
-/**
- * IDs of the platform's "stdlib" tools — pre-selected when the user
- * opens the new-agent editor. Versions are filled in by package-editor
- * once `usePackageList("tool")` has loaded the canonical caret range
- * from the registry, so the template never carries a placeholder.
- */
-export const DEFAULT_SYSTEM_TOOL_IDS: readonly string[] = [
-  "@appstrate/log",
-  "@appstrate/output",
-  "@appstrate/pin",
-  "@appstrate/note",
-];
-
 export function defaultEditorState(orgSlug?: string, userEmail?: string): AgentEditorState {
   return {
     manifest: {
       $schema: AFPS_SCHEMA_URLS.agent,
-      schemaVersion: "1.1",
+      schema_version: "0.2",
       type: "agent",
       name: orgSlug ? `@${orgSlug}/` : "",
       version: "1.0.0",
-      displayName: "",
+      display_name: "",
       description: "",
       author: userEmail ?? "",
       timeout: 300,
-      dependencies: {
-        providers: {},
-      },
+      dependencies: {},
     },
     prompt: "",
   };
@@ -74,66 +63,95 @@ export function defaultSkillManifest(
 ): Record<string, unknown> {
   return {
     $schema: AFPS_SCHEMA_URLS.skill,
-    schemaVersion: "1.1",
+    schema_version: "0.2",
     type: "skill",
     name: orgSlug ? `@${orgSlug}/` : "",
     version: "1.0.0",
-    displayName: "",
+    display_name: "",
     description: "",
     author: userEmail ?? "",
-  };
-}
-
-export function defaultToolManifest(orgSlug?: string, userEmail?: string): Record<string, unknown> {
-  return {
-    $schema: AFPS_SCHEMA_URLS.tool,
-    schemaVersion: "1.1",
-    type: "tool",
-    name: orgSlug ? `@${orgSlug}/` : "",
-    version: "1.0.0",
-    displayName: "",
-    description: "",
-    author: userEmail ?? "",
-    entrypoint: "tool.ts",
-    tool: {
-      name: "my_tool",
-      description: "Tool",
-      inputSchema: { type: "object", properties: {} },
-    },
-  };
-}
-
-export function defaultProviderManifest(
-  orgSlug?: string,
-  userEmail?: string,
-): Record<string, unknown> {
-  return {
-    $schema: AFPS_SCHEMA_URLS.provider,
-    schemaVersion: "1.1",
-    type: "provider",
-    name: orgSlug ? `@${orgSlug}/` : "",
-    version: "1.0.0",
-    displayName: "",
-    description: "",
-    author: userEmail ?? "",
-    definition: {
-      authMode: "oauth2",
-      oauth2: {
-        authorizationUrl: "",
-        tokenUrl: "",
-        scopeSeparator: " ",
-        pkceEnabled: true,
-        tokenAuthMethod: "client_secret_post",
-      },
-    },
   };
 }
 
 export const DEFAULT_SKILL_CONTENT = "---\nname: \ndescription: \n---\n\n";
 
-export const DEFAULT_TOOL_CONTENT = "";
+// ─── Default manifest for integration ───────────────────────
 
-export const DEFAULT_TOOL_SOURCE = `import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";\n\nexport default function (pi: ExtensionAPI) {\n  pi.registerTool({\n    name: "my_tool",\n    description: "Describe what this tool does",\n    parameters: {},\n    execute(_toolCallId, _params, _signal) {\n      return { content: [{ type: "text", text: "Hello" }] };\n    },\n  });\n}\n`;
+/**
+ * Minimal valid AFPS integration skeleton for the "new" editor. Uses a
+ * `remote` Streamable-HTTP source (no mcp-server bundle dependency, authorable
+ * end-to-end via the editor) + a single api_key auth that injects the key as a
+ * Bearer header. The author edits the URL, auth, and tools from here — the raw
+ * JSON tab exposes the full manifest for the fields the structured form doesn't
+ * cover yet.
+ */
+export function defaultIntegrationManifest(
+  orgSlug?: string,
+  userEmail?: string,
+): Record<string, unknown> {
+  return {
+    $schema: AFPS_SCHEMA_URLS.integration,
+    schema_version: "0.2",
+    type: "integration",
+    name: orgSlug ? `@${orgSlug}/` : "",
+    version: "1.0.0",
+    display_name: "",
+    description: "",
+    author: userEmail ?? "",
+    source: {
+      kind: "remote",
+      remote: { url: "https://", transport: "streamable-http" },
+    },
+    auths: {
+      primary: {
+        type: "api_key",
+        authorized_uris: ["https://**"],
+        credentials: {
+          schema: {
+            type: "object",
+            required: ["api_key"],
+            properties: {
+              api_key: { type: "string", description: "API key for this integration." },
+            },
+          },
+        },
+        delivery: {
+          http: {
+            in: "header",
+            name: "Authorization",
+            prefix: "Bearer ",
+            value: "{$credential.api_key}",
+          },
+        },
+      },
+    },
+  };
+}
+
+// ─── Runtime tools (manifest.runtime_tools) ──────────────────
+
+/**
+ * Read the agent manifest's top-level `runtime_tools: string[]` (AFPS) —
+ * the built-in runtime tools the agent author opted into (all opt-in,
+ * `output` included). Tolerates a missing or malformed field by returning an
+ * empty array.
+ */
+export function getRuntimeTools(m: Record<string, unknown>): string[] {
+  const raw = m.runtime_tools;
+  return Array.isArray(raw) ? raw.filter((v): v is string => typeof v === "string") : [];
+}
+
+/**
+ * Write the selected runtime tool ids back into the manifest. An empty
+ * selection drops the field entirely so the manifest stays minimal.
+ */
+export function setRuntimeTools(m: Record<string, unknown>, tools: string[]): void {
+  if (tools.length > 0) {
+    m.runtime_tools = tools;
+  } else {
+    delete m.runtime_tools;
+  }
+}
 
 // ─── Manifest accessors ─────────────────────────────────────
 
@@ -143,27 +161,44 @@ export function getManifestName(m: Record<string, unknown>): { scope: string; id
   return match ? { scope: match[1]!, id: match[2]! } : { scope: "", id: raw };
 }
 
-/** Extract MetadataState from a manifest object. Includes timeout if present (agents only). */
+/** Extract MetadataState from a manifest object. Includes timeout if present (agents only).
+ *
+ * `author` accepts both the AFPS §3.1 bare-string form and the structured
+ * `{ name, email?, url? }` object form: the editor's metadata UI is a single
+ * text input, so the object form is rendered as its `name` field. Saving
+ * collapses the object to a string — round-tripping the object shape
+ * end-to-end would require an editor UI change.
+ */
 export function manifestToMetadata(m: Record<string, unknown>): MetadataState {
   const { scope, id } = getManifestName(m);
+  const authorRaw = m.author;
+  const authorText =
+    typeof authorRaw === "string"
+      ? authorRaw
+      : authorRaw && typeof authorRaw === "object" && "name" in authorRaw
+        ? ((authorRaw as { name?: string }).name ?? "")
+        : "";
   return {
     id,
     scope,
     version: (m.version as string) ?? "1.0.0",
-    displayName: (m.displayName as string) ?? "",
+    displayName: (m.display_name as string) ?? "", // canonical-casing-exempt: MetadataState TS-internal field (CASING_CONVENTIONS.md carve-out); manifest write is via metadataToManifestPatch's snake_case `display_name`.
     description: (m.description as string) ?? "",
-    author: (m.author as string) ?? "",
+    author: authorText,
     keywords: Array.isArray(m.keywords) ? (m.keywords as string[]) : [],
     ...(typeof m.timeout === "number" ? { timeout: m.timeout } : {}),
   };
 }
 
-/** Apply MetadataState changes back into a manifest patch. */
+/** Apply MetadataState changes back into a manifest patch.
+ *
+ * Emits canonical AFPS snake_case (`display_name`).
+ */
 export function metadataToManifestPatch(m: MetadataState): Record<string, unknown> {
   return {
     name: m.scope ? `@${m.scope}/${m.id}` : m.id,
     version: m.version,
-    displayName: m.displayName,
+    display_name: m.displayName,
     description: m.description,
     author: m.author,
     keywords: m.keywords,
@@ -175,13 +210,29 @@ export function getDeps(m: Record<string, unknown>): Record<string, unknown> {
   return (m.dependencies ?? {}) as Record<string, unknown>;
 }
 
-export const getProviderEntries = parseManifestProviders;
-export const setProviderEntries = writeManifestProviders;
-
 export function getResourceEntries(
   m: Record<string, unknown>,
-  type: "skills" | "tools",
+  type: "skills" | "integrations",
 ): ResourceEntry[] {
+  // Integrations: the version comes from `dependencies.integrations.<id>`
+  // (a bare semver string, §4.1) and the tool/scope/auth selection from the
+  // top-level `integrations_configuration.<id>` map (§4.4). `auth_key`
+  // selects which `auths.<key>` entry on the depended-on integration this
+  // agent uses, when the integration declares multiple auths.
+  if (type === "integrations") {
+    return parseManifestIntegrations(m).map((e) => ({
+      id: e.id,
+      version: e.version,
+      // AFPS §4.4 wildcard — preserve the `"*"` literal verbatim instead of
+      // spreading it as a string into `["*"]` (which would corrupt the
+      // round-trip back to `writeManifestIntegrations`).
+      ...(e.tools !== undefined
+        ? { tools: isToolsWildcard(e.tools) ? e.tools : [...e.tools] }
+        : {}),
+      ...(e.scopes !== undefined ? { scopes: [...e.scopes] } : {}),
+      ...(e.auth_key !== undefined ? { auth_key: e.auth_key } : {}),
+    }));
+  }
   const deps = getDeps(m);
   const record = (deps[type] ?? {}) as Record<string, string>;
   return Object.entries(record).map(([id, version]) => ({ id, version }));
@@ -189,11 +240,29 @@ export function getResourceEntries(
 
 export function setResourceEntries(
   m: Record<string, unknown>,
-  type: "skills" | "tools",
+  type: "skills" | "integrations",
   entries: ResourceEntry[],
 ): void {
-  if (!m.dependencies) m.dependencies = { providers: {} };
+  if (!m.dependencies) m.dependencies = {};
   const deps = m.dependencies as Record<string, unknown>;
+  if (type === "integrations") {
+    writeManifestIntegrations(
+      m,
+      entries
+        .filter((e) => e.id)
+        .map((e) => ({
+          id: e.id,
+          version: e.version ?? "*",
+          // AFPS §4.4 wildcard — preserve `"*"` literal; never spread.
+          ...(e.tools !== undefined
+            ? { tools: isToolsWildcard(e.tools) ? e.tools : [...e.tools] }
+            : {}),
+          ...(e.scopes !== undefined ? { scopes: [...e.scopes] } : {}),
+          ...(e.auth_key !== undefined ? { auth_key: e.auth_key } : {}),
+        })),
+    );
+    return;
+  }
   const record: Record<string, string> = {};
   for (const e of entries) {
     if (e.id) record[e.id] = e.version ?? "*";
@@ -224,11 +293,20 @@ export function manifestToSchemaFields(
 ): Record<string, SchemaField[]> {
   type ManifestWrapper = {
     schema?: JSONSchemaObject;
-    fileConstraints?: Record<string, { accept?: string; maxSize?: number }>;
-    uiHints?: Record<string, { placeholder?: string }>;
-    propertyOrder?: string[];
+    file_constraints?: Record<string, FileConstraint>;
+    ui_hints?: Record<string, { placeholder?: string }>;
+    property_order?: string[];
   };
-  const wrapperFor = (key: string) => manifest[key] as ManifestWrapper | undefined;
+  const wrapperFor = (key: string) => {
+    const raw = manifest[key] as ManifestWrapper | undefined;
+    if (!raw) return undefined;
+    return {
+      schema: raw.schema,
+      file_constraints: raw.file_constraints,
+      ui_hints: raw.ui_hints,
+      property_order: raw.property_order,
+    };
+  };
   return {
     input: schemaToFields(wrapperFor("input")?.schema, "input", wrapperFor("input")),
     output: schemaToFields(wrapperFor("output")?.schema, "output", wrapperFor("output")),
@@ -253,20 +331,20 @@ export function schemaToFields(
   schema: JSONSchemaObject | undefined,
   mode: "input" | "output" | "config" | "credentials",
   wrapper?: {
-    fileConstraints?: Record<string, FileConstraint>;
-    uiHints?: Record<string, UIHint>;
-    propertyOrder?: string[];
+    file_constraints?: Record<string, FileConstraint>;
+    ui_hints?: Record<string, UIHint>;
+    property_order?: string[];
   },
 ): SchemaField[] {
   if (!schema?.properties) return [];
   const requiredSet = new Set(schema.required || []);
-  const keys = getOrderedKeys(schema, wrapper?.propertyOrder);
+  const keys = getOrderedKeys(schema, wrapper?.property_order);
   return keys.map((key) => {
     const prop = schema.properties[key]!;
     const fileField = isFileField(prop);
     const isInputFile = mode === "input" && fileField;
-    const constraints = wrapper?.fileConstraints?.[key];
-    const hint = wrapper?.uiHints?.[key];
+    const constraints = wrapper?.file_constraints?.[key];
+    const hint = wrapper?.ui_hints?.[key];
     const type = isInputFile ? "string" : typeof prop.type === "string" ? prop.type : "string";
 
     // Extract array enum items
@@ -293,7 +371,7 @@ export function schemaToFields(
         ? {
             isFile: true,
             accept: constraints?.accept || "",
-            maxSize: constraints?.maxSize != null ? String(constraints.maxSize) : "",
+            maxSize: constraints?.max_size != null ? String(constraints.max_size) : "", // canonical-casing-exempt: SchemaField TS-internal field (carve-out); manifest write is via fieldsToSchema's snake_case `max_size`.
             multiple: isMultipleFileField(prop),
             maxFiles: prop.maxItems != null ? String(prop.maxItems) : "",
           }
@@ -332,6 +410,18 @@ export function schemaToFields(
   });
 }
 
+/**
+ * Build a fresh AFPS canonical `SchemaWrapper` from editor field state.
+ *
+ * Emits only canonical snake_case keys (`schema`, `file_constraints`,
+ * `ui_hints`, `property_order`). Every per-property entry is constructed
+ * from scratch, so non-canonical camelCase siblings (`fileConstraints`,
+ * `uiHints`, `propertyOrder`, per-property `maxSize`) cannot leak through.
+ * The caller replaces the wrapper wholesale (`updateManifest({ input:
+ * wrapper })`); the shallow-merge semantics drop any pre-existing camelCase
+ * keys carried by the previous wrapper value. Idempotent against
+ * already-canonical manifests.
+ */
 export function fieldsToSchema(
   fields: SchemaField[],
   mode: "input" | "output" | "config" | "credentials",
@@ -340,8 +430,8 @@ export function fieldsToSchema(
   if (filtered.length === 0) return null;
   const properties: Record<string, JSONSchema7> = {};
   const required: string[] = [];
-  const fileConstraints: Record<string, FileConstraint> = {};
-  const uiHints: Record<string, UIHint> = {};
+  const file_constraints: Record<string, FileConstraint> = {};
+  const ui_hints: Record<string, UIHint> = {};
   for (const f of filtered) {
     const key = f.key.trim();
     if (mode === "input" && f.isFile) {
@@ -364,14 +454,14 @@ export function fieldsToSchema(
         if (f.description) prop.description = f.description;
         properties[key] = prop;
       }
-      // Build fileConstraints
+      // Build file_constraints (canonical AFPS snake_case)
       const constraint: FileConstraint = {};
       if (f.accept) constraint.accept = f.accept;
       if (f.maxSize) {
         const n = Number(f.maxSize);
-        if (!isNaN(n)) constraint.maxSize = n;
+        if (!isNaN(n)) constraint.max_size = n;
       }
-      if (Object.keys(constraint).length > 0) fileConstraints[key] = constraint;
+      if (Object.keys(constraint).length > 0) file_constraints[key] = constraint;
     } else {
       const prop: JSONSchema7 = { type: f.type as JSONSchema7TypeName };
       if (f.description) prop.description = f.description;
@@ -428,9 +518,9 @@ export function fieldsToSchema(
         }
       }
       properties[key] = prop;
-      // Build uiHints for placeholder
+      // Build ui_hints for placeholder (canonical AFPS snake_case)
       if (mode === "input" && f.placeholder) {
-        uiHints[key] = { placeholder: f.placeholder };
+        ui_hints[key] = { placeholder: f.placeholder };
       }
     }
     if (f.required) required.push(key);
@@ -441,8 +531,8 @@ export function fieldsToSchema(
       properties,
       ...(required.length > 0 ? { required } : {}),
     },
-    ...(Object.keys(fileConstraints).length > 0 ? { fileConstraints } : {}),
-    ...(Object.keys(uiHints).length > 0 ? { uiHints } : {}),
-    propertyOrder: filtered.map((f) => f.key.trim()),
+    ...(Object.keys(file_constraints).length > 0 ? { file_constraints } : {}),
+    ...(Object.keys(ui_hints).length > 0 ? { ui_hints } : {}),
+    property_order: filtered.map((f) => f.key.trim()),
   };
 }

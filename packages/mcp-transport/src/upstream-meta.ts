@@ -2,11 +2,11 @@
 // Copyright 2026 Appstrate
 
 /**
- * Wire format for `provider_call` upstream-response metadata threaded
+ * Wire format for `api_call` upstream-response metadata threaded
  * back over MCP — shared between the sidecar serializer and the
  * runtime-side parser.
  *
- * The MCP `provider_call` tool's `CallToolResult` carries the upstream
+ * The MCP `api_call` tool's `CallToolResult` carries the upstream
  * payload via `content[]` (text or `resource_link`). HTTP status and
  * response headers are out-of-band on `_meta`, under the namespaced
  * key {@link UPSTREAM_META_KEY}.
@@ -32,8 +32,12 @@
  * MCP `_meta` key under which the sidecar packages upstream HTTP
  * status + response headers. Namespaced to avoid colliding with
  * vendor-specific or future SDK-defined `_meta` keys.
+ *
+ * AFPS (Phase F1): reverse-DNS namespace — `_meta` keys must be
+ * either a single bare token or a reverse-DNS prefix (RFC §2.2 / Appendix
+ * B). The canonical form is `"dev.appstrate/upstream"`.
  */
-export const UPSTREAM_META_KEY = "appstrate/upstream";
+export const UPSTREAM_META_KEY = "dev.appstrate/upstream";
 
 /**
  * Headers the sidecar is willing to forward AND the runtime is willing
@@ -90,7 +94,7 @@ export const UPSTREAM_HEADER_ALLOWLIST = new Set<string>([
 
 /**
  * Serialised upstream metadata. Always present on every
- * `provider_call` `CallToolResult` regardless of success or failure:
+ * `api_call` `CallToolResult` regardless of success or failure:
  *
  * - On a real upstream exchange: `status` is the upstream HTTP code,
  *   `headers` is the allowlisted projection.

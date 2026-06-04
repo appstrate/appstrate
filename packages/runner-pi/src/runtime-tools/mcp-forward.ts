@@ -5,13 +5,13 @@
  * Generic Pi-extension factory for runtime-injected tools that forward
  * verbatim to the sidecar over MCP `tools/call`.
  *
- * This is the symmetric counterpart to `buildProviderCallExtensionFactory`:
- * `provider_call` is bundle-driven (one tool, dispatches by
- * `providerId`), and the runtime-injected tools (`run_history`,
- * `recall_memory`, …) are runtime-driven (one Pi-tool registration per
- * descriptor in {@link RUNTIME_INJECTED_TOOLS}). Hosting both factories
- * in `@appstrate/runner-pi` keeps the runtime container's
- * `mcp/direct.ts` orchestration-only — no per-tool boilerplate.
+ * This is the symmetric counterpart to `buildApiCallExtensionFactory`:
+ * `{ns}__api_call` is bundle-driven (one tool per integration), and the
+ * runtime-injected tools (`run_history`, `recall_memory`, …) are
+ * runtime-driven (one Pi-tool registration per descriptor in
+ * {@link RUNTIME_INJECTED_TOOLS}). Hosting both factories in
+ * `@appstrate/runner-pi` keeps the runtime container's `mcp/direct.ts`
+ * orchestration-only — no per-tool boilerplate.
  *
  * Why a single factory: each tool's wiring is a four-step recipe —
  *   1. emit `<tool>.called` with `toolCallId`/`runId`,
@@ -47,7 +47,7 @@ interface PiToolResult {
  * text pointers (`[resource <uri>]`) so the LLM still sees the URI and
  * can fetch the resource via `resources/read` if it cares.
  */
-function callToolResultToPi(result: CallToolResult): PiToolResult {
+export function callToolResultToPi(result: CallToolResult): PiToolResult {
   const content: PiToolContent[] = result.content.map((c) => {
     if (c.type === "text") return { type: "text", text: c.text };
     if (c.type === "image") return { type: "image", data: c.data, mimeType: c.mimeType };
@@ -73,11 +73,13 @@ function callToolResultToPi(result: CallToolResult): PiToolResult {
 }
 
 /**
- * Event emitter signature shared with `provider-bridge.ts`. Generic
- * shape so callers can route events into any sink (CloudEvents,
+ * Event emitter signature shared across the runner-pi runtime (the
+ * runtime-injected tools here, the `{ns}__api_call` bridge, the
+ * resource-spill helper, and the runtime container's `mcp/direct.ts`).
+ * Generic shape so callers can route events into any sink (CloudEvents,
  * console, in-memory test recorder, …).
  */
-export type RuntimeToolEventEmitter = (event: { type: string; [k: string]: unknown }) => void;
+export type RuntimeEventEmitter = (event: { type: string; [k: string]: unknown }) => void;
 
 export interface BuildRuntimeToolFactoriesOptions {
   /** MCP client connected to the sidecar advertising the runtime-injected tools. */
@@ -85,7 +87,7 @@ export interface BuildRuntimeToolFactoriesOptions {
   /** Run id stamped on `<tool>.called` / `<tool>.completed` events. */
   runId: string;
   /** Telemetry sink for `<tool>.called` / `<tool>.completed` events. */
-  emit: RuntimeToolEventEmitter;
+  emit: RuntimeEventEmitter;
   /**
    * Override the descriptor list. Defaults to {@link
    * RUNTIME_INJECTED_TOOLS} — the canonical set the platform prompt

@@ -16,16 +16,13 @@ import {
 } from "../hooks/use-packages";
 import type { AgentDetail, OrgPackageItemDetail, PackageType } from "@appstrate/shared-types";
 import type { JSONSchemaObject } from "@appstrate/core/form";
-import { usePackageOwnership } from "../hooks/use-org";
 import { usePermissions } from "../hooks/use-permissions";
-import { useProviders, useProviderCallbackUrl } from "../hooks/use-providers";
-import { useDeleteProviderCredentials } from "../hooks/use-mutations";
 import { usePackageInstallState, useTogglePackageInstall } from "../hooks/use-library";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
 import { LoadingState } from "../components/page-states";
 import { getVersionRedirect, hasActualChanges } from "../lib/version-helpers";
 import { packageDetailPath } from "../lib/package-paths";
-import { useAgentDetailUI } from "../stores/agent-detail-ui-store";
+import { primaryDisplayFile, companionDisplayFile } from "../lib/package-files";
 import { AlertTriangle } from "lucide-react";
 
 // Shared components
@@ -38,27 +35,25 @@ import { VersionHistory } from "../components/version-history";
 import { DiffTab } from "../components/diff-tab";
 import { CreateVersionModal } from "../components/create-version-modal";
 import { ForkPackageModal } from "../components/fork-package-modal";
-import { ProviderCredentialsForm } from "../components/provider-credentials-form";
-import { ProviderConnectButton } from "../components/provider-connect-button";
 // Agent-specific components
 import { AgentActions } from "../components/package-detail/agent-actions";
 import {
-  AgentConnectorsTab,
   AgentRunsTab,
   AgentSchedulesTab,
   AgentMemoryTab,
   AgentApiTab,
 } from "../components/package-detail/agent-tabs";
-import { AgentModals } from "../components/package-detail/agent-modals";
+import { AgentConnectionsSection } from "../components/package-detail/agent-connections-section";
 import { AgentConfigurationTab } from "../components/package-detail/agent-configuration-tab";
 import { RunAgentButton } from "../components/run-agent-button";
 import { PackageCard } from "../components/package-card";
 import { useAgentReadiness } from "../hooks/use-agent-readiness";
+import { useAgentIntegrationsReadiness } from "../hooks/use-agent-integrations-readiness";
 import { useModels, useAgentModel } from "../hooks/use-models";
 import { useProxies } from "../hooks/use-proxies";
 
 type DetailTab =
-  | "connectors"
+  | "connections"
   | "runs"
   | "configuration"
   | "schedules"
@@ -70,14 +65,6 @@ type DetailTab =
   | "usedBy";
 
 const EMPTY_CONFIG_SCHEMA: JSONSchemaObject = { type: "object", properties: {} };
-
-/** Primary companion file name per package type. */
-const COMPANION_FILE_NAME: Record<PackageType, string> = {
-  agent: "prompt.md",
-  skill: "SKILL.md",
-  tool: "TOOL.md",
-  provider: "PROVIDER.md",
-};
 
 // ─── Agent Run Button (inline, no wrapper) ────────────────────────────
 
@@ -95,24 +82,28 @@ function AgentRunButtonInline({
   const { data: models } = useModels();
   const { data: agentModel } = useAgentModel(packageId);
   const readiness = useAgentReadiness(detail, agentModel?.modelId, models, configSchemaOverride);
+  // Launch-time integration readiness — drives the non-blocking orange badge.
+  // Same server resolver as the run-kickoff 412 (see useAgentIntegrationsReadiness).
+  const integrationsReady = useAgentIntegrationsReadiness(
+    packageId,
+    detail?.dependencies.integrations,
+  );
 
   if (!detail) return null;
 
-  const { hasRequiredConfig, hasModel, hasPrompt, hasRequiredSkills, hasRequiredTools } = readiness;
-  // Provider connection checks are handled by the ConnectionSummaryModal
-  const runDisabled =
-    !hasPrompt || !hasRequiredSkills || !hasRequiredTools || !hasRequiredConfig || !hasModel;
+  const { hasRequiredConfig, hasModel, hasPrompt, hasRequiredSkills } = readiness;
+  // Integration connection gaps don't disable Run — they surface as a warning
+  // badge here and the recovery modal at run-kickoff (412 → MissingConnectionsModal).
+  const runDisabled = !hasPrompt || !hasRequiredSkills || !hasRequiredConfig || !hasModel;
   const runDisabledTitle = !hasPrompt
     ? t("detail.titleEmptyPrompt")
     : !hasRequiredSkills
       ? t("detail.titleMissingSkill")
-      : !hasRequiredTools
-        ? t("detail.titleMissingTool")
-        : !hasRequiredConfig
-          ? t("detail.titleConfig")
-          : !hasModel
-            ? t("detail.titleModel")
-            : undefined;
+      : !hasRequiredConfig
+        ? t("detail.titleConfig")
+        : !hasModel
+          ? t("detail.titleModel")
+          : undefined;
 
   return (
     <RunAgentButton
@@ -121,6 +112,7 @@ function AgentRunButtonInline({
       version={resolvedVersion}
       disabled={runDisabled}
       disabledTitle={runDisabledTitle}
+      connectionWarning={!runDisabled && !integrationsReady.ready}
       showLabel
     />
   );
@@ -154,15 +146,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     version: versionParam,
   } = useParams<{ scope: string; name: string; version?: string }>();
   const packageId = `${scope}/${name}`;
-  const { isOwned } = usePackageOwnership(packageId);
   const { isAdmin } = usePermissions();
   const isVersionView = !!versionParam;
-  const resetUI = useAgentDetailUI((s) => s.reset);
-
-  // Reset modal state when leaving the page or switching packages
-  useEffect(() => {
-    return () => resetUI();
-  }, [packageId, resetUI]);
 
   // ── Data loading (unified) ──
   const { data: detail, isLoading, error } = usePackageDetail(type, packageId);
@@ -171,13 +156,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const { data: orgProxies } = useProxies();
   const { data: orgModels } = useModels();
 
-  // Provider-specific data (ProviderConfig with adminCredentialSchema, setupGuide, etc.)
-  const providersQuery = useProviders();
-  const callbackUrlQuery = useProviderCallbackUrl();
-  const providerConfig =
-    type === "provider" ? providersQuery.data?.find((p) => p.id === packageId) : undefined;
-  const callbackUrl = type === "provider" ? callbackUrlQuery.data : undefined;
-
   // Agents list for "Used by" tab enrichment
   const { data: allAgents } = useAgents();
 
@@ -185,11 +163,16 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const agentDetail = type === "agent" ? (detail as AgentDetail | undefined) : undefined;
   const pkgDetail = type !== "agent" ? (detail as OrgPackageItemDetail | undefined) : undefined;
 
-  const displayName = agentDetail?.displayName ?? pkgDetail?.name ?? pkgDetail?.id ?? "";
+  const displayName = agentDetail?.display_name ?? pkgDetail?.name ?? pkgDetail?.id ?? "";
   const source = agentDetail?.source ?? pkgDetail?.source;
   const version = agentDetail?.version ?? pkgDetail?.version;
-  const hasUnarchivedChanges = agentDetail?.hasUnarchivedChanges ?? pkgDetail?.hasUnarchivedChanges;
-  const forkedFrom = agentDetail?.forkedFrom ?? pkgDetail?.forkedFrom ?? null;
+  const hasUnarchivedChanges =
+    agentDetail?.has_unarchived_changes ?? pkgDetail?.has_unarchived_changes;
+  const forkedFrom = agentDetail?.forked_from ?? pkgDetail?.forked_from ?? null;
+  // Mutability is gated on whether the org owns the package row, not on its scope name.
+  // Every package returned here is already org-scoped server-side, so anything that is not a
+  // read-only system package is freely editable/deletable (registry checks happen at publish).
+  const isOwned = source !== "system";
 
   const { data: versionDetail, isLoading: versionLoading } = useVersionDetail(
     type,
@@ -215,19 +198,18 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const downloadPackage = usePackageDownload(scope, name);
   const downloadBundle = useAgentBundleExport(scope, name);
   const deletePkgMutation = useDeletePackage(type);
-  const deleteCredentialsMutation = useDeleteProviderCredentials();
   const uninstallMutation = useTogglePackageInstall();
   const currentAppId = useCurrentApplicationId();
   const { installedAppNames, isInstalledInCurrentApp } = usePackageInstallState(packageId);
   const [forkOpen, setForkOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{
-    type: "deleteCredentials" | "deletePackage" | "uninstallPackage";
+    type: "deletePackage" | "uninstallPackage";
     description: string;
   } | null>(null);
 
   // ── State ──
   const allValidTabs: DetailTab[] = [
-    "connectors",
+    "connections",
     "runs",
     "configuration",
     "schedules",
@@ -252,8 +234,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       const val = agentDetail?.config?.current?.[key];
       return val === undefined || val === null || val === "";
     });
-  const defaultTab: DetailTab =
-    type === "agent" ? "runs" : type === "provider" ? "configuration" : "content";
+  const defaultTab: DetailTab = type === "agent" ? "runs" : "content";
   const [tab, setTab] = useTabWithHash<DetailTab>(allValidTabs, defaultTab);
   // Reset tab if it becomes invalid
   useEffect(() => {
@@ -282,11 +263,13 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   }
   const { isHistoricalVersion } = versionResult;
 
-  // Companion file for the dropdown (built from existing API fields)
+  // Companion file for the dropdown (built from existing API fields). Only
+  // types with a content-sourced file have one — mcp-server (manifest-only)
+  // has no companion, so the dropdown shows the manifest alone.
+  const companion = companionDisplayFile(type);
   const companionContent = isHistoricalVersion ? versionDetail?.content : currentContent;
-  const companionFile = companionContent
-    ? { name: COMPANION_FILE_NAME[type], content: companionContent }
-    : undefined;
+  const companionFile =
+    companion && companionContent ? { name: companion.name, content: companionContent } : undefined;
 
   // ── Version-aware config schema ──
   // When viewing a historical version, use that version's config schema (or empty if none).
@@ -323,13 +306,12 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   // ── Render ──
   const isBuiltIn = source === "system";
-  const isImported = !!detail && !isOwned && !isBuiltIn;
 
   // Determine available tabs based on type
 
   const agentTabs: Array<{ id: DetailTab; label: string }> = [
     { id: "runs", label: t("detail.tabRuns") },
-    { id: "connectors", label: t("detail.tabConnectors") },
+    { id: "connections", label: t("detail.tabConnections") },
     ...(effectiveShowConfigTab
       ? [{ id: "configuration" as DetailTab, label: t("detail.tabConfiguration") }]
       : []),
@@ -339,12 +321,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   ];
 
   const pkgTabs: Array<{ id: DetailTab; label: string }> = [
-    ...(isAdmin && type === "provider"
-      ? [{ id: "configuration" as DetailTab, label: t("providers.configure", { ns: "settings" }) }]
-      : []),
     {
       id: "content",
-      label: type === "tool" ? t("editor.tabSource") : t(`editor.tabContent.${type}`),
+      label: primaryDisplayFile(type).name,
     },
     { id: "usedBy", label: t("packages.usedBy") },
   ];
@@ -387,7 +366,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
               }
               companionFile={companionFile}
               isOwned={isOwned}
-              isImported={isImported}
               isHistoricalVersion={isHistoricalVersion}
               downloadVersion={downloadVersion}
               downloadPackage={downloadPackage}
@@ -407,20 +385,12 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                 }
                 companionFile={companionFile}
                 isOwned={isOwned}
-                isImported={isImported}
                 isBuiltIn={isBuiltIn}
                 isHistoricalVersion={isHistoricalVersion}
                 downloadVersion={downloadVersion}
                 onDownload={downloadPackage}
                 onCreateVersion={() => setCreateVersionOpen(true)}
                 onFork={() => setForkOpen(true)}
-                hasCredentials={providerConfig?.hasCredentials}
-                onDeleteCredentials={() => {
-                  setConfirmAction({
-                    type: "deleteCredentials",
-                    description: t("providers.deleteCredentialsConfirm", { ns: "settings" }),
-                  });
-                }}
                 canDeletePackage={!!pkgDetail && pkgDetail.agents.length === 0}
                 onDeletePackage={() => {
                   if (!pkgDetail) return;
@@ -523,8 +493,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           isHistorical={isHistoricalVersion}
         />
       )}
-      {type === "agent" && tab === "connectors" && (
-        <AgentConnectorsTab packageId={packageId} detail={agentDetail} />
+      {type === "agent" && tab === "connections" && agentDetail && (
+        <AgentConnectionsSection packageId={packageId} detail={agentDetail} />
       )}
       {type === "agent" && tab === "runs" && (
         <AgentRunsTab
@@ -537,29 +507,32 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       {type === "agent" && tab === "memory" && <AgentMemoryTab packageId={packageId} />}
       {type === "agent" && tab === "api" && <AgentApiTab packageId={packageId} />}
 
-      {type !== "agent" && tab === "content" && pkgDetail && (
-        <div className="border-border bg-card rounded-lg border p-4">
-          <pre className="text-muted-foreground bg-muted/50 overflow-x-auto rounded-md p-3 font-mono text-xs whitespace-pre-wrap">
-            {type === "tool"
-              ? ((isHistoricalVersion && versionDetail?.sourceCode != null
-                  ? versionDetail.sourceCode
-                  : pkgDetail.sourceCode) ?? "")
+      {type !== "agent" &&
+        tab === "content" &&
+        pkgDetail &&
+        (() => {
+          // The primary file's source decides what the content tab renders:
+          // manifest-sourced types (mcp-server) show the manifest verbatim —
+          // they have no content file; content-sourced types show their stored
+          // content (prompt.md, SKILL.md, …).
+          const body =
+            primaryDisplayFile(type).source === "manifest"
+              ? JSON.stringify(
+                  (isHistoricalVersion ? versionDetail?.manifest : pkgDetail.manifest) ?? {},
+                  null,
+                  2,
+                )
               : isHistoricalVersion && versionDetail?.content != null
                 ? versionDetail.content
-                : pkgDetail.content}
-          </pre>
-        </div>
-      )}
-
-      {type === "provider" && tab === "configuration" && providerConfig && (
-        <div className="border-border bg-card rounded-lg border p-4">
-          <ProviderCredentialsForm
-            provider={providerConfig}
-            callbackUrl={callbackUrl}
-            footer={<ProviderConnectButton provider={providerConfig} />}
-          />
-        </div>
-      )}
+                : pkgDetail.content;
+          return (
+            <div className="border-border bg-card rounded-lg border p-4">
+              <pre className="text-muted-foreground bg-muted/50 overflow-x-auto rounded-md p-3 font-mono text-xs whitespace-pre-wrap">
+                {body}
+              </pre>
+            </div>
+          );
+        })()}
 
       {type !== "agent" &&
         tab === "usedBy" &&
@@ -577,13 +550,12 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                 <PackageCard
                   key={agent.id}
                   id={agent.id}
-                  displayName={agent.displayName}
+                  displayName={agent.display_name}
                   description={agent.description}
                   type="agent"
                   source={agent.source}
                   keywords={agent.keywords}
-                  providerIds={Object.keys(agent.dependencies.providers ?? {})}
-                  runningRuns={agent.runningRuns}
+                  runningRuns={agent.running_runs}
                 />
               ))}
             </div>
@@ -617,19 +589,12 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         type={type}
       />
 
-      {/* Agent modals */}
-      {type === "agent" && <AgentModals packageId={packageId} />}
-
       <ConfirmModal
         open={!!confirmAction}
         onClose={() => setConfirmAction(null)}
         title={t("btn.confirm", { ns: "common" })}
         description={confirmAction?.description ?? ""}
-        isPending={
-          deleteCredentialsMutation.isPending ||
-          deletePkgMutation.isPending ||
-          uninstallMutation.isPending
-        }
+        isPending={deletePkgMutation.isPending || uninstallMutation.isPending}
         confirmLabel={
           confirmAction?.type === "uninstallPackage"
             ? t("packages.uninstall", { ns: "settings" })
@@ -638,9 +603,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         onConfirm={() => {
           if (!confirmAction) return;
           const close = () => setConfirmAction(null);
-          if (confirmAction.type === "deleteCredentials") {
-            deleteCredentialsMutation.mutate(packageId, { onSuccess: close });
-          } else if (confirmAction.type === "uninstallPackage") {
+          if (confirmAction.type === "uninstallPackage") {
             if (!currentAppId) return;
             uninstallMutation.mutate(
               { applicationId: currentAppId, packageId, installed: true },

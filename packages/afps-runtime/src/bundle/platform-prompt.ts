@@ -8,15 +8,16 @@
  * This is NOT an AFPS contract — callers choose whether to prepend it.
  * External runners happy with the raw template alone (`renderPrompt`)
  * can skip this helper. The sections it builds (System / Environment /
- * Tools / Skills / Connected Providers / User Input / Documents /
- * Configuration / Checkpoint / Memory / Run History) represent one
- * reasonable convention for an AFPS-style agent; platforms and CLIs
- * may compose it as-is or override specific option fields.
+ * Tools / Skills / User Input / Documents / Configuration / Checkpoint /
+ * Memory / Run History) represent one reasonable convention for an
+ * AFPS-style agent; platforms and CLIs may compose it as-is or override
+ * specific option fields.
  */
 
 import type { ExecutionContext } from "../types/execution-context.ts";
 import { renderTemplate } from "../template/mustache.ts";
-import type { PromptView, PromptViewProvider, PromptViewUpload } from "./prompt-renderer.ts";
+import { isFileField } from "@appstrate/afps-shared/file-field";
+import type { PromptView, PromptViewUpload } from "./prompt-renderer.ts";
 
 const TEMPLATE_RENDER_MIN_VERSION = [1, 1] as const;
 
@@ -28,23 +29,6 @@ function supportsTemplateRendering(schemaVersion: string | undefined): boolean {
   const minor = Number(match[2]);
   const [minMajor, minMinor] = TEMPLATE_RENDER_MIN_VERSION;
   return major > minMajor || (major === minMajor && minor >= minMinor);
-}
-
-/**
- * Heuristic matching the AFPS 1.3 file-field convention: a JSON Schema
- * node is a "file" when it is a string with `format: uri` and a
- * `contentMediaType`, or an array of such items.
- */
-function isFileField(schema: unknown): boolean {
-  if (!schema || typeof schema !== "object") return false;
-  const s = schema as Record<string, unknown>;
-  if (s.type === "string" && s.format === "uri" && typeof s.contentMediaType === "string") {
-    return true;
-  }
-  if (s.type === "array" && typeof s.items === "object" && s.items !== null) {
-    return isFileField(s.items);
-  }
-  return false;
 }
 
 function formatFileSize(bytes: number): string {
@@ -59,7 +43,24 @@ export interface PlatformPromptTool {
   description?: string;
 }
 
-export type PlatformPromptProvider = PromptViewProvider;
+/**
+ * Per-integration prompt entry. The integration is identified by its
+ * package id; the optional human-readable description comes from the
+ * integration manifest, and `doc` carries the raw `INTEGRATION.md`
+ * content (AFPS §3.5) — when present, the runtime SHOULD surface it
+ * to the agent. We inline it directly into the platform prompt so the
+ * LLM can read it without an extra workspace lookup.
+ */
+export interface PlatformPromptIntegration {
+  id: string;
+  description?: string;
+  /**
+   * Raw `INTEGRATION.md` content (markdown). When non-empty, renders a
+   * `### API Documentation` subsection under the integration's section.
+   * Caller-side truncation is applied before passing this in.
+   */
+  doc?: string;
+}
 
 export interface PlatformPromptSchema {
   properties?: Record<string, unknown>;
@@ -79,20 +80,22 @@ export interface PlatformPromptOptions {
   /** Run timeout in seconds — surfaced in the `## System` section. */
   timeoutSeconds?: number;
 
-  /** Bundled tools catalogue + inline TOOL.md docs. */
-  availableTools?: ReadonlyArray<PlatformPromptTool>;
-  /** Bundled skills catalogue. */
+  /**
+   * Bundled skills catalogue. Skills are workspace file references, not
+   * MCP tools, so they keep a prompt section (tools are advertised via
+   * MCP `tools/list` and are deliberately NOT listed in the prompt).
+   */
   availableSkills?: ReadonlyArray<PlatformPromptTool>;
-  /** Raw TOOL.md contents appended after the tool list. */
-  toolDocs?: ReadonlyArray<{ id: string; content: string }>;
 
   /**
-   * Providers to surface in the `## Connected Providers` section.
-   * Caller-filtered — pass only those for which credentials are wired.
-   * The LLM-facing tool surface is the canonical `provider_call`;
-   * each entry contributes one `providerId` to that tool's enum.
+   * Integrations resolved for this run — one entry per declared,
+   * installed, and connected integration. Each entry surfaces the
+   * integration's description (from its manifest) and, when present,
+   * its `INTEGRATION.md` content inlined into the prompt so the agent
+   * can read the integration's API documentation alongside the
+   * `{ns}__*` tools advertised via MCP `tools/list`. AFPS §3.5.
    */
-  providers?: ReadonlyArray<PlatformPromptProvider>;
+  integrations?: ReadonlyArray<PlatformPromptIntegration>;
 
   /** Input schema — drives the `## User Input` section. */
   inputSchema?: PlatformPromptSchema;
@@ -122,19 +125,20 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
   const input = (context.input as Record<string, unknown>) ?? {};
   const config = context.config ?? {};
   const platformName = opts.platformName ?? "Appstrate";
-  const connectedProviders = opts.providers ?? [];
 
   // ─── Section model (#368) ─────────────────────────────────────────
   // The platform prompt owns SECTIONS — headers, intro prose, and data
   // dumps the runtime sources from DB/state. Tool USAGE prose lives in
-  // each tool's `TOOL.md` and flows in through `opts.toolDocs`.
+  // each tool's MCP `description` (surfaced via `tools/list`), never in
+  // the prompt.
   //
   // That means the Checkpoint / Pinned Slots / Memory sections render
   // their data block when data exists, with no tool-specific footers.
-  // If `@appstrate/pin` isn't loaded, no `pin(...)` instructions appear
-  // anywhere in the prompt — the absence of the tool's TOOL.md is the
-  // gate. Conversely, when the tool ships, its TOOL.md teaches the LLM
-  // how to interact with the data shown in the platform-owned section.
+  // If the `pin` tool isn't loaded, no `pin(...)` instructions appear
+  // anywhere in the prompt — the absence of the tool from `tools/list`
+  // is the gate. Conversely, when the tool ships, its MCP descriptor
+  // `description` teaches the LLM how to interact with the data shown
+  // in the platform-owned section.
 
   // --- System identity & environment ---
   sections.push("## System\n");
@@ -149,9 +153,7 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
   );
   sections.push(
     "- **Network access**: Outbound HTTP/HTTPS is available. " +
-      "Use `curl`, `fetch`, or any HTTP client to call public APIs and websites directly. " +
-      "Authenticated requests to connected providers go through the `provider_call` MCP tool " +
-      "listed under **Connected Providers** — credentials are injected server-side.",
+      "Use `curl`, `fetch`, or any HTTP client to call public APIs and websites directly.",
   );
   if (opts.timeoutSeconds) {
     sections.push(
@@ -173,24 +175,38 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
       "You may use the filesystem for temporary processing during this run only.\n",
   );
 
-  if (opts.availableTools && opts.availableTools.length > 0) {
-    sections.push("### Tools");
-    sections.push(
-      "You have access to the following tools (in addition to standard coding capabilities):\n",
-    );
-    for (const tool of opts.availableTools) {
-      const desc = tool.description ? `: ${tool.description}` : "";
-      sections.push(`- **${tool.name || tool.id}**${desc}`);
-    }
-    sections.push("");
-  }
+  // --- Communication contract ---
+  // The platform parses ONLY the typed events your tools emit. Plain
+  // assistant text (prose, reasoning, chat-style replies) is never wired
+  // to the user — it lives and dies inside this container. Weaker models
+  // default to "here are your results: …" free text, which silently
+  // reaches no one. State the invariant explicitly so every result,
+  // status update, question, or error is routed through a tool call.
+  // Kept tool-agnostic (no opt-in tool names) per the #368 section
+  // contract — which tool to use is taught by each tool's MCP descriptor
+  // `description` (surfaced via `tools/list`), not the prompt.
+  sections.push("### Communication");
+  sections.push(
+    "Anything you write as plain text — outside a tool call — is **never delivered to the user**. " +
+      "It stays inside this ephemeral container and is discarded when the run ends. " +
+      "The user does not see your prose, your reasoning, or any chat-style reply.\n",
+  );
+  sections.push(
+    "**The only way to communicate with the user is by calling a tool.** " +
+      "Every result, status update, intermediate finding, question, or error you want the user " +
+      "to receive MUST go through a tool that conveys it. If you would normally end a turn by " +
+      'writing a summary or "here are your results", call the appropriate tool instead. ' +
+      "If no available tool can carry a given piece of information, that information cannot reach " +
+      "the user — do not assume a final text message will be read.\n",
+  );
 
-  if (opts.toolDocs && opts.toolDocs.length > 0) {
-    for (const doc of opts.toolDocs) {
-      sections.push(doc.content);
-      sections.push("");
-    }
-  }
+  // Tools are advertised to the model via MCP `tools/list` (name +
+  // description + input schema). The prompt deliberately does NOT list
+  // them: a partial/stale in-prompt list would contradict the live tool
+  // set, and the Communication contract above already states the only
+  // platform invariant the model can't infer from `tools/list`. Skills
+  // (below) are NOT MCP tools — they're workspace files — so they keep
+  // their own section.
 
   if (opts.availableSkills && opts.availableSkills.length > 0) {
     sections.push("### Skills");
@@ -204,50 +220,25 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
     sections.push("");
   }
 
-  // --- Connected providers ---
-  if (connectedProviders.length > 0) {
-    sections.push("## Connected Providers\n");
-    sections.push(
-      "To call any connected provider, use the `provider_call` MCP tool with " +
-        "`{ providerId, method, target, headers?, body?, responseMode? }`. " +
-        "Pass the `providerId` from the list below; `target` must be an absolute URL " +
-        "matching one of the provider's authorized URLs. " +
-        "Non-2xx upstream responses are returned with `isError: true` — read the body to " +
-        "diagnose rather than retrying blindly. Proxy timeout is 30 s. " +
-        "For other public APIs (no auth), call them directly with `curl` / `fetch`.\n",
-    );
-
-    sections.push(
-      'Binary content: pass `body: { fromFile: "documents/<name>" }` to upload a workspace file as the request body, or `body: { fromBytes: "<base64>", encoding: "base64" }` to upload inline binary bytes computed in memory (up to 5 MB; standard base64 RFC 4648 §4 only — alphabet `+/`; URL-safe base64 with `-_` is not accepted). ' +
-        'Use `responseMode: { toFile: "documents/<name>.<ext>" }` to stream the upstream response into the workspace. ' +
-        'Without `toFile`, responses that would blow the LLM context (large text payloads or binary blobs over 64 KB) auto-spill to a workspace file under `responses/<toolCallId>` (no extension — the authoritative content type is on `body.mimeType`). The result is `body.kind === "file"` with the workspace-relative `path`; read the spilled file with the standard `read` tool when you need the content. Smaller binaries are returned base64-encoded under `body.data` with `body.kind === "inline"`. ' +
-        "Inspect `body.kind` on the returned JSON to dispatch.\n",
-    );
-
-    sections.push(
-      "Multipart uploads (e.g. Drive file upload, Gmail send with attachment): pass `body: { multipart: [...] }` to compose a multipart/form-data body mixing text fields and workspace files. " +
-        'Each part is one of: `{ name, value }` (text field), `{ name, fromFile, filename?, contentType? }` (workspace file), or `{ name, fromBytes, encoding: "base64", filename?, contentType? }` (inline bytes). ' +
-        'Example — Drive resumable upload metadata + file: `{ multipart: [{ name: "metadata", value: JSON.stringify({name:"report.pdf"}), contentType: "application/json" }, { name: "file", fromFile: "documents/report.pdf", contentType: "application/pdf" }] }`. ' +
-        'Example — Gmail send with inline attachment: `{ multipart: [{ name: "message", value: rawMimeString }, { name: "attachment", fromFile: "documents/invoice.pdf", filename: "invoice.pdf", contentType: "application/pdf" }] }`. ' +
-        "Total size across all parts is capped at 5 MB; use a single `{ fromFile }` body for larger uploads.\n",
-    );
-
-    sections.push("Available providers:");
-    sections.push(
-      "Each provider has a corresponding skill (`provider-<scope>-<name>`) — read it before calling `provider_call` for the first time. Skills are listed under `<available_skills>` with full descriptions and file paths.\n",
-    );
-    for (const provider of connectedProviders) {
-      const displayName = provider.displayName ?? provider.id;
-
-      sections.push(`- **${displayName}** (\`${provider.id}\`)`);
-
-      if (provider.allowAllUris) {
-        sections.push(`  Authorized URLs: all public URLs`);
-      } else if (provider.authorizedUris && provider.authorizedUris.length > 0) {
-        sections.push(`  Authorized URLs: ${provider.authorizedUris.join(", ")}`);
+  // --- Integrations ---
+  // One section per integration resolved for this run. The integration's
+  // tools are advertised via MCP `tools/list` under the `{ns}__*` prefix —
+  // we deliberately do NOT list them here. The `### API Documentation`
+  // subsection surfaces the integration's `INTEGRATION.md` (AFPS §3.5)
+  // verbatim so the LLM can read its API contract without a workspace
+  // lookup. Subsection omitted when `doc` is absent / empty.
+  if (opts.integrations && opts.integrations.length > 0) {
+    for (const integ of opts.integrations) {
+      sections.push(`## Integration: ${integ.id}\n`);
+      if (integ.description) {
+        sections.push(`${integ.description}\n`);
+      }
+      if (integ.doc && integ.doc.trim().length > 0) {
+        sections.push("### API Documentation\n");
+        sections.push(integ.doc);
+        sections.push("");
       }
     }
-    sections.push("");
   }
 
   // --- User input ---
@@ -327,9 +318,10 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
   // --- Checkpoint ---
   // Data-only section: renders the snapshot from the prior run when one
   // exists. How to update it (or whether the agent can at all) is
-  // determined by which tools are loaded — the relevant TOOL.md (e.g.
-  // `@appstrate/pin`) carries the call instructions. With no such tool
-  // the snapshot is implicit read-only carry-over.
+  // determined by which tools are loaded — the relevant tool's MCP
+  // descriptor `description` (e.g. `pin`, surfaced via `tools/list`)
+  // carries the call instructions. With no such tool the snapshot is
+  // implicit read-only carry-over.
   if (context.checkpoint !== undefined && context.checkpoint !== null) {
     sections.push("## Checkpoint\n");
     sections.push(
@@ -347,8 +339,8 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
   // --- Pinned Slots (named, non-checkpoint) ---
   // Data-only section: dumps named pinned slots (any key other than
   // "checkpoint") so they are visible on every run. Update instructions
-  // belong to the tool that owns the slot semantics (`@appstrate/pin`'s
-  // TOOL.md) and are surfaced through the standard tool-doc flow.
+  // belong to the tool that owns the slot semantics (the `pin` tool's
+  // MCP descriptor `description`) and are surfaced via `tools/list`.
   if (context.pinnedSlots && Object.keys(context.pinnedSlots).length > 0) {
     sections.push("## Pinned Slots\n");
     sections.push("Named pinned slots (always visible across runs):\n");
@@ -367,10 +359,11 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
 
   // --- Memory ---
   // Data-only section: dumps the agent's pinned memory list (working
-  // set, ADR-012 tier 1). The archive tier (ADR-013) is reachable via
-  // tool calls — those instructions live in the relevant TOOL.md
-  // (`@appstrate/note` for writes, runtime-injected `recall_memory`
-  // for searches). Section omitted when no memories are pinned.
+  // set, tier 1). The archive tier is reachable via
+  // tool calls — those instructions live in each tool's MCP descriptor
+  // `description` (`note` for writes, runtime-injected `recall_memory`
+  // for searches, surfaced via `tools/list`). Section omitted when no
+  // memories are pinned.
   if (context.memories && context.memories.length > 0) {
     sections.push("## Memory\n");
     sections.push("Pinned memories (always visible across runs):\n");

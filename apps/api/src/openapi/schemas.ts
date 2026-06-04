@@ -4,94 +4,6 @@ import { orgRoleEnum } from "@appstrate/db/schema";
 
 const ORG_ROLES = [...orgRoleEnum.enumValues];
 
-// ─── Shared building blocks for ProviderConfig{,Input,Update} ───────────────
-//
-// The three provider-config schemas (read response, create input, update input)
-// share most of their property bag verbatim. We expose the common pieces as
-// JS-level constants and spread them into each schema, so the rendered OpenAPI
-// stays flat (no `allOf`) — `verify-openapi.ts` reads `properties`/`required`
-// directly off the resolved schema and does not chase `allOf` composition.
-
-const providerAuthModeEnum = {
-  type: "string",
-  enum: ["oauth2", "oauth1", "api_key", "basic", "custom"],
-} as const;
-
-const providerTokenContentTypeProperty = {
-  type: "string",
-  enum: ["application/x-www-form-urlencoded", "application/json"],
-  description:
-    "Content-Type used for OAuth2 token endpoint request bodies. Defaults to application/x-www-form-urlencoded; set to application/json for providers like Atlassian/Jira that require a JSON body.",
-} as const;
-
-const providerCredentialTransformProperty = {
-  type: "object",
-  required: ["template", "encoding"],
-  properties: {
-    template: {
-      type: "string",
-      minLength: 1,
-      description:
-        "Free-form template with {{var}} placeholders resolved against the user-provided credential fields.",
-    },
-    encoding: {
-      type: "string",
-      enum: ["base64"],
-      description:
-        "Whitelisted post-substitution transform applied to the rendered template. AFPS v1: base64 only.",
-    },
-  },
-  description:
-    "Generic, template-based pre-encoding for api_key credentials. Lets manifests express any provider-specific Basic-auth convention (Freshdesk/Teamwork, Zendesk, …) without spec changes.",
-} as const;
-
-const providerAvailableScopesProperty = {
-  type: "array",
-  items: {
-    type: "object",
-    properties: {
-      value: { type: "string" },
-      label: { type: "string" },
-    },
-  },
-} as const;
-
-/**
- * Properties shared by ProviderConfigInput AND ProviderConfigUpdate.
- * Excludes `id` (Input-only, required) and `displayName` (different shape per schema).
- */
-const providerInputSharedProperties = {
-  version: { type: "string" },
-  description: { type: "string" },
-  author: { type: "string" },
-  authMode: providerAuthModeEnum,
-  clientId: { type: "string" },
-  clientSecret: { type: "string" },
-  authorizationUrl: { type: "string" },
-  tokenUrl: { type: "string" },
-  refreshUrl: { type: "string" },
-  requestTokenUrl: { type: "string", description: "OAuth1 request token endpoint" },
-  accessTokenUrl: { type: "string", description: "OAuth1 access token endpoint" },
-  defaultScopes: { type: "array", items: { type: "string" } },
-  scopeSeparator: { type: "string" },
-  pkceEnabled: { type: "boolean" },
-  tokenAuthMethod: { type: "string", enum: ["client_secret_post", "client_secret_basic"] },
-  tokenContentType: providerTokenContentTypeProperty,
-  authorizationParams: { type: "object" },
-  tokenParams: { type: "object" },
-  credentialSchema: { type: "object", description: "JSON Schema for custom credential fields" },
-  credentialFieldName: { type: "string" },
-  credentialHeaderName: { type: "string" },
-  credentialHeaderPrefix: { type: "string" },
-  credentialTransform: providerCredentialTransformProperty,
-  availableScopes: providerAvailableScopesProperty,
-  iconUrl: { type: "string" },
-  categories: { type: "array", items: { type: "string" } },
-  docsUrl: { type: "string" },
-  authorizedUris: { type: "array", items: { type: "string" } },
-  allowAllUris: { type: "boolean" },
-} as const;
-
 /**
  * All OpenAPI schema definitions (components/schemas).
  */
@@ -121,7 +33,46 @@ export const schemas = {
           properties: {
             field: { type: "string" },
             code: { type: "string" },
+            title: {
+              type: "string",
+              description: "Human-readable title; preserved from the underlying error factory.",
+            },
             message: { type: "string" },
+            // Channel-specific smuggles surfaced by services/integration-connection-resolver.ts:translateResolutionError.
+            // Documented here so SDK consumers can rely on them without reading the resolver source.
+            candidateConnectionIds: {
+              type: "array",
+              items: { type: "string" },
+              description:
+                "Populated on `must_choose_connection`. Connection ids the caller may pick from; pass one back via the request body's `connection_overrides` map to retry the run.",
+            },
+            connection_id: {
+              type: "string",
+              description:
+                "Populated on `needs_reconnection` and `insufficient_scopes`. Forward as `connectionId` on the OAuth re-kickoff so the callback UPDATEs the existing row in place (avoids duplicate INSERT — single-writer contract in `integration-connections.ts:persistCredentialBundle`).",
+            },
+            missing_scopes: {
+              type: "array",
+              items: { type: "string" },
+              description:
+                "Populated on `insufficient_scopes`. OAuth scopes the agent's selected tools require that the connection lacks; forwarded to the OAuth re-consent prompt.",
+            },
+            owned_by_actor: {
+              type: "boolean",
+              description:
+                "Populated on `insufficient_scopes`. True when the under-scoped connection belongs to the calling actor (UI offers an upgrade) vs. a foreign shared row (read-only error).",
+            },
+            required_auth_key: {
+              type: "string",
+              description:
+                "Populated on `auth_key_mismatch`. The agent dep's pinned `auth_key` per AFPS §4.1.",
+            },
+            available_auth_keys: {
+              type: "array",
+              items: { type: "string" },
+              description:
+                "Populated on `auth_key_mismatch`. Auth keys the actor's existing connections use; helps the UI route to the correct connect method.",
+            },
           },
         },
       },
@@ -139,20 +90,19 @@ export const schemas = {
   ApplicationPackage: {
     type: "object",
     description: "A package installed in an application with its config and overrides.",
-    required: ["packageId", "enabled", "installedAt", "updatedAt"],
+    required: ["packageId", "enabled", "installed_at", "updatedAt"],
     properties: {
       object: { type: "string", enum: ["application_package"] },
       packageId: { type: "string", description: "Package ID from org catalog" },
       config: { type: "object", description: "Application-specific configuration" },
       modelId: { type: ["string", "null"], description: "Model override for this app" },
       proxyId: { type: ["string", "null"], description: "Proxy override for this app" },
-      appProfileId: { type: ["string", "null"], description: "App profile override" },
-      versionId: { type: ["integer", "null"], description: "Pinned version (null = latest)" },
+      version_id: { type: ["integer", "null"], description: "Pinned version (null = latest)" },
       enabled: { type: "boolean" },
-      installedAt: { type: "string", format: "date-time" },
+      installed_at: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
-      packageType: { type: "string", enum: ["agent", "skill", "tool", "provider"] },
-      packageSource: { type: "string", enum: ["system", "local"] },
+      package_type: { type: "string", enum: ["agent", "skill", "mcp-server", "integration"] },
+      package_source: { type: "string", enum: ["system", "local"] },
     },
   },
   OrgSettings: {
@@ -230,45 +180,7 @@ export const schemas = {
       },
     },
   },
-  ProviderStatus: {
-    type: "object",
-    required: ["id", "provider", "status", "authMode"],
-    properties: {
-      id: { type: "string", description: "Provider requirement ID" },
-      provider: { type: "string", description: "Provider ID" },
-      description: { type: "string" },
-      status: { type: "string", enum: ["connected", "not_connected", "needs_reconnection"] },
-      authMode: { type: "string" },
-      scopesRequired: { type: "array", items: { type: "string" } },
-      scopesGranted: { type: "array", items: { type: "string" } },
-      scopesSufficient: { type: "boolean" },
-      scopesMissing: { type: "array", items: { type: "string" } },
-      source: {
-        type: "string",
-        enum: ["app_binding", "user_profile"],
-        description: "How the connection profile was resolved",
-      },
-      profileName: {
-        type: ["string", "null"],
-        description: "Name of the connection profile used",
-      },
-      profileOwnerName: {
-        type: ["string", "null"],
-        description: "Name of the owner of the connection profile",
-      },
-    },
-  },
   AgentSkillRef: {
-    type: "object",
-    required: ["id", "name"],
-    properties: {
-      id: { type: "string" },
-      version: { type: "string" },
-      name: { type: "string" },
-      description: { type: "string" },
-    },
-  },
-  AgentToolRef: {
     type: "object",
     required: ["id", "name"],
     properties: {
@@ -283,9 +195,9 @@ export const schemas = {
     required: ["id", "source", "type"],
     properties: {
       id: { type: "string" },
-      displayName: { type: "string" },
+      display_name: { type: "string" },
       description: { type: "string" },
-      schemaVersion: { type: "string" },
+      schema_version: { type: "string" },
       author: { type: "string" },
       keywords: { type: "array", items: { type: "string" } },
       source: { type: "string", enum: ["system", "local"] },
@@ -297,15 +209,15 @@ export const schemas = {
       type: {
         type: "string",
         description: "Package type from manifest",
-        enum: ["agent", "skill", "tool", "provider"],
+        enum: ["agent", "skill", "mcp-server", "integration"],
       },
-      runningRuns: { type: "integer" },
+      running_runs: { type: "integer" },
       dependencies: {
         type: "object",
         properties: {
-          providers: { type: "object", additionalProperties: { type: "string" } },
           skills: { type: "object", additionalProperties: { type: "string" } },
-          tools: { type: "object", additionalProperties: { type: "string" } },
+          mcp_servers: { type: "object", additionalProperties: { type: "string" } },
+          integrations: { type: "object", additionalProperties: { type: "string" } },
         },
       },
     },
@@ -315,7 +227,7 @@ export const schemas = {
     required: ["id", "source"],
     properties: {
       id: { type: "string" },
-      displayName: { type: "string" },
+      display_name: { type: "string" },
       description: { type: "string" },
       source: { type: "string", enum: ["system", "local"] },
       scope: { type: ["string", "null"], description: "Scope from manifest name" },
@@ -330,7 +242,7 @@ export const schemas = {
         format: "date-time",
         description: "Last updated timestamp (user agents only)",
       },
-      lockVersion: {
+      lock_version: {
         type: "integer",
         description: "Optimistic lock version (user agents only)",
       },
@@ -340,9 +252,9 @@ export const schemas = {
         properties: {
           schema: { type: "object", description: "Pure JSON Schema 2020-12 object" },
           current: { type: "object", description: "Current configuration values" },
-          fileConstraints: { $ref: "#/components/schemas/FileConstraintsMap" },
-          uiHints: { $ref: "#/components/schemas/UIHintsMap" },
-          propertyOrder: {
+          file_constraints: { $ref: "#/components/schemas/FileConstraintsMap" },
+          ui_hints: { $ref: "#/components/schemas/UIHintsMap" },
+          property_order: {
             type: "array",
             items: { type: "string" },
             description: "Presentation order for schema properties",
@@ -354,9 +266,9 @@ export const schemas = {
         description: "AFPS schema wrapper for per-run input.",
         properties: {
           schema: { type: "object", description: "Pure JSON Schema 2020-12 object" },
-          fileConstraints: { $ref: "#/components/schemas/FileConstraintsMap" },
-          uiHints: { $ref: "#/components/schemas/UIHintsMap" },
-          propertyOrder: {
+          file_constraints: { $ref: "#/components/schemas/FileConstraintsMap" },
+          ui_hints: { $ref: "#/components/schemas/UIHintsMap" },
+          property_order: {
             type: "array",
             items: { type: "string" },
             description: "Presentation order for schema properties",
@@ -368,7 +280,7 @@ export const schemas = {
         description: "AFPS schema wrapper for per-run output.",
         properties: {
           schema: { type: "object", description: "Pure JSON Schema 2020-12 object" },
-          propertyOrder: {
+          property_order: {
             type: "array",
             items: { type: "string" },
             description: "Presentation order for schema properties",
@@ -378,48 +290,64 @@ export const schemas = {
       dependencies: {
         type: "object",
         properties: {
-          providers: { type: "array", items: { $ref: "#/components/schemas/ProviderStatus" } },
           skills: { type: "array", items: { $ref: "#/components/schemas/AgentSkillRef" } },
-          tools: { type: "array", items: { $ref: "#/components/schemas/AgentToolRef" } },
+          mcp_servers: {
+            type: "array",
+            items: {
+              type: "object",
+              required: ["id", "version"],
+              properties: {
+                id: { type: "string" },
+                version: { type: "string" },
+              },
+            },
+            description: "AFPS §4.1 mcp_servers dependency group",
+          },
+          integrations: {
+            type: "array",
+            items: {
+              type: "object",
+              required: ["id", "version"],
+              properties: {
+                id: { type: "string" },
+                version: { type: "string" },
+                tools: {
+                  oneOf: [
+                    { type: "array", items: { type: "string" } },
+                    { type: "string", enum: ["*"] },
+                  ],
+                  description:
+                    "Niveau 2 tool allowlist (optional). Either an array of selected tool names or the AFPS §4.4 wildcard literal '*' opting the agent into every upstream tool (requires integration's `allow_undeclared_tools: true`).",
+                },
+                scopes: {
+                  type: "array",
+                  items: { type: "string" },
+                  description: "Niveau 2 explicit scope escape hatch (optional)",
+                },
+              },
+            },
+          },
         },
       },
-      lastRun: {
+      last_run: {
         type: ["object", "null"],
         description: "Summary of the most recent run (null if never run)",
         properties: {
           id: { type: "string" },
           status: { type: "string" },
-          startedAt: { type: "string", format: "date-time" },
+          started_at: { type: "string", format: "date-time" },
           duration: { type: "integer" },
         },
       },
-      runningRuns: { type: "integer" },
-      versionCount: {
+      running_runs: { type: "integer" },
+      version_count: {
         type: "integer",
         description: "Number of published versions (0 for built-in agents)",
       },
-      agentAppProfileId: {
-        type: ["string", "null"],
-        format: "uuid",
-        description: "Admin-configured app connection profile ID (null if none)",
-      },
-      agentAppProfileName: {
-        type: ["string", "null"],
-        description: "Display name of the admin-configured app connection profile",
-      },
-      forkedFrom: { type: ["string", "null"], description: "Source package ID if forked" },
-      hasUnarchivedChanges: {
+      forked_from: { type: ["string", "null"], description: "Source package ID if forked" },
+      has_unarchived_changes: {
         type: "boolean",
         description: "Whether the active version has changes not yet archived as a version",
-      },
-      populatedProviders: {
-        type: "object",
-        additionalProperties: { $ref: "#/components/schemas/ProviderConfig" },
-        description: "ProviderConfig keyed by provider ID for the agent's required providers",
-      },
-      callbackUrl: {
-        type: "string",
-        description: "OAuth callback URL for provider connections",
       },
     },
   },
@@ -430,7 +358,7 @@ export const schemas = {
       packageId: { type: "string" },
       version: { type: "string", description: "Semver version string (e.g. 1.0.0)" },
       integrity: { type: "string", description: "SRI integrity hash (sha256-...)" },
-      artifactSize: { type: "integer", description: "Artifact ZIP size in bytes" },
+      artifact_size: { type: "integer", description: "Artifact ZIP size in bytes" },
       yanked: { type: "boolean", description: "Whether this version has been yanked" },
       createdBy: { type: ["string", "null"] },
       createdAt: { type: ["string", "null"], format: "date-time" },
@@ -438,13 +366,13 @@ export const schemas = {
   },
   Run: {
     type: "object",
-    required: ["id", "orgId", "applicationId", "status", "versionDirty", "startedAt"],
+    required: ["id", "orgId", "applicationId", "status", "version_dirty", "started_at"],
     properties: {
       id: { type: "string" },
       packageId: {
         type: ["string", "null"],
         description:
-          "Source agent ID. NULL when the source agent has been deleted — the run row survives via `runs.package_id ON DELETE SET NULL` (migration 0017). Read `agentScope` / `agentName` for display in that case; re-running is not possible.",
+          "Source agent ID. NULL when the source agent has been deleted — the run row survives via `runs.package_id ON DELETE SET NULL` (migration 0017). Read `agent_scope` / `agent_name` for display in that case; re-running is not possible.",
       },
       userId: {
         type: ["string", "null"],
@@ -459,7 +387,7 @@ export const schemas = {
       result: { type: "object" },
       checkpoint: { type: "object" },
       error: { type: "string" },
-      tokenUsage: {
+      token_usage: {
         type: ["object", "null"],
         description:
           "Snapshot of token consumption for the run. Snake-case keys match the AFPS wire format emitted by every runner (PiRunner / remote CLI / GitHub Action) and stored verbatim in JSONB.",
@@ -471,22 +399,21 @@ export const schemas = {
         },
         additionalProperties: false,
       },
-      startedAt: { type: "string", format: "date-time" },
-      completedAt: { type: "string", format: "date-time" },
+      started_at: { type: "string", format: "date-time" },
+      completed_at: { type: "string", format: "date-time" },
       duration: { type: "integer", description: "Duration in milliseconds" },
-      connectionProfileId: { type: "string" },
       scheduleId: { type: "string" },
-      versionLabel: {
+      version_label: {
         type: ["string", "null"],
         description: "Version label at run time (e.g. '1.0.0')",
       },
-      versionDirty: {
+      version_dirty: {
         type: "boolean",
         description: "Whether the draft had unpublished changes at run time",
       },
-      proxyLabel: { type: ["string", "null"], description: "Proxy label used at run time" },
-      modelLabel: { type: ["string", "null"], description: "Model label used at run time" },
-      modelSource: {
+      proxy_label: { type: ["string", "null"], description: "Proxy label used at run time" },
+      model_label: { type: ["string", "null"], description: "Model label used at run time" },
+      model_source: {
         type: ["string", "null"],
         description: "Model source: 'system' (platform-provided) or 'org' (user-configured)",
       },
@@ -513,63 +440,117 @@ export const schemas = {
         description: "Snapshot of the effective agent config (merged overrides) at run creation",
         additionalProperties: true,
       },
-      configOverride: {
+      config_override: {
         type: ["object", "null"],
         description:
-          "Per-run config delta — the raw object the caller sent in the request body. `config` is the resolved (deep-merged) snapshot; `configOverride` is the raw delta that the dashboard uses to badge 'default vs override'. Null when the run used persisted defaults verbatim.",
+          "Per-run config delta — the raw object the caller sent in the request body. `config` is the resolved (deep-merged) snapshot; `config_override` is the raw delta that the dashboard uses to badge 'default vs override'. Null when the run used persisted defaults verbatim.",
         additionalProperties: true,
       },
-      userName: {
+      user_name: {
         type: ["string", "null"],
         description:
           "Display name of the dashboard user who triggered the run (from profiles table)",
       },
-      endUserName: {
+      end_user_name: {
         type: ["string", "null"],
         description: "Display name of the end-user (name or externalId fallback)",
       },
-      apiKeyName: {
+      api_key_name: {
         type: ["string", "null"],
         description: "Name of the API key that triggered the run",
       },
-      scheduleName: {
+      schedule_name: {
         type: ["string", "null"],
         description: "Name of the schedule that triggered the run",
       },
-      runnerName: {
+      runner_name: {
         type: ["string", "null"],
         description:
           "Human-friendly label for the runner that triggered the run — CLI host (`os.hostname()`), GitHub Action workflow, or whatever the caller passes via `X-Appstrate-Runner-Name`. Stamped at INSERT and never updated.",
       },
-      runnerKind: {
+      runner_kind: {
         type: ["string", "null"],
         description:
           "Free-form classifier driving the dashboard icon (`cli`, `github-action`, …). Sourced from `X-Appstrate-Runner-Kind` or inferred from the auth context.",
       },
-      agentScope: {
+      agent_scope: {
         type: ["string", "null"],
         description:
           "Denormalized agent scope at run creation. Survives rename, delete, or shadow compaction — the global run view falls back to this when the source package is gone.",
       },
-      agentName: {
+      agent_name: {
         type: ["string", "null"],
-        description: "Denormalized agent name at run creation (see agentScope).",
+        description: "Denormalized agent name at run creation (see agent_scope).",
       },
-      packageEphemeral: {
+      package_ephemeral: {
         type: "boolean",
         description:
           "Present on enriched run responses. True when the source package is an inline-run shadow (POST /api/runs/inline).",
       },
-      inlineManifest: {
+      inline_manifest: {
         type: ["object", "null"],
         description:
           "Inline runs only. Snapshot of the manifest submitted at run time. Null once the shadow has been compacted (see INLINE_RUN_LIMITS.retention_days).",
         additionalProperties: true,
       },
-      inlinePrompt: {
+      inline_prompt: {
         type: ["string", "null"],
         description:
           "Inline runs only. Snapshot of the prompt submitted at run time. Null once the shadow has been compacted.",
+      },
+      notifiedAt: {
+        type: ["string", "null"],
+        format: "date-time",
+        description:
+          "When the user was notified of run completion (in-app notification). Null until notification fires.",
+      },
+      readAt: {
+        type: ["string", "null"],
+        format: "date-time",
+        description: "When the user marked the run notification as read. Null until acknowledged.",
+      },
+      runNumber: {
+        type: ["integer", "null"],
+        description:
+          "Per-(app, package) monotonic counter assigned at run creation. Stable identifier for UI display.",
+      },
+      runOrigin: {
+        type: ["string", "null"],
+        enum: ["platform", "remote", null],
+        description:
+          "Which runner drives this run: 'platform' (server-managed Docker container) or 'remote' (caller's host via signed events).",
+      },
+      contextSnapshot: {
+        type: ["object", "null"],
+        description:
+          "Runner-provided execution environment metadata (os, cli version, git sha, ...) stamped at run creation.",
+        additionalProperties: true,
+      },
+      modelCredentialId: {
+        type: ["string", "null"],
+        description:
+          "ID of the model_provider_credentials row resolved at run creation (audit + cost-attribution).",
+      },
+      connection_overrides: {
+        type: ["object", "null"],
+        description:
+          'Per-integration connection picks for this run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (#1).',
+        additionalProperties: { type: "string" },
+      },
+      connections_used: {
+        type: ["array", "null"],
+        description:
+          "Connections resolved for this run, projected from the internal snapshot for display. Null when the agent declares no integrations.",
+        items: {
+          type: "object",
+          required: ["integration_id", "label", "account_id", "source"],
+          properties: {
+            integration_id: { type: "string" },
+            label: { type: ["string", "null"] },
+            account_id: { type: ["string", "null"] },
+            source: { type: "string" },
+          },
+        },
       },
     },
   },
@@ -598,131 +579,43 @@ export const schemas = {
     required: [
       "id",
       "packageId",
-      "connectionProfileId",
       "orgId",
-      "cronExpression",
+      "applicationId",
+      "cron_expression",
       "createdAt",
       "updatedAt",
     ],
     properties: {
       id: { type: "string" },
       packageId: { type: "string" },
-      connectionProfileId: { type: "string", format: "uuid" },
+      userId: { type: ["string", "null"], description: "Member actor the schedule runs as" },
+      endUserId: { type: ["string", "null"], description: "End-user actor the schedule runs as" },
       orgId: { type: "string" },
+      applicationId: {
+        type: "string",
+        description: "Application ID (app_ prefix) that owns this schedule",
+      },
       name: { type: ["string", "null"] },
       enabled: { type: ["boolean", "null"] },
-      cronExpression: { type: "string" },
+      cron_expression: { type: "string" },
       timezone: { type: ["string", "null"] },
       input: { type: "object" },
-      configOverride: { type: ["object", "null"] },
-      modelIdOverride: { type: ["string", "null"] },
-      proxyIdOverride: { type: ["string", "null"] },
-      versionOverride: { type: ["string", "null"] },
-      lastRunAt: { type: ["string", "null"], format: "date-time" },
-      nextRunAt: { type: ["string", "null"], format: "date-time" },
+      config_override: { type: ["object", "null"] },
+      model_id_override: { type: ["string", "null"] },
+      proxy_id_override: { type: ["string", "null"] },
+      version_override: { type: ["string", "null"] },
+      connection_overrides: {
+        type: ["object", "null"],
+        description:
+          'Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Flat map: `{ "@scope/integration": "<connection_id>" }`. Replayed on every fire; loses to admin pins (#1), beats actor-fallback (#4).',
+        additionalProperties: { type: "string" },
+      },
+      last_run_at: { type: ["string", "null"], format: "date-time" },
+      next_run_at: { type: ["string", "null"], format: "date-time" },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
-      profileName: { type: ["string", "null"] },
-      profileType: { type: ["string", "null"], enum: ["user", "app", null] },
-      readiness: {
-        type: "object",
-        properties: {
-          status: { type: "string", enum: ["ready", "degraded", "not_ready"] },
-          totalProviders: { type: "integer" },
-          connectedProviders: { type: "integer" },
-          missingProviders: { type: "array", items: { type: "string" } },
-        },
-      },
-    },
-  },
-  AvailableProvider: {
-    type: "object",
-    required: ["uniqueKey", "provider", "status", "authMode"],
-    properties: {
-      uniqueKey: { type: "string" },
-      provider: { type: "string" },
-      displayName: { type: "string" },
-      logo: { type: "string" },
-      status: { type: "string", enum: ["connected", "not_connected", "needs_reconnection"] },
-      authMode: { type: "string" },
-      connectionId: { type: "string" },
-      connectedAt: { type: "string" },
-      scopesGranted: { type: "array", items: { type: "string" } },
-    },
-  },
-  ConnectionStatus: {
-    type: "object",
-    required: ["provider", "status"],
-    properties: {
-      provider: { type: "string" },
-      status: { type: "string", enum: ["connected", "not_connected", "needs_reconnection"] },
-      connectionId: { type: "string" },
-      connectedAt: { type: "string" },
-      scopesGranted: { type: "array", items: { type: "string" } },
-    },
-  },
-  ProviderConfig: {
-    type: "object",
-    required: ["id", "displayName", "authMode"],
-    properties: {
-      id: { type: "string" },
-      displayName: { type: "string" },
-      authMode: providerAuthModeEnum,
-      source: { type: "string", enum: ["built-in", "custom"] },
-      hasCredentials: {
-        type: "boolean",
-        description: "Whether admin credentials are currently configured for this provider",
-      },
-      enabled: {
-        type: "boolean",
-        description: "Whether this provider is enabled for use in the organization",
-      },
-      adminCredentialSchema: {
-        type: "object",
-        description:
-          "JSON Schema describing admin credential fields. Undefined means no admin credentials needed.",
-      },
-      authorizationUrl: { type: "string" },
-      tokenUrl: { type: "string" },
-      refreshUrl: { type: "string" },
-      requestTokenUrl: { type: "string", description: "OAuth1 request token endpoint" },
-      accessTokenUrl: { type: "string", description: "OAuth1 access token endpoint" },
-      defaultScopes: { type: "array", items: { type: "string" } },
-      scopeSeparator: { type: "string" },
-      pkceEnabled: { type: "boolean" },
-      tokenAuthMethod: { type: "string", enum: ["client_secret_post", "client_secret_basic"] },
-      tokenContentType: providerTokenContentTypeProperty,
-      authorizationParams: { type: "object" },
-      tokenParams: { type: "object" },
-      credentialSchema: { type: "object" },
-      credentialFieldName: { type: "string" },
-      credentialHeaderName: { type: "string" },
-      credentialHeaderPrefix: { type: "string" },
-      credentialTransform: providerCredentialTransformProperty,
-      availableScopes: providerAvailableScopesProperty,
-      authorizedUris: { type: "array", items: { type: "string" } },
-      allowAllUris: { type: "boolean" },
-      iconUrl: { type: "string" },
-      categories: { type: "array", items: { type: "string" } },
-      docsUrl: { type: "string" },
-      usedByAgents: { type: "integer" },
-    },
-  },
-  ProviderConfigInput: {
-    type: "object",
-    required: ["id", "displayName", "authMode"],
-    properties: {
-      id: { type: "string", minLength: 1 },
-      displayName: { type: "string", minLength: 1 },
-      ...providerInputSharedProperties,
-    },
-  },
-  ProviderConfigUpdate: {
-    type: "object",
-    required: ["displayName", "authMode"],
-    properties: {
-      displayName: { type: "string", minLength: 1 },
-      ...providerInputSharedProperties,
+      actor_name: { type: ["string", "null"], description: "Display name of the schedule actor" },
+      actor_type: { type: ["string", "null"], enum: ["user", "end_user", null] },
     },
   },
   ApiKeyInfo: {
@@ -738,7 +631,7 @@ export const schemas = {
         description: "Permission scopes granted to this API key.",
       },
       createdBy: { type: ["string", "null"] },
-      createdByName: { type: "string" },
+      created_by_name: { type: "string" },
       expiresAt: { type: ["string", "null"], format: "date-time" },
       lastUsedAt: { type: ["string", "null"], format: "date-time" },
       revokedAt: { type: ["string", "null"], format: "date-time" },
@@ -753,12 +646,16 @@ export const schemas = {
       name: { type: ["string", "null"] },
       description: { type: ["string", "null"] },
       source: { type: "string", enum: ["system", "local"] },
+      scope: {
+        type: ["string", "null"],
+        description: "Scope from manifest name (e.g. @myorg from @myorg/name)",
+      },
       createdBy: { type: ["string", "null"] },
-      createdByName: { type: "string" },
-      usedByAgents: { type: "integer" },
+      created_by_name: { type: "string" },
+      used_by_agents: { type: "integer" },
       version: { type: ["string", "null"], description: "Manifest version (semver)" },
-      autoInstalled: { type: "boolean" },
-      forkedFrom: { type: ["string", "null"], description: "Source package ID if forked" },
+      auto_installed: { type: "boolean" },
+      forked_from: { type: ["string", "null"], description: "Source package ID if forked" },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
     },
@@ -771,34 +668,42 @@ export const schemas = {
       name: { type: ["string", "null"] },
       description: { type: ["string", "null"] },
       content: { type: "string", description: "Package item content" },
+      source_code: {
+        type: ["string", "null"],
+        description: "Secondary source file content (e.g. .ts for tools)",
+      },
       source: { type: "string", enum: ["system", "local"] },
+      scope: {
+        type: ["string", "null"],
+        description: "Scope from manifest name (e.g. @myorg from @myorg/name)",
+      },
       createdBy: { type: ["string", "null"] },
-      createdByName: { type: "string" },
-      usedByAgents: { type: "integer" },
-      autoInstalled: { type: "boolean" },
-      lockVersion: { type: "integer", description: "Optimistic lock version" },
+      created_by_name: { type: "string" },
+      used_by_agents: { type: "integer" },
+      auto_installed: { type: "boolean" },
+      lock_version: { type: "integer", description: "Optimistic lock version" },
       version: { type: ["string", "null"], description: "Manifest version (semver)" },
       manifest: { type: "object", description: "Full manifest object" },
-      manifestName: {
+      manifest_name: {
         type: ["string", "null"],
         description: "Manifest name (@scope/name) — may differ from package ID",
       },
-      versionCount: {
+      version_count: {
         type: "integer",
         description: "Number of published versions",
       },
-      hasUnarchivedChanges: {
+      has_unarchived_changes: {
         type: "boolean",
         description: "Whether the active version has changes not yet archived as a version",
       },
-      forkedFrom: { type: ["string", "null"], description: "Source package ID if forked" },
+      forked_from: { type: ["string", "null"], description: "Source package ID if forked" },
       agents: {
         type: "array",
         items: {
           type: "object",
           properties: {
             id: { type: "string" },
-            displayName: { type: "string" },
+            display_name: { type: "string" },
           },
         },
       },
@@ -912,6 +817,76 @@ export const schemas = {
       },
     },
   },
+  IntegrationCredentialsResponse: {
+    type: "object",
+    description:
+      "Live credentials + per-auth HTTP delivery plans + per-auth expiries for an installed integration. Returned by both `GET /internal/integration-credentials/{scope}/{name}` and `POST .../refresh` (identical shape). Feeds the sidecar's MITM `MitmCredentialSource.current()` + `.deliveryPlans()`. All wire keys are snake_case per AFPS (see `docs/CASING_CONVENTIONS.md` — internal sidecar↔platform endpoints share the Zone 1 default).",
+    required: ["auths", "delivery_plans", "expires_at_epoch_ms"],
+    properties: {
+      auths: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["auth_key", "auth_type", "fields", "authorized_uris"],
+          properties: {
+            auth_key: { type: "string" },
+            auth_type: { type: "string" },
+            fields: { type: "object", additionalProperties: { type: "string" } },
+            authorized_uris: { type: "array", items: { type: "string" } },
+            resource: {
+              type: "string",
+              description:
+                "RFC 8707 resource indicator declared by the manifest (`auths.{key}.resource`). AFPS §7.3 name — matches the RFC.",
+            },
+            expires_at: { type: "string", format: "date-time" },
+            scopes_granted: { type: "array", items: { type: "string" } },
+            identity_claims: {
+              type: "object",
+              additionalProperties: { type: "string" },
+              description:
+                "Identity claims captured at connect time (e.g. OIDC `sub`, `email`). AFPS §7 name.",
+            },
+          },
+        },
+      },
+      delivery_plans: {
+        type: "object",
+        additionalProperties: {
+          type: "object",
+          required: ["header_name", "header_prefix", "value", "allow_server_override"],
+          properties: {
+            header_name: { type: "string" },
+            header_prefix: { type: "string" },
+            value: { type: "string" },
+            allow_server_override: { type: "boolean" },
+          },
+        },
+      },
+      expires_at_epoch_ms: {
+        type: "object",
+        additionalProperties: { type: ["integer", "null"] },
+      },
+    },
+  },
+  IntegrationPin: {
+    type: "object",
+    required: [
+      "packageId",
+      "integration_package_id",
+      "auth_key",
+      "connection_id",
+      "createdAt",
+      "updatedAt",
+    ],
+    properties: {
+      packageId: { type: "string" },
+      integration_package_id: { type: "string" },
+      auth_key: { type: "string" },
+      connection_id: { type: "string", format: "uuid" },
+      createdAt: { type: "string", format: "date-time" },
+      updatedAt: { type: "string", format: "date-time" },
+    },
+  },
   OrgProxy: {
     type: "object",
     required: ["id", "label", "enabled", "isDefault", "source", "createdAt", "updatedAt"],
@@ -973,19 +948,11 @@ export const schemas = {
     description:
       "AFPS Agent manifest extended with Appstrate platform fields. " +
       "Standard fields are defined by the AFPS Agent schema; extension fields use the x- prefix per AFPS §10.",
-    allOf: [{ $ref: "https://afps.appstrate.dev/packages/schema/v1/agent.schema.json" }],
+    allOf: [{ $ref: "https://schemas.afps.dev/v0/agent.schema.json" }],
   },
   SkillManifest: {
-    description: "AFPS Skill manifest. See https://afps.appstrate.dev for field reference.",
-    $ref: "https://afps.appstrate.dev/packages/schema/v1/skill.schema.json",
-  },
-  ToolManifest: {
-    description: "AFPS Tool manifest. See https://afps.appstrate.dev for field reference.",
-    $ref: "https://afps.appstrate.dev/packages/schema/v1/tool.schema.json",
-  },
-  ProviderManifest: {
-    description: "AFPS Provider manifest. See https://afps.appstrate.dev for field reference.",
-    $ref: "https://afps.appstrate.dev/packages/schema/v1/provider.schema.json",
+    description: "AFPS Skill manifest. See https://schemas.afps.dev for field reference.",
+    $ref: "https://schemas.afps.dev/v0/skill.schema.json",
   },
   FileConstraintsMap: {
     type: "object",
@@ -999,7 +966,7 @@ export const schemas = {
           type: "string",
           description: "Comma-separated accepted file extensions (e.g. .pdf,.docx)",
         },
-        maxSize: {
+        max_size: {
           type: "number",
           description: "Maximum file size in bytes",
         },
@@ -1025,14 +992,14 @@ export const schemas = {
     type: "array",
     description:
       "Packages of a single type visible to the org. Each entry carries an " +
-      "`installedIn` array listing the caller-org applications where the package " +
+      "`installed_in` array listing the caller-org applications where the package " +
       "is currently installed (empty array = not installed in any of the caller's apps).",
     items: {
       type: "object",
-      required: ["id", "type", "source", "name", "description", "installedIn"],
+      required: ["id", "type", "source", "name", "description", "installed_in"],
       properties: {
         id: { type: "string", description: "Package id (`pkg_…`)." },
-        type: { type: "string", enum: ["agent", "skill", "tool", "provider"] },
+        type: { type: "string", enum: ["agent", "skill", "mcp-server", "integration"] },
         source: {
           type: "string",
           description:
@@ -1041,14 +1008,14 @@ export const schemas = {
         name: {
           type: "string",
           description:
-            "Display name from the package draft manifest (`displayName`); falls back to the package id.",
+            "Display name from the package draft manifest (`manifest.display_name`); falls back to the package id.",
         },
         description: {
           type: "string",
           description:
             "Description from the package draft manifest; empty string when not provided.",
         },
-        installedIn: {
+        installed_in: {
           type: "array",
           description:
             "Application ids (`app_…`) belonging to the caller's org where this package is installed.",

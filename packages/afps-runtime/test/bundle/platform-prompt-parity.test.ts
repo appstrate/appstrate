@@ -12,8 +12,6 @@
  * Platform-specific divergences (by design):
  *   - `platformName`: "Appstrate" / "Appstrate CLI" / caller-defined
  *   - `## Documents` section: only the platform has DB-backed uploads
- *   - `## Connected Providers`: platform may filter by credential
- *     availability (providersReplace); CLI takes the bundle list as-is
  *
  * Anything else that diverges is a regression. A new contributor who
  * adds a section to `renderPlatformPrompt` without threading it through
@@ -46,7 +44,7 @@ function makeFixtureBundle(): Bundle {
       name: "@fixture/agent",
       version: "1.0.0",
       type: "agent",
-      schemaVersion: "1.3",
+      schema_version: "0.1",
       timeout: 120,
       input: {
         schema: {
@@ -68,28 +66,30 @@ function makeFixtureBundle(): Bundle {
     },
     { "prompt.md": "Answer the user's question." },
   );
-  const tool = pkg(
+  const mcp = pkg(
     "@fixture/search@1.0.0",
-    { name: "search", type: "tool", description: "Search the web" },
-    { "TOOL.md": "# search\nUse it wisely." },
+    {
+      manifest_version: "0.3",
+      name: "@fixture/search",
+      version: "1.0.0",
+      type: "mcp-server",
+      schema_version: "0.1",
+      server: {
+        type: "node",
+        entry_point: "server/index.js",
+        mcp_config: { command: "node", args: ["server/index.js"] },
+      },
+    },
+    { "server/index.js": "//" },
   );
   const skill = pkg("@fixture/writing@1.0.0", {
     name: "writing",
     type: "skill",
     description: "Write clear prose",
   });
-  const provider = pkg("@fixture/gmail@1.0.0", {
-    name: "Gmail",
-    type: "provider",
-    definition: {
-      authMode: "oauth2",
-      authorizedUris: ["https://gmail.googleapis.com/**"],
-      docsUrl: "https://developers.google.com/gmail/api",
-    },
-  });
 
   const packages = new Map<PackageIdentity, BundlePackage>();
-  for (const p of [root, tool, skill, provider]) packages.set(p.identity, p);
+  for (const p of [root, mcp, skill]) packages.set(p.identity, p);
   return {
     bundleFormatVersion: "1.0",
     root: root.identity,
@@ -125,9 +125,6 @@ function canonicalize(prompt: string): string {
         /Uploaded documents are available under `\.\/documents\/` \(relative to cwd\) and listed in the `## Documents` section below\. /g,
         "",
       )
-      // strip the `## Connected Providers` section (may be filtered on
-      // the platform by credential availability; CLI paths list all)
-      .replace(/## Connected Providers\n[\s\S]*?(?=\n## |\n---|$)/g, "")
       // collapse repeated blank lines left by section removal
       .replace(/\n{3,}/g, "\n\n")
   );
@@ -147,18 +144,6 @@ describe("cross-path prompt parity", () => {
       uploads: [
         { name: "brief.pdf", path: "./documents/brief.pdf", size: 12345, type: "application/pdf" },
       ],
-      // Platform-specific: filtered provider list (e.g. only those with
-      // credentials wired). Replaces the bundle-derived list.
-      providers: [
-        {
-          id: "@fixture/gmail",
-          displayName: "Gmail",
-          authMode: "oauth2",
-          authorizedUris: ["https://gmail.googleapis.com/**"],
-          docsUrl: "https://developers.google.com/gmail/api",
-        },
-      ],
-      providersReplace: true,
     }),
   );
 
@@ -174,8 +159,9 @@ describe("cross-path prompt parity", () => {
     for (const prompt of [platformPrompt, externalRunPrompt, appstrateRunPrompt]) {
       expect(prompt).toContain("## System");
       expect(prompt).toContain("### Environment");
-      expect(prompt).toContain("### Tools");
-      expect(prompt).toContain("**search**: Search the web");
+      // Tools are advertised via MCP tools/list, never listed in the prompt.
+      expect(prompt).not.toContain("### Tools");
+      expect(prompt).not.toContain("**search**: Search the web");
       expect(prompt).toContain("### Skills");
       expect(prompt).toContain("**writing**: Write clear prose");
       expect(prompt).toContain("## User Input");
@@ -204,19 +190,19 @@ describe("cross-path prompt parity", () => {
   });
 
   it("platform prompt matches CLI prompts modulo the documented divergences", () => {
-    // Platform: includes Documents and filtered Connected Providers.
-    // Canonicalize strips these platform-only sections so the residue
-    // must match the CLI render byte-for-byte.
+    // Platform: includes the Documents section. Canonicalize strips that
+    // platform-only section so the residue must match the CLI render
+    // byte-for-byte.
     expect(canonicalize(platformPrompt)).toEqual(canonicalize(externalRunPrompt));
   });
 
-  it("only the CLI paths list providers from the bundle as-is", () => {
-    expect(externalRunPrompt).toContain("## Connected Providers");
-    expect(externalRunPrompt).toContain("**Gmail**");
-    expect(appstrateRunPrompt).toContain("## Connected Providers");
-    expect(appstrateRunPrompt).toContain("**Gmail**");
-    // Platform path also has it, just potentially filtered
-    expect(platformPrompt).toContain("## Connected Providers");
+  it("no prompt path emits a Connected Providers section", () => {
+    // The provider prompt dimension is fully removed — outbound API
+    // access is surfaced via integration MCP tools, not the prompt.
+    for (const prompt of [platformPrompt, externalRunPrompt, appstrateRunPrompt]) {
+      expect(prompt).not.toContain("## Connected Providers");
+      expect(prompt).not.toContain("provider_call");
+    }
   });
 
   it("only the platform path emits the Documents section", () => {

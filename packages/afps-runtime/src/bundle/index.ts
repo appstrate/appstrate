@@ -71,27 +71,20 @@ export {
   type BundleValidationResult,
   type ValidateBundleOptions,
 } from "./validate-bundle.ts";
-export {
-  resolveToolEntrypoint,
-  AfpsEntrypointError,
-  type AfpsEntrypointErrorCode,
-  type ResolvedToolEntrypoint,
-} from "./tool-entrypoint.ts";
 
 // ─── Prompt rendering ───────────────────────────────────────────────
 export {
   renderPrompt,
   buildPromptView,
   type PromptView,
-  type PromptViewProvider,
   type PromptViewUpload,
   type RenderPromptOptions,
 } from "./prompt-renderer.ts";
 export {
   renderPlatformPrompt,
   type PlatformPromptOptions,
-  type PlatformPromptProvider,
   type PlatformPromptTool,
+  type PlatformPromptIntegration,
   type PlatformPromptSchema,
 } from "./platform-prompt.ts";
 export {

@@ -17,14 +17,12 @@
  * wire format and the in-process `Actor` type (`@appstrate/connect`).
  * The `PersistenceScope` here narrows `Actor` by adding a `'shared'`
  * variant for app-wide rows; non-shared scopes pass through unchanged.
- *
- * See `docs/adr/ADR-011-checkpoint-unification.md` and
- * `docs/adr/ADR-012-memory-as-tool.md`.
  */
 
 import { and, asc, count, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packagePersistence } from "@appstrate/db/schema";
+import type { PackagePersistenceRow } from "@appstrate/db/schema";
 import type { Actor } from "../../lib/actor.ts";
 import { packagePersistenceContentSchema } from "../../lib/jsonb-schemas.ts";
 
@@ -69,26 +67,17 @@ export type PersistenceScope =
   | { type: "end_user"; id: string }
   | { type: "shared" };
 
-export interface Memory {
-  id: number;
-  content: unknown;
-  runId: string | null;
-  createdAt: Date;
-  pinned: boolean;
-  actorType: "user" | "end_user" | "shared";
-  actorId: string | null;
-}
+export type Memory = Pick<
+  PackagePersistenceRow,
+  "id" | "content" | "runId" | "createdAt" | "pinned" | "actorType" | "actorId"
+>;
 
-export interface PinnedSlotRow {
-  id: number;
-  key: string;
-  content: unknown;
-  runId: string | null;
-  actorType: "user" | "end_user" | "shared";
-  actorId: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-}
+// `key` is narrowed to non-null: the pinned-slot query filters `key IS NOT NULL`
+// (archive rows carry `key: null`), so the row type's nullable `key` is replaced.
+export type PinnedSlotRow = Pick<
+  PackagePersistenceRow,
+  "id" | "content" | "runId" | "actorType" | "actorId" | "createdAt" | "updatedAt"
+> & { key: string };
 
 // --- Actor ↔ storage translation --------------------------------------------
 
@@ -326,8 +315,7 @@ export async function listPinnedSlots(
 /**
  * Read every memory visible to a scope. Includes both pinned + archive
  * rows — the UI tab uses this to show all memories regardless of
- * visibility tier. The agent's prompt path uses {@link listPinnedMemories}
- * instead.
+ * visibility tier.
  */
 export async function listMemories(
   packageId: string,
@@ -361,50 +349,12 @@ export async function listMemories(
 }
 
 /**
- * Pinned memories — always rendered into the agent's system prompt.
- * Today no agent path writes these via `note` (default pinned=false);
- * the function exists so the prompt builder reads from a single,
- * intentional source instead of slicing `listMemories`. Named pinned
- * slots written by `pin({ key, content })` live in a separate column
- * shape (`key IS NOT NULL`) and are surfaced via `listPinnedSlots`.
- */
-export async function listPinnedMemories(
-  packageId: string,
-  applicationId: string,
-  scope: PersistenceScope,
-): Promise<Memory[]> {
-  const rows = await db
-    .select({
-      id: packagePersistence.id,
-      content: packagePersistence.content,
-      runId: packagePersistence.runId,
-      createdAt: packagePersistence.createdAt,
-      pinned: packagePersistence.pinned,
-      actorType: packagePersistence.actorType,
-      actorId: packagePersistence.actorId,
-    })
-    .from(packagePersistence)
-    .where(
-      and(
-        eq(packagePersistence.packageId, packageId),
-        eq(packagePersistence.applicationId, applicationId),
-        isNull(packagePersistence.key),
-        eq(packagePersistence.pinned, true),
-        buildVisibilityFilter(scope)!,
-      ),
-    )
-    .orderBy(asc(packagePersistence.createdAt));
-
-  return rows as Memory[];
-}
-
-/**
  * Archive recall — backs the agent-facing `recall_memory` MCP tool.
  *
  * Returns archive memories (`pinned=false`) visible to the scope, optionally
  * narrowed by an ILIKE substring match on text content. This is intentionally
- * a flat substring search, not vector retrieval — see ADR-012 for why we
- * draw the line here. JSON content (non-string) is excluded from `query`
+ * a flat substring search, not vector retrieval — by design for now,
+ * we draw the line here. JSON content (non-string) is excluded from `query`
  * filtering since the index isn't text-typed; pass no query to get all
  * archive rows.
  *
@@ -456,10 +406,10 @@ export async function recallMemories(
 }
 
 /**
- * Append memories for a scope. Defaults to `pinned=false` (archive tier);
- * the AFPS `note` tool has no pinning parameter so every agent-written
- * memory lands in the archive. Bounded at {@link MAX_MEMORIES_PER_SCOPE}
- * per `(package, app, scope)` and trimmed to {@link MAX_MEMORY_CONTENT}
+ * Append memories for a scope. Always `pinned=false` (archive tier); the
+ * AFPS `note` tool has no pinning parameter so every agent-written memory
+ * lands in the archive. Bounded at {@link MAX_MEMORIES_PER_SCOPE} per
+ * `(package, app, scope)` and trimmed to {@link MAX_MEMORY_CONTENT}
  * characters per entry.
  */
 export async function addMemories(
@@ -469,10 +419,8 @@ export async function addMemories(
   scope: PersistenceScope,
   contents: unknown[],
   runId: string | null,
-  opts: { pinned?: boolean } = {},
 ): Promise<number> {
   if (contents.length === 0) return 0;
-  const pinned = opts.pinned ?? false;
 
   const { actorType, actorId } = storageActor(scope);
 
@@ -502,7 +450,7 @@ export async function addMemories(
       applicationId,
       orgId,
       key: null,
-      pinned,
+      pinned: false,
       actorType,
       actorId,
       content: trimmed,

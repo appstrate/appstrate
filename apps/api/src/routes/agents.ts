@@ -27,17 +27,10 @@ import type { AgentManifest } from "../types/index.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getActor } from "../lib/actor.ts";
-import {
-  setUserAgentProviderOverride,
-  removeUserAgentProviderOverride,
-  getUserAgentProviderOverrides,
-  getAccessibleProfile,
-  resolveActorProfileContext,
-} from "../services/connection-profiles.ts";
 import { parseScopedName } from "@appstrate/core/naming";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { z } from "zod";
-import { ApiError, forbidden, invalidRequest, notFound, parseBody } from "../lib/errors.ts";
+import { ApiError, invalidRequest, notFound, parseBody } from "../lib/errors.ts";
 import { asJSONSchemaObject, mergeWithDefaults } from "@appstrate/core/form";
 import { getAppScope } from "../lib/scope.ts";
 import {
@@ -47,21 +40,14 @@ import {
 } from "../services/bundle-assembly.ts";
 import { writeBundleToBuffer } from "@appstrate/afps-runtime/bundle";
 import { rateLimit } from "../middleware/rate-limit.ts";
-import { resolveAgentReadiness } from "../services/agent-readiness.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 export const proxyIdSchema = z.object({ proxyId: z.string().nullable() });
 export const modelIdSchema = z.object({ modelId: z.string().nullable() });
-export const appProfileIdSchema = z.object({ appProfileId: z.uuid().nullable() });
-export const setProviderProfileSchema = z.object({
-  providerId: z.string().min(1),
-  connectionProfileId: z.uuid(),
-});
-export const removeProviderProfileSchema = z.object({ providerId: z.string().min(1) });
 
 /**
- * Parse the `actorType` / `actorId` query-param pair shared by the
+ * Parse the `actor_type` / `actor_id` query-param pair shared by the
  * persistence GET / DELETE routes into a {@link PersistenceScope}.
- * Returns `null` when the caller did not supply `actorType` (i.e. no
+ * Returns `null` when the caller did not supply `actor_type` (i.e. no
  * scope override) and throws `invalidRequest` when the combination is
  * malformed.
  */
@@ -77,7 +63,7 @@ function scopeFromQueryParams(
   if (actorTypeParam === "end_user" && actorIdParam) {
     return { type: "end_user", id: actorIdParam };
   }
-  throw invalidRequest("Invalid actorType / actorId combination");
+  throw invalidRequest("Invalid actor_type / actor_id combination");
 }
 
 export function createAgentsRouter() {
@@ -98,17 +84,15 @@ export function createAgentsRouter() {
       const parsed = parseScopedName(manifest.name);
       return {
         id: row.id,
-        displayName: manifest.displayName,
+        display_name: manifest.display_name,
         description: manifest.description,
-        schemaVersion: manifest.schemaVersion,
+        schema_version: manifest.schema_version,
         author: manifest.author,
         keywords: manifest.keywords ?? [],
         dependencies: {
-          providers: (manifest.dependencies?.providers ?? {}) as Record<string, string>,
           skills: (manifest.dependencies?.skills ?? {}) as Record<string, string>,
-          tools: (manifest.dependencies?.tools ?? {}) as Record<string, string>,
         },
-        runningRuns: runningCounts[row.id] ?? 0,
+        running_runs: runningCounts[row.id] ?? 0,
         source: row.source ?? "local",
         scope: parsed?.scope ?? null,
         version: manifest.version,
@@ -151,73 +135,6 @@ export function createAgentsRouter() {
         config,
         validation: { valid: true },
       });
-    },
-  );
-
-  // GET /api/agents/:scope/:name/provider-profiles — get per-provider profile overrides
-  router.get("/:scope{@[^/]+}/:name/provider-profiles", requireAgent(), async (c) => {
-    const agent = c.get("package");
-    const actor = getActor(c);
-    const overrides = await getUserAgentProviderOverrides(actor, agent.id);
-    return c.json({ overrides });
-  });
-
-  // PUT /api/agents/:scope/:name/provider-profiles — set per-provider override
-  // Provider ID passed in body (scoped IDs contain slashes, can't be in URL)
-  router.put(
-    "/:scope{@[^/]+}/:name/provider-profiles",
-    requireAgent(),
-    requirePermission("agents", "run"),
-    async (c) => {
-      const agent = c.get("package");
-      const actor = getActor(c);
-      const body = await c.req.json();
-      const data = parseBody(setProviderProfileSchema, body);
-
-      // Validate ownership — user can only set overrides to their own profiles
-      const profile = await getAccessibleProfile(data.connectionProfileId, actor, {
-        orgId: c.get("orgId"),
-        applicationId: c.get("applicationId")!,
-      });
-      if (!profile) {
-        throw forbidden("Cannot use a profile you do not own");
-      }
-
-      await setUserAgentProviderOverride(
-        actor,
-        agent.id,
-        data.providerId,
-        data.connectionProfileId,
-      );
-      await recordAuditFromContext(c, {
-        action: "agent.provider_profile_set",
-        resourceType: "agent",
-        resourceId: agent.id,
-        after: { providerId: data.providerId, connectionProfileId: data.connectionProfileId },
-      });
-      return c.json({ success: true });
-    },
-  );
-
-  // DELETE /api/agents/:scope/:name/provider-profiles — remove per-provider override
-  // Provider ID passed in body
-  router.delete(
-    "/:scope{@[^/]+}/:name/provider-profiles",
-    requireAgent(),
-    requirePermission("agents", "run"),
-    async (c) => {
-      const agent = c.get("package");
-      const actor = getActor(c);
-      const body = await c.req.json();
-      const data = parseBody(removeProviderProfileSchema, body);
-      await removeUserAgentProviderOverride(actor, agent.id, data.providerId);
-      await recordAuditFromContext(c, {
-        action: "agent.provider_profile_removed",
-        resourceType: "agent",
-        resourceId: agent.id,
-        after: { providerId: data.providerId },
-      });
-      return c.json({ success: true });
     },
   );
 
@@ -287,35 +204,11 @@ export function createAgentsRouter() {
     },
   );
 
-  // PUT /api/agents/:scope/:name/app-profile — set app profile for this agent (admin-only)
-  router.put(
-    "/:scope{@[^/]+}/:name/app-profile",
-    requireAgent(),
-    requirePermission("agents", "configure"),
-    async (c) => {
-      const agent = c.get("package");
-      const scope = getAppScope(c);
-      const body = await c.req.json();
-      const data = parseBody(appProfileIdSchema, body);
-
-      await updateInstalledPackage(scope, agent.id, { appProfileId: data.appProfileId });
-
-      await recordAuditFromContext(c, {
-        action: "agent.app_profile_updated",
-        resourceType: "agent",
-        resourceId: agent.id,
-        after: { appProfileId: data.appProfileId },
-      });
-
-      return c.json({ success: true });
-    },
-  );
-
   // ─────────────────────────────────────────────────────────────────
-  // Unified persistence (checkpoints + memories) — ADR-011
+  // Unified persistence (checkpoints + memories)
   // ─────────────────────────────────────────────────────────────────
 
-  // GET /api/agents/:scope/:name/persistence?kind=&actorType=&actorId=
+  // GET /api/agents/:scope/:name/persistence?kind=&actor_type=&actor_id=
   // Read the unified persistence rows visible to the caller.
   router.get(
     "/:scope{@[^/]+}/:name/persistence",
@@ -325,8 +218,8 @@ export function createAgentsRouter() {
       const agent = c.get("package");
       const applicationId = c.get("applicationId");
       const kindParam = c.req.query("kind");
-      const actorTypeParam = c.req.query("actorType");
-      const actorIdParam = c.req.query("actorId");
+      const actorTypeParam = c.req.query("actor_type");
+      const actorIdParam = c.req.query("actor_id");
       const runIdParam = c.req.query("runId");
 
       // Default scope = caller's actor. Admin filtering by other actors
@@ -369,8 +262,8 @@ export function createAgentsRouter() {
               key: slot.key,
               content: slot.content,
               runId: slot.runId,
-              actorType: slot.actorType,
-              actorId: slot.actorId,
+              actor_type: slot.actorType,
+              actor_id: slot.actorId,
               createdAt: slot.createdAt?.toISOString() ?? null,
               updatedAt: slot.updatedAt?.toISOString() ?? null,
             }))
@@ -380,8 +273,8 @@ export function createAgentsRouter() {
               id: m.id,
               content: m.content,
               runId: m.runId,
-              actorType: m.actorType,
-              actorId: m.actorId,
+              actor_type: m.actorType,
+              actor_id: m.actorId,
               pinned: m.pinned,
               createdAt: m.createdAt?.toISOString() ?? null,
             }))
@@ -442,7 +335,7 @@ export function createAgentsRouter() {
     },
   );
 
-  // DELETE /api/agents/:scope/:name/persistence?kind=&actorType=&actorId=
+  // DELETE /api/agents/:scope/:name/persistence?kind=&actor_type=&actor_id=
   // Bulk delete: by default wipes every memory + checkpoint for the agent
   // in this app. Narrow with query params.
   router.delete(
@@ -453,8 +346,8 @@ export function createAgentsRouter() {
       const agent = c.get("package");
       const applicationId = c.get("applicationId");
       const kindParam = c.req.query("kind");
-      const actorTypeParam = c.req.query("actorType");
-      const actorIdParam = c.req.query("actorId");
+      const actorTypeParam = c.req.query("actor_type");
+      const actorIdParam = c.req.query("actor_id");
 
       const scope = scopeFromQueryParams(actorTypeParam, actorIdParam) ?? undefined;
 
@@ -484,58 +377,10 @@ export function createAgentsRouter() {
         },
       });
 
-      return c.json({ memoriesDeleted, checkpointDeleted });
-    },
-  );
-
-  // GET /api/agents/:scope/:name/readiness — preflight inspector
-  // Returns the unsatisfied provider list under the given profile context
-  // (default or explicit `connectionProfileId` + per-provider overrides).
-  // Used by the CLI to decide whether to prompt the user to open the
-  // browser and connect missing providers before triggering a run.
-  router.get(
-    "/:scope{@[^/]+}/:name/readiness",
-    requireAgent(),
-    requirePermission("agents", "read"),
-    async (c) => {
-      const agent = c.get("package");
-      const orgId = c.get("orgId");
-      const applicationId = c.get("applicationId");
-      const actor = getActor(c);
-
-      const explicitProfileId = c.req.query("connectionProfileId");
-      const queryEntries = Object.entries(c.req.query());
-      // `providerProfile.<id>=<uuid>` — flatten to a Record<string,string>
-      // for the readiness resolver. Unknown / malformed entries are
-      // ignored; the resolver narrows to known providers anyway.
-      const perProviderOverrides: Record<string, string> = {};
-      for (const [key, value] of queryEntries) {
-        if (!key.startsWith("providerProfile.")) continue;
-        const providerId = key.slice("providerProfile.".length);
-        if (providerId && typeof value === "string" && value.length > 0) {
-          perProviderOverrides[providerId] = value;
-        }
-      }
-
-      // Default profile id: explicit override → actor's default → app
-      // profile. Mirrors the run pipeline's actor → app cascade so the
-      // preflight + run paths agree on the answer.
-      let defaultUserProfileId: string | null = null;
-      if (explicitProfileId && explicitProfileId.length > 0) {
-        defaultUserProfileId = explicitProfileId;
-      } else if (actor) {
-        const ctx = await resolveActorProfileContext(actor, agent.id, null, applicationId);
-        defaultUserProfileId = ctx.defaultUserProfileId;
-      }
-
-      const report = await resolveAgentReadiness({
-        agent,
-        applicationId,
-        orgId,
-        defaultUserProfileId,
-        perProviderOverrides,
+      return c.json({
+        memories_deleted: memoriesDeleted,
+        checkpoint_deleted: checkpointDeleted,
       });
-      return c.json(report);
     },
   );
 

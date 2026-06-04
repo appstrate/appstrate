@@ -20,19 +20,37 @@ import { usePackageVersions } from "../hooks/use-packages";
 import { useProvidersRegistry } from "../hooks/use-model-provider-credentials";
 import { findProviderByApiShapeAndBaseUrl } from "../lib/provider-registry-helpers";
 import { getProviderIcon } from "./icons";
+import { useIntegrationDetail } from "../hooks/use-integrations";
+import { connectableAuthKeysForAgent } from "@appstrate/core/integration";
+import { IntegrationConnectionPicker } from "./integration-connect/integration-connection-picker";
 
 const INHERIT = "__inherit__";
 const NONE = "__none__";
 
 export interface RunOverridesValue {
   /** Override delta — deep-merged with persisted config on the server. */
-  configOverride?: Record<string, unknown>;
+  config_override?: Record<string, unknown>;
   /** Per-run model id override. */
-  modelIdOverride?: string;
+  model_id_override?: string;
   /** Per-run proxy id override. */
-  proxyIdOverride?: string;
+  proxy_id_override?: string;
   /** Per-run version label or dist-tag override. */
-  versionOverride?: string;
+  version_override?: string;
+  /**
+   * Per-integration connection picks — frozen at schedule create/edit so
+   * every fire uses the same row. Loses to admin pins; beats
+   * schedule-less fallback + per-run overrides on the actor. Flat map:
+   * `{ "@scope/integration": "<connection_id>" }`. The chosen connection
+   * carries its own `auth_key`; the picker UI surfaces one row per
+   * declared authKey for readability but writes one value per integration
+   * (last write wins per integration — matches the wire format).
+   */
+  connection_overrides?: Record<string, string>;
+}
+
+interface AgentIntegrationRef {
+  id: string;
+  tools?: string[] | "*";
 }
 
 export interface RunOverridesPanelProps {
@@ -47,6 +65,13 @@ export interface RunOverridesPanelProps {
   persistedProxyId: string | null;
   /** Persisted version pin (or null = follow latest dist-tag). */
   persistedVersion: string | null;
+  /**
+   * Agent's declared integration dependencies — drives the
+   * connectionOverrides picker. Pass an empty array to hide the section
+   * (e.g. for agents without integrations). The caller is responsible
+   * for reading `dependencies.integrations` off the agent manifest.
+   */
+  agentIntegrations?: AgentIntegrationRef[];
   /** Current value (controlled). */
   value: RunOverridesValue;
   onChange: (next: RunOverridesValue) => void;
@@ -69,6 +94,7 @@ export function RunOverridesPanel({
   persistedModelId,
   persistedProxyId,
   persistedVersion,
+  agentIntegrations,
   value,
   onChange,
 }: RunOverridesPanelProps) {
@@ -84,7 +110,7 @@ export function RunOverridesPanel({
   // override) so the form reflects the merged starting point.
   const [configValues, setConfigValues] = useState<Record<string, unknown>>(() => ({
     ...persistedConfig,
-    ...(value.configOverride ?? {}),
+    ...(value.config_override ?? {}),
   }));
 
   const wrapper: SchemaWrapper | null = useMemo(
@@ -97,31 +123,31 @@ export function RunOverridesPanel({
 
   const setModel = (next: string) => {
     if (next === INHERIT || next === persistedModelId) {
-      const { modelIdOverride: _omit, ...rest } = value;
+      const { model_id_override: _omit, ...rest } = value;
       void _omit;
       onChange(rest);
     } else {
-      onChange({ ...value, modelIdOverride: next });
+      onChange({ ...value, model_id_override: next });
     }
   };
 
   const setProxy = (next: string) => {
     if (next === INHERIT || next === (persistedProxyId ?? INHERIT)) {
-      const { proxyIdOverride: _omit, ...rest } = value;
+      const { proxy_id_override: _omit, ...rest } = value;
       void _omit;
       onChange(rest);
     } else {
-      onChange({ ...value, proxyIdOverride: next });
+      onChange({ ...value, proxy_id_override: next });
     }
   };
 
   const setVersion = (next: string) => {
     if (next === INHERIT || next === (persistedVersion ?? "latest")) {
-      const { versionOverride: _omit, ...rest } = value;
+      const { version_override: _omit, ...rest } = value;
       void _omit;
       onChange(rest);
     } else {
-      onChange({ ...value, versionOverride: next });
+      onChange({ ...value, version_override: next });
     }
   };
 
@@ -129,20 +155,20 @@ export function RunOverridesPanel({
     setConfigValues(formData);
     const delta = computeConfigDelta(persistedConfig, formData);
     if (delta === null) {
-      const { configOverride: _omit, ...rest } = value;
+      const { config_override: _omit, ...rest } = value;
       void _omit;
       onChange(rest);
     } else {
-      onChange({ ...value, configOverride: delta });
+      onChange({ ...value, config_override: delta });
     }
   };
 
   const orgDefaultModel = orgModels?.find((m) => m.isDefault && m.enabled);
   const orgDefaultProxy = orgProxies?.find((p) => p.isDefault && p.enabled);
 
-  const modelSelectValue = value.modelIdOverride ?? persistedModelId ?? INHERIT;
-  const proxySelectValue = value.proxyIdOverride ?? persistedProxyId ?? INHERIT;
-  const versionSelectValue = value.versionOverride ?? persistedVersion ?? INHERIT;
+  const modelSelectValue = value.model_id_override ?? persistedModelId ?? INHERIT;
+  const proxySelectValue = value.proxy_id_override ?? persistedProxyId ?? INHERIT;
+  const versionSelectValue = value.version_override ?? persistedVersion ?? INHERIT;
 
   return (
     <div className="space-y-4">
@@ -251,6 +277,117 @@ export function RunOverridesPanel({
           </div>
         </div>
       )}
+
+      {agentIntegrations && agentIntegrations.length > 0 && (
+        <ScheduleConnectionOverridesSection
+          agentPackageId={packageId}
+          integrations={agentIntegrations}
+          value={value.connection_overrides ?? {}}
+          onChange={(next) => {
+            // Drop falsy entries — empty string === "Inherit", which is
+            // the absence of an override; sending it would be a spurious
+            // pick the resolver would have to disambiguate.
+            const compacted: Record<string, string> = {};
+            for (const [intId, connId] of Object.entries(next)) {
+              if (connId) compacted[intId] = connId;
+            }
+            if (Object.keys(compacted).length === 0) {
+              const { connection_overrides: _omit, ...rest } = value;
+              void _omit;
+              onChange(rest);
+            } else {
+              onChange({ ...value, connection_overrides: compacted });
+            }
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Per-integration picker section that drives `value.connection_overrides`.
+ * Renders the shared `IntegrationConnectionPicker` (one dropdown per
+ * integration) in `override` mode: selecting writes the pick into the
+ * flat `connection_overrides` map, "inherit" clears it. The pick freezes
+ * into the schedule row on save (cascade layer 4 — below admin pins,
+ * above member pins).
+ *
+ * Identical UX to the agent page's connection picker — same candidate
+ * list, scope/lock verdicts and inline connect flow — only the
+ * persistence target differs (transient form value vs. member pin).
+ */
+function ScheduleConnectionOverridesSection({
+  agentPackageId,
+  integrations,
+  value,
+  onChange,
+}: {
+  agentPackageId: string;
+  integrations: AgentIntegrationRef[];
+  value: Record<string, string>;
+  onChange: (next: Record<string, string>) => void;
+}) {
+  const { t } = useTranslation(["agents"]);
+  return (
+    <div className="space-y-2">
+      <Label>{t("schedule.connectionOverrides.label")}</Label>
+      <p className="text-muted-foreground text-xs">{t("schedule.connectionOverrides.hint")}</p>
+      <div className="border-border bg-card space-y-3 rounded-md border p-3">
+        {integrations.map((integ) => (
+          <IntegrationOverrideRow
+            key={integ.id}
+            agentPackageId={agentPackageId}
+            integration={integ}
+            value={value[integ.id] ?? ""}
+            onChange={(connId) => {
+              const next = { ...value };
+              if (connId) next[integ.id] = connId;
+              else delete next[integ.id];
+              onChange(next);
+            }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function IntegrationOverrideRow({
+  agentPackageId,
+  integration,
+  value,
+  onChange,
+}: {
+  agentPackageId: string;
+  integration: AgentIntegrationRef;
+  /** Currently-picked connection id; empty = inherit. */
+  value: string;
+  onChange: (next: string) => void;
+}) {
+  const { data: detail } = useIntegrationDetail(integration.id);
+  const displayName = detail?.manifest.display_name ?? integration.id;
+
+  // Gate the row on whether the agent can connect this integration at all
+  // (declared auth the actor can start a flow on, given its tool selection).
+  // Mirrors the run-time `integration_not_active`/no-auth gates so the
+  // schedule editor never offers an override for an unconnectable integration.
+  if (!detail) return null;
+  if (connectableAuthKeysForAgent(detail.manifest, integration.tools).length === 0) return null;
+
+  return (
+    <div className="space-y-1.5" data-testid={`schedule-conn-row-${integration.id}`}>
+      <div className="text-xs font-medium">{displayName}</div>
+      <IntegrationConnectionPicker
+        integrationId={integration.id}
+        agentPackageId={agentPackageId}
+        manifest={detail.manifest}
+        authStatuses={detail.auths}
+        displayName={displayName}
+        agentTools={integration.tools}
+        agentScopes={undefined}
+        persistence={{ mode: "override", value, onChange }}
+      />
     </div>
   );
 }

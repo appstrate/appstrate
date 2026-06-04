@@ -4,14 +4,18 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import i18n from "../i18n";
-import { api, apiFetch, buildQs, uploadFormData } from "../api";
+import { api, ApiError, buildQs, uploadFormData } from "../api";
 import { PACKAGE_CONFIG, type PackageType } from "./use-packages";
 import { packageDetailPath } from "../lib/package-paths";
-import { invalidateConnectionRelated } from "./invalidation";
-
-const OAUTH_TIMEOUT_MS = 5 * 60 * 1000;
 
 export function onMutationError(err: Error) {
+  // Skip the generic toast for missing_integration_connection (412) —
+  // the RunAgentButton renders MissingConnectionsModal off `runAgent.error`
+  // for that case. Showing both a toast AND the modal is noisy and the
+  // toast carries strictly less info than the modal.
+  if (err instanceof ApiError && err.code === "missing_integration_connection") {
+    return;
+  }
   toast.error(i18n.t("error.prefix", { message: err.message }));
 }
 
@@ -34,6 +38,14 @@ export function useSaveConfig(packageId: string) {
 export interface RunAgentParams {
   input?: Record<string, unknown>;
   version?: string;
+  /**
+   * Per-integration connection picks for THIS run (#199 mechanism #2).
+   * Flat map: `{ "@scope/integration": "<connectionId>" }` — one pick per
+   * integration; the chosen connection carries its own `auth_key`. Wire
+   * format validated by `input-parser.ts`. Surfaced from the must_choose
+   * modal picker.
+   */
+  connectionOverrides?: Record<string, string>;
 }
 
 export function useRunAgent(packageId: string) {
@@ -41,10 +53,11 @@ export function useRunAgent(packageId: string) {
   const navigate = useNavigate();
   return useMutation({
     mutationFn: async (params?: RunAgentParams) => {
-      const { input, version } = params ?? {};
+      const { input, version, connectionOverrides } = params ?? {};
       const qs = buildQs({ version });
       const body: Record<string, unknown> = {};
       if (input !== undefined) body.input = input;
+      if (connectionOverrides !== undefined) body.connection_overrides = connectionOverrides;
       return api<{ runId: string }>(`/agents/${packageId}/run${qs}`, {
         method: "POST",
         body: JSON.stringify(body),
@@ -54,109 +67,6 @@ export function useRunAgent(packageId: string) {
       qc.invalidateQueries({ queryKey: ["runs"] });
       qc.invalidateQueries({ queryKey: ["paginated-runs"] });
       navigate(`/agents/${packageId}/runs/${data.runId}`);
-    },
-    onError: onMutationError,
-  });
-}
-
-export function useConnect() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (
-      params: string | { provider: string; scopes?: string[]; connectionProfileId?: string },
-    ) => {
-      const provider = typeof params === "string" ? params : params.provider;
-      const scopes = typeof params === "string" ? undefined : params.scopes;
-      const connectionProfileId =
-        typeof params === "string" ? undefined : params.connectionProfileId;
-
-      const body: Record<string, unknown> = {};
-      if (scopes) body.scopes = scopes;
-      if (connectionProfileId) body.connectionProfileId = connectionProfileId;
-
-      const session = await apiFetch<{ authUrl: string }>(`/api/connections/connect/${provider}`, {
-        method: "POST",
-        body: JSON.stringify(body),
-      });
-      const popup = window.open(session.authUrl, "oauth", "width=600,height=700");
-      if (!popup) {
-        throw new Error(i18n.t("error.popupBlocked"));
-      }
-      return new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          clearInterval(interval);
-          reject(new Error(i18n.t("error.oauthTimeout")));
-        }, OAUTH_TIMEOUT_MS);
-        const interval = setInterval(() => {
-          if (popup.closed) {
-            clearInterval(interval);
-            clearTimeout(timeout);
-            resolve();
-          }
-        }, 500);
-      });
-    },
-    onSuccess: () => {
-      invalidateConnectionRelated(qc);
-      toast.success(i18n.t("settings:providers.connectSuccess"));
-    },
-    onError: onMutationError,
-  });
-}
-
-export function useConnectApiKey() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({
-      provider,
-      apiKey,
-      connectionProfileId,
-    }: {
-      provider: string;
-      apiKey: string;
-      connectionProfileId?: string;
-    }) => {
-      return apiFetch(`/api/connections/connect/${provider}/api-key`, {
-        method: "POST",
-        body: JSON.stringify({ apiKey, ...(connectionProfileId ? { connectionProfileId } : {}) }),
-      });
-    },
-    onSuccess: () => {
-      invalidateConnectionRelated(qc);
-      toast.success(i18n.t("settings:providers.connectSuccess"));
-    },
-    onError: onMutationError,
-  });
-}
-
-export function useDisconnect() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (
-      params: string | { provider: string; connectionProfileId?: string; connectionId?: string },
-    ) => {
-      const provider = typeof params === "string" ? params : params.provider;
-      const connectionProfileId =
-        typeof params === "string" ? undefined : params.connectionProfileId;
-      const connectionId = typeof params === "string" ? undefined : params.connectionId;
-      const qs = buildQs({
-        connectionId,
-        ...(!connectionId ? { connectionProfileId } : {}),
-      });
-      return apiFetch(`/api/connections/${provider}${qs}`, { method: "DELETE" });
-    },
-    onSuccess: () => invalidateConnectionRelated(qc),
-    onError: onMutationError,
-  });
-}
-
-export function useDeleteAllConnections() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: () => api("/app-profiles/connections", { method: "DELETE" }),
-    onSuccess: () => {
-      invalidateConnectionRelated(qc);
-      qc.invalidateQueries({ queryKey: ["connection-profiles"] });
     },
     onError: onMutationError,
   });
@@ -174,17 +84,33 @@ export function useImportPackage() {
       // extension so users can drag both kinds into the same modal.
       if (file.name.toLowerCase().endsWith(".afps-bundle")) {
         const res = await uploadFormData<{
-          rootPackageId: string;
-          rootVersion: string;
+          root_package_id: string;
+          root_version: string;
+          warnings?: string[];
         }>("/packages/import-bundle", fd);
-        return { packageId: res.rootPackageId, type: "agent" as const };
+        return {
+          packageId: res.root_package_id,
+          type: "agent" as const,
+          warnings: res.warnings,
+        };
       }
       const qs = force ? "?force=true" : "";
-      return uploadFormData<{ packageId: string; type: string }>(`/packages/import${qs}`, fd);
+      return uploadFormData<{ packageId: string; type: string; warnings?: string[] }>(
+        `/packages/import${qs}`,
+        fd,
+      );
     },
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["agents"] });
       qc.invalidateQueries({ queryKey: ["packages"] });
+      // Non-blocking install-time warnings (AFPS §7.7) —
+      // surface each one as a sonner warning toast so publishers see them
+      // immediately after a successful import.
+      if (data.warnings && data.warnings.length > 0) {
+        for (const message of data.warnings) {
+          toast.warning(message);
+        }
+      }
       navigate(`/${data.type === "agent" ? "agent" : data.type}s/${data.packageId}`);
     },
     onError: onMutationError,
@@ -226,34 +152,6 @@ export function useCancelRun() {
   });
 }
 
-export function useConnectCredentials() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({
-      provider,
-      credentials,
-      connectionProfileId,
-    }: {
-      provider: string;
-      credentials: Record<string, string>;
-      connectionProfileId?: string;
-    }) => {
-      return apiFetch(`/api/connections/connect/${provider}/credentials`, {
-        method: "POST",
-        body: JSON.stringify({
-          credentials,
-          ...(connectionProfileId ? { connectionProfileId } : {}),
-        }),
-      });
-    },
-    onSuccess: () => {
-      invalidateConnectionRelated(qc);
-      toast.success(i18n.t("settings:providers.connectSuccess"));
-    },
-    onError: onMutationError,
-  });
-}
-
 export function useDeleteAgentRuns(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -285,7 +183,7 @@ export function useDeleteAgent() {
   });
 }
 
-// --- Memory mutations (unified persistence — ADR-011) ---
+// --- Memory mutations (unified persistence) ---
 
 export function useDeleteMemory(packageId: string) {
   const qc = useQueryClient();
@@ -304,7 +202,7 @@ export function useDeleteAllMemories(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async () => {
-      return api<{ memoriesDeleted: number; checkpointDeleted: boolean }>(
+      return api<{ memories_deleted: number; checkpoint_deleted: boolean }>(
         `/agents/${packageId}/persistence?kind=memory`,
         { method: "DELETE" },
       );
@@ -327,7 +225,7 @@ export function useCreatePackage(type: PackageType) {
       id?: string;
       manifest: Record<string, unknown>;
       content: string;
-      sourceCode?: string;
+      source_code?: string;
     }) => {
       return api<{ packageId: string }>(`/packages/${cfg.path}`, {
         method: "POST",
@@ -337,7 +235,7 @@ export function useCreatePackage(type: PackageType) {
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["packages"] });
       if (type === "agent") qc.invalidateQueries({ queryKey: ["agents"] });
-      if (type === "provider") invalidateProviderQueries(qc);
+      if (type === "integration") qc.invalidateQueries({ queryKey: ["integrations"] });
       if (data.packageId) {
         navigate(packageDetailPath(type, data.packageId));
       }
@@ -354,10 +252,10 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
     mutationFn: async (body: {
       manifest: Record<string, unknown>;
       content: string;
-      sourceCode?: string;
-      lockVersion: number;
+      source_code?: string;
+      lock_version: number;
     }) => {
-      return api<{ lockVersion: number }>(`/packages/${cfg.path}/${packageId}`, {
+      return api<{ lock_version: number }>(`/packages/${cfg.path}/${packageId}`, {
         method: "PUT",
         body: JSON.stringify(body),
       });
@@ -365,58 +263,17 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["packages"] });
       if (type === "agent") qc.invalidateQueries({ queryKey: ["agents"] });
-      if (type === "provider") invalidateProviderQueries(qc);
+      // An agent's tools drive the required OAuth scopes, so editing them
+      // changes the per-integration agent-resolution verdict (e.g. a connection
+      // flips to insufficient_scopes / needs reconnection). Invalidate the
+      // integrations subtree on agent edits too, not only integration edits, so
+      // the Connections tab verdict + badges refresh without a page reload.
+      if (type === "agent" || type === "integration") {
+        qc.invalidateQueries({ queryKey: ["integrations"] });
+      }
       qc.invalidateQueries({ queryKey: ["version-info"] });
       navigate(packageDetailPath(type, packageId));
     },
-    onError: onMutationError,
-  });
-}
-
-// --- Provider mutations ---
-
-function invalidateProviderQueries(qc: ReturnType<typeof useQueryClient>) {
-  const cfg = PACKAGE_CONFIG.provider;
-  qc.invalidateQueries({ queryKey: ["providers"] });
-  qc.invalidateQueries({ queryKey: ["packages", cfg.path] });
-  qc.invalidateQueries({ queryKey: ["version-info"] });
-  qc.invalidateQueries({ queryKey: ["available-providers"] });
-}
-
-export function useConfigureProviderCredentials() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({
-      providerId,
-      credentials,
-      enabled,
-      invalidateConnections,
-    }: {
-      providerId: string;
-      credentials?: Record<string, string>;
-      enabled?: boolean;
-      invalidateConnections?: boolean;
-    }) => {
-      return api(`/providers/credentials/${providerId}`, {
-        method: "PUT",
-        body: JSON.stringify({ credentials, enabled, invalidateConnections }),
-      });
-    },
-    onSuccess: () => {
-      invalidateProviderQueries(qc);
-      toast.success(i18n.t("settings:providers.credentialsSaved"));
-    },
-    onError: onMutationError,
-  });
-}
-
-export function useDeleteProviderCredentials() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (providerId: string) => {
-      return api(`/providers/credentials/${providerId}`, { method: "DELETE" });
-    },
-    onSuccess: () => invalidateProviderQueries(qc),
     onError: onMutationError,
   });
 }

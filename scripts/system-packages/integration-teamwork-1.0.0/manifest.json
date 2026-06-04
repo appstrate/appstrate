@@ -1,0 +1,60 @@
+{
+  "name": "@appstrate/teamwork",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.1",
+  "display_name": "Teamwork (API)",
+  "description": "Project management and collaboration platform for client work",
+  "keywords": ["project-management", "collaboration"],
+  "license": "Apache-2.0",
+  "icon": "https://api.iconify.design/logos/teamwork.svg",
+  "source": {
+    "kind": "none"
+  },
+  "auths": {
+    "primary": {
+      "type": "api_key",
+      "authorized_uris": ["https://*.teamwork.com/**"],
+      "credentials": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "api_key": {
+              "type": "string",
+              "description": "Teamwork API key (found in Settings > API & Webhooks)"
+            },
+            "subdomain": {
+              "type": "string",
+              "description": "Your Teamwork subdomain (e.g. 'mycompany' from mycompany.teamwork.com)"
+            }
+          },
+          "required": ["api_key", "subdomain"]
+        }
+      },
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Basic",
+          "value": "{$credential.api_key}:X",
+          "encoding": "base64"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/auth": {
+          "required": true
+        }
+      }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/api": {
+      "auths": {
+        "primary": {}
+      }
+    }
+  }
+}

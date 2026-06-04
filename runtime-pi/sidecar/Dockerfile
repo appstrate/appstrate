@@ -26,6 +26,7 @@ WORKDIR /build
 COPY package.json bun.lock ./
 COPY patches/ patches/
 COPY packages/afps-runtime/package.json  packages/afps-runtime/
+COPY packages/afps-shared/package.json   packages/afps-shared/
 COPY packages/connect/package.json       packages/connect/
 COPY packages/core/package.json          packages/core/
 COPY packages/db/package.json            packages/db/
@@ -62,10 +63,20 @@ RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
 #   - @appstrate/core/{errors,ssrf}           getErrorMessage + isBlockedHost/Url,
 #                                             imported by credential-proxy.ts /
 #                                             mcp.ts / ssrf.ts
+#   - @appstrate/runner-pi/runtime-tools      canonical run_history / recall_memory
+#                                             descriptors (name + description +
+#                                             parameter JSON Schema), imported by
+#                                             mcp.ts to build the firstParty tool
+#                                             advertisements. The `./runtime-tools`
+#                                             subpath is pi-free (no pi-ai /
+#                                             pi-coding-agent imports) so the
+#                                             compiled binary stays minimal.
 COPY packages/connect/src        packages/connect/src
 COPY packages/afps-runtime/src   packages/afps-runtime/src
+COPY packages/afps-shared/src    packages/afps-shared/src
 COPY packages/mcp-transport/src  packages/mcp-transport/src
 COPY packages/core/src           packages/core/src
+COPY packages/runner-pi/src      packages/runner-pi/src
 
 # Sidecar sources. Glob is single-level (no recursion into `test/`),
 # so adding a new `.ts` file at `runtime-pi/sidecar/*.ts` is picked up
@@ -94,8 +105,19 @@ LABEL org.opencontainers.image.title="Appstrate Sidecar" \
 # Runtime dependencies:
 #   - libstdc++, libgcc  glibc-like symbols the Bun-compiled binary links against
 #   - ca-certificates    TLS trust store for outbound provider calls
+#   - docker-cli         used to spawn per-integration runner containers
+#                        (`appstrate-mcp-runner-{node,python,binary,bun,uv}`) when
+#                        a manifest declares `server.type: <runtime>`. The
+#                        sidecar shells out to `docker run -i ...` and pipes
+#                        stdio through to the runner; the runner image carries
+#                        the language interpreter, never the sidecar itself.
+#   - openssl            Phase 1.5 — mint the per-run CA + leaf certs for the
+#                        MITM HTTPS proxy that injects integration credentials
+#                        transparently on `delivery.http` auths. Without
+#                        openssl, sidecar falls back to env-delivery only and
+#                        in-run OAuth refresh is unavailable for those auths.
 # `wget` ships with busybox in Alpine → HEALTHCHECK adds no install cost.
-RUN apk add --no-cache libstdc++ libgcc ca-certificates
+RUN apk add --no-cache libstdc++ libgcc ca-certificates docker-cli openssl
 
 COPY --from=builder --chmod=0555 /build/runtime-pi/sidecar/sidecar /usr/local/bin/sidecar
 
