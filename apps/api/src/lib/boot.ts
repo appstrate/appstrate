@@ -6,6 +6,7 @@ import { packages, packageVersions } from "@appstrate/db/schema";
 import { expireOldInvitations } from "../services/invitations.ts";
 import { cleanupExpiredKeys } from "../services/api-keys.ts";
 import { cleanupExpiredUploads, startUploadGc } from "../services/uploads.ts";
+import { startOrphanReaper } from "../services/orphan-reaper.ts";
 import { createNotifyTriggers } from "@appstrate/db/notify";
 import { logger } from "./logger.ts";
 import {
@@ -330,6 +331,11 @@ export async function boot(): Promise<void> {
 
   // Kick off the recurring upload sweep once initial cleanup is scheduled.
   startUploadGc();
+
+  // Kick off the recurring orphan-container reaper. The boot-time
+  // `cleanupOrphans` above only runs once; a long-lived API needs a periodic
+  // sweep so failed-launch residue can't accumulate until the next restart.
+  startOrphanReaper();
 }
 
 /**

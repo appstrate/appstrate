@@ -13,9 +13,13 @@ import {
   createNetwork,
   connectContainerToNetwork,
   removeNetwork,
+  networkExists,
+  findNetworkByName,
+  ensureNetwork,
   cleanupOrphanedContainers,
   cleanupOrphanedNetworks,
   cleanupOrphanedRunNetworks,
+  reapStaleManagedContainers,
   getContainerHostPort,
 } from "../../../src/services/docker.ts";
 
@@ -701,4 +705,93 @@ describe("Full lifecycle", () => {
     const res = await fetch(`${DOCKER_URL}/containers/${id}/json`);
     expect(res.status).toBe(404);
   }, 30_000);
+});
+
+// ─── ensureNetwork / networkExists / findNetworkByName ──────
+
+describe("ensureNetwork / networkExists / findNetworkByName", () => {
+  it(
+    "creates the network when absent, then resolves the same id idempotently",
+    async () => {
+      const name = `appstrate-test-egress-${uid()}`;
+      const id1 = trackNetwork(await ensureNetwork(name));
+
+      expect(await networkExists(id1)).toBe(true);
+      expect(await findNetworkByName(name)).toBe(id1);
+
+      // Second call must reuse the existing network — no duplicate, no throw.
+      const id2 = await ensureNetwork(name);
+      expect(id2).toBe(id1);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "networkExists / findNetworkByName report a removed network as gone",
+    async () => {
+      const name = `appstrate-test-egress-${uid()}`;
+      const id = await ensureNetwork(name);
+      expect(await networkExists(id)).toBe(true);
+
+      await removeNetwork(id);
+
+      // This mirrors the stale-egress-cache bug: a cached id whose network was
+      // reclaimed must read as absent so the orchestrator recreates it.
+      expect(await networkExists(id)).toBe(false);
+      expect(await findNetworkByName(name)).toBeNull();
+    },
+    TIMEOUT,
+  );
+});
+
+// ─── reapStaleManagedContainers ─────────────────────────────
+
+describe("reapStaleManagedContainers", () => {
+  it(
+    "removes a non-running managed container older than the cutoff",
+    async () => {
+      const id = await createRawContainer(["sleep", "60"]); // created, never started
+
+      // Negative maxAge → cutoff in the future → the just-created container
+      // counts as stale and gets reaped.
+      const removed = await reapStaleManagedContainers(-10);
+      expect(removed).toBeGreaterThanOrEqual(1);
+
+      const res = await fetch(`${DOCKER_URL}/containers/${id}/json`);
+      expect(res.status).toBe(404);
+      untrackContainer(id);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "never removes a running container, even past the cutoff",
+    async () => {
+      const id = await createRawContainer(["sleep", "60"]);
+      await startContainer(id);
+
+      await reapStaleManagedContainers(-10);
+
+      // The live run must survive the sweep — the State guard protects it.
+      const res = await fetch(`${DOCKER_URL}/containers/${id}/json`);
+      expect(res.status).toBe(200);
+
+      await stopContainer(id, 1);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "leaves a fresh container untouched within the age window",
+    async () => {
+      const id = await createRawContainer(["sleep", "60"]);
+
+      // 1h window → a container created moments ago is not yet stale.
+      await reapStaleManagedContainers(3600);
+
+      const res = await fetch(`${DOCKER_URL}/containers/${id}/json`);
+      expect(res.status).toBe(200);
+    },
+    TIMEOUT,
+  );
 });

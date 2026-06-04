@@ -232,6 +232,14 @@ export interface ContainerOrchestrator {
   /** Clean up orphaned workloads/networks from a previous crash. */
   cleanupOrphans(): Promise<CleanupReport>;
 
+  /**
+   * Periodic, runtime-safe orphan sweep. Unlike {@link cleanupOrphans}
+   * (boot-only), this MUST be safe to call while runs are live: implementations
+   * remove only terminated/stale residue, never an active workload, and never
+   * shared infra. Returns the number reclaimed; a no-op returns 0.
+   */
+  reapStaleOrphans(): Promise<number>;
+
   /** Ensure images are locally available (pull if missing/outdated). No-op when not applicable. */
   ensureImages(images: string[]): Promise<void>;
 

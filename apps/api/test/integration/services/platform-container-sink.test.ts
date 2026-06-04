@@ -89,6 +89,9 @@ function createFakeOrchestrator(config: FakeOrchestratorConfig = {}): FakeOrches
     async cleanupOrphans(): Promise<CleanupReport> {
       return { workloads: 0, isolationBoundaries: 0 };
     },
+    async reapStaleOrphans(): Promise<number> {
+      return 0;
+    },
     async ensureImages() {},
     async createIsolationBoundary(runId: string): Promise<IsolationBoundary> {
       const boundary: IsolationBoundary = { id: `net_${runId}`, name: `appstrate-exec-${runId}` };

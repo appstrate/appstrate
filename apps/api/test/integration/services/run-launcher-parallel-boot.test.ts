@@ -70,6 +70,9 @@ function createTimingFake(config: TimingFakeConfig): {
     async cleanupOrphans(): Promise<CleanupReport> {
       return { workloads: 0, isolationBoundaries: 0 };
     },
+    async reapStaleOrphans(): Promise<number> {
+      return 0;
+    },
     async ensureImages() {},
     async createIsolationBoundary(runId: string): Promise<IsolationBoundary> {
       return { id: `net_${runId}`, name: `appstrate-exec-${runId}` };
@@ -270,5 +273,83 @@ describe("#406 parallel-boot — pi.ts vs slow sidecar", () => {
     // /health round-trips. Generous upper bound to keep the test
     // resilient on slow CI.
     expect(elapsed).toBeLessThan(2_000);
+  });
+});
+
+describe("partial-failure cleanup — created workloads must not leak", () => {
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
+  it("removes the already-created agent workload when sidecar creation rejects", async () => {
+    const removed: WorkloadHandle[] = [];
+    let boundaryRemoved = false;
+    const agentHandle: WorkloadHandle = { id: "agent_leak", runId: "run_leak", role: "agent" };
+
+    // Mirrors the real stale-egress failure: the sidecar branch rejects (its
+    // own container is reaped internally by the orchestrator), while the agent
+    // branch resolves a handle. `Promise.all` rejects without cancelling the
+    // agent branch, so a successfully-created agent container exists. The
+    // launcher MUST reap it — pre-fix, the handle was assigned only AFTER the
+    // await, so `finally` saw `undefined` and stranded the container.
+    const orchestrator: ContainerOrchestrator = {
+      async initialize() {},
+      async shutdown() {},
+      async cleanupOrphans(): Promise<CleanupReport> {
+        return { workloads: 0, isolationBoundaries: 0 };
+      },
+      async reapStaleOrphans(): Promise<number> {
+        return 0;
+      },
+      async ensureImages() {},
+      async createIsolationBoundary(runId: string): Promise<IsolationBoundary> {
+        return { id: `net_${runId}`, name: `appstrate-exec-${runId}` };
+      },
+      async removeIsolationBoundary() {
+        boundaryRemoved = true;
+      },
+      async createSidecar(): Promise<WorkloadHandle> {
+        // Small delay so the agent's createWorkload resolves (and its handle
+        // is captured) before this rejects — exactly the real ordering, where
+        // the sidecar fails late at `startContainer`.
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        throw new Error("Docker start container failed: 404 network not found");
+      },
+      async createWorkload(spec: WorkloadSpec): Promise<WorkloadHandle> {
+        return { id: agentHandle.id, runId: spec.runId, role: spec.role };
+      },
+      async startWorkload() {},
+      async stopWorkload() {},
+      async removeWorkload(handle: WorkloadHandle) {
+        removed.push(handle);
+      },
+      async waitForExit(): Promise<number> {
+        return 0;
+      },
+      async *streamLogs(): AsyncGenerator<string> {},
+      async stopByRunId(): Promise<StopResult> {
+        return "stopped";
+      },
+      async resolvePlatformApiUrl(): Promise<string> {
+        return "http://platform:3000";
+      },
+    };
+
+    await expect(
+      runPlatformContainer({
+        runId: "run_leak",
+        context: buildContext("run_leak"),
+        plan: buildRunPlan(),
+        sinkCredentials: mintSinkCredentials({
+          runId: "run_leak",
+          appUrl: "http://platform:3000",
+          ttlSeconds: 60,
+        }),
+        orchestrator,
+      }),
+    ).rejects.toThrow();
+
+    expect(removed.map((h) => h.id)).toContain("agent_leak");
+    expect(boundaryRemoved).toBe(true);
   });
 });

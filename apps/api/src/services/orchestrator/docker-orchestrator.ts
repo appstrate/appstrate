@@ -15,7 +15,11 @@ import * as docker from "../docker.ts";
 import { createNetworkWithPoolRetry } from "../docker-errors.ts";
 import { logger } from "../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { SIDECAR_MEMORY_BYTES, SIDECAR_NANO_CPUS } from "./constants.ts";
+import {
+  ORPHAN_REAP_MAX_AGE_SECONDS,
+  SIDECAR_MEMORY_BYTES,
+  SIDECAR_NANO_CPUS,
+} from "./constants.ts";
 
 class DockerWorkloadHandle implements WorkloadHandle {
   constructor(
@@ -44,13 +48,39 @@ export class DockerOrchestrator implements ContainerOrchestrator {
     // already masks the warm-image sidecar boot, so a pre-warmed pool buys
     // nothing extra on the user-visible latency.
     const env = getEnv();
-    const [, , , egressId] = await Promise.all([
+    await Promise.all([
       docker.ensureImage(env.PI_IMAGE),
       docker.ensureImage(env.SIDECAR_IMAGE),
       docker.detectPlatformNetwork(),
-      docker.createNetwork("appstrate-egress"),
+      // Populates `this.egressNetworkId`; resolves an existing network or
+      // creates one. Same path used per-run, so boot and steady state agree.
+      this.ensureEgressNetwork(),
     ]);
-    this.egressNetworkId = egressId;
+  }
+
+  /**
+   * Resolve the shared egress network's ID, re-validating the cached value
+   * against the live daemon and recreating the network on a miss.
+   *
+   * The egress network is shared infra reused across every run, cached once at
+   * boot. But it can be reclaimed out from under a long-lived API — a host
+   * `docker network prune`, a Docker daemon restart, or a co-located Appstrate
+   * instance's boot sweep (which removes `appstrate-egress` by name). A stale
+   * cache is silent and catastrophic: `createContainer` still succeeds (the
+   * dead network ID is only recorded on the container), but `startContainer`
+   * 404s with "network <id> not found", so EVERY run fails to launch until the
+   * API restarts. Re-validating here makes the orchestrator self-heal.
+   */
+  private async ensureEgressNetwork(): Promise<string> {
+    const cached = this.egressNetworkId;
+    if (cached && (await docker.networkExists(cached))) return cached;
+    const id = await docker.ensureNetwork("appstrate-egress");
+    this.egressNetworkId = id;
+    return id;
+  }
+
+  async reapStaleOrphans(): Promise<number> {
+    return docker.reapStaleManagedContainers(ORPHAN_REAP_MAX_AGE_SECONDS);
   }
 
   async shutdown(): Promise<void> {
@@ -126,33 +156,45 @@ export class DockerOrchestrator implements ContainerOrchestrator {
 
     // Create sidecar on egress network (primary) so it has DNS + internet.
     // Then connect to run network (internal) with "sidecar" alias for agent DNS.
+    // Re-validate the egress network ID rather than trusting the boot-time
+    // cache: if it went stale the `start` below would 404 on every run.
     const containerId = await docker.createContainer(runId, sidecarEnv, {
       image: env.SIDECAR_IMAGE,
       adapterName: "sidecar",
       memory: SIDECAR_MEMORY_BYTES,
       nanoCpus: SIDECAR_NANO_CPUS,
-      networkId: this.egressNetworkId!,
+      networkId: await this.ensureEgressNetwork(),
       extraHosts: platformNetwork ? [] : ["host.docker.internal:host-gateway"],
     });
 
-    // Connect to run network (agent reaches sidecar via "sidecar" DNS alias)
-    await docker.connectContainerToNetwork(boundary.id, containerId, ["sidecar"]);
+    // The container now exists but isn't started. Any failure before we return
+    // its handle (a connect error, a stale-network 404 at start) would strand
+    // it as a `created` orphan — the caller's cleanup keys off the handle we
+    // haven't returned yet. Remove it on the throw path so a failed launch
+    // never leaks a container.
+    try {
+      // Connect to run network (agent reaches sidecar via "sidecar" DNS alias)
+      await docker.connectContainerToNetwork(boundary.id, containerId, ["sidecar"]);
 
-    if (platformNetwork) {
-      await docker.connectContainerToNetwork(platformNetwork.networkId, containerId);
+      if (platformNetwork) {
+        await docker.connectContainerToNetwork(platformNetwork.networkId, containerId);
+      }
+
+      // #406 — parallel boot. Start the sidecar but DO NOT block on its
+      // `/health` here. The agent (started in parallel by pi.ts) drives
+      // a retrying MCP handshake against `sidecar:8080/mcp`, which absorbs:
+      //   - ECONNREFUSED while the sidecar is wiring its listener
+      //   - ENOTFOUND while the Docker bridge propagates the "sidecar" alias
+      // Sidecar exit detection still happens loudly: a non-blocking watcher
+      // races `waitForExit` against the run. If the sidecar dies before MCP
+      // connects, the watcher logs `exitCode` + buffered stderr/stdout, so
+      // operators see "sidecar exited 1 (npm not found)" rather than the
+      // agent's eventual "deadline exceeded" hand-wave.
+      await docker.startContainer(containerId);
+    } catch (err) {
+      await docker.removeContainer(containerId).catch(() => {});
+      throw err;
     }
-
-    // #406 — parallel boot. Start the sidecar but DO NOT block on its
-    // `/health` here. The agent (started in parallel by pi.ts) drives
-    // a retrying MCP handshake against `sidecar:8080/mcp`, which absorbs:
-    //   - ECONNREFUSED while the sidecar is wiring its listener
-    //   - ENOTFOUND while the Docker bridge propagates the "sidecar" alias
-    // Sidecar exit detection still happens loudly: a non-blocking watcher
-    // races `waitForExit` against the run. If the sidecar dies before MCP
-    // connects, the watcher logs `exitCode` + buffered stderr/stdout, so
-    // operators see "sidecar exited 1 (npm not found)" rather than the
-    // agent's eventual "deadline exceeded" hand-wave.
-    await docker.startContainer(containerId);
     this.watchSidecarExit(runId, containerId);
 
     return new DockerWorkloadHandle(containerId, runId, "sidecar");
@@ -230,7 +272,15 @@ export class DockerOrchestrator implements ContainerOrchestrator {
     });
 
     if (spec.files && spec.files.items.length > 0) {
-      await docker.injectFiles(containerId, spec.files.items, spec.files.targetDir);
+      // Injection runs against the created-but-not-started container; a throw
+      // here would leak a `created` orphan (the handle isn't returned yet, so
+      // the caller can't reap it). Remove it on the throw path.
+      try {
+        await docker.injectFiles(containerId, spec.files.items, spec.files.targetDir);
+      } catch (err) {
+        await docker.removeContainer(containerId).catch(() => {});
+        throw err;
+      }
     }
 
     return new DockerWorkloadHandle(containerId, spec.runId, spec.role);

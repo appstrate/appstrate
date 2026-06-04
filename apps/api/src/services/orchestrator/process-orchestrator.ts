@@ -170,6 +170,12 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     return { workloads, isolationBoundaries };
   }
 
+  async reapStaleOrphans(): Promise<number> {
+    // The process adapter has no managed Docker containers to reap; boundary
+    // directories from dead runs are reclaimed by cleanupOrphans at boot.
+    return 0;
+  }
+
   async createIsolationBoundary(runId: string): Promise<IsolationBoundary> {
     const dir = join(DATA_DIR, runId);
     await mkdir(dir, { recursive: true });

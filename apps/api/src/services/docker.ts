@@ -480,6 +480,46 @@ export async function removeNetwork(networkId: string): Promise<void> {
   await assertDockerOk(res, "remove network", [404]);
 }
 
+/** True if a Docker network with this ID currently exists on the daemon. */
+export async function networkExists(networkId: string): Promise<boolean> {
+  const res = await dockerFetch(`/networks/${networkId}`);
+  if (res.status === 404) return false;
+  return res.ok;
+}
+
+/** Resolve a Docker network ID by its exact name, or null if none matches. */
+export async function findNetworkByName(name: string): Promise<string | null> {
+  const filters = JSON.stringify({ name: [name] });
+  const res = await dockerFetch(`/networks?filters=${encodeURIComponent(filters)}`);
+  if (!res.ok) return null;
+  const networks = (await res.json()) as Array<{ Id: string; Name: string }>;
+  // Docker's `name` network filter is a substring match — pin to exact name.
+  return networks.find((n) => n.Name === name)?.Id ?? null;
+}
+
+/**
+ * Idempotently resolve a Docker network ID by exact name, creating it if
+ * absent. Tolerates the create race (a co-located instance / concurrent boot
+ * creating the same shared network): on a duplicate/error, re-resolve by name
+ * before giving up. Used for the shared `appstrate-egress` infra network,
+ * which can be reclaimed out from under a long-lived API.
+ */
+export async function ensureNetwork(
+  name: string,
+  options?: { internal?: boolean },
+): Promise<string> {
+  const existing = await findNetworkByName(name);
+  if (existing) return existing;
+  try {
+    return await createNetwork(name, options);
+  } catch (err) {
+    // Lost a create race (or hit CheckDuplicate) — re-resolve before failing.
+    const raced = await findNetworkByName(name);
+    if (raced) return raced;
+    throw err;
+  }
+}
+
 // --- Orphaned container cleanup ---
 
 export async function cleanupOrphanedContainers(): Promise<{
@@ -508,6 +548,32 @@ export async function cleanupOrphanedContainers(): Promise<{
   const networkCount = await cleanupOrphanedNetworks();
 
   return { containers: containers.length, networks: networkCount };
+}
+
+/**
+ * Runtime-safe periodic orphan sweep. Unlike {@link cleanupOrphanedContainers}
+ * (boot-only — it force-removes EVERY managed container and tears down the
+ * shared egress network, which is only safe when no runs are live), this
+ * removes only managed containers that are (a) not running/restarting and
+ * (b) older than `maxAgeSeconds`. It never touches a live run nor any network,
+ * so it is safe to call on a long-lived API. Reclaims the residue of launches
+ * that leaked between `createContainer` and the lifecycle cleanup. Returns the
+ * number of containers removed.
+ */
+export async function reapStaleManagedContainers(maxAgeSeconds: number): Promise<number> {
+  const filters = JSON.stringify({ label: ["appstrate.managed=true"] });
+  const res = await dockerFetch(`/containers/json?all=true&filters=${encodeURIComponent(filters)}`);
+  if (!res.ok) return 0;
+  // `/containers/json` reports `State` as a lowercase string ("created",
+  // "running", "exited", …) and `Created` as Unix seconds.
+  const containers = (await res.json()) as Array<{ Id: string; State: string; Created: number }>;
+  const cutoff = Math.floor(Date.now() / 1000) - maxAgeSeconds;
+  const stale = containers.filter(
+    (c) => c.State !== "running" && c.State !== "restarting" && c.Created < cutoff,
+  );
+  if (stale.length === 0) return 0;
+  const results = await Promise.allSettled(stale.map((c) => removeContainer(c.Id)));
+  return results.filter((r) => r.status === "fulfilled").length;
 }
 
 /**

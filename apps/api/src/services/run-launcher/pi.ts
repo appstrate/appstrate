@@ -228,25 +228,35 @@ export async function runPlatformContainer(
     // Sidecar + agent setup in parallel (identical to the legacy path —
     // the only behavioural change is WHERE the agent's events end up).
     // When `skipSidecar`, we only create the agent workload.
+    //
+    // Capture each handle the instant its create resolves (inside `.then`),
+    // NOT after the whole `Promise.all` settles. `Promise.all` rejects on the
+    // first failing branch but does NOT cancel its siblings — so a sidecar
+    // failure can leave a successfully-created agent container behind. With a
+    // post-await assignment the reject would throw straight to `finally` with
+    // both handles still `undefined`, stranding that container. Eager capture
+    // lets `finally` reap whatever was created.
     const [sidecar, agent] = await Promise.all([
-      skipSidecar ? Promise.resolve(undefined) : orch.createSidecar(runId, boundary, sidecarSpec),
-      orch.createWorkload(
-        {
-          runId,
-          role: "agent",
-          image: getEnv().PI_IMAGE,
-          env: containerEnv,
-          resources: { memoryBytes: 1536 * 1024 * 1024, nanoCpus: 2_000_000_000 },
-          files:
-            filesToInject.length > 0
-              ? { items: filesToInject, targetDir: "/workspace" }
-              : undefined,
-        },
-        boundary,
-      ),
+      skipSidecar
+        ? Promise.resolve(undefined)
+        : orch.createSidecar(runId, boundary, sidecarSpec).then((h) => (sidecarHandle = h)),
+      orch
+        .createWorkload(
+          {
+            runId,
+            role: "agent",
+            image: getEnv().PI_IMAGE,
+            env: containerEnv,
+            resources: { memoryBytes: 1536 * 1024 * 1024, nanoCpus: 2_000_000_000 },
+            files:
+              filesToInject.length > 0
+                ? { items: filesToInject, targetDir: "/workspace" }
+                : undefined,
+          },
+          boundary,
+        )
+        .then((h) => (agentHandle = h)),
     ]);
-    sidecarHandle = sidecar;
-    agentHandle = agent;
 
     return await waitForWorkload(orch, agent, sidecar, plan.timeout, signal);
   } finally {
