@@ -91,8 +91,13 @@ COPY --from=build /app/packages/core/package.json ./packages/core/
 COPY --from=build /app/packages/afps-runtime/src ./packages/afps-runtime/src
 COPY --from=build /app/packages/afps-runtime/package.json ./packages/afps-runtime/
 
-# AFPS shared (zero-dep leaf — companion-files, semver, integrity, credential-template, …)
+# AFPS shared (companion-files, semver, integrity, credential-template, …)
 # Required by @appstrate/core, @appstrate/afps-runtime, @appstrate/connect at runtime.
+# NOT a zero-dep leaf: it declares `semver`. Bun installs isolated per-package
+# node_modules, so afps-shared's `semver` lives in ITS OWN node_modules — which MUST
+# ship, or the runtime crash-loops with
+# `Cannot find package 'semver' from .../packages/afps-shared/src/semver-resolve.ts`.
+COPY --from=deps /app/packages/afps-shared/node_modules ./packages/afps-shared/node_modules
 COPY --from=build /app/packages/afps-shared/src ./packages/afps-shared/src
 COPY --from=build /app/packages/afps-shared/package.json ./packages/afps-shared/
 
