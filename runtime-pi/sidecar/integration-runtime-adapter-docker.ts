@@ -32,12 +32,17 @@ import {
 } from "./integration-runtime-adapter.ts";
 
 /**
- * Map MCPB-compatible `server.type` to the Appstrate runner image. The
- * runner image carries the language interpreter; the sidecar's own
- * image carries none. Adding a new runtime is one map entry here + one
- * `runtime-pi/runners/{name}/Dockerfile`.
+ * Map MCPB-compatible `server.type` to the *default* Appstrate runner
+ * image. The runner image carries the language interpreter; the
+ * sidecar's own image carries none. Adding a new runtime is one map
+ * entry here + one `runtime-pi/runners/{name}/Dockerfile`.
+ *
+ * These bare `:latest` tags only resolve on a host that ran
+ * `bun run docker:build:runners` (local dev / OSS). Production overrides
+ * each entry with a versioned GHCR ref via the `RUNNER_IMAGE_*` env vars
+ * below — see `resolveRunnerImage`.
  */
-const RUNNER_IMAGE_BY_TYPE: Record<string, string> = {
+const DEFAULT_RUNNER_IMAGE_BY_TYPE: Record<string, string> = {
   node: "appstrate-mcp-runner-node:latest",
   // In process mode `bun` runs as a host subprocess; in docker mode it gets
   // its own container here, like every other runtime — keeps tier-3's
@@ -52,6 +57,39 @@ const RUNNER_IMAGE_BY_TYPE: Record<string, string> = {
   uv: "appstrate-mcp-runner-uv:latest",
   binary: "appstrate-mcp-runner-binary:latest",
 };
+
+/**
+ * Operator env var carrying the resolved image ref per runtime. In
+ * production these point at versioned GHCR images
+ * (`ghcr.io/appstrate/appstrate-mcp-runner-<type>:<version>`), forwarded
+ * from the API host into the sidecar container via `pickOperatorSidecarEnv`
+ * (`SIDECAR_OPERATOR_ENV_KEYS` in `@appstrate/runner-pi`). Absent → the
+ * bare `:latest` default, which only resolves on a host that pre-built the
+ * runner images. Unlike `PI_IMAGE`/`SIDECAR_IMAGE` (consumed by the API to
+ * create the agent + sidecar containers), runner images are consumed *here*
+ * inside the sidecar — so they ride the operator-env forwarding channel
+ * rather than the API's own `getEnv()`.
+ */
+const RUNNER_IMAGE_ENV_BY_TYPE: Record<string, string> = {
+  node: "RUNNER_IMAGE_NODE",
+  bun: "RUNNER_IMAGE_BUN",
+  python: "RUNNER_IMAGE_PYTHON",
+  uv: "RUNNER_IMAGE_UV",
+  binary: "RUNNER_IMAGE_BINARY",
+};
+
+/**
+ * Resolve the runner image for an MCPB `server.type`: operator
+ * `RUNNER_IMAGE_*` override if set + non-empty, else the compiled bare-tag
+ * default. Returns undefined for an unknown type so the caller emits the
+ * supported-types error.
+ */
+function resolveRunnerImage(type: string): string | undefined {
+  const envKey = RUNNER_IMAGE_ENV_BY_TYPE[type];
+  const override = envKey ? process.env[envKey] : undefined;
+  if (override !== undefined && override !== "") return override;
+  return DEFAULT_RUNNER_IMAGE_BY_TYPE[type];
+}
 
 /**
  * Path inside the runner container where the run-CA cert lands. `/tmp`
@@ -142,11 +180,11 @@ function planContainer(spec: IntegrationSpawnSpec, bundleRoot: string): Containe
       "integration-runtime-adapter-docker: server.type required for local-source spawn",
     );
   }
-  const image = RUNNER_IMAGE_BY_TYPE[t];
+  const image = resolveRunnerImage(t);
   if (!image) {
     throw new Error(
       `integration-runtime-adapter-docker: server.type "${t}" has no runner image. ` +
-        `Supported types: ${Object.keys(RUNNER_IMAGE_BY_TYPE).join(", ")}`,
+        `Supported types: ${Object.keys(DEFAULT_RUNNER_IMAGE_BY_TYPE).join(", ")}`,
     );
   }
   const entry = server.entry_point;

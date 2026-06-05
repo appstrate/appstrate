@@ -49,6 +49,27 @@ jobs:
           - name: appstrate-sidecar
             context: .
             dockerfile: ./runtime-pi/sidecar/Dockerfile
+          # Per-integration MCP runner images. Spawned by the sidecar via
+          # `docker create` when an AFPS integration declares a local
+          # `server.type` — the sidecar resolves the GHCR ref from
+          # `RUNNER_IMAGE_*` (docker-compose). Without these published, the
+          # daemon falls back to a Docker Hub pull of the bare tag and fails
+          # with "pull access denied".
+          - name: appstrate-mcp-runner-node
+            context: ./runtime-pi/runners/node
+            dockerfile: ./runtime-pi/runners/node/Dockerfile
+          - name: appstrate-mcp-runner-python
+            context: ./runtime-pi/runners/python
+            dockerfile: ./runtime-pi/runners/python/Dockerfile
+          - name: appstrate-mcp-runner-bun
+            context: ./runtime-pi/runners/bun
+            dockerfile: ./runtime-pi/runners/bun/Dockerfile
+          - name: appstrate-mcp-runner-uv
+            context: ./runtime-pi/runners/uv
+            dockerfile: ./runtime-pi/runners/uv/Dockerfile
+          - name: appstrate-mcp-runner-binary
+            context: ./runtime-pi/runners/binary
+            dockerfile: ./runtime-pi/runners/binary/Dockerfile
 
     steps:
       - name: Checkout
