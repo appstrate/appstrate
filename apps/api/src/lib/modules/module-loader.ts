@@ -138,8 +138,6 @@ async function initSortedModules(
   ctx: ModuleInitContext,
 ): Promise<void> {
   const sorted = topoSort(modules);
-  validateNoDuplicatePrefixes(sorted);
-  validateModuleOidcScopes(sorted);
   // Compute the RBAC snapshot from module contributions and register it
   // BEFORE init() runs, so any module that calls `resolvePermissions(...)`
   // during init (e.g. seeding default API keys with module-owned scopes)
@@ -173,47 +171,6 @@ async function initSortedModules(
     logger.info("Module loaded", { id: mod.manifest.id, version: mod.manifest.version });
   }
   _initialized = true;
-}
-
-/**
- * Format enforced on module-contributed OIDC scopes: lowercase
- * `namespace:action`, alphanumeric + `_` + `-`, both halves required.
- *
- * The compile-time `${string}:${string}` template literal on
- * `AppstrateModule.oidcScopes` already forbids single-word scopes (which
- * are reserved for the OIDC identity vocabulary `openid|profile|email|
- * offline_access`). This regex tightens the runtime contract — rejects
- * uppercase, whitespace, and exotic characters that a `string`-typed
- * value coming from JSON config or a JS module could still smuggle in.
- */
-const MODULE_OIDC_SCOPE_PATTERN = /^[a-z][a-z0-9_-]*:[a-z][a-z0-9_-]*$/;
-
-/**
- * Fail-fast at boot if any module declares an `oidcScopes` entry that
- * doesn't match `MODULE_OIDC_SCOPE_PATTERN`. The OIDC module is exempt:
- * its canonical vocabulary (identity + permission scopes) lives in
- * `modules/oidc/auth/scopes.ts` and follows its own rules — single-word
- * identity scopes are intentional there.
- *
- * Errors name the offending module + scope so the operator can fix the
- * declaration without grepping. Run alongside `validateNoDuplicatePrefixes`
- * in `initSortedModules` so the platform refuses to boot rather than
- * silently shipping malformed scopes into discovery / `assertValidScopes`.
- */
-export function validateModuleOidcScopes(modules: readonly AppstrateModule[]): void {
-  for (const mod of modules) {
-    if (mod.manifest.id === "oidc") continue;
-    const scopes = mod.oidcScopes;
-    if (!scopes) continue;
-    for (const scope of scopes) {
-      if (typeof scope !== "string" || !MODULE_OIDC_SCOPE_PATTERN.test(scope)) {
-        throw new Error(
-          `Module "${mod.manifest.id}" declared invalid oidcScope ${JSON.stringify(scope)}. ` +
-            `Expected lowercase "namespace:action" matching ${MODULE_OIDC_SCOPE_PATTERN}.`,
-        );
-      }
-    }
-  }
 }
 
 /**
@@ -326,29 +283,6 @@ function validateContribution(
   }
 }
 
-/**
- * Throw if any two modules declare the same `appScopedPaths` prefix.
- *
- * Without this guard, Hono silently routes to the first match and the second
- * module becomes inert — a nasty class of silent override. We run the check
- * both at module load time and in the test harness so collisions surface
- * immediately with a clear error message.
- */
-export function validateNoDuplicatePrefixes(modules: readonly AppstrateModule[]): void {
-  const seen = new Map<string, string>();
-  for (const mod of modules) {
-    for (const prefix of mod.appScopedPaths ?? []) {
-      const existing = seen.get(prefix);
-      if (existing && existing !== mod.manifest.id) {
-        throw new Error(
-          `Duplicate module appScopedPath "${prefix}" declared by both "${existing}" and "${mod.manifest.id}"`,
-        );
-      }
-      seen.set(prefix, mod.manifest.id);
-    }
-  }
-}
-
 /** Get a loaded module by ID, or null if not loaded. */
 export function getModule(id: string): AppstrateModule | null {
   return _modules.get(id) ?? null;
@@ -382,18 +316,6 @@ export function registerModuleRoutes(app: Hono<AppEnv>): void {
   }
 }
 
-/**
- * Collect app-scoped route prefixes contributed by loaded modules.
- * Core prefixes (agents, runs, …) are declared separately in `index.ts`.
- */
-export function getModuleAppScopedPaths(): string[] {
-  const paths: string[] = [];
-  for (const mod of _modules.values()) {
-    if (mod.appScopedPaths) paths.push(...mod.appScopedPaths);
-  }
-  return paths;
-}
-
 /** Collect OpenAPI path definitions from all loaded modules. */
 export function getModuleOpenApiPaths(): Record<string, unknown> {
   const paths: Record<string, unknown> = {};
@@ -412,29 +334,6 @@ export function getModuleOpenApiComponentSchemas(): Record<string, unknown> {
     if (moduleSchemas) Object.assign(schemas, moduleSchemas);
   }
   return schemas;
-}
-
-/**
- * Aggregate OIDC scopes contributed by every loaded module (excluding the
- * OIDC module itself, whose canonical vocabulary lives in
- * `modules/oidc/auth/scopes.ts`). The OIDC module reads this at boot via
- * `betterAuthPlugins()` so the aggregated list reaches:
- *   1. `oauthProvider({ scopes })` — feeds discovery `scopes_supported`
- *   2. `assertValidScopes` — gates `OIDC_INSTANCE_CLIENTS` registration
- *   3. `GET /api/oauth/scopes` — admin tooling
- *
- * Returns deduplicated entries in load order. Empty when no module
- * contributes — preserves the OSS zero-footprint invariant.
- */
-export function getModuleOidcScopes(): string[] {
-  const seen = new Set<string>();
-  for (const mod of _modules.values()) {
-    if (mod.manifest.id === "oidc") continue;
-    for (const scope of mod.oidcScopes ?? []) {
-      if (typeof scope === "string" && scope.length > 0) seen.add(scope);
-    }
-  }
-  return Array.from(seen);
 }
 
 /**

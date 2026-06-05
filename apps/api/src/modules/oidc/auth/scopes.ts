@@ -9,7 +9,6 @@
  */
 
 import type { Permission } from "../../../lib/permissions.ts";
-import { getModuleOidcScopes } from "../../../lib/modules/module-loader.ts";
 
 /**
  * OIDC protocol scopes that grant no Appstrate permission. Required by the
@@ -54,16 +53,14 @@ export const OIDC_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permission>(
 ]);
 
 /**
- * Built-in scope vocabulary served by the OIDC module. Identity scopes
- * first, then core `Permission` strings drawn from `OIDC_ALLOWED_SCOPES` —
- * no second vocabulary, no translation layer. The scope `agents:run`
- * grants the `agents:run` permission verbatim.
+ * Scope vocabulary served by the OIDC module. Identity scopes first, then
+ * core `Permission` strings drawn from `OIDC_ALLOWED_SCOPES` — no second
+ * vocabulary, no translation layer. The scope `agents:run` grants the
+ * `agents:run` permission verbatim.
  *
- * Module-contributed scopes (declared via `AppstrateModule.oidcScopes`)
- * extend this vocabulary at boot — see `getAppstrateScopes()` /
- * `getAppstrateScopeSet()` for the dynamic version that includes them.
- * Read this constant only when the caller specifically wants the
- * built-in core list (rare; tests).
+ * Owned wholly by the OIDC module: there is no cross-module scope
+ * contribution point. Modules that need to gate routes on an end-user JWT
+ * use `permissionsContribution()` + the RBAC pipeline instead.
  */
 export const APPSTRATE_BUILTIN_SCOPES: readonly string[] = [
   ...OIDC_IDENTITY_SCOPES,
@@ -71,21 +68,16 @@ export const APPSTRATE_BUILTIN_SCOPES: readonly string[] = [
 ];
 
 /**
- * Full scope vocabulary served by the OIDC module — built-ins plus every
- * scope contributed by other loaded modules via `AppstrateModule.oidcScopes`.
+ * Full scope vocabulary served by the OIDC module.
  *
  * Called at boot by `oauthProvider({ scopes })` (so discovery
- * `scopes_supported` advertises the union), at request time by
+ * `scopes_supported` advertises the vocabulary), at request time by
  * `GET /api/oauth/scopes`, and on every client (re)registration by
- * `assertValidScopes`. Module-contributed entries are deduplicated
- * against the built-ins so a module that re-declares `agents:read` is
- * harmless. Read fresh each call — module loading is one-shot at boot
- * but tests flush the registry between cases.
+ * `assertValidScopes`. Kept as a function (not a bare const) so callers
+ * stay decoupled from the underlying representation.
  */
 export function getAppstrateScopes(): readonly string[] {
-  const seen = new Set<string>(APPSTRATE_BUILTIN_SCOPES);
-  for (const scope of getModuleOidcScopes()) seen.add(scope);
-  return Array.from(seen);
+  return APPSTRATE_BUILTIN_SCOPES;
 }
 
 /** O(1) membership check on the full vocabulary. Materialized per call (cheap). */

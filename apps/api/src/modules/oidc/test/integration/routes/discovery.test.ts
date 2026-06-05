@@ -91,9 +91,8 @@ describe("OIDC discovery — RFC 8414 + OpenID Connect Discovery", () => {
       const { body } = await fetchJson<OpenIdConfigShape>("/.well-known/openid-configuration");
       expect(body.scopes_supported).toBeDefined();
       // Every entry of `getAppstrateScopes()` (identity scopes +
-      // OIDC_ALLOWED_SCOPES + module-contributed scopes) must appear in
-      // `scopes_supported`. This is the contract the admin UI + satellite
-      // registrations rely on.
+      // OIDC_ALLOWED_SCOPES) must appear in `scopes_supported`. This is the
+      // contract the admin UI + satellite registrations rely on.
       for (const scope of getAppstrateScopes()) {
         expect(body.scopes_supported).toContain(scope);
       }
