@@ -37,6 +37,7 @@ import {
 } from "@appstrate/core/dependencies";
 import {
   missingScopesForConnection,
+  manifestAuthKeySet,
   type IntegrationManifest,
   type ConnectionOverrides,
   type ConnectionResolutionError,
@@ -136,6 +137,15 @@ export interface ResolveConnectionsInput {
    * current actor (drives `ownedByActor` on `insufficient_scopes`).
    */
   actorEndUserId?: string | null;
+  /**
+   * Resolve integrations the agent declared but left INERT (no tools/scopes
+   * selected). The runtime never spawns these, so the run path leaves this
+   * `false` and skips them. The agent-page picker sets it `true`: an inert
+   * integration still has connections to manage and a pin cascade to honour,
+   * so the picker wants the same verdict (and `source`) the cascade produces —
+   * without re-deriving the precedence itself.
+   */
+  includeInert?: boolean;
 }
 
 // ─────────────────────────── Pure resolver (unit-tested) ──────────────────────
@@ -168,8 +178,11 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
 
   for (const req of input.requirements) {
     // Inert only when the agent picked neither tools nor scopes. apiCall
-    // integrations expose no tools, so scope selection keeps them active.
-    if (!req.hasSelectedTools && req.agentScopes.length === 0) continue;
+    // integrations expose no tools, so scope selection keeps them active. The
+    // runtime skips inert integrations (never spawned); the picker opts in via
+    // `includeInert` so it gets the same cascade verdict for connections it
+    // still manages.
+    if (!req.hasSelectedTools && req.agentScopes.length === 0 && !input.includeInert) continue;
 
     // Orphaned-auth guard: drop this integration's connections whose `authKey`
     // no longer exists in its CURRENT manifest. A version bump can rename the
@@ -179,15 +192,13 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
     // the run auto-picks a connection that silently fails at runtime, and the
     // member picker offers a connection the integration page (which iterates
     // manifest auths) doesn't show. Other integrations' rows pass through
-    // untouched. Empty manifest auths → no constraint (defensive).
-    const manifestAuthKeys = new Set(
-      Object.keys((req.manifest as { auths?: Record<string, unknown> }).auths ?? {}),
-    );
+    // untouched. `null` (manifest absent / zero auths) → no constraint.
+    const liveAuthKeys = manifestAuthKeySet(req.manifest);
     const liveConnections =
-      manifestAuthKeys.size === 0
+      liveAuthKeys === null
         ? input.accessibleConnections
         : input.accessibleConnections.filter(
-            (c) => c.integrationId !== req.integrationId || manifestAuthKeys.has(c.authKey),
+            (c) => c.integrationId !== req.integrationId || liveAuthKeys.has(c.authKey),
           );
     const liveIndex = new Map<string, ConnectionRow>();
     for (const c of liveConnections) liveIndex.set(c.id, c);
@@ -490,6 +501,8 @@ export interface ResolveConnectionsForRunInput {
   scope: AppScope;
   runOverrides?: ConnectionOverrides | null;
   scheduleOverrides?: ConnectionOverrides | null;
+  /** Resolve inert integrations too — see {@link ResolveConnectionsInput.includeInert}. */
+  includeInert?: boolean;
 }
 
 export async function resolveConnectionsForRun(
@@ -525,6 +538,7 @@ export async function resolveConnectionsForRun(
     scheduleOverrides: input.scheduleOverrides ?? null,
     actorUserId,
     actorEndUserId,
+    includeInert: input.includeInert ?? false,
   });
 }
 

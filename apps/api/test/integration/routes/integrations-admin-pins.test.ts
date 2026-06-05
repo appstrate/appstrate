@@ -207,6 +207,75 @@ describe("/api/integrations/:packageId admin surface", () => {
       const res = await app.request(`/api/integrations/${INTEGRATION}/agent-resolution/${AGENT}`);
       expect(res.status).toBe(401);
     });
+
+    // Regression (#576 follow-up): an INERT integration entry (declared with an
+    // auth_key but no tools/scopes) is skipped by the run resolver, so
+    // resolveAgentIntegrationPick falls through to its inert branch. That branch
+    // must still honour the member pin — otherwise a PUT /me/integration-pins
+    // succeeds (200) but the verdict stays "must_choose" and the picker can
+    // never reflect the selection.
+    it("honours the member pin on an INERT integration (no tools/scopes)", async () => {
+      // Inert agent: declares the integration with an auth_key only — no tools,
+      // no scopes — so the run resolver treats it as inert and emits no verdict.
+      const INERT_AGENT = "@adminorg/agent-inert";
+      await seedAgent({
+        id: INERT_AGENT,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: {
+          name: INERT_AGENT,
+          version: "1.0.0",
+          type: "agent",
+          schema_version: "0.2",
+          display_name: "Inert Test Agent",
+          dependencies: { integrations: { [INTEGRATION]: "^1.0.0" } },
+          integrations_configuration: { [INTEGRATION]: { auth_key: "primary" } },
+        },
+      });
+      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, INERT_AGENT);
+
+      // Two accessible connections → ambiguous → must_choose until pinned.
+      const connA = await seedPrivateConnectionFor(ctx.user.id);
+      const connB = await seedSharedConnection();
+
+      const beforeRes = await app.request(
+        `/api/integrations/${INTEGRATION}/agent-resolution/${INERT_AGENT}`,
+        { headers: authHeaders(ctx) },
+      );
+      const before = (await beforeRes.json()) as {
+        status: string;
+        resolved_connection_id: string | null;
+      };
+      expect(before.status).toBe("must_choose");
+      expect(before.resolved_connection_id).toBeNull();
+
+      // Member pins connection B via the same endpoint the picker calls.
+      const pinRes = await app.request("/api/me/integration-pins", {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agent_package_id: INERT_AGENT,
+          integration_package_id: INTEGRATION,
+          connection_id: connB,
+        }),
+      });
+      expect(pinRes.status).toBe(200);
+
+      const afterRes = await app.request(
+        `/api/integrations/${INTEGRATION}/agent-resolution/${INERT_AGENT}`,
+        { headers: authHeaders(ctx) },
+      );
+      const after = (await afterRes.json()) as {
+        status: string;
+        resolved_connection_id: string | null;
+        member_pinned_connection_id: string | null;
+      };
+      // The pin must now drive the verdict — not must_choose.
+      expect(after.status).toBe("pinned");
+      expect(after.resolved_connection_id).toBe(connB);
+      expect(after.member_pinned_connection_id).toBe(connB);
+      expect(connA).not.toBe(connB);
+    });
   });
 
   // ─── PUT /:packageId/pins/:agentPackageId (admin org pin) ─

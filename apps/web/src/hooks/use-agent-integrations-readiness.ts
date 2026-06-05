@@ -5,6 +5,7 @@ import type { AgentIntegrationEntry, IntegrationAgentResolution } from "@appstra
 import { api } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
+import { agentResolutionQueryKey } from "./use-integrations";
 import {
   isIntegrationEntryActive,
   resolutionBlocksRun,
@@ -43,15 +44,9 @@ export function useAgentIntegrationsReadiness(
 
   const results = useQueries({
     queries: active.map((entry) => ({
-      // Mirror `useIntegrationAgentResolution`'s key verbatim to share its cache.
-      queryKey: [
-        "integrations",
-        orgId ?? undefined,
-        applicationId ?? undefined,
-        "agent-resolution",
-        entry.id,
-        agentPackageId,
-      ] as const,
+      // Shared key builder → same cache entry as `useIntegrationAgentResolution`,
+      // so the badge and the Connexions tab never fetch the verdict twice.
+      queryKey: agentResolutionQueryKey(orgId, applicationId, entry.id, agentPackageId),
       enabled: Boolean(orgId && applicationId && agentPackageId),
       queryFn: () =>
         api<IntegrationAgentResolution>(
