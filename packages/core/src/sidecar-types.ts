@@ -334,6 +334,28 @@ export interface IntegrationSpawnSpec {
    */
   httpDeliveryAuths?: Record<string, HttpDeliveryAuthSpec>;
   /**
+   * Explicit egress signal — `true` when this local-source runner needs a
+   * controlled outbound route but NO header injection. A local runner sits on
+   * the per-run network (`internal: true` in docker mode) with no direct
+   * egress; its only way out is a per-integration listener the sidecar mounts
+   * and hands the runner as `HTTPS_PROXY`.
+   *
+   * Egress is orthogonal to credential injection (issue #543). A
+   * `delivery.http` integration gets its egress route from the MITM listener
+   * its injection plan already mounts ({@link httpDeliveryAuths}). A
+   * `delivery.env` integration (the server authenticates itself, e.g. a
+   * form/session login) resolves NO injection plan — this flag tells the
+   * sidecar to mount a plain CONNECT egress listener (tunnel + SSRF floor, no
+   * TLS termination, no cert mint) so the runner can reach upstream.
+   *
+   * Never set for `mtls` (the runner must reach upstream directly so the
+   * client-cert handshake is not terminated) nor for non-local sources
+   * (remote MCP / serverless have no runner). When both this and a non-empty
+   * {@link httpDeliveryAuths} are present, the MITM listener wins and provides
+   * egress — the sidecar picks ONE listener per integration, MITM-first.
+   */
+  needsEgress?: boolean;
+  /**
    * R8a defensive filter — names from `manifest.hidden_tools` (AFPS
    * §3.4 / `integration.schema.json`). Install-time validation already
    * subtracts these from the agent's tool catalog via

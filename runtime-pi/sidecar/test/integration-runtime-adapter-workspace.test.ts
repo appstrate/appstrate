@@ -75,7 +75,7 @@ describe("process adapter — workspace env propagation", () => {
         workspaceMount: { mount: "/workspace", access: "rw" },
       }),
       bundleRoot,
-      mitm: null,
+      egress: null,
       workspaceHandle: { kind: "directory", path: workspacePath },
       onStderrLine: () => {},
     });
@@ -110,7 +110,7 @@ describe("process adapter — workspace env propagation", () => {
         workspaceMount: { mount: "/workspace", access: "rw" },
       }),
       bundleRoot,
-      mitm: null,
+      egress: null,
       workspaceHandle: null, // Orchestrator carried no handle.
       onStderrLine: () => {},
     });
@@ -139,7 +139,7 @@ describe("process adapter — workspace env propagation", () => {
       runId: "run-3",
       spec: baseSpec(), // no workspaceMount
       bundleRoot,
-      mitm: null,
+      egress: null,
       workspaceHandle: { kind: "directory", path: workspacePath },
       onStderrLine: () => {},
     });

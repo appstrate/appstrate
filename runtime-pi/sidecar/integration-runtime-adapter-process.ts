@@ -21,7 +21,8 @@ import { SubprocessTransport } from "@appstrate/mcp-transport";
 import { logger } from "./logger.ts";
 import type { IntegrationSpawnSpec } from "./integrations-boot.ts";
 import {
-  buildMitmEnvBlock,
+  buildProxyEnvBlock,
+  buildCaEnvBlock,
   isPathSafeForMount,
   registerIntegrationRuntimeAdapter,
   resolveBundleEntry,
@@ -213,13 +214,18 @@ export function createProcessIntegrationRuntimeAdapter(): IntegrationRuntimeAdap
     },
 
     async spawn(options: SpawnIntegrationOptions): Promise<SpawnedIntegration> {
-      const { runId, spec, bundleRoot, mitm, workspaceHandle, onStderrLine } = options;
+      const { runId, spec, bundleRoot, egress, workspaceHandle, onStderrLine } = options;
       const plan = planSubprocess(spec, bundleRoot);
       const procEnv: Record<string, string> = { ...spec.spawnEnv };
-      if (mitm) {
-        // Subprocess sees the host fs directly; pass the CA path through
-        // unchanged (no docker cp).
-        Object.assign(procEnv, buildMitmEnvBlock(mitm.proxyUrl, mitm.caCertHostPath));
+      if (egress) {
+        // Proxy routing for BOTH listener kinds (MITM + plain CONNECT).
+        Object.assign(procEnv, buildProxyEnvBlock(egress.proxyUrl));
+        // CA trust ONLY for a TLS-terminating MITM listener. Subprocess sees
+        // the host fs directly; pass the CA path through unchanged (no docker
+        // cp). A plain CONNECT egress listener has a null caCertHostPath.
+        if (egress.caCertHostPath !== null) {
+          Object.assign(procEnv, buildCaEnvBlock(egress.caCertHostPath));
+        }
       }
       // Per-run shared workspace exposure for the subprocess. Unlike
       // docker mode (which bind-mounts a volume), the subprocess just

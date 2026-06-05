@@ -45,15 +45,27 @@ export interface RuntimeAdapterRunContext {
 }
 
 /**
- * Per-integration MITM context the adapter must wire into the runner
- * (env vars + CA file delivery). `null` means env-delivery only (no
- * MITM listener was spawned for this integration's auths).
+ * Per-integration egress context the adapter wires into the runner (proxy
+ * env vars + optional CA file delivery). `null` means the runner gets no
+ * egress route (mtls / `delivery.files` runners reach upstream directly).
+ *
+ * Egress is decoupled from credential injection (#543). `caCertHostPath`
+ * discriminates the listener kind:
+ *   - non-null → a MITM listener (TLS terminate + inject) is in front; the
+ *     runner must trust the run CA, so the adapter copies the PEM in and sets
+ *     the CA env block.
+ *   - null → a plain CONNECT egress listener (tunnel + SSRF floor, no TLS
+ *     termination); no CA needed, so the adapter sets only the proxy env block.
  */
-export interface RuntimeMitmContext {
+export interface RuntimeEgressContext {
   /** Full HTTPS_PROXY URL the runner targets (e.g. `http://sidecar:39472`). */
   readonly proxyUrl: string;
-  /** Absolute path on the sidecar's fs to the run-CA PEM file. */
-  readonly caCertHostPath: string;
+  /**
+   * Absolute path on the sidecar's fs to the run-CA PEM file when a
+   * TLS-terminating MITM listener is in front; `null` for a plain CONNECT
+   * egress listener (no TLS termination → the runner needs no extra CA).
+   */
+  readonly caCertHostPath: string | null;
 }
 
 export interface SpawnIntegrationOptions {
@@ -61,8 +73,13 @@ export interface SpawnIntegrationOptions {
   readonly spec: IntegrationSpawnSpec;
   /** Absolute path on the sidecar's fs to the extracted bundle root. */
   readonly bundleRoot: string;
-  /** MITM context (proxy URL + CA file path). `null` = env-delivery only. */
-  readonly mitm: RuntimeMitmContext | null;
+  /**
+   * Egress context (proxy URL + optional CA file path). `null` = no egress
+   * route (mtls / `delivery.files` reach upstream directly). A non-null
+   * `caCertHostPath` signals a TLS-terminating MITM listener; `null` signals
+   * a plain CONNECT egress listener.
+   */
+  readonly egress: RuntimeEgressContext | null;
   /**
    * Per-run shared workspace handle decoded from the sidecar's
    * `WORKSPACE_HANDLE_JSON` env var. Adapters mount/expose it under
@@ -237,26 +254,14 @@ export function isPathSafeForMount(
 }
 
 /**
- * Build the standard MITM-proxy env block. Adapters call this with the
- * proxy URL the runner targets and the path the CA cert lands at inside
- * the runner's filesystem (the path differs by adapter — Docker copies
- * the cert into the container's `/tmp/appstrate-ca.pem`; the process
- * adapter passes the host path directly because the subprocess shares
- * the parent's fs).
- *
- * Names are the standardised conventions honoured by Node (via
- * undici-style dispatchers + NODE_TLS_REJECT_UNAUTHORIZED), Python
- * (requests / httpx / urllib via REQUESTS_CA_BUNDLE / SSL_CERT_FILE),
- * curl (CURL_CA_BUNDLE), and git (GIT_SSL_CAINFO — git wraps libcurl
- * but uses its OWN env var, ignoring CURL_CA_BUNDLE/SSL_CERT_FILE).
- * Without GIT_SSL_CAINFO a mcp-server that shells out to `git`
- * (clone/fetch/push over HTTPS) sees `SSL certificate problem: unable
- * to get local issuer certificate` even with the MITM proxy reachable.
+ * Proxy-routing half of the egress env block — points every standard
+ * `HTTP(S)_PROXY` var at the per-integration listener. Always applied when an
+ * egress context is present, for BOTH listener kinds (MITM and plain CONNECT),
+ * because routing the runner's traffic out is orthogonal to whether the proxy
+ * terminates TLS. The CA half ({@link buildCaEnvBlock}) is layered on top only
+ * for the MITM kind.
  */
-export function buildMitmEnvBlock(
-  proxyUrl: string,
-  caCertPathInRuntime: string,
-): Record<string, string> {
+export function buildProxyEnvBlock(proxyUrl: string): Record<string, string> {
   return {
     HTTPS_PROXY: proxyUrl,
     HTTP_PROXY: proxyUrl,
@@ -264,6 +269,26 @@ export function buildMitmEnvBlock(
     http_proxy: proxyUrl,
     NO_PROXY: "127.0.0.1,localhost",
     no_proxy: "127.0.0.1,localhost",
+  };
+}
+
+/**
+ * CA-trust half of the egress env block — only needed when a TLS-terminating
+ * MITM listener is in front, so the runner trusts the per-SNI leaf certs it
+ * mints. A plain CONNECT egress listener does NOT terminate TLS, so no extra
+ * CA is required and this block is skipped (no cert mint, no `docker cp`).
+ *
+ * Names are the standardised conventions honoured by Node
+ * (NODE_EXTRA_CA_CERTS), Python (requests / httpx / urllib via
+ * REQUESTS_CA_BUNDLE / SSL_CERT_FILE), curl (CURL_CA_BUNDLE), and git
+ * (GIT_SSL_CAINFO — git wraps libcurl but uses its OWN env var, ignoring
+ * CURL_CA_BUNDLE/SSL_CERT_FILE). Without GIT_SSL_CAINFO a mcp-server that
+ * shells out to `git` (clone/fetch/push over HTTPS) sees `SSL certificate
+ * problem: unable to get local issuer certificate` even with the proxy
+ * reachable.
+ */
+export function buildCaEnvBlock(caCertPathInRuntime: string): Record<string, string> {
+  return {
     NODE_EXTRA_CA_CERTS: caCertPathInRuntime,
     SSL_CERT_FILE: caCertPathInRuntime,
     REQUESTS_CA_BUNDLE: caCertPathInRuntime,

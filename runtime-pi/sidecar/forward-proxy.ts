@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createServer as createHttpServer, request as httpRequest } from "node:http";
-import { connect as netConnect } from "node:net";
 import type { Socket } from "node:net";
 import type { IncomingMessage, ServerResponse, Server as HttpServer } from "node:http";
 import {
@@ -10,6 +9,12 @@ import {
   HOP_BY_HOP_HEADERS,
   type SidecarConfig,
 } from "./helpers.ts";
+import {
+  parseConnectTarget,
+  netConnectWithTimeout,
+  relaySockets,
+  TUNNEL_IDLE_TIMEOUT_MS,
+} from "./connect-tunnel.ts";
 import { logger } from "./logger.ts";
 
 export interface ForwardProxyDeps {
@@ -32,8 +37,6 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
   const listenHost = deps.listenHost ?? "0.0.0.0";
   const isBlockedHostFn = deps.isBlockedHostFn ?? isBlockedHost;
 
-  const CONNECT_TIMEOUT_MS = 10_000;
-  const SOCKET_IDLE_TIMEOUT_MS = 120_000; // 2 min idle → destroy tunnel
   const MAX_CONNECT_HEADER_SIZE = 16_384; // 16 KB — CONNECT response headers should be tiny
 
   function getUpstreamProxy(
@@ -77,25 +80,10 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
     }
   }
 
-  function relay(s1: Socket, s2: Socket): void {
-    s1.pipe(s2);
-    s2.pipe(s1);
-    // Idle timeout — destroys both sides if no data flows for SOCKET_IDLE_TIMEOUT_MS
-    s1.setTimeout(SOCKET_IDLE_TIMEOUT_MS, () => {
-      s1.destroy();
-    });
-    s2.setTimeout(SOCKET_IDLE_TIMEOUT_MS, () => {
-      s2.destroy();
-    });
-    s1.on("error", () => s2.destroy());
-    s2.on("error", () => s1.destroy());
-    s1.on("close", () => {
-      if (!s2.destroyed) s2.destroy();
-    });
-    s2.on("close", () => {
-      if (!s1.destroyed) s1.destroy();
-    });
-  }
+  // Tunnel parsing / connect-with-timeout / relay live in connect-tunnel.ts —
+  // shared verbatim with the per-integration egress listener (#543). Local
+  // alias keeps the call sites below unchanged.
+  const relay = (s1: Socket, s2: Socket) => relaySockets(s1, s2, TUNNEL_IDLE_TIMEOUT_MS);
 
   /** Strip hop-by-hop headers + Connection-listed headers from incoming request. */
   function forwardHeaders(
@@ -116,19 +104,6 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
       out[key] = value;
     }
     return out;
-  }
-
-  /** Connect with a timeout — destroys the socket if it doesn't connect in time. */
-  function netConnectWithTimeout(port: number, host: string, onConnect: () => void): Socket {
-    const socket = netConnect(port, host, () => {
-      clearTimeout(timer);
-      onConnect();
-    });
-    const timer = setTimeout(() => {
-      socket.destroy(new Error(`Connect timeout after ${CONNECT_TIMEOUT_MS}ms to ${host}:${port}`));
-    }, CONNECT_TIMEOUT_MS);
-    socket.on("close", () => clearTimeout(timer));
-    return socket;
   }
 
   // The platform API is a trusted destination: the agent can only send
@@ -234,34 +209,13 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
     const target = req.url ?? "";
 
     // Parse host:port — handles IPv6 bracket notation ([::1]:443)
-    let host: string;
-    let port: number;
-    if (target.startsWith("[")) {
-      const closeBracket = target.indexOf("]");
-      if (closeBracket === -1) {
-        clientSocket.write("HTTP/1.1 400 Bad Request\r\n\r\n");
-        clientSocket.destroy();
-        return;
-      }
-      host = target.slice(1, closeBracket);
-      const rest = target.slice(closeBracket + 1);
-      port = rest.startsWith(":") ? parseInt(rest.slice(1)) || 443 : 443;
-    } else {
-      const colonIdx = target.lastIndexOf(":");
-      if (colonIdx === -1) {
-        host = target;
-        port = 443;
-      } else {
-        host = target.slice(0, colonIdx);
-        port = parseInt(target.slice(colonIdx + 1)) || 443;
-      }
-    }
-
-    if (!host) {
+    const parsedTarget = parseConnectTarget(target);
+    if (!parsedTarget) {
       clientSocket.write("HTTP/1.1 400 Bad Request\r\n\r\n");
       clientSocket.destroy();
       return;
     }
+    const { host, port } = parsedTarget;
 
     // SSRF protection — block CONNECT tunnels to internal/private networks,
     // except the trusted platform API (handles local-dev host.docker.internal).
