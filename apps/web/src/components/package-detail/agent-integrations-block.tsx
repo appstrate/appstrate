@@ -9,18 +9,16 @@ import {
   useAgentsConsumingIntegration,
   type AgentIntegrationEntry,
   type IntegrationAuthStatus,
-  type IntegrationAgentResolution,
   type IntegrationCandidate,
   type IntegrationManifestView,
 } from "../../hooks/use-integrations";
 import { InlineConnectButton } from "../integration-connect/inline-connect-button";
 import { connectionDisplayLabel } from "../integration-connect/connection-label";
-import { pickDefaultAuth } from "../integration-connect/pick-default-auth";
 import { connectableAuthKeys } from "../integration-connect/connectable-auth-keys";
 import { IntegrationConnectionPicker } from "../integration-connect/integration-connection-picker";
 import {
   isIntegrationEntryActive,
-  resolutionBlocksRun,
+  resolveAction,
 } from "../integration-connect/integration-run-readiness";
 import { requiredScopesForAgent } from "@appstrate/core/integration";
 
@@ -320,80 +318,6 @@ function buildReuseInfo(
     return t("detail.integrationReuseSingle", { account });
   }
   return t("detail.integrationReuseShared", { account, count: agentCount });
-}
-
-/**
- * Map the server resolution → connect action for the fallback card. Mirrors
- * `resolutionBlocksRun`'s blocking states, choosing the right intent + target:
- *
- *   - `resolved_missing_scopes` non-empty → `upgrade` the resolved connection
- *     (incremental consent for the missing scopes only).
- *   - `needs_reconnection` → `reconnect` the resolved connection.
- *   - `none` / `must_choose` / `stale` → `connect` a fresh connection on the
- *     default auth (preferring oauth2; mirrors the spawn resolver — the agent
- *     only needs ONE of the declared auths resolved).
- *   - `auto` / `pinned` / `admin_locked` with no missing scopes → null (OK).
- *
- * Connect/reconnect/upgrade all request the agent's inferred scopes — the
- * backend only adds manifest defaults for a plain connect, so the agent
- * surface forwards what THIS agent needs (the integration page connects at
- * defaults). Empty union (no tools/scopes picked) → omit, stay at defaults.
- */
-function resolveAction(
-  resolution: IntegrationAgentResolution,
-  manifest: IntegrationManifestView,
-  agentTools: string[] | "*" | undefined,
-  agentScopes: string[] | undefined,
-): {
-  authKey: string;
-  scopes?: string[];
-  intent: "connect" | "reconnect" | "upgrade";
-  connectionId?: string;
-} | null {
-  const resolvedConnection =
-    resolution.candidates.find((c) => c.id === resolution.resolved_connection_id) ?? null;
-
-  // Under-scoped resolved connection → incremental-consent upgrade on it.
-  if (resolution.resolved_missing_scopes.length > 0 && resolvedConnection) {
-    return {
-      authKey: resolvedConnection.auth_key,
-      intent: "upgrade",
-      connectionId: resolvedConnection.id,
-      scopes: resolution.resolved_missing_scopes,
-    };
-  }
-
-  // Resolved connection flagged for re-consent → reconnect it in place.
-  if (resolution.status === "needs_reconnection" && resolvedConnection) {
-    const scopes = requiredScopesForAgent({
-      manifest,
-      authKey: resolvedConnection.auth_key,
-      agentTools,
-      agentScopes,
-    });
-    return {
-      authKey: resolvedConnection.auth_key,
-      intent: "reconnect",
-      connectionId: resolvedConnection.id,
-      ...(scopes.length ? { scopes } : {}),
-    };
-  }
-
-  // Any remaining blocking state — none / must_choose / stale, OR a
-  // needs_reconnection / missing-scopes resolution whose target connection is
-  // absent from `candidates` (so the upgrade/reconnect branches above didn't
-  // fire) — falls back to a fresh connect on the default auth. Keying this off
-  // the same predicate the run badge uses keeps the CTA in lockstep with
-  // resolutionBlocksRun: the card never goes silent while the badge blocks.
-  if (resolutionBlocksRun(resolution)) {
-    const authKey = pickDefaultAuth(manifest.auths);
-    if (!authKey) return null;
-    const scopes = requiredScopesForAgent({ manifest, authKey, agentTools, agentScopes });
-    return { authKey, intent: "connect", ...(scopes.length ? { scopes } : {}) };
-  }
-
-  // auto / pinned / admin_locked, fully scoped → connected, no action.
-  return null;
 }
 
 function CardShell({

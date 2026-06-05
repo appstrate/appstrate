@@ -173,6 +173,10 @@ export function RunAgentButton({
           runAgent.reset();
         }}
         errors={missingErrors ?? []}
+        agentPackageId={packageId}
+        {...(detail?.dependencies.integrations
+          ? { integrationEntries: detail.dependencies.integrations }
+          : {})}
         retrying={runAgent.isPending}
         onRetryWithOverrides={(overrides) => {
           // Re-fire the run with the user's picks. Keep the modal open
