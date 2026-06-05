@@ -184,6 +184,16 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
 export const SIDECAR_OPERATOR_ENV_KEYS = [
   "SIDECAR_MAX_REQUEST_BODY_BYTES",
   "SIDECAR_MAX_MCP_ENVELOPE_BYTES",
+  // Runner image refs per MCPB `server.type`. Consumed sidecar-side by
+  // `integration-runtime-adapter-docker.resolveRunnerImage`; absent keys
+  // fall back to the adapter's bare `:latest` defaults (local dev). In
+  // production these carry the versioned GHCR refs so the sidecar can
+  // `docker create` runner containers without a Docker Hub pull.
+  "RUNNER_IMAGE_NODE",
+  "RUNNER_IMAGE_BUN",
+  "RUNNER_IMAGE_PYTHON",
+  "RUNNER_IMAGE_UV",
+  "RUNNER_IMAGE_BINARY",
 ] as const;
 
 export type SidecarOperatorEnvKey = (typeof SIDECAR_OPERATOR_ENV_KEYS)[number];

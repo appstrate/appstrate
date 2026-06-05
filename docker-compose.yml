@@ -134,6 +134,35 @@ services:
     entrypoint: ["true"]
     restart: "no"
 
+  # Per-integration MCP runner images. The sidecar `docker create`s one of
+  # these per local AFPS integration (resolved from RUNNER_IMAGE_* below).
+  # Pre-pulled so the first integration boot doesn't block on — or fail at —
+  # an on-demand pull.
+  appstrate-mcp-runner-node:
+    image: ghcr.io/appstrate/appstrate-mcp-runner-node:${APPSTRATE_VERSION:-latest}
+    entrypoint: ["true"]
+    restart: "no"
+
+  appstrate-mcp-runner-python:
+    image: ghcr.io/appstrate/appstrate-mcp-runner-python:${APPSTRATE_VERSION:-latest}
+    entrypoint: ["true"]
+    restart: "no"
+
+  appstrate-mcp-runner-bun:
+    image: ghcr.io/appstrate/appstrate-mcp-runner-bun:${APPSTRATE_VERSION:-latest}
+    entrypoint: ["true"]
+    restart: "no"
+
+  appstrate-mcp-runner-uv:
+    image: ghcr.io/appstrate/appstrate-mcp-runner-uv:${APPSTRATE_VERSION:-latest}
+    entrypoint: ["true"]
+    restart: "no"
+
+  appstrate-mcp-runner-binary:
+    image: ghcr.io/appstrate/appstrate-mcp-runner-binary:${APPSTRATE_VERSION:-latest}
+    entrypoint: ["true"]
+    restart: "no"
+
   appstrate:
     image: ghcr.io/appstrate/appstrate:${APPSTRATE_VERSION:-latest}
     networks:
@@ -176,6 +205,14 @@ services:
       # Set it only if you need to point sidecars at a different host.
       - PI_IMAGE=ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-latest}
       - SIDECAR_IMAGE=ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-latest}
+      # Runner images forwarded to the sidecar (SIDECAR_OPERATOR_ENV_KEYS) so
+      # it spawns integration runners from GHCR instead of bare `:latest` tags
+      # (which the daemon would try — and fail — to pull from Docker Hub).
+      - RUNNER_IMAGE_NODE=ghcr.io/appstrate/appstrate-mcp-runner-node:${APPSTRATE_VERSION:-latest}
+      - RUNNER_IMAGE_PYTHON=ghcr.io/appstrate/appstrate-mcp-runner-python:${APPSTRATE_VERSION:-latest}
+      - RUNNER_IMAGE_BUN=ghcr.io/appstrate/appstrate-mcp-runner-bun:${APPSTRATE_VERSION:-latest}
+      - RUNNER_IMAGE_UV=ghcr.io/appstrate/appstrate-mcp-runner-uv:${APPSTRATE_VERSION:-latest}
+      - RUNNER_IMAGE_BINARY=ghcr.io/appstrate/appstrate-mcp-runner-binary:${APPSTRATE_VERSION:-latest}
       # ── System config (JSON arrays) ──
       - SYSTEM_PROVIDER_KEYS=${SYSTEM_PROVIDER_KEYS:-[]}
       - SYSTEM_PROXIES=${SYSTEM_PROXIES:-[]}
