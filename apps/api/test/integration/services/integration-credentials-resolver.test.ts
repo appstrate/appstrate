@@ -36,6 +36,10 @@ import { integrationConnections, integrationOauthClients, packages } from "@apps
 import { eq } from "drizzle-orm";
 import { encryptCredentials } from "@appstrate/connect";
 import { resolveLiveIntegrationCredentials } from "../../../src/services/integration-credentials-resolver.ts";
+import {
+  localIntegrationManifest,
+  httpHeaderDelivery,
+} from "../../helpers/integration-manifests.ts";
 
 const INTEGRATION_ID = "@official/gmail";
 
@@ -131,17 +135,6 @@ function gmailManifest(tokenUrl: string): Record<string, unknown> {
       delete_message: { required_scopes: { primary: ["delete"] } },
     },
   };
-}
-
-/** Same as {@link gmailManifest} but issuer-only (no explicit endpoints) — the
- * token_endpoint must be resolved via OIDC discovery from `issuer`. */
-function issuerOnlyGmailManifest(issuer: string): Record<string, unknown> {
-  const m = gmailManifest("unused") as {
-    auths: { primary: Record<string, unknown> };
-  };
-  const { authorization_endpoint: _a, token_endpoint: _t, ...rest } = m.auths.primary;
-  m.auths.primary = { ...rest, issuer };
-  return m as Record<string, unknown>;
 }
 
 function agentManifest(name: string, tools: string[]): Record<string, unknown> {
@@ -268,29 +261,6 @@ describe("resolveLiveIntegrationCredentials", () => {
     expect(await needsReconnection(connId)).toBe(false);
   });
 
-  it("throws 410 and flags needsReconnection when an oauth2 auth is unrefreshable on a FORCED refresh", async () => {
-    const connId = await seedConnection({ userId: ctx.user.id });
-    // Remove the per-app OAuth client → buildIntegrationOAuthRefreshContext
-    // returns null, so the oauth2 token cannot be refreshed server-side. A
-    // forced refresh only happens after an upstream 401, so the credential is
-    // dead: must flag + 410 (not the old silent stale-200).
-    await db
-      .delete(integrationOauthClients)
-      .where(eq(integrationOauthClients.integrationId, INTEGRATION_ID));
-
-    let status: number | undefined;
-    try {
-      await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(), {
-        forceRefresh: true,
-      });
-      throw new Error("expected resolveLiveIntegrationCredentials to throw");
-    } catch (err) {
-      status = (err as { status?: number }).status;
-    }
-    expect(status).toBe(410);
-    expect(await needsReconnection(connId)).toBe(true);
-  });
-
   it("does NOT flag an unrefreshable oauth2 auth on a PROACTIVE read (no forced refresh)", async () => {
     const connId = await seedConnection({ userId: ctx.user.id });
     await db
@@ -304,27 +274,157 @@ describe("resolveLiveIntegrationCredentials", () => {
     expect(await needsReconnection(connId)).toBe(false);
   });
 
-  it("discovers token_endpoint from issuer and refreshes an issuer-only oauth2 auth (no flag)", async () => {
-    // Drive/OneDrive-style manifest: `issuer` only, no literal token_endpoint.
-    // The refresh path must resolve the endpoint via OIDC discovery (same as the
-    // connect flow) instead of giving up — otherwise the connection would die +
-    // get flagged on every token expiry.
-    await db
-      .update(packages)
-      .set({ draftManifest: issuerOnlyGmailManifest(token.origin) })
-      .where(eq(packages.id, INTEGRATION_ID));
-    const connId = await seedConnection({ userId: ctx.user.id });
-    token.setResponse({ access_token: "discovered-access", expires_in: 3600 });
-
-    const result = await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(), {
-      forceRefresh: true,
-    });
-
-    // Refresh succeeded via discovery → NOT flagged, fresh token surfaced.
-    expect(await needsReconnection(connId)).toBe(false);
-    const primary = result.auths.find((a) => a.authKey === "primary");
-    expect(primary?.fields.access_token).toBe("discovered-access");
+  // ── Invariant matrix ──
+  // A FORCED refresh only happens after the sidecar saw an upstream 401. For
+  // EVERY auth shape a real fleet uses, the outcome must be exactly one of:
+  //   • refreshed → fresh token rotated in, connection NOT flagged; or
+  //   • terminal  → 410 + connection flagged needsReconnection.
+  // It must NEVER be the old silent "stale-200, no flag" no-op (the original
+  // bug). The `expect: "refreshed"` branch asserts the token was genuinely
+  // ROTATED (not the seeded "old-access"), so a silent no-op fails both
+  // branches and can never sneak back in for any shape in the grid.
+  const OAUTH_DELIVERY = httpHeaderDelivery({
+    name: "Authorization",
+    prefix: "Bearer ",
+    field: "access_token",
   });
+  const FORCED_REFRESH_MATRIX: Array<{
+    name: string;
+    make: (t: TokenServer) => ReturnType<typeof localIntegrationManifest>;
+    deleteClient?: boolean;
+    expect: "refreshed" | "flagged";
+  }> = [
+    {
+      name: "oauth2 explicit token_endpoint",
+      make: (t) =>
+        localIntegrationManifest({
+          name: INTEGRATION_ID,
+          serverName: "@official/gmail-server",
+          auths: {
+            primary: {
+              type: "oauth2",
+              authorizationEndpoint: "https://idp/a",
+              tokenEndpoint: t.url,
+              tokenEndpointAuthMethod: "client_secret_post",
+              delivery: OAUTH_DELIVERY,
+            },
+          },
+        }),
+      expect: "refreshed",
+    },
+    {
+      name: "oauth2 issuer-only (OIDC discovery — Drive/OneDrive shape)",
+      make: (t) =>
+        localIntegrationManifest({
+          name: INTEGRATION_ID,
+          serverName: "@official/gmail-server",
+          auths: {
+            primary: {
+              type: "oauth2",
+              issuer: t.origin,
+              tokenEndpointAuthMethod: "client_secret_post",
+              delivery: OAUTH_DELIVERY,
+            },
+          },
+        }),
+      expect: "refreshed",
+    },
+    {
+      name: "oauth2 public client (token_endpoint_auth_method none)",
+      make: (t) =>
+        localIntegrationManifest({
+          name: INTEGRATION_ID,
+          serverName: "@official/gmail-server",
+          auths: {
+            primary: {
+              type: "oauth2",
+              authorizationEndpoint: "https://idp/a",
+              tokenEndpoint: t.url,
+              tokenEndpointAuthMethod: "none",
+              delivery: OAUTH_DELIVERY,
+            },
+          },
+        }),
+      expect: "refreshed",
+    },
+    {
+      name: "oauth2 with no registered OAuth client",
+      make: (t) =>
+        localIntegrationManifest({
+          name: INTEGRATION_ID,
+          serverName: "@official/gmail-server",
+          auths: {
+            primary: {
+              type: "oauth2",
+              authorizationEndpoint: "https://idp/a",
+              tokenEndpoint: t.url,
+              tokenEndpointAuthMethod: "client_secret_post",
+              delivery: OAUTH_DELIVERY,
+            },
+          },
+        }),
+      deleteClient: true,
+      expect: "flagged",
+    },
+    {
+      name: "api_key",
+      make: () =>
+        localIntegrationManifest({
+          name: INTEGRATION_ID,
+          serverName: "@official/gmail-server",
+          auths: { primary: { type: "api_key", credentialFields: ["api_key"] } },
+        }),
+      expect: "flagged",
+    },
+    {
+      name: "basic",
+      make: () =>
+        localIntegrationManifest({
+          name: INTEGRATION_ID,
+          serverName: "@official/gmail-server",
+          auths: { primary: { type: "basic", credentialFields: ["username", "password"] } },
+        }),
+      expect: "flagged",
+    },
+  ];
+
+  for (const c of FORCED_REFRESH_MATRIX) {
+    it(`forced refresh invariant — ${c.name} → ${c.expect}`, async () => {
+      await db
+        .update(packages)
+        .set({ draftManifest: c.make(token) as unknown as Record<string, unknown> })
+        .where(eq(packages.id, INTEGRATION_ID));
+      if (c.deleteClient) {
+        await db
+          .delete(integrationOauthClients)
+          .where(eq(integrationOauthClients.integrationId, INTEGRATION_ID));
+      }
+      const connId = await seedConnection({ userId: ctx.user.id });
+      // OAuth refresh exchange (when reached) returns a rotated token.
+      token.setResponse({ access_token: "rotated", expires_in: 3600 });
+
+      let status: number | undefined;
+      let result: Awaited<ReturnType<typeof resolveLiveIntegrationCredentials>> | undefined;
+      try {
+        result = await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(), {
+          forceRefresh: true,
+        });
+      } catch (err) {
+        status = (err as { status?: number }).status;
+      }
+
+      if (c.expect === "flagged") {
+        expect(status).toBe(410);
+        expect(await needsReconnection(connId)).toBe(true);
+      } else {
+        expect(status).toBeUndefined();
+        expect(await needsReconnection(connId)).toBe(false);
+        const primary = result!.auths.find((a) => a.authKey === "primary");
+        // Genuinely rotated — NOT the seeded "old-access" → forbids silent no-op.
+        expect(primary?.fields.access_token).toBe("rotated");
+      }
+    });
+  }
 
   it("flips needsReconnection when a scope shrink drops below the installed-agent floor", async () => {
     // Agent requires `delete`; the refresh narrows the grant to read+send only.
