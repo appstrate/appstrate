@@ -58,15 +58,6 @@ import {
 import { oidcPaths } from "./openapi/paths.ts";
 import { oidcSchemas } from "./openapi/schemas.ts";
 import {
-  cliRefreshToken,
-  deviceCode,
-  jwks,
-  oauthClient,
-  oauthAccessToken,
-  oauthRefreshToken,
-  oauthConsent,
-} from "@appstrate/db/schema";
-import {
   ensureInstanceClient,
   getInstanceClientId,
   listFirstPartyClientIds,
@@ -192,21 +183,8 @@ const oidcModule: AppstrateModule = {
     return oidcBetterAuthPlugins({ cachedTrustedClientIds });
   },
 
-  drizzleSchemas() {
-    // Names must match the camelCase model ids Better Auth's oauth-provider,
-    // jwt, and device-authorization plugins use internally (see
-    // `@better-auth/oauth-provider` `schema`, `better-auth/plugins/jwt/schema`,
-    // and `better-auth/plugins/device-authorization/schema`).
-    return {
-      jwks,
-      oauthClient,
-      oauthAccessToken,
-      oauthRefreshToken,
-      oauthConsent,
-      deviceCode,
-      cliRefreshToken,
-    };
-  },
+  // No `drizzleSchemas()`: the OIDC tables (jwks, oauth_clients, …) live in the
+  // core schema barrel, which the Better Auth adapter resolves directly.
 
   openApiPaths() {
     return oidcPaths;

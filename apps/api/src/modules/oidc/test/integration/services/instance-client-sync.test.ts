@@ -373,13 +373,10 @@ describe("oidcModule.init() — boot wiring", () => {
 
     const { default: oidcModule } = await import("../../../index.ts");
     const initCtx = {
-      databaseUrl: process.env.DATABASE_URL ?? null,
       redisUrl: process.env.REDIS_URL ?? null,
       appUrl: process.env.APP_URL ?? "http://localhost:3000",
-      isEmbeddedDb: false,
       // Migrations are already applied by the test preload — we only care
       // about the post-migration steps of `init()` here.
-      applyMigrations: async () => {},
       getSendMail: async () => () => {},
       getOrgAdminEmails: async () => [],
       services: {} as import("@appstrate/core/module").PlatformServices,
@@ -415,11 +412,8 @@ describe("oidcModule.init() — boot wiring", () => {
 
     const { default: oidcModule } = await import("../../../index.ts");
     const initCtx = {
-      databaseUrl: process.env.DATABASE_URL ?? null,
       redisUrl: process.env.REDIS_URL ?? null,
       appUrl: process.env.APP_URL ?? "http://localhost:3000",
-      isEmbeddedDb: false,
-      applyMigrations: async () => {},
       getSendMail: async () => () => {},
       getOrgAdminEmails: async () => [],
       services: {} as import("@appstrate/core/module").PlatformServices,

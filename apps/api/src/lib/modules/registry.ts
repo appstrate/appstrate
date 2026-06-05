@@ -9,13 +9,11 @@
  * a default AppstrateModule (or an `appstrateModule` named export).
  */
 
-import { isEmbeddedDb } from "@appstrate/db/client";
 import { db } from "@appstrate/db/client";
 import { organizationMembers, user } from "@appstrate/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import type { ModuleInitContext, PlatformServices } from "@appstrate/core/module";
 import { getEnv } from "@appstrate/env";
-import { applyModuleMigrations } from "./migrate.ts";
 
 // ---- Platform service imports (for buildPlatformServices) -----------------
 import { logger } from "../logger.ts";
@@ -161,12 +159,8 @@ function buildPlatformServices(): PlatformServices {
 export function buildModuleInitContext(): ModuleInitContext {
   const env = getEnv();
   const ctx: ModuleInitContext = {
-    databaseUrl: env.DATABASE_URL ?? null,
     redisUrl: env.REDIS_URL ?? null,
     appUrl: env.APP_URL,
-    isEmbeddedDb,
-    applyMigrations: (moduleId, migrationsDir, opts) =>
-      applyModuleMigrations(moduleId, migrationsDir, opts),
     getSendMail: async () => {
       // Lazy import to break circular dep: email.ts -> app-config.ts -> modules
       const { sendMail } = await import("../../services/email.ts");

@@ -58,11 +58,8 @@ describe("core-providers module", () => {
     // construction surface from @appstrate/core/module.
     await expect(
       coreProvidersModule.init({
-        databaseUrl: null,
         redisUrl: null,
         appUrl: "http://localhost:3000",
-        isEmbeddedDb: true,
-        applyMigrations: async () => {},
         getSendMail: async () => () => {},
         getOrgAdminEmails: async () => [],
         services: {} as never,

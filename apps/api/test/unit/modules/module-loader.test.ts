@@ -36,11 +36,8 @@ function mockModule(id: string, overrides: Partial<AppstrateModule> = {}): Appst
 
 function mockCtx(): ModuleInitContext {
   return {
-    databaseUrl: null,
     redisUrl: null,
     appUrl: "http://localhost:3000",
-    isEmbeddedDb: true,
-    applyMigrations: async () => {},
     getSendMail: async () => () => {},
     getOrgAdminEmails: async () => [],
     services: {} as ModuleInitContext["services"],
@@ -814,32 +811,22 @@ describe("module-loader", () => {
     it("returns empty shape in OSS mode (no modules loaded)", () => {
       expect(getModuleContributions()).toEqual({
         betterAuthPlugins: [],
-        drizzleSchemas: {},
       });
     });
 
-    it("flattens plugins + schemas from multiple modules in load order", async () => {
+    it("flattens plugins from multiple modules in load order", async () => {
       const plugA = { id: "plug-a" };
       const plugB1 = { id: "plug-b1" };
       const plugB2 = { id: "plug-b2" };
-      const tableA = { __table: "a" };
-      const tableB = { __table: "b" };
       await loadModulesFromInstances(
         [
-          mockModule("a", {
-            betterAuthPlugins: () => [plugA],
-            drizzleSchemas: () => ({ tableA }),
-          }),
-          mockModule("b", {
-            betterAuthPlugins: () => [plugB1, plugB2],
-            drizzleSchemas: () => ({ tableB }),
-          }),
+          mockModule("a", { betterAuthPlugins: () => [plugA] }),
+          mockModule("b", { betterAuthPlugins: () => [plugB1, plugB2] }),
         ],
         mockCtx(),
       );
       const contributions = getModuleContributions();
       expect(contributions.betterAuthPlugins).toEqual([plugA, plugB1, plugB2]);
-      expect(contributions.drizzleSchemas).toEqual({ tableA, tableB });
     });
 
     it("returns empty shape after resetModules()", async () => {
@@ -851,7 +838,6 @@ describe("module-loader", () => {
       resetModules();
       expect(getModuleContributions()).toEqual({
         betterAuthPlugins: [],
-        drizzleSchemas: {},
       });
     });
   });

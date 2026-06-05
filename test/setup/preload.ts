@@ -19,11 +19,10 @@
  * modules because anything in either root is part of the repo — there is no
  * "module disabled" state in tests, unlike production (MODULES env var).
  */
-import { resolve, join, basename } from "path";
+import { resolve, join } from "path";
 import { readdirSync, existsSync, statSync, mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import type { AppstrateModule } from "@appstrate/core/module";
-import { applyModuleMigration } from "./apply-module-migration.ts";
 import {
   TEST_DB_NAME,
   TEST_DB_USER,
@@ -297,27 +296,8 @@ const moduleEntries: DiscoveredModule[] = [
   ...discoverModules(workspaceModulesRoot, "src/index.ts", (n) => n.startsWith("module-")),
 ];
 
-const applyModuleMigrationsPGlite = TIER0
-  ? (await import("../../apps/api/src/lib/modules/migrate.ts")).applyModuleMigrations
-  : null;
-
-for (const { dir: moduleDir } of moduleEntries) {
-  const migrationsDir = join(moduleDir, "drizzle", "migrations");
-  if (!existsSync(migrationsDir)) continue;
-  if (applyModuleMigrationsPGlite) {
-    // tier0: apply against PGlite via the shared module migrator (journal-driven,
-    // per-module tracking table). Module id = directory name.
-    await applyModuleMigrationsPGlite(basename(moduleDir), migrationsDir);
-  } else {
-    // tier3: pipe each .sql straight into the test postgres container.
-    const sqlFiles = readdirSync(migrationsDir)
-      .filter((f) => f.endsWith(".sql"))
-      .sort();
-    for (const sqlFile of sqlFiles) {
-      applyModuleMigration(join(migrationsDir, sqlFile));
-    }
-  }
-}
+// Modules no longer own migrations — their tables live in the core schema and
+// are created by the core migration step above. Nothing to apply per module.
 
 // Dynamic imports are async — bun supports top-level await in preloads.
 const { registerTruncationTables } = await import("../../apps/api/test/helpers/db.ts");
@@ -363,10 +343,7 @@ const { collectModuleContributions, emitEvent } =
   await import("../../apps/api/src/lib/modules/module-loader.ts");
 const { createAuth, setPostBootstrapOrgHook } = await import("../../packages/db/src/auth.ts");
 const contributions = collectModuleContributions(importedModules);
-createAuth(
-  contributions.betterAuthPlugins as Parameters<typeof createAuth>[0],
-  contributions.drizzleSchemas,
-);
+createAuth(contributions.betterAuthPlugins as Parameters<typeof createAuth>[0]);
 
 // Mirror the production post-bootstrap wiring (boot.ts) so the bootstrap
 // after-hook does the same provisioning under test as it does in prod.

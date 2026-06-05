@@ -494,10 +494,7 @@ function buildBasePlugins(
 // Test harness: `test/setup/preload.ts` calls `createAuth([], {})` during
 // preload so module test runs boot cleanly.
 
-function buildAuth(
-  extraPlugins: BetterAuthPluginList = [],
-  extraSchemas: Record<string, unknown> = {},
-) {
+function buildAuth(extraPlugins: BetterAuthPluginList = []) {
   const env = getEnv();
   const smtpEnabled = !!(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS && env.SMTP_FROM);
   // Tests set `SMTP_HOST=__test_json__` to exercise the SMTP-enabled BA flow
@@ -572,7 +569,7 @@ function buildAuth(
   return betterAuth({
     database: drizzleAdapter(db, {
       provider: "pg",
-      schema: { ...schema, ...extraSchemas },
+      schema: { ...schema },
     }),
 
     baseURL: env.APP_URL,
@@ -936,7 +933,6 @@ type AuthInstance = ReturnType<typeof buildAuth>;
 
 let _auth: AuthInstance | null = null;
 let _lastExtraPlugins: BetterAuthPluginList = [];
-let _lastExtraSchemas: Record<string, unknown> = {};
 
 /**
  * Construct the Better Auth singleton. Idempotent — subsequent calls are
@@ -946,14 +942,10 @@ let _lastExtraSchemas: Record<string, unknown> = {};
  * `AppstrateModule.drizzleSchemas()`) are merged with `basePlugins` and the
  * core schema before the instance is built.
  */
-export function createAuth(
-  extraPlugins: BetterAuthPluginList = [],
-  extraSchemas: Record<string, unknown> = {},
-): void {
+export function createAuth(extraPlugins: BetterAuthPluginList = []): void {
   if (_auth) return;
   _lastExtraPlugins = extraPlugins;
-  _lastExtraSchemas = extraSchemas;
-  _auth = buildAuth(extraPlugins, extraSchemas);
+  _auth = buildAuth(extraPlugins);
 }
 
 /**
@@ -969,7 +961,7 @@ export function createAuth(
  * having to reload the entire process.
  */
 export function _rebuildAuthForTesting(): void {
-  _auth = buildAuth(_lastExtraPlugins, _lastExtraSchemas);
+  _auth = buildAuth(_lastExtraPlugins);
 }
 
 /** Get the Better Auth instance. Throws if `createAuth()` has not yet run. */

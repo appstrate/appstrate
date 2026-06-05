@@ -169,27 +169,6 @@ export interface AppstrateModule {
   betterAuthPlugins?(): unknown[];
 
   /**
-   * Drizzle tables contributed to the Better Auth adapter.
-   *
-   * Better Auth's Drizzle adapter resolves `findOne({ model: "name" })` calls
-   * against a flat `schema` record. When a module's plugins (e.g. the JWT or
-   * OAuth provider plugin) operate on module-owned tables, those tables must
-   * be registered with the adapter — otherwise the plugin fails with
-   * `"Drizzle Adapter: The model X was not found in the schema object."`.
-   *
-   * Return a flat map whose keys are the camelCase model names Better Auth
-   * expects (e.g. `"jwks"`, `"oauthClient"`, `"oauthAccessToken"`) and whose
-   * values are the Drizzle table instances from the module's `schema.ts`.
-   * The values are typed as `unknown` here to keep `drizzle-orm` out of the
-   * published core surface — the boot integration site in
-   * `packages/db/src/auth.ts` merges them into the adapter config as-is.
-   *
-   * Called once at boot, during `createAuth()`, immediately before the
-   * Better Auth instance is constructed.
-   */
-  drizzleSchemas?(): Record<string, unknown>;
-
-  /**
    * Named hooks (first-match-wins).
    * The platform invokes hooks by name — only the first module that provides
    * a given hook is called. For broadcast-to-all semantics, use `events`.
@@ -994,32 +973,10 @@ export interface RunConnectionMissingParams {
 // ---------------------------------------------------------------------------
 
 export interface ModuleInitContext {
-  /** PostgreSQL connection string, or null in PGlite mode. */
-  databaseUrl: string | null;
   /** Redis connection string, or null when Redis is absent. */
   redisUrl: string | null;
   /** Public-facing URL of the platform (for OAuth callbacks, etc.). */
   appUrl: string;
-  /** Whether running in embedded DB mode (PGlite). */
-  isEmbeddedDb: boolean;
-  /**
-   * Apply Drizzle migrations for a module.
-   * Handles both PostgreSQL and PGlite. Each module gets its own migration
-   * tracking table (`__drizzle_migrations_<moduleId>`), with hyphens in
-   * `moduleId` replaced by underscores so the identifier is a valid SQL name
-   * (e.g. `my-module` → `__drizzle_migrations_my_module`).
-   *
-   * @param moduleId - Module identifier (e.g. "webhooks", "cloud")
-   * @param migrationsDir - Absolute path to the module's migrations directory
-   * @param opts.requireCoreTables - Optional list of core table names that MUST
-   *   exist before the module migration runs. Modules that use backward FK
-   *   references should declare them here so a broken boot order fails loudly.
-   */
-  applyMigrations: (
-    moduleId: string,
-    migrationsDir: string,
-    opts?: { requireCoreTables?: readonly string[] },
-  ) => Promise<void>;
   /** Lazy email sender (breaks circular deps at module load time). */
   getSendMail: () => Promise<(to: string, subject: string, html: string) => void>;
   /** Query helper: get org admin emails. */
